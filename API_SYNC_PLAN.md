@@ -5,6 +5,25 @@ _2026-06-21. How to align the RN app's zod models (`bluebubbles-rn/src/core/mode
 (`bluebubbles-server/packages/protocol` + `packages/bbd/src/serialize` + `.../api/operations`).
 Grounded in a field-by-field divergence pass over both repos._
 
+## Status (2026-06-21)
+
+**Phase A — app adapts (DONE, on `bluebubbles-rn` master):** ServerInfo accepts Gator's `{version}`
+(connect no longer throws) + advisory version gate; Find My uses Gator's `/findmy/*` paths + tuple/
+camelCase shapes; scheduled adapted to Gator's `/scheduled-message` flat shape + string id +
+delete-recreate edit. Contract-test gate stood up (`test/contract/wireContract.test.ts`). 449 tests.
+
+**Phase D — server adds (DONE, on `bluebubbles-server` branch `app-sync/additive-wire-fields`):**
+- #7 delivered-tier flags (`wasDeliveredQuietly`/`didNotifyRecipient`) emitted by `messageSerializer`.
+- #1 `server/info` now also returns `server_version`/`private_api`/`proxy_service`/`supports_header_auth`.
+- #4 `chat/query` honors `with:[participants,lastMessage]` (the inbox now gets members + a preview).
+- bbd: 219 tests, tsc + lint clean. All additive (no wire renames/removals).
+
+**Still open:** Phase B (formalize per-entity shapes in `protocol/v1`), Phase C (generate fixtures from
+the server + extend the contract test to every entity), and the heavier Phase D items below — chat
+mutations (#5, needs the Private-API write path), nested attachments (#6), and rich message fields
+(attributedBody/payloadData/messageSummaryInfo — the reader has the columns; needs typedstream
+decoding). os_version on `server/info` also left out.
+
 ## TL;DR — the core problem
 
 The RN app was ported against **upstream BlueBubbles**'s `/api/v1`. Your server is the **Gator
