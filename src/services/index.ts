@@ -277,8 +277,12 @@ export async function startSync(): Promise<void> {
     } else {
       const version =
         useSessionStore.getState().serverInfo?.server_version ?? (await api.serverVersion());
-      const result = await incrementalSync(db, api, { serverVersion: version });
-      sync.done({ chats: 0, messages: result.messages });
+      // Per-page progress so the DB-reactive inbox hydrates mid-sync (not just at the end).
+      const result = await incrementalSync(db, api, {
+        serverVersion: version,
+        onProgress: (p) => sync.progress(p),
+      });
+      sync.done(result);
     }
   } catch (e) {
     sync.fail(e instanceof Error ? e.message : 'Sync failed');

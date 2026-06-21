@@ -87,6 +87,12 @@ export interface IncrementalSyncOptions {
   batchSize?: number;
   /** Shared deduper (e.g. with the live socket path) to avoid double-processing. */
   deduper?: GuidDeduper;
+  /**
+   * Fired after EACH page is persisted (not just at the end) so a DB-reactive
+   * inbox hydrates mid-sync. `chats` is the running count of distinct chats
+   * seen, `messages` the running count of fresh messages stored.
+   */
+  onProgress?: (p: SyncProgress) => void;
 }
 
 /**
@@ -95,16 +101,22 @@ export interface IncrementalSyncOptions {
  * handles + the messages, and advance the marker. Port of
  * incremental_sync_manager.dart. The marker advances on every batch (even
  * all-duplicate ones) to guarantee forward progress.
+ *
+ * Each page is committed by its own `upsertChats`/`upsertMessages` calls (NOT
+ * batched into one transaction spanning the whole loop), so the drizzle adapter
+ * flushes op-sqlite's reactive queries per page and `onProgress` ticks per page
+ * — letting the inbox render as data arrives.
  */
 export async function incrementalSync(
   db: AppDatabase,
   api: SyncApi,
   opts: IncrementalSyncOptions,
-): Promise<{ messages: number }> {
+): Promise<SyncProgress> {
   const batchSize = opts.batchSize ?? SYNC_BATCH_SIZE;
   const deduper = opts.deduper ?? new GuidDeduper();
   let marker: SyncMarker = await getSyncMarker(db);
   let messages = 0;
+  const seenChats = new Set<string>();
 
   for (;;) {
     const cursor = buildSyncCursor(opts.serverVersion, marker);
@@ -129,6 +141,7 @@ export async function incrementalSync(
         handleMap,
       );
       messages += fresh.length;
+      for (const c of embeddedChats) seenChats.add(c.guid);
     }
 
     marker = advanceMarker(
@@ -137,8 +150,12 @@ export async function incrementalSync(
     );
     await setSyncMarker(db, marker);
 
+    // Per-page tick: this page's writes are already committed + flushed above, so
+    // surfacing progress here lets the reactive inbox catch up immediately.
+    opts.onProgress?.({ chats: seenChats.size, messages });
+
     if (batch.length < batchSize) break;
   }
 
-  return { messages };
+  return { chats: seenChats.size, messages };
 }

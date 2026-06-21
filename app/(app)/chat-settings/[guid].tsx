@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -20,6 +20,7 @@ import {
   setChatCustomization,
   setChatMute,
 } from '@db/repositories';
+import { useReactiveQuery } from '@db/useReactiveQuery';
 import { http } from '@/services';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { isGroupRow, resolveTitle } from '@utils';
@@ -76,19 +77,20 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   };
 
   // ── Group management (SERVER-GATED, Private API) ────────────────────────────
-  const [members, setMembers] = useState<{ address: string; name: string }[]>([]);
+  // Members are reactive on the DB: add/remove/rename handlers persist the server
+  // chat (writes chat_handles + handles), so this auto-updates — no manual refresh.
+  const { data: membersData } = useReactiveQuery<{ address: string; name: string }[]>(
+    () => getChatParticipants(getDatabase(), guid),
+    ['chat_handles', 'handles', 'chats'],
+    [guid],
+  );
+  const members = membersData ?? [];
   const [renaming, setRenaming] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [adding, setAdding] = useState(false);
   const [addAddress, setAddAddress] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (isGroup) void getChatParticipants(getDatabase(), guid).then(setMembers);
-  }, [isGroup, guid]);
-  const refreshMembers = (): void => {
-    void getChatParticipants(getDatabase(), guid).then(setMembers);
-  };
   const groupError = (): void =>
     Alert.alert('Group', 'Couldn’t update — the server needs the Private API enabled.');
 
@@ -114,7 +116,6 @@ export default function ChatSettingsScreen(): React.JSX.Element {
       .then(() => {
         setAdding(false);
         setAddAddress('');
-        refreshMembers();
       })
       .catch(groupError)
       .finally(() => setBusy(false));
@@ -130,7 +131,6 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           void chatsApi
             .updateParticipant(http, guid, 'remove', address)
             .then((chat) => persistServerChat(getDatabase(), chat)) // prune the member locally
-            .then(refreshMembers)
             .catch(groupError)
             .finally(() => setBusy(false));
         },

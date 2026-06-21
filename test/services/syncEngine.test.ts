@@ -98,6 +98,42 @@ describe('incrementalSync', () => {
     expect(await listMessages(db, cx.id)).toHaveLength(2);
   });
 
+  it('reports progress per page (not just at the end) so the inbox hydrates mid-sync', async () => {
+    const { db } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
+
+    // Two full pages then an empty one → the loop persists each page before the next.
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchMessagesAfter: async (cursor) => {
+        if (cursor.mode === 'rowid' && cursor.after === 0) {
+          return [msg('m1', 1, 'a', 'cA'), msg('m2', 2, 'b', 'cA')];
+        }
+        if (cursor.mode === 'rowid' && cursor.after === 2) {
+          return [msg('m3', 3, 'c', 'cB'), msg('m4', 4, 'd', 'cB')];
+        }
+        return [];
+      },
+    };
+
+    const ticks: { chats: number; messages: number }[] = [];
+    const result = await incrementalSync(db, api, {
+      serverVersion: '1.9.0',
+      batchSize: 2,
+      deduper: new GuidDeduper(),
+      onProgress: (p) => ticks.push({ ...p }),
+    });
+
+    // One tick per persisted page, with monotonically growing running counts.
+    expect(ticks).toEqual([
+      { chats: 1, messages: 2 },
+      { chats: 2, messages: 4 },
+    ]);
+    expect(result).toEqual({ chats: 2, messages: 4 });
+  });
+
   it('falls back to a timestamp cursor on older servers', async () => {
     const { db } = await createTestDb();
     await setSyncMarker(db, { lastSyncedRowId: null, lastSyncedTimestamp: 5000 });

@@ -77,13 +77,18 @@ export async function searchContactAddresses(
   return out;
 }
 
+interface ContactMatch {
+  id: number;
+  displayName: string | null;
+  avatar: string | null;
+}
+
 /**
- * Match every handle's address to a contact (by normalized phone/email) and
- * write the contact's display_name + avatar + contact_id onto the handle. The
- * contact name then wins everywhere (all titles resolve via h.display_name) and
- * the reactive 'handles' watchers re-render. Returns the count updated.
+ * Build an address-key → contact index from the local contacts table (phones
+ * keyed by last-10-digits, emails lowercased). Shared by the full match pass and
+ * the opportunistic per-ingestion link.
  */
-export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
+async function buildContactIndex(db: AppDatabase): Promise<Map<string, ContactMatch>> {
   const contactRows = await db.all<{
     id: number;
     displayName: string | null;
@@ -92,14 +97,11 @@ export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
     avatar: string | null;
   }>(sql`SELECT id, display_name AS displayName, phones, emails, avatar FROM contacts`);
 
-  const index = new Map<
-    string,
-    { id: number; displayName: string | null; avatar: string | null }
-  >();
+  const index = new Map<string, ContactMatch>();
   for (const c of contactRows) {
     const phones: string[] = c.phones ? JSON.parse(c.phones) : [];
     const emails: string[] = c.emails ? JSON.parse(c.emails) : [];
-    const val = { id: c.id, displayName: c.displayName, avatar: c.avatar };
+    const val: ContactMatch = { id: c.id, displayName: c.displayName, avatar: c.avatar };
     for (const p of phones) {
       const k = phoneKey(p);
       if (k) index.set(k, val);
@@ -109,6 +111,64 @@ export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
       if (k) index.set(k, val);
     }
   }
+  return index;
+}
+
+/**
+ * Write a matched contact's name/avatar onto a single handle. Always claims the
+ * handle (avatar + contact_id) but only overwrites display_name when the contact
+ * actually has one — otherwise a photo-only contact would blank out the server
+ * name (COALESCE then falls back to the raw address). Returns true if it wrote.
+ */
+async function applyContactMatch(
+  db: AppDatabase,
+  handleId: number,
+  match: ContactMatch,
+): Promise<boolean> {
+  if (!match.displayName && !match.avatar) return false;
+  const set: { avatar: string | null; contactId: number; displayName?: string } = {
+    avatar: match.avatar,
+    contactId: match.id,
+  };
+  if (match.displayName) set.displayName = match.displayName;
+  await db.update(handles).set(set).where(eq(handles.id, handleId));
+  return true;
+}
+
+/**
+ * Opportunistically link freshly-ingested handles to already-synced device
+ * contacts (no native call) so a contact's name/avatar wins immediately on
+ * message/chat ingestion — without waiting for the next full contacts sync.
+ * Reuses the contactMatch keys (last-10-digits phone, lowercased email). Only
+ * touches the given addresses; never reverts (the full pass owns un-linking).
+ * Returns the count linked. No-op when there are no contacts.
+ */
+export async function linkHandlesToContacts(db: AppDatabase, addresses: string[]): Promise<number> {
+  if (addresses.length === 0) return 0;
+  const index = await buildContactIndex(db);
+  if (index.size === 0) return 0;
+
+  const wanted = new Set(addresses);
+  const handleRows = await db.all<{ id: number; address: string; contactId: number | null }>(
+    sql`SELECT id, address, contact_id AS contactId FROM handles`,
+  );
+  let linked = 0;
+  for (const h of handleRows) {
+    if (!wanted.has(h.address) || h.contactId != null) continue; // only new/unlinked ones
+    const match = index.get(handleKey(h.address));
+    if (match && (await applyContactMatch(db, h.id, match))) linked += 1;
+  }
+  return linked;
+}
+
+/**
+ * Match every handle's address to a contact (by normalized phone/email) and
+ * write the contact's display_name + avatar + contact_id onto the handle. The
+ * contact name then wins everywhere (all titles resolve via h.display_name) and
+ * the reactive 'handles' watchers re-render. Returns the count updated.
+ */
+export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
+  const index = await buildContactIndex(db);
 
   const handleRows = await db.all<{
     id: number;
@@ -121,22 +181,12 @@ export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
   let updated = 0;
   for (const h of handleRows) {
     const match = index.get(handleKey(h.address));
-    const useful = match && (match.displayName || match.avatar);
-    if (useful) {
-      // Always claim the handle (avatar + contact_id) but only overwrite the
-      // display name when the contact actually has one — otherwise a photo-only
-      // contact would blank out the server-provided name (COALESCE then falls
-      // back to the raw address).
-      const set: { avatar: string | null; contactId: number; displayName?: string } = {
-        avatar: match.avatar,
-        contactId: match.id,
-      };
-      if (match.displayName) set.displayName = match.displayName;
-      await db.update(handles).set(set).where(eq(handles.id, h.id));
+    if (match && (await applyContactMatch(db, h.id, match))) {
       updated += 1;
     } else if (h.contactId != null) {
-      // Previously matched, but the device contact is gone now → revert to the
-      // server name (or the raw address if the server never sent one) + clear avatar.
+      // No useful match anymore (contact removed, or stripped of name + photo) but
+      // the handle is still linked → revert to the server name (or the raw address
+      // if the server never sent one) + clear avatar.
       await db
         .update(handles)
         .set({ displayName: h.serverDisplayName, avatar: null, contactId: null })

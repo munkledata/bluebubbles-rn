@@ -3,6 +3,7 @@ import type { Handle } from '@core/models';
 import { handles } from '../schema';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
+import { linkHandlesToContacts } from './contacts';
 
 /** Upsert handles by address; returns address → row id. */
 export async function upsertHandles(
@@ -46,5 +47,12 @@ export async function upsertHandles(
     .returning({ id: handles.id, address: handles.address });
 
   for (const r of rows) map.set(r.address, r.id);
+
+  // Contact-link-on-ingestion: opportunistically claim these handles for any
+  // already-synced device contact (pure DB match, no native call) so the contact
+  // name/avatar wins immediately — without waiting for the next contacts sync.
+  // No-op when the contacts table is empty.
+  await linkHandlesToContacts(db, [...map.keys()]);
+
   return map;
 }
