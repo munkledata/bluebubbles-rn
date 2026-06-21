@@ -50,15 +50,15 @@ describe('server-management endpoints unwrap the { status, message, data } envel
   });
 });
 
-describe('findMy endpoints unwrap the bare array payload', () => {
-  it('getDevices returns the inner array, not { data }', async () => {
-    mockKy.mockResolvedValue(envelope([{ id: 'd1' }, { id: 'd2' }]));
+describe('findMy endpoints unwrap the named-key list payload', () => {
+  it('getDevices returns the inner { devices } array', async () => {
+    mockKy.mockResolvedValue(envelope({ devices: [{ id: 'd1' }, { id: 'd2' }] }));
     const res = await findMyApi.getDevices(client());
     expect(res).toHaveLength(2);
   });
 
-  it('refreshDevices returns the refreshed array', async () => {
-    mockKy.mockResolvedValue(envelope([{ id: 'd9' }]));
+  it('refreshDevices returns the refreshed { devices } array', async () => {
+    mockKy.mockResolvedValue(envelope({ devices: [{ id: 'd9' }] }));
     const res = await findMyApi.refreshDevices(client());
     expect(res).toHaveLength(1);
   });

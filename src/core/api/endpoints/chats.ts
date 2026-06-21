@@ -10,9 +10,12 @@ export interface ChatQuery {
   sort?: string;
 }
 
+// The server wraps the list in a named key ({ chats: [...] }) inside the unwrapped `data`.
+const ChatList = z.object({ chats: z.array(Chat).nullish() });
+
 /** POST /api/v1/chat/query — paginated chat list. */
-export function queryChats(http: HttpClient, q: ChatQuery = {}): Promise<Chat[]> {
-  return http.post('/chat/query', z.array(Chat), {
+export async function queryChats(http: HttpClient, q: ChatQuery = {}): Promise<Chat[]> {
+  const res = await http.post('/chat/query', ChatList, {
     json: {
       limit: q.limit ?? 1000,
       offset: q.offset ?? 0,
@@ -20,6 +23,7 @@ export function queryChats(http: HttpClient, q: ChatQuery = {}): Promise<Chat[]>
       sort: q.sort ?? 'lastmessage',
     },
   });
+  return res.chats ?? [];
 }
 
 export interface CreateChatParams {

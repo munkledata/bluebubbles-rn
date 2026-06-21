@@ -10,13 +10,17 @@ export interface MessagePage {
   after?: number;
 }
 
+// The server wraps list responses in a named key ({ messages: [...] }); the HttpClient
+// already unwrapped the { status, message, data } envelope, so `data` IS that object.
+const MessageList = z.object({ messages: z.array(Message).nullish() });
+
 /** GET /api/v1/chat/{guid}/message — messages for a chat, newest first. */
-export function chatMessages(
+export async function chatMessages(
   http: HttpClient,
   chatGuid: string,
   page: MessagePage = {},
 ): Promise<Message[]> {
-  return http.get(`/chat/${encodeURIComponent(chatGuid)}/message`, z.array(Message), {
+  const res = await http.get(`/chat/${encodeURIComponent(chatGuid)}/message`, MessageList, {
     query: {
       limit: page.limit ?? 100,
       offset: page.offset ?? 0,
@@ -24,6 +28,7 @@ export function chatMessages(
       sort: 'DESC',
     },
   });
+  return res.messages ?? [];
 }
 
 export interface SendTextParams {
@@ -66,8 +71,8 @@ export interface MessageQuery {
  * POST /api/v1/message/query — messages after a cursor, oldest-first, with their
  * chats embedded (so incremental sync can resolve each message's chat).
  */
-export function queryMessages(http: HttpClient, q: MessageQuery): Promise<Message[]> {
-  return http.post('/message/query', z.array(Message), {
+export async function queryMessages(http: HttpClient, q: MessageQuery): Promise<Message[]> {
+  const res = await http.post('/message/query', MessageList, {
     json: {
       limit: q.limit ?? 1000,
       after: q.afterTimestamp,
@@ -76,6 +81,7 @@ export function queryMessages(http: HttpClient, q: MessageQuery): Promise<Messag
       sort: 'ASC',
     },
   });
+  return res.messages ?? [];
 }
 
 export interface SendReactionParams {
