@@ -27,6 +27,8 @@ function m(partial: Partial<MessageRow>): MessageRow {
     hasAttachments: 0,
     error: 0,
     sendState: 'sent',
+    wasDeliveredQuietly: 0,
+    didNotifyRecipient: 0,
     associatedMessageGuid: null,
     associatedMessageType: null,
     threadOriginatorGuid: null,

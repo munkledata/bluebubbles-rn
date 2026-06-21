@@ -49,6 +49,8 @@ export async function upsertMessages(
         threadOriginatorGuid: m.threadOriginatorGuid ?? null,
         expressiveSendStyleId: m.expressiveSendStyleId ?? null,
         error: m.error ?? 0,
+        wasDeliveredQuietly: m.wasDeliveredQuietly ?? false,
+        didNotifyRecipient: m.didNotifyRecipient ?? false,
       })),
     )
     .onConflictDoUpdate({
@@ -60,6 +62,10 @@ export async function upsertMessages(
         dateEdited: sql`excluded.date_edited`,
         dateRetracted: sql`excluded.date_retracted`,
         error: sql`excluded.error`,
+        // Delivery tiers flip on a later updated-message event (Apple may report the
+        // quiet delivery after the initial echo), so refresh them on conflict too.
+        wasDeliveredQuietly: sql`excluded.was_delivered_quietly`,
+        didNotifyRecipient: sql`excluded.did_notify_recipient`,
       },
     })
     .returning({ id: messages.id, guid: messages.guid });
@@ -184,6 +190,8 @@ export interface MessageRow {
   hasAttachments: number;
   error: number;
   sendState: string;
+  wasDeliveredQuietly: number;
+  didNotifyRecipient: number;
   associatedMessageGuid: string | null;
   associatedMessageType: string | null;
   threadOriginatorGuid: string | null;
@@ -210,6 +218,8 @@ export async function listMessagesWithSenders(
       m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
       m.date_retracted AS dateRetracted,
       m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
+      m.was_delivered_quietly AS wasDeliveredQuietly,
+      m.did_notify_recipient AS didNotifyRecipient,
       m.associated_message_guid AS associatedMessageGuid,
       m.associated_message_type AS associatedMessageType,
       m.thread_originator_guid AS threadOriginatorGuid,

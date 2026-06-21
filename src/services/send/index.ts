@@ -1,6 +1,7 @@
 import * as scheduledApi from '@core/api/endpoints/scheduled';
 import { getDatabase } from '@db/database';
 import {
+  cancelOutgoing as cancelOutgoingRepo,
   deleteMessageByGuid,
   deleteScheduled,
   getScheduledById,
@@ -199,4 +200,13 @@ export async function retry(
 ): Promise<{ tempGuid: string }> {
   await deleteMessageByGuid(getDatabase(), oldTempGuid);
   return sendTextMessage(getDatabase(), http, args);
+}
+
+/**
+ * Cancel a still-queued/sending (or errored) optimistic message: drop its queue
+ * row + optimistic message. Guarded to a no-op once the send has reconciled to its
+ * real guid (see cancelOutgoing repo helper). Returns whether anything was cancelled.
+ */
+export function cancelOutgoing(tempGuid: string): Promise<boolean> {
+  return cancelOutgoingRepo(getDatabase(), tempGuid);
 }

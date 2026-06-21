@@ -18,6 +18,7 @@ export const PRESS_OPEN = 'open-chat';
 export const PRESS_REMINDER = 'open-reminder';
 export const ACTION_REPLY = 'reply';
 export const ACTION_MARK_READ = 'mark-read';
+export const ACTION_LOVE = 'love';
 export const ACTION_ANSWER_FACETIME = 'answer-facetime';
 export const ACTION_DECLINE_FACETIME = 'decline-facetime';
 
@@ -116,6 +117,7 @@ export async function postNotification(intent: NotificationIntent): Promise<void
           },
         ],
       },
+      // Android caps inline actions at ~3; keep Reply + Mark-as-read + one tapback.
       actions: [
         {
           title: 'Reply',
@@ -123,6 +125,7 @@ export async function postNotification(intent: NotificationIntent): Promise<void
           input: { allowFreeFormInput: true, placeholder: 'Message' },
         },
         { title: 'Mark as read', pressAction: { id: ACTION_MARK_READ } },
+        { title: '♥ Love', pressAction: { id: ACTION_LOVE } },
       ],
     },
   });

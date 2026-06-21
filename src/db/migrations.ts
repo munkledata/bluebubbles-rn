@@ -247,4 +247,15 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE chats ADD COLUMN background_uri TEXT`,
     ],
   },
+  {
+    // Phase 2.2 delivered tiers: Apple's "Delivered Quietly" / "Did Not Notify".
+    // was_delivered_quietly && !did_notify_recipient → the "Delivered Quietly"
+    // status label. Both fields arrive in the server message payload. Additive
+    // only; applied transactionally + idempotently by name.
+    name: '0010_delivered_tiers',
+    statements: [
+      `ALTER TABLE messages ADD COLUMN was_delivered_quietly INTEGER DEFAULT 0`,
+      `ALTER TABLE messages ADD COLUMN did_notify_recipient INTEGER DEFAULT 0`,
+    ],
+  },
 ];

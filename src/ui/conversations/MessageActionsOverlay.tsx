@@ -19,6 +19,8 @@ export interface SelectedMessage {
   dateCreated: number | null; // for the "recent" edit/unsend gate
   isRetracted: boolean;
   isTemp: boolean; // not yet on the server → can't edit/unsend
+  /** Local send lifecycle of an optimistic message ('sending' | 'error' | 'sent'). */
+  sendState: string;
 }
 
 interface MessageActionsOverlayProps {
@@ -30,6 +32,8 @@ interface MessageActionsOverlayProps {
   onRemindLater: () => void;
   onEdit: () => void;
   onUnsend: () => void;
+  /** Cancel a still-queued/sending (or errored) optimistic message before it confirms. */
+  onCancelSend: () => void;
 }
 
 // iMessage allows edit/unsend on your own messages for ~15 minutes.
@@ -47,6 +51,7 @@ export function MessageActionsOverlay({
   onRemindLater,
   onEdit,
   onUnsend,
+  onCancelSend,
 }: MessageActionsOverlayProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -59,6 +64,14 @@ export function MessageActionsOverlay({
     !selected.isTemp &&
     selected.dateCreated != null &&
     Date.now() - selected.dateCreated <= EDIT_WINDOW_MS;
+
+  // A still-optimistic own message (queued/sending or errored, not yet confirmed)
+  // can be cancelled — drop it before it lands rather than only retry an error.
+  const canCancel =
+    !!selected &&
+    selected.isFromMe &&
+    !selected.isRetracted &&
+    (selected.sendState === 'sending' || selected.sendState === 'error');
 
   const pick = (base: ReactionBaseType): void => {
     // Tapping a type you already applied removes it (toggle).
@@ -127,6 +140,19 @@ export function MessageActionsOverlay({
               }}
             >
               <Text style={[styles.actionText, { color: theme.color.destructive }]}>Unsend</Text>
+            </Pressable>
+          ) : null}
+          {canCancel ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onCancelSend();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.destructive }]}>
+                {selected?.sendState === 'error' ? 'Remove' : 'Cancel Sending'}
+              </Text>
             </Pressable>
           ) : null}
         </View>

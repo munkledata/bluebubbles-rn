@@ -90,6 +90,36 @@ export async function insertOutgoingReaction(
 }
 
 /**
+ * Cancel a still-pending optimistic send: remove its queue row AND its optimistic
+ * message — but ONLY while the send hasn't been reconciled to its real identity.
+ *
+ * Guard: the row is cancellable only while its `outgoing_queue` row still exists
+ * AND the message is still in a temp send state ('sending' or 'error'). Once
+ * `reconcileOutgoingSuccess` promotes the row to its real guid and drops the queue
+ * row, this is a no-op (it can no longer find the queue row by tempGuid), so a
+ * concurrent reconcile can never be clobbered. Returns whether anything was cancelled.
+ */
+export async function cancelOutgoing(db: AppDatabase, tempGuid: string): Promise<boolean> {
+  const queued = await db.all<{ id: number }>(
+    sql`SELECT id FROM outgoing_queue WHERE temp_guid = ${tempGuid} LIMIT 1`,
+  );
+  if (!queued[0]) return false; // already reconciled (or never queued) → not cancellable
+  // The message must still be the optimistic temp row. If it's been promoted to 'sent'
+  // (a reconcile that left the queue row), don't delete a real, sent message.
+  const msg = await db.all<{ id: number }>(
+    sql`SELECT id FROM messages WHERE guid = ${tempGuid} AND send_state IN ('sending', 'error') LIMIT 1`,
+  );
+  if (!msg[0]) {
+    // Stranded queue row with no matching temp message → just clear the queue entry.
+    await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+    return true;
+  }
+  await db.delete(messages).where(eq(messages.guid, tempGuid));
+  await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+  return true;
+}
+
+/**
  * Reconcile a successful send. If the real message already exists (the socket
  * echo landed first via DbEventSink), drop the temp row; otherwise promote the
  * temp row to the real guid in place. Either way, no duplicate (guid is unique).

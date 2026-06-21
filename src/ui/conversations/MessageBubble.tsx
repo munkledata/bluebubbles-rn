@@ -4,7 +4,7 @@ import { bubbleEffectOf } from '@core/effects';
 import { hasMention, parseAttributedRuns, type TextRun } from '@core/richtext';
 import type { AttachmentRow, MessagePreview, MessageRow, ReactionRow } from '@db/repositories';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { firstUrl, resolveBubbleColor, safeOpenUrl } from '@utils';
+import { errorTitleForCode, firstUrl, resolveBubbleColor, safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
 import { AttachmentView } from '../attachments';
 import { BubbleEffectView } from './effects';
@@ -131,15 +131,20 @@ export const MessageBubble = React.memo(function MessageBubble({
 
   if (isFromMe && isError) {
     return (
-      <View style={styles.errorRow}>
-        <Pressable
-          onPress={onRetry}
-          hitSlop={8}
-          style={[styles.errorBadge, { borderColor: theme.color.destructive }]}
-        >
-          <Text style={[styles.errorMark, { color: theme.color.destructive }]}>!</Text>
-        </Pressable>
-        {bubble}
+      <View>
+        <View style={styles.errorRow}>
+          <Pressable
+            onPress={onRetry}
+            hitSlop={8}
+            style={[styles.errorBadge, { borderColor: theme.color.destructive }]}
+          >
+            <Text style={[styles.errorMark, { color: theme.color.destructive }]}>!</Text>
+          </Pressable>
+          {bubble}
+        </View>
+        <Text style={[styles.errorTitle, { color: theme.color.destructive }]}>
+          {errorTitleForCode(msg.error)}
+        </Text>
       </View>
     );
   }
@@ -203,6 +208,7 @@ const styles = StyleSheet.create({
   tombstone: { fontStyle: 'italic', fontSize: 13, marginHorizontal: 14, marginVertical: 4 },
   edited: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },
   errorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
+  errorTitle: { fontSize: 11, textAlign: 'right', marginRight: 14, marginTop: 2 },
   errorBadge: {
     width: 20,
     height: 20,

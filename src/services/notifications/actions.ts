@@ -5,9 +5,11 @@ import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { ensureDatabase, http, markRead } from '@/services';
 import { sendTextMessage } from '@/services/send/sendService';
+import { sendReactionMessage } from '@/services/send/sendReactionService';
 import {
   ACTION_ANSWER_FACETIME,
   ACTION_DECLINE_FACETIME,
+  ACTION_LOVE,
   ACTION_MARK_READ,
   ACTION_REPLY,
   PRESS_REMINDER,
@@ -40,6 +42,14 @@ export async function handleNotificationAction(detail: EventDetail): Promise<voi
       await markRead(chatGuid);
       await notifee.cancelNotification(chatGuid);
       break;
+    case ACTION_LOVE: {
+      // "♥ Love" the message the notification is about. Needs the messageGuid the
+      // intent carried; without it there's nothing to react to.
+      const messageGuid = detail.notification?.data?.messageGuid as string | undefined;
+      if (messageGuid) await loveMessage(chatGuid, messageGuid);
+      await notifee.cancelNotification(chatGuid);
+      break;
+    }
     case PRESS_REMINDER: {
       // Reminder fired + tapped → it's done; remove the DB row. Deep-link to the
       // chat is handled by launchActivity.
@@ -93,4 +103,20 @@ async function replyTo(chatGuid: string, text: string): Promise<void> {
   }
   // ensureDatabase: a killed-app inline-reply runs headless with no prior DB open.
   await sendTextMessage(await ensureDatabase(), http, { chatGuid, text });
+}
+
+/** Send a 'love' tapback for the notification's message (mirrors the in-app react path). */
+async function loveMessage(chatGuid: string, messageGuid: string): Promise<void> {
+  // DEV: simulate the reaction round-trip locally without a server.
+  if (isDevServer()) {
+    const { devSendFakeReaction } = await import('@features/conversations/devSeed');
+    await devSendFakeReaction(chatGuid, messageGuid, 'love');
+    return;
+  }
+  // ensureDatabase: a killed-app action runs headless with no prior DB open.
+  await sendReactionMessage(await ensureDatabase(), http, {
+    chatGuid,
+    targetGuid: messageGuid,
+    reaction: 'love',
+  });
 }

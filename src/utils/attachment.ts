@@ -12,6 +12,19 @@ export function attachmentKind(mimeType: string | null): AttachmentKind {
   return 'file';
 }
 
+/**
+ * Bucket an attachment into the conversation-details "shared media" sections.
+ * Photos = images, Videos = videos; everything else (files, audio, contacts,
+ * locations) folds into Documents. (Links are derived from message text, not here.)
+ */
+export type MediaSection = 'photo' | 'video' | 'document';
+export function mediaSection(mimeType: string | null): MediaSection {
+  const kind = attachmentKind(mimeType);
+  if (kind === 'image') return 'photo';
+  if (kind === 'video') return 'video';
+  return 'document';
+}
+
 /** Human-readable byte size, e.g. "2.5 MB". */
 export function friendlySize(bytes: number | null | undefined): string {
   if (bytes == null || bytes <= 0) return '';

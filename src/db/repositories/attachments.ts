@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
+import { firstUrl, mediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
@@ -97,6 +98,86 @@ export async function getAttachmentByGuid(
     FROM attachments WHERE guid = ${guid} LIMIT 1
   `);
   return rows[0] ?? null;
+}
+
+/** A shared link surfaced in conversation details (derived from message text). */
+export interface ChatLink {
+  url: string;
+  messageGuid: string;
+  dateCreated: number | null;
+}
+
+/** Shared media + links for a chat, bucketed for the conversation-details sections. */
+export interface ChatMediaByKind {
+  photos: AttachmentRow[];
+  videos: AttachmentRow[];
+  documents: AttachmentRow[];
+  links: ChatLink[];
+}
+
+/**
+ * Shared attachments + links for a chat (for the conversation-details media sections),
+ * newest-first. Attachments are joined to their messages and bucketed by MIME via
+ * `mediaSection` (Photos / Videos / Documents); stickers and unsent (retracted) messages
+ * are excluded. Links are the first http(s) URL of each text message, deduped to the most
+ * recent occurrence. `limit` caps each bucket so the strip stays lightweight.
+ */
+export async function listChatAttachmentsByKind(
+  db: AppDatabase,
+  chatGuid: string,
+  limit = 60,
+): Promise<ChatMediaByKind> {
+  const out: ChatMediaByKind = { photos: [], videos: [], documents: [], links: [] };
+
+  const attRows = await db.all<AttachmentRow & { dateCreated: number | null }>(sql`
+    SELECT
+      a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
+      a.transfer_name AS transferName, a.total_bytes AS totalBytes,
+      a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
+      a.is_sticker AS isSticker, a.local_path AS localPath, m.date_created AS dateCreated
+    FROM attachments a
+    JOIN messages m ON m.id = a.message_id
+    JOIN chats c ON c.id = m.chat_id
+    WHERE c.guid = ${chatGuid}
+      AND a.is_sticker = 0
+      AND m.date_retracted IS NULL
+    ORDER BY m.date_created DESC, a.id DESC
+  `);
+  for (const r of attRows) {
+    const bucket =
+      mediaSection(r.mimeType) === 'photo'
+        ? out.photos
+        : mediaSection(r.mimeType) === 'video'
+          ? out.videos
+          : out.documents;
+    if (bucket.length < limit) bucket.push(r);
+  }
+
+  // Links: scan text messages for a first URL. Most-recent first; one entry per URL.
+  const textRows = await db.all<{
+    guid: string;
+    text: string | null;
+    dateCreated: number | null;
+  }>(sql`
+    SELECT m.guid, m.text, m.date_created AS dateCreated
+    FROM messages m
+    JOIN chats c ON c.id = m.chat_id
+    WHERE c.guid = ${chatGuid}
+      AND m.text LIKE '%http%'
+      AND m.date_retracted IS NULL
+      AND m.associated_message_type IS NULL
+    ORDER BY m.date_created DESC, m.id DESC
+  `);
+  const seen = new Set<string>();
+  for (const r of textRows) {
+    if (out.links.length >= limit) break;
+    const url = firstUrl(r.text);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.links.push({ url, messageGuid: r.guid, dateCreated: r.dateCreated });
+  }
+
+  return out;
 }
 
 /** Optimistically insert an outgoing image message + its local attachment + queue row. */

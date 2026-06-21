@@ -9,6 +9,7 @@ import { dispatchRealtimeEvent, http, markRead, sendTyping } from '@/services';
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 import {
+  cancelOutgoing,
   editText,
   fireDueScheduled,
   react,
@@ -166,6 +167,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
       dateCreated: msg.dateCreated,
       isRetracted: !!msg.dateRetracted,
       isTemp: msg.guid.startsWith('temp-'),
+      sendState: msg.sendState,
     });
   }, []);
 
@@ -189,6 +191,26 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
         },
       },
     ]);
+  };
+
+  const onCancelSelected = (): void => {
+    if (!selected) return;
+    const g = selected.guid;
+    const sending = selected.sendState === 'sending';
+    Alert.alert(
+      sending ? 'Cancel sending?' : 'Remove message?',
+      sending
+        ? 'Stop sending this message and remove it.'
+        : 'Remove this unsent message from the conversation.',
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: sending ? 'Cancel Sending' : 'Remove',
+          style: 'destructive',
+          onPress: () => void cancelOutgoing(g),
+        },
+      ],
+    );
   };
 
   const onReact = (reaction: string): void => {
@@ -365,6 +387,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
         onRemindLater={onRemindLater}
         onEdit={onEditSelected}
         onUnsend={onUnsendSelected}
+        onCancelSend={onCancelSelected}
       />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />

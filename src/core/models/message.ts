@@ -30,6 +30,11 @@ export const Message = z.object({
   hasAttachments: z.boolean().nullish(),
   attachments: z.array(Attachment).nullish(),
 
+  /** Apple delivery tiers: delivered without notifying ("Delivered Quietly")
+      vs explicitly notified the recipient. Surfaced in the status row. */
+  wasDeliveredQuietly: z.boolean().nullish(),
+  didNotifyRecipient: z.boolean().nullish(),
+
   /** Chats this message belongs to (message/query `with: ['chats']`). */
   chats: z.array(ChatSummary).nullish(),
 

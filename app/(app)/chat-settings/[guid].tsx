@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -19,15 +20,18 @@ import {
   deleteChatLocal,
   getChatParticipants,
   getChatTheme,
+  listChatAttachmentsByKind,
   persistServerChat,
   setChatCustomization,
   setChatMute,
   setChatTheme,
+  type AttachmentRow,
+  type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { http } from '@/services';
 import { useChatHeader } from '@features/conversations/useChatHeader';
-import { isGroupRow, resolveTitle } from '@utils';
+import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
 import { Screen, ThemeStudio, useTheme } from '@ui';
 import { safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
@@ -100,6 +104,14 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   const hasChatTheme = !!chatThemeData?.themeTokens;
   const hasBackground = !!chatThemeData?.backgroundUri;
   const [studioOpen, setStudioOpen] = useState(false);
+
+  // Shared media (Phase 2.1): photos/videos/documents/links for the details sections.
+  // Reactive on messages + attachments so a new shared item appears without a refresh.
+  const { data: mediaData } = useReactiveQuery<ChatMediaByKind>(
+    () => listChatAttachmentsByKind(getDatabase(), guid),
+    ['messages', 'attachments'],
+    [guid],
+  );
 
   // The studio opens with the chat's stored theme, falling back to the active global theme.
   const studioTokens = (): ThemeTokens => safeParseTokens(chatThemeData?.themeTokens) ?? theme;
@@ -274,6 +286,11 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           ) : null}
         </View>
 
+        <MediaSections
+          media={mediaData}
+          onOpenMedia={(g) => router.push(`/media/${encodeURIComponent(g)}`)}
+        />
+
         <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
           NOTIFICATIONS
         </Text>
@@ -413,6 +430,132 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   );
 }
 
+/** A single attachment thumbnail in the shared-media strip (image preview or kind glyph). */
+function MediaThumb({
+  att,
+  glyph,
+  onPress,
+}: {
+  att: AttachmentRow;
+  glyph: string;
+  onPress?: () => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      style={[styles.thumb, { backgroundColor: theme.color.groupedBackground }]}
+      accessibilityRole="image"
+    >
+      {att.localPath ? (
+        <Image
+          source={{ uri: att.localPath }}
+          placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
+          contentFit="cover"
+          style={styles.thumbImg}
+        />
+      ) : (
+        <Text style={styles.thumbGlyph}>{glyph}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+/**
+ * Conversation-details shared media (Phase 2.1): horizontal thumbnail strips for
+ * Photos + Videos (tap → media viewer), and count rows for Documents + Links
+ * (links open via the safe URL opener). Renders nothing when the chat has no media.
+ */
+function MediaSections({
+  media,
+  onOpenMedia,
+}: {
+  media: ChatMediaByKind | null | undefined;
+  onOpenMedia: (attachmentGuid: string) => void;
+}): React.JSX.Element | null {
+  const theme = useTheme();
+  if (!media) return null;
+  const { photos, videos, documents, links } = media;
+  if (!photos.length && !videos.length && !documents.length && !links.length) return null;
+
+  const labelStyle = [styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }];
+  const rowValueStyle = [styles.rowValue, { color: theme.color.tertiaryLabel }];
+
+  return (
+    <>
+      <Text style={labelStyle}>SHARED MEDIA</Text>
+      {photos.length > 0 ? (
+        <>
+          <Text style={[styles.mediaStripLabel, { color: theme.color.tertiaryLabel }]}>
+            Photos · {photos.length}
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
+            {photos.map((a) => (
+              <MediaThumb key={a.guid} att={a} glyph="🖼" onPress={() => onOpenMedia(a.guid)} />
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
+      {videos.length > 0 ? (
+        <>
+          <Text style={[styles.mediaStripLabel, { color: theme.color.tertiaryLabel }]}>
+            Videos · {videos.length}
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
+            {videos.map((a) => (
+              <MediaThumb key={a.guid} att={a} glyph="▶" onPress={() => onOpenMedia(a.guid)} />
+            ))}
+          </ScrollView>
+        </>
+      ) : null}
+      {documents.length > 0 || links.length > 0 ? (
+        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+          {documents.length > 0 ? (
+            <View style={styles.row}>
+              <Text style={[styles.rowLabel, { color: theme.color.label }]}>Documents</Text>
+              <Text style={rowValueStyle}>{documents.length}</Text>
+            </View>
+          ) : null}
+          {links.length > 0 ? (
+            <View>
+              <View
+                style={[
+                  styles.row,
+                  documents.length > 0 && {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Links</Text>
+                <Text style={rowValueStyle}>{links.length}</Text>
+              </View>
+              {links.slice(0, 5).map((l) => (
+                <Pressable
+                  key={l.messageGuid}
+                  onPress={() => void safeOpenUrl(l.url)}
+                  style={[
+                    styles.row,
+                    {
+                      borderTopColor: theme.color.separator,
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                >
+                  <Text numberOfLines={1} style={[styles.linkText, { color: theme.color.tint }]}>
+                    {l.url}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -449,4 +592,18 @@ const styles = StyleSheet.create({
   remove: { fontSize: 18, paddingHorizontal: 4 },
   reset: { alignItems: 'center', paddingVertical: 24 },
   resetText: { fontSize: 16 },
+  mediaStripLabel: { fontSize: 13, marginLeft: 12, marginBottom: 6, marginTop: 4 },
+  strip: { marginBottom: 8 },
+  thumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    marginRight: 8,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbImg: { width: '100%', height: '100%' },
+  thumbGlyph: { fontSize: 26 },
+  linkText: { fontSize: 15, flex: 1 },
 });

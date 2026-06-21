@@ -116,6 +116,10 @@ export const messages = sqliteTable(
     error: integer('error').default(0),
     /** Local send lifecycle for optimistic outgoing messages. */
     sendState: text('send_state').default('sent'),
+    /** Apple delivery tiers: delivered without notifying ("Delivered Quietly")
+        vs explicitly notified the recipient. Both arrive in the server payload. */
+    wasDeliveredQuietly: integer('was_delivered_quietly', { mode: 'boolean' }).default(false),
+    didNotifyRecipient: integer('did_notify_recipient', { mode: 'boolean' }).default(false),
   },
   (t) => ({
     guidIdx: uniqueIndex('messages_guid_idx').on(t.guid),
