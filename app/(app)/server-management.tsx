@@ -1,0 +1,381 @@
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { serverApi } from '@core/api';
+import { http, startSync } from '@/services';
+import { useSessionStore } from '@state/sessionStore';
+import { useSyncStore } from '@state/syncStore';
+import { Screen, useTheme } from '@ui';
+
+type Totals = { handles?: number; messages?: number; chats?: number; attachments?: number };
+
+/** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
+export default function ServerManagementScreen(): React.JSX.Element {
+  const theme = useTheme();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const serverInfo = useSessionStore((s) => s.serverInfo);
+  const syncStatus = useSyncStore((s) => s.status);
+  const syncCounts = useSyncStore((s) => ({ chats: s.chats, messages: s.messages }));
+
+  const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
+  const [latency, setLatency] = useState<number | null>(null);
+  const [reachable, setReachable] = useState<boolean | null>(null);
+  const [totals, setTotals] = useState<Totals | null>(null);
+  const [logs, setLogs] = useState<string | null>(null);
+
+  // Measure round-trip latency on mount; guard against setState after unmount.
+  useEffect(() => {
+    let alive = true;
+    const t0 = Date.now();
+    void serverApi
+      .ping(http)
+      .then(() => {
+        if (alive) {
+          setLatency(Date.now() - t0);
+          setReachable(true);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setReachable(false);
+          setLatency(null);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Run an admin action with an in-flight guard; reports the outcome.
+  const run = (label: string, fn: () => Promise<unknown>, okMsg: string): void => {
+    if (busy) return;
+    setBusy(label);
+    void fn()
+      .then(() => Alert.alert('Server', okMsg))
+      .catch(() => Alert.alert('Server', `Couldn’t ${label.toLowerCase()}. Check your connection.`))
+      .finally(() => setBusy(null));
+  };
+
+  const confirmThen = (
+    label: string,
+    message: string,
+    fn: () => Promise<unknown>,
+    okMsg: string,
+    destructive = false,
+  ): void => {
+    Alert.alert(label, message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: label,
+        style: destructive ? 'destructive' : 'default',
+        onPress: () => run(label, fn, okMsg),
+      },
+    ]);
+  };
+
+  const onCheckUpdate = (): void => {
+    if (busy) return;
+    setBusy('Check for Updates');
+    void serverApi
+      .checkUpdate(http)
+      .then((res) => {
+        const available = res?.available;
+        Alert.alert(
+          'Updates',
+          available ? 'A newer server version is available.' : 'Your server is up to date.',
+        );
+      })
+      .catch(() => Alert.alert('Server', 'Couldn’t check for updates.'))
+      .finally(() => setBusy(null));
+  };
+
+  const onLoadStats = (): void => {
+    if (busy) return;
+    setBusy('Load Stats');
+    void serverApi
+      .serverStatTotals(http)
+      .then((res) => setTotals((res as Totals) ?? {}))
+      .catch(() => Alert.alert('Server', 'Couldn’t load statistics.'))
+      .finally(() => setBusy(null));
+  };
+
+  const onViewLogs = (): void => {
+    if (busy) return;
+    setBusy('View Logs');
+    void serverApi
+      .serverLogs(http, 500)
+      .then((res) => {
+        setLogs(typeof res === 'string' ? res : JSON.stringify(res, null, 2));
+      })
+      .catch(() => Alert.alert('Server', 'Couldn’t fetch logs.'))
+      .finally(() => setBusy(null));
+  };
+
+  const onSyncNow = (): void => {
+    if (busy || syncStatus === 'syncing') return;
+    void startSync();
+  };
+
+  return (
+    <Screen>
+      <View
+        style={[
+          styles.header,
+          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
+        ]}
+      >
+        <Pressable onPress={() => router.back()} hitSlop={8}>
+          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
+        </Pressable>
+        <Text style={[styles.title, { color: theme.color.label }]}>Server Management</Text>
+        <View style={styles.spacer} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        <Section label="STATUS" theme={theme}>
+          <InfoRow label="Connection" theme={theme}>
+            {reachable == null ? 'Checking…' : reachable ? 'Reachable' : 'Unreachable'}
+            {latency != null ? ` · ${latency} ms` : ''}
+          </InfoRow>
+          <InfoRow label="Server version" theme={theme}>
+            {serverInfo?.server_version ?? 'Unknown'}
+          </InfoRow>
+          <InfoRow label="macOS" theme={theme}>
+            {serverInfo?.os_version ?? 'Unknown'}
+          </InfoRow>
+          <InfoRow label="Private API" theme={theme}>
+            {serverInfo?.private_api ? 'Enabled' : 'Disabled'}
+          </InfoRow>
+          <InfoRow label="Proxy" theme={theme}>
+            {serverInfo?.proxy_service ?? 'Direct'}
+          </InfoRow>
+          <InfoRow label="Sync" theme={theme}>
+            {syncStatus === 'syncing'
+              ? `Syncing… (${syncCounts.chats} chats, ${syncCounts.messages} msgs)`
+              : syncStatus === 'done'
+                ? `Up to date (${syncCounts.messages} msgs)`
+                : syncStatus === 'error'
+                  ? 'Error'
+                  : 'Idle'}
+          </InfoRow>
+        </Section>
+
+        <Section label="ACTIONS" theme={theme}>
+          <ActionRow
+            label="Sync Now"
+            theme={theme}
+            disabled={syncStatus === 'syncing'}
+            onPress={onSyncNow}
+          />
+          <ActionRow
+            label="Restart iMessage"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'Restart iMessage'}
+            onPress={() =>
+              confirmThen(
+                'Restart iMessage',
+                'Restart the Messages app on the Mac?',
+                () => serverApi.restartImessage(http),
+                'Messages is restarting.',
+              )
+            }
+          />
+          <ActionRow
+            label="Restart Services"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'Restart Services'}
+            onPress={() =>
+              confirmThen(
+                'Restart Services',
+                'Soft-restart the server services (Private API)?',
+                () => serverApi.softRestart(http),
+                'Services are restarting.',
+              )
+            }
+          />
+          <ActionRow
+            label="Restart Server"
+            theme={theme}
+            destructive
+            disabled={!!busy}
+            busy={busy === 'Restart Server'}
+            onPress={() =>
+              confirmThen(
+                'Restart Server',
+                'Fully restart the server process? This will briefly drop your connection.',
+                () => serverApi.hardRestart(http),
+                'The server is restarting — reconnecting shortly.',
+                true,
+              )
+            }
+          />
+          <ActionRow
+            label="Check for Updates"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'Check for Updates'}
+            onPress={onCheckUpdate}
+          />
+          <ActionRow
+            label="View Server Logs"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'View Logs'}
+            onPress={onViewLogs}
+          />
+        </Section>
+
+        <Section label="STATISTICS" theme={theme}>
+          {totals ? (
+            <>
+              <InfoRow label="Chats" theme={theme}>
+                {String(totals.chats ?? '—')}
+              </InfoRow>
+              <InfoRow label="Messages" theme={theme}>
+                {String(totals.messages ?? '—')}
+              </InfoRow>
+              <InfoRow label="Handles" theme={theme}>
+                {String(totals.handles ?? '—')}
+              </InfoRow>
+              <InfoRow label="Attachments" theme={theme}>
+                {String(totals.attachments ?? '—')}
+              </InfoRow>
+            </>
+          ) : (
+            <ActionRow
+              label="Load Statistics"
+              theme={theme}
+              disabled={!!busy}
+              busy={busy === 'Load Stats'}
+              onPress={onLoadStats}
+            />
+          )}
+        </Section>
+      </ScrollView>
+
+      <Modal visible={logs != null} animationType="slide" onRequestClose={() => setLogs(null)}>
+        <Screen>
+          <View
+            style={[
+              styles.header,
+              { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
+            ]}
+          >
+            <Pressable onPress={() => setLogs(null)} hitSlop={8}>
+              <Text style={[styles.back, { color: theme.color.tint }]}>Done</Text>
+            </Pressable>
+            <Text style={[styles.title, { color: theme.color.label }]}>Server Logs</Text>
+            <View style={styles.spacer} />
+          </View>
+          <ScrollView contentContainerStyle={styles.logBody} horizontal={false}>
+            <Text style={[styles.logText, { color: theme.color.secondaryLabel }]} selectable>
+              {logs}
+            </Text>
+          </ScrollView>
+        </Screen>
+      </Modal>
+    </Screen>
+  );
+}
+
+function Section({
+  label,
+  theme,
+  children,
+}: {
+  label: string;
+  theme: ReturnType<typeof useTheme>;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <>
+      <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>{label}</Text>
+      <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+        {children}
+      </View>
+    </>
+  );
+}
+
+function InfoRow({
+  label,
+  theme,
+  children,
+}: {
+  label: string;
+  theme: ReturnType<typeof useTheme>;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+      <Text style={[styles.rowLabel, { color: theme.color.label }]}>{label}</Text>
+      <Text style={[styles.rowValue, { color: theme.color.secondaryLabel }]} numberOfLines={1}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+function ActionRow({
+  label,
+  theme,
+  onPress,
+  disabled,
+  busy,
+  destructive,
+}: {
+  label: string;
+  theme: ReturnType<typeof useTheme>;
+  onPress: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+  destructive?: boolean;
+}): React.JSX.Element {
+  const color = destructive ? theme.color.destructive : theme.color.tint;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.row, { borderTopColor: theme.color.separator, opacity: disabled ? 0.4 : 1 }]}
+    >
+      <Text style={[styles.rowLabel, { color }]}>{label}</Text>
+      <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
+        {busy ? '…' : '›'}
+      </Text>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  back: { fontSize: 17 },
+  title: { fontSize: 17, fontWeight: '600' },
+  spacer: { width: 50 },
+  content: { paddingVertical: 12, paddingBottom: 40 },
+  sectionLabel: { fontSize: 13, marginLeft: 30, marginBottom: 6, marginTop: 22 },
+  group: { marginHorizontal: 16, borderRadius: 12, overflow: 'hidden' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  rowLabel: { fontSize: 16 },
+  rowValue: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
+  logBody: { padding: 14 },
+  logText: { fontSize: 11, fontFamily: 'Menlo', lineHeight: 16 },
+});

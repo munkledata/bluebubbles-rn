@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, development]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck · Format · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (ESLint — react-hooks)
+        run: npm run lint
+
+      - name: Prettier (check)
+        run: npx prettier --check "src/**/*.{ts,tsx}" "app/**/*.{ts,tsx}" "test/**/*.ts"
+
+      - name: Guards (no raw console.*; dev fixtures stay __DEV__-gated)
+        run: |
+          set -e
+          # All logging must go through the redacting logger (src/core/secure/logger.ts is the only sink).
+          if grep -rnE "console\.(log|warn|error|info|debug)\(" src app \
+               --include='*.ts' --include='*.tsx' | grep -v 'src/core/secure/logger.ts'; then
+            echo "::error::Raw console.* found — use the redacting logger (import { logger } from '@core/secure')."
+            exit 1
+          fi
+          # The dev-fixture origin must only appear in __DEV__-gated entry points.
+          STRAY=$(grep -rln "dev.local" src app --include='*.ts' --include='*.tsx' \
+                    | grep -vE 'utils/isDev\.ts|welcome\.tsx' || true)
+          if [ -n "$STRAY" ]; then
+            echo "::error::'dev.local' referenced outside the known __DEV__-gated files:"; echo "$STRAY"
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: npm test -- --ci

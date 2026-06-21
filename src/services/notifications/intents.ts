@@ -1,0 +1,84 @@
+import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
+import { getChatHeader } from '@db/repositories';
+import type { AppDatabase } from '@db/types';
+
+/**
+ * Pure projection: a normalized event → the notifications to show/clear. Reads
+ * the chat header for the title/group info. No native imports, so it is unit-
+ * tested in Node against better-sqlite3. Redaction is applied later by the
+ * Notifee service, not here.
+ */
+export async function buildMessageIntents(
+  db: AppDatabase,
+  event: NormalizedEvent,
+): Promise<NotificationIntent[]> {
+  switch (event.type) {
+    case 'new-message': {
+      const m = event.message;
+      if (m.isFromMe) return []; // never notify for our own messages
+      const chatGuid = m.chats?.[0]?.guid;
+      if (!chatGuid || !m.guid) return [];
+      const header = await getChatHeader(db, chatGuid);
+      const senderName = m.handle?.displayName ?? m.handle?.address ?? 'Unknown';
+      const isGroup = (header?.participantCount ?? 0) > 1;
+      const chatTitle =
+        header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
+      return [
+        {
+          kind: 'message',
+          chatGuid,
+          chatTitle,
+          senderName,
+          senderHandle: m.handle?.address ?? 'unknown',
+          body: m.text ?? '📎 Attachment',
+          messageGuid: m.guid,
+          timestamp: m.dateCreated ?? Date.now(),
+          isGroup,
+        },
+      ];
+    }
+    case 'chat-read-status-changed':
+      // Read elsewhere → clear any pending notification for this chat.
+      return [{ kind: 'cancel', chatGuid: event.payload.chatGuid }];
+    case 'incoming-facetime': {
+      // Legacy incoming event (carries `caller`).
+      const { uuid, caller, address } = event.payload;
+      if (!uuid) return [];
+      return [
+        {
+          kind: 'facetime-call',
+          uuid,
+          callerName: caller ?? address ?? 'Unknown caller',
+          isAudio: event.payload.is_audio ?? false,
+        },
+      ];
+    }
+    case 'ft-call-status-changed': {
+      const { uuid, status_id: status, address, handle } = event.payload;
+      if (!uuid) return [];
+      if (status === 6) return [{ kind: 'facetime-cancel', uuid }]; // call ended → dismiss
+      if (status === 4)
+        return [
+          {
+            kind: 'facetime-call',
+            uuid,
+            callerName: address ?? handle?.address ?? 'Unknown caller',
+            isAudio: event.payload.is_audio ?? false,
+          },
+        ];
+      return [];
+    }
+    case 'imessage-aliases-removed': {
+      // The user's own iMessage alias(es) were deregistered — surface it (parity with the
+      // Flutter "deregistered" toast) instead of silently dropping the event.
+      const raw = event.payload.aliases;
+      const aliases = Array.isArray(raw)
+        ? raw.filter((a): a is string => typeof a === 'string' && a.length > 0)
+        : [];
+      if (aliases.length === 0) return [];
+      return [{ kind: 'alias-removed', aliases }];
+    }
+    default:
+      return [];
+  }
+}

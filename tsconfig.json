@@ -1,6 +1,57 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@core": [
+        "./src/core/index.ts"
+      ],
+      "@core/*": [
+        "./src/core/*"
+      ],
+      "@db": [
+        "./src/db/schema.ts"
+      ],
+      "@db/*": [
+        "./src/db/*"
+      ],
+      "@ui": [
+        "./src/ui/index.ts"
+      ],
+      "@ui/*": [
+        "./src/ui/*"
+      ],
+      "@state/*": [
+        "./src/state/*"
+      ],
+      "@features/*": [
+        "./src/features/*"
+      ],
+      "@native/*": [
+        "./src/native/*"
+      ],
+      "@utils": [
+        "./src/utils/index.ts"
+      ],
+      "@utils/*": [
+        "./src/utils/*"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "app",
+    "*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

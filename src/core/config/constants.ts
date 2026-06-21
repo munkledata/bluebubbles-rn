@@ -1,0 +1,60 @@
+/**
+ * App-wide constants for the React-free core layer.
+ */
+
+/** REST API base path appended to the server origin. */
+export const API_BASE_PATH = '/api/v1';
+
+/**
+ * Minimum BlueBubbles Server version required by this client.
+ *
+ * The rebuild moves the auth token out of the URL query string and into an
+ * `Authorization` header / socket `auth` payload, and adopts AEAD payload
+ * crypto. Both require server support, so setup gates on this version.
+ */
+export const MIN_SERVER_VERSION = '1.9.0';
+
+/** Header used to carry the server password instead of the legacy `?guid=`. */
+export const AUTH_HEADER = 'Authorization';
+
+/** Scheme prefix for the bearer-style auth header value. */
+export const AUTH_SCHEME = 'Bearer';
+
+/**
+ * Headers that bypass tunnel interstitial warning pages. Ported from the
+ * Flutter app (http_service.dart): ngrok + zrok skip headers.
+ */
+export const TUNNEL_SKIP_HEADERS: Readonly<Record<string, string>> = {
+  'ngrok-skip-browser-warning': 'true',
+  skip_zrok_interstitial: 'true',
+};
+
+/** Realtime event names emitted by the server (socket) and forwarded via FCM. */
+export const SERVER_EVENTS = [
+  'new-message',
+  'updated-message',
+  'typing-indicator',
+  'chat-read-status-changed',
+  'group-name-change',
+  'participant-added',
+  'participant-removed',
+  'participant-left',
+  'ft-call-status-changed',
+  'incoming-facetime',
+  'imessage-aliases-removed',
+] as const;
+
+export type ServerEventName = (typeof SERVER_EVENTS)[number];
+
+/** Default page size for full/incremental sync, matching the Flutter default. */
+export const SYNC_BATCH_SIZE = 1000;
+
+/** Extra fields requested during sync (incremental_sync_manager.dart withQuery). */
+export const SYNC_WITH_QUERY = [
+  'chats',
+  'chats.participants',
+  'attachments',
+  'attributedBody',
+  'messageSummaryInfo',
+  'payloadData',
+] as const;
