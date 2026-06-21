@@ -48,6 +48,16 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
     }
   });
 
+  it('Message accepts a message with nested attachments (with=attachments)', () => {
+    const res = Message.safeParse(fixture('messageWithAttachments.gator.json'));
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.attachments).toHaveLength(1);
+      expect(res.data.attachments?.[0]?.mimeType).toBe('image/jpeg');
+      expect(res.data.attachments?.[0]?.guid).toBe('at-IMG-9988');
+    }
+  });
+
   it('Handle accepts the handleSerializer shape', () => {
     const res = Handle.safeParse(fixture('handle.gator.json'));
     expect(res.success).toBe(true);
