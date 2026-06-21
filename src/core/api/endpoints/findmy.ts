@@ -6,23 +6,22 @@ import type { HttpClient } from '../http';
 // opaque and normalize in core/findmy (server shape varies across versions).
 const ListResponse = z.array(z.unknown()).nullish();
 
+// Paths: the Gator fork serves /findmy/* (upstream BlueBubbles used /icloud/findmy/*).
 async function list(http: HttpClient, path: string): Promise<unknown[]> {
   return (await http.get(path, ListResponse)) ?? [];
 }
 
-export const getDevices = (http: HttpClient): Promise<unknown[]> =>
-  list(http, '/icloud/findmy/devices');
+export const getDevices = (http: HttpClient): Promise<unknown[]> => list(http, '/findmy/devices');
 
-export const getFriends = (http: HttpClient): Promise<unknown[]> =>
-  list(http, '/icloud/findmy/friends');
+export const getFriends = (http: HttpClient): Promise<unknown[]> => list(http, '/findmy/friends');
 
 export async function refreshDevices(http: HttpClient): Promise<unknown[]> {
-  const res = await http.post('/icloud/findmy/devices/refresh', ListResponse, { json: {} });
+  const res = await http.post('/findmy/devices/refresh', ListResponse, { json: {} });
   // Some server versions return no data on refresh — fall back to a GET.
   return res && res.length > 0 ? res : getDevices(http);
 }
 
 export async function refreshFriends(http: HttpClient): Promise<unknown[]> {
-  const res = await http.post('/icloud/findmy/friends/refresh', ListResponse, { json: {} });
+  const res = await http.post('/findmy/friends/refresh', ListResponse, { json: {} });
   return res && res.length > 0 ? res : getFriends(http);
 }

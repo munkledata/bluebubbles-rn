@@ -3,7 +3,7 @@
 import { ApiError } from '@core/api/errors';
 import { MIN_SERVER_VERSION } from '@core/config';
 import type { ServerInfo } from '@core/models';
-import type { SecureVault } from '@core/secure';
+import { logger, type SecureVault } from '@core/secure';
 import { isAtLeast } from '@utils/version';
 
 export type ConnectFailureKind = 'unauthorized' | 'unreachable' | 'outdated' | 'unknown';
@@ -42,12 +42,14 @@ export async function connectToServer(
     return mapError(err);
   }
 
-  if (!isAtLeast(info.server_version, minVersion)) {
-    return {
-      ok: false,
-      kind: 'outdated',
-      message: `This app requires BlueBubbles Server ${minVersion}+ (yours is ${info.server_version}). Please update your server.`,
-    };
+  // Version is ADVISORY, not a hard gate. The Gator fork uses its own versioning and a
+  // below-min (or version-less) server still works in a degraded mode — header auth is
+  // present and rowid sync falls back to timestamps — so we warn and proceed rather than
+  // block (which previously made the app unusable against Gator).
+  if (info.server_version && !isAtLeast(info.server_version, minVersion)) {
+    logger.warn(
+      `[connect] server ${info.server_version} is below the recommended ${minVersion}; proceeding (some features may be degraded).`,
+    );
   }
 
   // Validated — persist credentials securely (replaces plaintext SharedPreferences).

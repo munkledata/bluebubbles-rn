@@ -7,7 +7,7 @@ export function httpSyncApi(http: HttpClient): SyncApi {
   return {
     async serverVersion(): Promise<string> {
       const info = await serverApi.serverInfo(http);
-      return info.server_version;
+      return info.server_version ?? ''; // unknown → '' (sync treats as old → timestamp cursor)
     },
     fetchChats: (offset, limit): Promise<Chat[]> => chatsApi.queryChats(http, { offset, limit }),
     fetchChatMessages: (chatGuid, offset, limit): Promise<Message[]> =>

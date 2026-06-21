@@ -41,15 +41,15 @@ describe('connectToServer', () => {
     }
   });
 
-  it('rejects servers below the minimum version (outdated) without persisting', async () => {
+  it('connects to a below-minimum server (version is advisory, not a hard gate) and persists', async () => {
     const vault = new InMemoryVault();
     const res = await connectToServer('https://srv', 'pw', {
       fetchServerInfo: async () => ({ server_version: '1.5.0' }),
       vault,
       minServerVersion: '1.9.0',
     });
-    expect(res).toMatchObject({ ok: false, kind: 'outdated' });
-    expect(await vault.get('serverAddress')).toBeNull();
+    expect(res.ok).toBe(true); // warns but proceeds — works degraded against the Gator fork
+    expect(await vault.get('serverAddress')).toBe('https://srv');
   });
 
   it('treats unexpected errors as unknown', async () => {
