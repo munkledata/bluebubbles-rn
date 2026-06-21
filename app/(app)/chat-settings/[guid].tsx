@@ -33,6 +33,7 @@ import { http } from '@/services';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
 import { Screen, ThemeStudio, useTheme } from '@ui';
+import { adaptiveTokensFromImage } from '@ui/theme/adaptiveFromImage';
 import { safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
@@ -128,6 +129,36 @@ export default function ChatSettingsScreen(): React.JSX.Element {
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       if (res.canceled || res.assets.length === 0) return;
       await setChatTheme(getDatabase(), guid, { backgroundUri: res.assets[0]!.uri });
+    })();
+  };
+
+  // Phase 3.3: pick an image (with a crop) and derive a per-chat theme from its dominant
+  // colour, setting the background AND the generated tokens together. If the native colour
+  // extractor isn't linked yet (returns null), just set the background and explain.
+  const generateThemeFromBackground = (): void => {
+    void (async () => {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 1,
+      });
+      if (res.canceled || res.assets.length === 0) return;
+      const uri = res.assets[0]!.uri;
+      const tokens = await adaptiveTokensFromImage(uri, theme.mode);
+      if (tokens) {
+        await setChatTheme(getDatabase(), guid, {
+          themeTokens: JSON.stringify(tokens),
+          backgroundUri: uri,
+        });
+      } else {
+        await setChatTheme(getDatabase(), guid, { backgroundUri: uri });
+        Alert.alert(
+          'Background set',
+          'Adaptive theming needs an app update before it can colour-match this image. The background was applied.',
+        );
+      }
     })();
   };
 
@@ -275,6 +306,11 @@ export default function ChatSettingsScreen(): React.JSX.Element {
             <Text style={[styles.rowLabel, { color: theme.color.label }]}>Set Background…</Text>
             <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
               {hasBackground ? 'On' : 'None'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={generateThemeFromBackground} style={[styles.row, divider]}>
+            <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+              Generate theme from background
             </Text>
           </Pressable>
           {hasChatTheme || hasBackground ? (

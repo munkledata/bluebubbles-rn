@@ -52,6 +52,7 @@
     "ky": "^1.7.2",
     "react": "19.2.3",
     "react-native": "0.85.3",
+    "react-native-image-colors": "^2.6.0",
     "react-native-libsodium": "^1.7.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
