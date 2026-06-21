@@ -18,7 +18,7 @@ lastMessage]`; **nested attachments** on `chat/:guid/message` (`with=attachments
 cursor the app pages by — was dropped by the serializer). bbd 231 tests; all additive.
 
 **🔴 BIG DISCOVERY — endpoint-SHAPE divergence (DONE, app master):** the entity-level audit proved the app
-modeled the server *entities* but MISSED the response *wrappers*. Gator wraps EVERY list in a named key
+modeled the server _entities_ but MISSED the response _wrappers_. Gator wraps EVERY list in a named key
 (`{chats}`/`{messages}`/`{devices}`/`{friends}`) and returns status/ack objects for actions, while the app
 expected bare arrays/entities — so the **inbox, messages, Find My, sends, unsend, FaceTime all actually
 failed against Gator.** Reconciled every endpoint: lists→named-key; sends/reactions/edit→`SendAck{guid?}`;
@@ -41,10 +41,12 @@ ship-blockers in `message/query` (no `originalROWID`; closed `ServiceType` enum)
 regression (the prior rework assumed a tempGuid echo Gator never sends). Verify wire/optimistic-state changes
 adversarially, not just by green tests.
 
-**Still open:** Phase B/C bidirectional (server-side snapshot fixtures); chat mutations (#5, needs the
+**Still open:** **on-device verification** of everything above against a live Gator + macOS host (nothing here
+is device-verified — it's correct vs code + contract fixtures only); the **LOW transactional residual** in the
+live reconcile (wrap `reconcileEchoByContent` + `upsertMessages` in one `db.transaction` — see the TODO in
+`DbEventSink.onEvent`); Phase B/C bidirectional (server-side snapshot fixtures); chat mutations (#5, needs the
 Private-API write path); rich message fields (attributedBody/payloadData — reader has the columns, needs
-typedstream decoding); os_version on `server/info`. On-device verification of all of the above against a live
-Gator + macOS host.
+typedstream decoding); os_version on `server/info`.
 
 ## TL;DR — the core problem
 
@@ -66,6 +68,7 @@ Make **`protocol/v1` the single typed source of truth for the whole wire contrac
 envelope. Today it only defines `ResponseFormat<T>`; extend it with the per-entity `data` shapes
 (`MessageV1`, `ChatV1`, `HandleV1`, `AttachmentV1`, `ServerInfoV1`, `ScheduledMessageV1`,
 `FindMyDeviceV1`/`FindMyFriendV1`, plus `ResponseError` + `ResponseMetadata`). Then:
+
 - the **server** serializers/operations are typed to return those shapes (compile-time conformance);
 - the **app** zod models are the runtime mirror of those shapes (one per entity), validated against
   golden fixtures in CI (below).
@@ -80,36 +83,36 @@ frozen contract → fix server). Where Gator **intentionally** changed/renamed, 
 
 ### 🔴 P0 — the app cannot work against Gator until these are fixed
 
-| # | Divergence | Decision |
-|---|---|---|
-| 1 | **ServerInfo**: server emits `{ version }`; app's `ServerInfo` **requires** `server_version` (+ wants `os_version`, `private_api`, `proxy_service`, `supports_header_auth`). App's `.parse` **throws → connect/version-gate fails**. | **Server** adds the v1 fields (`server_version`, `os_version`, `private_api`, `proxy_service`, `supports_header_auth`) in `coreOperations.ts`. Short-term **app** softens `server_version` to also read `version`. |
-| 2 | **Scheduled path/shape**: app calls `/message/schedule` (GET/POST/**PUT**/DELETE), nested `{ payload:{chatGuid,message,method}, scheduledFor, schedule, type, id:number }`. Server is `/api/v1/scheduled-message` (GET/POST/DELETE only), **flat** `{ id:**string-uuid**, chatGuid, text, scheduledFor, status }`. → 404s, `z.number()` id rejects, no update, no recurrence. | **Both.** Server restores the upstream `/message/schedule` path + nested shape + PUT + the `schedule` recurrence field (honors frozen v1), **or** app adapts to `/scheduled-message` + flat shape + string id. Pick one and encode in `protocol/v1`. (Recommend server-conforms — the app already shipped the upstream shape.) |
-| 3 | **FindMy path/shape**: app calls `/icloud/findmy/{devices,friends}(/refresh)`; server is `/api/v1/findmy/*`. Server uses `coordinates:[lat,lng]` tuple + `handle:string` + `shortAddress`/`longAddress` (camelCase); app's `normalize.ts` expects `.location.latitude`, `.handle.address`, `short_address` (snake_case). → 404 + nothing normalizes. | **Both.** Server restores `/icloud/findmy/*` + the upstream nested/snake_case shape, **or** app adapts paths + `normalize.ts` to the tuple/camelCase shape. Encode in `protocol/v1`. |
-| 4 | **Chat `with` directive ignored**: app sends `with:[participants,lastMessage]`; `readOperations.ts` returns bare `serializeChat` (no participants/lastMessage). → inbox rows have no members/preview. | **Server** honors `with` in `/chat/query` + `/chat/{guid}` (nested participants + lastMessage), matching the app's `Chat` model. |
+| #   | Divergence                                                                                                                                                                                                                                                                                                                                                                    | Decision                                                                                                                                                                                                                                                                                                                       |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **ServerInfo**: server emits `{ version }`; app's `ServerInfo` **requires** `server_version` (+ wants `os_version`, `private_api`, `proxy_service`, `supports_header_auth`). App's `.parse` **throws → connect/version-gate fails**.                                                                                                                                          | **Server** adds the v1 fields (`server_version`, `os_version`, `private_api`, `proxy_service`, `supports_header_auth`) in `coreOperations.ts`. Short-term **app** softens `server_version` to also read `version`.                                                                                                             |
+| 2   | **Scheduled path/shape**: app calls `/message/schedule` (GET/POST/**PUT**/DELETE), nested `{ payload:{chatGuid,message,method}, scheduledFor, schedule, type, id:number }`. Server is `/api/v1/scheduled-message` (GET/POST/DELETE only), **flat** `{ id:**string-uuid**, chatGuid, text, scheduledFor, status }`. → 404s, `z.number()` id rejects, no update, no recurrence. | **Both.** Server restores the upstream `/message/schedule` path + nested shape + PUT + the `schedule` recurrence field (honors frozen v1), **or** app adapts to `/scheduled-message` + flat shape + string id. Pick one and encode in `protocol/v1`. (Recommend server-conforms — the app already shipped the upstream shape.) |
+| 3   | **FindMy path/shape**: app calls `/icloud/findmy/{devices,friends}(/refresh)`; server is `/api/v1/findmy/*`. Server uses `coordinates:[lat,lng]` tuple + `handle:string` + `shortAddress`/`longAddress` (camelCase); app's `normalize.ts` expects `.location.latitude`, `.handle.address`, `short_address` (snake_case). → 404 + nothing normalizes.                          | **Both.** Server restores `/icloud/findmy/*` + the upstream nested/snake_case shape, **or** app adapts paths + `normalize.ts` to the tuple/camelCase shape. Encode in `protocol/v1`.                                                                                                                                           |
+| 4   | **Chat `with` directive ignored**: app sends `with:[participants,lastMessage]`; `readOperations.ts` returns bare `serializeChat` (no participants/lastMessage). → inbox rows have no members/preview.                                                                                                                                                                         | **Server** honors `with` in `/chat/query` + `/chat/{guid}` (nested participants + lastMessage), matching the app's `Chat` model.                                                                                                                                                                                               |
 
 ### 🟠 P1 — features silently no-op until the server emits the data
 
-| # | Divergence | Decision |
-|---|---|---|
-| 5 | **Chat mutations** (`POST /chat/new`, participant add/remove, `PUT /chat/{guid}` rename) — app calls them; server may not implement. → new-chat + group management fail. | **Server** implements these operations returning the updated `Chat` (the app already persists the returned chat). |
-| 6 | **Message attachments not nested**: app requests `with=attachments`; `messageSerializer` omits the array. | **Server** nests `attachments[]` on `MessageResponse` when requested (else app must N+1 fetch). |
-| 7 | **Delivered tiers**: app just shipped `wasDeliveredQuietly` + `didNotifyRecipient` (Phase 2, migration 0010); server has the DB columns but the serializer **doesn't emit them**. → the "Delivered Quietly" tier never lights up. | **Server** emits both in `messageSerializer`. |
-| 8 | **Rich message fields**: server omits `attributedBody`, `messageSummaryInfo`, `payloadData` (rich text / tapback summary / digital-touch). App models them. | **Server** emits them (or documents that Gator drops rich text → app degrades to plaintext). |
-| 9 | **Attachment dimensions**: `height`/`width`/`webUrl` app-only (server never sends); `hideAttachment` server-only (app drops). | **Server** adds `height`/`width`; app adds `hideAttachment` to its zod (additive). |
+| #   | Divergence                                                                                                                                                                                                                        | Decision                                                                                                          |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 5   | **Chat mutations** (`POST /chat/new`, participant add/remove, `PUT /chat/{guid}` rename) — app calls them; server may not implement. → new-chat + group management fail.                                                          | **Server** implements these operations returning the updated `Chat` (the app already persists the returned chat). |
+| 6   | **Message attachments not nested**: app requests `with=attachments`; `messageSerializer` omits the array.                                                                                                                         | **Server** nests `attachments[]` on `MessageResponse` when requested (else app must N+1 fetch).                   |
+| 7   | **Delivered tiers**: app just shipped `wasDeliveredQuietly` + `didNotifyRecipient` (Phase 2, migration 0010); server has the DB columns but the serializer **doesn't emit them**. → the "Delivered Quietly" tier never lights up. | **Server** emits both in `messageSerializer`.                                                                     |
+| 8   | **Rich message fields**: server omits `attributedBody`, `messageSummaryInfo`, `payloadData` (rich text / tapback summary / digital-touch). App models them.                                                                       | **Server** emits them (or documents that Gator drops rich text → app degrades to plaintext).                      |
+| 9   | **Attachment dimensions**: `height`/`width`/`webUrl` app-only (server never sends); `hideAttachment` server-only (app drops).                                                                                                     | **Server** adds `height`/`width`; app adds `hideAttachment` to its zod (additive).                                |
 
 ### 🟡 P2 — model hygiene (no breakage, but tighten the contract)
 
-| # | Divergence | Decision |
-|---|---|---|
-| 10 | **Client-only fields on the wire schema**: app's `Chat` expects `isPinned`/`muteType`/`muteArgs`/`lastReadMessageGuid`; `Handle` expects `color`/`displayName`/`originalROWID`. These are **local UI state / contact enrichment**, not server data. | **App** — move them OUT of the wire zod model (keep them as local DB columns only), so the wire schema reflects only what the server sends. Prevents false "server should send X" confusion. |
-| 11 | **Envelope extras dropped**: server sends optional `error:{type,message}` (non-2xx) + `metadata:{offset,limit,total,count}` (pagination); app `apiResponse` models neither. | **App** — add `error` + `metadata` to `apiResponse` (additive) for better error messages + paginated sync. |
-| 12 | **Contacts**: server has `GET /api/v1/contact` (`firstName`/`lastName`/`phoneNumbers`/`hasAvatar`); app only uses device contacts (`givenName`/`familyName`/file-uri avatar) and never calls it. | Leave app device-first; **if** server contacts get wired later, add a zod model with the server's naming. Document the intentional gap. |
+| #   | Divergence                                                                                                                                                                                                                                          | Decision                                                                                                                                                                                     |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 10  | **Client-only fields on the wire schema**: app's `Chat` expects `isPinned`/`muteType`/`muteArgs`/`lastReadMessageGuid`; `Handle` expects `color`/`displayName`/`originalROWID`. These are **local UI state / contact enrichment**, not server data. | **App** — move them OUT of the wire zod model (keep them as local DB columns only), so the wire schema reflects only what the server sends. Prevents false "server should send X" confusion. |
+| 11  | **Envelope extras dropped**: server sends optional `error:{type,message}` (non-2xx) + `metadata:{offset,limit,total,count}` (pagination); app `apiResponse` models neither.                                                                         | **App** — add `error` + `metadata` to `apiResponse` (additive) for better error messages + paginated sync.                                                                                   |
+| 12  | **Contacts**: server has `GET /api/v1/contact` (`firstName`/`lastName`/`phoneNumbers`/`hasAvatar`); app only uses device contacts (`givenName`/`familyName`/file-uri avatar) and never calls it.                                                    | Leave app device-first; **if** server contacts get wired later, add a zod model with the server's naming. Document the intentional gap.                                                      |
 
 ---
 
 ## The plan (phased)
 
-**Phase A — Stop the bleeding (app + server, P0 #1–4).** Get the app *functional* against Gator.
+**Phase A — Stop the bleeding (app + server, P0 #1–4).** Get the app _functional_ against Gator.
 Pick the direction per #1–4 above (recommend: server conforms to upstream v1 paths/shapes; app makes
 `server_version` tolerant as a stopgap). Each app-side change lands behind the existing gate
 (tsc·eslint·jest) with an updated/added fixture (below).
@@ -120,6 +123,7 @@ Type the `bbd/serialize/*` functions' return values to those interfaces (compile
 the server). This makes "the serializer and the contract agree" a build error if violated.
 
 **Phase C — Drift-prevention gate (the durable mechanism).**
+
 1. **Golden fixtures.** Add a tiny server script/test that serializes representative rows and writes
    canonical JSON fixtures per entity+endpoint into `protocol/fixtures/v1/*.json` (committed).
 2. **Contract test in the app.** A jest test loads each fixture and runs the matching zod model's

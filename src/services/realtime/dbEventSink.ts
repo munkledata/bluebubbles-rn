@@ -35,6 +35,9 @@ export class DbEventSink implements EventSink {
         // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
         // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
         // Live path only — never the sync path (see reconcileEchoByContent).
+        // TODO(low): wrap reconcileEchoByContent + upsertMessages in one db.transaction so the
+        // queue-delete and the guid-promote commit atomically — a hard crash in the sub-ms gap
+        // could otherwise strand a queue-less unpromoted temp row (a permanent duplicate).
         const echoChatId = message.chats?.[0]?.guid
           ? chatMap.get(message.chats[0].guid)
           : undefined;
