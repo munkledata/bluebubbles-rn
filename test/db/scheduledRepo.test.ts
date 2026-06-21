@@ -14,6 +14,7 @@ import {
   SCHED_MAX_ATTEMPTS,
   updateScheduled,
 } from '@db/repositories';
+import { ScheduledItem } from '@core/api/endpoints/scheduled';
 import { runDueScheduled } from '@/services/send/scheduleService';
 import { createTestDb } from '../support/testDb';
 
@@ -40,6 +41,18 @@ describe('scheduled messages repo', () => {
     });
     const [row] = await listDueScheduled(db, 1000);
     expect(row?.selectedMessageGuid).toBe('orig-guid');
+  });
+
+  it('stores a uuid-STRING serverId verbatim (SQLite INTEGER affinity keeps non-numeric text)', async () => {
+    const { db } = await createTestDb();
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'srv',
+      scheduledFor: 1,
+      serverId: '3f2b1a90-uuid-4c2d',
+    });
+    const row = await getScheduledById(db, id);
+    expect(row?.serverId).toBe('3f2b1a90-uuid-4c2d');
   });
 
   it('listDueScheduled returns only past-due pending rows', async () => {
@@ -116,7 +129,12 @@ describe('scheduled messages repo', () => {
 
     it('skips server-backed rows — the SERVER fires them, not the local worker', async () => {
       const { db } = await createTestDb();
-      await insertScheduled(db, { chatGuid: 'c1', text: 'srv', scheduledFor: 1, serverId: 99 });
+      await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'srv',
+        scheduledFor: 1,
+        serverId: 'srv-1',
+      });
       let sends = 0;
       const fired = await runDueScheduled(db, noHttp, 1000, async () => {
         sends += 1;
@@ -160,32 +178,32 @@ describe('scheduled messages repo', () => {
       await reconcileServerScheduled(
         db,
         [
-          { serverId: 1, chatGuid: 'c1', text: 'a', scheduledFor: 1000, status: 'pending' },
-          { serverId: 2, chatGuid: 'c2', text: 'b', scheduledFor: 2000, status: 'pending' },
+          { serverId: 'uuid-1', chatGuid: 'c1', text: 'a', scheduledFor: 1000, status: 'pending' },
+          { serverId: 'uuid-2', chatGuid: 'c2', text: 'b', scheduledFor: 2000, status: 'pending' },
         ],
-        [1, 2],
+        ['uuid-1', 'uuid-2'],
       );
       expect(await listAllScheduled(db)).toHaveLength(3); // local + 2 server-backed
 
-      // Re-sync: the server now only reports id 2 (id 1 fired/deleted), with an edited text.
+      // Re-sync: the server now only reports uuid-2 (uuid-1 fired/deleted), with an edited text.
       await reconcileServerScheduled(
         db,
-        [{ serverId: 2, chatGuid: 'c2', text: 'b2', scheduledFor: 5000, status: 'pending' }],
-        [2],
+        [{ serverId: 'uuid-2', chatGuid: 'c2', text: 'b2', scheduledFor: 5000, status: 'pending' }],
+        ['uuid-2'],
       );
       const texts = (await listAllScheduled(db)).map((r) => r.text).sort();
-      expect(texts).toEqual(['b2', 'keep-local']); // id 1 pruned, id 2 updated, local kept
+      expect(texts).toEqual(['b2', 'keep-local']); // uuid-1 pruned, uuid-2 updated, local kept
     });
 
     it('keeps a malformed-but-present row (id in the raw set but dropped from items)', async () => {
       const { db } = await createTestDb();
       await reconcileServerScheduled(
         db,
-        [{ serverId: 7, chatGuid: 'c', text: 'good', scheduledFor: 1, status: 'pending' }],
-        [7],
+        [{ serverId: 'uuid-7', chatGuid: 'c', text: 'good', scheduledFor: 1, status: 'pending' }],
+        ['uuid-7'],
       );
-      // Next sync: id 7 still reported (raw set) but unparseable so absent from items → NOT pruned.
-      await reconcileServerScheduled(db, [], [7]);
+      // Next sync: uuid-7 still reported (raw set) but unparseable so absent from items → NOT pruned.
+      await reconcileServerScheduled(db, [], ['uuid-7']);
       expect(await listAllScheduled(db)).toHaveLength(1);
     });
 
@@ -193,8 +211,8 @@ describe('scheduled messages repo', () => {
       const { db } = await createTestDb();
       await reconcileServerScheduled(
         db,
-        [{ serverId: 9, chatGuid: 'c', text: 'x', scheduledFor: 1, status: 'pending' }],
-        [9],
+        [{ serverId: 'uuid-9', chatGuid: 'c', text: 'x', scheduledFor: 1, status: 'pending' }],
+        ['uuid-9'],
       );
       await reconcileServerScheduled(db, [], []); // empty raw set → skip prune
       expect(await listAllScheduled(db)).toHaveLength(1);
@@ -255,6 +273,50 @@ describe('scheduled messages repo', () => {
       await claimScheduled(db, id); // pending → sending
       await updateScheduled(db, id, { text: 'changed' });
       expect((await getScheduledById(db, id))?.text).toBe('hi'); // unchanged
+    });
+
+    it('repoints serverId (the no-PUT re-create path repoints the local row at the new uuid)', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'old',
+        scheduledFor: 1000,
+        serverId: 'old-uuid',
+      });
+      await updateScheduled(db, id, { text: 'new', scheduledFor: 2000, serverId: 'new-uuid' });
+      const row = await getScheduledById(db, id);
+      expect(row).toMatchObject({ text: 'new', scheduledFor: 2000, serverId: 'new-uuid' });
+    });
+  });
+
+  describe('Gator contract', () => {
+    it('parses a flat Gator scheduled-message item via the ScheduledItem zod', () => {
+      const parsed = ScheduledItem.parse({
+        id: '3f2b1a90-7c4d-4e2f-9a1b-0c2d4e6f8a01',
+        chatGuid: 'iMessage;-;+15551234567',
+        text: 'see you at 5',
+        scheduledFor: 1_750_000_000_000,
+        status: 'pending',
+      });
+      expect(parsed.id).toBe('3f2b1a90-7c4d-4e2f-9a1b-0c2d4e6f8a01');
+      expect(parsed.scheduledFor).toBe(1_750_000_000_000);
+      expect(parsed.status).toBe('pending');
+    });
+
+    it('accepts an item with no status (status is nullish on the wire)', () => {
+      const parsed = ScheduledItem.parse({
+        id: 'uuid-x',
+        chatGuid: 'c1',
+        text: 'hi',
+        scheduledFor: 1,
+      });
+      expect(parsed.status).toBeUndefined();
+    });
+
+    it('rejects a numeric id (Gator ids are uuid STRINGS, never the old integer)', () => {
+      expect(() =>
+        ScheduledItem.parse({ id: 42, chatGuid: 'c1', text: 'hi', scheduledFor: 1 }),
+      ).toThrow();
     });
   });
 });

@@ -2,97 +2,65 @@ import { z } from 'zod';
 import type { HttpClient } from '../http';
 
 /**
- * Server-side scheduled messages (F-8). Mirrors the Flutter `/message/schedule`
- * routes so a message fires on time even while the phone is asleep — the on-device
- * worker is only a fallback for servers/messages that can't be scheduled remotely.
+ * Server-side scheduled messages (F-8) — Gator contract.
+ *
+ * Gator schedules a message so it fires on time even while the phone is asleep; the
+ * on-device worker is only a fallback for messages Gator can't schedule remotely
+ * (an offline create, or a reply-target message — the flat body can't carry one).
+ *
+ * Gator's REST surface (no PUT/update, no recurrence):
+ *   POST   /api/v1/scheduled-message  { chatGuid, text, scheduledFor }  → ScheduledMessage
+ *   GET    /api/v1/scheduled-message                                     → ScheduledMessage[]
+ *   DELETE /api/v1/scheduled-message/:id
+ *
+ * Every response is wrapped in the v1 `{ status, message, data }` envelope (HttpClient
+ * unwraps `data`); GET's `data` is `{ scheduledMessages: [...] }`, DELETE's is `{ removed }`.
  */
 
-/** Recurrence spec (parity with the Flutter `Schedule` model). */
-export interface ScheduleSpec {
-  type: 'once' | 'recurring';
-  interval?: number;
-  intervalType?: 'hourly' | 'daily' | 'weekly' | 'monthly';
-}
-
-const ScheduledItem = z
+/** The flat Gator scheduled-message shape (id is a server-assigned uuid string). */
+export const ScheduledItem = z
   .object({
-    id: z.number(),
-    type: z.string().nullish(),
-    payload: z
-      .object({
-        chatGuid: z.string(),
-        message: z.string(),
-        method: z.string().nullish(),
-      })
-      .passthrough()
-      .nullish(),
-    // The server serializes scheduledFor as an ISO string; create/update send epoch ms.
-    scheduledFor: z.union([z.string(), z.number()]).nullish(),
-    schedule: z
-      .object({
-        type: z.string(),
-        interval: z.number().nullish(),
-        intervalType: z.string().nullish(),
-      })
-      .passthrough()
-      .nullish(),
-    status: z.string().nullish(),
-    error: z.string().nullish(),
+    id: z.string(),
+    chatGuid: z.string(),
+    text: z.string(),
+    /** Epoch ms. */
+    scheduledFor: z.number(),
+    status: z.string().nullish(), // 'pending' | 'sent' | 'failed'
   })
   .passthrough();
 export type ScheduledItem = z.infer<typeof ScheduledItem>;
 
-const ListResponse = z.object({ data: z.array(ScheduledItem).nullish() }).passthrough();
-const ItemResponse = z.object({ data: ScheduledItem.nullish() }).passthrough();
+// GET returns the list under `scheduledMessages`; POST returns the bare item.
+const ListResponse = z
+  .object({ scheduledMessages: z.array(ScheduledItem).nullish() })
+  .passthrough();
+const ItemResponse = ScheduledItem;
+const DeleteResponse = z.object({ removed: z.boolean().nullish() }).passthrough().nullish();
 
 export interface ScheduledArgs {
   chatGuid: string;
   message: string;
   /** Epoch ms. */
   scheduledFor: number;
-  schedule?: ScheduleSpec;
-  method?: string;
 }
 
-function body(args: ScheduledArgs): Record<string, unknown> {
-  return {
-    type: 'send-message',
-    payload: {
-      chatGuid: args.chatGuid,
-      message: args.message,
-      method: args.method ?? 'private-api',
-    },
-    scheduledFor: args.scheduledFor,
-    schedule: args.schedule ?? { type: 'once' },
-  };
-}
-
-/** GET /message/schedule — all scheduled messages the server is tracking. */
+/** GET /scheduled-message — every scheduled message Gator is tracking. */
 export async function getScheduled(http: HttpClient): Promise<ScheduledItem[]> {
-  const res = await http.get('/message/schedule', ListResponse);
-  return res.data ?? [];
+  const res = await http.get('/scheduled-message', ListResponse);
+  return res.scheduledMessages ?? [];
 }
 
-/** POST /message/schedule — create a server-side scheduled message. */
+/** POST /scheduled-message — create a server-side scheduled message; returns the new item. */
 export async function createScheduled(
   http: HttpClient,
   args: ScheduledArgs,
 ): Promise<ScheduledItem | null> {
-  const res = await http.post('/message/schedule', ItemResponse, { json: body(args) });
-  return res.data ?? null;
+  return http.post('/scheduled-message', ItemResponse, {
+    json: { chatGuid: args.chatGuid, text: args.message, scheduledFor: args.scheduledFor },
+  });
 }
 
-/** PUT /message/schedule/{id} — edit a server-side scheduled message. */
-export async function updateScheduled(
-  http: HttpClient,
-  id: number,
-  args: ScheduledArgs,
-): Promise<ScheduledItem | null> {
-  const res = await http.put(`/message/schedule/${id}`, ItemResponse, { json: body(args) });
-  return res.data ?? null;
-}
-
-/** DELETE /message/schedule/{id}. */
-export function deleteScheduled(http: HttpClient, id: number): Promise<unknown> {
-  return http.delete(`/message/schedule/${id}`, z.unknown());
+/** DELETE /scheduled-message/{id}. */
+export function deleteScheduled(http: HttpClient, id: string): Promise<unknown> {
+  return http.delete(`/scheduled-message/${id}`, DeleteResponse);
 }

@@ -166,7 +166,9 @@ export const contacts = sqliteTable('contacts', {
 
 export const scheduledMessages = sqliteTable('scheduled_messages', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  serverId: integer('server_id'),
+  // Gator's server-side scheduled id is a uuid STRING. SQLite INTEGER affinity stored a
+  // non-numeric value as text already, so no SQL migration is needed for existing rows.
+  serverId: text('server_id'),
   chatGuid: text('chat_guid').notNull(),
   payload: text('payload').notNull(),
   scheduledFor: integer('scheduled_for').notNull(),

@@ -6,7 +6,7 @@ import type { AppDatabase } from '../types';
 
 export interface ScheduledRow {
   id: number;
-  serverId: number | null;
+  serverId: string | null;
   chatGuid: string;
   text: string;
   selectedMessageGuid?: string;
@@ -23,7 +23,7 @@ const SCHED_COLS = sql`id, server_id AS serverId, chat_guid AS chatGuid, payload
 
 function mapScheduled(r: {
   id: number;
-  serverId: number | null;
+  serverId: string | null;
   chatGuid: string;
   payload: string;
   scheduledFor: number;
@@ -49,7 +49,7 @@ export async function insertScheduled(
     scheduledFor: number;
     selectedMessageGuid?: string;
     /** Set when the server is also tracking this row (server fires it; the local ticker skips it). */
-    serverId?: number | null;
+    serverId?: string | null;
   },
 ): Promise<number> {
   const payload: ScheduledPayload = {
@@ -80,13 +80,13 @@ export async function insertScheduled(
 export async function reconcileServerScheduled(
   db: AppDatabase,
   items: {
-    serverId: number;
+    serverId: string;
     chatGuid: string;
     text: string;
     scheduledFor: number;
     status: string;
   }[],
-  serverIds: number[],
+  serverIds: string[],
 ): Promise<void> {
   for (const it of items) {
     const existing = await db.all<{ id: number; payload: string }>(
@@ -115,7 +115,7 @@ export async function reconcileServerScheduled(
   }
   if (serverIds.length === 0) return; // never prune on an empty/suspect server view
   const keep = new Set(serverIds);
-  const localServer = await db.all<{ id: number; serverId: number }>(
+  const localServer = await db.all<{ id: number; serverId: string }>(
     sql`SELECT id, server_id AS serverId FROM scheduled_messages WHERE server_id IS NOT NULL`,
   );
   const stale: number[] = [];
@@ -128,16 +128,17 @@ export async function reconcileServerScheduled(
 }
 
 /**
- * Edit a still-pending scheduled message's text and/or fire time. The `status='pending'`
+ * Edit a still-pending scheduled message's text and/or fire time (and, when a server-backed
+ * row is re-created against Gator's no-PUT API, its new `serverId`). The `status='pending'`
  * guard is the correctness lock — a row already claimed/sent can't be edited (mirrors
  * `claimScheduled`). The reply target (selectedMessageGuid) is preserved through the JSON.
  */
 export async function updateScheduled(
   db: AppDatabase,
   id: number,
-  patch: { text?: string; scheduledFor?: number },
+  patch: { text?: string; scheduledFor?: number; serverId?: string | null },
 ): Promise<void> {
-  const set: { payload?: string; scheduledFor?: number } = {};
+  const set: { payload?: string; scheduledFor?: number; serverId?: string | null } = {};
   if (patch.text !== undefined) {
     const cur = await db.all<{ payload: string }>(
       sql`SELECT payload FROM scheduled_messages WHERE id = ${id} LIMIT 1`,
@@ -147,6 +148,7 @@ export async function updateScheduled(
     set.payload = JSON.stringify(p);
   }
   if (patch.scheduledFor !== undefined) set.scheduledFor = patch.scheduledFor;
+  if (patch.serverId !== undefined) set.serverId = patch.serverId;
   if (Object.keys(set).length === 0) return;
   await db
     .update(scheduledMessages)
@@ -208,7 +210,7 @@ export async function claimScheduled(db: AppDatabase, id: number): Promise<boole
 export async function markScheduledSent(
   db: AppDatabase,
   id: number,
-  serverId: number | null = null,
+  serverId: string | null = null,
 ): Promise<void> {
   await db
     .update(scheduledMessages)

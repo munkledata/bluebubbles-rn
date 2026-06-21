@@ -2,7 +2,6 @@ import type { HttpClient } from '@core/api/http';
 // Import the endpoint module directly (not the @core/api barrel) so this stays
 // node-importable in tests without pulling in ky (ESM).
 import * as scheduledApi from '@core/api/endpoints/scheduled';
-import type { ScheduleSpec } from '@core/api/endpoints/scheduled';
 import { logger } from '@core/secure';
 import {
   claimScheduled,
@@ -19,32 +18,26 @@ export interface ScheduleArgs {
   text: string;
   scheduledFor: number;
   selectedMessageGuid?: string;
-  /** Recurrence (defaults to once). */
-  schedule?: ScheduleSpec;
-  /** Send method to record server-side ('private-api' | 'apple-script'). */
-  method?: string;
 }
 
 /**
- * Schedule a message. Prefers SERVER-side scheduling (the server fires it on time even if
- * the phone is asleep), recording the returned id so the on-device worker SKIPS it (no
+ * Schedule a message. Prefers SERVER-side scheduling (Gator fires it on time even if the
+ * phone is asleep), recording the returned uuid so the on-device worker SKIPS it (no
  * double-send). Falls back to a local-only row when the server can't schedule it: an older
- * server, an offline create, or a reply-target message (the server payload can't carry one).
+ * server, an offline create, or a reply-target message (Gator's flat body can't carry one).
  */
 export async function scheduleTextMessage(
   db: AppDatabase,
   http: HttpClient,
   args: ScheduleArgs,
-): Promise<{ id: number; serverId: number | null }> {
-  let serverId: number | null = null;
+): Promise<{ id: number; serverId: string | null }> {
+  let serverId: string | null = null;
   if (!args.selectedMessageGuid) {
     try {
       const created = await scheduledApi.createScheduled(http, {
         chatGuid: args.chatGuid,
         message: args.text,
         scheduledFor: args.scheduledFor,
-        schedule: args.schedule,
-        method: args.method,
       });
       serverId = created?.id ?? null;
     } catch (e) {

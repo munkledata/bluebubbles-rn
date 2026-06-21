@@ -81,7 +81,7 @@ export function unsend(args: { messageGuid: string }): Promise<{ ok: boolean }> 
 }
 
 /** UI-facing: store a message to send later (server-side when possible). */
-export function schedule(args: ScheduleArgs): Promise<{ id: number; serverId: number | null }> {
+export function schedule(args: ScheduleArgs): Promise<{ id: number; serverId: string | null }> {
   return scheduleTextMessage(getDatabase(), http, args);
 }
 
@@ -90,7 +90,7 @@ export function schedule(args: ScheduleArgs): Promise<{ id: number; serverId: nu
  * if it fails we keep the local row and rethrow (the message is still scheduled server-side,
  * so the user must be able to retry the cancel rather than lose the only handle to it).
  */
-export async function cancelScheduled(row: { id: number; serverId: number | null }): Promise<void> {
+export async function cancelScheduled(row: { id: number; serverId: string | null }): Promise<void> {
   if (row.serverId != null) {
     await scheduledApi.deleteScheduled(http, row.serverId); // throws → local kept, UI alerts
   }
@@ -98,9 +98,10 @@ export async function cancelScheduled(row: { id: number; serverId: number | null
 }
 
 /**
- * Edit a scheduled message's text/time. For a server-backed row the SERVER update goes FIRST
- * (preserving its recurrence schedule); only on success is the local row updated. A failed PUT
- * rethrows so the edit screen can surface it instead of silently diverging from the server.
+ * Edit a scheduled message's text/time. Gator has NO update endpoint, so for a server-backed
+ * row we re-create it: DELETE the old scheduled message, POST a fresh one, then point the local
+ * row at the new uuid. The server call goes FIRST — any failure rethrows so the edit screen can
+ * surface it instead of silently diverging from the server. Local-only rows just update locally.
  */
 export async function editScheduled(
   id: number,
@@ -109,37 +110,26 @@ export async function editScheduled(
   const db = getDatabase();
   const row = await getScheduledById(db, id);
   if (row?.serverId != null) {
-    let schedule: scheduledApi.ScheduleSpec | undefined;
-    try {
-      // Preserve the server's recurrence — read its current schedule and forward it, so an
-      // edit doesn't silently downgrade a recurring message to one-time.
-      const cur = (await scheduledApi.getScheduled(http)).find((it) => it.id === row.serverId);
-      if (cur?.schedule?.type) {
-        schedule = {
-          type: cur.schedule.type === 'recurring' ? 'recurring' : 'once',
-          interval: cur.schedule.interval ?? undefined,
-          intervalType: cur.schedule.intervalType as scheduledApi.ScheduleSpec['intervalType'],
-        };
-      }
-    } catch {
-      /* couldn't read the schedule — the PUT below still preserves text/time */
-    }
-    await scheduledApi.updateScheduled(http, row.serverId, {
+    // No PUT on Gator: delete the old server-side message and create a replacement.
+    await scheduledApi.deleteScheduled(http, row.serverId);
+    const created = await scheduledApi.createScheduled(http, {
       chatGuid: row.chatGuid,
       message: patch.text,
       scheduledFor: patch.scheduledFor ?? row.scheduledFor,
-      schedule,
     });
+    // Repoint the local row at the fresh uuid alongside the text/time change.
+    await updateScheduled(db, id, { ...patch, serverId: created?.id ?? null });
+    return;
   }
   await updateScheduled(db, id, patch);
 }
 
-/** Server scheduled status → local {pending,sent,error} so active/recurring rows stay visible. */
+/** Gator scheduled status (pending|sent|failed) → local {pending,sent,error} so pending rows stay visible. */
 function normalizeSchedStatus(s: string | null | undefined): string {
   const v = (s ?? '').toLowerCase();
   if (v === 'complete' || v === 'completed' || v === 'sent') return 'sent';
   if (v === 'error' || v === 'failed') return 'error';
-  return 'pending'; // pending / scheduled / active / recurring → keep visible + cancellable
+  return 'pending'; // pending / scheduled → keep visible + cancellable
 }
 
 /** Pull the server's scheduled list into the local DB (keeps server-backed rows accurate). */
@@ -155,18 +145,12 @@ export async function syncScheduledFromServer(): Promise<void> {
   const serverIds = items.map((it) => it.id);
   const mapped = items
     .map((it) => {
-      const sf =
-        typeof it.scheduledFor === 'number'
-          ? it.scheduledFor
-          : it.scheduledFor
-            ? Date.parse(it.scheduledFor)
-            : NaN;
-      if (!it.payload || !Number.isFinite(sf)) return null;
+      if (!Number.isFinite(it.scheduledFor)) return null;
       return {
         serverId: it.id,
-        chatGuid: it.payload.chatGuid,
-        text: it.payload.message,
-        scheduledFor: sf,
+        chatGuid: it.chatGuid,
+        text: it.text,
+        scheduledFor: it.scheduledFor,
         status: normalizeSchedStatus(it.status),
       };
     })
