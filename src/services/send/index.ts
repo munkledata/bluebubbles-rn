@@ -110,15 +110,26 @@ export async function editScheduled(
   const db = getDatabase();
   const row = await getScheduledById(db, id);
   if (row?.serverId != null) {
-    // No PUT on Gator: delete the old server-side message and create a replacement.
-    await scheduledApi.deleteScheduled(http, row.serverId);
-    const created = await scheduledApi.createScheduled(http, {
-      chatGuid: row.chatGuid,
-      message: patch.text,
-      scheduledFor: patch.scheduledFor ?? row.scheduledFor,
-    });
+    // No PUT on Gator: delete the old server-side message, then create a replacement.
+    await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
+    let newServerId: string | null;
+    try {
+      const created = await scheduledApi.createScheduled(http, {
+        chatGuid: row.chatGuid,
+        message: patch.text,
+        scheduledFor: patch.scheduledFor ?? row.scheduledFor,
+      });
+      newServerId = created?.id ?? null;
+    } catch (e) {
+      // DELETE succeeded but the re-create failed: the old server message is gone. DROP the
+      // serverId so the on-device worker fires the edited message as a fallback (rather than
+      // orphaning it — a non-null serverId would make the local worker skip it forever), apply
+      // the edit locally, then surface the failure.
+      await updateScheduled(db, id, { ...patch, serverId: null });
+      throw e;
+    }
     // Repoint the local row at the fresh uuid alongside the text/time change.
-    await updateScheduled(db, id, { ...patch, serverId: created?.id ?? null });
+    await updateScheduled(db, id, { ...patch, serverId: newServerId });
     return;
   }
   await updateScheduled(db, id, patch);
