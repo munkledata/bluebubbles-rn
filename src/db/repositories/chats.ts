@@ -139,6 +139,35 @@ export async function setChatCustomization(
   await db.update(chats).set(set).where(eq(chats.guid, guid));
 }
 
+/**
+ * Set a chat's per-chat theme override and/or chat-background image. Pass a field
+ * as `undefined` to leave it unchanged, or `null` to clear it (revert to the global
+ * theme / no background). Device-local — excluded from upsertChats' conflict set.
+ */
+export async function setChatTheme(
+  db: AppDatabase,
+  guid: string,
+  patch: { themeTokens?: string | null; backgroundUri?: string | null },
+): Promise<void> {
+  const set: { themeTokens?: string | null; backgroundUri?: string | null } = {};
+  if (patch.themeTokens !== undefined) set.themeTokens = patch.themeTokens;
+  if (patch.backgroundUri !== undefined) set.backgroundUri = patch.backgroundUri;
+  if (Object.keys(set).length === 0) return;
+  await db.update(chats).set(set).where(eq(chats.guid, guid));
+}
+
+/** A chat's per-chat theme override + background uri (null fields → inherit/none). */
+export async function getChatTheme(
+  db: AppDatabase,
+  guid: string,
+): Promise<{ themeTokens: string | null; backgroundUri: string | null } | null> {
+  const rows = await db.all<{ themeTokens: string | null; backgroundUri: string | null }>(
+    sql`SELECT theme_tokens AS themeTokens, background_uri AS backgroundUri
+          FROM chats WHERE guid = ${guid} LIMIT 1`,
+  );
+  return rows[0] ?? null;
+}
+
 // ---- Queries ---------------------------------------------------------------
 
 /** Inbox: non-archived chats, most-recent first. */

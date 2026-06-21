@@ -236,4 +236,15 @@ export const MIGRATIONS: Migration[] = [
     name: '0008_outgoing_next_retry',
     statements: [`ALTER TABLE outgoing_queue ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0`],
   },
+  {
+    // Phase 3.2 per-chat theming: a JSON ThemeTokens override (recolors the whole
+    // conversation) and a chat-background image uri. Both device-local and excluded
+    // from upsertChats' conflict set so a server re-sync never clobbers them.
+    // Additive only; applied transactionally + idempotently by name.
+    name: '0009_chat_theme',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN theme_tokens TEXT`,
+      `ALTER TABLE chats ADD COLUMN background_uri TEXT`,
+    ],
+  },
 ];

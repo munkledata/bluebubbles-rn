@@ -57,6 +57,10 @@ export const chats = sqliteTable(
     /** Local per-chat customizations (never overwritten by a server re-sync). */
     customName: text('custom_name'),
     customColor: text('custom_color'),
+    /** Per-chat theme override: JSON `ThemeTokens` blob (null → inherit the global theme). */
+    themeTokens: text('theme_tokens'),
+    /** Per-chat chat-background image uri (null → no background). */
+    backgroundUri: text('background_uri'),
     lastReadMessageGuid: text('last_read_message_guid'),
     /** Denormalized for fast inbox sorting without a join. */
     latestMessageDate: integer('latest_message_date'),

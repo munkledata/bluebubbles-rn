@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
@@ -45,6 +46,7 @@ import {
   TypingBubble,
   type SelectedMessage,
 } from '@ui';
+import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useTypingStore } from '@state/typingStore';
@@ -56,10 +58,23 @@ const VoiceRecorder = lazy(() =>
   import('@ui/conversations/VoiceRecorder').then((m) => ({ default: m.VoiceRecorder })),
 );
 
-/** Phase 4 conversation view: reactive message list + composer with optimistic send. */
+/**
+ * Phase 4 conversation view: reactive message list + composer with optimistic send.
+ * Wrapped in ChatThemeProvider so a per-chat theme (Phase 3.2) recolors the whole
+ * conversation — every `useTheme()` below (including Screen) sees the chat override.
+ */
 export default function ChatScreen(): React.JSX.Element {
   const { guid } = useLocalSearchParams<{ guid: string }>();
+  return (
+    <ChatThemeProvider guid={guid}>
+      <ChatScreenInner guid={guid} />
+    </ChatThemeProvider>
+  );
+}
+
+function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
   const header = useChatHeader(guid);
+  const backgroundUri = useChatBackgroundUri(guid);
   const isGroup = header.data ? isGroupRow(header.data) : false;
   // ONE message subscription for the whole screen — fed to the list, smart-reply
   // chips, and the screen-effect trigger (avoids 3× the reactive query work).
@@ -282,6 +297,17 @@ export default function ChatScreen(): React.JSX.Element {
 
   return (
     <Screen>
+      {backgroundUri ? (
+        <Image
+          source={{ uri: backgroundUri }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          // Behind the message list; the list container is transparent so this shows
+          // through. Bubbles stay readable because the (edited) tokens control contrast.
+          pointerEvents="none"
+          accessibilityIgnoresInvertColors
+        />
+      ) : null}
       {/* `padding` consumes the keyboard inset under Android edge-to-edge
           (RN 0.85 / Expo SDK 56 default), keeping the composer above the keyboard. */}
       <KeyboardAvoidingView style={styles.flex} behavior="padding">

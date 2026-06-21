@@ -1,7 +1,9 @@
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,15 +18,18 @@ import { getDatabase } from '@db/database';
 import {
   deleteChatLocal,
   getChatParticipants,
+  getChatTheme,
   persistServerChat,
   setChatCustomization,
   setChatMute,
+  setChatTheme,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { http } from '@/services';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { isGroupRow, resolveTitle } from '@utils';
-import { Screen, useTheme } from '@ui';
+import { Screen, ThemeStudio, useTheme } from '@ui';
+import { safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
 const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'];
@@ -85,6 +90,39 @@ export default function ChatSettingsScreen(): React.JSX.Element {
     [guid],
   );
   const members = membersData ?? [];
+
+  // Per-chat theme + background (Phase 3.2). Reactive so the row subtitle reflects state.
+  const { data: chatThemeData } = useReactiveQuery(
+    () => getChatTheme(getDatabase(), guid),
+    ['chats'],
+    [guid],
+  );
+  const hasChatTheme = !!chatThemeData?.themeTokens;
+  const hasBackground = !!chatThemeData?.backgroundUri;
+  const [studioOpen, setStudioOpen] = useState(false);
+
+  // The studio opens with the chat's stored theme, falling back to the active global theme.
+  const studioTokens = (): ThemeTokens => safeParseTokens(chatThemeData?.themeTokens) ?? theme;
+
+  const applyChatTheme = (tokens: ThemeTokens): void => {
+    setStudioOpen(false);
+    void setChatTheme(getDatabase(), guid, { themeTokens: JSON.stringify(tokens) });
+  };
+
+  const pickBackground = (): void => {
+    void (async () => {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      if (res.canceled || res.assets.length === 0) return;
+      await setChatTheme(getDatabase(), guid, { backgroundUri: res.assets[0]!.uri });
+    })();
+  };
+
+  const clearChatTheme = (): void => {
+    void setChatTheme(getDatabase(), guid, { themeTokens: null, backgroundUri: null });
+  };
+
   const [renaming, setRenaming] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [adding, setAdding] = useState(false);
@@ -212,6 +250,31 @@ export default function ChatSettingsScreen(): React.JSX.Element {
         </View>
 
         <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
+          CHAT THEME
+        </Text>
+        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+          <Pressable onPress={() => setStudioOpen(true)} style={styles.row}>
+            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Chat Theme…</Text>
+            <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
+              {hasChatTheme ? 'Custom' : 'Default'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={pickBackground} style={[styles.row, divider]}>
+            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Set Background…</Text>
+            <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
+              {hasBackground ? 'On' : 'None'}
+            </Text>
+          </Pressable>
+          {hasChatTheme || hasBackground ? (
+            <Pressable onPress={clearChatTheme} style={[styles.row, divider]}>
+              <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>
+                Clear chat theme / background
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
           NOTIFICATIONS
         </Text>
         <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
@@ -329,6 +392,23 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           </Text>
         </Pressable>
       </ScrollView>
+
+      {studioOpen ? (
+        <Modal
+          visible
+          transparent
+          animationType="slide"
+          onRequestClose={() => setStudioOpen(false)}
+        >
+          <ThemeStudio
+            title="Chat Theme"
+            initialTokens={studioTokens()}
+            showName={false}
+            onApply={(tokens) => applyChatTheme(tokens)}
+            onCancel={() => setStudioOpen(false)}
+          />
+        </Modal>
+      ) : null}
     </Screen>
   );
 }
@@ -365,6 +445,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   rowLabel: { fontSize: 16 },
+  rowValue: { fontSize: 15 },
   remove: { fontSize: 18, paddingHorizontal: 4 },
   reset: { alignItems: 'center', paddingVertical: 24 },
   resetText: { fontSize: 16 },

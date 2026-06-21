@@ -181,3 +181,17 @@ export const DEFAULT_PRESET: PresetKey = 'oled-dark';
 export function resolvePreset(key: string | null | undefined): ThemeTokens {
   return (key && key in PRESETS ? PRESETS[key as PresetKey] : PRESETS[DEFAULT_PRESET]).tokens;
 }
+
+/**
+ * Safe parse of a stored tokens blob. Returns null for null/empty/corrupt input so
+ * callers (the theme editor, the per-chat ChatThemeProvider) fall back to a known
+ * theme rather than crash. Pure, so it's usable in non-React code + tests.
+ */
+export function safeParseTokens(json: string | null | undefined): ThemeTokens | null {
+  if (!json) return null;
+  try {
+    return JSON.parse(json) as ThemeTokens;
+  } catch {
+    return null;
+  }
+}

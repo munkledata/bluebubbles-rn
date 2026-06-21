@@ -1,15 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import {
@@ -20,52 +11,11 @@ import {
   type CustomThemeRow,
 } from '@db/repositories';
 import { useThemeStore } from '@state/themeStore';
-import { Screen, useTheme } from '@ui';
-import { cloneTokens, EDITABLE_COLORS, isValidHex } from '@ui/theme/editableTokens';
-import { resolvePreset, type ThemeMode, type ThemeTokens } from '@ui/theme/tokens';
+import { Screen, ThemeStudio, useTheme } from '@ui';
+import { resolvePreset, safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
-interface Draft {
-  id: number | null;
-  name: string;
-  mode: ThemeMode;
-  base: ThemeTokens;
-  hex: Record<string, string>;
-}
-
-function draftFrom(row: CustomThemeRow | null, fallback: ThemeTokens): Draft {
-  let base = fallback;
-  if (row) {
-    try {
-      base = JSON.parse(row.tokens) as ThemeTokens;
-    } catch {
-      base = fallback;
-    }
-  }
-  return {
-    id: row?.id ?? null,
-    name: row?.name ?? 'My Theme',
-    mode: base.mode,
-    base: cloneTokens(base),
-    hex: Object.fromEntries(EDITABLE_COLORS.map((f) => [f.key, f.read(base)])),
-  };
-}
-
-/** Build the full token set from a draft's edited hex values (assumes all valid). */
-function tokensFromDraft(d: Draft): ThemeTokens {
-  const out = cloneTokens(d.base);
-  out.mode = d.mode;
-  for (const f of EDITABLE_COLORS) f.write(out, (d.hex[f.key] ?? '').trim());
-  return out;
-}
-
-/** Safe parse of a stored tokens blob (a corrupt row must not crash the screen). */
-function safeParseTokens(json: string): ThemeTokens | null {
-  try {
-    return JSON.parse(json) as ThemeTokens;
-  } catch {
-    return null;
-  }
-}
+/** Which theme the studio is editing: a new one, or an existing row. */
+type Editing = { row: CustomThemeRow | null };
 
 /** F-12: create/edit/delete custom themes and pick the active one (live recolor). */
 export default function ThemesScreen(): React.JSX.Element {
@@ -79,7 +29,7 @@ export default function ThemesScreen(): React.JSX.Element {
   const presetKey = useThemeStore((s) => s.preset);
 
   const [rows, setRows] = useState<CustomThemeRow[]>([]);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -93,33 +43,25 @@ export default function ThemesScreen(): React.JSX.Element {
     void refresh();
   }, [refresh]);
 
-  const openNew = (): void => setDraft(draftFrom(null, resolvePreset(presetKey)));
-  const openEdit = (row: CustomThemeRow): void =>
-    setDraft(draftFrom(row, resolvePreset(presetKey)));
+  // Tokens the studio opens with: the row's stored tokens, or the active preset for a new theme.
+  const editorTokens = (): ThemeTokens => {
+    const fromRow = editing?.row ? safeParseTokens(editing.row.tokens) : null;
+    return fromRow ?? resolvePreset(presetKey);
+  };
 
-  const onSave = async (): Promise<void> => {
-    if (!draft) return;
-    const name = draft.name.trim();
-    if (!name) {
-      Alert.alert('Theme', 'Give your theme a name.');
-      return;
-    }
-    const bad = EDITABLE_COLORS.find((f) => !isValidHex(draft.hex[f.key] ?? ''));
-    if (bad) {
-      Alert.alert('Theme', `“${bad.label}” needs a valid hex color (e.g. #1982FC).`);
-      return;
-    }
-    const tokens = JSON.stringify(tokensFromDraft(draft));
+  const onApply = async (tokens: ThemeTokens, name: string): Promise<void> => {
+    const blob = JSON.stringify(tokens);
     try {
       const db = getDatabase();
-      if (draft.id == null) {
-        const id = await createCustomTheme(db, { name, mode: draft.mode, tokens });
-        await setCustomTheme(id, tokensFromDraft(draft)); // activate the new theme
+      if (editing?.row == null) {
+        const id = await createCustomTheme(db, { name, mode: tokens.mode, tokens: blob });
+        await setCustomTheme(id, tokens); // activate the new theme
       } else {
-        await updateCustomTheme(db, draft.id, { name, mode: draft.mode, tokens });
-        if (draft.id === activeId) await reloadCustomTokens(); // live recolor
+        const id = editing.row.id;
+        await updateCustomTheme(db, id, { name, mode: tokens.mode, tokens: blob });
+        if (id === activeId) await reloadCustomTokens(); // live recolor
       }
-      setDraft(null);
+      setEditing(null);
       await refresh();
     } catch {
       Alert.alert('Theme', 'Couldn’t save the theme.');
@@ -159,7 +101,7 @@ export default function ThemesScreen(): React.JSX.Element {
           <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
         </Pressable>
         <Text style={[styles.title, { color: theme.color.label }]}>Custom Themes</Text>
-        <Pressable onPress={openNew} hitSlop={8}>
+        <Pressable onPress={() => setEditing({ row: null })} hitSlop={8}>
           <Text style={[styles.add, { color: theme.color.tint }]}>＋</Text>
         </Pressable>
       </View>
@@ -202,7 +144,7 @@ export default function ThemesScreen(): React.JSX.Element {
               {row.id === activeId ? (
                 <Text style={[styles.check, { color: theme.color.tint }]}>✓</Text>
               ) : null}
-              <Pressable onPress={() => openEdit(row)} hitSlop={8} style={styles.action}>
+              <Pressable onPress={() => setEditing({ row })} hitSlop={8} style={styles.action}>
                 <Text style={[styles.actionText, { color: theme.color.tint }]}>Edit</Text>
               </Pressable>
               <Pressable onPress={() => onDelete(row)} hitSlop={8} style={styles.action}>
@@ -221,125 +163,19 @@ export default function ThemesScreen(): React.JSX.Element {
         ) : null}
       </ScrollView>
 
-      {draft ? (
-        <ThemeEditorModal
-          draft={draft}
-          onChange={setDraft}
-          onCancel={() => setDraft(null)}
-          onSave={() => void onSave()}
-        />
+      {editing ? (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+          <ThemeStudio
+            title={editing.row == null ? 'New Theme' : 'Edit Theme'}
+            initialTokens={editorTokens()}
+            initialName={editing.row?.name ?? 'My Theme'}
+            showName
+            onApply={(tokens, name) => void onApply(tokens, name)}
+            onCancel={() => setEditing(null)}
+          />
+        </Modal>
       ) : null}
     </Screen>
-  );
-}
-
-function ThemeEditorModal({
-  draft,
-  onChange,
-  onCancel,
-  onSave,
-}: {
-  draft: Draft;
-  onChange: (d: Draft) => void;
-  onCancel: () => void;
-  onSave: () => void;
-}): React.JSX.Element {
-  const theme = useTheme();
-  const insets = useSafeAreaInsets();
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onCancel}>
-      <View style={[styles.sheet, { backgroundColor: theme.color.background }]}>
-        <View style={[styles.sheetHeader, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={onCancel} hitSlop={8}>
-            <Text style={[styles.back, { color: theme.color.tint }]}>Cancel</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: theme.color.label }]}>
-            {draft.id == null ? 'New Theme' : 'Edit Theme'}
-          </Text>
-          <Pressable onPress={onSave} hitSlop={8}>
-            <Text style={[styles.save, { color: theme.color.tint }]}>Save</Text>
-          </Pressable>
-        </View>
-        <ScrollView
-          contentContainerStyle={styles.editorContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          <TextInput
-            value={draft.name}
-            onChangeText={(name) => onChange({ ...draft, name })}
-            placeholder="Theme name"
-            placeholderTextColor={theme.color.tertiaryLabel}
-            style={[
-              styles.nameInput,
-              {
-                color: theme.color.label,
-                backgroundColor: theme.color.secondaryBackground,
-                borderColor: theme.color.separator,
-              },
-            ]}
-          />
-          <View style={styles.modeRow}>
-            {(['light', 'dark'] as const).map((m) => (
-              <Pressable
-                key={m}
-                onPress={() => onChange({ ...draft, mode: m })}
-                style={[
-                  styles.modeBtn,
-                  {
-                    backgroundColor:
-                      draft.mode === m ? theme.color.tint : theme.color.secondaryBackground,
-                  },
-                ]}
-              >
-                <Text
-                  style={{
-                    color: draft.mode === m ? '#fff' : theme.color.label,
-                    fontWeight: '600',
-                  }}
-                >
-                  {m === 'light' ? 'Light' : 'Dark'}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {EDITABLE_COLORS.map((f) => {
-            const val = draft.hex[f.key] ?? '';
-            const ok = isValidHex(val);
-            return (
-              <View key={f.key} style={styles.colorRow}>
-                <Text style={[styles.colorLabel, { color: theme.color.label }]}>{f.label}</Text>
-                <View
-                  style={[
-                    styles.swatch,
-                    {
-                      backgroundColor: ok ? val.trim() : 'transparent',
-                      borderColor: theme.color.separator,
-                    },
-                  ]}
-                />
-                <TextInput
-                  value={val}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={(v) => onChange({ ...draft, hex: { ...draft.hex, [f.key]: v } })}
-                  placeholder="#RRGGBB"
-                  placeholderTextColor={theme.color.tertiaryLabel}
-                  style={[
-                    styles.hexInput,
-                    {
-                      color: ok ? theme.color.label : theme.color.destructive,
-                      backgroundColor: theme.color.secondaryBackground,
-                      borderColor: ok ? theme.color.separator : theme.color.destructive,
-                    },
-                  ]}
-                />
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
-    </Modal>
   );
 }
 
@@ -353,7 +189,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   back: { fontSize: 17 },
-  save: { fontSize: 17, fontWeight: '600' },
   add: { fontSize: 26, fontWeight: '400' },
   title: { fontSize: 17, fontWeight: '600' },
   content: { paddingVertical: 12 },
@@ -374,36 +209,4 @@ const styles = StyleSheet.create({
   actionText: { fontSize: 15 },
   revert: { alignItems: 'center', marginTop: 24 },
   revertText: { fontSize: 15 },
-  // editor
-  sheet: { flex: 1 },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-  },
-  editorContent: { padding: 16, paddingBottom: 60 },
-  nameInput: {
-    fontSize: 17,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 14,
-  },
-  modeRow: { flexDirection: 'row', gap: 10, marginBottom: 18 },
-  modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10 },
-  colorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  colorLabel: { flex: 1, fontSize: 14 },
-  swatch: { width: 28, height: 28, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth },
-  hexInput: {
-    width: 120,
-    fontSize: 15,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    fontVariant: ['tabular-nums'],
-  },
 });

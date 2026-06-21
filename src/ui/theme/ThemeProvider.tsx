@@ -5,11 +5,16 @@ import { lightTheme, resolvePreset, type ThemeMode, type ThemeTokens } from './t
 
 export type ThemePreference = ThemeMode | 'system';
 
-interface ThemeContextValue {
+export interface ThemeContextValue {
   theme: ThemeTokens;
 }
 
-const ThemeContext = createContext<ThemeContextValue>({ theme: lightTheme });
+/**
+ * Exported so a nested provider (e.g. ChatThemeProvider) can override the active
+ * theme for a subtree. Consumers should keep using `useTheme()` rather than this
+ * directly.
+ */
+export const ThemeContext = createContext<ThemeContextValue>({ theme: lightTheme });
 
 interface ThemeProviderProps {
   children: ReactNode;
