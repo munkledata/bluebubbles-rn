@@ -19,6 +19,9 @@ interface MessageRowProps {
   isGroup: boolean;
   isLastOutgoing: boolean;
   accentColor?: string | null;
+  /** A chat background is set → add a subtle text shadow so these unbacked, non-bubble
+   *  texts (date separator, sender header, status line) stay legible over the image. */
+  hasBackground?: boolean;
   // Take the message so the list can pass STABLE callbacks (the per-row binding
   // happens here, inside the memoized row, not in the list's renderItem).
   onRetry?: (msg: EnrichedMessage) => void;
@@ -41,6 +44,7 @@ export const MessageRow = React.memo(function MessageRow({
   isGroup,
   isLastOutgoing,
   accentColor,
+  hasBackground,
   onRetry,
   onLongPress,
   onJumpToReply,
@@ -56,6 +60,16 @@ export const MessageRow = React.memo(function MessageRow({
   const hasReactions = (msg.reactions?.length ?? 0) > 0;
   const marginTop = separator || breaksGroup ? 8 : 0;
 
+  // Over a chat background these non-bubble texts have no backing, so add a soft scrim
+  // (a contrasting text shadow) ONLY when a background is set. The shadow colour is the
+  // opposite of the text colour so it works on both light + dark backgrounds/themes.
+  const scrim = hasBackground
+    ? ({
+        textShadowColor: theme.mode === 'dark' ? '#000000CC' : '#FFFFFFCC',
+        textShadowRadius: 3,
+      } as const)
+    : null;
+
   const originator = msg.threadOriginatorGuid;
   return (
     <View
@@ -65,12 +79,14 @@ export const MessageRow = React.memo(function MessageRow({
       ]}
     >
       {separator ? (
-        <Text style={[styles.separator, { color: theme.color.tertiaryLabel }]}>
+        <Text style={[styles.separator, { color: theme.color.tertiaryLabel }, scrim]}>
           {formatSeparatorDate(msg.dateCreated)}
         </Text>
       ) : null}
       {header ? (
-        <Text style={[styles.sender, { color: theme.color.tertiaryLabel }]}>{msg.senderName}</Text>
+        <Text style={[styles.sender, { color: theme.color.tertiaryLabel }, scrim]}>
+          {msg.senderName}
+        </Text>
       ) : null}
       <MessageBubble
         msg={msg}
@@ -81,7 +97,7 @@ export const MessageRow = React.memo(function MessageRow({
         onJumpToReply={onJumpToReply && originator ? () => onJumpToReply(originator) : undefined}
       />
       {status ? (
-        <Text style={[styles.status, { color: theme.color.tertiaryLabel }]}>{status}</Text>
+        <Text style={[styles.status, { color: theme.color.tertiaryLabel }, scrim]}>{status}</Text>
       ) : null}
     </View>
   );

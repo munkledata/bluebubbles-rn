@@ -342,6 +342,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
           isGroup={isGroup}
           messages={messages}
           accentColor={header.data?.customColor}
+          hasBackground={!!backgroundUri}
           onLongPressMessage={onLongPressMessage}
         />
         {isTyping ? <TypingBubble /> : null}

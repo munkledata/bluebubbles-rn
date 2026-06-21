@@ -9,6 +9,31 @@ export interface ServerMsgFields {
   dateDelivered: number | null;
 }
 
+/**
+ * Temp guids the user cancelled WHILE a POST was in flight. The send already left the
+ * device, so the server will echo it back — either as a fresh `reconcileOutgoingSuccess`
+ * (the POST resolving) or as a socket-delivered new-message. We remember the cancelled
+ * tempGuid so the reconcile path can drop that echo instead of re-materializing a bubble
+ * the user explicitly cancelled. Entries are consumed on the matching reconcile, and the
+ * set is bounded (a hard cap evicts the oldest) so it can't grow unboundedly.
+ */
+const cancelledTempGuids = new Set<string>();
+const CANCELLED_SET_MAX = 256;
+
+/** Mark a tempGuid as cancelled-in-flight (evicting the oldest entry past the cap). */
+function markCancelled(tempGuid: string): void {
+  if (cancelledTempGuids.size >= CANCELLED_SET_MAX) {
+    const oldest = cancelledTempGuids.values().next().value;
+    if (oldest !== undefined) cancelledTempGuids.delete(oldest);
+  }
+  cancelledTempGuids.add(tempGuid);
+}
+
+/** Test/diagnostic hook: was this tempGuid cancelled-in-flight (and not yet reconciled)? */
+export function wasCancelledInFlight(tempGuid: string): boolean {
+  return cancelledTempGuids.has(tempGuid);
+}
+
 /** Optimistically insert an outgoing text message + its queue row, and bump the chat. */
 export async function insertOutgoingText(
   db: AppDatabase,
@@ -98,6 +123,10 @@ export async function insertOutgoingReaction(
  * `reconcileOutgoingSuccess` promotes the row to its real guid and drops the queue
  * row, this is a no-op (it can no longer find the queue row by tempGuid), so a
  * concurrent reconcile can never be clobbered. Returns whether anything was cancelled.
+ *
+ * A 'sending' row may have a POST already in flight — cancelling it can't unsend what
+ * the server already accepted, so we record the tempGuid (`markCancelled`) so the later
+ * reconcile drops the server echo instead of resurrecting the cancelled bubble.
  */
 export async function cancelOutgoing(db: AppDatabase, tempGuid: string): Promise<boolean> {
   const queued = await db.all<{ id: number }>(
@@ -106,14 +135,17 @@ export async function cancelOutgoing(db: AppDatabase, tempGuid: string): Promise
   if (!queued[0]) return false; // already reconciled (or never queued) → not cancellable
   // The message must still be the optimistic temp row. If it's been promoted to 'sent'
   // (a reconcile that left the queue row), don't delete a real, sent message.
-  const msg = await db.all<{ id: number }>(
-    sql`SELECT id FROM messages WHERE guid = ${tempGuid} AND send_state IN ('sending', 'error') LIMIT 1`,
+  const msg = await db.all<{ id: number; sendState: string }>(
+    sql`SELECT id, send_state AS sendState FROM messages WHERE guid = ${tempGuid} AND send_state IN ('sending', 'error') LIMIT 1`,
   );
   if (!msg[0]) {
     // Stranded queue row with no matching temp message → just clear the queue entry.
     await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
     return true;
   }
+  // 'sending' ⇒ a POST may be in flight; remember the cancel so the server echo is
+  // dropped on reconcile. ('error' rows have no in-flight POST — nothing to suppress.)
+  if (msg[0].sendState === 'sending') markCancelled(tempGuid);
   await db.delete(messages).where(eq(messages.guid, tempGuid));
   await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
   return true;
@@ -123,12 +155,26 @@ export async function cancelOutgoing(db: AppDatabase, tempGuid: string): Promise
  * Reconcile a successful send. If the real message already exists (the socket
  * echo landed first via DbEventSink), drop the temp row; otherwise promote the
  * temp row to the real guid in place. Either way, no duplicate (guid is unique).
+ *
+ * If the user CANCELLED this send while its POST was in flight, the cancel must stick:
+ * we skip promoting the temp row and best-effort delete the reconciled server.guid row
+ * (which the socket echo may have already inserted) so the cancelled bubble doesn't
+ * reappear. The queue row is always cleared.
  */
 export async function reconcileOutgoingSuccess(
   db: AppDatabase,
   tempGuid: string,
   server: ServerMsgFields,
 ): Promise<void> {
+  if (cancelledTempGuids.has(tempGuid)) {
+    cancelledTempGuids.delete(tempGuid);
+    // The user cancelled mid-flight: drop any trace of this send — the leftover temp row
+    // (if the delete raced) AND the server echo that landed under the real guid.
+    await db.delete(messages).where(eq(messages.guid, tempGuid));
+    await db.delete(messages).where(eq(messages.guid, server.guid));
+    await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+    return;
+  }
   const dup = await db.all<{ id: number }>(
     sql`SELECT id FROM messages WHERE guid = ${server.guid} LIMIT 1`,
   );

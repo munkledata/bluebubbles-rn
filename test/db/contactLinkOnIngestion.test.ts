@@ -125,4 +125,42 @@ describe('contact-link on handle ingestion (1.5)', () => {
     expect(rows.find((r) => r.address === 'b@x.com')?.d).toBeNull(); // untouched
     expect(rows.find((r) => r.address === 'b@x.com')?.c).toBeNull();
   });
+
+  it('does not relink a large set of unrelated handles (scoped to the ingested addresses)', async () => {
+    const { db, raw } = await createTestDb();
+    // One contact per address: a big pool of matchable handles + the one we ingest.
+    const N = 200;
+    const others = Array.from({ length: N }, (_, i) => `other${i}@x.com`);
+    await upsertContacts(db, [
+      contact({ sourceId: 'craig', displayName: 'Craig', emails: ['craig@apple.com'] }),
+      ...others.map((addr, i) =>
+        contact({ sourceId: `o${i}`, displayName: `Person ${i}`, emails: [addr] }),
+      ),
+    ]);
+    // Insert ALL handles, then strip every link so they LOOK unlinked + matchable.
+    await upsertHandles(db, [
+      { address: 'craig@apple.com' },
+      ...others.map((address) => ({ address })),
+    ]);
+    raw.prepare('UPDATE handles SET display_name = NULL, contact_id = NULL').run();
+
+    // Ingest only Craig — the 200 unrelated (but matchable) handles must be left alone.
+    const linked = await linkHandlesToContacts(db, ['craig@apple.com']);
+
+    expect(linked).toBe(1); // exactly the one requested address, not the whole table
+    const craig = raw
+      .prepare("SELECT display_name d, contact_id c FROM handles WHERE address='craig@apple.com'")
+      .get() as { d: string | null; c: number | null };
+    expect(craig.d).toBe('Craig');
+    expect(craig.c).not.toBeNull();
+    // None of the unrelated handles got relinked, even though a contact exists for each.
+    const stillUnlinked = (
+      raw
+        .prepare(
+          "SELECT COUNT(*) c FROM handles WHERE contact_id IS NULL AND address LIKE 'other%'",
+        )
+        .get() as { c: number }
+    ).c;
+    expect(stillUnlinked).toBe(N);
+  });
 });

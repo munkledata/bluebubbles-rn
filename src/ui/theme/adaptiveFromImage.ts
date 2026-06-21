@@ -147,12 +147,26 @@ export function readableTextOn(bg: string): string {
  * Normalize a raw seed into a usable tint: keep its hue, but pull near-grey or
  * extreme colours into a vivid-but-not-neon band (S ∈ [0.35, 0.85]) and a usable
  * lightness band (L ∈ [0.40, 0.62]) so the accent reads clearly on either mode.
+ *
+ * Crucially, the tint is reused verbatim as `bubble.senderBackground`, so it MUST be
+ * able to carry AA (≥ 4.5) text. At high saturation the [0.40, 0.62] band has a
+ * "dead zone" (roughly L ∈ [0.45, 0.60]) where neither near-white nor near-black
+ * clears 4.5 on the tint. We close it by darkening: keep the hue + saturation, then
+ * step L down (toward a darker, white-on-tint readable shade) until the more-readable
+ * foreground clears AA. A floor of 0.15 keeps a vivid hue (no muddy near-black) and the
+ * loop is bounded; darkening only ever raises white-on-tint contrast so it converges.
  */
 function normalizeTint(seedHex: string): string {
   const { h, s, l } = hexToHsl(seedHex);
   const s2 = clamp(s, 0.35, 0.85);
-  const l2 = clamp(l, 0.4, 0.62);
-  return hslToHex(h, s2, l2);
+  let l2 = clamp(l, 0.4, 0.62);
+  let tint = hslToHex(h, s2, l2);
+  // Darken in small steps until the tint can carry AA text (hue/saturation preserved).
+  while (l2 > 0.15 && contrastRatio(readableTextOn(tint), tint) < 4.5) {
+    l2 = Math.max(0.15, l2 - 0.02);
+    tint = hslToHex(h, s2, l2);
+  }
+  return tint;
 }
 
 /** A pleasant SMS green that nods toward the seed hue but stays unmistakably green. */

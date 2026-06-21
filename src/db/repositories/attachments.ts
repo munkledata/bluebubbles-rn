@@ -129,6 +129,10 @@ export async function listChatAttachmentsByKind(
 ): Promise<ChatMediaByKind> {
   const out: ChatMediaByKind = { photos: [], videos: [], documents: [], links: [] };
 
+  // Bound the scan: a chat can have thousands of attachments, but each of the 3 buckets
+  // only needs `limit`. Pull a generous window (limit*bucketCount, with headroom for an
+  // uneven kind distribution) instead of the whole chat, and stop bucketing once all
+  // three buckets are full.
   const attRows = await db.all<AttachmentRow & { dateCreated: number | null }>(sql`
     SELECT
       a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
@@ -142,6 +146,7 @@ export async function listChatAttachmentsByKind(
       AND a.is_sticker = 0
       AND m.date_retracted IS NULL
     ORDER BY m.date_created DESC, a.id DESC
+    LIMIT ${limit * 4}
   `);
   for (const r of attRows) {
     const bucket =
@@ -151,9 +156,14 @@ export async function listChatAttachmentsByKind(
           ? out.videos
           : out.documents;
     if (bucket.length < limit) bucket.push(r);
+    // All three buckets full → nothing more to gather (rows are newest-first).
+    if (out.photos.length >= limit && out.videos.length >= limit && out.documents.length >= limit) {
+      break;
+    }
   }
 
   // Links: scan text messages for a first URL. Most-recent first; one entry per URL.
+  // Bounded too (dedup can drop rows, so allow headroom over `limit`).
   const textRows = await db.all<{
     guid: string;
     text: string | null;
@@ -167,6 +177,7 @@ export async function listChatAttachmentsByKind(
       AND m.date_retracted IS NULL
       AND m.associated_message_type IS NULL
     ORDER BY m.date_created DESC, m.id DESC
+    LIMIT ${limit * 4}
   `);
   const seen = new Set<string>();
   for (const r of textRows) {

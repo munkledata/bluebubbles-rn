@@ -2,6 +2,10 @@ import { eq, sql } from 'drizzle-orm';
 import { emailKey, handleKey, phoneKey } from '@utils/contactMatch';
 import { contacts, handles } from '../schema';
 import type { AppDatabase } from '../types';
+import { chunk } from './_shared';
+
+/** Max addresses per `IN (...)` list — well under SQLite's ~999 bound-variable limit. */
+const HANDLE_IN_CHUNK = 500;
 
 // ---- Contacts sync ---------------------------------------------------------
 
@@ -148,15 +152,22 @@ export async function linkHandlesToContacts(db: AppDatabase, addresses: string[]
   const index = await buildContactIndex(db);
   if (index.size === 0) return 0;
 
-  const wanted = new Set(addresses);
-  const handleRows = await db.all<{ id: number; address: string; contactId: number | null }>(
-    sql`SELECT id, address, contact_id AS contactId FROM handles`,
-  );
+  // Scope the handles scan to exactly the addresses being ingested, and skip rows that
+  // are already linked — in SQL — so this never rebuilds the whole handle index for
+  // unrelated chats. The IN-list is chunked to stay under SQLite's bound-variable limit.
   let linked = 0;
-  for (const h of handleRows) {
-    if (!wanted.has(h.address) || h.contactId != null) continue; // only new/unlinked ones
-    const match = index.get(handleKey(h.address));
-    if (match && (await applyContactMatch(db, h.id, match))) linked += 1;
+  for (const batch of chunk([...new Set(addresses)], HANDLE_IN_CHUNK)) {
+    const inList = sql.join(
+      batch.map((a) => sql`${a}`),
+      sql`, `,
+    );
+    const handleRows = await db.all<{ id: number; address: string }>(
+      sql`SELECT id, address FROM handles WHERE address IN (${inList}) AND contact_id IS NULL`,
+    );
+    for (const h of handleRows) {
+      const match = index.get(handleKey(h.address));
+      if (match && (await applyContactMatch(db, h.id, match))) linked += 1;
+    }
   }
   return linked;
 }

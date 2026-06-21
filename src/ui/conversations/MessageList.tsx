@@ -12,6 +12,8 @@ interface MessageListProps {
   /** Newest-first messages (the chat screen owns the single useMessages subscription). */
   messages: EnrichedMessage[];
   accentColor?: string | null;
+  /** A chat background image is set → unbacked overlay text needs a legibility scrim. */
+  hasBackground?: boolean;
   onLongPressMessage?: (msg: EnrichedMessage) => void;
 }
 
@@ -22,6 +24,7 @@ export function MessageList({
   isGroup,
   messages,
   accentColor,
+  hasBackground,
   onLongPressMessage,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
@@ -70,6 +73,7 @@ export function MessageList({
             newer={rows[index + 1] ?? null}
             isGroup={isGroup}
             accentColor={accentColor}
+            hasBackground={hasBackground}
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}
             onLongPress={onLongPressMessage}

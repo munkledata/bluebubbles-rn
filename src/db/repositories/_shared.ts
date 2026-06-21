@@ -11,6 +11,14 @@ export function dedupeBy<T>(items: T[], key: (t: T) => string): T[] {
   return [...map.values()];
 }
 
+/** Split a list into fixed-size chunks (for bounded SQL `IN (...)` lists). */
+export function chunk<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 /** Sanitize a user query into a safe FTS5 prefix match (quote each token). */
 export function toFtsQuery(input: string): string {
   const tokens = input.match(/[\p{L}\p{N}]+/gu) ?? [];

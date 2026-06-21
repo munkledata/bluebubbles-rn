@@ -101,4 +101,64 @@ describe('conversation-view repositories', () => {
     inbox = await listChatsForInbox(db);
     expect(inbox[0]!.unreadCount).toBe(0);
   });
+
+  // Fix #8: a later event that OMITS a delivery-tier flag must not downgrade a stored
+  // `true` (COALESCE(excluded.x, messages.x) on conflict). A later event that DOES carry
+  // the flag still updates it.
+  it('upsertMessages does not let a flagless re-upsert downgrade a stored delivery tier', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const tier = (guid: string): { q: number | null; n: number | null } =>
+      raw
+        .prepare(
+          'SELECT was_delivered_quietly q, did_notify_recipient n FROM messages WHERE guid = ?',
+        )
+        .get(guid) as { q: number | null; n: number | null };
+
+    // First event sets the quiet-delivery tier true.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'q1',
+          text: 'quiet',
+          dateCreated: 400,
+          handle: { address: 'a@x.com' },
+          wasDeliveredQuietly: true,
+          didNotifyRecipient: true,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+    expect(tier('q1').q).toBe(1);
+    expect(tier('q1').n).toBe(1);
+
+    // A later event for the same guid OMITS both flags → the stored trues must survive.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'q1', text: 'quiet edited', dateCreated: 400 })],
+      () => chatId,
+      new Map(),
+    );
+    expect(tier('q1').q).toBe(1); // not downgraded
+    expect(tier('q1').n).toBe(1);
+
+    // A later event that DOES carry a (different) flag still updates it.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'q1',
+          dateCreated: 400,
+          wasDeliveredQuietly: true,
+          didNotifyRecipient: false,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+    expect(tier('q1').q).toBe(1);
+    expect(tier('q1').n).toBe(0); // explicit false IS applied
+  });
 });

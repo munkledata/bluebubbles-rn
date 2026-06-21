@@ -16,18 +16,34 @@ export interface SocketAuthOptions {
   legacyQueryAuth?: boolean;
   /**
    * Optional URL-refresh hook for the reconnect escalation ladder. After socket.io's
-   * built-in retries are exhausted we call this to (re)discover the server origin from
-   * Firebase (mirrors the Flutter `fdb.fetchNewUrl()` path) and reconnect to the result.
-   * If omitted, the escalation just reconnects to the same origin (clean no-op hook).
+   * built-in retries are exhausted we call this to (re)discover the server origin and
+   * reconnect to the result (the Flutter app does this via `fdb.fetchNewUrl()`).
+   *
+   * NOTE: this is an OPTIONAL hook only. Nothing in `src/` wires it yet — the Firebase
+   * `ServerUrlResolver.refresh()` that would supply a fresh origin is not built at the
+   * composition root, so today the escalation just reconnects to the SAME origin (a
+   * clean no-op when the hook is omitted). Pass a resolver here to enable rediscovery.
    */
   refreshUrl?: () => Promise<string | null>;
 }
 
 // ── Reconnect escalation (Phase 1.1) ──────────────────────────────────────────
-// socket.io already does quick built-in retries. ON TOP of that we run an app-level
-// escalation: once the manager reports `reconnect_failed` (or repeated connect_errors),
-// we wait a capped-exponential backoff, refresh the server URL, then restart the socket.
+// socket.io does quick built-in retries, but we cap them (`reconnectionAttempts`) so it
+// SURRENDERS to our app-level ladder instead of retrying forever. ON TOP of socket.io,
+// once the manager reports `reconnect_failed` (i.e. those capped retries are exhausted),
+// we wait a capped-exponential backoff, optionally refresh the server URL, then restart
+// the socket. (With socket.io's default `reconnectionAttempts: Infinity`, that event
+// would never fire and this whole ladder would be dead code.)
 
+/**
+ * How many built-in reconnect attempts socket.io makes before it gives up and emits
+ * `reconnect_failed` — at which point our app-level escalation ladder takes over. This
+ * MUST be finite (socket.io defaults it to Infinity); otherwise `reconnect_failed`
+ * never fires and the escalation below is unreachable.
+ */
+const SOCKET_RECONNECTION_ATTEMPTS = 5;
+/** Ceiling for socket.io's own per-attempt backoff (its ladder, not ours). */
+const SOCKET_RECONNECTION_DELAY_MAX_MS = 10_000;
 /** Base delay for the escalation backoff. */
 const SOCKET_BACKOFF_BASE_MS = 1_000;
 /** Hard ceiling for the escalation backoff. */
@@ -137,6 +153,11 @@ export class SocketService {
         : { auth: { password: this.password } }),
       extraHeaders: this.opts.headers ?? {},
       reconnection: true,
+      // Cap socket.io's built-in retries (its default is Infinity) so it surrenders to
+      // our app-level escalation ladder: after this many failed attempts the Manager
+      // emits `reconnect_failed`, which triggers scheduleEscalation() below.
+      reconnectionAttempts: SOCKET_RECONNECTION_ATTEMPTS,
+      reconnectionDelayMax: SOCKET_RECONNECTION_DELAY_MAX_MS,
     });
     for (const event of SERVER_EVENTS) {
       this.socket.on(event, (data: unknown) => {

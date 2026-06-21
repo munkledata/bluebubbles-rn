@@ -1,3 +1,4 @@
+import { Directory, File, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -29,6 +30,7 @@ import {
   type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
+import { useRedactedModeStore } from '@state/redactedModeStore';
 import { http } from '@/services';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
@@ -38,6 +40,33 @@ import { safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
 const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'];
+
+/**
+ * Copy a picked image into a STABLE app directory before we persist its path.
+ *
+ * ImagePicker hands back a uri inside an OS-managed cache dir that can be purged at
+ * any time — persisting that path would silently lose the background later. We copy
+ * the asset into {documents}/chat-bg/<guid>-<n><ext> (documents is not purged) and
+ * return the new uri to store. The <n> suffix avoids clobbering a previously-set
+ * background that's still referenced. Falls back to the original uri if the copy
+ * fails (e.g. expo-file-system unavailable) so the feature still works best-effort.
+ */
+async function persistBackground(guid: string, srcUri: string): Promise<string> {
+  try {
+    const dir = new Directory(Paths.document, 'chat-bg');
+    dir.create({ intermediates: true, idempotent: true });
+    const src = new File(srcUri);
+    const ext = src.extension || '.jpg';
+    // Per-guid, monotonic-ish suffix so a re-pick doesn't overwrite the live file.
+    const safeGuid = guid.replace(/[^A-Za-z0-9._-]/g, '_');
+    const dest = new File(dir, `${safeGuid}-${Date.now()}${ext}`);
+    await src.copy(dest);
+    return dest.uri;
+  } catch {
+    // Copy unavailable/failed → store the original (transient) path as a last resort.
+    return srcUri;
+  }
+}
 
 /** Per-chat customization: custom name, accent color, mute. */
 export default function ChatSettingsScreen(): React.JSX.Element {
@@ -128,7 +157,9 @@ export default function ChatSettingsScreen(): React.JSX.Element {
       if (!perm.granted) return;
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       if (res.canceled || res.assets.length === 0) return;
-      await setChatTheme(getDatabase(), guid, { backgroundUri: res.assets[0]!.uri });
+      // Copy out of the purgeable ImagePicker cache into a stable app dir before storing.
+      const stableUri = await persistBackground(guid, res.assets[0]!.uri);
+      await setChatTheme(getDatabase(), guid, { backgroundUri: stableUri });
     })();
   };
 
@@ -145,8 +176,11 @@ export default function ChatSettingsScreen(): React.JSX.Element {
         quality: 1,
       });
       if (res.canceled || res.assets.length === 0) return;
-      const uri = res.assets[0]!.uri;
-      const tokens = await adaptiveTokensFromImage(uri, theme.mode);
+      const pickedUri = res.assets[0]!.uri;
+      // Extract the seed colour from the picked asset, THEN copy it into a stable dir
+      // (the ImagePicker cache path is purgeable) and persist that path.
+      const tokens = await adaptiveTokensFromImage(pickedUri, theme.mode);
+      const uri = await persistBackground(guid, pickedUri);
       if (tokens) {
         await setChatTheme(getDatabase(), guid, {
           themeTokens: JSON.stringify(tokens),
@@ -469,14 +503,24 @@ export default function ChatSettingsScreen(): React.JSX.Element {
 /** A single attachment thumbnail in the shared-media strip (image preview or kind glyph). */
 function MediaThumb({
   att,
+  kind,
   glyph,
+  redacted,
   onPress,
 }: {
   att: AttachmentRow;
+  kind: 'photo' | 'video';
   glyph: string;
+  redacted: boolean;
   onPress?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
+  // Redacted mode: never render the actual media (shoulder-surf / screenshot safety) —
+  // show a neutral glyph tile instead. expo-image can't decode a video file, so a video
+  // renders ONLY its blurhash poster (no file source) or the ▶ glyph fallback; feeding
+  // the video uri to <Image source> would just show a blank tile.
+  const showImage = !redacted && kind === 'photo' && !!att.localPath;
+  const videoPoster = !redacted && kind === 'video' && !!att.blurhash;
   return (
     <Pressable
       onPress={onPress}
@@ -484,13 +528,23 @@ function MediaThumb({
       style={[styles.thumb, { backgroundColor: theme.color.groupedBackground }]}
       accessibilityRole="image"
     >
-      {att.localPath ? (
+      {showImage ? (
         <Image
-          source={{ uri: att.localPath }}
+          source={{ uri: att.localPath! }}
           placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
           contentFit="cover"
           style={styles.thumbImg}
         />
+      ) : videoPoster ? (
+        // Poster-only: blurhash as the image (NO video source) with a play glyph overlay.
+        <>
+          <Image
+            placeholder={{ blurhash: att.blurhash! }}
+            contentFit="cover"
+            style={styles.thumbImg}
+          />
+          <Text style={[styles.thumbGlyph, styles.thumbGlyphOverlay]}>▶</Text>
+        </>
       ) : (
         <Text style={styles.thumbGlyph}>{glyph}</Text>
       )}
@@ -511,6 +565,10 @@ function MediaSections({
   onOpenMedia: (attachmentGuid: string) => void;
 }): React.JSX.Element | null {
   const theme = useTheme();
+  // Redacted (privacy) mode: mirror the rest of the app — never surface link URLs or
+  // photo/video previews here. Thumbnails fall back to neutral kind tiles (MediaThumb)
+  // and link URLs are replaced by a placeholder so a screenshot leaks nothing.
+  const redacted = useRedactedModeStore((s) => s.enabled);
   if (!media) return null;
   const { photos, videos, documents, links } = media;
   if (!photos.length && !videos.length && !documents.length && !links.length) return null;
@@ -528,7 +586,14 @@ function MediaSections({
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
             {photos.map((a) => (
-              <MediaThumb key={a.guid} att={a} glyph="🖼" onPress={() => onOpenMedia(a.guid)} />
+              <MediaThumb
+                key={a.guid}
+                att={a}
+                kind="photo"
+                glyph="🖼"
+                redacted={redacted}
+                onPress={() => onOpenMedia(a.guid)}
+              />
             ))}
           </ScrollView>
         </>
@@ -540,7 +605,14 @@ function MediaSections({
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
             {videos.map((a) => (
-              <MediaThumb key={a.guid} att={a} glyph="▶" onPress={() => onOpenMedia(a.guid)} />
+              <MediaThumb
+                key={a.guid}
+                att={a}
+                kind="video"
+                glyph="▶"
+                redacted={redacted}
+                onPress={() => onOpenMedia(a.guid)}
+              />
             ))}
           </ScrollView>
         </>
@@ -580,7 +652,7 @@ function MediaSections({
                   ]}
                 >
                   <Text numberOfLines={1} style={[styles.linkText, { color: theme.color.tint }]}>
-                    {l.url}
+                    {redacted ? '[link]' : l.url}
                   </Text>
                 </Pressable>
               ))}
@@ -641,5 +713,12 @@ const styles = StyleSheet.create({
   },
   thumbImg: { width: '100%', height: '100%' },
   thumbGlyph: { fontSize: 26 },
+  // Play glyph drawn over a video's blurhash poster (the strip tile is centered).
+  thumbGlyphOverlay: {
+    position: 'absolute',
+    color: '#FFFFFF',
+    textShadowColor: '#000000',
+    textShadowRadius: 3,
+  },
   linkText: { fontSize: 15, flex: 1 },
 });

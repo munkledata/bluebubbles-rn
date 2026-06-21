@@ -138,4 +138,45 @@ describe('generateAdaptiveTokens', () => {
       }
     }
   });
+
+  // The handful of fixed seeds above happen to dodge the high-saturation "dead zone"
+  // (L ≈ 0.45–0.60) where neither near-white nor near-black clears AA on the raw tint.
+  // This exhaustive sweep is the real guarantee: for EVERY hue, at high saturation,
+  // across the lightness band normalizeTint clamps into, the sender text MUST clear
+  // 4.5 on the (tint-as-)senderBackground. It catches the regression the fixed seeds
+  // masked, while the label/received contrast still holds for every generated theme.
+  it('AA sender contrast holds across an exhaustive hue sweep at high saturation', () => {
+    let worstSender = Infinity;
+    let worstAt = '';
+    for (let h = 0; h < 360; h += 1) {
+      // Walk the lightness band normalizeTint clamps into (0.40–0.62), at saturations
+      // spanning its clamp range, so the high-S dead zone is fully exercised.
+      for (const s of [0.35, 0.5, 0.7, 0.85, 1.0]) {
+        for (let l = 0.4; l <= 0.621; l += 0.02) {
+          const seed = hslToHex(h, s, l);
+          for (const mode of MODES) {
+            const t = generateAdaptiveTokens(seed, mode);
+            const senderC = contrastRatio(
+              t.color.bubble.senderText,
+              t.color.bubble.senderBackground,
+            );
+            const labelC = contrastRatio(t.color.label, t.color.background);
+            const recvC = contrastRatio(
+              t.color.bubble.receivedText,
+              t.color.bubble.receivedBackgroundTop,
+            );
+            if (senderC < worstSender) {
+              worstSender = senderC;
+              worstAt = `h=${h} s=${s} l=${l.toFixed(2)} ${mode} tint=${t.color.bubble.senderBackground}`;
+            }
+            expect(labelC).toBeGreaterThanOrEqual(4.5);
+            expect(recvC).toBeGreaterThanOrEqual(4);
+          }
+        }
+      }
+    }
+    // The whole point: NOT a single (hue, S, L) combination drops below AA.
+    expect(worstSender).toBeGreaterThanOrEqual(4.5);
+    if (worstSender < 4.5) throw new Error(`sender contrast dead zone at ${worstAt}`);
+  });
 });

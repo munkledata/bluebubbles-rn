@@ -49,8 +49,11 @@ export async function upsertMessages(
         threadOriginatorGuid: m.threadOriginatorGuid ?? null,
         expressiveSendStyleId: m.expressiveSendStyleId ?? null,
         error: m.error ?? 0,
-        wasDeliveredQuietly: m.wasDeliveredQuietly ?? false,
-        didNotifyRecipient: m.didNotifyRecipient ?? false,
+        // NULL (not false) when the event omits the flag, so the COALESCE on conflict
+        // (below) can keep a previously-stored `true` instead of being handed a 0 that
+        // would mask the real value. Consumers treat NULL as falsy, same as false.
+        wasDeliveredQuietly: m.wasDeliveredQuietly ?? null,
+        didNotifyRecipient: m.didNotifyRecipient ?? null,
       })),
     )
     .onConflictDoUpdate({
@@ -63,9 +66,11 @@ export async function upsertMessages(
         dateRetracted: sql`excluded.date_retracted`,
         error: sql`excluded.error`,
         // Delivery tiers flip on a later updated-message event (Apple may report the
-        // quiet delivery after the initial echo), so refresh them on conflict too.
-        wasDeliveredQuietly: sql`excluded.was_delivered_quietly`,
-        didNotifyRecipient: sql`excluded.did_notify_recipient`,
+        // quiet delivery after the initial echo), so refresh them on conflict too — but
+        // COALESCE so a later event that OMITS the flag (excluded = NULL) can't downgrade
+        // a previously-stored `true` back to false/null. A present flag still overwrites.
+        wasDeliveredQuietly: sql`COALESCE(excluded.was_delivered_quietly, ${messages.wasDeliveredQuietly})`,
+        didNotifyRecipient: sql`COALESCE(excluded.did_notify_recipient, ${messages.didNotifyRecipient})`,
       },
     })
     .returning({ id: messages.id, guid: messages.guid });
