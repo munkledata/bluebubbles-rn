@@ -1,0 +1,26 @@
+{
+  "chats": [
+    {
+      "guid": "iMessage;-;+15551234567",
+      "chatIdentifier": "+15551234567",
+      "displayName": null,
+      "style": 43,
+      "isArchived": false,
+      "groupId": null,
+      "participants": [
+        {
+          "address": "+15551234567",
+          "country": "us",
+          "uncanonicalizedId": null,
+          "service": "iMessage"
+        }
+      ],
+      "lastMessage": {
+        "guid": "p:0/LASTMSG-1122-3344",
+        "text": "see you then",
+        "dateCreated": 1718900002000,
+        "isFromMe": true
+      }
+    }
+  ]
+}

@@ -14,8 +14,14 @@ export const epochMillis = z
     return Number.isFinite(n) ? n : null;
   });
 
-/** Apple service for a handle/message: iMessage or SMS. */
-export const ServiceType = z.enum(['iMessage', 'SMS']);
+// Apple service for a handle/message. OPEN string at the wire boundary, NOT a closed enum:
+// chat.db's handle.service column can hold values beyond iMessage/SMS (e.g. "RCS" on newer
+// macOS, legacy carrier strings) and the server emits it verbatim. Because a query/message
+// page is validated as ONE hard array parse, a single unknown service bound to a closed enum
+// would fail the ENTIRE page (a sync stall). Matching the legacy Flutter `String service`
+// contract avoids that; the UI distinguishes only the two known values (else renders iMessage).
+export const KNOWN_SERVICES = ['iMessage', 'SMS'] as const;
+export const ServiceType = z.string();
 export type ServiceType = z.infer<typeof ServiceType>;
 
 /** Envelope every BlueBubbles REST response is wrapped in: { status, data, message }. */

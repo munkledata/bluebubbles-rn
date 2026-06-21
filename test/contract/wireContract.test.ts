@@ -58,6 +58,21 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
     }
   });
 
+  it('Message accepts a fully-hydrated query-messages row: originalROWID + chats + handle + attachments', () => {
+    const res = Message.safeParse(fixture('messageQueryHydrated.gator.json'));
+    expect(res.success).toBe(true);
+    if (res.success) {
+      // originalROWID is the incremental-sync cursor — it MUST survive parsing.
+      expect(res.data.originalROWID).toBe(4821);
+      // chats[0].guid is how incremental sync routes the message to a chat.
+      expect(res.data.chats?.[0]?.guid).toBe('iMessage;-;+15551234567');
+      expect(res.data.attachments?.[0]?.guid).toBe('at-QRY-5566');
+      // An UNKNOWN service ("RCS") must NOT fail the parse (it would fail a closed enum,
+      // and one bad handle fails the whole sync page). It is preserved verbatim.
+      expect(res.data.handle?.service).toBe('RCS');
+    }
+  });
+
   it('Handle accepts the handleSerializer shape', () => {
     const res = Handle.safeParse(fixture('handle.gator.json'));
     expect(res.success).toBe(true);

@@ -7,22 +7,44 @@ Grounded in a field-by-field divergence pass over both repos._
 
 ## Status (2026-06-21)
 
-**Phase A — app adapts (DONE, on `bluebubbles-rn` master):** ServerInfo accepts Gator's `{version}`
+**Phase A — app adapts (DONE, `bluebubbles-rn` master):** ServerInfo accepts Gator's `{version}`
 (connect no longer throws) + advisory version gate; Find My uses Gator's `/findmy/*` paths + tuple/
-camelCase shapes; scheduled adapted to Gator's `/scheduled-message` flat shape + string id +
-delete-recreate edit. Contract-test gate stood up (`test/contract/wireContract.test.ts`). 449 tests.
+camelCase shapes; scheduled adapted to Gator's flat shape + string id + delete-recreate edit.
 
-**Phase D — server adds (DONE, on `bluebubbles-server` branch `app-sync/additive-wire-fields`):**
-- #7 delivered-tier flags (`wasDeliveredQuietly`/`didNotifyRecipient`) emitted by `messageSerializer`.
-- #1 `server/info` now also returns `server_version`/`private_api`/`proxy_service`/`supports_header_auth`.
-- #4 `chat/query` honors `with:[participants,lastMessage]` (the inbox now gets members + a preview).
-- bbd: 219 tests, tsc + lint clean. All additive (no wire renames/removals).
+**Phase D — server adds (DONE, `bluebubbles-server` branch `app-sync/additive-wire-fields`, pushed to
+the `gator` fork):** delivered-tier flags; enriched `server/info`; `chat/query` `with:[participants,
+lastMessage]`; **nested attachments** on `chat/:guid/message` (`with=attachments`); **`POST /message/query`**
+(the incremental-sync endpoint — was entirely missing); **`originalROWID` on every message** (the wire
+cursor the app pages by — was dropped by the serializer). bbd 231 tests; all additive.
 
-**Still open:** Phase B (formalize per-entity shapes in `protocol/v1`), Phase C (generate fixtures from
-the server + extend the contract test to every entity), and the heavier Phase D items below — chat
-mutations (#5, needs the Private-API write path), nested attachments (#6), and rich message fields
-(attributedBody/payloadData/messageSummaryInfo — the reader has the columns; needs typedstream
-decoding). os_version on `server/info` also left out.
+**🔴 BIG DISCOVERY — endpoint-SHAPE divergence (DONE, app master):** the entity-level audit proved the app
+modeled the server *entities* but MISSED the response *wrappers*. Gator wraps EVERY list in a named key
+(`{chats}`/`{messages}`/`{devices}`/`{friends}`) and returns status/ack objects for actions, while the app
+expected bare arrays/entities — so the **inbox, messages, Find My, sends, unsend, FaceTime all actually
+failed against Gator.** Reconciled every endpoint: lists→named-key; sends/reactions/edit→`SendAck{guid?}`;
+unsend→`{unsent}`; FaceTime paths + `create-facetime-link`; FCM→`/devices`. Confirmed Gator has **NO chat
+mutations** (only `POST /chat/query`) — those app calls are left with UNIMPLEMENTED notes. `ServiceType`
+widened enum→open string (a closed enum failed the WHOLE page on an `RCS`/unknown service). Endpoint-shape
+contract tests added so this class can't silently regress.
+
+**🔴 BIG DISCOVERY — outgoing reconcile architecture (DONE, app master):** Gator's `new-message` is a
+chat.db ROWID-watcher emission that carries **no `tempGuid`** (unlike upstream BlueBubbles). So the optimistic
+send→echo reconcile cannot match by tempGuid. Built `reconcileEchoByContent` (live `DbEventSink` path ONLY —
+never sync, which would false-match historical messages): content-matches the `temp-…` row, promotes it in
+place (id + attachments + `local_path` preserved), honoring cancellation + a ±5min window to defeat
+cross-device hijack. Plus `markOutgoingSentNoGuid` on the AppleScript no-guid path (no requeue) and
+`local_path` carry-over in the ack dup-branch. Six regression tests reproduce the orphan / echo-race /
+requeue / cross-device cases. App at 476 tests, tsc + eslint clean.
+
+**Process note:** three adversarial verification workflows caught what the passing test suites did not — two
+ship-blockers in `message/query` (no `originalROWID`; closed `ServiceType` enum) and a critical reconcile
+regression (the prior rework assumed a tempGuid echo Gator never sends). Verify wire/optimistic-state changes
+adversarially, not just by green tests.
+
+**Still open:** Phase B/C bidirectional (server-side snapshot fixtures); chat mutations (#5, needs the
+Private-API write path); rich message fields (attributedBody/payloadData — reader has the columns, needs
+typedstream decoding); os_version on `server/info`. On-device verification of all of the above against a live
+Gator + macOS host.
 
 ## TL;DR — the core problem
 

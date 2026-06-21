@@ -1,4 +1,4 @@
-import { Message } from '@core/models';
+import { SendAck } from './messages';
 import type { HttpClient } from '../http';
 
 /** Authed URL for downloading an attachment's binary (consumed by the file downloader). */
@@ -14,11 +14,15 @@ export interface SendAttachmentParams {
 }
 
 /**
- * POST /api/v1/message/attachment (multipart/form-data) → server Message with the
- * attachment. On React Native, FormData accepts a `{ uri, name, type }` file part.
- * Native-free (FormData exists in Node + RN), so it is Node-testable with a fake http.
+ * POST /api/v1/message/attachment (multipart/form-data) → the send ack `{ guid? }` (the
+ * real message GUID; attachment sends require the Private API, so it's present on
+ * success), NOT a Message — see {@link SendAck}. The attachment's own server guid is not
+ * acked here; the optimistic attachment row keeps its local guid until the socket
+ * `new-message` echo carries the real one. On React Native, FormData accepts a
+ * `{ uri, name, type }` file part. Native-free (FormData exists in Node + RN), so it is
+ * Node-testable with a fake http.
  */
-export function sendAttachment(http: HttpClient, p: SendAttachmentParams): Promise<Message> {
+export function sendAttachment(http: HttpClient, p: SendAttachmentParams): Promise<SendAck> {
   const form = new FormData();
   form.append('attachment', {
     uri: p.file.uri,
@@ -29,5 +33,5 @@ export function sendAttachment(http: HttpClient, p: SendAttachmentParams): Promi
   form.append('tempGuid', p.tempGuid);
   form.append('name', p.file.name);
   form.append('method', 'private-api');
-  return http.post('/message/attachment', Message, { form });
+  return http.post('/message/attachment', SendAck, { form });
 }

@@ -5,6 +5,7 @@ import { logger } from '@core/secure';
 import {
   claimOutgoing,
   listRetryableOutgoing,
+  markOutgoingSentNoGuid,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
   type RetryableOutgoing,
@@ -54,11 +55,18 @@ async function resend(
       logger.debug(`[queue] skipping retry of unsupported kind: ${row.kind}`);
       return false;
     }
-    await reconcileOutgoingSuccess(db, row.tempGuid, {
-      guid: server.guid,
-      dateCreated: server.dateCreated ?? now,
-      dateDelivered: server.dateDelivered ?? null,
-    });
+    // The Private-API path acks a real GUID → promote in place. The AppleScript fallback
+    // returns no guid → mark sent + clear the queue, leaving the socket echo to reconcile
+    // (never reconcile with an undefined guid).
+    if (server.guid) {
+      await reconcileOutgoingSuccess(db, row.tempGuid, {
+        guid: server.guid,
+        dateCreated: now,
+        dateDelivered: null,
+      });
+    } else {
+      await markOutgoingSentNoGuid(db, row.tempGuid);
+    }
     return true;
   } catch (e) {
     const code = e instanceof ApiError && e.status ? e.status : -1;

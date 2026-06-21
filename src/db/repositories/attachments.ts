@@ -15,6 +15,35 @@ export async function upsertAttachments(
   );
   if (deduped.length === 0) return;
 
+  // Reconcile the optimistic-send path: the Gator attachment-send ack carries only the
+  // MESSAGE guid (not the attachment guid — see SendAck), so the local temp attachment
+  // row is reconciled here when the socket `new-message` echo lands. For each incoming
+  // real attachment whose message still has a pending optimistic temp attachment
+  // (guid like 'temp-…-att', identified by its retained local_path), re-point that temp
+  // row to the real guid in place — preserving its on-disk local_path so the image keeps
+  // rendering without a re-download, and avoiding a duplicate attachment on the bubble.
+  for (const { att, messageId } of deduped) {
+    const temp = await db.all<{ guid: string; localPath: string | null }>(
+      sql`SELECT guid, local_path AS localPath FROM attachments
+          WHERE message_id = ${messageId} AND guid LIKE '%-att' AND guid <> ${att.guid}
+          LIMIT 1`,
+    );
+    const t = temp[0];
+    if (!t) continue;
+    // If the real guid already exists (a prior echo inserted it), just drop the temp row.
+    const existing = await db.all<{ id: number }>(
+      sql`SELECT id FROM attachments WHERE guid = ${att.guid} LIMIT 1`,
+    );
+    if (existing[0]) {
+      await db.delete(attachments).where(eq(attachments.guid, t.guid));
+    } else {
+      await db
+        .update(attachments)
+        .set({ guid: att.guid, localPath: t.localPath })
+        .where(eq(attachments.guid, t.guid));
+    }
+  }
+
   await db
     .insert(attachments)
     .values(

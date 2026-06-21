@@ -78,12 +78,18 @@ async function handleFaceTimeAction(actionId: string | undefined, uuid: string):
   }
   if (actionId === ACTION_ANSWER_FACETIME) {
     try {
-      const link = isDevServer()
-        ? `https://facetime.apple.com/join#v=1&p=dev&k=${uuid}`
-        : await faceTimeApi.answerFaceTime(http, uuid);
+      let link: string | null;
+      if (isDevServer()) {
+        link = `https://facetime.apple.com/join#v=1&p=dev&k=${uuid}`;
+      } else {
+        // Gator's answer op only acks the answer ({ answered: true }); the openable join
+        // link is minted by a SEPARATE op. Answer the call, then request a link to open.
+        await faceTimeApi.answerFaceTime(http, uuid);
+        link = await faceTimeApi.createFaceTimeLink(http);
+      }
       // The link comes from the server — only open a real FaceTime link, never an
       // arbitrary scheme/Intent (a compromised server could otherwise deep-link).
-      if (!/^(facetime:|https:\/\/facetime\.apple\.com\/)/i.test(link))
+      if (!link || !/^(facetime:|https:\/\/facetime\.apple\.com\/)/i.test(link))
         throw new Error('rejected non-FaceTime link');
       await Linking.openURL(link);
     } catch {

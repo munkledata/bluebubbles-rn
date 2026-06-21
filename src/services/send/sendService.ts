@@ -4,6 +4,7 @@ import { sendText } from '@core/api/endpoints/messages';
 import {
   getChatIdByGuid,
   insertOutgoingText,
+  markOutgoingSentNoGuid,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
@@ -78,11 +79,20 @@ export async function sendTextMessage(
       effectId: args.effectId,
       method,
     });
-    await reconcileOutgoingSuccess(db, tempGuid, {
-      guid: server.guid,
-      dateCreated: server.dateCreated ?? now,
-      dateDelivered: server.dateDelivered ?? null,
-    });
+    // The server ack carries the real GUID only on the Private-API path. On the
+    // AppleScript fallback (stock server, no helper) the guid is ABSENT — flip the optimistic
+    // row to 'sent' and drop the queue row (no spurious retry); the live socket `new-message`
+    // echo then reconciles it to the real guid by content (Gator emits no tempGuid). Never
+    // call reconcileOutgoingSuccess with an undefined guid.
+    if (server.guid) {
+      await reconcileOutgoingSuccess(db, tempGuid, {
+        guid: server.guid,
+        dateCreated: now,
+        dateDelivered: null,
+      });
+    } else {
+      await markOutgoingSentNoGuid(db, tempGuid);
+    }
   } catch (e) {
     const code = e instanceof ApiError && e.status ? e.status : -1;
     await reconcileOutgoingError(db, tempGuid, code);

@@ -4,6 +4,13 @@ import type { AppDatabase } from '../types';
 
 /** Server fields used to promote an optimistic message to its real identity. */
 export interface ServerMsgFields {
+  /**
+   * The real server GUID. ABSENT on the AppleScript send path (the helper isn't
+   * connected, so the server can't ack a GUID) — callers MUST NOT invoke this with an
+   * undefined guid; instead they call `markOutgoingSentNoGuid`, and the live socket
+   * `new-message` echo reconciles the optimistic row by CONTENT (`reconcileEchoByContent`,
+   * since Gator's echo carries no tempGuid). The guard below is a belt-and-braces backstop.
+   */
   guid: string;
   dateCreated: number | null;
   dateDelivered: number | null;
@@ -166,6 +173,11 @@ export async function reconcileOutgoingSuccess(
   tempGuid: string,
   server: ServerMsgFields,
 ): Promise<void> {
+  // Backstop: never promote a row to an undefined/empty guid. The AppleScript send path
+  // returns no GUID ack, so callers leave reconciliation to the socket `new-message`
+  // echo (which carries tempGuid); if a caller slips through, no-op rather than corrupt
+  // the optimistic row's guid to NULL.
+  if (!server.guid) return;
   if (cancelledTempGuids.has(tempGuid)) {
     cancelledTempGuids.delete(tempGuid);
     // The user cancelled mid-flight: drop any trace of this send — the leftover temp row
@@ -179,6 +191,23 @@ export async function reconcileOutgoingSuccess(
     sql`SELECT id FROM messages WHERE guid = ${server.guid} LIMIT 1`,
   );
   if (dup[0]) {
+    // The live echo already inserted the real message (it beat this ack, and content-match
+    // didn't promote our temp row — e.g. an edge where the text differs). Carry any on-disk
+    // local_path from the temp row's attachment onto the real row's attachment BEFORE the
+    // cascade-delete, so a just-sent image isn't lost to a re-download. (One attachment per
+    // outgoing message in this app.)
+    const tempAtt = await db.all<{ localPath: string | null }>(
+      sql`SELECT ta.local_path AS localPath FROM attachments ta
+          JOIN messages tm ON tm.id = ta.message_id
+          WHERE tm.guid = ${tempGuid} AND ta.local_path IS NOT NULL LIMIT 1`,
+    );
+    const lp = tempAtt[0]?.localPath;
+    if (lp) {
+      // db.run (not db.all) — a non-returning UPDATE; db.all throws "use run()" on better-sqlite3.
+      await db.run(
+        sql`UPDATE attachments SET local_path = ${lp} WHERE message_id = ${dup[0].id} AND local_path IS NULL`,
+      );
+    }
     await db.delete(messages).where(eq(messages.guid, tempGuid));
   } else {
     await db
@@ -194,6 +223,104 @@ export async function reconcileOutgoingSuccess(
       .where(eq(messages.guid, tempGuid));
   }
   await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+}
+
+/**
+ * Reconcile a send that SUCCEEDED but returned no GUID (the AppleScript fallback path).
+ * The message left the device, so: drop the queue row (no more retries) and flip the
+ * still-temp optimistic bubble to 'sent'. Its identity stays the tempGuid until the socket
+ * `new-message` echo (which carries the tempGuid) promotes it to the real guid. Used by the
+ * send services and the retry processor for the absent-guid case.
+ */
+export async function markOutgoingSentNoGuid(db: AppDatabase, tempGuid: string): Promise<void> {
+  if (cancelledTempGuids.has(tempGuid)) {
+    cancelledTempGuids.delete(tempGuid);
+    await db.delete(messages).where(eq(messages.guid, tempGuid));
+    await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+    return;
+  }
+  await db.update(messages).set({ sendState: 'sent', error: 0 }).where(eq(messages.guid, tempGuid));
+  await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+}
+
+/** The minimal echo fields reconcileEchoByContent needs to correlate to an optimistic row. */
+export interface EchoMatchFields {
+  guid: string;
+  isFromMe?: boolean | null;
+  text?: string | null;
+  dateCreated?: number | null;
+  associatedMessageGuid?: string | null;
+  associatedMessageType?: string | null;
+}
+
+/** Only match a temp row sent within this window of the echo's own timestamp, so a
+ *  coincidentally-identical message from ANOTHER device can't hijack an unrelated stale row. */
+const ECHO_MATCH_WINDOW_MS = 5 * 60_000;
+
+/**
+ * Reconcile the LIVE echo of one of OUR sent messages against its optimistic temp row.
+ *
+ * Gator's `new-message` is a chat.db ROWID-watcher emission and carries NO tempGuid (unlike
+ * upstream BlueBubbles, which correlates it in its message manager) — so we cannot match by
+ * tempGuid. Instead, an incoming is-from-me message with a REAL guid is matched by CONTENT to
+ * a still-pending `temp-…` row in the same chat (same text / reaction / attachment) and that
+ * row is promoted IN PLACE to the real guid. The caller's subsequent upsert then UPDATEs the
+ * same row (preserving its id, attachments + local_path) instead of inserting a duplicate; the
+ * queue row is dropped. No-op if the real guid already exists (already reconciled by the HTTP
+ * ack) or nothing matches.
+ *
+ * MUST be called ONLY on the live realtime echo path (DbEventSink), never the full/incremental
+ * SYNC path: sync replays historical sent messages, and content-matching a brand-new optimistic
+ * send to an OLD identical message would corrupt its identity. The retry/ack path reconciles
+ * sync/offline sends by guid instead.
+ */
+export async function reconcileEchoByContent(
+  db: AppDatabase,
+  m: EchoMatchFields,
+  chatId: number,
+): Promise<void> {
+  if (!m.isFromMe || m.guid.startsWith('temp-')) return;
+  // Already reconciled (the HTTP ack promoted the temp row first) → leave it to the upsert.
+  const already = await db.all<{ id: number }>(
+    sql`SELECT id FROM messages WHERE guid = ${m.guid} LIMIT 1`,
+  );
+  if (already[0]) return;
+  // Match on the fields the BARE socket echo reliably carries — serializeMessage emits NO
+  // has_attachments/attachments on the live event, so we must NOT gate on them. A reaction
+  // matches its target+type; everything else matches exact text. This covers attachments too:
+  // an outgoing attachment send and its echo both have null text. (Attachments are always sent
+  // via the Private API — the AppleScript fallback is plain-text only — so on the ack-less
+  // no-guid path only TEXT arrives here, and text matches reliably; an attachment that races
+  // its ack falls back to reconcileOutgoingSuccess's dup-branch local_path carry-over.)
+  const match =
+    m.associatedMessageType != null
+      ? sql`associated_message_type = ${m.associatedMessageType} AND associated_message_guid IS ${m.associatedMessageGuid ?? null}`
+      : sql`associated_message_type IS NULL AND text IS ${m.text ?? null}`;
+  // Time-bound the match to a send near the echo's own timestamp (defeats a cross-device
+  // identical-content hijack of an unrelated stale row).
+  const echoDate = m.dateCreated ?? null;
+  const window =
+    echoDate != null
+      ? sql`AND date_created >= ${echoDate - ECHO_MATCH_WINDOW_MS} AND date_created <= ${echoDate + ECHO_MATCH_WINDOW_MS}`
+      : sql``;
+  // Prefer an actually-in-flight 'sending' row, then oldest-first (the first echo corresponds
+  // to the first send) so rapid identical sends promote in order, not swapped.
+  const rows = await db.all<{ guid: string }>(sql`
+    SELECT guid FROM messages
+    WHERE chat_id = ${chatId} AND is_from_me = 1 AND guid LIKE 'temp-%'
+      AND send_state IN ('sending', 'sent') AND ${match} ${window}
+    ORDER BY (send_state = 'sending') DESC, date_created ASC, id ASC LIMIT 1`);
+  const temp = rows[0];
+  if (!temp) return;
+  // Never resurrect a send the user cancelled in flight (same guard as the ack / no-guid paths).
+  if (wasCancelledInFlight(temp.guid)) return;
+  // Drop the queue row BEFORE promoting, so a concurrent retry tick in the gap can't claim and
+  // re-POST a send that's already being reconciled.
+  await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
+  await db
+    .update(messages)
+    .set({ guid: m.guid, sendState: 'sent', error: 0 })
+    .where(eq(messages.guid, temp.guid));
 }
 
 /** Max automatic retries before a queued send retires to the 'error' bubble. */

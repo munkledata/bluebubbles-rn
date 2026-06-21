@@ -27,12 +27,19 @@ export async function sendEdit(
   const prev = await getMessageTextByGuid(db, args.messageGuid);
   await applyLocalEdit(db, args.messageGuid, args.newText, now);
   try {
-    await editMessage(http, {
+    // The server returns the sender's send ack `{ guid? }`. A present guid is the
+    // Private-API confirmation that the edit went through; treat its absence as a
+    // soft failure and revert (edits require the Private API, so no guid = no edit).
+    const ack = await editMessage(http, {
       messageGuid: args.messageGuid,
       editedMessage: args.newText,
       backwardsCompatibilityMessage: `Edited to: “${args.newText}”`,
       partIndex: 0,
     });
+    if (!ack.guid) {
+      if (prev) await applyLocalEdit(db, args.messageGuid, prev.text ?? '', prev.dateEdited ?? 0);
+      return { ok: false };
+    }
     return { ok: true };
   } catch {
     if (prev) await applyLocalEdit(db, args.messageGuid, prev.text ?? '', prev.dateEdited ?? 0);
@@ -53,7 +60,13 @@ export async function sendUnsend(
 ): Promise<{ ok: boolean }> {
   await applyLocalUnsend(db, args.messageGuid, now);
   try {
-    await unsendMessage(http, { messageGuid: args.messageGuid, partIndex: 0 });
+    // The server returns a status object `{ unsent: true }`; derive ok from it (a
+    // 2xx that didn't actually unsend → revert the local retraction).
+    const ack = await unsendMessage(http, { messageGuid: args.messageGuid, partIndex: 0 });
+    if (ack.unsent === false) {
+      await clearLocalUnsend(db, args.messageGuid);
+      return { ok: false };
+    }
     return { ok: true };
   } catch {
     await clearLocalUnsend(db, args.messageGuid);

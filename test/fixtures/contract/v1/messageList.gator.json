@@ -1,0 +1,13 @@
+{
+  "messages": [
+    {
+      "guid": "p:0/AABBCCDD-1122-3344-5566-77889900AABB",
+      "text": "hey there",
+      "dateCreated": 1718900000000,
+      "isFromMe": false,
+      "isDelivered": true,
+      "itemType": 0,
+      "partCount": 1
+    }
+  ]
+}

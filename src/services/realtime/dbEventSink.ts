@@ -3,6 +3,7 @@ import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 import {
   getChatIdByGuid,
   getNewestReceivedGuid,
+  reconcileEchoByContent,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
@@ -30,6 +31,16 @@ export class DbEventSink implements EventSink {
           ...(message.handle ? [message.handle] : []),
         ]);
         const chatMap = await upsertChats(this.db, embeddedChats, handleMap);
+        // Reconcile our own optimistic send against this LIVE echo before the upsert: Gator's
+        // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
+        // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
+        // Live path only — never the sync path (see reconcileEchoByContent).
+        const echoChatId = message.chats?.[0]?.guid
+          ? chatMap.get(message.chats[0].guid)
+          : undefined;
+        if (echoChatId != null) {
+          await reconcileEchoByContent(this.db, message, echoChatId);
+        }
         await upsertMessages(
           this.db,
           [message],

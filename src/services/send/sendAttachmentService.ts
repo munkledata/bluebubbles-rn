@@ -4,7 +4,7 @@ import type { HttpClient } from '@core/api/http';
 import {
   getChatIdByGuid,
   insertOutgoingAttachment,
-  promoteAttachmentGuid,
+  markOutgoingSentNoGuid,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
@@ -56,15 +56,20 @@ export async function sendImageMessage(
       tempGuid,
       file: { uri: args.image.uri, name: args.image.name, type: args.image.mimeType },
     });
-    const serverAtt = server.attachments?.[0];
-    if (serverAtt?.guid) {
-      await promoteAttachmentGuid(db, attachmentGuid, serverAtt.guid, args.image.uri);
+    // The server ack carries only the message GUID (no attachment guid). Promote the message
+    // row when the GUID is present; the optimistic attachment row keeps its local guid +
+    // local_path until the live socket `new-message` echo reconciles the attachment guid in
+    // place (upsertAttachments). On the no-guid path, flip to 'sent' + drop the queue row (no
+    // spurious retry) and let the content-matched echo promote it. Never reconcile w/ undefined.
+    if (server.guid) {
+      await reconcileOutgoingSuccess(db, tempGuid, {
+        guid: server.guid,
+        dateCreated: now,
+        dateDelivered: null,
+      });
+    } else {
+      await markOutgoingSentNoGuid(db, tempGuid);
     }
-    await reconcileOutgoingSuccess(db, tempGuid, {
-      guid: server.guid,
-      dateCreated: server.dateCreated ?? now,
-      dateDelivered: server.dateDelivered ?? null,
-    });
   } catch (e) {
     const code = e instanceof ApiError && e.status ? e.status : -1;
     await reconcileOutgoingError(db, tempGuid, code);

@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat } from '@core/models';
-import { upsertChats, upsertHandles } from '@db/repositories';
+import { Chat, Message } from '@core/models';
+import { upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { sendImageMessage } from '@/services/send/sendAttachmentService';
 import { createTestDb } from '../support/testDb';
@@ -27,52 +27,97 @@ async function seedChat(db: AppDatabase, guid: string) {
 const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 
+/**
+ * Simulate the socket `new-message` echo: the server re-broadcasts the just-sent message
+ * by its REAL guid, carrying the real attachment guid (which the HTTP attachment ack does
+ * NOT include — the Gator ack is `{ guid }`, the message guid only). DbEventSink routes
+ * this through upsertMessages → upsertAttachments, which reconciles the optimistic temp
+ * attachment in place (preserving local_path).
+ */
+async function echoMessageWithAttachment(
+  db: AppDatabase,
+  raw: Database.Database,
+  msgGuid: string,
+  attGuid: string,
+) {
+  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+  const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number }).id;
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid: msgGuid,
+        isFromMe: true,
+        dateCreated: 1000,
+        hasAttachments: true,
+        attachments: [{ guid: attGuid, mimeType: 'image/jpeg' }],
+      }),
+    ],
+    () => chatId,
+    handles,
+  );
+}
+
 describe('sendImageMessage', () => {
-  it('optimistically inserts an image message + attachment + queue, then reconciles', async () => {
+  it('promotes the message on the ack; the attachment keeps its local guid+path until the echo', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
+    // Gator's attachment-send ack carries ONLY the message guid (no attachment guid).
     await sendImageMessage(
       db,
-      fakeHttp(async () => ({
-        guid: 'real-msg',
-        dateCreated: 1000,
-        dateDelivered: null,
-        attachments: [{ guid: 'real-att' }],
-      })),
+      fakeHttp(async () => ({ guid: 'real-msg', viaPrivateApi: true })),
       { chatGuid: 'c1', image: IMG },
     );
 
     expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(1);
     const msg = one(raw, 'SELECT guid, send_state s, has_attachments h FROM messages');
-    expect(msg.guid).toBe('real-msg');
+    expect(msg.guid).toBe('real-msg'); // promoted via the ack guid
     expect(msg.s).toBe('sent');
     expect(msg.h).toBe(1);
+    // The attachment is NOT promoted by the ack — it keeps its optimistic temp guid + the
+    // on-disk local path so it renders immediately.
     const att = one(raw, 'SELECT guid, local_path lp FROM attachments');
-    expect(att.guid).toBe('real-att'); // promoted
-    expect(att.lp).toBe('file:///photo.jpg'); // local file retained → renders without re-download
+    expect(att.guid as string).toMatch(/-att$/);
+    expect(att.lp).toBe('file:///photo.jpg');
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
   });
 
-  it('does not duplicate the attachment when the echo lands first', async () => {
+  it('reconciles the temp attachment to the real guid (preserving local_path) on the socket echo', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await sendImageMessage(
+      db,
+      fakeHttp(async () => ({ guid: 'real-msg', viaPrivateApi: true })),
+      { chatGuid: 'c1', image: IMG },
+    );
+
+    await echoMessageWithAttachment(db, raw, 'real-msg', 'real-att');
+
+    // One attachment, now under the REAL guid, with the local path carried over → no
+    // duplicate bubble, no re-download.
+    expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(1);
+    const att = one(raw, 'SELECT guid, local_path lp FROM attachments');
+    expect(att.guid).toBe('real-att');
+    expect(att.lp).toBe('file:///photo.jpg');
+  });
+
+  it('does not duplicate the attachment when the echo real guid already exists', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await sendImageMessage(
       db,
       fakeHttp(async () => {
-        // Simulate DbEventSink upserting the real attachment guid before responding
-        // (message_id is nullable; the dedup is by attachment guid).
+        // A prior echo already inserted the real attachment guid (message_id nullable).
         raw
           .prepare("INSERT INTO attachments (guid, mime_type) VALUES ('real-att2', 'image/jpeg')")
           .run();
-        return {
-          guid: 'real-msg2',
-          dateCreated: 1000,
-          dateDelivered: 2000,
-          attachments: [{ guid: 'real-att2' }],
-        };
+        return { guid: 'real-msg2', viaPrivateApi: true };
       }),
       { chatGuid: 'c1', image: IMG },
     );
+
+    await echoMessageWithAttachment(db, raw, 'real-msg2', 'real-att2');
+    // The temp row is dropped (the real guid pre-existed) → exactly one 'real-att2'.
     expect(
       (one(raw, "SELECT COUNT(*) c FROM attachments WHERE guid='real-att2'") as { c: number }).c,
     ).toBe(1);

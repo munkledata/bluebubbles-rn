@@ -12,7 +12,22 @@ export interface MessagePage {
 
 // The server wraps list responses in a named key ({ messages: [...] }); the HttpClient
 // already unwrapped the { status, message, data } envelope, so `data` IS that object.
-const MessageList = z.object({ messages: z.array(Message).nullish() });
+export const MessageList = z.object({ messages: z.array(Message).nullish() });
+
+/**
+ * The Gator write ops (send/react/attachment) return a `SendResult`, NOT a Message:
+ * `{ guid?: string, viaPrivateApi: boolean }`. `guid` is the REAL message GUID on the
+ * Private-API path (the ack) and is ABSENT on the AppleScript fallback (plain text only).
+ * We parse only what we consume — the optional guid — and tolerate the extra `viaPrivateApi`.
+ */
+export const SendAck = z
+  .object({ guid: z.string().nullish(), viaPrivateApi: z.boolean().nullish() })
+  .passthrough();
+export type SendAck = z.infer<typeof SendAck>;
+
+/** `unsend-message` returns a status object `{ unsent: true }`, not a Message. */
+export const UnsendAck = z.object({ unsent: z.boolean().nullish() }).passthrough();
+export type UnsendAck = z.infer<typeof UnsendAck>;
 
 /** GET /api/v1/chat/{guid}/message — messages for a chat, newest first. */
 export async function chatMessages(
@@ -44,9 +59,14 @@ export interface SendTextParams {
   method?: string;
 }
 
-/** POST /api/v1/message/text — send a text message (private API for effects/replies). */
-export function sendText(http: HttpClient, params: SendTextParams): Promise<Message> {
-  return http.post('/message/text', Message, {
+/**
+ * POST /api/v1/message/text — send a text message (private API for effects/replies).
+ * Returns the send ack: `{ guid? }` — the real GUID on the Private-API path, ABSENT on
+ * the AppleScript fallback (in which case the socket `new-message` echo reconciles by
+ * tempGuid). NOT a Message — see {@link SendAck}.
+ */
+export function sendText(http: HttpClient, params: SendTextParams): Promise<SendAck> {
+  return http.post('/message/text', SendAck, {
     json: {
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
@@ -95,9 +115,13 @@ export interface SendReactionParams {
   partIndex?: number;
 }
 
-/** POST /api/v1/message/react — send (or remove, with a `-` prefix) a tapback. */
-export function sendReaction(http: HttpClient, params: SendReactionParams): Promise<Message> {
-  return http.post('/message/react', Message, {
+/**
+ * POST /api/v1/message/react — send (or remove, with a `-` prefix) a tapback. Returns
+ * the send ack `{ guid? }` (reactions require the Private API, so the guid is present on
+ * success), NOT a Message — see {@link SendAck}.
+ */
+export function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
+  return http.post('/message/react', SendAck, {
     json: {
       chatGuid: params.chatGuid,
       selectedMessageGuid: params.selectedMessageGuid,
@@ -117,9 +141,12 @@ export interface EditMessageParams {
   partIndex?: number;
 }
 
-/** POST /api/v1/message/{guid}/edit — edit a sent message's text (Private API, Ventura+). */
-export function editMessage(http: HttpClient, p: EditMessageParams): Promise<Message> {
-  return http.post(`/message/${encodeURIComponent(p.messageGuid)}/edit`, Message, {
+/**
+ * POST /api/v1/message/{guid}/edit — edit a sent message's text (Private API, Ventura+).
+ * Returns the sender's send ack `{ guid? }`, NOT a Message — see {@link SendAck}.
+ */
+export function editMessage(http: HttpClient, p: EditMessageParams): Promise<SendAck> {
+  return http.post(`/message/${encodeURIComponent(p.messageGuid)}/edit`, SendAck, {
     json: {
       editedMessage: p.editedMessage,
       backwardsCompatibilityMessage: p.backwardsCompatibilityMessage,
@@ -133,9 +160,12 @@ export interface UnsendMessageParams {
   partIndex?: number;
 }
 
-/** POST /api/v1/message/{guid}/unsend — retract a sent message (Private API, Ventura+). */
-export function unsendMessage(http: HttpClient, p: UnsendMessageParams): Promise<Message> {
-  return http.post(`/message/${encodeURIComponent(p.messageGuid)}/unsend`, Message, {
+/**
+ * POST /api/v1/message/{guid}/unsend — retract a sent message (Private API, Ventura+).
+ * Returns a status object `{ unsent: true }`, NOT a Message — see {@link UnsendAck}.
+ */
+export function unsendMessage(http: HttpClient, p: UnsendMessageParams): Promise<UnsendAck> {
+  return http.post(`/message/${encodeURIComponent(p.messageGuid)}/unsend`, UnsendAck, {
     json: { partIndex: p.partIndex ?? 0 },
   });
 }

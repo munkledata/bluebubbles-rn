@@ -4,6 +4,7 @@ import type { HttpClient } from '@core/api/http';
 import {
   getChatIdByGuid,
   insertOutgoingReaction,
+  markOutgoingSentNoGuid,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
@@ -51,11 +52,18 @@ export async function sendReactionMessage(
       selectedMessageText: args.selectedMessageText,
       reaction: args.reaction,
     });
-    await reconcileOutgoingSuccess(db, tempGuid, {
-      guid: server.guid,
-      dateCreated: server.dateCreated ?? now,
-      dateDelivered: null,
-    });
+    // Reactions require the Private API, so the ack carries the real GUID on success.
+    // If it's ever absent, flip to 'sent' + drop the queue row (no spurious retry); the live
+    // echo reconciles by content (never reconcile with an undefined guid).
+    if (server.guid) {
+      await reconcileOutgoingSuccess(db, tempGuid, {
+        guid: server.guid,
+        dateCreated: now,
+        dateDelivered: null,
+      });
+    } else {
+      await markOutgoingSentNoGuid(db, tempGuid);
+    }
   } catch (e) {
     const code = e instanceof ApiError && e.status ? e.status : -1;
     await reconcileOutgoingError(db, tempGuid, code);
