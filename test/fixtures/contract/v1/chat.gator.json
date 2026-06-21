@@ -1,0 +1,35 @@
+{
+  "guid": "iMessage;-;+15551234567",
+  "chatIdentifier": "+15551234567",
+  "displayName": null,
+  "style": 43,
+  "isArchived": false,
+  "groupId": null,
+  "participants": [
+    {
+      "address": "+15551234567",
+      "country": "us",
+      "uncanonicalizedId": null,
+      "service": "iMessage"
+    }
+  ],
+  "lastMessage": {
+    "guid": "p:0/LASTMSG-1122-3344",
+    "text": "see you then",
+    "subject": null,
+    "dateCreated": 1718900002000,
+    "dateRead": 0,
+    "dateDelivered": 1718900003000,
+    "isFromMe": true,
+    "isDelivered": true,
+    "isRead": false,
+    "isSent": true,
+    "wasDeliveredQuietly": false,
+    "didNotifyRecipient": true,
+    "isAudioMessage": false,
+    "itemType": 0,
+    "associatedMessageGuid": null,
+    "associatedMessageType": null,
+    "partCount": 1
+  }
+}

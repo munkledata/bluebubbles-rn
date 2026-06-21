@@ -10,6 +10,8 @@
   "isDelivered": true,
   "isRead": false,
   "isSent": true,
+  "wasDeliveredQuietly": false,
+  "didNotifyRecipient": true,
   "isAudioMessage": false,
   "itemType": 0,
   "groupTitle": null,

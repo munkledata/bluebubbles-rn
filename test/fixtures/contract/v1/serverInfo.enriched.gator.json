@@ -1,0 +1,7 @@
+{
+  "version": "1.2.3",
+  "server_version": "1.2.3",
+  "private_api": true,
+  "proxy_service": "zrok",
+  "supports_header_auth": true
+}
