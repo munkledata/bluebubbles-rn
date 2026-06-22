@@ -7,9 +7,14 @@ import type { AppDatabase } from '@db/types';
 import { sendImageMessage } from '@/services/send/sendAttachmentService';
 import { createTestDb } from '../support/testDb';
 
-function fakeHttp(impl: () => Promise<unknown>): HttpClient {
-  return { post: () => impl() } as unknown as HttpClient;
+function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
+  return {
+    post: (_p: string, _s: unknown, opts?: { json?: unknown }) => impl(opts?.json),
+  } as unknown as HttpClient;
 }
+
+/** Stub file reader: the service reads the file as base64 before posting (F-6). */
+const fakeReadBase64 = async (_uri: string): Promise<string> => 'ZmFrZS1ieXRlcw==';
 
 const IMG = {
   uri: 'file:///photo.jpg',
@@ -63,12 +68,24 @@ describe('sendImageMessage', () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     // Gator's attachment-send ack carries ONLY the message guid (no attachment guid).
+    let body: Record<string, unknown> | undefined;
     await sendImageMessage(
       db,
-      fakeHttp(async () => ({ guid: 'real-msg', viaPrivateApi: true })),
+      fakeHttp(async (json) => {
+        body = json as Record<string, unknown>;
+        return { guid: 'real-msg', viaPrivateApi: true };
+      }),
       { chatGuid: 'c1', image: IMG },
+      fakeReadBase64,
     );
 
+    // F-6: JSON body with base64 data (NOT multipart). Server wants { chatGuid, name, data, … }.
+    expect(body).toMatchObject({
+      chatGuid: 'c1',
+      name: 'photo.jpg',
+      data: 'ZmFrZS1ieXRlcw==',
+      method: 'private-api',
+    });
     expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(1);
     const msg = one(raw, 'SELECT guid, send_state s, has_attachments h FROM messages');
     expect(msg.guid).toBe('real-msg'); // promoted via the ack guid
@@ -89,6 +106,7 @@ describe('sendImageMessage', () => {
       db,
       fakeHttp(async () => ({ guid: 'real-msg', viaPrivateApi: true })),
       { chatGuid: 'c1', image: IMG },
+      fakeReadBase64,
     );
 
     await echoMessageWithAttachment(db, raw, 'real-msg', 'real-att');
@@ -114,6 +132,7 @@ describe('sendImageMessage', () => {
         return { guid: 'real-msg2', viaPrivateApi: true };
       }),
       { chatGuid: 'c1', image: IMG },
+      fakeReadBase64,
     );
 
     await echoMessageWithAttachment(db, raw, 'real-msg2', 'real-att2');
@@ -132,6 +151,7 @@ describe('sendImageMessage', () => {
         throw new ApiError('server_error', 'boom', 500);
       }),
       { chatGuid: 'c1', image: IMG },
+      fakeReadBase64,
     );
     const msg = one(raw, 'SELECT send_state s, error e FROM messages');
     expect(msg.s).toBe('error');
@@ -149,7 +169,12 @@ describe('sendImageMessage', () => {
     });
     // Mirrors sendImages(): one optimistic sendImageMessage per picked asset.
     for (let i = 0; i < 3; i++) {
-      await sendImageMessage(db, fail, { chatGuid: 'c1', image: { ...IMG, name: `p${i}.jpg` } });
+      await sendImageMessage(
+        db,
+        fail,
+        { chatGuid: 'c1', image: { ...IMG, name: `p${i}.jpg` } },
+        fakeReadBase64,
+      );
     }
     expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(3);
     expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(3);

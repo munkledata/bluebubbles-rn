@@ -16,10 +16,14 @@ export async function getFriends(http: HttpClient): Promise<unknown[]> {
   return (await http.get('/findmy/friends', FriendsResponse)).friends ?? [];
 }
 
+/**
+ * "Refresh" devices. AUDIT (F-20): the Gator server has NO `/findmy/devices/refresh` route
+ * (only `/findmy/friends/refresh` exists) — POSTing it 404s. So we don't issue the doomed
+ * request; we just GET the current device list, which degrades gracefully (no misleading
+ * error). If a server adds the route, restore the POST + GET-fallback here.
+ */
 export async function refreshDevices(http: HttpClient): Promise<unknown[]> {
-  const res = await http.post('/findmy/devices/refresh', DevicesResponse, { json: {} });
-  // Some server versions return no data on refresh — fall back to a GET.
-  return (res.devices ?? []).length > 0 ? (res.devices ?? []) : getDevices(http);
+  return getDevices(http);
 }
 
 export async function refreshFriends(http: HttpClient): Promise<unknown[]> {

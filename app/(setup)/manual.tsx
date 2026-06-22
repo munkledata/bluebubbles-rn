@@ -1,6 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { connect } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
@@ -12,8 +20,13 @@ export default function Manual(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const [url, setUrl] = useState('');
   const [password, setPassword] = useState('');
+  const [allowInsecure, setAllowInsecure] = useState(false);
   const status = useSessionStore((s) => s.status);
   const error = useSessionStore((s) => s.error);
+
+  // Show the insecure-connection acknowledgement only for an explicit http:// URL.
+  const isHttp = /^http:\/\//i.test(url.trim());
+  const submit = (): void => void connect(url.trim(), password, allowInsecure);
 
   useEffect(() => {
     if (status === 'connected') router.replace('/home');
@@ -50,17 +63,30 @@ export default function Manual(): React.JSX.Element {
             autoCapitalize="none"
             value={password}
             onChangeText={setPassword}
-            onSubmitEditing={() => connect(url.trim(), password)}
+            onSubmitEditing={submit}
             returnKeyType="go"
           />
+          {isHttp ? (
+            <View style={styles.insecureRow}>
+              <View style={styles.insecureText}>
+                <Text style={[styles.insecureTitle, { color: theme.color.label }]}>
+                  Allow insecure connection
+                </Text>
+                <Text style={[styles.insecureSub, { color: theme.color.secondaryLabel }]}>
+                  This server uses unencrypted http://. Only enable for a server you trust.
+                </Text>
+              </View>
+              <Switch value={allowInsecure} onValueChange={setAllowInsecure} />
+            </View>
+          ) : null}
           {error ? (
             <Text style={[styles.error, { color: theme.color.destructive }]}>{error}</Text>
           ) : null}
           <Button
             title="Connect"
             loading={status === 'connecting'}
-            disabled={!url.trim() || !password}
-            onPress={() => connect(url.trim(), password)}
+            disabled={!url.trim() || !password || (isHttp && !allowInsecure)}
+            onPress={submit}
             style={styles.button}
           />
         </ScrollView>
@@ -76,4 +102,15 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, marginBottom: 24, lineHeight: 22 },
   error: { fontSize: 14, marginBottom: 12 },
   button: { marginTop: 8 },
+  insecureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    marginBottom: 4,
+    gap: 12,
+  },
+  insecureText: { flex: 1 },
+  insecureTitle: { fontSize: 15, fontWeight: '600' },
+  insecureSub: { fontSize: 13, lineHeight: 18, marginTop: 2 },
 });

@@ -7,6 +7,18 @@ describe('redaction', () => {
     );
   });
 
+  it('strips the extended sensitive query params (apikey/secret/fcmtoken) from URLs', () => {
+    // These were leaking before F-25 (the URL redaction only covered guid|password|token,
+    // while object-key redaction covered more — the two lists are now shared).
+    expect(redactUrls('https://x/cb?apikey=AKIA123&page=2')).toBe(
+      'https://x/cb?apikey=[redacted]&page=2',
+    );
+    expect(redactUrls('https://x/cb?secret=s3cr3t')).toBe('https://x/cb?secret=[redacted]');
+    expect(redactUrls('https://x/push?fcmtoken=tok-xyz&id=9')).toBe(
+      'https://x/push?fcmtoken=[redacted]&id=9',
+    );
+  });
+
   it('redacts a bare Authorization Bearer token string', () => {
     expect(redactUrls('Authorization: Bearer hunter2-secret-pw')).toBe(
       'Authorization: Bearer [redacted]',

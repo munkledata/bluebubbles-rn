@@ -2,8 +2,12 @@ import { z } from 'zod';
 import { Handle } from './handle';
 import { Message } from './message';
 
-/** Chat display style: 45 = group (DM/group distinction in iMessage). */
-export const ChatStyle = z.union([z.literal(43), z.literal(45)]);
+/**
+ * Chat display style: 43 = DM, 45 = group (the standard iMessage values). Kept as a plain
+ * `number` (not a strict union) so a non-standard style from a newer/odd server doesn't fail
+ * the whole chat/message page parse — the only consumer (`isGroup`) compares against 45.
+ */
+export const ChatStyle = z.number();
 
 /** A conversation (Flutter: Chat). */
 export const Chat = z.object({

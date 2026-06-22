@@ -42,7 +42,7 @@ export function Composer({
   const trimmed = text.trim();
   const isEditing = editingText != null;
 
-  // Debounced typing emit: started-typing on input, stopped-typing after a pause / on send.
+  // Debounced typing emit: start-typing on input, stop-typing after a pause / on send.
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingActive = useRef(false);
   const emitTyping = (active: boolean): void => {

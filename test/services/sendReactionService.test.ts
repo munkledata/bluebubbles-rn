@@ -51,7 +51,8 @@ describe('sendReactionMessage', () => {
       { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', selectedMessageText: 'hi' },
     );
 
-    expect(body).toMatchObject({ selectedMessageGuid: 'mt', reaction: 'love', partIndex: 0 });
+    // Server contract: { chatGuid, messageGuid, reactionType } (F-2).
+    expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'love', partIndex: 0 });
     const row = one(
       raw,
       "SELECT guid, send_state s, associated_message_type t FROM messages WHERE associated_message_guid='mt'",

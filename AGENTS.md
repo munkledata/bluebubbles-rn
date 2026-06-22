@@ -46,12 +46,15 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
 - **Drizzle + op-sqlite v17 reactive lists:** use raw `db.all(sql\`…\`)` for read queries
   (works on both drivers); reactive hooks (`useReactiveQuery`) subscribe to table names and
   re-run the query — the write→flush is automatic via the adapter.
-- **`db.run(sql\`…\`)` is NOT supported by the adapter — it throws only on device.** The
-  `drizzleAdapter` Proxy implements the `execute*` path (used by `.all()` and the
-  `.insert()/.update()/.delete()` builders) but not drizzle's `.run()` entry. better-sqlite3
-  (Node tests) *does* implement `.run()`, so tests pass while the device fails — another
-  test-vs-device divergence. For writes use a builder (`db.delete(t).where(…)`,
-  `db.update(t).set({…})`, `db.insert(t).values({…}).returning({…})`) or `db.all(sql\`…\`)`.
+- **`db.run(sql\`…\`)` DOES work on op-sqlite v17** (corrected — the earlier note claiming it
+  throws on device was wrong). Drizzle's query-builder `.run()` routes through `executeAsync`,
+  which the `drizzleAdapter` Proxy DOES override (alongside `execute`/`executeRawAsync`), so a
+  non-returning raw write (`db.run(sql\`UPDATE …\`)`) commits on device. Two production sites rely
+  on this: `reconcileOutgoingSuccess` (outgoing.ts) and `reconcileServerScheduled` (scheduled.ts) —
+  both use `db.run` precisely because `db.all` on a non-returning UPDATE throws "use run()" under
+  better-sqlite3 (Node tests). Use `db.run` for a non-returning raw write, `db.all(sql\`… RETURNING\`)`
+  when you need rows back, or a builder (`db.delete(t).where(…)`, `db.update(t).set({…})`,
+  `db.insert(t).values({…}).returning({…})`).
 
 ## UI gotchas
 - **Android edge-to-edge keyboard:** Expo SDK 56 / RN 0.85 enable edge-to-edge by default, so
@@ -183,7 +186,8 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   (2) `listRetryableOutgoing` only returns rows that are already-failed (`attempts>=1`) OR older than
   `OUTGOING_GRACE_MS` (a just-inserted row is assumed owned by the live UI send). Backoff via
   `outgoingBackoffMs`; retire at `OUTGOING_MAX_ATTEMPTS`. Run it at boot (home) + the background task — NOT
-  per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim (op-sqlite has no `db.run`).
+  per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim because it must read back the claimed
+  row (`db.run` works too but returns no rows; use it only for non-returning writes).
 - **Native security modules are dependency-deferred + advisory, so the build stays green pre-rebuild.**
   `react-native-libsodium` (crypto), `jail-monkey` (`deviceIntegrity`), `react-native-ssl-public-key-pinning`
   (`certPinning`) are all installed but only touched via a lazy `import()` inside a `try/catch` (root check)
@@ -206,9 +210,13 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   never inited). Use `ensureDatabase()` in any background/notification-action handler.
 - **Encrypted FCM payloads** (`encrypted: 'true'`, AES) are NOT yet decrypted in RN — TODO before
   enabling server-side payload encryption.
-- **App-lock is a UI gate, not key custody:** the SQLCipher key is `WHEN_UNLOCKED`, so a headless push
-  decrypts the DB + posts (content gated only by redacted mode) even while app-locked. Acceptable for
-  delivery, but the lock does not withhold the key from the push path — don't claim otherwise.
+- **App-lock is a UI gate, not key custody:** a headless push decrypts the DB + posts (content gated
+  only by redacted/locked mode) even while app-locked. Acceptable for delivery, but the lock does NOT
+  withhold the key from the push path — don't claim otherwise. NOTE: `keychainAccessible: WHEN_UNLOCKED`
+  on the secure-store options is iOS-only and INERT on Android (the Android Keystore applies no
+  "accessible only when unlocked" attribute here), so it is NOT an at-rest key-custody guarantee on
+  Android. `requireAuthentication` is intentionally OFF so the headless-while-locked decrypt works
+  (see `src/native/secureVault.ts`).
 
 ## Crypto gotchas (react-native-libsodium, verified on-device)
 - **AAD must be a `string`.** The NATIVE binding throws `crypto_aead_xchacha20poly1305_ietf_encrypt:

@@ -26,7 +26,41 @@ export interface ParsedFcm {
 export function parseFcmData(data: Record<string, unknown> | undefined): ParsedFcm {
   return {
     eventName: String(data?.type ?? ''),
-    body: data?.data ?? data,
+    body: hoistChatGuid(data?.data ?? data, data?.chatGuid),
     encrypted: String(data?.encrypted ?? '').toLowerCase() === 'true',
   };
+}
+
+/**
+ * Live `new-message` / `updated-message` pushes carry a top-level `chatGuid` on the FCM
+ * envelope (sibling to `type`/`data`) as the defensive fallback for when the server didn't
+ * embed `chats[]` in the message body. Fold it INTO the body (where the Message schema reads
+ * it) so the chats-less fallback in DbEventSink/buildMessageIntents can resolve the chat.
+ * The body is usually a JSON string at this point — parse, inject, re-stringify (the
+ * EventRouter's `coerceData` re-parses it). Only injected when the body lacks its own.
+ */
+function hoistChatGuid(body: unknown, envelopeChatGuid: unknown): unknown {
+  if (typeof envelopeChatGuid !== 'string' || envelopeChatGuid.length === 0) return body;
+  const obj = asObject(body);
+  if (!obj || typeof obj.chatGuid === 'string') return body;
+  const merged = { ...obj, chatGuid: envelopeChatGuid };
+  // Preserve the JSON-string form the EventRouter expects to re-parse.
+  return typeof body === 'string' ? JSON.stringify(merged) : merged;
+}
+
+/** Parse a JSON string (or accept an object) into a plain record; null on anything else. */
+function asObject(body: unknown): Record<string, unknown> | null {
+  if (typeof body === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(body);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  return body && typeof body === 'object' && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : null;
 }

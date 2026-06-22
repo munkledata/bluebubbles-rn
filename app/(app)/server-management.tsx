@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { serverApi } from '@core/api';
+import { isUnimplementedEndpoint } from '@core/api/errors';
 import { http, startSync } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
@@ -48,13 +49,24 @@ export default function ServerManagementScreen(): React.JSX.Element {
     };
   }, []);
 
+  // Whether the connected server implements the admin routes (restart/update/stats/logs).
+  // Gator implements none of them, so we hide those actions rather than fail with a 404.
+  const adminSupported = serverApi.SERVER_MANAGEMENT_SUPPORTED;
+
+  // Distinguish "this server doesn't support the action" from a real connection failure so
+  // the copy isn't misleading (the old code blamed every 404 on the connection).
+  const failCopy = (label: string, e: unknown): string =>
+    isUnimplementedEndpoint(e)
+      ? `${label} isn’t supported on this server.`
+      : `Couldn’t ${label.toLowerCase()}. Check your connection.`;
+
   // Run an admin action with an in-flight guard; reports the outcome.
   const run = (label: string, fn: () => Promise<unknown>, okMsg: string): void => {
     if (busy) return;
     setBusy(label);
     void fn()
       .then(() => Alert.alert('Server', okMsg))
-      .catch(() => Alert.alert('Server', `Couldn’t ${label.toLowerCase()}. Check your connection.`))
+      .catch((e: unknown) => Alert.alert('Server', failCopy(label, e)))
       .finally(() => setBusy(null));
   };
 
@@ -87,7 +99,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
           available ? 'A newer server version is available.' : 'Your server is up to date.',
         );
       })
-      .catch(() => Alert.alert('Server', 'Couldn’t check for updates.'))
+      .catch((e: unknown) => Alert.alert('Server', failCopy('Check for updates', e)))
       .finally(() => setBusy(null));
   };
 
@@ -97,7 +109,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
     void serverApi
       .serverStatTotals(http)
       .then((res) => setTotals((res as Totals) ?? {}))
-      .catch(() => Alert.alert('Server', 'Couldn’t load statistics.'))
+      .catch((e: unknown) => Alert.alert('Server', failCopy('Load statistics', e)))
       .finally(() => setBusy(null));
   };
 
@@ -109,7 +121,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
       .then((res) => {
         setLogs(typeof res === 'string' ? res : JSON.stringify(res, null, 2));
       })
-      .catch(() => Alert.alert('Server', 'Couldn’t fetch logs.'))
+      .catch((e: unknown) => Alert.alert('Server', failCopy('Fetch logs', e)))
       .finally(() => setBusy(null));
   };
 
@@ -169,92 +181,104 @@ export default function ServerManagementScreen(): React.JSX.Element {
             disabled={syncStatus === 'syncing'}
             onPress={onSyncNow}
           />
-          <ActionRow
-            label="Restart iMessage"
-            theme={theme}
-            disabled={!!busy}
-            busy={busy === 'Restart iMessage'}
-            onPress={() =>
-              confirmThen(
-                'Restart iMessage',
-                'Restart the Messages app on the Mac?',
-                () => serverApi.restartImessage(http),
-                'Messages is restarting.',
-              )
-            }
-          />
-          <ActionRow
-            label="Restart Services"
-            theme={theme}
-            disabled={!!busy}
-            busy={busy === 'Restart Services'}
-            onPress={() =>
-              confirmThen(
-                'Restart Services',
-                'Soft-restart the server services (Private API)?',
-                () => serverApi.softRestart(http),
-                'Services are restarting.',
-              )
-            }
-          />
-          <ActionRow
-            label="Restart Server"
-            theme={theme}
-            destructive
-            disabled={!!busy}
-            busy={busy === 'Restart Server'}
-            onPress={() =>
-              confirmThen(
-                'Restart Server',
-                'Fully restart the server process? This will briefly drop your connection.',
-                () => serverApi.hardRestart(http),
-                'The server is restarting — reconnecting shortly.',
-                true,
-              )
-            }
-          />
-          <ActionRow
-            label="Check for Updates"
-            theme={theme}
-            disabled={!!busy}
-            busy={busy === 'Check for Updates'}
-            onPress={onCheckUpdate}
-          />
-          <ActionRow
-            label="View Server Logs"
-            theme={theme}
-            disabled={!!busy}
-            busy={busy === 'View Logs'}
-            onPress={onViewLogs}
-          />
-        </Section>
-
-        <Section label="STATISTICS" theme={theme}>
-          {totals ? (
+          {adminSupported ? (
             <>
-              <InfoRow label="Chats" theme={theme}>
-                {String(totals.chats ?? '—')}
-              </InfoRow>
-              <InfoRow label="Messages" theme={theme}>
-                {String(totals.messages ?? '—')}
-              </InfoRow>
-              <InfoRow label="Handles" theme={theme}>
-                {String(totals.handles ?? '—')}
-              </InfoRow>
-              <InfoRow label="Attachments" theme={theme}>
-                {String(totals.attachments ?? '—')}
-              </InfoRow>
+              <ActionRow
+                label="Restart iMessage"
+                theme={theme}
+                disabled={!!busy}
+                busy={busy === 'Restart iMessage'}
+                onPress={() =>
+                  confirmThen(
+                    'Restart iMessage',
+                    'Restart the Messages app on the Mac?',
+                    () => serverApi.restartImessage(http),
+                    'Messages is restarting.',
+                  )
+                }
+              />
+              <ActionRow
+                label="Restart Services"
+                theme={theme}
+                disabled={!!busy}
+                busy={busy === 'Restart Services'}
+                onPress={() =>
+                  confirmThen(
+                    'Restart Services',
+                    'Soft-restart the server services (Private API)?',
+                    () => serverApi.softRestart(http),
+                    'Services are restarting.',
+                  )
+                }
+              />
+              <ActionRow
+                label="Restart Server"
+                theme={theme}
+                destructive
+                disabled={!!busy}
+                busy={busy === 'Restart Server'}
+                onPress={() =>
+                  confirmThen(
+                    'Restart Server',
+                    'Fully restart the server process? This will briefly drop your connection.',
+                    () => serverApi.hardRestart(http),
+                    'The server is restarting — reconnecting shortly.',
+                    true,
+                  )
+                }
+              />
+              <ActionRow
+                label="Check for Updates"
+                theme={theme}
+                disabled={!!busy}
+                busy={busy === 'Check for Updates'}
+                onPress={onCheckUpdate}
+              />
+              <ActionRow
+                label="View Server Logs"
+                theme={theme}
+                disabled={!!busy}
+                busy={busy === 'View Logs'}
+                onPress={onViewLogs}
+              />
             </>
           ) : (
-            <ActionRow
-              label="Load Statistics"
-              theme={theme}
-              disabled={!!busy}
-              busy={busy === 'Load Stats'}
-              onPress={onLoadStats}
-            />
+            <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+              <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel, textAlign: 'left' }]}>
+                Restart, update check, and logs aren’t supported on this server.
+              </Text>
+            </View>
           )}
         </Section>
+
+        {adminSupported && (
+          <Section label="STATISTICS" theme={theme}>
+            {totals ? (
+              <>
+                <InfoRow label="Chats" theme={theme}>
+                  {String(totals.chats ?? '—')}
+                </InfoRow>
+                <InfoRow label="Messages" theme={theme}>
+                  {String(totals.messages ?? '—')}
+                </InfoRow>
+                <InfoRow label="Handles" theme={theme}>
+                  {String(totals.handles ?? '—')}
+                </InfoRow>
+                <InfoRow label="Attachments" theme={theme}>
+                  {String(totals.attachments ?? '—')}
+                </InfoRow>
+              </>
+            ) : (
+              <ActionRow
+                label="Load Statistics"
+                theme={theme}
+                disabled={!!busy}
+                busy={busy === 'Load Stats'}
+                onPress={onLoadStats}
+              />
+            )}
+          </Section>
+        )}
       </ScrollView>
 
       <Modal visible={logs != null} animationType="slide" onRequestClose={() => setLogs(null)}>

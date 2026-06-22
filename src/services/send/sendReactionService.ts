@@ -49,7 +49,6 @@ export async function sendReactionMessage(
     const server = await sendReaction(http, {
       chatGuid: args.chatGuid,
       selectedMessageGuid: args.targetGuid,
-      selectedMessageText: args.selectedMessageText,
       reaction: args.reaction,
     });
     // Reactions require the Private API, so the ack carries the real GUID on success.

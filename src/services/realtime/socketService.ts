@@ -130,8 +130,14 @@ export class SocketService {
   // Error-log throttling state: signature key → last-logged epoch ms.
   private readonly lastErrorLoggedAt = new Map<string, number>();
 
-  constructor(sink: EventSink) {
-    this.router = new EventRouter(sink);
+  /**
+   * Pass a shared {@link EventRouter} to dedup across transports (socket + FCM): both must use
+   * the SAME router so its `seen` set sees both deliveries of one message (separate routers
+   * have separate sets → the cross-transport dedup is a no-op). Falls back to a private router
+   * built from `sink` when none is supplied (tests, single-transport use).
+   */
+  constructor(sink: EventSink, router?: EventRouter) {
+    this.router = router ?? new EventRouter(sink);
   }
 
   connect(origin: string, password: string, opts: SocketAuthOptions = {}): void {
@@ -276,7 +282,7 @@ export class SocketService {
     this.socket = null;
   }
 
-  /** Emit an event to the server (e.g. started/stopped-typing). No-op if disconnected. */
+  /** Emit an event to the server (e.g. start-typing/stop-typing). No-op if disconnected. */
   emit(event: string, payload?: unknown): void {
     this.socket?.emit(event, payload);
   }

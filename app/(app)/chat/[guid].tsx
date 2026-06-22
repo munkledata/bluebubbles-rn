@@ -138,7 +138,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
       const g = editing.guid;
       setEditing(null);
       if (isDev()) void devEditFake(g, text);
-      else void editText({ messageGuid: g, newText: text });
+      else void editText({ messageGuid: g, newText: text, chatGuid: guid });
       return;
     }
     if (replyTo) {
@@ -187,7 +187,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
         style: 'destructive',
         onPress: () => {
           if (isDev()) void devUnsendFake(g);
-          else void unsend({ messageGuid: g });
+          else void unsend({ messageGuid: g, chatGuid: guid });
         },
       },
     ]);

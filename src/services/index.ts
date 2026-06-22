@@ -1,5 +1,5 @@
 import { chatsApi, HttpClient, serverApi } from '@core/api';
-import { sanitizeServerAddress } from '@core/config';
+import { isCleartext, sanitizeServerAddress } from '@core/config';
 import { SecretBox } from '@core/crypto';
 import { logger } from '@core/secure';
 import { applyCertPinning, type CertPins } from '@native/certPinning';
@@ -149,8 +149,17 @@ function realtimeSink(db: AppDatabase): EventSink {
   return realtimeSinkInstance;
 }
 
-let devRouter: EventRouter | null = null;
-/** Dispatch a raw realtime event through the shared pipeline (dev injection / future FCM). */
+// ONE EventRouter shared across every transport (socket, dev injection, FCM) so its dedup
+// `seen` set spans them — a message delivered by BOTH socket and FCM is then processed (and
+// notified) exactly once (separate routers = separate sets = the dedup is a no-op). The socket
+// is handed this same instance in startRealtime().
+let sharedRouterInstance: EventRouter | null = null;
+function sharedRouter(db: AppDatabase): EventRouter {
+  sharedRouterInstance ??= new EventRouter(realtimeSink(db));
+  return sharedRouterInstance;
+}
+
+/** Dispatch a raw realtime event through the shared pipeline (dev injection / FCM). */
 export async function dispatchRealtimeEvent(eventName: string, rawData: unknown): Promise<void> {
   const db = await ensureDatabase();
   // A killed-app FCM wake does NOT run the UI boot effect that seeds the notification
@@ -158,8 +167,7 @@ export async function dispatchRealtimeEvent(eventName: string, rawData: unknown)
   // otherwise a headless push would leak message content despite redacted mode being ON.
   await useRedactedModeStore.getState().hydrate();
   setHideNotificationPreview(useRedactedModeStore.getState().enabled);
-  devRouter ??= new EventRouter(realtimeSink(db));
-  await devRouter.handle(eventName, rawData, 'dev');
+  await sharedRouter(db).handle(eventName, rawData, 'fcm');
 }
 
 /** Dev push transport, pre-bound to dispatch — drives the "Inject message" button. */
@@ -295,7 +303,8 @@ export async function startRealtime(): Promise<void> {
   const { origin, password } = useSessionStore.getState();
   if (!origin || !password) return;
   socket?.disconnect();
-  socket = new SocketService(realtimeSink(db));
+  // Hand the socket the SHARED router so socket + FCM dedup against one `seen` set (F-31).
+  socket = new SocketService(realtimeSink(db), sharedRouter(db));
   // Keep the socket in the SAME auth mode as REST: header/auth-payload by default,
   // `?guid=` query against a stock server that only reads the legacy param.
   socket.connect(origin, password, {
@@ -311,12 +320,30 @@ export async function startRealtime(): Promise<void> {
   }
 }
 
-/** Validate + connect to a server, updating the session store with the outcome. */
-export async function connect(rawOrigin: string, password: string): Promise<void> {
+/**
+ * Validate + connect to a server, updating the session store with the outcome.
+ *
+ * `allowCleartext` must be explicitly set true to connect to a plaintext `http://` origin
+ * (e.g. a LAN/IP server the user knowingly trusts). By default we reject it: we must never
+ * attach the Bearer credential to an unencrypted origin without that acknowledgement. (Android
+ * `usesCleartextTraffic=false` also blocks it at the OS layer; this is the clear UX + the
+ * credential-safety gate.)
+ */
+export async function connect(
+  rawOrigin: string,
+  password: string,
+  allowCleartext = false,
+): Promise<void> {
   const store = useSessionStore.getState();
   const origin = sanitizeServerAddress(rawOrigin);
   if (!origin) {
     store.failed('Please enter a valid server URL.');
+    return;
+  }
+  if (isCleartext(origin) && !allowCleartext) {
+    store.failed(
+      'This server uses an insecure http:// connection. Use https://, or enable insecure connections to continue.',
+    );
     return;
   }
   if (!password) {
@@ -341,12 +368,14 @@ export async function connect(rawOrigin: string, password: string): Promise<void
 }
 
 /**
- * Emit a typing indicator to the server (`started`/`stopped-typing` with the chat guid).
- * No-op when not connected. SERVER-GATED: the BlueBubbles server only relays this to the
- * other party with the **private API** enabled — so it can't be verified without a server.
+ * Emit a typing indicator to the server. The server listens on `start-typing` / `stop-typing`
+ * with a `{ guid }` payload — NOT `started-typing`/`stopped-typing` with `{ chatGuid }` (which
+ * it ignored, so the indicator never reached the other party). No-op when not connected.
+ * SERVER-GATED: the server only relays this with the **private API** enabled, so it can't be
+ * verified without a server.
  */
 export function sendTyping(chatGuid: string, isTyping: boolean): void {
-  socket?.emit(isTyping ? 'started-typing' : 'stopped-typing', { chatGuid });
+  socket?.emit(isTyping ? 'start-typing' : 'stop-typing', { guid: chatGuid });
 }
 
 /** Mark a chat read: update the local read marker (clears the badge) and notify the server. */

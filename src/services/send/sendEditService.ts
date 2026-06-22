@@ -4,6 +4,7 @@ import {
   applyLocalEdit,
   applyLocalUnsend,
   clearLocalUnsend,
+  getChatGuidByMessageGuid,
   getMessageTextByGuid,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
@@ -11,6 +12,8 @@ import type { AppDatabase } from '@db/types';
 export interface SendEditArgs {
   messageGuid: string;
   newText: string;
+  /** Chat the message lives in (server-required). Resolved from the DB row when omitted. */
+  chatGuid?: string;
 }
 
 /**
@@ -24,6 +27,9 @@ export async function sendEdit(
   args: SendEditArgs,
   now: number = Date.now(),
 ): Promise<{ ok: boolean }> {
+  // The edit route requires chatGuid; resolve from the message's DB row when not supplied.
+  const chatGuid = args.chatGuid ?? (await getChatGuidByMessageGuid(db, args.messageGuid));
+  if (!chatGuid) return { ok: false }; // unknown chat → can't satisfy the server contract
   const prev = await getMessageTextByGuid(db, args.messageGuid);
   await applyLocalEdit(db, args.messageGuid, args.newText, now);
   try {
@@ -31,6 +37,7 @@ export async function sendEdit(
     // Private-API confirmation that the edit went through; treat its absence as a
     // soft failure and revert (edits require the Private API, so no guid = no edit).
     const ack = await editMessage(http, {
+      chatGuid,
       messageGuid: args.messageGuid,
       editedMessage: args.newText,
       backwardsCompatibilityMessage: `Edited to: “${args.newText}”`,
@@ -49,6 +56,8 @@ export async function sendEdit(
 
 export interface SendUnsendArgs {
   messageGuid: string;
+  /** Chat the message lives in (server-required). Resolved from the DB row when omitted. */
+  chatGuid?: string;
 }
 
 /** Optimistic unsend: mark retracted locally, POST, clear the mark on failure. */
@@ -58,11 +67,18 @@ export async function sendUnsend(
   args: SendUnsendArgs,
   now: number = Date.now(),
 ): Promise<{ ok: boolean }> {
+  // The unsend route requires chatGuid; resolve from the message's DB row when not supplied.
+  const chatGuid = args.chatGuid ?? (await getChatGuidByMessageGuid(db, args.messageGuid));
+  if (!chatGuid) return { ok: false }; // unknown chat → can't satisfy the server contract
   await applyLocalUnsend(db, args.messageGuid, now);
   try {
     // The server returns a status object `{ unsent: true }`; derive ok from it (a
     // 2xx that didn't actually unsend → revert the local retraction).
-    const ack = await unsendMessage(http, { messageGuid: args.messageGuid, partIndex: 0 });
+    const ack = await unsendMessage(http, {
+      chatGuid,
+      messageGuid: args.messageGuid,
+      partIndex: 0,
+    });
     if (ack.unsent === false) {
       await clearLocalUnsend(db, args.messageGuid);
       return { ok: false };

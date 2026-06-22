@@ -8,14 +8,35 @@
 
 const PLACEHOLDER = '[redacted]';
 
+// The single source of truth for sensitive names — used for BOTH structured object-key
+// redaction AND URL query-param redaction so the two never drift (the URL path previously
+// covered only guid|password|token while object keys covered more, leaking e.g. ?apikey=).
+const SENSITIVE_KEY_NAMES = [
+  'guid',
+  'password',
+  'token',
+  'fcmtoken',
+  'authorization',
+  'apikey',
+  'api_key',
+  'secret',
+  'credential',
+];
+
 // Query params / JSON keys whose values must never be logged.
-const SENSITIVE_KEYS = /^(guid|password|token|fcmtoken|authorization|apikey|api_key|secret)$/i;
+const SENSITIVE_KEYS = new RegExp(`^(${SENSITIVE_KEY_NAMES.join('|')})$`, 'i');
+
+// `?guid=…` / `&apikey=…` etc. — the same key list, matched as a URL query param.
+const SENSITIVE_QUERY = new RegExp(
+  `([?&])(${SENSITIVE_KEY_NAMES.join('|')})=[^&\\s]+`,
+  'gi',
+);
 
 /** Strip sensitive query params (notably `guid`) AND bearer tokens from any string. */
 export function redactUrls(input: string): string {
   return (
     input
-      .replace(/([?&])(guid|password|token)=[^&\s]+/gi, `$1$2=${PLACEHOLDER}`)
+      .replace(SENSITIVE_QUERY, `$1$2=${PLACEHOLDER}`)
       // `Authorization: Bearer <password>` logged as a raw string (the key-based redaction
       // only catches structured `{ authorization: ... }`, not a bare header string).
       .replace(/\bBearer\s+\S+/gi, `Bearer ${PLACEHOLDER}`)

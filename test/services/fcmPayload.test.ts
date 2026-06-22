@@ -53,6 +53,39 @@ describe('parseFcmData', () => {
     }
   });
 
+  it('F-1: hoists a top-level envelope `chatGuid` into the body so the chats-less fallback works', async () => {
+    // The server carries chatGuid as a sibling of type/data when it didn't embed chats[].
+    const fcm = {
+      type: 'new-message',
+      data: JSON.stringify({ guid: 'srv-3', text: 'hi' }),
+      chatGuid: 'cFallback',
+    };
+    const { body } = parseFcmData(fcm);
+    expect(typeof body).toBe('string');
+    const parsed = JSON.parse(body as string) as { guid: string; chatGuid?: string };
+    expect(parsed.chatGuid).toBe('cFallback'); // folded into the message body
+
+    // …and it round-trips through the router into a parsed message carrying chatGuid.
+    const { events, sink } = collector();
+    const router = new EventRouter(sink);
+    const out = await router.handle('new-message', body, 'fcm');
+    if (out?.type === 'new-message') {
+      expect(out.message.chatGuid).toBe('cFallback');
+    }
+    expect(events).toHaveLength(1);
+  });
+
+  it('F-1: does NOT override a chatGuid the body already carries', () => {
+    const fcm = {
+      type: 'new-message',
+      data: JSON.stringify({ guid: 'srv-4', chatGuid: 'cInner' }),
+      chatGuid: 'cEnvelope',
+    };
+    const { body } = parseFcmData(fcm);
+    const parsed = JSON.parse(body as string) as { chatGuid?: string };
+    expect(parsed.chatGuid).toBe('cInner');
+  });
+
   it('the OLD behavior — dispatching the whole envelope — would NOT route (guid is nested)', async () => {
     const { sink } = collector();
     const router = new EventRouter(sink);

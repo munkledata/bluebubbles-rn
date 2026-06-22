@@ -60,9 +60,18 @@ export class EventRouter {
     return normalized;
   }
 
-  /** True (and records the guid) if this message event was already processed. */
+  /**
+   * True (and records the guid) if this message event was already processed.
+   *
+   * Dedup is restricted to `new-message` only: a redelivered new-message (socket + FCM, or a
+   * retried push) must post its notification exactly once. `updated-message` is NOT deduped —
+   * a guid receives many updates (delivered → read → edited → retracted), each carrying a
+   * DIFFERENT timestamp, and they must all reach the sink (the DB upsert's COALESCE is
+   * idempotent, so re-applying one is harmless). Deduping by guid here would drop every
+   * update after the first for a given message.
+   */
   private isDuplicate(event: NormalizedEvent): boolean {
-    if (event.type !== 'new-message' && event.type !== 'updated-message') return false;
+    if (event.type !== 'new-message') return false;
     const guid = event.message.guid;
     if (!guid) return false;
     const key = `${event.type}:${guid}`;

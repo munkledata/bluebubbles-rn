@@ -10,28 +10,34 @@ export interface SendAttachmentParams {
   chatGuid: string;
   /** Message temp guid (also the attachment temp guid server-side). */
   tempGuid: string;
-  file: { uri: string; name: string; type: string };
+  /** Display/transfer name of the file. */
+  name: string;
+  /** The file bytes, base64-encoded (read at the uri by the caller). */
+  data: string;
+  /** Send method; 'private-api' for stock attachment sends. */
+  method?: string;
 }
 
 /**
- * POST /api/v1/message/attachment (multipart/form-data) → the send ack `{ guid? }` (the
- * real message GUID; attachment sends require the Private API, so it's present on
- * success), NOT a Message — see {@link SendAck}. The attachment's own server guid is not
- * acked here; the optimistic attachment row keeps its local guid until the socket
- * `new-message` echo carries the real one. On React Native, FormData accepts a
- * `{ uri, name, type }` file part. Native-free (FormData exists in Node + RN), so it is
- * Node-testable with a fake http.
+ * POST /api/v1/message/attachment (application/json) → the send ack `{ guid? }` (the real
+ * message GUID; attachment sends require the Private API, so it's present on success), NOT a
+ * Message — see {@link SendAck}. The attachment's own server guid is not acked here; the
+ * optimistic attachment row keeps its local guid until the socket `new-message` echo carries
+ * the real one.
+ *
+ * Server contract: it has NO multipart parser — it accepts JSON `{ chatGuid, name, data,
+ * tempGuid, method }` with the file bytes base64-encoded in `data` (the old multipart body
+ * was silently rejected). The caller reads the base64 (expo-file-system) and passes it in, so
+ * this stays Node-pure / unit-testable with a fake http.
  */
 export function sendAttachment(http: HttpClient, p: SendAttachmentParams): Promise<SendAck> {
-  const form = new FormData();
-  form.append('attachment', {
-    uri: p.file.uri,
-    name: p.file.name,
-    type: p.file.type,
-  } as unknown as Blob);
-  form.append('chatGuid', p.chatGuid);
-  form.append('tempGuid', p.tempGuid);
-  form.append('name', p.file.name);
-  form.append('method', 'private-api');
-  return http.post('/message/attachment', SendAck, { form });
+  return http.post('/message/attachment', SendAck, {
+    json: {
+      chatGuid: p.chatGuid,
+      tempGuid: p.tempGuid,
+      name: p.name,
+      data: p.data,
+      method: p.method ?? 'private-api',
+    },
+  });
 }

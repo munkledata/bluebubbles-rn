@@ -64,6 +64,9 @@ export interface SendTextParams {
  * Returns the send ack: `{ guid? }` — the real GUID on the Private-API path, ABSENT on
  * the AppleScript fallback (in which case the socket `new-message` echo reconciles by
  * tempGuid). NOT a Message — see {@link SendAck}.
+ *
+ * Server contract: it reads the body under `text` (NOT `message`, which it ignores → a
+ * blank send). We keep `message` on the params and map it to `text` on the wire here.
  */
 export function sendText(http: HttpClient, params: SendTextParams): Promise<SendAck> {
   return http.post('/message/text', SendAck, {
@@ -71,7 +74,7 @@ export function sendText(http: HttpClient, params: SendTextParams): Promise<Send
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
       method: params.method ?? 'private-api',
-      message: params.message,
+      text: params.message,
       subject: params.subject,
       selectedMessageGuid: params.selectedMessageGuid,
       effectId: params.effectId,
@@ -106,9 +109,8 @@ export async function queryMessages(http: HttpClient, q: MessageQuery): Promise<
 
 export interface SendReactionParams {
   chatGuid: string;
+  /** Server GUID of the message being reacted to. */
   selectedMessageGuid: string;
-  /** The reacted-to message's text (the server echoes it on the reaction). */
-  selectedMessageText?: string;
   /** 'love' | 'like' | … or '-love' etc. to remove. */
   reaction: string;
   /** Target part for multipart messages; defaults to 0. */
@@ -119,20 +121,25 @@ export interface SendReactionParams {
  * POST /api/v1/message/react — send (or remove, with a `-` prefix) a tapback. Returns
  * the send ack `{ guid? }` (reactions require the Private API, so the guid is present on
  * success), NOT a Message — see {@link SendAck}.
+ *
+ * Server contract: it requires `{ chatGuid, messageGuid, reactionType }` — NOT the
+ * `selectedMessage*`/`reaction` keys the older client sent (which the server dropped → no
+ * tapback). We map our params onto the server's names here.
  */
 export function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
   return http.post('/message/react', SendAck, {
     json: {
       chatGuid: params.chatGuid,
-      selectedMessageGuid: params.selectedMessageGuid,
-      selectedMessageText: params.selectedMessageText,
-      reaction: params.reaction,
+      messageGuid: params.selectedMessageGuid,
+      reactionType: params.reaction,
       partIndex: params.partIndex ?? 0,
     },
   });
 }
 
 export interface EditMessageParams {
+  /** Chat the message lives in — the server REQUIRES this (min 1). */
+  chatGuid: string;
   /** Server GUID of the message to edit (your own, sent < ~15 min ago). */
   messageGuid: string;
   editedMessage: string;
@@ -144,18 +151,25 @@ export interface EditMessageParams {
 /**
  * POST /api/v1/message/{guid}/edit — edit a sent message's text (Private API, Ventura+).
  * Returns the sender's send ack `{ guid? }`, NOT a Message — see {@link SendAck}.
+ *
+ * Server contract: it requires `chatGuid` and reads `editedText`/`backwardsCompatText`
+ * (NOT `editedMessage`/`backwardsCompatibilityMessage`, which it ignored → no edit). We map
+ * our params onto the server's names here.
  */
 export function editMessage(http: HttpClient, p: EditMessageParams): Promise<SendAck> {
   return http.post(`/message/${encodeURIComponent(p.messageGuid)}/edit`, SendAck, {
     json: {
-      editedMessage: p.editedMessage,
-      backwardsCompatibilityMessage: p.backwardsCompatibilityMessage,
+      chatGuid: p.chatGuid,
+      editedText: p.editedMessage,
+      backwardsCompatText: p.backwardsCompatibilityMessage,
       partIndex: p.partIndex ?? 0,
     },
   });
 }
 
 export interface UnsendMessageParams {
+  /** Chat the message lives in — the server REQUIRES this (min 1). */
+  chatGuid: string;
   messageGuid: string;
   partIndex?: number;
 }
@@ -163,9 +177,12 @@ export interface UnsendMessageParams {
 /**
  * POST /api/v1/message/{guid}/unsend — retract a sent message (Private API, Ventura+).
  * Returns a status object `{ unsent: true }`, NOT a Message — see {@link UnsendAck}.
+ *
+ * Server contract: it requires `chatGuid` (min 1) — omitting it (as the old client did)
+ * failed validation server-side. We thread it through from the caller.
  */
 export function unsendMessage(http: HttpClient, p: UnsendMessageParams): Promise<UnsendAck> {
   return http.post(`/message/${encodeURIComponent(p.messageGuid)}/unsend`, UnsendAck, {
-    json: { partIndex: p.partIndex ?? 0 },
+    json: { chatGuid: p.chatGuid, partIndex: p.partIndex ?? 0 },
   });
 }

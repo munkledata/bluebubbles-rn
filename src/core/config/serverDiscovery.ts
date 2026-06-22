@@ -9,8 +9,12 @@
 /**
  * Normalize a user-entered server address into a clean origin.
  * - trims whitespace and trailing slashes
- * - prepends https:// when no scheme is given (HTTPS-first; the rebuild enforces
- *   TLS, downgrading to http only for explicit LAN/IP opt-in handled elsewhere)
+ * - prepends https:// when no scheme is given (HTTPS-first)
+ *
+ * NOTE: this does NOT enforce TLS — an explicitly-typed `http://` origin is preserved as-is.
+ * The cleartext gate lives in `connect()` (services/index.ts), which rejects an http:// origin
+ * unless the caller passes an explicit `allowCleartext` acknowledgement (so the Bearer
+ * credential is never attached to an unencrypted origin by default). Use {@link isCleartext}.
  */
 export function sanitizeServerAddress(input: string | null | undefined): string | null {
   if (!input) return null;

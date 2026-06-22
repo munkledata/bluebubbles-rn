@@ -97,7 +97,7 @@ describe('endpoint shapes: send / action acks (NOT bare Messages)', () => {
   it('unsendMessage parses the { unsent: true } status object (not a Message)', async () => {
     const fx = fixture('unsendAck.gator.json');
     expect(UnsendAck.safeParse(fx).success).toBe(true);
-    const ack = await unsendMessage(httpReturning(fx), { messageGuid: 'm1' });
+    const ack = await unsendMessage(httpReturning(fx), { chatGuid: 'c1', messageGuid: 'm1' });
     expect(ack.unsent).toBe(true);
   });
 });

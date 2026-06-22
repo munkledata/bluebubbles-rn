@@ -302,3 +302,18 @@ export async function getMessageTextByGuid(
   );
   return rows[0] ?? null;
 }
+
+/**
+ * Resolve the GUID of the chat a message belongs to (via its chat_id → chats.guid). The
+ * edit/unsend server routes require `chatGuid`, which the UI doesn't always have in scope.
+ */
+export async function getChatGuidByMessageGuid(
+  db: AppDatabase,
+  messageGuid: string,
+): Promise<string | null> {
+  const rows = await db.all<{ guid: string }>(
+    sql`SELECT c.guid AS guid FROM messages m JOIN chats c ON c.id = m.chat_id
+        WHERE m.guid = ${messageGuid} LIMIT 1`,
+  );
+  return rows[0]?.guid ?? null;
+}

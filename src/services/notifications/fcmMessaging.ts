@@ -38,14 +38,17 @@ function deliver(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
  * open otherwise bypasses the lock entirely.
  */
 async function deliverRespectingLock(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
-  let locked = false;
+  // Fail CLOSED: if we can't determine the lock state we assume LOCKED, so a vault failure
+  // can never leak sender/content. This does NOT drop delivery — postLockedNotification()
+  // still posts a content-less notice; we just withhold the body until the user unlocks.
+  let locked = true;
   try {
     locked = effectivelyLocked(
       useLockStore.getState(),
       (await vault.get('appLockEnabled')) === 'true',
     );
-  } catch {
-    /* fall through as unlocked — failing closed here would drop all delivery */
+  } catch (e) {
+    logger.warn('[fcm] lock-state check failed — failing closed (content-less notice)', e);
   }
   if (locked) {
     await postLockedNotification();

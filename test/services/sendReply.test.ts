@@ -48,7 +48,7 @@ describe('reply send (sendTextMessage with a reply target)', () => {
       { chatGuid: 'c1', text: 'Yes!', selectedMessageGuid: 'orig' },
     );
 
-    expect(body).toMatchObject({ selectedMessageGuid: 'orig', message: 'Yes!' });
+    expect(body).toMatchObject({ selectedMessageGuid: 'orig', text: 'Yes!' });
     const row = raw
       .prepare("SELECT thread_originator_guid t FROM messages WHERE guid='real-reply'")
       .get() as {

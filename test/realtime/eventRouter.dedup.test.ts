@@ -33,4 +33,20 @@ describe('EventRouter dedup-by-GUID', () => {
     await router.handle('updated-message', { guid: 'x', dateCreated: 2 }, 'socket');
     expect(events).toHaveLength(2);
   });
+
+  it('does NOT dedup updated-message: two updates for one guid (different dateRead) both reach the sink', async () => {
+    const { events, sink } = collector();
+    const router = new EventRouter(sink);
+    // A message receives a stream of updates (delivered → read → edited …), each with a
+    // different timestamp; deduping by guid would drop everything after the first.
+    const a = await router.handle('updated-message', { guid: 'u', dateRead: 0 }, 'socket');
+    const b = await router.handle('updated-message', { guid: 'u', dateRead: 1234 }, 'socket');
+    expect(a?.type).toBe('updated-message');
+    expect(b?.type).toBe('updated-message'); // NOT dropped as a "duplicate"
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => (e.type === 'updated-message' ? e.message.dateRead : null))).toEqual([
+      0,
+      1234,
+    ]);
+  });
 });

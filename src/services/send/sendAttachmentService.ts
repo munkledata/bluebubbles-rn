@@ -21,14 +21,23 @@ export interface PickedImage {
 }
 
 /**
+ * Reads a file at `uri` and returns its bytes base64-encoded. Injected so this module stays
+ * Node-testable (no expo-file-system import on the test path); the production reader uses the
+ * expo-file-system `File` object API (see `expoBase64Reader` in the UI-facing wiring).
+ */
+export type FileBase64Reader = (uri: string) => Promise<string>;
+
+/**
  * Optimistic image send: inserts a local attachment row (renders immediately from
- * disk), uploads multipart, then reconciles message + attachment guids. Mirrors
- * `sendTextMessage`; pure orchestration (no RN imports) so it is Node-testable.
+ * disk), reads the file as base64, uploads it as JSON, then reconciles message +
+ * attachment guids. Mirrors `sendTextMessage`; pure orchestration (the file read is
+ * injected) so it is Node-testable.
  */
 export async function sendImageMessage(
   db: AppDatabase,
   http: HttpClient,
   args: { chatGuid: string; image: PickedImage },
+  readBase64: FileBase64Reader,
   now: number = Date.now(),
 ): Promise<{ tempGuid: string }> {
   const chatId = await getChatIdByGuid(db, args.chatGuid);
@@ -51,10 +60,13 @@ export async function sendImageMessage(
   });
 
   try {
+    // Read the file bytes as base64 (the server has no multipart parser — it wants JSON).
+    const data = await readBase64(args.image.uri);
     const server = await sendAttachment(http, {
       chatGuid: args.chatGuid,
       tempGuid,
-      file: { uri: args.image.uri, name: args.image.name, type: args.image.mimeType },
+      name: args.image.name,
+      data,
     });
     // The server ack carries only the message GUID (no attachment guid). Promote the message
     // row when the GUID is present; the optimistic attachment row keeps its local guid +

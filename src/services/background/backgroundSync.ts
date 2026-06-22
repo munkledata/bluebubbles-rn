@@ -26,7 +26,10 @@ TaskManager.defineTask(BG_SYNC_TASK, async () => {
     // Retry stranded/failed sends while we're awake (the ~15-min recovery cadence).
     await runOutgoingQueue(db, http);
     return BackgroundTask.BackgroundTaskResult.Success;
-  } catch {
+  } catch (e) {
+    // Don't swallow silently: a recurring catch-up failure (auth expiry, schema/migration
+    // error, etc.) is otherwise invisible. The logger redacts before any sink.
+    logger.error('[bg] background sync failed', e);
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });

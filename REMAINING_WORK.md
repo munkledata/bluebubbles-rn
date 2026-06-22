@@ -46,3 +46,33 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
 - [ ] **API-model sync with the server** — keep the app's zod models (`src/core/models/*`) aligned with
       `~/github/BB/bluebubbles-server` (which carries our server-side changes). Plan in progress.
 - [ ] Decide whether to push `master` / open a PR (currently local only).
+
+## 6. Post-audit open items (2026-06-21 security/functional audit)
+_Most findings from [SECURITY_FUNCTIONAL_AUDIT_2026-06-21.md](./SECURITY_FUNCTIONAL_AUDIT_2026-06-21.md)
+are FIXED and merged. These are the deliberate deferrals + the things static review can't close._
+
+**Deferred — need a decision, not just code:**
+- [ ] 🟠 **F10 — Android key custody.** `requireAuthentication` is intentionally OFF on the SQLCipher DB
+      key / server password (`src/native/secureVault.ts`) because enabling it forces user-auth on every
+      Keystore op and would **break headless-FCM-while-locked decrypt** (the F1 path). Decide: keep the
+      current posture (app-lock is a UI/content gate; key released to the app UID without user-presence)
+      OR enable real key custody and make headless pushes content-less until unlock. Docs already corrected.
+- [ ] 🟡 **F18 — Server config secrets at rest** (server repo). FCM private key / Cloudflare+zrok tokens /
+      OAuth secret / VAPID key are plaintext in `config.db`, protected only by `chmod 0600`. Follow-up:
+      move long-lived cloud creds to the macOS Keychain; exclude the userData dir from Time Machine/iCloud.
+      See `bluebubbles-server/AUDIT_FOLLOWUPS.md`.
+
+**Needs live-host validation (fixed in code, unverifiable from static review):**
+- [ ] 🔴 **F3 send-text** — fix renames the body key `message`→`text`; this previously **failed open**
+      (blank message sent, no error). Send a real message against a live Gator+macOS host and confirm the
+      recipient gets the actual text, not an empty bubble.
+- [ ] 🔴 **F1 realtime** — confirm a socket/FCM-pushed message now BOTH persists to the DB AND posts a
+      notification on-device (server hydration + app `chatGuid` fallback).
+- [ ] 🟡 Helper-sourced live event shapes (typing / read-status / group / facetime) vs the app zod schemas —
+      validate against the running BlueBubbles helper dylib (not in either repo).
+
+**Recommended — recurrence prevention:**
+- [ ] Extend the contract-test gate to (a) feed the **actual outgoing request JSON** through the server's
+      zod input schemas and (b) route the **bare live-wire `serializeMessage` shape** (no embedded `chats[]`)
+      through `EventRouter→DbEventSink`. Partially seeded by the new tests; make it a standing gate so
+      request-body / live-wire drift can't regress invisibly again.

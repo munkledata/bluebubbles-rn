@@ -26,3 +26,20 @@ export class ApiError extends Error {
     return new ApiError('server_error', message ?? `Unexpected status ${status}`, status);
   }
 }
+
+/**
+ * Thrown by endpoint wrappers whose server route the Gator server does NOT implement (would
+ * 404). Distinct from a connection error so callers can show "unsupported on this server"
+ * (and hide/disable the action) instead of a misleading "check your connection" message.
+ */
+export class UnimplementedEndpointError extends Error {
+  constructor(public readonly endpoint: string) {
+    super(`Endpoint not implemented on this server: ${endpoint}`);
+    this.name = 'UnimplementedEndpointError';
+  }
+}
+
+/** True if `e` is an {@link UnimplementedEndpointError} (route not supported by the server). */
+export function isUnimplementedEndpoint(e: unknown): e is UnimplementedEndpointError {
+  return e instanceof UnimplementedEndpointError;
+}

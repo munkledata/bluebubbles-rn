@@ -15,6 +15,7 @@ import { sendReactionMessage, type SendReactionArgs } from './sendReactionServic
 import { sendEdit, sendUnsend } from './sendEditService';
 import { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 import { sendImageMessage, type PickedImage } from './sendAttachmentService';
+import { expoBase64Reader } from './fileBase64';
 import { runOutgoingQueue } from './outgoingQueueService';
 
 export { runOutgoingQueue } from './outgoingQueueService';
@@ -30,7 +31,7 @@ export function sendImage(args: {
   chatGuid: string;
   image: PickedImage;
 }): Promise<{ tempGuid: string }> {
-  return sendImageMessage(getDatabase(), http, args);
+  return sendImageMessage(getDatabase(), http, args, expoBase64Reader);
 }
 
 /** UI-facing multi-image send: one optimistic message + attachment per picked asset. */
@@ -40,7 +41,7 @@ export function sendImages(args: {
 }): Promise<{ tempGuid: string }[]> {
   return Promise.all(
     args.images.map((image) =>
-      sendImageMessage(getDatabase(), http, { chatGuid: args.chatGuid, image }),
+      sendImageMessage(getDatabase(), http, { chatGuid: args.chatGuid, image }, expoBase64Reader),
     ),
   );
 }
@@ -71,12 +72,16 @@ export function reply(args: {
 }
 
 /** UI-facing edit of a sent message's text (optimistic + revert on failure). */
-export function editText(args: { messageGuid: string; newText: string }): Promise<{ ok: boolean }> {
+export function editText(args: {
+  messageGuid: string;
+  newText: string;
+  chatGuid?: string;
+}): Promise<{ ok: boolean }> {
   return sendEdit(getDatabase(), http, args);
 }
 
 /** UI-facing unsend/retract of a sent message. */
-export function unsend(args: { messageGuid: string }): Promise<{ ok: boolean }> {
+export function unsend(args: { messageGuid: string; chatGuid?: string }): Promise<{ ok: boolean }> {
   return sendUnsend(getDatabase(), http, args);
 }
 

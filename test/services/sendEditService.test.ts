@@ -14,6 +14,18 @@ const failHttp = {
   },
 } as unknown as HttpClient;
 
+/** Capture the JSON body so we can assert the server-required wire shape (F-4/F-5). */
+function capturingHttp(impl: () => Promise<unknown>): { http: HttpClient; body(): unknown } {
+  let captured: unknown;
+  const http = {
+    post: (_p: string, _s: unknown, opts?: { json?: unknown }) => {
+      captured = opts?.json;
+      return impl();
+    },
+  } as unknown as HttpClient;
+  return { http, body: () => captured };
+}
+
 const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 
@@ -41,6 +53,27 @@ describe('sendEdit / sendUnsend', () => {
     const row = one(raw, "SELECT text, date_edited e FROM messages WHERE guid='m1'");
     expect(row.text).toBe('edited!');
     expect(row.e).toBe(5000);
+  });
+
+  it('edit: posts the server-required body {chatGuid, editedText, backwardsCompatText} (F-4)', async () => {
+    const { db } = await createTestDb();
+    await seed(db); // m1 lives in chat c1
+    const cap = capturingHttp(async () => ({ guid: 'm1' }));
+    await sendEdit(db, cap.http, { messageGuid: 'm1', newText: 'edited!' }, 5000);
+    expect(cap.body()).toMatchObject({
+      chatGuid: 'c1', // resolved from the message's DB row
+      editedText: 'edited!',
+      partIndex: 0,
+    });
+    expect((cap.body() as Record<string, unknown>).backwardsCompatText).toContain('edited!');
+  });
+
+  it('unsend: posts the server-required body {chatGuid} (F-5)', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    const cap = capturingHttp(async () => ({ unsent: true }));
+    await sendUnsend(db, cap.http, { messageGuid: 'm1' }, 7000);
+    expect(cap.body()).toMatchObject({ chatGuid: 'c1', partIndex: 0 });
   });
 
   it('edit: reverts the text on failure', async () => {

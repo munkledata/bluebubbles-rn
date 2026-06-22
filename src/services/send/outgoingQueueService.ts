@@ -47,7 +47,6 @@ async function resend(
         chatGuid: row.chatGuid,
         selectedMessageGuid: p.selectedMessageGuid,
         reaction: p.reaction,
-        selectedMessageText: p.selectedMessageText,
       });
     } else {
       // Attachment re-upload from the queue isn't supported yet (needs the file at

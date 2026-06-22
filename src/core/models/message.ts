@@ -38,6 +38,15 @@ export const Message = z.object({
   /** Chats this message belongs to (message/query `with: ['chats']`). */
   chats: z.array(ChatSummary).nullish(),
 
+  /**
+   * Top-level chat GUID carried by LIVE realtime events (socket/FCM `new-message` /
+   * `updated-message`). The server hydrates `chats[]` on these events, but if it is ever
+   * empty/absent this is the defensive fallback so the event isn't silently dropped
+   * (see DbEventSink + buildMessageIntents). Absent on the sync/query path (which always
+   * carries `chats[]`).
+   */
+  chatGuid: z.string().nullish(),
+
   /** Reaction/threading linkage. */
   associatedMessageGuid: z.string().nullish(),
   associatedMessageType: z.string().nullish(),
@@ -54,4 +63,16 @@ export type Message = z.infer<typeof Message>;
 export function isReaction(m: Pick<Message, 'associatedMessageType'>): boolean {
   const t = m.associatedMessageType;
   return !!t && !t.startsWith('-'); // "-love" etc. == reaction removal
+}
+
+/**
+ * Resolve the GUID of the chat a (live) message belongs to: prefer the hydrated
+ * `chats[0].guid`, falling back to the top-level `chatGuid` a realtime event may carry
+ * when the server didn't embed `chats[]`. Returns null when neither is present (the
+ * caller logs + skips rather than silently dropping the event — see DbEventSink).
+ */
+export function resolveMessageChatGuid(
+  m: Pick<Message, 'chats' | 'chatGuid'>,
+): string | undefined {
+  return m.chats?.[0]?.guid ?? m.chatGuid ?? undefined;
 }

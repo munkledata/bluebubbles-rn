@@ -1,3 +1,4 @@
+import { resolveMessageChatGuid } from '@core/models';
 import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
 import { getChatHeader } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
@@ -16,7 +17,9 @@ export async function buildMessageIntents(
     case 'new-message': {
       const m = event.message;
       if (m.isFromMe) return []; // never notify for our own messages
-      const chatGuid = m.chats?.[0]?.guid;
+      // Prefer the hydrated chats[0].guid, falling back to the top-level chatGuid a live event
+      // may carry — without this a chats-less event would build no notification.
+      const chatGuid = resolveMessageChatGuid(m);
       if (!chatGuid || !m.guid) return [];
       const header = await getChatHeader(db, chatGuid);
       const senderName = m.handle?.displayName ?? m.handle?.address ?? 'Unknown';
