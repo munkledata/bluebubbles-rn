@@ -102,10 +102,13 @@ const config: ExpoConfig = {
       'expo-build-properties',
       {
         android: {
-          // SECURITY: forbid plaintext HTTP globally. Cleartext is only permitted
-          // for explicit user-enabled LAN/IP setups via a runtime-added domain
-          // exception (network security config), never app-wide.
-          usesCleartextTraffic: false,
+          // Cleartext HTTP is permitted at the OS level so the app CAN reach a direct-LAN
+          // server over http:// (Android API 28+ blocks cleartext by default, which made
+          // direct-LAN connections impossible). It is NOT used blindly: connect() default-DENIES
+          // http:// origins and only proceeds when the user explicitly enables the per-connection
+          // "Allow insecure connection" toggle (services/index.ts + the manual-setup screen).
+          // HTTPS / a tunnel remains the recommended path, especially for remote access.
+          usesCleartextTraffic: true,
           minSdkVersion: 24,
           // Notifee ships its `app.notifee:core` AAR as a local maven repo; register
           // it so `:app` can resolve it. The url resolves relative to the :app project
