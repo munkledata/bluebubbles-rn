@@ -171,8 +171,12 @@ scheduler claim, and WebPush SSRF guard).
 **Deferred / decision items (tracked in [REMAINING_WORK.md](./REMAINING_WORK.md) §6 and the server's `AUDIT_FOLLOWUPS.md`):**
 - **F10 — Android `requireAuthentication`:** intentionally left OFF (would break headless-FCM-while-locked
   decrypt = the F1 path). Docs corrected; needs a product decision on key custody vs. push.
-- **F18 — server config secrets → macOS Keychain:** deferred (larger native feature); `chmod 0600`
-  confirmed covering `.db`/`-wal`/`-shm`; TODO + backup-exclusion note added in code.
+- **F18 — server config secrets → macOS Keychain:** ✅ **DONE (2026-06-22).** The 5 cloud credentials now
+  live in the macOS Keychain (`VaultedConfigStore` + `MacKeychainSecretStore`), redacted from `config.db`
+  with verify-before-redact + VACUUM purge; the server `password` stays with `chmod 0600`. Verified by 265
+  tests, an adversarial review, and an end-to-end proof against the live DB. Remaining: validate no Keychain
+  ACL prompt on a packaged/launchd build (5s timeout already prevents a boot hang). See
+  `bluebubbles-server/AUDIT_FOLLOWUPS.md`.
 
 **Must be confirmed on a live Gator + macOS host (static review can't):** F3 send-text (fails open → verify
 real text arrives), F1 realtime (message persists AND notifies on device), F17 tunnel (admin SPA/oauth NOT

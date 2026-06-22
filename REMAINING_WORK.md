@@ -57,10 +57,14 @@ are FIXED and merged. These are the deliberate deferrals + the things static rev
       Keystore op and would **break headless-FCM-while-locked decrypt** (the F1 path). Decide: keep the
       current posture (app-lock is a UI/content gate; key released to the app UID without user-presence)
       OR enable real key custody and make headless pushes content-less until unlock. Docs already corrected.
-- [ ] 🟡 **F18 — Server config secrets at rest** (server repo). FCM private key / Cloudflare+zrok tokens /
-      OAuth secret / VAPID key are plaintext in `config.db`, protected only by `chmod 0600`. Follow-up:
-      move long-lived cloud creds to the macOS Keychain; exclude the userData dir from Time Machine/iCloud.
-      See `bluebubbles-server/AUDIT_FOLLOWUPS.md`.
+- [x] ✅ **F18 — Server config secrets at rest** (server repo, done 2026-06-22). The 5 cloud creds
+      (FCM service-account / OAuth secret / VAPID key / Cloudflare + zrok tokens) now live in the macOS
+      Keychain (`VaultedConfigStore` + `MacKeychainSecretStore`), redacted from `config.db`. The server
+      `password` intentionally stays (with `chmod 0600`). REMAINING: validate no Keychain ACL prompt on a
+      packaged/launchd build; exclude the userData dir from Time Machine/iCloud. See
+      `bluebubbles-server/AUDIT_FOLLOWUPS.md`.
+- [x] ✅ **LAN-URL bug** (server repo, done 2026-06-22). `getLanIpv4()` was returning a virtual interface
+      (`feth* 10.144.47.51`) instead of the real Wi-Fi LAN; now skips virtual interfaces.
 
 **Needs live-host validation (fixed in code, unverifiable from static review):**
 - [ ] 🔴 **F3 send-text** — fix renames the body key `message`→`text`; this previously **failed open**
