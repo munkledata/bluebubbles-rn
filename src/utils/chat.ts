@@ -7,12 +7,34 @@ export interface TitleInput {
   participantNames: string | null; // "Alice, Bob"
 }
 
-/** Chat title resolution: local custom name → server name → participants → id. */
+/**
+ * Whether a string is a usable human NAME, vs server "names" that are really junk: a raw
+ * iMessage chat-guid identifier ("chat947991747861991169") or a phone-number list
+ * ("(209) 430-4494, (215) 954-8728, …"). For those we'd rather fall through to the
+ * contact-resolved participant names than echo a guid/number-blob back at the user.
+ */
+function isMeaningfulName(s: string | null | undefined): boolean {
+  const t = s?.trim();
+  if (!t) return false;
+  if (/^chat[0-9]+$/i.test(t)) return false; // raw chat-guid identifier
+  if (/^[\s\d()+\-.,;]+$/.test(t)) return false; // only phone-number characters → not a real name
+  return true;
+}
+
+/**
+ * Chat title resolution: local custom name → a REAL server name → contact-resolved
+ * participants → a non-junk identifier. A junk server name (raw chat-guid or a phone-number
+ * list) is skipped in favor of the participant names; a group with nothing usable shows
+ * "Group" rather than a raw `chat<digits>` id.
+ */
 export function resolveTitle(c: TitleInput): string {
   if (c.customName?.trim()) return c.customName.trim();
-  if (c.displayName?.trim()) return c.displayName.trim();
+  if (isMeaningfulName(c.displayName)) return c.displayName!.trim();
   if (c.participantNames?.trim()) return c.participantNames.trim();
-  return c.chatIdentifier ?? 'Unknown';
+  if (c.displayName?.trim()) return c.displayName.trim(); // last resort: a number-list beats a raw id
+  const id = c.chatIdentifier?.trim();
+  if (id && !/^chat[0-9]+$/i.test(id)) return id; // a phone/email identifier is a usable 1:1 fallback
+  return isGroupRow(c) ? 'Group' : (id ?? 'Unknown');
 }
 
 /** A valid 6-digit hex color (e.g. "#1982FC"), used for per-chat accent colors. */
