@@ -27,14 +27,18 @@ function isMeaningfulName(s: string | null | undefined): boolean {
  * list) is skipped in favor of the participant names; a group with nothing usable shows
  * "Group" rather than a raw `chat<digits>` id.
  */
+const RAW_CHAT_GUID = /^chat[0-9]+$/i;
+
 export function resolveTitle(c: TitleInput): string {
   if (c.customName?.trim()) return c.customName.trim();
   if (isMeaningfulName(c.displayName)) return c.displayName!.trim();
   if (c.participantNames?.trim()) return c.participantNames.trim();
-  if (c.displayName?.trim()) return c.displayName.trim(); // last resort: a number-list beats a raw id
+  // Weak fallbacks — but NEVER surface a raw chat-guid ("chat<digits>") as a name.
+  const dn = c.displayName?.trim();
+  if (dn && !RAW_CHAT_GUID.test(dn)) return dn; // e.g. a phone-number list beats nothing
   const id = c.chatIdentifier?.trim();
-  if (id && !/^chat[0-9]+$/i.test(id)) return id; // a phone/email identifier is a usable 1:1 fallback
-  return isGroupRow(c) ? 'Group' : (id ?? 'Unknown');
+  if (id && !RAW_CHAT_GUID.test(id)) return id; // a phone/email identifier is a usable 1:1 fallback
+  return 'Group'; // a raw chat-guid group with no synced name/members
 }
 
 /** A valid 6-digit hex color (e.g. "#1982FC"), used for per-chat accent colors. */

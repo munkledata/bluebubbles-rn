@@ -1,6 +1,6 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Attachment, Message } from '@core/models';
-import { chats, messages, outgoingQueue } from '../schema';
+import { chatHandles, chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
 import { dedupeBy, toFtsQuery } from './_shared';
 import { upsertAttachments } from './attachments';
@@ -76,6 +76,21 @@ export async function upsertMessages(
     .returning({ id: messages.id, guid: messages.guid });
 
   for (const r of rows) map.set(r.guid, r.id);
+
+  // Link message SENDERS into chat_handles (additive) so a chat shows participant names even
+  // when its participants were never synced via chat/query — e.g. a realtime-created group that
+  // would otherwise render as "Group" / a raw chat-guid. Only received messages carry a sender
+  // handle (sent/own messages have none). onConflictDoNothing keeps it idempotent and never
+  // disturbs a canonical participant list that upsertChats may have set from a participants payload.
+  const participantLinks = new Map<string, { chatId: number; handleId: number }>();
+  for (const { m, chatId } of withChat) {
+    const addr = m.handle?.address;
+    const handleId = addr ? handleIdByAddress.get(addr) : undefined;
+    if (handleId != null) participantLinks.set(`${chatId}:${handleId}`, { chatId, handleId });
+  }
+  if (participantLinks.size > 0) {
+    await db.insert(chatHandles).values([...participantLinks.values()]).onConflictDoNothing();
+  }
 
   // Upsert nested attachments now that we have message ids.
   const attRows: Array<{ att: Attachment; messageId: number }> = [];
