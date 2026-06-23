@@ -33,7 +33,7 @@ import { DbEventSink } from './realtime/dbEventSink';
 import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { SocketService } from './realtime/socketService';
-import { fullSync, httpSyncApi, incrementalSync } from './sync';
+import { fullSync, httpSyncApi, incrementalSync, syncChatMessages } from './sync';
 
 /**
  * Composition root.
@@ -294,6 +294,21 @@ export async function startSync(): Promise<void> {
     }
   } catch (e) {
     sync.fail(e instanceof Error ? e.message : 'Sync failed');
+  }
+}
+
+/**
+ * Backfill ONE chat's message history from the server, on demand (called when a thread opens).
+ * Makes a thread show its full history even if the large initial sync hasn't reached it yet or
+ * was interrupted — independent of the global sync marker. Best-effort; never throws to the UI.
+ */
+export async function ensureChatSynced(chatGuid: string): Promise<number> {
+  try {
+    const db = await ensureDatabase();
+    return await syncChatMessages(db, httpSyncApi(http), chatGuid, { maxMessages: 500 });
+  } catch (e) {
+    logger.warn('[sync] on-demand chat backfill failed', e);
+    return 0;
   }
 }
 

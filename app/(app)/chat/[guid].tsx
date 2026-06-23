@@ -5,7 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, KeyboardAvoidingView, Pressable, StyleSheet, Text } from 'react-native';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import type { MessagePreview } from '@db/repositories';
-import { dispatchRealtimeEvent, http, markRead, sendTyping } from '@/services';
+import { dispatchRealtimeEvent, ensureChatSynced, http, markRead, sendTyping } from '@/services';
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 import {
@@ -79,7 +79,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
   const isGroup = header.data ? isGroupRow(header.data) : false;
   // ONE message subscription for the whole screen — fed to the list, smart-reply
   // chips, and the screen-effect trigger (avoids 3× the reactive query work).
-  const { data: messagesData, error: messagesError } = useMessages(guid);
+  const { data: messagesData, error: messagesError } = useMessages(guid, 250);
   const messages = messagesData ?? [];
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const markedRef = useRef(false);
@@ -94,6 +94,10 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
     markedRef.current = true;
     void markRead(guid);
     clearChatNotification(guid); // dismiss any tray notification for this chat
+    // Backfill this thread's history from the server on open, so it fills in even if the
+    // large initial sync hasn't reached it yet (or was interrupted). The reactive query
+    // picks up the upserted messages automatically.
+    void ensureChatSynced(guid);
   }, [guid]);
 
   const isDev = isDevServer;

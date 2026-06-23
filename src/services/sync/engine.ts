@@ -1,6 +1,7 @@
 import { SYNC_BATCH_SIZE } from '@core/config';
 import { advanceMarker, buildSyncCursor, GuidDeduper, type SyncMarker } from '@core/sync';
 import {
+  getChatIdByGuid,
   getSyncMarker,
   maxMessageMarker,
   setSyncMarker,
@@ -80,6 +81,41 @@ export async function fullSync(
 
   await setSyncMarker(db, await maxMessageMarker(db));
   return { chats, messages };
+}
+
+/**
+ * On-demand backfill of ONE chat's messages from the server, independent of the global
+ * full/incremental sync. Opening a thread calls this so its history is present even when the
+ * large initial sync hasn't reached that chat yet (or was interrupted) — pages
+ * `/chat/:guid/message` (newest-first) and upserts each page until exhausted or `maxMessages`.
+ * Idempotent (upsert COALESCE), so re-opening a thread re-confirms without duplicating.
+ */
+export async function syncChatMessages(
+  db: AppDatabase,
+  api: SyncApi,
+  chatGuid: string,
+  opts: { pageSize?: number; maxMessages?: number } = {},
+): Promise<number> {
+  const chatId = await getChatIdByGuid(db, chatGuid);
+  if (chatId == null) return 0; // chat not synced yet — nothing to attach messages to
+  const pageSize = opts.pageSize ?? 100;
+  const cap = opts.maxMessages ?? 500;
+  let offset = 0;
+  let total = 0;
+  for (;;) {
+    const msgs = await api.fetchChatMessages(chatGuid, offset, pageSize);
+    if (msgs.length === 0) break;
+    const handleMap = await upsertHandles(
+      db,
+      msgs.flatMap((m) => (m.handle ? [m.handle] : [])),
+    );
+    await upsertMessages(db, msgs, () => chatId, handleMap);
+    total += msgs.length;
+    offset += msgs.length;
+    if (msgs.length < pageSize) break;
+    if (total >= cap) break;
+  }
+  return total;
 }
 
 export interface IncrementalSyncOptions {
