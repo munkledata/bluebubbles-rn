@@ -9,6 +9,8 @@ import { useTheme } from '@ui';
  */
 export default function Index(): React.JSX.Element {
   const status = useSessionStore((s) => s.status);
+  // A saved session = a server URL + password persisted to the vault (hydrated at boot).
+  const hasSession = useSessionStore((s) => !!(s.origin && s.password));
   const theme = useTheme();
 
   if (status === 'loading') {
@@ -19,7 +21,11 @@ export default function Index(): React.JSX.Element {
     );
   }
 
-  return <Redirect href={status === 'connected' ? '/home' : '/welcome'} />;
+  // Skip the connect screen whenever credentials are saved — go straight to home and let the
+  // connection/sync resume in the background. Even a transient connection error keeps the saved
+  // session, so the user is never bounced back to setup. Only a truly unauthenticated state
+  // (no saved server URL/password) shows the welcome/connect flow.
+  return <Redirect href={hasSession ? '/home' : '/welcome'} />;
 }
 
 const styles = StyleSheet.create({

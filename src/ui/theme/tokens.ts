@@ -167,6 +167,12 @@ export const nordTheme: ThemeTokens = {
   font,
 };
 
+/**
+ * The CATALOG of all preset definitions. Keeping every definition here (even disabled ones)
+ * means re-enabling a theme is a one-line change — just add its key to {@link PRESET_ORDER}.
+ * To add a brand-new theme: define its `ThemeTokens` above, add the key to {@link PresetKey},
+ * add an entry here, then list the key in PRESET_ORDER.
+ */
 export const PRESETS: Record<PresetKey, ThemePreset> = {
   'ios-light': { key: 'ios-light', label: 'iOS Light', tokens: iosLightTheme },
   'bright-white': { key: 'bright-white', label: 'Bright White', tokens: lightTheme },
@@ -174,12 +180,25 @@ export const PRESETS: Record<PresetKey, ThemePreset> = {
   nord: { key: 'nord', label: 'Nord', tokens: nordTheme },
 };
 
-export const PRESET_ORDER: PresetKey[] = ['ios-light', 'bright-white', 'oled-dark', 'nord'];
+/**
+ * The presets ACTUALLY offered to the user (Settings reads this) and honored by
+ * {@link resolvePreset}. Currently only OLED Dark is enabled; the other definitions stay in
+ * {@link PRESETS} so you can re-enable any of them by adding its key back to this array, e.g.
+ * `['oled-dark', 'nord']`.
+ */
+export const PRESET_ORDER: PresetKey[] = ['oled-dark'];
 export const DEFAULT_PRESET: PresetKey = 'oled-dark';
 
-/** Pure: preset key → tokens, falling back to the default for unknown keys. */
+const ACTIVE_PRESETS = new Set<string>(PRESET_ORDER);
+
+/**
+ * Pure: preset key → tokens. Only keys in {@link PRESET_ORDER} are honored; any other (an
+ * unknown key, or a now-disabled theme a user had previously selected) falls back to the
+ * always-present {@link DEFAULT_PRESET}.
+ */
 export function resolvePreset(key: string | null | undefined): ThemeTokens {
-  return (key && key in PRESETS ? PRESETS[key as PresetKey] : PRESETS[DEFAULT_PRESET]).tokens;
+  const usable = !!key && ACTIVE_PRESETS.has(key) && key in PRESETS;
+  return (usable ? PRESETS[key as PresetKey] : PRESETS[DEFAULT_PRESET]).tokens;
 }
 
 /**

@@ -34,6 +34,7 @@ import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { SocketService } from './realtime/socketService';
 import { fullSync, httpSyncApi, incrementalSync, syncChatMessages } from './sync';
+import { syncContacts } from './contacts/contactsService';
 
 /**
  * Composition root.
@@ -295,6 +296,12 @@ export async function startSync(): Promise<void> {
   } catch (e) {
     sync.fail(e instanceof Error ? e.message : 'Sync failed');
   }
+
+  // Resolve device contacts onto handles so chats — especially GROUPS — show contact names
+  // instead of raw phone numbers in the inbox/headers. Fire-and-forget with its own catch:
+  // a denied contacts permission (or any IO error) must NOT affect the message-sync status.
+  // Runs after connect and on every boot-with-session (both call startSync); idempotent.
+  void syncContacts().catch((e) => logger.debug('[contacts] auto-sync skipped', e));
 }
 
 /**
