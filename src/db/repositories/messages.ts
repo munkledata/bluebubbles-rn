@@ -61,6 +61,8 @@ export async function upsertMessages(
     .onConflictDoUpdate({
       target: messages.guid,
       set: {
+        // An EDIT empties the text column and re-fills it server-side from the attributedBody
+        // typedstream, so `excluded.text` carries the new body on a re-sync — already updated here.
         text: sql`excluded.text`,
         dateRead: sql`excluded.date_read`,
         dateDelivered: sql`excluded.date_delivered`,

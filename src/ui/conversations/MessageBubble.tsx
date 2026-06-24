@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
-import { hasMention, parseAttributedRuns, type TextRun } from '@core/richtext';
+import { parseAttributedRuns, type TextRun } from '@core/richtext';
 import type { AttachmentRow, MessagePreview, MessageRow, ReactionRow } from '@db/repositories';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { errorTitleForCode, firstUrl, resolveBubbleColor, safeOpenUrl } from '@utils';
@@ -48,11 +48,17 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isSending = msg.sendState === 'sending';
   const atts = msg.attachments ?? [];
   const reactions = msg.reactions ?? [];
-  const hasText = !!msg.text;
+  // EDITED messages keep their text in attributedBody (the `text` column goes empty), so derive the
+  // body from the parsed runs rather than `msg.text` alone — otherwise an edit renders as a blank
+  // bubble. `bodyTextOf` strips the U+FFFC attachment placeholder so an attachment-only message
+  // isn't a stray-glyph bubble.
+  const runs = parseAttributedRuns(msg.attributedBody, msg.text);
+  const bodyText = bodyTextOf(runs);
+  const hasText = bodyText.trim().length > 0;
   const isRetracted = !!msg.dateRetracted;
   const isEdited = !isRetracted && !!msg.dateEdited;
   // Redacted mode also suppresses the link preview (it would leak the URL/title).
-  const previewUrl = !redacted && hasText && !isRetracted ? firstUrl(msg.text) : null;
+  const previewUrl = !redacted && hasText && !isRetracted ? firstUrl(bodyText) : null;
 
   // Unsent: replace the whole bubble (incl. reactions/quote/attachments) with a tombstone.
   if (isRetracted) {
@@ -105,9 +111,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             ]}
           >
             <Text style={[styles.text, { color: textColor, fontSize: theme.font.size.body }]}>
-              {redacted
-                ? 'Message'
-                : renderBody(msg.attributedBody, msg.text!, textColor, theme.color.tint)}
+              {redacted ? 'Message' : renderRuns(runs, textColor, theme.color.tint)}
             </Text>
           </View>
           {reactions.length > 0 ? (
@@ -155,28 +159,33 @@ export const MessageBubble = React.memo(function MessageBubble({
   return bubble;
 });
 
+const OBJECT_REPLACEMENT = /￼/g;
+
+/** Plain body text from the parsed runs (attachments excluded, U+FFFC placeholder stripped). */
+function bodyTextOf(runs: TextRun[]): string {
+  return runs
+    .filter((r) => !r.attachment)
+    .map((r) => r.text.replace(OBJECT_REPLACEMENT, ''))
+    .join('');
+}
+
 /**
- * Render the bubble text. When the message carries a confirmed @mention in its
- * attributedBody, render styled runs (mentions in the accent color, links still
- * tappable); otherwise fall back to plain linkify of the text.
+ * Render the bubble text from the parsed attributedBody runs: mentions in the accent color,
+ * links tappable, everything else plain. Rendering from the runs (not `msg.text`) is what makes
+ * EDITED messages show — their edited text lives in attributedBody while the `text` column is empty.
  */
-function renderBody(
-  attributedBody: string | null,
-  text: string,
-  color: string,
-  mentionColor: string,
-): React.ReactNode {
-  const runs = parseAttributedRuns(attributedBody, text);
-  if (!hasMention(runs)) return linkify(text, color);
+function renderRuns(runs: TextRun[], color: string, mentionColor: string): React.ReactNode {
   return runs.map((run: TextRun, i) => {
     if (run.attachment) return null; // rendered separately as an attachment
+    const text = run.text.replace(OBJECT_REPLACEMENT, '');
+    if (!text) return null;
     if (run.mention)
       return (
         <Text key={i} style={{ color: mentionColor, fontWeight: '600' }}>
-          {run.text}
+          {text}
         </Text>
       );
-    return <React.Fragment key={i}>{linkify(run.text, color)}</React.Fragment>;
+    return <React.Fragment key={i}>{linkify(text, color)}</React.Fragment>;
   });
 }
 
