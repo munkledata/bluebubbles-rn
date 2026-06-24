@@ -33,7 +33,7 @@ import { DbEventSink } from './realtime/dbEventSink';
 import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { SocketService } from './realtime/socketService';
-import { fullSync, httpSyncApi, incrementalSync, syncChatMessages } from './sync';
+import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
 import { syncContacts } from './contacts/contactsService';
 
 /**
@@ -284,6 +284,10 @@ export async function startSync(): Promise<void> {
       const result = await fullSync(db, api, { onProgress: (p) => sync.progress(p) });
       sync.done(result);
     } else {
+      // Refresh the FULL chat list first so conversations the interrupted first sync never reached
+      // (disproportionately older SMS threads) appear in the inbox; their history backfills on open.
+      // Best-effort — a failure here must not block the incremental message sync below.
+      await syncAllChats(db, api).catch((e) => logger.debug('[sync] chat-list refresh failed', e));
       const version =
         useSessionStore.getState().serverInfo?.server_version ?? (await api.serverVersion());
       // Per-page progress so the DB-reactive inbox hydrates mid-sync (not just at the end).

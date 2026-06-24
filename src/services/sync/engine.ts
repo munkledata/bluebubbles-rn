@@ -26,57 +26,80 @@ export interface FullSyncOptions {
 }
 
 /**
- * Initial full sync: page through all chats, upsert participants + chats, then
- * page each chat's messages into the DB. Finishes by setting the incremental
- * marker to the highest message rowid/date stored. Port of full_sync_manager.dart.
+ * Fetch + store EVERY chat (the list + participants only, no messages), paging `chat/query`.
+ * Returns the stored chats so a caller can page their messages. Cheap (a couple of requests for
+ * hundreds of chats), so it runs on every sync — that's what surfaces conversations (e.g. older
+ * SMS threads) that an interrupted first sync never reached; their history backfills on demand.
+ */
+export async function syncAllChats(
+  db: AppDatabase,
+  api: SyncApi,
+  chatPageSize = 200,
+): Promise<{ guid: string; chatId: number }[]> {
+  const stored: { guid: string; chatId: number }[] = [];
+  let offset = 0;
+  for (;;) {
+    const batch = await api.fetchChats(offset, chatPageSize);
+    if (batch.length === 0) break;
+    const handleMap = await upsertHandles(
+      db,
+      batch.flatMap((c) => c.participants ?? []),
+    );
+    const chatMap = await upsertChats(db, batch, handleMap);
+    for (const chat of batch) {
+      const chatId = chatMap.get(chat.guid);
+      if (chatId != null) stored.push({ guid: chat.guid, chatId });
+    }
+    offset += batch.length;
+    if (batch.length < chatPageSize) break;
+  }
+  return stored;
+}
+
+/**
+ * Initial full sync: store all chats, then page bounded recent messages per chat into the DB.
+ * Finishes by setting the incremental marker to the highest message rowid/date stored.
  */
 export async function fullSync(
   db: AppDatabase,
   api: SyncApi,
   opts: FullSyncOptions = {},
 ): Promise<SyncProgress> {
-  const chatPageSize = opts.chatPageSize ?? 200;
   const messagePageSize = opts.messagePageSize ?? 100;
-  let chats = 0;
+  // Cap per-chat history in the bulk pass so EVERY chat is reached (full history loads on demand
+  // via ensureChatSynced when a thread opens). An unbounded per-chat pull made a busy chat
+  // monopolize the whole sync, so on a slow/flaky link later chats — disproportionately older SMS
+  // conversations — were never reached and never appeared.
+  const maxPerChat = opts.maxMessagesPerChat ?? 100;
   let messages = 0;
-  let offset = 0;
 
-  for (;;) {
-    const batch = await api.fetchChats(offset, chatPageSize);
-    if (batch.length === 0) break;
+  // Phase 1: store ALL chats first (fast — just the list + participants). This guarantees every
+  // conversation shows in the inbox even if the message pass below is interrupted by a timeout.
+  const stored = await syncAllChats(db, api, opts.chatPageSize ?? 200);
+  const chats = stored.length;
+  opts.onProgress?.({ chats, messages });
 
-    const handleMap = await upsertHandles(
-      db,
-      batch.flatMap((c) => c.participants ?? []),
-    );
-    const chatMap = await upsertChats(db, batch, handleMap);
-    chats += batch.length;
-
-    for (const chat of batch) {
-      const chatId = chatMap.get(chat.guid);
-      if (chatId == null) continue;
-
+  // Phase 2: bounded recent messages per chat. Per-chat errors are swallowed so one unreachable
+  // chat (or a mid-sync connection drop) can't abort the rest — those chats simply backfill later.
+  for (const { guid, chatId } of stored) {
+    try {
       let mOffset = 0;
       for (;;) {
-        const msgs = await api.fetchChatMessages(chat.guid, mOffset, messagePageSize);
+        const msgs = await api.fetchChatMessages(guid, mOffset, messagePageSize);
         if (msgs.length === 0) break;
-
         const msgHandleMap = await upsertHandles(
           db,
           msgs.flatMap((m) => (m.handle ? [m.handle] : [])),
         );
-        await upsertMessages(db, msgs, () => chatId, new Map([...handleMap, ...msgHandleMap]));
+        await upsertMessages(db, msgs, () => chatId, msgHandleMap);
         messages += msgs.length;
         opts.onProgress?.({ chats, messages });
-
         mOffset += msgs.length;
-        if (msgs.length < messagePageSize) break;
-        if (opts.maxMessagesPerChat && mOffset >= opts.maxMessagesPerChat) break;
+        if (msgs.length < messagePageSize || mOffset >= maxPerChat) break;
       }
+    } catch {
+      // leave this chat's history for the on-demand backfill; keep syncing the others.
     }
-
-    offset += batch.length;
-    if (batch.length < chatPageSize) break;
   }
 
   await setSyncMarker(db, await maxMessageMarker(db));
