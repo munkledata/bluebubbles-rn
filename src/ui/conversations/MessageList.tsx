@@ -3,6 +3,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import { usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageRow } from './MessageRow';
 
@@ -15,6 +16,8 @@ interface MessageListProps {
   /** A chat background image is set → unbacked overlay text needs a legibility scrim. */
   hasBackground?: boolean;
   onLongPressMessage?: (msg: EnrichedMessage) => void;
+  /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
+  onRefresh?: () => Promise<unknown>;
 }
 
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
@@ -26,8 +29,12 @@ export function MessageList({
   accentColor,
   hasBackground,
   onLongPressMessage,
+  onRefresh,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
+  // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
+  // memoized inside the hook so FlashList's layout stays stable across the frequent re-renders.
+  const { refreshControl } = usePullToRefresh(onRefresh ?? (() => Promise.resolve()));
 
   // messages is newest-first; reverse to chronological for display.
   const rows = useMemo(() => messages.slice().reverse(), [messages]);
@@ -66,6 +73,7 @@ export function MessageList({
         data={rows}
         keyExtractor={(m: EnrichedMessage) => m.guid}
         maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
+        refreshControl={onRefresh ? refreshControl : undefined}
         renderItem={({ item, index }: { item: EnrichedMessage; index: number }) => (
           <MessageRow
             msg={item}

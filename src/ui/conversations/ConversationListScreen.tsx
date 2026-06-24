@@ -3,10 +3,11 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { startSync } from '@/services';
 import { useChats } from '@features/conversations/useChats';
 import type { InboxRow } from '@db/repositories';
 import { buildPreview, resolveTitle } from '@utils';
-import { Screen, TextField } from '../primitives';
+import { Screen, TextField, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { ChatActionsSheet, type ChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
@@ -19,6 +20,8 @@ export function ConversationListScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { data, isLoading, error } = useChats();
   const [search, setSearch] = useState('');
+  // Pull-to-refresh runs a normal incremental sync (new messages + chat/contact updates).
+  const { refreshControl } = usePullToRefresh(startSync, insets.top);
 
   const rows = useMemo(() => {
     const all = data ?? [];
@@ -124,6 +127,7 @@ export function ConversationListScreen(): React.JSX.Element {
       <FlashList
         data={listData}
         keyExtractor={(r: InboxRow) => r.guid}
+        refreshControl={refreshControl}
         renderItem={({ item }: { item: InboxRow }) => (
           <ConversationTile row={item} onPress={openChat} onLongPress={onLongPress} />
         )}

@@ -348,6 +348,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
           accentColor={header.data?.customColor}
           hasBackground={!!backgroundUri}
           onLongPressMessage={onLongPressMessage}
+          onRefresh={() => ensureChatSynced(guid)}
         />
         {isTyping ? <TypingBubble /> : null}
         <SmartReplyChips messages={messages} onPick={onSend} />
