@@ -21,7 +21,8 @@ export function ConversationListScreen(): React.JSX.Element {
   const { data, isLoading, error } = useChats();
   const [search, setSearch] = useState('');
   // Pull-to-refresh runs a normal incremental sync (new messages + chat/contact updates).
-  const { refreshControl } = usePullToRefresh(startSync, insets.top);
+  // The list now sits below the fixed header, so the spinner needs no extra top offset.
+  const { refreshControl } = usePullToRefresh(startSync);
 
   const rows = useMemo(() => {
     const all = data ?? [];
@@ -65,7 +66,8 @@ export function ConversationListScreen(): React.JSX.Element {
     [rows, searching],
   );
 
-  const ListHeader = (
+  // The title + search are PINNED (rendered above the list, so they don't scroll away).
+  const fixedHeader = (
     <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
       <View style={styles.titleRow}>
         <Text style={[styles.largeTitle, { color: theme.color.label }]}>Messages</Text>
@@ -107,9 +109,16 @@ export function ConversationListScreen(): React.JSX.Element {
           🔍 Search Messages
         </Text>
       </Pressable>
-      <PinnedGrid rows={pinned} onPress={openChat} onLongPress={onLongPress} />
     </View>
   );
+
+  // The pinned-chats grid scrolls WITH the list (it's content, like iOS).
+  const listHeader =
+    pinned.length > 0 ? (
+      <View style={styles.pinnedWrap}>
+        <PinnedGrid rows={pinned} onPress={openChat} onLongPress={onLongPress} />
+      </View>
+    ) : null;
 
   const ListFooter = (
     <Pressable
@@ -124,33 +133,36 @@ export function ConversationListScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <FlashList
-        data={listData}
-        keyExtractor={(r: InboxRow) => r.guid}
-        refreshControl={refreshControl}
-        renderItem={({ item }: { item: InboxRow }) => (
-          <ConversationTile row={item} onPress={openChat} onLongPress={onLongPress} />
-        )}
-        ListHeaderComponent={ListHeader}
-        ListFooterComponent={listData.length > 0 ? ListFooter : null}
-        ItemSeparatorComponent={() => (
-          <View style={[styles.separator, { backgroundColor: theme.color.separator }]} />
-        )}
-        ListEmptyComponent={
-          isLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator color={theme.color.tint} />
-            </View>
-          ) : (
-            <View style={styles.center}>
-              <Text style={[styles.emptyText, { color: theme.color.secondaryLabel }]}>
-                {error ? `Couldn’t load conversations` : search ? 'No matches' : 'No Conversations'}
-              </Text>
-            </View>
-          )
-        }
-        contentContainerStyle={styles.listContent}
-      />
+      {fixedHeader}
+      <View style={styles.list}>
+        <FlashList
+          data={listData}
+          keyExtractor={(r: InboxRow) => r.guid}
+          refreshControl={refreshControl}
+          renderItem={({ item }: { item: InboxRow }) => (
+            <ConversationTile row={item} onPress={openChat} onLongPress={onLongPress} />
+          )}
+          ListHeaderComponent={listHeader}
+          ListFooterComponent={listData.length > 0 ? ListFooter : null}
+          ItemSeparatorComponent={() => (
+            <View style={[styles.separator, { backgroundColor: theme.color.separator }]} />
+          )}
+          ListEmptyComponent={
+            isLoading ? (
+              <View style={styles.center}>
+                <ActivityIndicator color={theme.color.tint} />
+              </View>
+            ) : (
+              <View style={styles.center}>
+                <Text style={[styles.emptyText, { color: theme.color.secondaryLabel }]}>
+                  {error ? `Couldn’t load conversations` : search ? 'No matches' : 'No Conversations'}
+                </Text>
+              </View>
+            )
+          }
+          contentContainerStyle={styles.listContent}
+        />
+      </View>
       <ChatActionsSheet target={actionTarget} onClose={() => setActionTarget(null)} />
     </Screen>
   );
@@ -158,6 +170,8 @@ export function ConversationListScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingBottom: 8 },
+  list: { flex: 1 },
+  pinnedWrap: { paddingHorizontal: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   largeTitle: { fontSize: 34, fontWeight: '700', marginBottom: 10 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
