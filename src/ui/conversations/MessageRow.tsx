@@ -9,6 +9,7 @@ import {
   showTail,
   statusFor,
 } from '@utils';
+import { Avatar } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageBubble } from './MessageBubble';
 
@@ -71,6 +72,27 @@ export const MessageRow = React.memo(function MessageRow({
     : null;
 
   const originator = msg.threadOriginatorGuid;
+  // In a GROUP, received messages get the sender's avatar to their left — but only on the LAST
+  // bubble of a consecutive run (the tail); earlier bubbles in the run reserve the same gutter so
+  // they stay aligned. Own messages + 1:1 chats need no avatar (it's obvious who's talking).
+  const showAvatar = isGroup && msg.isFromMe !== 1;
+
+  const headerNode = header ? (
+    <Text style={[styles.sender, { color: theme.color.tertiaryLabel }, scrim]}>
+      {msg.senderName}
+    </Text>
+  ) : null;
+  const bubbleNode = (
+    <MessageBubble
+      msg={msg}
+      showTail={tail}
+      accentColor={accentColor}
+      onRetry={onRetry ? () => onRetry(msg) : undefined}
+      onLongPress={onLongPress ? () => onLongPress(msg) : undefined}
+      onJumpToReply={onJumpToReply && originator ? () => onJumpToReply(originator) : undefined}
+    />
+  );
+
   return (
     <View
       style={[
@@ -83,19 +105,24 @@ export const MessageRow = React.memo(function MessageRow({
           {formatSeparatorDate(msg.dateCreated)}
         </Text>
       ) : null}
-      {header ? (
-        <Text style={[styles.sender, { color: theme.color.tertiaryLabel }, scrim]}>
-          {msg.senderName}
-        </Text>
-      ) : null}
-      <MessageBubble
-        msg={msg}
-        showTail={tail}
-        accentColor={accentColor}
-        onRetry={onRetry ? () => onRetry(msg) : undefined}
-        onLongPress={onLongPress ? () => onLongPress(msg) : undefined}
-        onJumpToReply={onJumpToReply && originator ? () => onJumpToReply(originator) : undefined}
-      />
+      {showAvatar ? (
+        <View style={styles.avatarRow}>
+          <View style={styles.avatarSlot}>
+            {tail ? (
+              <Avatar name={msg.senderName ?? msg.senderAddress ?? '?'} uri={msg.senderAvatar} size={26} />
+            ) : null}
+          </View>
+          <View style={styles.bubbleCol}>
+            {headerNode}
+            {bubbleNode}
+          </View>
+        </View>
+      ) : (
+        <>
+          {headerNode}
+          {bubbleNode}
+        </>
+      )}
       {status ? (
         <Text style={[styles.status, { color: theme.color.tertiaryLabel }, scrim]}>{status}</Text>
       ) : null}
@@ -107,4 +134,10 @@ const styles = StyleSheet.create({
   separator: { textAlign: 'center', fontSize: 12, marginVertical: 10 },
   sender: { fontSize: 12, marginLeft: 24, marginBottom: 2 },
   status: { fontSize: 11, textAlign: 'right', marginRight: 14, marginTop: 2 },
+  // Group received-message layout: [ avatar gutter | sender header + bubble ]. The avatar aligns
+  // to the bottom (next to the last bubble of the run); the bubble keeps its own marginHorizontal,
+  // so the existing sender marginLeft still lines up within the column.
+  avatarRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  avatarSlot: { width: 32, paddingLeft: 6, paddingBottom: 3, justifyContent: 'flex-end' },
+  bubbleCol: { flex: 1 },
 });
