@@ -21,8 +21,10 @@ describe('Message model', () => {
 });
 
 describe('Chat model', () => {
-  it('identifies group chats by style or participant count', () => {
-    expect(isGroup(Chat.parse({ guid: 'c', style: 45 }))).toBe(true);
+  it('identifies group chats by iMessage style (43=group, 45=DM) or participant count', () => {
+    expect(isGroup(Chat.parse({ guid: 'c', style: 43 }))).toBe(true); // 43 = group
+    expect(isGroup(Chat.parse({ guid: 'c', style: 45 }))).toBe(false); // 45 = 1:1 DM
+    // no style → fall back to participant count
     expect(
       isGroup(Chat.parse({ guid: 'c', participants: [{ address: 'a' }, { address: 'b' }] })),
     ).toBe(true);

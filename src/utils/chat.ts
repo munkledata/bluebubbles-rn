@@ -57,9 +57,17 @@ export function resolveBubbleColor(
   return isHexColor(customColor) ? customColor : fallback;
 }
 
-/** True group chat → render GroupAvatar; else a single Avatar. */
+/**
+ * True group chat → render GroupAvatar; else a single Avatar.
+ *
+ * iMessage `chat.style`: **43 = group**, **45 = 1:1 (DM)** (verified against chat.db — every
+ * 45 chat has exactly one participant, every 43 has 2+). Trust the style when present: a DM
+ * stays a SINGLE avatar even when the other person texts from multiple handles (email + number),
+ * which would otherwise inflate `participantCount` and wrongly promote it to a group. Fall back
+ * to the participant count only when the style is unknown.
+ */
 export function isGroupRow(c: { style: number | null; participantCount: number }): boolean {
-  return c.style === 45 || c.participantCount > 1;
+  return c.style != null ? c.style === 43 : c.participantCount > 1;
 }
 
 function firstParticipant(names: string | null): string | null {

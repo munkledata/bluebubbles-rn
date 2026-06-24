@@ -27,8 +27,12 @@ export const Chat = z.object({
 });
 export type Chat = z.infer<typeof Chat>;
 
-/** True for a group chat (more than one participant or group style). */
+/**
+ * True for a group chat. iMessage `chat.style`: 43 = group, 45 = 1:1 (DM). Trust the style when
+ * present (a DM is never a group even with multiple participant handles); fall back to the
+ * participant count only when the style is unknown.
+ */
 export function isGroup(chat: Pick<Chat, 'style' | 'participants'>): boolean {
-  if (chat.style === 45) return true;
+  if (chat.style != null) return chat.style === 43;
   return (chat.participants?.length ?? 0) > 1;
 }

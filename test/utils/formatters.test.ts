@@ -121,10 +121,16 @@ describe('chat resolution', () => {
     ).toBe('Fam');
   });
 
-  it('detects groups by style or participant count', () => {
-    expect(isGroupRow({ style: 45, participantCount: 1 })).toBe(true);
+  it('detects groups by iMessage style (43=group, 45=DM), falling back to participant count', () => {
+    // style 45 is a 1:1 DM → single avatar, even if extra handles inflate the count.
+    expect(isGroupRow({ style: 45, participantCount: 1 })).toBe(false);
+    expect(isGroupRow({ style: 45, participantCount: 2 })).toBe(false);
+    // style 43 is a group, regardless of the (sometimes under-synced) participant count.
     expect(isGroupRow({ style: 43, participantCount: 2 })).toBe(true);
-    expect(isGroupRow({ style: 43, participantCount: 1 })).toBe(false);
+    expect(isGroupRow({ style: 43, participantCount: 1 })).toBe(true);
+    // unknown style → fall back to the participant count.
+    expect(isGroupRow({ style: null, participantCount: 2 })).toBe(true);
+    expect(isGroupRow({ style: null, participantCount: 1 })).toBe(false);
   });
 
   it('seeds a 1:1 avatar from the single participant', () => {
@@ -132,7 +138,7 @@ describe('chat resolution', () => {
       avatarSeed({
         displayName: null,
         chatIdentifier: 'x',
-        style: 43,
+        style: 45, // 45 = DM
         participantCount: 1,
         participantNames: 'Alice',
       }),
