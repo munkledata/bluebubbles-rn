@@ -258,4 +258,15 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE messages ADD COLUMN did_notify_recipient INTEGER DEFAULT 0`,
     ],
   },
+  {
+    // Backfill has_attachments for already-synced rows. The server never sends a
+    // `hasAttachments` flag, so earlier syncs stored it as 0 even when the message had
+    // (and persisted) attachment rows — which left images unrendered and reply previews
+    // blank. Recompute it from the attachments table. Idempotent (re-running re-sets 1).
+    name: '0011_backfill_has_attachments',
+    statements: [
+      `UPDATE messages SET has_attachments = 1
+         WHERE id IN (SELECT DISTINCT message_id FROM attachments WHERE message_id IS NOT NULL)`,
+    ],
+  },
 ];

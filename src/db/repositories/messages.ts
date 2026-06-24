@@ -43,7 +43,9 @@ export async function upsertMessages(
         dateDelivered: m.dateDelivered ?? null,
         dateEdited: m.dateEdited ?? null,
         dateRetracted: m.dateRetracted ?? null,
-        hasAttachments: m.hasAttachments ?? false,
+        // The server omits `hasAttachments`; infer it from the hydrated attachments array so the
+        // flag stays accurate for reply-quote previews (the image read path no longer relies on it).
+        hasAttachments: m.hasAttachments ?? (m.attachments?.length ?? 0) > 0,
         associatedMessageGuid: m.associatedMessageGuid ?? null,
         associatedMessageType: m.associatedMessageType ?? null,
         threadOriginatorGuid: m.threadOriginatorGuid ?? null,
@@ -71,6 +73,9 @@ export async function upsertMessages(
         // a previously-stored `true` back to false/null. A present flag still overwrites.
         wasDeliveredQuietly: sql`COALESCE(excluded.was_delivered_quietly, ${messages.wasDeliveredQuietly})`,
         didNotifyRecipient: sql`COALESCE(excluded.did_notify_recipient, ${messages.didNotifyRecipient})`,
+        // A later hydrated re-sync can flip a stale 0 → 1; never downgrade 1 → 0 when a fetch
+        // omits attachments (excluded = 0), so MAX with the already-stored value.
+        hasAttachments: sql`MAX(excluded.has_attachments, ${messages.hasAttachments})`,
       },
     })
     .returning({ id: messages.id, guid: messages.guid });

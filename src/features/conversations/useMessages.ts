@@ -35,7 +35,12 @@ export function useMessages(chatGuid: string, limit = 100): ReactiveState<Enrich
       if (chatId == null) return [];
       const msgs = await listMessagesWithSenders(db, chatId, limit);
 
-      const ids = msgs.filter((m) => m.hasAttachments === 1).map((m) => m.id);
+      // Load attachments by actual stored rows, NOT by gating on `hasAttachments`: the server
+      // omits that flag, so it persists as 0 and this filter excluded every message — which is
+      // exactly why images rendered as blank "￼" bubbles. The attachment rows are already in the
+      // DB; listAttachmentsByMessageIds filters by `message_id IN`, so passing every id simply
+      // returns nothing for text-only messages.
+      const ids = msgs.map((m) => m.id);
       const attByMsg = await listAttachmentsByMessageIds(db, ids);
       const reactionsByGuid = await listReactionsByMessageGuids(
         db,
