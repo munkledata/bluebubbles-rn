@@ -1,10 +1,9 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
-  Keyboard,
+  KeyboardAvoidingView,
   Pressable,
   StyleSheet,
   Text,
@@ -34,26 +33,6 @@ export function ConversationListScreen(): React.JSX.Element {
   const rows = data ?? [];
   // Pull-to-refresh: incremental sync. The list sits below the fixed title → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
-
-  // Lift the bottom search bar above the keyboard by its height. Done manually (not
-  // <KeyboardAvoidingView behavior="padding">, which leaves a persistent black gap UNDER the bar
-  // when the keyboard is closed on Android edge-to-edge). We measure the lift from the keyboard's
-  // top edge (endCoordinates.screenY) the way RN's own KAV does — under edge-to-edge + adjustResize
-  // `endCoordinates.height` frequently reports 0, so the bar wouldn't rise if we trusted it.
-  const [kbHeight, setKbHeight] = useState(0);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', (e) => {
-      const h = e.endCoordinates.height;
-      const lift =
-        h > 0 ? h : Math.max(0, Dimensions.get('screen').height - e.endCoordinates.screenY);
-      setKbHeight(lift);
-    });
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
 
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(
@@ -127,16 +106,17 @@ export function ConversationListScreen(): React.JSX.Element {
     </Pressable>
   );
 
-  // The search bar lives at the BOTTOM. `marginBottom: kbHeight` lifts it above the keyboard when
-  // open (Android edge-to-edge); when closed it sits flush at the bottom with only the safe-area
-  // inset — no gap. paddingBottom carries the home-indicator inset only while the keyboard is down.
+  // The search bar lives at the BOTTOM, inside the KeyboardAvoidingView below — its `padding`
+  // behavior lifts the bar above the keyboard. `keyboardVerticalOffset={-insets.bottom}` cancels
+  // the nav-bar-sized padding KAV otherwise leaves UNDER the bar when the keyboard is closed on
+  // Android edge-to-edge (the cause of the earlier black gap). paddingBottom keeps the input above
+  // the nav bar while the keyboard is down.
   const searchBar = (
     <View
       style={[
         styles.searchBar,
         {
-          marginBottom: kbHeight,
-          paddingBottom: kbHeight > 0 ? 10 : Math.max(insets.bottom, 10),
+          paddingBottom: Math.max(insets.bottom, 10),
           borderTopColor: theme.color.separator,
           backgroundColor: theme.color.background,
         },
@@ -173,7 +153,11 @@ export function ConversationListScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View style={styles.flex}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior="padding"
+        keyboardVerticalOffset={-insets.bottom}
+      >
         {titleRow}
         <View style={styles.list}>
           {searching ? (
@@ -209,7 +193,7 @@ export function ConversationListScreen(): React.JSX.Element {
           )}
         </View>
         {searchBar}
-      </View>
+      </KeyboardAvoidingView>
       <ChatActionsSheet target={actionTarget} onClose={() => setActionTarget(null)} />
     </Screen>
   );
