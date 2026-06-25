@@ -6,8 +6,9 @@ import type { HttpClient } from '../http';
 /** GET /api/v1/ping — health check. The server returns `data: { pong: true }`. */
 const Pong = z.object({ pong: z.boolean() }).passthrough();
 export type Pong = z.infer<typeof Pong>;
+/** `retry: false` — a health/reachability probe must fail fast, not mask a down server by retrying. */
 export function ping(http: HttpClient): Promise<Pong> {
-  return http.get('/ping', Pong);
+  return http.get('/ping', Pong, { retry: false });
 }
 
 /** GET /api/v1/server/info — version, capabilities (used for min-version gating). */

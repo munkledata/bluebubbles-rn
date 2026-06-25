@@ -1,8 +1,10 @@
+import { mapWithConcurrency } from '@core/async/pool';
 import { SYNC_BATCH_SIZE } from '@core/config';
 import { advanceMarker, buildSyncCursor, GuidDeduper, type SyncMarker } from '@core/sync';
 import {
   getChatIdByGuid,
   getSyncMarker,
+  listRecentChatRefs,
   maxMessageMarker,
   setSyncMarker,
   upsertChats,
@@ -79,10 +81,13 @@ export async function fullSync(
   const chats = stored.length;
   opts.onProgress?.({ chats, messages });
 
-  // Phase 2: bounded recent messages per chat. Per-chat errors are swallowed so one unreachable
-  // chat (or a mid-sync connection drop) can't abort the rest — those chats simply backfill later.
-  for (const { guid, chatId } of stored) {
-    try {
+  // Phase 2: bounded recent messages per chat, PACED (small concurrency + a per-task delay) so the
+  // bulk pull doesn't peg a single self-hosted server. Per-chat errors are isolated so one
+  // unreachable chat (or a mid-sync drop) can't abort the rest — those chats backfill later.
+  await mapWithConcurrency(
+    stored,
+    CHAT_BACKFILL_CONCURRENCY,
+    async ({ guid, chatId }) => {
       let mOffset = 0;
       for (;;) {
         const msgs = await api.fetchChatMessages(guid, mOffset, messagePageSize);
@@ -97,13 +102,56 @@ export async function fullSync(
         mOffset += msgs.length;
         if (msgs.length < messagePageSize || mOffset >= maxPerChat) break;
       }
-    } catch {
-      // leave this chat's history for the on-demand backfill; keep syncing the others.
-    }
-  }
+    },
+    { delayMs: CHAT_BACKFILL_DELAY_MS },
+  );
 
   await setSyncMarker(db, await maxMessageMarker(db));
   return { chats, messages };
+}
+
+/** Bulk-sync pacing: a few in flight at once, with a short gap before each, to stay below the
+ *  single server's saturation point on multi-hundred-chat accounts. */
+export const CHAT_BACKFILL_CONCURRENCY = 3;
+export const CHAT_BACKFILL_DELAY_MS = 75;
+
+/** Cap on chats re-pulled per pull-to-refresh — bounds load on a single server (the most-recently-
+ *  active conversations the user is looking at; the rest backfill on open). */
+export const REFRESH_MAX_CHATS = 60;
+
+/**
+ * Re-pull the NEWEST page (`perChat`) of messages for the most-recently-active chats and upsert them
+ * — independent of the incremental cursor (which only fetches messages newer than its high-water
+ * mark and so never revisits an existing message). This is what makes an inbox pull-to-refresh
+ * actually fill in messages stored with stale/empty bodies before a fix (e.g. SMS/edited text
+ * recovered from attributedBody server-side). BOUNDED to `maxChats` recent chats so it can't
+ * saturate the server; older chats backfill on open. Paced + per-chat-isolated. Returns messages
+ * upserted.
+ */
+export async function refreshRecentMessages(
+  db: AppDatabase,
+  api: SyncApi,
+  opts: { perChat?: number; maxChats?: number } = {},
+): Promise<number> {
+  const perChat = opts.perChat ?? 25;
+  const chats = await listRecentChatRefs(db, opts.maxChats ?? REFRESH_MAX_CHATS);
+  let updated = 0;
+  await mapWithConcurrency(
+    chats,
+    CHAT_BACKFILL_CONCURRENCY,
+    async ({ guid, chatId }) => {
+      const msgs = await api.fetchChatMessages(guid, 0, perChat);
+      if (msgs.length === 0) return;
+      const msgHandleMap = await upsertHandles(
+        db,
+        msgs.flatMap((m) => (m.handle ? [m.handle] : [])),
+      );
+      await upsertMessages(db, msgs, () => chatId, msgHandleMap);
+      updated += msgs.length;
+    },
+    { delayMs: CHAT_BACKFILL_DELAY_MS },
+  );
+  return updated;
 }
 
 /**

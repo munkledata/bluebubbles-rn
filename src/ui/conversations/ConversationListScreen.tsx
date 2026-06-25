@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { startSync } from '@/services';
+import { refreshInbox } from '@/services';
 import { useChats } from '@features/conversations/useChats';
 import type { InboxRow } from '@db/repositories';
 import { buildPreview, resolveTitle } from '@utils';
@@ -20,9 +20,9 @@ export function ConversationListScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { data, isLoading, error } = useChats();
   const [search, setSearch] = useState('');
-  // Pull-to-refresh runs a normal incremental sync (new messages + chat/contact updates).
-  // The list now sits below the fixed header, so the spinner needs no extra top offset.
-  const { refreshControl } = usePullToRefresh(startSync);
+  // Pull-to-refresh: incremental sync + a paced re-pull of each chat's recent messages, so stale/
+  // empty bodies (e.g. SMS/edited text) fill in. The list sits below the fixed header → no offset.
+  const { refreshControl } = usePullToRefresh(refreshInbox);
 
   const rows = useMemo(() => {
     const all = data ?? [];

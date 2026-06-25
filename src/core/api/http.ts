@@ -8,6 +8,7 @@ import {
 } from '@core/config/constants';
 import { apiResponse } from '@core/models/common';
 import { ApiError } from './errors';
+import { withRetry, type RetryPolicy } from './retry';
 
 export interface HttpClientConfig {
   /** Current server origin, e.g. "https://abc.ngrok.io". May change on failover. */
@@ -35,6 +36,13 @@ export interface RequestOptions {
   /** Multipart form body for attachment uploads. */
   form?: FormData;
   signal?: AbortSignal;
+  /**
+   * Retry transient failures (dropped connection / timeout / 5xx) with backoff. Defaults ON for
+   * GET (idempotent reads), OFF for writes — a retried POST could double-send (the outgoing-queue
+   * owns send retries). Pass an explicit policy to opt a write in, or `false` to force a single
+   * shot (e.g. a reachability ping that must fail fast). Never applied to multipart `form` uploads.
+   */
+  retry?: RetryPolicy | false;
 }
 
 /**
@@ -133,47 +141,57 @@ export class HttpClient {
     const url = this.buildUrl(path);
     const search = this.buildSearch(opts.query);
 
-    let response: Response;
-    try {
-      response = await ky(url, {
-        method,
-        headers: this.buildHeaders(),
-        searchParams: search,
-        json: opts.form ? undefined : opts.json,
-        body: opts.form,
-        signal: opts.signal,
-        timeout: this.cfg.timeoutMs ?? 30_000,
-        retry: 0,
-        throwHttpErrors: false,
-        fetch: this.cfg.fetch,
-      });
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'TimeoutError') {
-        throw new ApiError('timeout', 'Request timed out', undefined, err);
+    // One full attempt: send, map transport/status/parse failures to a typed ApiError, return data.
+    // Headers are rebuilt per attempt so a retry picks up a refreshed origin/password.
+    const run = async (): Promise<z.infer<S>> => {
+      let response: Response;
+      try {
+        response = await ky(url, {
+          method,
+          headers: this.buildHeaders(),
+          searchParams: search,
+          json: opts.form ? undefined : opts.json,
+          body: opts.form,
+          signal: opts.signal,
+          timeout: this.cfg.timeoutMs ?? 30_000,
+          retry: 0,
+          throwHttpErrors: false,
+          fetch: this.cfg.fetch,
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'TimeoutError') {
+          throw new ApiError('timeout', 'Request timed out', undefined, err);
+        }
+        throw new ApiError('no_connection', 'Network request failed', undefined, err);
       }
-      throw new ApiError('no_connection', 'Network request failed', undefined, err);
-    }
 
-    if (!response.ok) {
-      throw ApiError.fromStatus(response.status, `${method} ${path} failed`);
-    }
+      if (!response.ok) {
+        throw ApiError.fromStatus(response.status, `${method} ${path} failed`);
+      }
 
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (err) {
-      throw new ApiError('parse_error', 'Response was not valid JSON', response.status, err);
-    }
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch (err) {
+        throw new ApiError('parse_error', 'Response was not valid JSON', response.status, err);
+      }
 
-    const parsed = apiResponse(schema).safeParse(body);
-    if (!parsed.success) {
-      throw new ApiError(
-        'parse_error',
-        `Response did not match schema for ${path}`,
-        response.status,
-        parsed.error,
-      );
-    }
-    return parsed.data.data;
+      const parsed = apiResponse(schema).safeParse(body);
+      if (!parsed.success) {
+        throw new ApiError(
+          'parse_error',
+          `Response did not match schema for ${path}`,
+          response.status,
+          parsed.error,
+        );
+      }
+      return parsed.data.data;
+    };
+
+    // Retry idempotent GETs by default; writes only when explicitly opted in; never multipart
+    // uploads; never when `retry: false`.
+    const wantsRetry =
+      opts.retry !== false && !opts.form && (method === 'GET' || opts.retry !== undefined);
+    return wantsRetry ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined) : run();
   }
 }
