@@ -272,25 +272,6 @@ export async function getChatIdByGuid(db: AppDatabase, guid: string): Promise<nu
   return rows[0]?.id ?? null;
 }
 
-/**
- * The N most-recently-active chats' guid + id (newest activity first), for a BOUNDED message
- * re-backfill on pull-to-refresh — so the refresh re-pulls the conversations the user actually
- * sees, not all hundreds of chats (which would saturate the server). Chats with no messages yet
- * (null date) sort last. Unarchived only.
- */
-export async function listRecentChatRefs(
-  db: AppDatabase,
-  limit: number,
-): Promise<{ guid: string; chatId: number }[]> {
-  const rows = await db.all<{ guid: string; id: number }>(sql`
-    SELECT guid, id FROM chats
-    WHERE is_archived = 0
-    ORDER BY (latest_message_date IS NULL), latest_message_date DESC
-    LIMIT ${limit}
-  `);
-  return rows.map((r: { guid: string; id: number }) => ({ guid: r.guid, chatId: r.id }));
-}
-
 /** Minimal chat row for the conversation header (title + avatar + group state). */
 export interface ChatHeaderRow {
   id: number;

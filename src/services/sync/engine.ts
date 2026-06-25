@@ -4,7 +4,6 @@ import { advanceMarker, buildSyncCursor, GuidDeduper, type SyncMarker } from '@c
 import {
   getChatIdByGuid,
   getSyncMarker,
-  listRecentChatRefs,
   maxMessageMarker,
   setSyncMarker,
   upsertChats,
@@ -114,51 +113,6 @@ export async function fullSync(
  *  concurrency low and leave a gap so it stays responsive to other requests. */
 export const CHAT_BACKFILL_CONCURRENCY = 2;
 export const CHAT_BACKFILL_DELAY_MS = 75;
-
-/**
- * Pull-to-refresh re-backfill is deliberately TINY + STRICTLY SEQUENTIAL: a casual pull must never
- * bulk-load this single-threaded server (a wider/parallel pass wedged the daemon at 100% CPU). It
- * refreshes only the few most-recently-active conversations the user is actually looking at; the
- * rest fill in on open (each thread's own on-demand backfill).
- */
-export const REFRESH_MAX_CHATS = 15;
-export const REFRESH_CONCURRENCY = 1;
-export const REFRESH_DELAY_MS = 150;
-
-/**
- * Re-pull the NEWEST page (`perChat`) of messages for the most-recently-active chats and upsert them
- * — independent of the incremental cursor (which only fetches messages newer than its high-water
- * mark and so never revisits an existing message). This is what makes an inbox pull-to-refresh
- * actually fill in messages stored with stale/empty bodies before a fix (e.g. SMS/edited text
- * recovered from attributedBody server-side). BOUNDED to `maxChats` recent chats so it can't
- * saturate the server; older chats backfill on open. Paced + per-chat-isolated. Returns messages
- * upserted.
- */
-export async function refreshRecentMessages(
-  db: AppDatabase,
-  api: SyncApi,
-  opts: { perChat?: number; maxChats?: number } = {},
-): Promise<number> {
-  const perChat = opts.perChat ?? 25;
-  const chats = await listRecentChatRefs(db, opts.maxChats ?? REFRESH_MAX_CHATS);
-  let updated = 0;
-  await mapWithConcurrency(
-    chats,
-    REFRESH_CONCURRENCY,
-    async ({ guid, chatId }) => {
-      const msgs = await api.fetchChatMessages(guid, 0, perChat);
-      if (msgs.length === 0) return;
-      const msgHandleMap = await upsertHandles(
-        db,
-        msgs.flatMap((m) => (m.handle ? [m.handle] : [])),
-      );
-      await upsertMessages(db, msgs, () => chatId, msgHandleMap);
-      updated += msgs.length;
-    },
-    { delayMs: REFRESH_DELAY_MS },
-  );
-  return updated;
-}
 
 /**
  * On-demand backfill of ONE chat's messages from the server, independent of the global

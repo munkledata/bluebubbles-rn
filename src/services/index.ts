@@ -33,14 +33,7 @@ import { DbEventSink } from './realtime/dbEventSink';
 import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { SocketService } from './realtime/socketService';
-import {
-  fullSync,
-  httpSyncApi,
-  incrementalSync,
-  refreshRecentMessages,
-  syncAllChats,
-  syncChatMessages,
-} from './sync';
+import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
 import { startReachabilityWatch, stopReachabilityWatch } from './reachability';
 import { syncContacts } from './contacts/contactsService';
 
@@ -280,28 +273,31 @@ export async function applyStoredCertPins(): Promise<void> {
 
 /** Run a full sync on first connect, otherwise an incremental catch-up sync. */
 let syncInFlight: Promise<void> | null = null;
-let backfillInFlight = false;
 let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
 
 /**
  * Coalesced sync entrypoint. Concurrent callers (boot, pull-to-refresh, reconnect-resume) share ONE
- * in-flight run rather than stacking overlapping syncs that would hammer the server. Pass
- * `rebackfill` (the inbox pull-to-refresh does) to also re-pull each chat's newest page so stale/
- * empty bodies fill in.
+ * in-flight run rather than stacking overlapping syncs that would hammer the server.
  */
-export function startSync(opts: { rebackfill?: boolean } = {}): Promise<void> {
+export function startSync(): Promise<void> {
   if (syncInFlight) return syncInFlight;
-  syncInFlight = runSync(opts).finally(() => {
+  syncInFlight = runSync().finally(() => {
     syncInFlight = null;
     lastSyncAt = Date.now();
   });
   return syncInFlight;
 }
 
-/** Inbox pull-to-refresh: full chat-list + incremental + a paced re-pull of recent messages. */
+/**
+ * Inbox pull-to-refresh: a LIGHT sync (chat-list refresh + incremental). It deliberately does NOT
+ * bulk re-fetch existing chats' messages — that wedges this single-threaded server (one conversation
+ * with a pathological hydration hangs the daemon). To fill in a conversation's stale/empty bodies
+ * (e.g. SMS/edited text the server now recovers), OPEN it — its own on-demand backfill re-pulls just
+ * that thread.
+ */
 export function refreshInbox(): Promise<void> {
-  return startSync({ rebackfill: true });
+  return startSync();
 }
 
 /**
@@ -314,7 +310,7 @@ export function maybeResumeSync(): void {
   void startSync();
 }
 
-async function runSync(opts: { rebackfill?: boolean }): Promise<void> {
+async function runSync(): Promise<void> {
   const sync = useSyncStore.getState();
   try {
     const db = await ensureDatabase();
@@ -339,19 +335,6 @@ async function runSync(opts: { rebackfill?: boolean }): Promise<void> {
         onProgress: (p) => sync.progress(p),
       });
       sync.done(result);
-
-      // Pull-to-refresh: re-pull the newest page for the most-recently-active chats in the BACKGROUND
-      // (bounded + paced + single-flight) so bodies the cursor-gated incremental skips — e.g. SMS/
-      // edited text now recovered server-side — fill in without opening each chat. Non-blocking:
-      // updates land via the reactive DB.
-      if (opts.rebackfill && !backfillInFlight) {
-        backfillInFlight = true;
-        void refreshRecentMessages(db, api)
-          .catch((e) => logger.debug('[sync] re-backfill failed', e))
-          .finally(() => {
-            backfillInFlight = false;
-          });
-      }
     }
   } catch (e) {
     sync.fail(e instanceof Error ? e.message : 'Sync failed');
