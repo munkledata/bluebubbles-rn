@@ -46,8 +46,14 @@ export const SERVER_EVENTS = [
 
 export type ServerEventName = (typeof SERVER_EVENTS)[number];
 
-/** Default page size for full/incremental sync, matching the Flutter default. */
-export const SYNC_BATCH_SIZE = 1000;
+/**
+ * Default page size for incremental sync. Smaller than the Flutter default (1000) on purpose: each
+ * page is serialized synchronously by a single-threaded self-hosted server (better-sqlite3 +
+ * per-message attachment hydration), so a 1000-row page can peg it at 100% CPU and leave it
+ * unresponsive to everything else for many seconds. Smaller pages let the server breathe between
+ * them, and the cursor advances per page so a slow/dropped page resumes instead of restarting.
+ */
+export const SYNC_BATCH_SIZE = 250;
 
 /** Extra fields requested during sync (incremental_sync_manager.dart withQuery). */
 export const SYNC_WITH_QUERY = [
