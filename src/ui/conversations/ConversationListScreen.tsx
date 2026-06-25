@@ -81,14 +81,27 @@ export function ConversationListScreen(): React.JSX.Element {
           </Pressable>
         </View>
       </View>
-      <TextField
-        placeholder="Search"
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={search}
-        onChangeText={setSearch}
-        style={styles.searchInput}
-      />
+      <View style={styles.searchWrap}>
+        <TextField
+          placeholder="Search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={search}
+          onChangeText={setSearch}
+          style={styles.searchInput}
+        />
+        {search.length > 0 ? (
+          <Pressable
+            onPress={() => setSearch('')}
+            hitSlop={10}
+            style={styles.clearButton}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
+            <Text style={[styles.clearIcon, { color: theme.color.tertiaryLabel }]}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <Pressable
         onPress={() => router.push('/search')}
         hitSlop={6}
@@ -172,7 +185,12 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   compose: { fontSize: 24, marginBottom: 10 },
   gear: { fontSize: 26, marginBottom: 10 },
-  searchInput: { marginBottom: 0 },
+  // Relative wrapper so the clear button can overlay the field's right edge. paddingRight on the
+  // input keeps typed text from running under the ✕.
+  searchWrap: { justifyContent: 'center' },
+  searchInput: { marginBottom: 0, paddingRight: 38 },
+  clearButton: { position: 'absolute', right: 12, top: 0, bottom: 16, justifyContent: 'center' },
+  clearIcon: { fontSize: 16, fontWeight: '600' },
   searchMessages: { paddingTop: 8, paddingBottom: 2 },
   searchMessagesText: { fontSize: 14, fontWeight: '500' },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 76 },

@@ -69,32 +69,43 @@ export function MessageList({
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 1600);
   }, []);
 
-  // Opened from a search hit → once the target row is loaded, scroll to + highlight it (once per
-  // target). Runs when `rows` first include the guid (loads are async). The timer is intentionally
-  // NOT cleared on a reactive `rows` update — that mustn't cancel the one-shot jump; `focusedRef`
-  // bounds it to one scroll per target. If the target is outside the loaded window, this no-ops and
-  // the chat just opens normally.
+  // Opened from a search hit → land on that message. The list is bottom-anchored, so an old target
+  // is far above the first render and `scrollToIndex` to it silently no-ops (the row isn't measured
+  // yet). Instead we REMOUNT the list keyed to the target with `initialScrollIndex` — a reliable
+  // mount-time scroll — once the target is in the loaded window. If it's not loaded, the chat just
+  // opens normally (no jump).
+  const focusIndex = useMemo(
+    () => (focusGuid ? rows.findIndex((m) => m.guid === focusGuid) : -1),
+    [focusGuid, rows],
+  );
+  const focusReady = focusGuid != null && focusIndex >= 0;
+  // Highlight the target once it's mounted in view (once per target); nudge it toward center.
   const focusedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusGuid || focusedRef.current === focusGuid) return;
-    const index = rows.findIndex((m) => m.guid === focusGuid);
-    if (index < 0) return;
-    focusedRef.current = focusGuid;
+    if (!focusReady || focusedRef.current === focusGuid) return;
+    focusedRef.current = focusGuid ?? null;
+    setHighlightGuid(focusGuid ?? null);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlightGuid(null), 3000);
     setTimeout(() => {
-      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
-      setHighlightGuid(focusGuid);
-      if (highlightTimer.current) clearTimeout(highlightTimer.current);
-      highlightTimer.current = setTimeout(() => setHighlightGuid(null), 2200);
-    }, 350);
-  }, [focusGuid, rows]);
+      try {
+        listRef.current?.scrollToIndex({ index: focusIndex, animated: false, viewPosition: 0.35 });
+      } catch {
+        // initialScrollIndex already placed it; centering is best-effort.
+      }
+    }, 450);
+  }, [focusReady, focusGuid, focusIndex]);
 
   return (
     <View style={styles.flex}>
       <FlashList
+        // Remount keyed to the focus target so initialScrollIndex (mount-time) lands on it.
+        key={focusReady ? `focus-${focusGuid}` : 'list'}
         ref={listRef}
         data={rows}
         keyExtractor={(m: EnrichedMessage) => m.guid}
-        maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
+        initialScrollIndex={focusReady ? focusIndex : undefined}
+        maintainVisibleContentPosition={focusReady ? undefined : { startRenderingFromBottom: true }}
         refreshControl={onRefresh ? refreshControl : undefined}
         renderItem={({ item, index }: { item: EnrichedMessage; index: number }) => (
           <MessageRow

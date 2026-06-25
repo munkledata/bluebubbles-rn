@@ -65,16 +65,14 @@ describe('edited/SMS text is searchable (derived from attributedBody)', () => {
 });
 
 describe('search result snippet (shows WHY a result matched)', () => {
-  it('returns a snippet containing the matched term, wrapped in highlight marks', async () => {
+  it('returns a snippet centered on the match, containing the matched term', async () => {
     const { db } = await createTestDb();
     await seed(db);
     const [hit] = await searchMessagesEnriched(db, 'birthday');
     expect(hit).toBeDefined();
-    // The matched word is present in the snippet (the raw text start might not be) ...
+    // The matched word is present in the snippet (the raw text START might not be, for a long
+    // message) — the UI bolds the query terms in JS.
     expect(hit!.snippet).toContain('birthday');
-    // ... and the matched token is wrapped in U+0002…U+0003 for the UI to bold.
-    expect(hit!.snippet).toContain(String.fromCharCode(2));
-    expect(hit!.snippet).toContain(String.fromCharCode(3));
   });
 });
 

@@ -199,10 +199,11 @@ export async function searchMessagesEnriched(
   const match = toFtsQuery(queryText);
   if (!match) return [];
   // `snippet()` needs the FTS table referenced by name (not an alias), so this query joins on
-  // `messages_fts` directly. char(2)/char(3) mark the matched tokens for the UI to bold.
+  // `messages_fts` directly. No mark args — it just centers the text on the match; the UI bolds the
+  // query terms in JS (control-char marks don't reliably survive the native bridge).
   return db.all<SearchResultRow>(sql`
     SELECT m.id, m.guid, m.text, m.date_created AS dateCreated, m.is_from_me AS isFromMe,
-           snippet(messages_fts, 0, char(2), char(3), '…', 12) AS snippet,
+           snippet(messages_fts, 0, '', '', '…', 12) AS snippet,
            c.guid AS chatGuid, c.display_name AS chatDisplayName, c.custom_name AS chatCustomName,
            c.chat_identifier AS chatIdentifier, c.style AS chatStyle,
            (SELECT group_concat(COALESCE(h2.display_name, h2.address), ', ' ORDER BY h2.id)

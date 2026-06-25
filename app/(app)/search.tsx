@@ -10,12 +10,6 @@ import { Screen, useTheme } from '@ui';
 import { ConversationTile } from '@ui/conversations/ConversationTile';
 import { formatChatDate, resolveTitle } from '@utils';
 
-// The FTS snippet wraps matched tokens in these control chars (see searchMessagesEnriched). Built
-// via fromCharCode so the source carries no invisible characters.
-const MARK_START = String.fromCharCode(2); // U+0002
-const MARK_END = String.fromCharCode(3); // U+0003
-const STRIP_MARKS = new RegExp('[' + MARK_START + MARK_END + ']', 'g');
-const MARK_RE = new RegExp(MARK_START + '([^' + MARK_END + ']*)' + MARK_END, 'g');
 // Cap the chat list on this page so the (non-virtualized) header stays light; the matching set is
 // identical to the inbox — this just bounds how many tiles render above the message hits.
 const MAX_CHAT_RESULTS = 50;
@@ -65,27 +59,27 @@ export default function SearchScreen(): React.JSX.Element {
     <Text style={[styles.section, { color: theme.color.secondaryLabel }]}>{label}</Text>
   );
 
-  // Render the FTS snippet, bolding the matched term(s) — so it's obvious WHY each result matched
-  // (and the matched word is always visible, even when it's deep in a long message).
+  // Bold the parts of the snippet that match the query — whole words starting with a query term
+  // (matching the FTS prefix search) — so it's obvious WHY each result matched. Done in JS over the
+  // centered snippet (no DB-side marks, which don't reliably survive the native bridge).
   const renderSnippet = (snippet: string | null): React.ReactNode => {
-    const s = snippet ?? '';
-    if (!s.includes(MARK_START)) return s.replace(STRIP_MARKS, '');
-    const out: React.ReactNode[] = [];
-    let last = 0;
-    let key = 0;
-    let m: RegExpExecArray | null;
-    MARK_RE.lastIndex = 0;
-    while ((m = MARK_RE.exec(s)) !== null) {
-      if (m.index > last) out.push(s.slice(last, m.index));
-      out.push(
-        <Text key={key++} style={{ fontWeight: '700', color: theme.color.label }}>
-          {m[1]}
-        </Text>,
+    const text = snippet ?? '';
+    const terms =
+      q
+        .trim()
+        .toLowerCase()
+        .match(/[\p{L}\p{N}]+/gu) ?? [];
+    if (terms.length === 0 || !text) return text;
+    return text.split(/([\p{L}\p{N}]+)/u).map((part, i) => {
+      const lower = part.toLowerCase();
+      return part && terms.some((t) => lower.startsWith(t)) ? (
+        <Text key={i} style={{ fontWeight: '700', color: theme.color.label }}>
+          {part}
+        </Text>
+      ) : (
+        part
       );
-      last = MARK_RE.lastIndex;
-    }
-    if (last < s.length) out.push(s.slice(last).replace(STRIP_MARKS, ''));
-    return out;
+    });
   };
 
   // Matched chats (identical to the inbox) render above the message hits, as the same tiles.

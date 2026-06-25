@@ -25,6 +25,12 @@ interface MessageBubbleProps {
   onLongPress?: () => void;
   /** Tap the reply quote → jump to the original message. */
   onJumpToReply?: () => void;
+  /**
+   * Don't render the "Edited" label here — the caller will, below the bubble. The group-avatar row
+   * aligns the sender avatar to the bubble's bottom, so an inline "Edited" would drag the avatar
+   * down to the label's level; MessageRow renders it under the row instead.
+   */
+  deferEdited?: boolean;
 }
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
@@ -38,6 +44,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetry,
   onLongPress,
   onJumpToReply,
+  deferEdited,
 }: MessageBubbleProps): React.JSX.Element {
   const theme = useTheme();
   const redacted = useRedactedModeStore((s) => s.enabled);
@@ -119,7 +126,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : null}
         </View>
       ) : null}
-      {isEdited ? (
+      {isEdited && !deferEdited ? (
         <Text
           style={[
             styles.edited,
