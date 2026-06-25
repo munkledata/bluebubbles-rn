@@ -110,14 +110,20 @@ export async function fullSync(
   return { chats, messages };
 }
 
-/** Bulk-sync pacing: a few in flight at once, with a short gap before each, to stay below the
- *  single server's saturation point on multi-hundred-chat accounts. */
-export const CHAT_BACKFILL_CONCURRENCY = 3;
+/** Full-sync message pass pacing — the server runs queries synchronously (one core), so keep
+ *  concurrency low and leave a gap so it stays responsive to other requests. */
+export const CHAT_BACKFILL_CONCURRENCY = 2;
 export const CHAT_BACKFILL_DELAY_MS = 75;
 
-/** Cap on chats re-pulled per pull-to-refresh — bounds load on a single server (the most-recently-
- *  active conversations the user is looking at; the rest backfill on open). */
-export const REFRESH_MAX_CHATS = 60;
+/**
+ * Pull-to-refresh re-backfill is deliberately TINY + STRICTLY SEQUENTIAL: a casual pull must never
+ * bulk-load this single-threaded server (a wider/parallel pass wedged the daemon at 100% CPU). It
+ * refreshes only the few most-recently-active conversations the user is actually looking at; the
+ * rest fill in on open (each thread's own on-demand backfill).
+ */
+export const REFRESH_MAX_CHATS = 15;
+export const REFRESH_CONCURRENCY = 1;
+export const REFRESH_DELAY_MS = 150;
 
 /**
  * Re-pull the NEWEST page (`perChat`) of messages for the most-recently-active chats and upsert them
@@ -138,7 +144,7 @@ export async function refreshRecentMessages(
   let updated = 0;
   await mapWithConcurrency(
     chats,
-    CHAT_BACKFILL_CONCURRENCY,
+    REFRESH_CONCURRENCY,
     async ({ guid, chatId }) => {
       const msgs = await api.fetchChatMessages(guid, 0, perChat);
       if (msgs.length === 0) return;
@@ -149,7 +155,7 @@ export async function refreshRecentMessages(
       await upsertMessages(db, msgs, () => chatId, msgHandleMap);
       updated += msgs.length;
     },
-    { delayMs: CHAT_BACKFILL_DELAY_MS },
+    { delayMs: REFRESH_DELAY_MS },
   );
   return updated;
 }
