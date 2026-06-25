@@ -6,20 +6,30 @@ import { type ReactiveState } from '@db/useReactiveQuery';
 import { resolveTitle } from '@utils';
 
 /**
- * The SINGLE definition of "which chats match a query", shared by the inbox top-bar and the search
- * page so the two stay in lockstep. A chat matches when the term is in its resolved title or
- * participant names, OR when any of its messages match (FTS over the local index, incl. decoded
- * edited/SMS text — debounced). Both screens filter the same loaded (non-archived) inbox rows, so
- * the result sets are identical by construction. Passes through `useChats`'s reactive state (one
- * subscription) with `data` filtered; an empty query returns all rows (what the inbox wants).
+ * Filters the loaded (non-archived) inbox rows to those matching a query. A chat always matches when
+ * the term is in its resolved title or participant names. When `contentMatches` is true (the inbox
+ * top-bar), it ALSO matches chats with a message body hit (FTS over the local index, incl. decoded
+ * edited/SMS — debounced), so the inbox filter finds a conversation by something said in it.
+ *
+ * The search page passes `contentMatches: false` for its "Chats" section: there, a chat should only
+ * appear when its NAME/people match (a "jump to this conversation" shortcut). Message-content
+ * matches belong in that page's "Messages" section, where the snippet shows the actual hit — so the
+ * Chats section never lists a chat whose visible preview doesn't explain why it's there.
+ *
+ * Passes through `useChats`'s reactive state (one subscription) with `data` filtered; an empty query
+ * returns all rows (what the inbox wants).
  */
-export function useChatMatches(query: string): ReactiveState<InboxRow[]> {
+export function useChatMatches(
+  query: string,
+  opts?: { contentMatches?: boolean },
+): ReactiveState<InboxRow[]> {
+  const contentMatches = opts?.contentMatches ?? true;
   const state = useChats();
   const [msgMatchGuids, setMsgMatchGuids] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const term = query.trim();
-    if (term.length < 2) {
+    if (!contentMatches || term.length < 2) {
       setMsgMatchGuids(new Set());
       return;
     }
@@ -37,7 +47,7 @@ export function useChatMatches(query: string): ReactiveState<InboxRow[]> {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [query]);
+  }, [query, contentMatches]);
 
   const data = useMemo(() => {
     const all = state.data ?? [];

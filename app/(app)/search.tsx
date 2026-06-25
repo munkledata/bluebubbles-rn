@@ -40,7 +40,9 @@ export default function SearchScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const [q, setQ] = useState('');
   const { results, loading } = useSearch(q);
-  const matched = useChatMatches(q);
+  // Chats section = NAME/people matches only (jump to a conversation). Message-content matches show
+  // in the Messages section below, with the snippet — so the Chats list never looks irrelevant.
+  const matched = useChatMatches(q, { contentMatches: false });
   const searching = q.trim().length >= 2;
   const chatRows = (searching ? (matched.data ?? []) : []).slice(0, MAX_CHAT_RESULTS);
 
