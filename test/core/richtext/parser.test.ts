@@ -1,4 +1,4 @@
-import { hasMention, parseAttributedRuns } from '@core/richtext';
+import { hasMention, parseAttributedRuns, plainTextFromAttributedBody } from '@core/richtext';
 
 // A realistic BlueBubbles attributedBody for "Hey @Alice!" where "@Alice" is a
 // confirmed mention. range is NSRange [start, length]; the only meaningful
@@ -88,5 +88,31 @@ describe('parseAttributedRuns', () => {
       { string: 'two', runs: [] },
     ]);
     expect(parseAttributedRuns(body, '')).toEqual([{ text: 'one' }, { text: 'two' }]);
+  });
+});
+
+describe('plainTextFromAttributedBody', () => {
+  it('returns empty for missing or malformed input', () => {
+    expect(plainTextFromAttributedBody(null)).toBe('');
+    expect(plainTextFromAttributedBody(undefined)).toBe('');
+    expect(plainTextFromAttributedBody('{bad json')).toBe('');
+  });
+
+  it('recovers the plain words (the searchable/preview text)', () => {
+    const body = JSON.stringify([{ string: 'see you at the birthday party', runs: [] }]);
+    expect(plainTextFromAttributedBody(body)).toBe('see you at the birthday party');
+  });
+
+  it('drops inline-attachment placeholders and U+FFFC, then trims', () => {
+    const body = JSON.stringify([
+      {
+        string: '￼ look at this',
+        runs: [
+          { range: [0, 1], attributes: { __kIMFileTransferGUIDAttributeName: 'att' } },
+          { range: [1, 13] },
+        ],
+      },
+    ]);
+    expect(plainTextFromAttributedBody(body)).toBe('look at this');
   });
 });

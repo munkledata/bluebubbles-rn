@@ -1,11 +1,12 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { refreshInbox } from '@/services';
 import { useChats } from '@features/conversations/useChats';
-import type { InboxRow } from '@db/repositories';
+import { getDatabase } from '@db/database';
+import { searchChatGuidsByMessage, type InboxRow } from '@db/repositories';
 import { buildPreview, resolveTitle } from '@utils';
 import { Screen, TextField, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
@@ -24,6 +25,32 @@ export function ConversationListScreen(): React.JSX.Element {
   // empty bodies (e.g. SMS/edited text) fill in. The list sits below the fixed header → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
 
+  // Chats whose MESSAGE CONTENT matches the term (full history, incl. decoded edited/SMS), so the
+  // top-bar finds the same things as the search page — not just chat names + the latest preview.
+  // Debounced FTS over the local index; the instant name filter below runs regardless.
+  const [msgMatchGuids, setMsgMatchGuids] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const term = search.trim();
+    if (term.length < 2) {
+      setMsgMatchGuids(new Set());
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchChatGuidsByMessage(getDatabase(), term)
+        .then((guids) => {
+          if (!cancelled) setMsgMatchGuids(new Set(guids));
+        })
+        .catch(() => {
+          if (!cancelled) setMsgMatchGuids(new Set());
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [search]);
+
   const rows = useMemo(() => {
     const all = data ?? [];
     const term = search.trim().toLowerCase();
@@ -31,9 +58,9 @@ export function ConversationListScreen(): React.JSX.Element {
     return all.filter((r) => {
       const haystack =
         `${resolveTitle(r)} ${r.participantNames ?? ''} ${buildPreview(r)}`.toLowerCase();
-      return haystack.includes(term);
+      return haystack.includes(term) || msgMatchGuids.has(r.guid);
     });
-  }, [data, search]);
+  }, [data, search, msgMatchGuids]);
 
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(
@@ -155,7 +182,11 @@ export function ConversationListScreen(): React.JSX.Element {
             ) : (
               <View style={styles.center}>
                 <Text style={[styles.emptyText, { color: theme.color.secondaryLabel }]}>
-                  {error ? `Couldn’t load conversations` : search ? 'No matches' : 'No Conversations'}
+                  {error
+                    ? `Couldn’t load conversations`
+                    : search
+                      ? 'No matches'
+                      : 'No Conversations'}
                 </Text>
               </View>
             )

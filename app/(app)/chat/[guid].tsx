@@ -65,21 +65,41 @@ const VoiceRecorder = lazy(() =>
  * conversation — every `useTheme()` below (including Screen) sees the chat override.
  */
 export default function ChatScreen(): React.JSX.Element {
-  const { guid } = useLocalSearchParams<{ guid: string }>();
+  // `focus`/`focusDate` arrive when opened from a search hit — scroll to + highlight that message.
+  const { guid, focus, focusDate } = useLocalSearchParams<{
+    guid: string;
+    focus?: string;
+    focusDate?: string;
+  }>();
   return (
     <ChatThemeProvider guid={guid}>
-      <ChatScreenInner guid={guid} />
+      <ChatScreenInner guid={guid} focusGuid={focus} focusDate={focusDate} />
     </ChatThemeProvider>
   );
 }
 
-function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
+function ChatScreenInner({
+  guid,
+  focusGuid,
+  focusDate,
+}: {
+  guid: string;
+  focusGuid?: string;
+  focusDate?: string;
+}): React.JSX.Element {
   const header = useChatHeader(guid);
   const backgroundUri = useChatBackgroundUri(guid);
   const isGroup = header.data ? isGroupRow(header.data) : false;
-  // ONE message subscription for the whole screen — fed to the list, smart-reply
-  // chips, and the screen-effect trigger (avoids 3× the reactive query work).
-  const { data: messagesData, error: messagesError } = useMessages(guid, 250);
+  // When focusing a search hit, widen the load down to its date (and raise the cap) so it's present
+  // to scroll to; otherwise the normal recent window. ONE message subscription for the whole screen
+  // — fed to the list, smart-reply chips, and the screen-effect trigger (avoids 3× the query work).
+  const sinceDateNum = focusDate ? Number(focusDate) : NaN;
+  const sinceDate = Number.isFinite(sinceDateNum) ? sinceDateNum : undefined;
+  const { data: messagesData, error: messagesError } = useMessages(
+    guid,
+    sinceDate != null ? 1500 : 250,
+    sinceDate,
+  );
   const messages = messagesData ?? [];
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const markedRef = useRef(false);
@@ -349,6 +369,7 @@ function ChatScreenInner({ guid }: { guid: string }): React.JSX.Element {
           hasBackground={!!backgroundUri}
           onLongPressMessage={onLongPressMessage}
           onRefresh={() => ensureChatSynced(guid)}
+          focusGuid={focusGuid}
         />
         {isTyping ? <TypingBubble /> : null}
         <SmartReplyChips messages={messages} onPick={onSend} />

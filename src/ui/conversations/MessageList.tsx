@@ -1,5 +1,5 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
@@ -18,6 +18,8 @@ interface MessageListProps {
   onLongPressMessage?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
   onRefresh?: () => Promise<unknown>;
+  /** A message guid to scroll to + highlight once on open (set when arriving from a search hit). */
+  focusGuid?: string;
 }
 
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
@@ -30,6 +32,7 @@ export function MessageList({
   hasBackground,
   onLongPressMessage,
   onRefresh,
+  focusGuid,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
@@ -65,6 +68,25 @@ export function MessageList({
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 1600);
   }, []);
+
+  // Opened from a search hit → once the target row is loaded, scroll to + highlight it (once per
+  // target). Runs when `rows` first include the guid (loads are async). The timer is intentionally
+  // NOT cleared on a reactive `rows` update — that mustn't cancel the one-shot jump; `focusedRef`
+  // bounds it to one scroll per target. If the target is outside the loaded window, this no-ops and
+  // the chat just opens normally.
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusGuid || focusedRef.current === focusGuid) return;
+    const index = rows.findIndex((m) => m.guid === focusGuid);
+    if (index < 0) return;
+    focusedRef.current = focusGuid;
+    setTimeout(() => {
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+      setHighlightGuid(focusGuid);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlightGuid(null), 2200);
+    }, 350);
+  }, [focusGuid, rows]);
 
   return (
     <View style={styles.flex}>

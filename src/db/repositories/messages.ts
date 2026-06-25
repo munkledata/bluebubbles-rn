@@ -1,5 +1,6 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Attachment, Message } from '@core/models';
+import { plainTextFromAttributedBody } from '@core/richtext';
 import { chatHandles, chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
 import { dedupeBy, toFtsQuery } from './_shared';
@@ -29,41 +30,54 @@ export async function upsertMessages(
   const rows = await db
     .insert(messages)
     .values(
-      withChat.map(({ m, chatId }) => ({
-        guid: m.guid,
-        originalRowId: m.originalROWID ?? null,
-        chatId,
-        handleId: m.handle?.address ? (handleIdByAddress.get(m.handle.address) ?? null) : null,
-        text: m.text ?? null,
-        subject: m.subject ?? null,
-        attributedBody: m.attributedBody ? JSON.stringify(m.attributedBody) : null,
-        isFromMe: m.isFromMe ?? false,
-        dateCreated: m.dateCreated ?? null,
-        dateRead: m.dateRead ?? null,
-        dateDelivered: m.dateDelivered ?? null,
-        dateEdited: m.dateEdited ?? null,
-        dateRetracted: m.dateRetracted ?? null,
-        // The server omits `hasAttachments`; infer it from the hydrated attachments array so the
-        // flag stays accurate for reply-quote previews (the image read path no longer relies on it).
-        hasAttachments: m.hasAttachments ?? (m.attachments?.length ?? 0) > 0,
-        associatedMessageGuid: m.associatedMessageGuid ?? null,
-        associatedMessageType: m.associatedMessageType ?? null,
-        threadOriginatorGuid: m.threadOriginatorGuid ?? null,
-        expressiveSendStyleId: m.expressiveSendStyleId ?? null,
-        error: m.error ?? 0,
-        // NULL (not false) when the event omits the flag, so the COALESCE on conflict
-        // (below) can keep a previously-stored `true` instead of being handed a 0 that
-        // would mask the real value. Consumers treat NULL as falsy, same as false.
-        wasDeliveredQuietly: m.wasDeliveredQuietly ?? null,
-        didNotifyRecipient: m.didNotifyRecipient ?? null,
-      })),
+      withChat.map(({ m, chatId }) => {
+        // Edited and SMS messages arrive with an empty `text` column — their body lives in the
+        // attributedBody typedstream. Decode it into `text` so the message is full-text searchable
+        // (FTS indexes only `text`) and previews/replies show the words. The server-side decode now
+        // populates `m.text` directly; this is the local fallback for anything it didn't.
+        const attributedBody = m.attributedBody ? JSON.stringify(m.attributedBody) : null;
+        const text =
+          m.text && m.text.length > 0
+            ? m.text
+            : plainTextFromAttributedBody(attributedBody) || null;
+        return {
+          guid: m.guid,
+          originalRowId: m.originalROWID ?? null,
+          chatId,
+          handleId: m.handle?.address ? (handleIdByAddress.get(m.handle.address) ?? null) : null,
+          text,
+          subject: m.subject ?? null,
+          attributedBody,
+          isFromMe: m.isFromMe ?? false,
+          dateCreated: m.dateCreated ?? null,
+          dateRead: m.dateRead ?? null,
+          dateDelivered: m.dateDelivered ?? null,
+          dateEdited: m.dateEdited ?? null,
+          dateRetracted: m.dateRetracted ?? null,
+          // The server omits `hasAttachments`; infer it from the hydrated attachments array so the
+          // flag stays accurate for reply-quote previews (the image read path no longer relies on it).
+          hasAttachments: m.hasAttachments ?? (m.attachments?.length ?? 0) > 0,
+          associatedMessageGuid: m.associatedMessageGuid ?? null,
+          associatedMessageType: m.associatedMessageType ?? null,
+          threadOriginatorGuid: m.threadOriginatorGuid ?? null,
+          expressiveSendStyleId: m.expressiveSendStyleId ?? null,
+          error: m.error ?? 0,
+          // NULL (not false) when the event omits the flag, so the COALESCE on conflict
+          // (below) can keep a previously-stored `true` instead of being handed a 0 that
+          // would mask the real value. Consumers treat NULL as falsy, same as false.
+          wasDeliveredQuietly: m.wasDeliveredQuietly ?? null,
+          didNotifyRecipient: m.didNotifyRecipient ?? null,
+        };
+      }),
     )
     .onConflictDoUpdate({
       target: messages.guid,
       set: {
-        // An EDIT empties the text column and re-fills it server-side from the attributedBody
-        // typedstream, so `excluded.text` carries the new body on a re-sync — already updated here.
-        text: sql`excluded.text`,
+        // An EDIT empties the text column and re-fills it (server-side decode, or our local
+        // attributedBody fallback above), so `excluded.text` carries the new body on a re-sync.
+        // COALESCE-preserve so a later event that legitimately omits text (e.g. a delivery/read
+        // receipt) can't blank out a good body — text is never intentionally cleared to empty.
+        text: sql`COALESCE(NULLIF(excluded.text, ''), ${messages.text})`,
         dateRead: sql`excluded.date_read`,
         dateDelivered: sql`excluded.date_delivered`,
         dateEdited: sql`excluded.date_edited`,
@@ -96,7 +110,10 @@ export async function upsertMessages(
     if (handleId != null) participantLinks.set(`${chatId}:${handleId}`, { chatId, handleId });
   }
   if (participantLinks.size > 0) {
-    await db.insert(chatHandles).values([...participantLinks.values()]).onConflictDoNothing();
+    await db
+      .insert(chatHandles)
+      .values([...participantLinks.values()])
+      .onConflictDoNothing();
   }
 
   // Upsert nested attachments now that we have message ids.
@@ -151,6 +168,12 @@ export interface SearchResultRow {
   id: number;
   guid: string;
   text: string | null;
+  /**
+   * An FTS5 snippet centered on the match, with the matched term(s) wrapped in U+0002…U+0003 so the
+   * UI can highlight them. This is what to display — the raw `text` start may not contain the match
+   * (the word can be deep in a long message), which looks like a wrong result.
+   */
+  snippet: string | null;
   dateCreated: number | null;
   isFromMe: number;
   chatGuid: string;
@@ -170,13 +193,16 @@ export async function searchMessagesEnriched(
 ): Promise<SearchResultRow[]> {
   const match = toFtsQuery(queryText);
   if (!match) return [];
+  // `snippet()` needs the FTS table referenced by name (not an alias), so this query joins on
+  // `messages_fts` directly. char(2)/char(3) mark the matched tokens for the UI to bold.
   return db.all<SearchResultRow>(sql`
     SELECT m.id, m.guid, m.text, m.date_created AS dateCreated, m.is_from_me AS isFromMe,
+           snippet(messages_fts, 0, char(2), char(3), '…', 12) AS snippet,
            c.guid AS chatGuid, c.display_name AS chatDisplayName,
            c.chat_identifier AS chatIdentifier,
            COALESCE(h.display_name, h.address) AS senderName
-    FROM messages_fts f
-    JOIN messages m ON m.id = f.rowid
+    FROM messages_fts
+    JOIN messages m ON m.id = messages_fts.rowid
     JOIN chats c ON c.id = m.chat_id
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE messages_fts MATCH ${match}
@@ -229,14 +255,19 @@ export interface MessageRow {
   senderService: string | null;
 }
 
-/** Messages for a chat, newest-first (the inverted list wants index 0 = newest). */
+/** Messages for a chat, newest-first (the inverted list wants index 0 = newest).
+ *  `sinceDate` widens the load downward (>= that date) so a search/jump target that's older than
+ *  the default window is included — capped by `limit`, so a very old target in a very active chat
+ *  may still fall outside it (the caller degrades gracefully to no-scroll). */
 export async function listMessagesWithSenders(
   db: AppDatabase,
   chatId: number,
   limit = 100,
   beforeDate?: number,
+  sinceDate?: number,
 ): Promise<MessageRow[]> {
   const cursor = beforeDate != null ? sql`AND m.date_created < ${beforeDate}` : sql``;
+  const floor = sinceDate != null ? sql`AND m.date_created >= ${sinceDate}` : sql``;
   return db.all<MessageRow>(sql`
     SELECT
       m.id, m.guid, m.chat_id AS chatId, m.handle_id AS handleId,
@@ -257,11 +288,35 @@ export async function listMessagesWithSenders(
       h.service AS senderService
     FROM messages m
     LEFT JOIN handles h ON h.id = m.handle_id
-    WHERE m.chat_id = ${chatId} ${cursor}
+    WHERE m.chat_id = ${chatId} ${cursor} ${floor}
       AND m.associated_message_type IS NULL
     ORDER BY m.date_created DESC, m.id DESC
     LIMIT ${limit}
   `);
+}
+
+/**
+ * Distinct chat GUIDs that have at least one message matching the FTS query. Powers the inbox
+ * top-bar so it filters chats by message CONTENT (incl. decoded edited/SMS text), keeping it
+ * consistent with the dedicated search page instead of matching only chat names + the latest preview.
+ */
+export async function searchChatGuidsByMessage(
+  db: AppDatabase,
+  queryText: string,
+  limit = 300,
+): Promise<string[]> {
+  const match = toFtsQuery(queryText);
+  if (!match) return [];
+  const rows = await db.all<{ guid: string }>(sql`
+    SELECT DISTINCT c.guid AS guid
+    FROM messages_fts f
+    JOIN messages m ON m.id = f.rowid
+    JOIN chats c ON c.id = m.chat_id
+    WHERE messages_fts MATCH ${match}
+      AND m.associated_message_type IS NULL
+    LIMIT ${limit}
+  `);
+  return rows.map((r: { guid: string }) => r.guid);
 }
 
 export interface MessagePreview {

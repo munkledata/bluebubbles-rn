@@ -80,3 +80,19 @@ export function parseAttributedRuns(
 export function hasMention(runs: TextRun[]): boolean {
   return runs.some((r) => r.mention);
 }
+
+/**
+ * Plain text recovered from a stored `attributedBody` JSON — the message's words with
+ * inline-attachment placeholders dropped and U+FFFC stripped. Returns '' when there's no
+ * real text. Used to populate `messages.text` (and thus the FTS index) for edited/SMS
+ * messages, whose `text` column is empty because their body lives only in attributedBody.
+ */
+export function plainTextFromAttributedBody(attributedBodyJson: string | null | undefined): string {
+  if (!attributedBodyJson) return '';
+  return parseAttributedRuns(attributedBodyJson, '')
+    .filter((r) => !r.attachment)
+    .map((r) => r.text)
+    .join('')
+    .replace(/￼/g, '')
+    .trim();
+}

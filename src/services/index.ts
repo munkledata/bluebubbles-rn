@@ -10,10 +10,13 @@ import {
   getChatIdByGuid,
   getNewestReceivedGuid,
   getSyncMarker,
+  kvGet,
+  kvSet,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
+import { plainTextFromAttributedBody } from '@core/richtext';
 import type { AppDatabase } from '@db/types';
 import { ExpoSecureVault } from '@native/secureVault';
 import { useLockStore } from '@state/lockStore';
@@ -177,12 +180,47 @@ export const devPush = new DevPushTransport();
 devPush.start(dispatchRealtimeEvent);
 
 /** Load stored credentials from the vault at boot and resolve the initial route. */
+/**
+ * One-time: make already-cached edited/SMS messages full-text searchable by decoding their
+ * attributedBody into the empty `text` column (FTS indexes only `text`). Guarded by a kv flag so
+ * it runs once; fire-and-forget so it never blocks boot, and a failure leaves the flag unset to
+ * retry next launch. Newly synced messages get this at upsert time, so this only backfills history.
+ */
+const SEARCH_BACKFILL_FLAG = 'maintenance.searchTextBackfill.v1';
+async function runSearchTextBackfillOnce(): Promise<void> {
+  try {
+    const db = getDatabase();
+    if ((await kvGet(db, SEARCH_BACKFILL_FLAG)) === 'done') return;
+    // Use the RAW handle so this bulk pass doesn't trigger a reactive flush per row (FTS triggers
+    // still fire on the UPDATE); flush once at the end. Only edited/SMS rows have empty text.
+    const raw = getRawDatabase();
+    const res = await raw.execute(
+      `SELECT id, attributed_body AS ab FROM messages WHERE (text IS NULL OR text = '') AND attributed_body IS NOT NULL`,
+    );
+    const rows = (res.rows ?? []) as Array<{ id: number; ab: string | null }>;
+    let fixed = 0;
+    for (const r of rows) {
+      const text = plainTextFromAttributedBody(r.ab);
+      if (!text) continue;
+      await raw.execute(`UPDATE messages SET text = ? WHERE id = ?`, [text, r.id]);
+      fixed += 1;
+    }
+    if (fixed > 0) raw.flushPendingReactiveQueries();
+    await kvSet(db, SEARCH_BACKFILL_FLAG, 'done');
+    if (fixed > 0) logger.info('[search] backfilled searchable text', { fixed });
+  } catch (e) {
+    logger.warn('[search] search-text backfill skipped', e);
+  }
+}
+
 export async function hydrateSession(): Promise<void> {
   // Open the encrypted store first so cached data is available offline. A
   // failure must not block reaching the setup UI, but it MUST be visible.
   await ensureDatabase().catch((e: unknown) => {
     logger.error('[db] initialization failed', e);
   });
+  // Make older edited/SMS messages searchable (one-time, background — never blocks boot).
+  void runSearchTextBackfillOnce();
 
   const [origin, password] = await Promise.all([
     vault.get('serverAddress'),
