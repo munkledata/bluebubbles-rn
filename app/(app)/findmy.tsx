@@ -24,14 +24,14 @@ export default function FindMyScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { devices, friends, loading, refreshing, error, load, refresh } = useFindMyStore();
-  const [tab, setTab] = useState<'devices' | 'people'>('devices');
+  const { devices, friends, items, loading, refreshing, error, load, refresh } = useFindMyStore();
+  const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const rows = tab === 'devices' ? devices : friends;
+  const rows = tab === 'devices' ? devices : tab === 'items' ? items : friends;
 
   return (
     <Screen>
@@ -53,7 +53,7 @@ export default function FindMyScreen(): React.JSX.Element {
       </View>
 
       <View style={[styles.tabs, { borderBottomColor: theme.color.separator }]}>
-        {(['devices', 'people'] as const).map((t) => (
+        {(['devices', 'items', 'people'] as const).map((t) => (
           <Pressable key={t} onPress={() => setTab(t)} style={styles.tab}>
             <Text
               style={[
@@ -61,7 +61,7 @@ export default function FindMyScreen(): React.JSX.Element {
                 { color: tab === t ? theme.color.tint : theme.color.secondaryLabel },
               ]}
             >
-              {t === 'devices' ? 'Devices' : 'People'}
+              {t === 'devices' ? 'Devices' : t === 'items' ? 'Items' : 'People'}
             </Text>
           </Pressable>
         ))}
@@ -82,12 +82,20 @@ export default function FindMyScreen(): React.JSX.Element {
         ) : null}
         {!error && rows.length === 0 ? (
           <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
-            {loading ? 'Loading…' : tab === 'devices' ? 'No devices' : 'No people'}
+            {loading
+              ? 'Loading…'
+              : tab === 'devices'
+                ? 'No devices'
+                : tab === 'items'
+                  ? 'No items'
+                  : 'No people'}
           </Text>
         ) : null}
         {tab === 'devices'
           ? devices.map((d) => <DeviceRow key={d.id} device={d} />)
-          : friends.map((f) => <FriendRow key={f.id} friend={f} />)}
+          : tab === 'items'
+            ? items.map((d) => <DeviceRow key={d.id} device={d} />)
+            : friends.map((f) => <FriendRow key={f.id} friend={f} />)}
       </ScrollView>
     </Screen>
   );

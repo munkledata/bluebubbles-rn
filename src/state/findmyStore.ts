@@ -70,10 +70,30 @@ const FIXTURE_FRIENDS: FindMyFriend[] = [
     lastUpdated: null,
   },
 ];
+const FIXTURE_ITEMS: FindMyDevice[] = [
+  {
+    id: 'i1',
+    name: 'Keys',
+    batteryLevel: null,
+    latitude: 37.7849,
+    longitude: -122.4094,
+    address: 'Mission District, SF',
+  },
+  {
+    id: 'i2',
+    name: 'Backpack',
+    batteryLevel: null,
+    latitude: null,
+    longitude: null,
+    address: null,
+  },
+];
 
 interface FindMyState {
   devices: FindMyDevice[];
   friends: FindMyFriend[];
+  /** Find My items / AirTags (the Gator items/devices split). Reuse the device shape + normalizer. */
+  items: FindMyDevice[];
   loading: boolean;
   /** A server-side location refresh (the POST /refresh endpoints) is in flight. */
   refreshing: boolean;
@@ -90,23 +110,33 @@ const isDev = isDevServer;
 export const useFindMyStore = create<FindMyState>((set) => ({
   devices: [],
   friends: [],
+  items: [],
   loading: false,
   refreshing: false,
   error: null,
   load: async () => {
     if (isDev()) {
-      set({ devices: FIXTURE_DEVICES, friends: FIXTURE_FRIENDS, loading: false, error: null });
+      set({
+        devices: FIXTURE_DEVICES,
+        friends: FIXTURE_FRIENDS,
+        items: FIXTURE_ITEMS,
+        loading: false,
+        error: null,
+      });
       return;
     }
     set({ loading: true, error: null });
     try {
-      const [devRaw, friRaw] = await Promise.all([
+      const [devRaw, friRaw, itemRaw] = await Promise.all([
         findMyApi.getDevices(http),
         findMyApi.getFriends(http),
+        findMyApi.getItems(http),
       ]);
       set({
         devices: devRaw.map(normalizeDevice),
         friends: friRaw.map(normalizeFriend),
+        // Items share the device wire shape, so they use the same normalizer.
+        items: itemRaw.map(normalizeDevice),
         loading: false,
       });
     } catch {
@@ -115,20 +145,28 @@ export const useFindMyStore = create<FindMyState>((set) => ({
   },
   refresh: async () => {
     if (isDev()) {
-      set({ devices: FIXTURE_DEVICES, friends: FIXTURE_FRIENDS, refreshing: false, error: null });
+      set({
+        devices: FIXTURE_DEVICES,
+        friends: FIXTURE_FRIENDS,
+        items: FIXTURE_ITEMS,
+        refreshing: false,
+        error: null,
+      });
       return;
     }
     set({ refreshing: true, error: null });
     try {
       // POST /refresh asks the server to re-poll iCloud (falls back to a GET if the
       // server returns nothing); this is what actually updates stale locations.
-      const [devRaw, friRaw] = await Promise.all([
+      const [devRaw, friRaw, itemRaw] = await Promise.all([
         findMyApi.refreshDevices(http),
         findMyApi.refreshFriends(http),
+        findMyApi.refreshItems(http),
       ]);
       set({
         devices: devRaw.map(normalizeDevice),
         friends: friRaw.map(normalizeFriend),
+        items: itemRaw.map(normalizeDevice),
         refreshing: false,
       });
     } catch {

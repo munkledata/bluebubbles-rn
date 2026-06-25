@@ -7,6 +7,9 @@ import type { HttpClient } from '../http';
 // normalized in core/findmy (shape varies across versions).
 const DevicesResponse = z.object({ devices: z.array(z.unknown()).nullish() }).passthrough();
 const FriendsResponse = z.object({ friends: z.array(z.unknown()).nullish() }).passthrough();
+// Items / AirTags — Gator's /findmy/items (added for the items/devices split). Same opaque,
+// version-tolerant element shape as devices (normalized via core/findmy).
+const ItemsResponse = z.object({ items: z.array(z.unknown()).nullish() }).passthrough();
 
 export async function getDevices(http: HttpClient): Promise<unknown[]> {
   return (await http.get('/findmy/devices', DevicesResponse)).devices ?? [];
@@ -14,6 +17,16 @@ export async function getDevices(http: HttpClient): Promise<unknown[]> {
 
 export async function getFriends(http: HttpClient): Promise<unknown[]> {
   return (await http.get('/findmy/friends', FriendsResponse)).friends ?? [];
+}
+
+export async function getItems(http: HttpClient): Promise<unknown[]> {
+  // Tolerate a server that predates the items/devices split: `/findmy/items` 404s there, and we must
+  // NOT fail the combined devices+friends+items load over it — degrade to no items.
+  try {
+    return (await http.get('/findmy/items', ItemsResponse)).items ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -29,4 +42,9 @@ export async function refreshDevices(http: HttpClient): Promise<unknown[]> {
 export async function refreshFriends(http: HttpClient): Promise<unknown[]> {
   const res = await http.post('/findmy/friends/refresh', FriendsResponse, { json: {} });
   return (res.friends ?? []).length > 0 ? (res.friends ?? []) : getFriends(http);
+}
+
+/** "Refresh" items — no `/findmy/items/refresh` route exists, so GET (degrades gracefully). */
+export async function refreshItems(http: HttpClient): Promise<unknown[]> {
+  return getItems(http);
 }
