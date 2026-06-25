@@ -1,13 +1,12 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { refreshInbox } from '@/services';
-import { useChats } from '@features/conversations/useChats';
-import { getDatabase } from '@db/database';
-import { searchChatGuidsByMessage, type InboxRow } from '@db/repositories';
-import { buildPreview, resolveTitle } from '@utils';
+import { useChatMatches } from '@features/search/useChatMatches';
+import type { InboxRow } from '@db/repositories';
+import { resolveTitle } from '@utils';
 import { Screen, TextField, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { ChatActionsSheet, type ChatActionTarget } from './ChatActionsSheet';
@@ -19,48 +18,13 @@ export function ConversationListScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { data, isLoading, error } = useChats();
   const [search, setSearch] = useState('');
-  // Pull-to-refresh: incremental sync + a paced re-pull of each chat's recent messages, so stale/
-  // empty bodies (e.g. SMS/edited text) fill in. The list sits below the fixed header → no offset.
+  // Matched chats come from the SHARED hook the search page also uses, so the two searches return
+  // the SAME set (resolved name/participants OR message content, incl. decoded edited/SMS text).
+  const { data, isLoading, error } = useChatMatches(search);
+  const rows = data ?? [];
+  // Pull-to-refresh: incremental sync. The list sits below the fixed header → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
-
-  // Chats whose MESSAGE CONTENT matches the term (full history, incl. decoded edited/SMS), so the
-  // top-bar finds the same things as the search page — not just chat names + the latest preview.
-  // Debounced FTS over the local index; the instant name filter below runs regardless.
-  const [msgMatchGuids, setMsgMatchGuids] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    const term = search.trim();
-    if (term.length < 2) {
-      setMsgMatchGuids(new Set());
-      return;
-    }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      searchChatGuidsByMessage(getDatabase(), term)
-        .then((guids) => {
-          if (!cancelled) setMsgMatchGuids(new Set(guids));
-        })
-        .catch(() => {
-          if (!cancelled) setMsgMatchGuids(new Set());
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [search]);
-
-  const rows = useMemo(() => {
-    const all = data ?? [];
-    const term = search.trim().toLowerCase();
-    if (!term) return all;
-    return all.filter((r) => {
-      const haystack =
-        `${resolveTitle(r)} ${r.participantNames ?? ''} ${buildPreview(r)}`.toLowerCase();
-      return haystack.includes(term) || msgMatchGuids.has(r.guid);
-    });
-  }, [data, search, msgMatchGuids]);
 
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(

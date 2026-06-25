@@ -3,9 +3,11 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { ChatNameMatch, SearchResultRow } from '@db/repositories';
+import type { SearchResultRow } from '@db/repositories';
+import { useChatMatches } from '@features/search/useChatMatches';
 import { useSearch } from '@features/search/useSearch';
 import { Screen, useTheme } from '@ui';
+import { ConversationTile } from '@ui/conversations/ConversationTile';
 import { formatChatDate, resolveTitle } from '@utils';
 
 // The FTS snippet wraps matched tokens in these control chars (see searchMessagesEnriched). Built
@@ -14,22 +16,39 @@ const MARK_START = String.fromCharCode(2); // U+0002
 const MARK_END = String.fromCharCode(3); // U+0003
 const STRIP_MARKS = new RegExp('[' + MARK_START + MARK_END + ']', 'g');
 const MARK_RE = new RegExp(MARK_START + '([^' + MARK_END + ']*)' + MARK_END, 'g');
+// Cap the chat list on this page so the (non-virtualized) header stays light; the matching set is
+// identical to the inbox — this just bounds how many tiles render above the message hits.
+const MAX_CHAT_RESULTS = 50;
 
+// The chat title for a message hit, resolved exactly like the inbox so a group shows its
+// name/participants (never a raw chat-guid) and a 1:1 shows the contact name. resolveTitle ignores
+// style/participantCount, so a placeholder count is fine.
 function chatTitle(r: SearchResultRow): string {
-  return r.chatDisplayName || r.chatIdentifier || r.senderName || 'Unknown';
+  return resolveTitle({
+    customName: r.chatCustomName,
+    displayName: r.chatDisplayName,
+    chatIdentifier: r.chatIdentifier,
+    participantNames: r.chatParticipantNames,
+    style: r.chatStyle,
+    participantCount: 0,
+  });
 }
 
 /**
- * Unified search: chat matches (by name / contact / number) AND message full-text hits
- * (incl. decoded edited/SMS text) — the same coverage as the inbox top-bar. Each message hit shows
- * a snippet centered on the match with the term bolded, and tapping it scrolls to that message.
+ * Unified search: a Chats section (the SAME matched chats the inbox top-bar shows, via the shared
+ * useChatMatches) and a Messages section (full-text hits, incl. decoded edited/SMS text). Each
+ * message hit shows a snippet centered on the match with the term bolded, and tapping it scrolls to
+ * that message.
  */
 export default function SearchScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [q, setQ] = useState('');
-  const { chats, results, loading } = useSearch(q);
+  const { results, loading } = useSearch(q);
+  const matched = useChatMatches(q);
+  const searching = q.trim().length >= 2;
+  const chatRows = (searching ? (matched.data ?? []) : []).slice(0, MAX_CHAT_RESULTS);
 
   const openChat = (guid: string): void => {
     router.push(`/chat/${encodeURIComponent(guid)}`);
@@ -69,34 +88,16 @@ export default function SearchScreen(): React.JSX.Element {
     return out;
   };
 
-  // Chat matches render above the message hits (FlashList header) — few in number, tap to open.
+  // Matched chats (identical to the inbox) render above the message hits, as the same tiles.
   const listHeader =
-    chats.length > 0 ? (
+    chatRows.length > 0 || results.length > 0 ? (
       <View>
-        {sectionLabel('Chats')}
-        {chats.map((c: ChatNameMatch) => (
-          <Pressable
-            key={c.guid}
-            style={[styles.row, { borderBottomColor: theme.color.separator }]}
-            onPress={() => openChat(c.guid)}
-          >
-            <View style={styles.rowText}>
-              <Text numberOfLines={1} style={[styles.title, { color: theme.color.label }]}>
-                {resolveTitle(c)}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={[styles.snippet, { color: theme.color.secondaryLabel }]}
-              >
-                {c.participantNames ?? c.chatIdentifier ?? ''}
-              </Text>
-            </View>
-          </Pressable>
+        {chatRows.length > 0 ? sectionLabel('Chats') : null}
+        {chatRows.map((c) => (
+          <ConversationTile key={c.guid} row={c} onPress={openChat} />
         ))}
         {results.length > 0 ? sectionLabel('Messages') : null}
       </View>
-    ) : results.length > 0 ? (
-      sectionLabel('Messages')
     ) : null;
 
   return (
@@ -153,7 +154,7 @@ export default function SearchScreen(): React.JSX.Element {
           </Pressable>
         )}
         ListEmptyComponent={
-          chats.length > 0 ? null : (
+          chatRows.length > 0 ? null : (
             <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
               {q.trim().length < 2
                 ? 'Type to search your messages & chats'

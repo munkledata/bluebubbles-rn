@@ -1,7 +1,6 @@
 import { Chat, Message } from '@core/models';
 import {
   searchChatGuidsByMessage,
-  searchChatsByName,
   searchMessagesEnriched,
   upsertChats,
   upsertHandles,
@@ -95,19 +94,15 @@ describe('searchChatGuidsByMessage (inbox top-bar message-content match)', () =>
   });
 });
 
-describe('searchChatsByName (name / participant match the FTS cannot do)', () => {
-  it('matches the chat title', async () => {
+describe('message hit carries chat fields for resolveTitle (no raw chat-guid titles)', () => {
+  it('returns custom/display name, identifier, style + participant names for the hit chat', async () => {
     const { db } = await createTestDb();
     await seed(db);
-    const guids = (await searchChatsByName(db, 'mom')).map((c) => c.guid);
-    expect(guids).toContain('c-mom');
-    expect(guids).not.toContain('c-work');
-  });
-
-  it('matches a participant contact name and a raw address', async () => {
-    const { db } = await createTestDb();
-    await seed(db);
-    expect((await searchChatsByName(db, 'boss')).map((c) => c.guid)).toContain('c-work');
-    expect((await searchChatsByName(db, 'a@b.com')).map((c) => c.guid)).toContain('c-mom');
+    const [hit] = await searchMessagesEnriched(db, 'birthday');
+    expect(hit).toBeDefined();
+    // The fields resolveTitle needs are present so a group never renders as a raw chat-guid.
+    expect(hit).toHaveProperty('chatCustomName');
+    expect(hit).toHaveProperty('chatStyle');
+    expect(hit!.chatParticipantNames).toContain('Mom');
   });
 });

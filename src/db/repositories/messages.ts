@@ -177,8 +177,13 @@ export interface SearchResultRow {
   dateCreated: number | null;
   isFromMe: number;
   chatGuid: string;
+  // Enough chat fields to run `resolveTitle` so a hit's title matches the inbox (a group shows its
+  // name/participants or "Group", never a raw chat-guid; a 1:1 shows the contact name).
   chatDisplayName: string | null;
+  chatCustomName: string | null;
   chatIdentifier: string | null;
+  chatStyle: number | null;
+  chatParticipantNames: string | null;
   senderName: string | null;
 }
 
@@ -198,8 +203,11 @@ export async function searchMessagesEnriched(
   return db.all<SearchResultRow>(sql`
     SELECT m.id, m.guid, m.text, m.date_created AS dateCreated, m.is_from_me AS isFromMe,
            snippet(messages_fts, 0, char(2), char(3), '…', 12) AS snippet,
-           c.guid AS chatGuid, c.display_name AS chatDisplayName,
-           c.chat_identifier AS chatIdentifier,
+           c.guid AS chatGuid, c.display_name AS chatDisplayName, c.custom_name AS chatCustomName,
+           c.chat_identifier AS chatIdentifier, c.style AS chatStyle,
+           (SELECT group_concat(COALESCE(h2.display_name, h2.address), ', ' ORDER BY h2.id)
+              FROM chat_handles ch JOIN handles h2 ON h2.id = ch.handle_id
+             WHERE ch.chat_id = c.id) AS chatParticipantNames,
            COALESCE(h.display_name, h.address) AS senderName
     FROM messages_fts
     JOIN messages m ON m.id = messages_fts.rowid

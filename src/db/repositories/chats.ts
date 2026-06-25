@@ -264,53 +264,6 @@ export async function listChatsForInbox(
   `);
 }
 
-/** A chat matched by NAME (title/identifier/participant contact name or address). */
-export interface ChatNameMatch {
-  guid: string;
-  customName: string | null;
-  displayName: string | null;
-  chatIdentifier: string | null;
-  style: number | null;
-  participantCount: number;
-  participantNames: string | null;
-}
-
-/**
- * Chats matching a query by NAME — chat title, identifier, or any participant's contact name /
- * phone / email. This is what the message FTS can't do (it only matches message bodies), so the
- * search page runs it alongside the message search to find e.g. "Mom" or a phone number. Returns
- * `resolveTitle`-ready rows; includes archived chats (the search page searches everything).
- */
-export async function searchChatsByName(
-  db: AppDatabase,
-  queryText: string,
-  limit = 20,
-): Promise<ChatNameMatch[]> {
-  const term = queryText.trim().toLowerCase();
-  if (term.length < 1) return [];
-  const like = `%${term}%`;
-  return db.all<ChatNameMatch>(sql`
-    SELECT c.guid, c.custom_name AS customName, c.display_name AS displayName,
-           c.chat_identifier AS chatIdentifier, c.style,
-           (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
-           (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
-              FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-             WHERE ch.chat_id = c.id) AS participantNames
-    FROM chats c
-    WHERE LOWER(COALESCE(c.custom_name, '')) LIKE ${like}
-       OR LOWER(COALESCE(c.display_name, '')) LIKE ${like}
-       OR LOWER(COALESCE(c.chat_identifier, '')) LIKE ${like}
-       OR EXISTS (
-         SELECT 1 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-          WHERE ch.chat_id = c.id
-            AND (LOWER(COALESCE(h.display_name, '')) LIKE ${like}
-                 OR LOWER(COALESCE(h.address, '')) LIKE ${like})
-       )
-    ORDER BY c.is_pinned DESC, c.latest_message_date DESC
-    LIMIT ${limit}
-  `);
-}
-
 // ---- Conversation view -----------------------------------------------------
 
 /** Resolve a chat's local integer id from its server guid. */
