@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Pressable, StyleSheet, Text } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text } from 'react-native';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import type { MessagePreview } from '@db/repositories';
 import { dispatchRealtimeEvent, ensureChatSynced, http, markRead, sendTyping } from '@/services';
@@ -341,6 +341,18 @@ function ChatScreenInner({
     ]);
   };
 
+  // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
+  // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
+  const [kbVisible, setKbVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKbVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   return (
     <Screen>
       {backgroundUri ? (
@@ -356,7 +368,7 @@ function ChatScreenInner({
       ) : null}
       {/* `padding` consumes the keyboard inset under Android edge-to-edge
           (RN 0.85 / Expo SDK 56 default), keeping the composer above the keyboard. */}
-      <KeyboardAvoidingView style={styles.flex} behavior="padding">
+      <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
         <ConversationHeader chatGuid={guid} />
         {messagesError ? (
           <Text style={styles.errorBanner}>Couldn’t load messages. Pull to refresh or reopen.</Text>

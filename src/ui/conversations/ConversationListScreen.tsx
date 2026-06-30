@@ -1,8 +1,9 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -33,6 +34,19 @@ export function ConversationListScreen(): React.JSX.Element {
   const rows = data ?? [];
   // Pull-to-refresh: incremental sync. The list sits below the fixed title → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
+
+  // Only let the KeyboardAvoidingView add padding WHILE the keyboard is up. When it's down the KAV
+  // is disabled (contributes 0), so it can't leave the nav-bar-sized residual gap under the bar that
+  // Android edge-to-edge otherwise produces after a show/hide cycle.
+  const [kbVisible, setKbVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKbVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(
@@ -156,6 +170,7 @@ export function ConversationListScreen(): React.JSX.Element {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior="padding"
+        enabled={kbVisible}
         keyboardVerticalOffset={-insets.bottom}
       >
         {titleRow}

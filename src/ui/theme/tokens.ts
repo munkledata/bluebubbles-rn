@@ -105,7 +105,7 @@ export const themes: Record<ThemeMode, ThemeTokens> = { light: lightTheme, dark:
 
 // ---- Named presets (selectable in Settings) -------------------------------
 
-export type PresetKey = 'ios-light' | 'bright-white' | 'oled-dark' | 'nord';
+export type PresetKey = 'ios-light' | 'bright-white' | 'oled-dark' | 'nord' | 'gator';
 
 export interface ThemePreset {
   key: PresetKey;
@@ -168,6 +168,36 @@ export const nordTheme: ThemeTokens = {
 };
 
 /**
+ * Gator: the app-icon palette — a deep-navy "underwater" background with vivid gator-green
+ * accents, and the icon's blue/green speech bubbles (blue sender, green SMS).
+ */
+export const gatorTheme: ThemeTokens = {
+  mode: 'dark',
+  color: {
+    background: '#0B1A2B',
+    secondaryBackground: '#16293E',
+    groupedBackground: '#0B1A2B',
+    label: '#F2F7FB',
+    secondaryLabel: '#AFC4D6',
+    tertiaryLabel: '#6E869B',
+    separator: '#223850',
+    tint: '#4FC865', // gator green
+    destructive: '#FF5A52',
+    bubble: {
+      senderBackground: '#2E8FE0', // the icon's blue bubble
+      senderText: '#FFFFFF',
+      receivedBackgroundTop: '#1E3147',
+      receivedBackgroundBottom: '#16293E',
+      receivedText: '#EAF2F8',
+      smsBackground: '#3FBF55', // gator green
+    },
+  },
+  spacing,
+  radius,
+  font,
+};
+
+/**
  * The CATALOG of all preset definitions. Keeping every definition here (even disabled ones)
  * means re-enabling a theme is a one-line change — just add its key to {@link PRESET_ORDER}.
  * To add a brand-new theme: define its `ThemeTokens` above, add the key to {@link PresetKey},
@@ -178,6 +208,7 @@ export const PRESETS: Record<PresetKey, ThemePreset> = {
   'bright-white': { key: 'bright-white', label: 'Bright White', tokens: lightTheme },
   'oled-dark': { key: 'oled-dark', label: 'OLED Dark', tokens: darkTheme },
   nord: { key: 'nord', label: 'Nord', tokens: nordTheme },
+  gator: { key: 'gator', label: 'Gator', tokens: gatorTheme },
 };
 
 /**
@@ -186,7 +217,7 @@ export const PRESETS: Record<PresetKey, ThemePreset> = {
  * {@link PRESETS} so you can re-enable any of them by adding its key back to this array, e.g.
  * `['oled-dark', 'nord']`.
  */
-export const PRESET_ORDER: PresetKey[] = ['oled-dark'];
+export const PRESET_ORDER: PresetKey[] = ['oled-dark', 'gator'];
 export const DEFAULT_PRESET: PresetKey = 'oled-dark';
 
 const ACTIVE_PRESETS = new Set<string>(PRESET_ORDER);
