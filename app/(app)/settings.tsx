@@ -10,6 +10,7 @@ import {
   useDownloadSettingsStore,
 } from '@state/downloadSettingsStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { MESSAGES_PER_CHAT_OPTIONS, useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -42,6 +43,10 @@ export default function SettingsScreen(): React.JSX.Element {
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
   const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
+  const messagesPerChat = useSyncSettingsStore((s) => s.messagesPerChat);
+  const setMessagesPerChat = useSyncSettingsStore((s) => s.setMessagesPerChat);
+  const mpcOptions = MESSAGES_PER_CHAT_OPTIONS as readonly number[];
+  const mpcIndex = Math.max(0, mpcOptions.indexOf(messagesPerChat));
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const [syncing, setSyncing] = useState(false);
@@ -57,6 +62,7 @@ export default function SettingsScreen(): React.JSX.Element {
     chatlist: 'chat list conversations compact dense appearance',
     notifications: 'notifications alerts message notifications sound',
     downloads: 'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
+    sync: 'sync messages per chat initial history',
     privacy: 'privacy redacted mode hide previews encryption key rotate security',
     server: 'server management restart logs statistics',
     about: 'about server version macos private api disconnect forget',
@@ -518,6 +524,70 @@ export default function SettingsScreen(): React.JSX.Element {
                     </Text>
                   </Pressable>
                 </View>
+              </View>
+            </View>
+          </>
+        )}
+
+        {match(SECTIONS.sync) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              SYNC
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Messages per Chat
+                </Text>
+                <View style={styles.stepper}>
+                  <Pressable
+                    onPress={() => void setMessagesPerChat(mpcOptions[mpcIndex - 1] ?? 0)}
+                    disabled={mpcIndex <= 0}
+                    hitSlop={8}
+                    accessibilityLabel="Fewer messages per chat"
+                  >
+                    <Text
+                      style={[
+                        styles.stepBtn,
+                        { color: mpcIndex <= 0 ? theme.color.tertiaryLabel : theme.color.tint },
+                      ]}
+                    >
+                      −
+                    </Text>
+                  </Pressable>
+                  <Text style={[styles.stepValue, { color: theme.color.label }]}>
+                    {messagesPerChat === 0 ? 'All' : messagesPerChat}
+                  </Text>
+                  <Pressable
+                    onPress={() =>
+                      void setMessagesPerChat(mpcOptions[mpcIndex + 1] ?? messagesPerChat)
+                    }
+                    disabled={mpcIndex >= mpcOptions.length - 1}
+                    hitSlop={8}
+                    accessibilityLabel="More messages per chat"
+                  >
+                    <Text
+                      style={[
+                        styles.stepBtn,
+                        {
+                          color:
+                            mpcIndex >= mpcOptions.length - 1
+                              ? theme.color.tertiaryLabel
+                              : theme.color.tint,
+                        },
+                      ]}
+                    >
+                      +
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+              <View style={[styles.row, { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                <Text style={{ color: theme.color.tertiaryLabel, fontSize: 13, flex: 1 }}>
+                  Caps the initial sync per chat (full history still loads when you open a chat).
+                </Text>
               </View>
             </View>
           </>

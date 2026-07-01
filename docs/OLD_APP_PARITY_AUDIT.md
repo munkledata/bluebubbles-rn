@@ -51,7 +51,16 @@ done.
   - **Chat List:** _Compact Conversation List_ (denser tiles). _(chat-list-settings)_
   - **Notifications:** _Message Notifications_ global toggle (gates message notifications foreground + headless; calls/reminders unaffected). _(notifications-settings)_
 
-**Still open** (need native rebuild config, server work, or on-device gesture verification): swipe actions on tiles (needs app-wide `GestureHandlerRootView` + recycling-safe swipeables — deferred to avoid shipping an untested app-wide gesture change blind), real-time Find My socket location (server events), Android SEND share-target (new native module + intent filters + rebuild), onboarding sync-settings + sync-progress + permissions screens (multi-screen flow), attachment-forward (vs text-only today), the remaining Conversation/Chat-list sub-toggles, and App Theme light/dark/system (excluded per request).
+### Wave 3 (2026-07-01)
+
+- **Swipe actions on conversation tiles** — swipe right → Mark Read/Unread; swipe left → Mute, Archive, Delete. Built on RN `PanResponder`+`Animated` (NOT gesture-handler/Reanimated: this project has no worklet plugin and ships animations on RN `Animated` only; gesture-handler v3 dropped the non-reanimated Swipeable). Recycling-safe (re-centers on row change). ⚠️ needs on-device gesture-feel + scroll-interaction verification. _(chat-list-settings / inbox)_
+- **Live Find My locations** — auto-refreshes every 60s while the Find My screen is open. Implemented as polling rather than a socket subscription because the Gator Find My backend is a read-only cache with no location-push events (a socket handler would be dead code). _(findmy)_
+- **Onboarding sync experience** — after connect (scan/manual) the app now shows a **Sync Progress** screen (live chats/messages counts, auto-advances to the inbox on completion) instead of dropping onto an empty list; plus a **Messages per Chat** initial-sync cap in Settings › SYNC (0 = all; full history still backfills on chat open), wired into `fullSync`. _(setup + sync-settings)_
+
+**Still open** (genuine external blockers or excluded): 
+- **Android SEND share-target** — needs `expo-share-intent` (config plugin + native module) + an `expo prebuild` to regenerate the native project + a device to verify share reception. Running prebuild blind (no device to confirm the regenerated build boots) risks destabilizing the build, so deferred until the device is back.
+- **Onboarding permissions screen** — the app already requests contacts + notification permissions functionally (lazily); a dedicated onboarding permissions page is the remaining polish.
+- **attachment-forward** (text-only forward today), the remaining Conversation/Chat-list sub-toggles, and **App Theme light/dark/system** (excluded per request).
 
 ## Screen coverage at a glance
 

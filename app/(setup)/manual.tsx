@@ -29,7 +29,7 @@ export default function Manual(): React.JSX.Element {
   const submit = (): void => void connect(url.trim(), password, allowInsecure);
 
   useEffect(() => {
-    if (status === 'connected') router.replace('/home');
+    if (status === 'connected') router.replace('/syncing');
   }, [status, router]);
 
   return (

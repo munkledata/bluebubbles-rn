@@ -27,6 +27,7 @@ import { DevPushTransport, type EventSink, EventRouter, FCM_ENABLED } from '@cor
 import { connectToServer } from './connection';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { buildMessageIntents } from './notifications/intents';
 import {
   postNotification,
@@ -376,7 +377,13 @@ async function runSync(): Promise<void> {
     const marker = await getSyncMarker(db);
     const isFirstSync = marker.lastSyncedRowId == null && marker.lastSyncedTimestamp == null;
     if (isFirstSync) {
-      const result = await fullSync(db, api, { onProgress: (p) => sync.progress(p) });
+      // Honor the "Messages per Chat" initial-sync cap (0 = all). Full history still backfills on
+      // demand when a chat is opened, so a cap only bounds the first bulk pass.
+      const perChat = useSyncSettingsStore.getState().messagesPerChat;
+      const result = await fullSync(db, api, {
+        onProgress: (p) => sync.progress(p),
+        ...(perChat > 0 ? { maxMessagesPerChat: perChat } : {}),
+      });
       sync.done(result);
     } else {
       // Refresh the FULL chat list first so conversations the interrupted first sync never reached

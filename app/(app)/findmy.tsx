@@ -36,6 +36,14 @@ export default function FindMyScreen(): React.JSX.Element {
     void load();
   }, [load]);
 
+  // Live-ish locations: the Gator Find My backend is a read-only cache (no location push events),
+  // so instead of a socket subscription we poll a server refresh every 60s while this screen is
+  // open. The store's `refreshing` guard coalesces overlapping refreshes.
+  useEffect(() => {
+    const id = setInterval(() => void refresh(), 60_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
   // Marker id namespaces the source so a device + friend can't collide; the list rows reuse it.
   const midDevice = (d: FindMyDevice, k: 'd' | 'i'): string => `${k}:${d.id}`;
   const midFriend = (f: FindMyFriend): string => `p:${f.id}`;

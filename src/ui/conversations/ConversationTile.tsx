@@ -1,6 +1,14 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { InboxRow } from '@db/repositories';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { getDatabase } from '@db/database';
+import {
+  deleteChatLocal,
+  setChatArchive,
+  setChatMute,
+  setChatUnreadLocal,
+  type InboxRow,
+} from '@db/repositories';
+import { markRead } from '@/services';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
@@ -16,6 +24,7 @@ import {
 } from '@utils';
 import { Avatar, GroupAvatar, Icon } from '../primitives';
 import { useTheme } from '../theme';
+import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 
 interface ConversationTileProps {
   row: InboxRow;
@@ -41,7 +50,53 @@ export const ConversationTile = React.memo(function ConversationTile({
   const group = isGroupRow(row);
   const muted = row.muteType === 'mute';
 
+  const confirmDelete = (): void => {
+    Alert.alert(
+      'Delete Conversation',
+      `Delete “${title}”? This removes it from this device (not from the server).`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void deleteChatLocal(getDatabase(), row.guid),
+        },
+      ],
+    );
+  };
+
+  // Swipe-right reveals Read/Unread; swipe-left reveals Mute, Archive, Delete (same set as the
+  // long-press sheet). iOS-ish colors.
+  const leftActions: SwipeAction[] = [
+    {
+      key: 'read',
+      label: unread ? 'Read' : 'Unread',
+      icon: unread ? 'mail-open-outline' : 'mail-unread-outline',
+      color: '#34C759',
+      onPress: () =>
+        unread ? void markRead(row.guid) : void setChatUnreadLocal(getDatabase(), row.guid),
+    },
+  ];
+  const rightActions: SwipeAction[] = [
+    {
+      key: 'mute',
+      label: muted ? 'Unmute' : 'Mute',
+      icon: muted ? 'notifications-outline' : 'notifications-off-outline',
+      color: '#FF9500',
+      onPress: () => void setChatMute(getDatabase(), row.guid, muted ? null : 'mute'),
+    },
+    {
+      key: 'archive',
+      label: row.isArchived ? 'Unarchive' : 'Archive',
+      icon: 'archive-outline',
+      color: '#8E8E93',
+      onPress: () => void setChatArchive(getDatabase(), row.guid, !row.isArchived),
+    },
+    { key: 'delete', label: 'Delete', icon: 'trash-outline', color: '#FF3B30', onPress: confirmDelete },
+  ];
+
   return (
+    <SwipeableRow resetKey={row.guid} left={leftActions} right={rightActions}>
     <Pressable
       onPress={() => onPress(row.guid)}
       onLongPress={onLongPress ? () => onLongPress(row) : undefined}
@@ -49,6 +104,7 @@ export const ConversationTile = React.memo(function ConversationTile({
       style={({ pressed }) => [
         styles.tile,
         compact ? styles.tileCompact : null,
+        { backgroundColor: theme.color.background },
         pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
       ]}
       accessibilityRole="button"
@@ -105,6 +161,7 @@ export const ConversationTile = React.memo(function ConversationTile({
         </View>
       </View>
     </Pressable>
+    </SwipeableRow>
   );
 });
 

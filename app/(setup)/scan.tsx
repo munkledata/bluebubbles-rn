@@ -19,7 +19,7 @@ export default function Scan(): React.JSX.Element {
   const connectError = useSessionStore((s) => s.error);
 
   useEffect(() => {
-    if (status === 'connected') router.replace('/home');
+    if (status === 'connected') router.replace('/syncing');
     // Allow re-scanning after a failed connection.
     if (status === 'error') scanned.current = false;
   }, [status, router]);

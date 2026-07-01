@@ -18,6 +18,7 @@ import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useThemeStore } from '@state/themeStore';
@@ -37,6 +38,7 @@ export default function RootLayout(): React.JSX.Element {
     void useSmartReplyStore.getState().hydrate();
     void useDownloadSettingsStore.getState().hydrate();
     void useFeatureSettingsStore.getState().hydrate();
+    void useSyncSettingsStore.getState().hydrate();
     void useRedactedModeStore
       .getState()
       .hydrate()
