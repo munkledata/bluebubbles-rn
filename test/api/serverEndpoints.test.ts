@@ -21,41 +21,62 @@ function client(): HttpClient {
   return new HttpClient({ getOrigin: () => 'https://x.test', getPassword: () => 'pw' });
 }
 
-// Restart / logs / update-check are only on the server's LOCAL admin console (reinject-helper
-// etc. are 403 for a remote client), so the wrappers reject with UnimplementedEndpointError (no
-// doomed HTTP call) and the UI hides them. Statistics ARE served on the password path and are
-// tested separately below.
-describe('server-management console-only endpoints stay unimplemented', () => {
-  it('SERVER_MANAGEMENT_SUPPORTED is false', () => {
-    expect(serverApi.SERVER_MANAGEMENT_SUPPORTED).toBe(false);
+// Restart (iMessage / services / server) and log-fetch are wired to the password-authed
+// admin-command dispatcher, so their wrappers POST to /admin/command and the UI shows them.
+// Update-check has no equivalent on the Gator fork, so it stays a no-HTTP rejection.
+describe('server-management restart/logs go through the admin-command dispatcher', () => {
+  it('SERVER_MANAGEMENT_SUPPORTED is true', () => {
+    expect(serverApi.SERVER_MANAGEMENT_SUPPORTED).toBe(true);
   });
 
-  it.each([
-    ['checkUpdate', () => serverApi.checkUpdate(client())],
-    ['serverLogs', () => serverApi.serverLogs(client())],
-    ['softRestart', () => serverApi.softRestart(client())],
-    ['hardRestart', () => serverApi.hardRestart(client())],
-    ['restartImessage', () => serverApi.restartImessage(client())],
-  ])('%s rejects with UnimplementedEndpointError (no HTTP call)', async (_name, call) => {
-    const err = await call().then(
+  it('checkUpdate stays unimplemented (no HTTP call)', async () => {
+    const err = await serverApi.checkUpdate(client()).then(
       () => null,
       (e: unknown) => e,
     );
     expect(isUnimplementedEndpoint(err)).toBe(true);
     expect(mockKy).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['restartImessage', () => serverApi.restartImessage(client())],
+    ['softRestart', () => serverApi.softRestart(client())],
+    ['hardRestart', () => serverApi.hardRestart(client())],
+  ])('%s posts once to the dispatcher and resolves', async (_name, call) => {
+    mockKy.mockResolvedValueOnce(envelope({ success: true }));
+    await expect(call()).resolves.toBeDefined();
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it('serverLogs returns the joined log text from the get-logs channel', async () => {
+    mockKy.mockResolvedValueOnce(envelope({ logs: 'line one\nline two' }));
+    await expect(serverApi.serverLogs(client(), 100)).resolves.toBe('line one\nline two');
+  });
 });
 
 describe('serverStatTotals reads stats via the admin-command dispatcher', () => {
-  it('aggregates message + image + video counts', async () => {
-    // Promise.all fires the 3 channels in order: message-count, image-count, video-count.
+  it('aggregates message/chat/handle counts + attachment/image/video/location media counts', async () => {
+    // Promise.all order: message, chat, handle (plain numbers), then attachment, image, video,
+    // location ([{ media_count }]).
     mockKy
-      .mockResolvedValueOnce(envelope(1234)) // get-message-count → a plain number
+      .mockResolvedValueOnce(envelope(1234)) // get-message-count
+      .mockResolvedValueOnce(envelope(56)) // get-chat-count
+      .mockResolvedValueOnce(envelope(78)) // get-handle-count
+      .mockResolvedValueOnce(envelope([{ media_count: 90 }])) // get-chat-attachment-count
       .mockResolvedValueOnce(envelope([{ media_count: 42 }])) // get-chat-image-count
-      .mockResolvedValueOnce(envelope([{ media_count: 7 }])); // get-chat-video-count
+      .mockResolvedValueOnce(envelope([{ media_count: 7 }])) // get-chat-video-count
+      .mockResolvedValueOnce(envelope([{ media_count: 3 }])); // get-chat-location-count
     const res = await serverApi.serverStatTotals(client());
-    expect(res).toEqual({ messages: 1234, images: 42, videos: 7 });
-    expect(mockKy).toHaveBeenCalledTimes(3);
+    expect(res).toEqual({
+      messages: 1234,
+      chats: 56,
+      handles: 78,
+      attachments: 90,
+      images: 42,
+      videos: 7,
+      locations: 3,
+    });
+    expect(mockKy).toHaveBeenCalledTimes(7);
   });
 });
 

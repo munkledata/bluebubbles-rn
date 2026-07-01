@@ -38,27 +38,27 @@ export function adminCommand<T>(
 }
 
 /**
- * False for the actions Gator only exposes on the LOCAL admin console (restart / logs / update
- * check) — a remote app can't invoke them (403 / unimplemented), so the UI hides them.
- * Statistics are served on the password path and handled separately.
+ * True: restart (iMessage / services / server) and log-fetch are wired to the password-authed
+ * admin-command dispatcher, so the UI shows the ACTIONS section. Update-check is the one action
+ * that stays unimplemented on the Gator fork (`checkUpdate` still rejects and isn't surfaced).
  */
-export const SERVER_MANAGEMENT_SUPPORTED = false;
+export const SERVER_MANAGEMENT_SUPPORTED = true;
 
-/** Generic server ack — the `data` payload for restart routes is null / a string / {}. */
+/** Generic server ack — the restart channels return `{ success, ... }`. */
 const ServerAck = z.unknown();
 export type ServerAck = z.infer<typeof ServerAck>;
 
-/** POST /mac/imessage/restart — restart the macOS Messages app. UNIMPLEMENTED on Gator. */
-export const restartImessage = (_http: HttpClient): Promise<ServerAck> =>
-  Promise.reject(new UnimplementedEndpointError('/mac/imessage/restart'));
+/** Relaunch the macOS Messages/FaceTime helper apps ("Restart iMessage") via the dispatcher. */
+export const restartImessage = (http: HttpClient): Promise<ServerAck> =>
+  adminCommand(http, 'restart-imessage', ServerAck);
 
-/** GET /server/restart/soft — restart the server's services. UNIMPLEMENTED on Gator. */
-export const softRestart = (_http: HttpClient): Promise<ServerAck> =>
-  Promise.reject(new UnimplementedEndpointError('/server/restart/soft'));
+/** Soft restart — reload the Private API helper and bounce the tunnel, no process exit. */
+export const softRestart = (http: HttpClient): Promise<ServerAck> =>
+  adminCommand(http, 'soft-restart', ServerAck);
 
-/** GET /server/restart/hard — restart the whole server process. UNIMPLEMENTED on Gator. */
-export const hardRestart = (_http: HttpClient): Promise<ServerAck> =>
-  Promise.reject(new UnimplementedEndpointError('/server/restart/hard'));
+/** Hard restart — exit the daemon so launchd (KeepAlive) respawns it (briefly drops the link). */
+export const hardRestart = (http: HttpClient): Promise<ServerAck> =>
+  adminCommand(http, 'hard-restart', ServerAck);
 
 const UpdateCheck = z
   .object({
@@ -75,36 +75,53 @@ export const checkUpdate = (_http: HttpClient): Promise<UpdateCheck> =>
 
 export interface StatTotals {
   messages: number;
+  chats: number;
+  handles: number;
+  attachments: number;
   images: number;
   videos: number;
+  locations: number;
 }
 
-// The dispatcher's stat channels: get-message-count → a plain number;
-// get-chat-image-count / get-chat-video-count → [{ media_count }].
+// The dispatcher's stat channels: get-message-count / get-chat-count / get-handle-count → a
+// plain number; the media counts (attachment/image/video/location) → [{ media_count }].
 const MediaCount = z.array(z.object({ media_count: z.number() }).passthrough()).nullish();
+// Tolerate the dispatcher's `[]` unknown-channel sentinel (an older server without a given count
+// channel): accept a number OR an array, and `asCount` coerces a non-number to 0 — so version
+// skew degrades gracefully instead of throwing and breaking the whole stats fetch.
+const CountNum = z.union([z.number(), z.array(z.unknown())]).nullish();
+const asCount = (v: number | unknown[] | null | undefined): number => (typeof v === 'number' ? v : 0);
 
 /**
- * Server statistics via the admin-command dispatcher (password-authed): total messages + image
- * and video attachment counts. Replaces the old stub — these channels are NOT admin-only, so a
- * remote client can read them.
+ * Server statistics via the admin-command dispatcher (password-authed): total messages, chats,
+ * handles, and attachment counts (all / image / video / location). These channels are NOT
+ * admin-only, so a remote client can read them.
  */
 export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
-  const [messages, images, videos] = await Promise.all([
-    adminCommand(http, 'get-message-count', z.number().nullish()),
+  const [messages, chats, handles, attachments, images, videos, locations] = await Promise.all([
+    adminCommand(http, 'get-message-count', CountNum),
+    adminCommand(http, 'get-chat-count', CountNum),
+    adminCommand(http, 'get-handle-count', CountNum),
+    adminCommand(http, 'get-chat-attachment-count', MediaCount),
     adminCommand(http, 'get-chat-image-count', MediaCount),
     adminCommand(http, 'get-chat-video-count', MediaCount),
+    adminCommand(http, 'get-chat-location-count', MediaCount),
   ]);
   return {
-    messages: messages ?? 0,
+    messages: asCount(messages),
+    chats: asCount(chats),
+    handles: asCount(handles),
+    attachments: attachments?.[0]?.media_count ?? 0,
     images: images?.[0]?.media_count ?? 0,
     videos: videos?.[0]?.media_count ?? 0,
+    locations: locations?.[0]?.media_count ?? 0,
   };
 }
 
-/** The `data` payload for /server/logs is a raw string (or occasionally an object). */
-const ServerLogs = z.unknown();
-export type ServerLogs = z.infer<typeof ServerLogs>;
+/** The `get-logs` channel returns `{ logs: string }` (a newline-joined, timestamped tail). */
+const ServerLogs = z.object({ logs: z.string().nullish() }).passthrough().nullish();
 
-/** GET /server/logs?count=N — recent server log lines. UNIMPLEMENTED on Gator. */
-export const serverLogs = (_http: HttpClient, _count = 500): Promise<ServerLogs> =>
-  Promise.reject(new UnimplementedEndpointError('/server/logs'));
+/** Recent server log lines via the admin-command dispatcher (password-authed). */
+export function serverLogs(http: HttpClient, count = 500): Promise<string> {
+  return adminCommand(http, 'get-logs', ServerLogs, { count }).then((r) => r?.logs ?? '');
+}

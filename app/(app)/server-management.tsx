@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
@@ -9,7 +9,15 @@ import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import { Screen, useTheme } from '@ui';
 
-type Totals = { messages?: number; images?: number; videos?: number };
+type Totals = {
+  messages?: number;
+  chats?: number;
+  handles?: number;
+  attachments?: number;
+  images?: number;
+  videos?: number;
+  locations?: number;
+};
 
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
@@ -18,6 +26,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const setServerInfo = useSessionStore((s) => s.setServerInfo);
+  const origin = useSessionStore((s) => s.origin);
   const syncStatus = useSyncStore((s) => s.status);
   // Select each primitive separately — an object-returning selector `(s) => ({...})` allocates a
   // fresh object every render, which useSyncExternalStore reads as a changed snapshot → infinite
@@ -85,10 +94,6 @@ export default function ServerManagementScreen(): React.JSX.Element {
     };
   }, [setServerInfo]);
 
-  // Whether the connected server implements the admin routes (restart/update/stats/logs).
-  // Gator implements none of them, so we hide those actions rather than fail with a 404.
-  const adminSupported = serverApi.SERVER_MANAGEMENT_SUPPORTED;
-
   // Distinguish "this server doesn't support the action" from a real connection failure so
   // the copy isn't misleading (the old code blamed every 404 on the connection).
   const failCopy = (label: string, e: unknown): string =>
@@ -123,22 +128,6 @@ export default function ServerManagementScreen(): React.JSX.Element {
     ]);
   };
 
-  const onCheckUpdate = (): void => {
-    if (busy) return;
-    setBusy('Check for Updates');
-    void serverApi
-      .checkUpdate(http)
-      .then((res) => {
-        const available = res?.available;
-        Alert.alert(
-          'Updates',
-          available ? 'A newer server version is available.' : 'Your server is up to date.',
-        );
-      })
-      .catch((e: unknown) => Alert.alert('Server', failCopy('Check for updates', e)))
-      .finally(() => setBusy(null));
-  };
-
   const onLoadStats = (): void => {
     if (busy) return;
     setBusy('Load Stats');
@@ -154,9 +143,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
     setBusy('View Logs');
     void serverApi
       .serverLogs(http, 500)
-      .then((res) => {
-        setLogs(typeof res === 'string' ? res : JSON.stringify(res, null, 2));
-      })
+      .then((res) => setLogs(res.trim() ? res : 'No recent log lines.'))
       .catch((e: unknown) => Alert.alert('Server', failCopy('Fetch logs', e)))
       .finally(() => setBusy(null));
   };
@@ -164,6 +151,15 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const onSyncNow = (): void => {
     if (busy || syncStatus === 'syncing') return;
     void startSync();
+  };
+
+  // Format a stat with thousands separators; em-dash until stats have loaded.
+  const statVal = (n?: number): string => (totals ? (n ?? 0).toLocaleString() : '—');
+
+  // Share the server URL (the share sheet includes Copy) — avoids a clipboard native dep.
+  const onShareUrl = (): void => {
+    if (!origin) return;
+    void Share.share({ message: origin }).catch(() => {});
   };
 
   return (
@@ -199,6 +195,19 @@ export default function ServerManagementScreen(): React.JSX.Element {
           <InfoRow label="Proxy" theme={theme}>
             {serverInfo?.proxy_service ?? 'Direct'}
           </InfoRow>
+          <Pressable
+            onPress={onShareUrl}
+            disabled={!origin}
+            style={[styles.row, { borderTopColor: theme.color.separator }]}
+          >
+            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Server URL</Text>
+            <Text
+              style={[styles.rowValue, { color: origin ? theme.color.tint : theme.color.secondaryLabel }]}
+              numberOfLines={1}
+            >
+              {origin ?? 'Unknown'}
+            </Text>
+          </Pressable>
           <InfoRow label="Sync" theme={theme}>
             {syncStatus === 'syncing'
               ? `Syncing… (${syncChats} chats, ${syncMessages} msgs)`
@@ -217,86 +226,80 @@ export default function ServerManagementScreen(): React.JSX.Element {
             disabled={syncStatus === 'syncing'}
             onPress={onSyncNow}
           />
-          {adminSupported ? (
-            <>
-              <ActionRow
-                label="Restart iMessage"
-                theme={theme}
-                disabled={!!busy}
-                busy={busy === 'Restart iMessage'}
-                onPress={() =>
-                  confirmThen(
-                    'Restart iMessage',
-                    'Restart the Messages app on the Mac?',
-                    () => serverApi.restartImessage(http),
-                    'Messages is restarting.',
-                  )
-                }
-              />
-              <ActionRow
-                label="Restart Services"
-                theme={theme}
-                disabled={!!busy}
-                busy={busy === 'Restart Services'}
-                onPress={() =>
-                  confirmThen(
-                    'Restart Services',
-                    'Soft-restart the server services (Private API)?',
-                    () => serverApi.softRestart(http),
-                    'Services are restarting.',
-                  )
-                }
-              />
-              <ActionRow
-                label="Restart Server"
-                theme={theme}
-                destructive
-                disabled={!!busy}
-                busy={busy === 'Restart Server'}
-                onPress={() =>
-                  confirmThen(
-                    'Restart Server',
-                    'Fully restart the server process? This will briefly drop your connection.',
-                    () => serverApi.hardRestart(http),
-                    'The server is restarting — reconnecting shortly.',
-                    true,
-                  )
-                }
-              />
-              <ActionRow
-                label="Check for Updates"
-                theme={theme}
-                disabled={!!busy}
-                busy={busy === 'Check for Updates'}
-                onPress={onCheckUpdate}
-              />
-              <ActionRow
-                label="View Server Logs"
-                theme={theme}
-                disabled={!!busy}
-                busy={busy === 'View Logs'}
-                onPress={onViewLogs}
-              />
-            </>
-          ) : (
-            <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
-              <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel, textAlign: 'left' }]}>
-                Restart, update check, and logs are managed from the server console (not exposed to
-                remote clients).
-              </Text>
-            </View>
-          )}
+          <ActionRow
+            label="Restart iMessage"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'Restart iMessage'}
+            onPress={() =>
+              confirmThen(
+                'Restart iMessage',
+                'Relaunch the Messages app on the Mac?',
+                () => serverApi.restartImessage(http),
+                'Messages is restarting.',
+              )
+            }
+          />
+          <ActionRow
+            label="Restart Services"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'Restart Services'}
+            onPress={() =>
+              confirmThen(
+                'Restart Services',
+                'Soft-restart the server services (Private API + tunnel)?',
+                () => serverApi.softRestart(http),
+                'Services are restarting.',
+              )
+            }
+          />
+          <ActionRow
+            label="Restart Server"
+            theme={theme}
+            destructive
+            disabled={!!busy}
+            busy={busy === 'Restart Server'}
+            onPress={() =>
+              confirmThen(
+                'Restart Server',
+                'Fully restart the server process? This will briefly drop your connection.',
+                () => serverApi.hardRestart(http),
+                'The server is restarting — reconnecting shortly.',
+                true,
+              )
+            }
+          />
+          <ActionRow
+            label="View Server Logs"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'View Logs'}
+            onPress={onViewLogs}
+          />
         </Section>
 
         <Section label="STATISTICS" theme={theme}>
           <InfoRow label="Messages" theme={theme}>
-            {totals ? String(totals.messages ?? 0) : '—'}
+            {statVal(totals?.messages)}
+          </InfoRow>
+          <InfoRow label="Chats" theme={theme}>
+            {statVal(totals?.chats)}
+          </InfoRow>
+          <InfoRow label="iMessage Numbers" theme={theme}>
+            {statVal(totals?.handles)}
+          </InfoRow>
+          <InfoRow label="Attachments" theme={theme}>
+            {statVal(totals?.attachments)}
           </InfoRow>
           <InfoRow label="Photos" theme={theme}>
-            {totals ? String(totals.images ?? 0) : '—'}
+            {statVal(totals?.images)}
           </InfoRow>
           <InfoRow label="Videos" theme={theme}>
-            {totals ? String(totals.videos ?? 0) : '—'}
+            {statVal(totals?.videos)}
+          </InfoRow>
+          <InfoRow label="Locations" theme={theme}>
+            {statVal(totals?.locations)}
           </InfoRow>
           <ActionRow
             label="Refresh Statistics"
