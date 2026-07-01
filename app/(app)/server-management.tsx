@@ -17,8 +17,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  const setServerInfo = useSessionStore((s) => s.setServerInfo);
   const syncStatus = useSyncStore((s) => s.status);
-  const syncCounts = useSyncStore((s) => ({ chats: s.chats, messages: s.messages }));
+  // Select each primitive separately — an object-returning selector `(s) => ({...})` allocates a
+  // fresh object every render, which useSyncExternalStore reads as a changed snapshot → infinite
+  // re-render loop ("Maximum update depth exceeded"). zustand has no auto-shallow-compare.
+  const syncChats = useSyncStore((s) => s.chats);
+  const syncMessages = useSyncStore((s) => s.messages);
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
   const [latency, setLatency] = useState<number | null>(null);
@@ -63,6 +68,22 @@ export default function ServerManagementScreen(): React.JSX.Element {
       alive = false;
     };
   }, []);
+
+  // Refresh the cached server info (version / macOS / private-API). On a hydrated boot the
+  // `connected` action never ran, so the session store still has serverInfo=null → "Unknown";
+  // fetching it here populates the STATUS section (and the app-wide `privateApiEnabled` gate).
+  useEffect(() => {
+    let alive = true;
+    void serverApi
+      .serverInfo(http)
+      .then((info) => {
+        if (alive) setServerInfo(info);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [setServerInfo]);
 
   // Whether the connected server implements the admin routes (restart/update/stats/logs).
   // Gator implements none of them, so we hide those actions rather than fail with a 404.
@@ -180,9 +201,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
           </InfoRow>
           <InfoRow label="Sync" theme={theme}>
             {syncStatus === 'syncing'
-              ? `Syncing… (${syncCounts.chats} chats, ${syncCounts.messages} msgs)`
+              ? `Syncing… (${syncChats} chats, ${syncMessages} msgs)`
               : syncStatus === 'done'
-                ? `Up to date (${syncCounts.messages} msgs)`
+                ? `Up to date (${syncMessages} msgs)`
                 : syncStatus === 'error'
                   ? 'Error'
                   : 'Idle'}
