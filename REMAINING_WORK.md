@@ -1,5 +1,12 @@
 # Remaining work
 
+> **STATUS UPDATE (2026-06-30):** Several items closed since this was written — **settings search,
+> download-concurrency config, seeded redacted avatars, and client error-code assignment on send
+> failures are now DONE**, and `master` is already pushed and in sync with origin (the "push master"
+> item is stale). Still open: scheduled recurrence, server-update install, QR display, and the socket
+> `refreshUrl` failover (needs `@react-native-firebase/database` + a `ServerUrlResolver` wire-up);
+> credential/native-gated: Sentry, Find My embedded map, Tasker receiver.
+
 _Living checklist of what's NOT yet done, as of 2026-06-21 (after merging the parity Phases 1–3
 to master). See [ROADMAP.md](./ROADMAP.md) for the full feature plan and [COMPARISON.md](./COMPARISON.md)
 for the RN-vs-Flutter gap analysis._

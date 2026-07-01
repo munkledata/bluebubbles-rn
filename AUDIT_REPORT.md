@@ -1,5 +1,14 @@
 # BlueBubbles RN — Audit Report (rebuild vs. Flutter original)
 
+> **STATUS UPDATE (2026-06-30):** Re-verified against the current code — most findings are now
+> RESOLVED. The one CRITICAL item (F-1, no compose/new-chat) is fully built (`app/(app)/new-chat.tsx`
+> + FAB + `POST /chat/new`); group management (F-2), Find My refresh calls (F-13), the server
+> contacts endpoint (F-10), and ESLint-in-CI + Firebase boot guard (CS-1/CS-3/CS-4) are all DONE.
+> Still genuinely open: multi-alias send (F-6), server-synced settings backup (F-11),
+> sticker-render / video-fullscreen / Android share-intent (F-14), and `allowBackup`/legacy-query
+> hygiene (SEC-5/6). Test/file counts below are historical (current: **104 suites / 532 tests**).
+> Everything below is the ORIGINAL 2026-06-20 snapshot.
+
 _Generated 2026-06-20 from a 7-agent audit (635k tokens) of the React Native rebuild
 (`bluebubbles-rn`, 176 source files / 19 screens / **77 test files, 345 passing**) against the
 original Flutter app (`bluebubbles-app`, 323 Dart files). **76 findings: 1 critical, 9 high,**

@@ -1,5 +1,14 @@
 # RN rewrite vs. BlueBubbles Flutter `development`
 
+> **STATUS UPDATE (2026-06-30):** Many gaps flagged below are now CLOSED — socket backoff +
+> reconnect escalation, incremental per-page sync, reactive group membership, conversation-details
+> media/links/docs sections, per-chat Theme Studio + adaptive-from-image, notification reactions,
+> mid-queue cancellation, friendly error titles, and the "Delivered Quietly" tier all shipped.
+> Closed on 2026-06-30: settings search, download-concurrency config, and seeded redacted avatars.
+> Still open (lower-priority parity): multi-image gallery, scheduled recurrence, server-update
+> install, QR display. Package names + line counts below are stale. The table below is the ORIGINAL
+> 2026-06-21 comparison.
+
 _Compiled 2026-06-21 by a parallel multi-agent comparison (6 subsystem reviewers reading both
 repos), then synthesized and spot-checked by hand. Companion to [AUDIT_REPORT.md](./AUDIT_REPORT.md)
 and [ROADMAP.md](./ROADMAP.md)._

@@ -1,5 +1,14 @@
 # Release Checklist
 
+> **STATUS UPDATE (2026-06-30):** Code foundations are complete; several checkboxes below are STALE.
+> **FCM is fully wired** (firebase app+messaging, `google-services.json`, `FCM_ENABLED=true`,
+> background handler at module top, **AES-256-GCM encrypted-payload decrypt**) — the §0.2 "blocked"
+> FCM items are done. §4.4 group management, §5.2 audio/voice/document, and §8.4 DB-key rotation are
+> DONE. The large remaining bucket is **needs-device / EAS** (builds, native rebuilds, on-device
+> spikes) plus credential-gated items (Sentry DSN, Maps key, cert-pin hash). NOTE: `repositories.ts`
+> was split into a **`src/db/repositories/` directory** — links below to `./src/db/repositories.ts`
+> point at the moved file. Test counts here are historical (current: **104 suites / 532 tests**).
+
 Two tiers of remaining work:
 
 - **Phase 0 — critical path to a *working* app** (below): FCM push, the crypto backend, and live-server

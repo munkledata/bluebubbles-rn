@@ -1,5 +1,13 @@
 # Security & Functional Audit — BlueBubbles RN app ↔ Gator server
 
+> **STATUS UPDATE (2026-06-30):** Every APP-SIDE finding is remediated or a documented intentional
+> decision — F1 chat-association fallback, F2–F7 send/edit/unsend/reaction/attachment wire shapes,
+> F12–F14 server-mgmt/typing/ping, F20–F22 / F24–F25 / F30–F32, encrypted-FCM decrypt, and the F10
+> vault-custody decision. The ~12 SERVER-only findings (F8, F9, F11, F15–F19, F23, F26–F29) live in
+> the `bluebubbles-server` repo and are tracked there (§7) — most are now fixed server-side too.
+> The standing "encrypted FCM payloads NOT yet decrypted" note is STALE: they ARE decrypted now
+> (shared `AEAD_GCM_V1` / AES-256-GCM via `src/services/notifications/fcmDecrypt.ts`).
+
 **Date:** 2026-06-21
 **Scope:** `bluebubbles-rn` (React Native / Expo SDK 56 client) and `BB/bluebubbles-server` ("Gator", Node/Electron server, logic in `packages/bbd`)
 **Method:** Multi-agent review across 9 dimensions (auth, injection, crypto/keys, network/SSRF, secrets/logging, wire-contract, realtime, app smells, server smells). **Every finding was independently re-checked by an adversarial verifier** that read both sides of the wire. 50 findings survived verification; 1 was refuted.

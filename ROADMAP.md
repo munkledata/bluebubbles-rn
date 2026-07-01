@@ -1,5 +1,12 @@
 # Parity Roadmap — closing the gap with Flutter `development`
 
+> **STATUS UPDATE (2026-06-30):** Phases 1–3 are largely delivered (socket backoff, list throttle,
+> reactive membership, per-page sync, contact-link, media sections, delivered tiers, mid-queue
+> cancel, friendly error titles, notification reactions, Theme Studio + per-chat + adaptive). The
+> Phase-4 tail was partly closed on 2026-06-30 — settings search, download-concurrency config, and
+> seeded redacted avatars are now DONE. Still open: scheduled recurrence, server-update install, QR
+> display, and the socket `refreshUrl`→`ServerUrlResolver` failover (still unwired).
+
 _Created 2026-06-21. Companion to [COMPARISON.md](./COMPARISON.md). Selects the upstream features that
 genuinely benefit **this** app (Android-only, iOS skin, offline-first DB-as-source, security-hardened)
 and lays out a concrete RN implementation path. Effort: **S** ≈ <½ day, **M** ≈ 1–2 days, **L** ≈ 3–5 days._

@@ -1,5 +1,12 @@
 # API model sync plan — RN app ⇄ Gator server
 
+> **STATUS UPDATE (2026-06-30):** The app-side Phase A + endpoint-shape reconciliation + outgoing
+> reconcile + contract fixtures/tests are DONE, and the server contacts endpoint (P2#12) IS wired
+> (`POST /contact/query` + avatar backfill). Remaining are low-severity schema-hygiene items
+> (client-only wire fields P2#10, error/metadata envelope P2#11, `hideAttachment` P1#9) plus the
+> server-repo / device-verifiable half. NOTE: `repositories.ts` was split into a
+> **`src/db/repositories/` directory** — file paths below may point at the moved location.
+
 _2026-06-21. How to align the RN app's zod models (`bluebubbles-rn/src/core/models`,
 `src/core/api/endpoints`) with the Gator server's wire contracts
 (`bluebubbles-server/packages/protocol` + `packages/bbd/src/serialize` + `.../api/operations`).
