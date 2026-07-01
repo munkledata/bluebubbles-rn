@@ -9,7 +9,7 @@ import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import { Screen, useTheme } from '@ui';
 
-type Totals = { handles?: number; messages?: number; chats?: number; attachments?: number };
+type Totals = { messages?: number; images?: number; videos?: number };
 
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
@@ -44,6 +44,21 @@ export default function ServerManagementScreen(): React.JSX.Element {
           setLatency(null);
         }
       });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Statistics ARE served on the password path (admin-command dispatcher) — load them on mount.
+  // Best-effort: on failure the section just shows placeholders, not an error.
+  useEffect(() => {
+    let alive = true;
+    void serverApi
+      .serverStatTotals(http)
+      .then((t) => {
+        if (alive) setTotals(t);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -245,40 +260,31 @@ export default function ServerManagementScreen(): React.JSX.Element {
           ) : (
             <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
               <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel, textAlign: 'left' }]}>
-                Restart, update check, and logs aren’t supported on this server.
+                Restart, update check, and logs are managed from the server console (not exposed to
+                remote clients).
               </Text>
             </View>
           )}
         </Section>
 
-        {adminSupported && (
-          <Section label="STATISTICS" theme={theme}>
-            {totals ? (
-              <>
-                <InfoRow label="Chats" theme={theme}>
-                  {String(totals.chats ?? '—')}
-                </InfoRow>
-                <InfoRow label="Messages" theme={theme}>
-                  {String(totals.messages ?? '—')}
-                </InfoRow>
-                <InfoRow label="Handles" theme={theme}>
-                  {String(totals.handles ?? '—')}
-                </InfoRow>
-                <InfoRow label="Attachments" theme={theme}>
-                  {String(totals.attachments ?? '—')}
-                </InfoRow>
-              </>
-            ) : (
-              <ActionRow
-                label="Load Statistics"
-                theme={theme}
-                disabled={!!busy}
-                busy={busy === 'Load Stats'}
-                onPress={onLoadStats}
-              />
-            )}
-          </Section>
-        )}
+        <Section label="STATISTICS" theme={theme}>
+          <InfoRow label="Messages" theme={theme}>
+            {totals ? String(totals.messages ?? 0) : '—'}
+          </InfoRow>
+          <InfoRow label="Photos" theme={theme}>
+            {totals ? String(totals.images ?? 0) : '—'}
+          </InfoRow>
+          <InfoRow label="Videos" theme={theme}>
+            {totals ? String(totals.videos ?? 0) : '—'}
+          </InfoRow>
+          <ActionRow
+            label="Refresh Statistics"
+            theme={theme}
+            disabled={!!busy}
+            busy={busy === 'Load Stats'}
+            onPress={onLoadStats}
+          />
+        </Section>
       </ScrollView>
 
       <Modal visible={logs != null} animationType="slide" onRequestClose={() => setLogs(null)}>

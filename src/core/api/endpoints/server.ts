@@ -16,15 +16,32 @@ export function serverInfo(http: HttpClient): Promise<ServerInfo> {
   return http.get('/server/info', ServerInfo);
 }
 
-// ---- Server management (F-9) — admin routes ----
-// AUDIT (F-14): the Gator server does NOT implement these admin routes — every one of them
-// 404s. They are kept as named exports (so the Server-Management screen can reference them and
-// detect support) but they reject with `UnimplementedEndpointError` instead of issuing a doomed
-// request that surfaces as a misleading "connection problem". `SERVER_MANAGEMENT_SUPPORTED`
-// lets the UI hide/disable the actions. If a future server adds these routes, restore the real
-// HTTP calls here and flip the flag.
+// ---- Server management (F-9) ----
+// Gator routes admin operations through one password-authed dispatch endpoint,
+// `POST /api/v1/admin/command` with `{ channel, data? }`. READ/STATUS channels (statistics,
+// status) are served on the normal password path; DESTRUCTIVE channels (reinject-helper /
+// "restart Messages", config writes, TLS, …) are gated to the trusted LOCAL admin console and
+// return 403 to a remote client — so restart / logs / update-check are NOT available from the
+// app and stay stubbed below. Statistics ARE available and are wired to the dispatcher.
 
-/** False while the Gator server implements none of the admin routes below (they 404). */
+/**
+ * Invoke a Gator admin-command channel over the password-authed dispatcher. The server wraps
+ * the channel result in the standard envelope; `http.post` unwraps + validates it with `schema`.
+ */
+export function adminCommand<T>(
+  http: HttpClient,
+  channel: string,
+  schema: z.ZodType<T>,
+  data?: unknown,
+): Promise<T> {
+  return http.post('/admin/command', schema, { json: { channel, data } });
+}
+
+/**
+ * False for the actions Gator only exposes on the LOCAL admin console (restart / logs / update
+ * check) — a remote app can't invoke them (403 / unimplemented), so the UI hides them.
+ * Statistics are served on the password path and handled separately.
+ */
 export const SERVER_MANAGEMENT_SUPPORTED = false;
 
 /** Generic server ack — the `data` payload for restart routes is null / a string / {}. */
@@ -56,20 +73,33 @@ export type UpdateCheck = z.infer<typeof UpdateCheck>;
 export const checkUpdate = (_http: HttpClient): Promise<UpdateCheck> =>
   Promise.reject(new UnimplementedEndpointError('/server/update/check'));
 
-const StatTotals = z
-  .object({
-    handles: z.number().nullish(),
-    messages: z.number().nullish(),
-    chats: z.number().nullish(),
-    attachments: z.number().nullish(),
-  })
-  .passthrough()
-  .nullish();
-export type StatTotals = z.infer<typeof StatTotals>;
+export interface StatTotals {
+  messages: number;
+  images: number;
+  videos: number;
+}
 
-/** GET /server/statistics/totals — entity counts. UNIMPLEMENTED on Gator. */
-export const serverStatTotals = (_http: HttpClient): Promise<StatTotals> =>
-  Promise.reject(new UnimplementedEndpointError('/server/statistics/totals'));
+// The dispatcher's stat channels: get-message-count → a plain number;
+// get-chat-image-count / get-chat-video-count → [{ media_count }].
+const MediaCount = z.array(z.object({ media_count: z.number() }).passthrough()).nullish();
+
+/**
+ * Server statistics via the admin-command dispatcher (password-authed): total messages + image
+ * and video attachment counts. Replaces the old stub — these channels are NOT admin-only, so a
+ * remote client can read them.
+ */
+export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
+  const [messages, images, videos] = await Promise.all([
+    adminCommand(http, 'get-message-count', z.number().nullish()),
+    adminCommand(http, 'get-chat-image-count', MediaCount),
+    adminCommand(http, 'get-chat-video-count', MediaCount),
+  ]);
+  return {
+    messages: messages ?? 0,
+    images: images?.[0]?.media_count ?? 0,
+    videos: videos?.[0]?.media_count ?? 0,
+  };
+}
 
 /** The `data` payload for /server/logs is a raw string (or occasionally an object). */
 const ServerLogs = z.unknown();

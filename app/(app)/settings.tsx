@@ -117,7 +117,10 @@ export default function SettingsScreen(): React.JSX.Element {
         <View style={styles.spacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <TextInput
           value={query}
           onChangeText={setQuery}

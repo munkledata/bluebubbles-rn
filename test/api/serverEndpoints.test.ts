@@ -21,17 +21,17 @@ function client(): HttpClient {
   return new HttpClient({ getOrigin: () => 'https://x.test', getPassword: () => 'pw' });
 }
 
-// F-14: the Gator server implements NONE of the admin routes (they 404). The wrappers now
-// reject with UnimplementedEndpointError (no doomed HTTP call) so the UI can show
-// "unsupported on this server" instead of a misleading connection error.
-describe('server-management endpoints are marked unimplemented (Gator 404s them)', () => {
+// Restart / logs / update-check are only on the server's LOCAL admin console (reinject-helper
+// etc. are 403 for a remote client), so the wrappers reject with UnimplementedEndpointError (no
+// doomed HTTP call) and the UI hides them. Statistics ARE served on the password path and are
+// tested separately below.
+describe('server-management console-only endpoints stay unimplemented', () => {
   it('SERVER_MANAGEMENT_SUPPORTED is false', () => {
     expect(serverApi.SERVER_MANAGEMENT_SUPPORTED).toBe(false);
   });
 
   it.each([
     ['checkUpdate', () => serverApi.checkUpdate(client())],
-    ['serverStatTotals', () => serverApi.serverStatTotals(client())],
     ['serverLogs', () => serverApi.serverLogs(client())],
     ['softRestart', () => serverApi.softRestart(client())],
     ['hardRestart', () => serverApi.hardRestart(client())],
@@ -43,6 +43,19 @@ describe('server-management endpoints are marked unimplemented (Gator 404s them)
     );
     expect(isUnimplementedEndpoint(err)).toBe(true);
     expect(mockKy).not.toHaveBeenCalled();
+  });
+});
+
+describe('serverStatTotals reads stats via the admin-command dispatcher', () => {
+  it('aggregates message + image + video counts', async () => {
+    // Promise.all fires the 3 channels in order: message-count, image-count, video-count.
+    mockKy
+      .mockResolvedValueOnce(envelope(1234)) // get-message-count → a plain number
+      .mockResolvedValueOnce(envelope([{ media_count: 42 }])) // get-chat-image-count
+      .mockResolvedValueOnce(envelope([{ media_count: 7 }])); // get-chat-video-count
+    const res = await serverApi.serverStatTotals(client());
+    expect(res).toEqual({ messages: 1234, images: 42, videos: 7 });
+    expect(mockKy).toHaveBeenCalledTimes(3);
   });
 });
 
