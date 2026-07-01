@@ -1,6 +1,7 @@
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { sendText } from '@core/api/endpoints/messages';
+import { sendErrorCode } from '@utils';
 import {
   getChatIdByGuid,
   insertOutgoingText,
@@ -94,7 +95,7 @@ export async function sendTextMessage(
       await markOutgoingSentNoGuid(db, tempGuid);
     }
   } catch (e) {
-    const code = e instanceof ApiError && e.status ? e.status : -1;
+    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
     await reconcileOutgoingError(db, tempGuid, code);
   }
 

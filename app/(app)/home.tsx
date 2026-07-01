@@ -19,6 +19,7 @@ import {
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { isDevServer } from '@utils/isDev';
 import { useSmartReplyStore } from '@state/smartReplyStore';
+import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
 import { ConversationListScreen } from '@ui';
 
 /**
@@ -36,6 +37,7 @@ export default function Home(): React.JSX.Element {
     // root layout may have skipped pre-connect.
     void useSmartReplyStore.getState().hydrate();
     void useRedactedModeStore.getState().hydrate();
+    void useDownloadSettingsStore.getState().hydrate();
     void (async () => {
       try {
         await recoverStuckScheduled();

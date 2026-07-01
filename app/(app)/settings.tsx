@@ -1,10 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
 import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { syncContacts } from '@/services/contacts/contactsService';
+import {
+  MAX_CONCURRENT_DOWNLOADS_LIMIT,
+  useDownloadSettingsStore,
+} from '@state/downloadSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -25,9 +29,25 @@ export default function SettingsScreen(): React.JSX.Element {
   const appLock = useLockStore((s) => s.enabled);
   const redacted = useRedactedModeStore((s) => s.enabled);
   const setRedacted = useRedactedModeStore((s) => s.setEnabled);
+  const maxDownloads = useDownloadSettingsStore((s) => s.maxConcurrent);
+  const setMaxDownloads = useDownloadSettingsStore((s) => s.setMaxConcurrent);
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const [syncing, setSyncing] = useState(false);
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  // Keyword bag per section — a section is shown when the query is empty OR matches its bag.
+  const SECTIONS = {
+    theme: 'theme appearance oled dark gator custom presets colors',
+    contacts: 'contacts sync names photos address book',
+    general: 'general suggested smart replies app lock biometric reminders backup find my location',
+    downloads: 'downloads parallel concurrent attachments images media bandwidth',
+    privacy: 'privacy redacted mode hide previews encryption key rotate security',
+    server: 'server management restart logs statistics',
+    about: 'about server version macos private api disconnect forget',
+  } as const;
+  const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
+  const anyMatch = Object.values(SECTIONS).some(match);
 
   const onDisconnect = (): void => {
     Alert.alert('Disconnect', 'Forget this server and clear stored credentials?', [
@@ -97,164 +117,305 @@ export default function SettingsScreen(): React.JSX.Element {
         <View style={styles.spacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>THEME</Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          {PRESET_ORDER.map((key, i) => (
-            <Pressable
-              key={key}
-              onPress={() => void setPreset(key)}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search settings"
+          placeholderTextColor={theme.color.tertiaryLabel}
+          autoCapitalize="none"
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          style={[
+            styles.search,
+            { backgroundColor: theme.color.secondaryBackground, color: theme.color.label },
+          ]}
+        />
+
+        {match(SECTIONS.theme) && (
+          <>
+            <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>THEME</Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              {PRESET_ORDER.map((key, i) => (
+                <Pressable
+                  key={key}
+                  onPress={() => void setPreset(key)}
+                  style={[
+                    styles.row,
+                    i > 0 && {
+                      borderTopColor: theme.color.separator,
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                    {PRESETS[key].label}
+                  </Text>
+                  {preset === key ? (
+                    <Text style={[styles.check, { color: theme.color.tint }]}>✓</Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </View>
+            <View
               style={[
-                styles.row,
-                i > 0 && {
-                  borderTopColor: theme.color.separator,
-                  borderTopWidth: StyleSheet.hairlineWidth,
-                },
+                styles.group,
+                { backgroundColor: theme.color.secondaryBackground, marginTop: 8 },
               ]}
             >
-              <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                {PRESETS[key].label}
-              </Text>
-              {preset === key ? (
-                <Text style={[styles.check, { color: theme.color.tint }]}>✓</Text>
-              ) : null}
-            </Pressable>
-          ))}
-        </View>
-        <View
-          style={[styles.group, { backgroundColor: theme.color.secondaryBackground, marginTop: 8 }]}
-        >
-          <Pressable onPress={() => router.push('/themes')} style={styles.row}>
-            <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Custom Themes…</Text>
-            <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
-          </Pressable>
-        </View>
+              <Pressable onPress={() => router.push('/themes')} style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Custom Themes…</Text>
+                <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          CONTACTS
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          <Pressable onPress={() => void onSyncContacts()} disabled={syncing} style={styles.row}>
-            <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
-              {syncing ? 'Syncing…' : 'Sync Contacts'}
+        {match(SECTIONS.contacts) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              CONTACTS
             </Text>
-          </Pressable>
-        </View>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <Pressable
+                onPress={() => void onSyncContacts()}
+                disabled={syncing}
+                style={styles.row}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
+                  {syncing ? 'Syncing…' : 'Sync Contacts'}
+                </Text>
+              </Pressable>
+            </View>
+          </>
+        )}
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          GENERAL
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Suggested Replies</Text>
-            <Switch
-              value={smartReplies}
-              onValueChange={(v) => void setSmartReplies(v)}
-              accessibilityLabel="Toggle suggested replies"
-            />
-          </View>
-          <View
-            style={[
-              styles.row,
-              { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>App Lock</Text>
-            <Switch
-              value={appLock}
-              onValueChange={(v) => void onToggleAppLock(v)}
-              accessibilityLabel="Require biometric unlock to open the app"
-            />
-          </View>
-          <Pressable
-            onPress={() => router.push('/reminders')}
-            style={[
-              styles.row,
-              { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Reminders</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/backup')}
-            style={[
-              styles.row,
-              { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Backup</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/findmy')}
-            style={[
-              styles.row,
-              { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Find My</Text>
-          </Pressable>
-        </View>
-
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          PRIVACY
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Redacted Mode</Text>
-            <Switch
-              value={redacted}
-              onValueChange={(v) => void setRedacted(v)}
-              accessibilityLabel="Hide message previews, names, and notification contents"
-            />
-          </View>
-          <Pressable
-            onPress={onRotateKey}
-            style={[
-              styles.row,
-              { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-          >
-            <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
-              Rotate encryption key…
+        {match(SECTIONS.general) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              GENERAL
             </Text>
-          </Pressable>
-        </View>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Suggested Replies</Text>
+                <Switch
+                  value={smartReplies}
+                  onValueChange={(v) => void setSmartReplies(v)}
+                  accessibilityLabel="Toggle suggested replies"
+                />
+              </View>
+              <View
+                style={[
+                  styles.row,
+                  {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>App Lock</Text>
+                <Switch
+                  value={appLock}
+                  onValueChange={(v) => void onToggleAppLock(v)}
+                  accessibilityLabel="Require biometric unlock to open the app"
+                />
+              </View>
+              <Pressable
+                onPress={() => router.push('/reminders')}
+                style={[
+                  styles.row,
+                  {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Reminders</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/backup')}
+                style={[
+                  styles.row,
+                  {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Backup</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/findmy')}
+                style={[
+                  styles.row,
+                  {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Find My</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          SERVER
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          <Pressable onPress={() => router.push('/server-management')} style={styles.row}>
-            <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Server Management…</Text>
-            <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
-          </Pressable>
-        </View>
+        {match(SECTIONS.downloads) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              DOWNLOADS
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Parallel Downloads
+                </Text>
+                <View style={styles.stepper}>
+                  <Pressable
+                    onPress={() => void setMaxDownloads(maxDownloads - 1)}
+                    disabled={maxDownloads <= 1}
+                    hitSlop={8}
+                    accessibilityLabel="Fewer parallel downloads"
+                  >
+                    <Text
+                      style={[
+                        styles.stepBtn,
+                        {
+                          color:
+                            maxDownloads <= 1 ? theme.color.tertiaryLabel : theme.color.tint,
+                        },
+                      ]}
+                    >
+                      −
+                    </Text>
+                  </Pressable>
+                  <Text style={[styles.stepValue, { color: theme.color.label }]}>
+                    {maxDownloads}
+                  </Text>
+                  <Pressable
+                    onPress={() => void setMaxDownloads(maxDownloads + 1)}
+                    disabled={maxDownloads >= MAX_CONCURRENT_DOWNLOADS_LIMIT}
+                    hitSlop={8}
+                    accessibilityLabel="More parallel downloads"
+                  >
+                    <Text
+                      style={[
+                        styles.stepBtn,
+                        {
+                          color:
+                            maxDownloads >= MAX_CONCURRENT_DOWNLOADS_LIMIT
+                              ? theme.color.tertiaryLabel
+                              : theme.color.tint,
+                        },
+                      ]}
+                    >
+                      +
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </>
+        )}
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          ABOUT
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          <InfoRow label="Server" value={origin ?? '—'} theme={theme} />
-          <InfoRow label="Version" value={serverInfo?.server_version ?? '—'} theme={theme} top />
-          <InfoRow label="macOS" value={serverInfo?.os_version ?? '—'} theme={theme} top />
-          <InfoRow
-            label="Private API"
-            value={serverInfo?.private_api ? 'Enabled' : 'Disabled'}
-            theme={theme}
-            top
-          />
-          <Pressable
-            onPress={onDisconnect}
-            style={[
-              styles.row,
-              { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Disconnect from server"
-          >
-            <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>Disconnect</Text>
-          </Pressable>
-        </View>
+        {match(SECTIONS.privacy) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              PRIVACY
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Redacted Mode</Text>
+                <Switch
+                  value={redacted}
+                  onValueChange={(v) => void setRedacted(v)}
+                  accessibilityLabel="Hide message previews, names, and notification contents"
+                />
+              </View>
+              <Pressable
+                onPress={onRotateKey}
+                style={[
+                  styles.row,
+                  {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
+                  Rotate encryption key…
+                </Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        {match(SECTIONS.server) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              SERVER
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <Pressable onPress={() => router.push('/server-management')} style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
+                  Server Management…
+                </Text>
+                <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        {match(SECTIONS.about) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              ABOUT
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <InfoRow label="Server" value={origin ?? '—'} theme={theme} />
+              <InfoRow label="Version" value={serverInfo?.server_version ?? '—'} theme={theme} top />
+              <InfoRow label="macOS" value={serverInfo?.os_version ?? '—'} theme={theme} top />
+              <InfoRow
+                label="Private API"
+                value={serverInfo?.private_api ? 'Enabled' : 'Disabled'}
+                theme={theme}
+                top
+              />
+              <Pressable
+                onPress={onDisconnect}
+                style={[
+                  styles.row,
+                  {
+                    borderTopColor: theme.color.separator,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Disconnect from server"
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>Disconnect</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        {q.length > 0 && !anyMatch && (
+          <Text style={[styles.noResults, { color: theme.color.secondaryLabel }]}>
+            No settings match “{query}”.
+          </Text>
+        )}
       </ScrollView>
     </Screen>
   );
@@ -300,6 +461,14 @@ const styles = StyleSheet.create({
   title: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
   spacer: { width: 70 },
   content: { padding: 16 },
+  search: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  noResults: { fontSize: 15, textAlign: 'center', marginTop: 32 },
   sectionLabel: { fontSize: 13, marginBottom: 6, marginLeft: 12 },
   group: { borderRadius: 12, overflow: 'hidden' },
   row: {
@@ -312,4 +481,7 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 16 },
   infoValue: { fontSize: 15, flexShrink: 1, marginLeft: 16, textAlign: 'right' },
   check: { fontSize: 16, fontWeight: '700' },
+  stepper: { flexDirection: 'row', alignItems: 'center' },
+  stepBtn: { fontSize: 24, fontWeight: '500', width: 32, textAlign: 'center' },
+  stepValue: { fontSize: 16, fontWeight: '600', minWidth: 24, textAlign: 'center' },
 });

@@ -9,6 +9,13 @@ interface AvatarProps {
   color?: string;
   /** Contact photo (file:// or data: uri). When set, renders the image instead of initials. */
   uri?: string | null;
+  /**
+   * Redacted mode: render a DETERMINISTIC, non-identifying tile derived by hashing this seed —
+   * distinct per person (so a list stays scannable) but revealing neither the real name nor the
+   * photo. When set it overrides `name`/`uri`. Pass the real identity (e.g. avatar seed / address);
+   * only its hash is ever shown.
+   */
+  seed?: string;
 }
 
 // iOS-ish avatar palette (used when colorfulAvatars is on; falls back here otherwise).
@@ -36,6 +43,20 @@ function initials(name: string): string {
   return (parts[0]!.charAt(0) + parts[parts.length - 1]!.charAt(0)).toUpperCase();
 }
 
+// Redacted-mode label alphabet (no I/O/0/1 to avoid look-alikes). A hash-derived 2-char code
+// gives per-identity distinction without revealing any real initial.
+const REDACT_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** Deterministic non-identifying tile (color + 2-char label) from a hash of the seed. */
+function seededRedacted(seed: string): { label: string; color: string } {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  const h = Math.abs(hash);
+  const a = REDACT_ALPHABET.charAt(h % REDACT_ALPHABET.length);
+  const b = REDACT_ALPHABET.charAt(Math.floor(h / REDACT_ALPHABET.length) % REDACT_ALPHABET.length);
+  return { label: a + b, color: PALETTE[h % PALETTE.length]! };
+}
+
 /**
  * Circular contact avatar: a photo when available, else initials on a color.
  * Decorative (`accessible={false}`) — the tile/header alongside it announces the
@@ -46,7 +67,23 @@ export const Avatar = React.memo(function Avatar({
   size = 40,
   color,
   uri,
+  seed,
 }: AvatarProps): React.JSX.Element {
+  // Redacted mode: a seeded, non-identifying tile (checked FIRST so name/photo never leak).
+  if (seed !== undefined) {
+    const r = seededRedacted(seed);
+    return (
+      <View
+        accessible={false}
+        style={[
+          styles.circle,
+          { width: size, height: size, borderRadius: size / 2, backgroundColor: r.color },
+        ]}
+      >
+        <Text style={[styles.text, { fontSize: size * 0.34 }]}>{r.label}</Text>
+      </View>
+    );
+  }
   if (uri) {
     return (
       <Image

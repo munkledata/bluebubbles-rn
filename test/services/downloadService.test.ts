@@ -1,7 +1,12 @@
 import { Attachment, Chat, Message } from '@core/models';
 import { getAttachmentByGuid, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { ensureDownloaded, type AttachmentFetcher } from '@/services/download/downloadService';
+import {
+  DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+  ensureDownloaded,
+  setMaxConcurrentDownloads,
+  type AttachmentFetcher,
+} from '@/services/download/downloadService';
 import { createTestDb } from '../support/testDb';
 
 async function seedAttachment(db: AppDatabase, guid: string) {
@@ -116,5 +121,43 @@ describe('ensureDownloaded', () => {
       await ensureDownloaded(db, fetcher, { guid: 'd3', transferName: 'x', localPath: null }),
     ).toBeNull();
     expect((await getAttachmentByGuid(db, 'd3'))?.localPath).toBeNull();
+  });
+
+  it('respects the configurable concurrency cap and wakes queued downloads when raised', async () => {
+    const { db } = await createTestDb();
+    for (const g of ['e1', 'e2', 'e3']) await seedAttachment(db, g);
+    let running = 0;
+    let peak = 0;
+    const gates: Array<() => void> = [];
+    const fetcher: AttachmentFetcher = {
+      exists: () => false,
+      download: () =>
+        new Promise<string>((resolve) => {
+          running += 1;
+          peak = Math.max(peak, running);
+          gates.push(() => {
+            running -= 1;
+            resolve('file:///x.jpg');
+          });
+        }),
+    };
+
+    try {
+      setMaxConcurrentDownloads(1);
+      const all = ['e1', 'e2', 'e3'].map((g) =>
+        ensureDownloaded(db, fetcher, { guid: g, transferName: 'x', localPath: null }),
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      expect(peak).toBe(1); // cap=1 → only one download runs at a time
+
+      setMaxConcurrentDownloads(3); // raising the cap must wake the two queued downloads
+      await new Promise((r) => setTimeout(r, 10));
+      expect(peak).toBe(3);
+
+      while (gates.length) gates.shift()!();
+      await Promise.all(all);
+    } finally {
+      setMaxConcurrentDownloads(DEFAULT_MAX_CONCURRENT_DOWNLOADS); // restore shared module state
+    }
   });
 });

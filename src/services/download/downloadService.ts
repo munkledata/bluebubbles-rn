@@ -11,13 +11,29 @@ export interface AttachmentFetcher {
   ): Promise<string>;
 }
 
-const MAX_CONCURRENT = 2;
+/** Default parallel-download cap; user-configurable (Settings → Downloads). */
+export const DEFAULT_MAX_CONCURRENT_DOWNLOADS = 2;
+export const MAX_CONCURRENT_DOWNLOADS_LIMIT = 6;
+
+let maxConcurrent = DEFAULT_MAX_CONCURRENT_DOWNLOADS;
 let active = 0;
 const waiters: Array<() => void> = [];
 const inFlight = new Map<string, Promise<string | null>>();
 
+/**
+ * Set the parallel-download cap at runtime (from the persisted setting). Clamped to
+ * [1, {@link MAX_CONCURRENT_DOWNLOADS_LIMIT}]. If the cap GROWS, wake queued downloads to
+ * fill the new slots immediately.
+ */
+export function setMaxConcurrentDownloads(n: number): void {
+  maxConcurrent = Math.max(1, Math.min(MAX_CONCURRENT_DOWNLOADS_LIMIT, Math.floor(n)));
+  while (active < maxConcurrent && waiters.length > 0) {
+    waiters.shift()!();
+  }
+}
+
 function acquire(): Promise<void> {
-  if (active < MAX_CONCURRENT) {
+  if (active < maxConcurrent) {
     active += 1;
     return Promise.resolve();
   }

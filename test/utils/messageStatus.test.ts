@@ -1,5 +1,6 @@
 import type { MessageRow } from '@db/repositories';
-import { deliveredQuietly, errorTitleForCode, statusFor } from '@utils';
+import { deliveredQuietly, errorTitleForCode, sendErrorCode, statusFor } from '@utils';
+import { ClientErrorCode } from '@utils/messageStatus';
 
 function m(p: Partial<MessageRow>): MessageRow {
   return {
@@ -94,5 +95,24 @@ describe('errorTitleForCode (2.4)', () => {
     expect(errorTitleForCode(-1)).toBe('Message Failed to Send');
     expect(errorTitleForCode(null)).toBe('Message Failed to Send');
     expect(errorTitleForCode(undefined)).toBe('Message Failed to Send');
+  });
+});
+
+describe('sendErrorCode', () => {
+  it('maps gateway / not-found statuses to their client codes', () => {
+    expect(sendErrorCode(502)).toBe(ClientErrorCode.badGateway);
+    expect(sendErrorCode(504)).toBe(ClientErrorCode.gatewayTimeout);
+    expect(sendErrorCode(404)).toBe(ClientErrorCode.notFound);
+  });
+
+  it('keeps any other server status verbatim', () => {
+    expect(sendErrorCode(500)).toBe(500);
+    expect(sendErrorCode(422)).toBe(422);
+  });
+
+  it('treats a missing HTTP status (network failure) as connectionRefused', () => {
+    // Previously collapsed to -1 ("Message Failed to Send"); now a specific title.
+    expect(sendErrorCode(null)).toBe(ClientErrorCode.connectionRefused);
+    expect(errorTitleForCode(sendErrorCode(null))).toBe('Connection Refused');
   });
 });

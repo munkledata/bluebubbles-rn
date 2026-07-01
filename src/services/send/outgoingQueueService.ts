@@ -2,6 +2,7 @@ import type { HttpClient } from '@core/api/http';
 import { ApiError } from '@core/api/errors';
 import { sendReaction, sendText } from '@core/api/endpoints/messages';
 import { logger } from '@core/secure';
+import { sendErrorCode } from '@utils';
 import {
   claimOutgoing,
   listRetryableOutgoing,
@@ -68,7 +69,7 @@ async function resend(
     }
     return true;
   } catch (e) {
-    const code = e instanceof ApiError && e.status ? e.status : -1;
+    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
     await reconcileOutgoingError(db, row.tempGuid, code, now);
     return false;
   }

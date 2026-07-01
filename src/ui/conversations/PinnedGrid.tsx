@@ -46,12 +46,14 @@ export function PinnedGrid({
               <GroupAvatar
                 names={redacted ? ['Contact', 'Contact'] : participantList(row.participantNames)}
                 uris={redacted ? [] : participantAvatars(row.participantAvatars)}
+                seeds={redacted ? participantList(row.participantNames) : undefined}
                 size={64}
               />
             ) : (
               <Avatar
-                name={redacted ? 'Contact' : avatarSeed(row)}
+                name={avatarSeed(row)}
                 uri={redacted ? null : participantAvatars(row.participantAvatars)[0]}
+                seed={redacted ? avatarSeed(row) : undefined}
                 size={64}
               />
             )}

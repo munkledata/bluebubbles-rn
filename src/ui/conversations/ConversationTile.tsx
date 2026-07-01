@@ -60,14 +60,17 @@ export const ConversationTile = React.memo(function ConversationTile({
         )}
         {group ? (
           <GroupAvatar
-            // Redacted mode must also mask the monogram + contact photo, not just text.
+            // Redacted mode masks the monogram + photo with deterministic seeded tiles
+            // (distinct per person, but revealing neither name nor photo).
             names={redacted ? ['Contact', 'Contact'] : participantList(row.participantNames)}
             uris={redacted ? [] : participantAvatars(row.participantAvatars)}
+            seeds={redacted ? participantList(row.participantNames) : undefined}
           />
         ) : (
           <Avatar
-            name={redacted ? 'Contact' : avatarSeed(row)}
+            name={avatarSeed(row)}
             uri={redacted ? null : participantAvatars(row.participantAvatars)[0]}
+            seed={redacted ? avatarSeed(row) : undefined}
           />
         )}
       </View>

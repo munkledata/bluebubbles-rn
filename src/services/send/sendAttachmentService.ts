@@ -1,6 +1,7 @@
 import { sendAttachment } from '@core/api/endpoints/attachments';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
+import { sendErrorCode } from '@utils';
 import {
   getChatIdByGuid,
   insertOutgoingAttachment,
@@ -83,7 +84,7 @@ export async function sendImageMessage(
       await markOutgoingSentNoGuid(db, tempGuid);
     }
   } catch (e) {
-    const code = e instanceof ApiError && e.status ? e.status : -1;
+    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
     await reconcileOutgoingError(db, tempGuid, code);
   }
 
