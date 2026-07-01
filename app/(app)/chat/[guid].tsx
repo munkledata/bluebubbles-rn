@@ -1,5 +1,4 @@
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text } from 'react-native';
@@ -25,7 +24,6 @@ import {
   devEditFake,
   devInjectEffect,
   devSendFake,
-  devSendFakeImage,
   devSendFakeReaction,
   devSendFakeReply,
   devUnsendFake,
@@ -45,6 +43,7 @@ import {
   ScreenEffectOverlay,
   SmartReplyChips,
   TypingBubble,
+  type PendingAttachment,
   type SelectedMessage,
 } from '@ui';
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
@@ -283,30 +282,10 @@ function ChatScreenInner({
     })();
   };
 
-  const attachPhotos = async (): Promise<void> => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-    });
-    if (res.canceled || res.assets.length === 0) return;
-    void sendImages({
-      chatGuid: guid,
-      images: res.assets.map((a) => ({
-        uri: a.uri,
-        name: a.fileName ?? a.uri.split('/').pop() ?? 'image.jpg',
-        mimeType: a.mimeType ?? 'image/jpeg',
-        size: a.fileSize ?? 0,
-        width: a.width,
-        height: a.height,
-      })),
-    });
-  };
-
-  const attachFiles = async (): Promise<void> => {
+  // The inline tray's "Files" button — pick documents and return them to STAGE as pending
+  // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
+  // beyond the OS document picker itself.
+  const pickFiles = async (): Promise<PendingAttachment[]> => {
     try {
       // Lazy import: expo-document-picker is a native module, kept off the chat-open path.
       const DocumentPicker = await import('expo-document-picker');
@@ -314,31 +293,17 @@ function ChatScreenInner({
         multiple: true,
         copyToCacheDirectory: true,
       });
-      if (res.canceled || res.assets.length === 0) return;
-      void sendImages({
-        chatGuid: guid,
-        images: res.assets.map((a) => ({
-          uri: a.uri,
-          name: a.name,
-          mimeType: a.mimeType ?? 'application/octet-stream',
-          size: a.size ?? 0,
-        })),
-      });
+      if (res.canceled || res.assets.length === 0) return [];
+      return res.assets.map((a) => ({
+        uri: a.uri,
+        name: a.name,
+        mimeType: a.mimeType ?? 'application/octet-stream',
+        size: a.size ?? 0,
+      }));
     } catch {
       Alert.alert('Attach', 'Couldn’t open the file picker.');
+      return [];
     }
-  };
-
-  const onAttach = (): void => {
-    if (isDev()) {
-      void devSendFakeImage(guid);
-      return;
-    }
-    Alert.alert('Attach', undefined, [
-      { text: 'Photos', onPress: () => void attachPhotos() },
-      { text: 'Files', onPress: () => void attachFiles() },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
   };
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
@@ -387,7 +352,8 @@ function ChatScreenInner({
         <SmartReplyChips messages={messages} onPick={onSend} />
         <Composer
           onSend={onSend}
-          onAttach={() => void onAttach()}
+          onSendAttachments={(items) => void sendImages({ chatGuid: guid, images: items })}
+          onPickFiles={pickFiles}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           editingText={editing?.text ?? null}

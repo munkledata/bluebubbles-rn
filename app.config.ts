@@ -90,9 +90,12 @@ const config: ExpoConfig = {
     [
       'expo-media-library',
       {
-        // Save-to-gallery only — we never browse the user's library.
+        // Save-to-gallery AND the inline attachment tray, which browses recent photos/videos
+        // (getAssetsAsync). The plugin adds the Android READ_MEDIA_IMAGES/VIDEO perms by default.
         savePhotosPermission:
           'BlueBubbles needs permission to save photos and videos from your conversations to your gallery.',
+        photosPermission:
+          'BlueBubbles needs access to your photos so you can attach them to conversations.',
         isAccessMediaLocationEnabled: false,
       },
     ],

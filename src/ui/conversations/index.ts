@@ -6,6 +6,7 @@ export * from './MessageList';
 export * from './MessageBubble';
 export * from './MessageRow';
 export * from './Composer';
+export * from './AttachmentTray';
 export * from './ReactionCluster';
 export * from './ReplyQuote';
 export * from './MessageActionsOverlay';

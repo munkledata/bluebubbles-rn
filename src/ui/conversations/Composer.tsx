@@ -1,16 +1,21 @@
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { Image } from 'expo-image';
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MessagePreview } from '@db/repositories';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
+import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
 import { EffectPicker } from './effects';
 
 interface ComposerProps {
   /** effectId set when sending with an iMessage send-effect (long-press send). */
   onSend: (text: string, effectId?: string) => void;
-  onAttach?: () => void;
+  /** Send photo/video/file attachments staged in the inline tray. */
+  onSendAttachments?: (items: PendingAttachment[]) => void;
+  /** Open the document picker (the tray's "Files" button); returns picked items to stage. */
+  onPickFiles?: () => Promise<PendingAttachment[]>;
   replyTo?: MessagePreview | null;
   onCancelReply?: () => void;
   /** When set, the composer edits this text instead of sending a new message. */
@@ -27,7 +32,8 @@ interface ComposerProps {
 /** iOS message composer: optional reply/edit bar + attach button + input + send button. */
 export function Composer({
   onSend,
-  onAttach,
+  onSendAttachments,
+  onPickFiles,
   replyTo,
   onCancelReply,
   editingText,
@@ -40,8 +46,26 @@ export function Composer({
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [effectOpen, setEffectOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(false);
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const trimmed = text.trim();
   const isEditing = editingText != null;
+  const attachEnabled = !!onSendAttachments && !isEditing;
+  const canSend = trimmed.length > 0 || pending.length > 0;
+
+  const addPending = (item: PendingAttachment): void =>
+    setPending((cur) => (cur.some((p) => p.uri === item.uri) ? cur : [...cur, item]));
+  const removePending = (uri: string): void =>
+    setPending((cur) => cur.filter((p) => p.uri !== uri));
+  const toggleTray = (): void =>
+    setTrayOpen((open) => {
+      if (!open) Keyboard.dismiss(); // the tray takes the keyboard's place
+      return !open;
+    });
+  const handlePickFiles = (): void => {
+    const p = onPickFiles?.();
+    if (p) void p.then((items) => items.forEach(addPending));
+  };
 
   // Debounced typing emit: start-typing on input, stop-typing after a pause / on send.
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,12 +94,16 @@ export function Composer({
   }, [editingText]);
 
   const submit = (effectId?: string): void => {
-    if (!trimmed) return;
     const captured = trimmed;
+    const atts = pending;
+    if (!captured && atts.length === 0) return;
     setText('');
+    setPending([]);
+    setTrayOpen(false);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     emitTyping(false);
-    onSend(captured, effectId);
+    if (atts.length > 0) onSendAttachments?.(atts);
+    if (captured) onSend(captured, effectId);
   };
 
   const cancelEdit = (): void => {
@@ -184,22 +212,63 @@ export function Composer({
         </View>
       ) : null}
 
+      {pending.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.pendingRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {pending.map((p) => (
+            <View key={p.uri} style={styles.pendingItem}>
+              {p.mimeType.startsWith('image/') ? (
+                <Image source={{ uri: p.uri }} style={styles.pendingThumb} contentFit="cover" />
+              ) : (
+                <View
+                  style={[
+                    styles.pendingThumb,
+                    styles.pendingFile,
+                    { backgroundColor: theme.color.secondaryBackground },
+                  ]}
+                >
+                  <Icon
+                    name={p.mimeType.startsWith('video/') ? 'videocam-outline' : 'document-outline'}
+                    size={22}
+                    color={theme.color.secondaryLabel}
+                  />
+                </View>
+              )}
+              <Pressable
+                onPress={() => removePending(p.uri)}
+                hitSlop={6}
+                style={styles.pendingRemove}
+                accessibilityRole="button"
+                accessibilityLabel="Remove attachment"
+              >
+                <Icon name="close-circle" size={20} color="#fff" />
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+
       <View style={styles.row}>
-        {onAttach ? (
+        {attachEnabled ? (
           <Pressable
-            onPress={onAttach}
+            onPress={toggleTray}
             hitSlop={8}
             style={styles.attach}
             accessibilityRole="button"
-            accessibilityLabel="Attach photo or file"
+            accessibilityLabel={trayOpen ? 'Close attachments' : 'Attach photo or file'}
           >
-            <Icon name="add" size={28} color={theme.color.tint} />
+            <Icon name={trayOpen ? 'close' : 'add'} size={28} color={theme.color.tint} />
           </Pressable>
         ) : null}
         <TextInput
           multiline
           value={text}
           onChangeText={onChangeText}
+          onFocus={() => setTrayOpen(false)}
           placeholder="iMessage"
           placeholderTextColor={theme.color.tertiaryLabel}
           style={[
@@ -222,10 +291,10 @@ export function Composer({
             <Icon name="calendar-outline" size={20} color={theme.color.tint} />
           </Pressable>
         ) : null}
-        {trimmed ? (
+        {canSend ? (
           <Pressable
             onPress={() => submit()}
-            onLongPress={isEditing ? undefined : () => setEffectOpen(true)}
+            onLongPress={!isEditing && trimmed ? () => setEffectOpen(true) : undefined}
             delayLongPress={250}
             style={[styles.send, { backgroundColor: theme.color.tint }]}
             accessibilityRole="button"
@@ -235,7 +304,7 @@ export function Composer({
             <Icon name="arrow-up" size={20} color="#fff" />
           </Pressable>
         ) : null}
-        {!trimmed && !isEditing && onStartVoice ? (
+        {!canSend && !isEditing && onStartVoice ? (
           <Pressable
             onPress={onStartVoice}
             hitSlop={8}
@@ -247,6 +316,7 @@ export function Composer({
           </Pressable>
         ) : null}
       </View>
+      {trayOpen ? <AttachmentTray onPick={addPending} onPickFiles={handlePickFiles} /> : null}
       <EffectPicker
         visible={effectOpen}
         onClose={() => setEffectOpen(false)}
@@ -286,4 +356,15 @@ const styles = StyleSheet.create({
   send: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   attach: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
   micBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  pendingRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 10 },
+  pendingItem: { width: 60, height: 60 },
+  pendingThumb: { width: 60, height: 60, borderRadius: 10 },
+  pendingFile: { alignItems: 'center', justifyContent: 'center' },
+  pendingRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 11,
+  },
 });
