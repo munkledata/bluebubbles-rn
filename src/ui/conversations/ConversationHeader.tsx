@@ -3,6 +3,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChatHeader } from '@features/conversations/useChatHeader';
+import { useFaceTime } from '@features/facetime/useFaceTime';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
@@ -25,6 +26,7 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { data } = useChatHeader(chatGuid);
+  const { startCall } = useFaceTime();
   const redacted = useRedactedModeStore((s) => s.enabled);
   const title = redactTitle(data ? resolveTitle(data) : '', redacted);
   const group = data ? isGroupRow(data) : false;
@@ -40,15 +42,17 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
         },
       ]}
     >
-      <Pressable
-        onPress={() => router.back()}
-        hitSlop={12}
-        style={styles.side}
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-      >
-        <Text style={[styles.back, { color: theme.color.tint }]}>‹</Text>
-      </Pressable>
+      <View style={styles.leftGroup}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.side}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Text style={[styles.back, { color: theme.color.tint }]}>‹</Text>
+        </Pressable>
+      </View>
       <Pressable
         onPress={() => router.push(`/chat-settings/${encodeURIComponent(chatGuid)}`)}
         style={styles.center}
@@ -74,15 +78,26 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
           {title}
         </Text>
       </Pressable>
-      <Pressable
-        onPress={() => router.push('/scheduled')}
-        hitSlop={12}
-        style={styles.side}
-        accessibilityRole="button"
-        accessibilityLabel="View scheduled messages"
-      >
-        <Text style={styles.calendar}>🗓️</Text>
-      </Pressable>
+      <View style={styles.rightGroup}>
+        <Pressable
+          onPress={() => void startCall({ chatGuid, video: true })}
+          hitSlop={12}
+          style={styles.side}
+          accessibilityRole="button"
+          accessibilityLabel="Start FaceTime call"
+        >
+          <Text style={styles.icon}>📹</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/scheduled')}
+          hitSlop={12}
+          style={styles.side}
+          accessibilityRole="button"
+          accessibilityLabel="View scheduled messages"
+        >
+          <Text style={styles.icon}>🗓️</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -95,9 +110,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  // Equal-width side groups (88 = two 44 slots) keep the centered title balanced even
+  // though the left has one button and the right has two.
+  leftGroup: {
+    width: 88,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  rightGroup: { width: 88, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   side: { width: 44, alignItems: 'center', justifyContent: 'center' },
   back: { fontSize: 34, fontWeight: '300', lineHeight: 36 },
   center: { flex: 1, alignItems: 'center', gap: 2 },
   title: { fontSize: 15, fontWeight: '600', maxWidth: '90%' },
-  calendar: { fontSize: 20 },
+  icon: { fontSize: 20 },
 });

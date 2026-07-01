@@ -1,6 +1,7 @@
 import notifee, { type EventDetail } from '@notifee/react-native';
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
+import { isFaceTimeLink } from '@core/facetime';
 import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { ensureDatabase, http, markRead } from '@/services';
@@ -89,8 +90,7 @@ async function handleFaceTimeAction(actionId: string | undefined, uuid: string):
       }
       // The link comes from the server — only open a real FaceTime link, never an
       // arbitrary scheme/Intent (a compromised server could otherwise deep-link).
-      if (!link || !/^(facetime:|https:\/\/facetime\.apple\.com\/)/i.test(link))
-        throw new Error('rejected non-FaceTime link');
+      if (!isFaceTimeLink(link)) throw new Error('rejected non-FaceTime link');
       await Linking.openURL(link);
     } catch {
       // best-effort; the call may already have ended / the link was rejected

@@ -1,6 +1,6 @@
 import { resolveMessageChatGuid } from '@core/models';
 import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
-import { getChatHeader } from '@db/repositories';
+import { getChatHeader, getHandleName } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 
 /**
@@ -22,7 +22,16 @@ export async function buildMessageIntents(
       const chatGuid = resolveMessageChatGuid(m);
       if (!chatGuid || !m.guid) return [];
       const header = await getChatHeader(db, chatGuid);
-      const senderName = m.handle?.displayName ?? m.handle?.address ?? 'Unknown';
+      // Resolve the sender's CONTACT name from the DB (the DbEventSink has already upserted +
+      // contact-linked the handle by the time this runs), matching the in-app UI. The event's
+      // `handle.displayName` is the server name (no device contact), so preferring it showed a
+      // bare phone number even when the contact is known locally.
+      const address = m.handle?.address;
+      const senderName =
+        (address ? await getHandleName(db, address) : null) ??
+        m.handle?.displayName ??
+        address ??
+        'Unknown';
       const isGroup = (header?.participantCount ?? 0) > 1;
       const chatTitle =
         header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;

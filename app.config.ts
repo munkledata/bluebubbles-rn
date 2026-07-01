@@ -27,9 +27,16 @@ const config: ExpoConfig = {
     // a file secret for EAS builds. The native build FAILS without this file.
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     predictiveBackGestureEnabled: false,
-    // Required (Android 14+) for the incoming-FaceTime full-screen-intent notification;
-    // without it the call notification silently degrades to heads-up. Needs a rebuild.
-    permissions: ['android.permission.USE_FULL_SCREEN_INTENT'],
+    // USE_FULL_SCREEN_INTENT (Android 14+): the incoming-FaceTime full-screen-intent
+    // notification degrades to heads-up without it.
+    // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS: the in-app FaceTime call WebView needs mic
+    // capture (getUserMedia); CAMERA is already declared by the expo-camera plugin.
+    // All need a native rebuild to take effect.
+    permissions: [
+      'android.permission.USE_FULL_SCREEN_INTENT',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.MODIFY_AUDIO_SETTINGS',
+    ],
     adaptiveIcon: {
       backgroundColor: '#4990de',
       foregroundImage: './assets/android-icon-foreground.png',

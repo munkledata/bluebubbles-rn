@@ -5,6 +5,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
 import { handleNotificationAction } from '@/services/notifications/actions';
 import { useLockStore } from '@state/lockStore';
+import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 
 /**
  * Layout for the connected app. Drives the resume re-lock (the gate itself is
@@ -35,5 +36,13 @@ export default function AppLayout(): React.JSX.Element {
     [],
   );
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <>
+      <Stack screenOptions={{ headerShown: false }} />
+      {/* App-wide so an incoming call rings on any screen; the in-call WebView overlay
+          takes over once answered (and is also opened by outgoing calls from the chat). */}
+      <IncomingFaceTimeOverlay />
+      <FaceTimeCallOverlay />
+    </>
+  );
 }

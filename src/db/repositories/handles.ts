@@ -5,6 +5,20 @@ import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { linkHandlesToContacts } from './contacts';
 
+/**
+ * The display name to show for a handle: the contact-matched name when present, else the
+ * raw address. Mirrors the `COALESCE(display_name, address)` every in-app query uses, so a
+ * notification shows the SAME name as the conversation list/chat (the event payload's
+ * `handle.displayName` is the server name, which has no device-contact name — that's why
+ * notifications were showing a bare phone number). Returns null when the handle is unknown.
+ */
+export async function getHandleName(db: AppDatabase, address: string): Promise<string | null> {
+  const rows = await db.all<{ name: string }>(
+    sql`SELECT COALESCE(display_name, address) AS name FROM handles WHERE address = ${address} LIMIT 1`,
+  );
+  return rows[0]?.name ?? null;
+}
+
 /** Upsert handles by address; returns address → row id. */
 export async function upsertHandles(
   db: AppDatabase,

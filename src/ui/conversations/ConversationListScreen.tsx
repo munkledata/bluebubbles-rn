@@ -81,6 +81,14 @@ export function ConversationListScreen(): React.JSX.Element {
         <Text style={[styles.largeTitle, { color: theme.color.label }]}>Messages</Text>
         <View style={styles.headerActions}>
           <Pressable
+            onPress={() => router.push('/facetime')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="FaceTime"
+          >
+            <Text style={styles.compose}>📹</Text>
+          </Pressable>
+          <Pressable
             onPress={() => router.push('/new-chat')}
             hitSlop={8}
             accessibilityRole="button"

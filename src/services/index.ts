@@ -35,6 +35,8 @@ import {
 import { DbEventSink } from './realtime/dbEventSink';
 import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
+import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
+import { useFaceTimeStore } from '@state/faceTimeStore';
 import { SocketService } from './realtime/socketService';
 import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
 import { startReachabilityWatch, stopReachabilityWatch } from './reachability';
@@ -142,14 +144,18 @@ export async function createNewChat(
 // events to UI state; inner layer writes the DB (source of truth) then notifies.
 let realtimeSinkInstance: EventSink | null = null;
 function realtimeSink(db: AppDatabase): EventSink {
-  realtimeSinkInstance ??= new TypingEventSink(
-    new NotifyingEventSink(
-      new DbEventSink(db),
-      db,
-      buildMessageIntents,
-      (intent) => void postNotification(intent),
+  realtimeSinkInstance ??= new FaceTimeEventSink(
+    new TypingEventSink(
+      new NotifyingEventSink(
+        new DbEventSink(db),
+        db,
+        buildMessageIntents,
+        (intent) => void postNotification(intent),
+      ),
+      (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
     ),
-    (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
+    (c) => useFaceTimeStore.getState().ring(c),
+    (uuid) => useFaceTimeStore.getState().dismissIncoming(uuid),
   );
   return realtimeSinkInstance;
 }
