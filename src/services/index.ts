@@ -151,7 +151,15 @@ function realtimeSink(db: AppDatabase): EventSink {
         new DbEventSink(db),
         db,
         buildMessageIntents,
-        (intent) => void postNotification(intent),
+        (intent) => {
+          // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
+          // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
+          // pull the kv-backed store — and the DB is still written regardless.
+          if (intent.kind === 'message' && !useFeatureSettingsStore.getState().messageNotifications) {
+            return;
+          }
+          void postNotification(intent);
+        },
       ),
       (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
     ),
@@ -179,6 +187,9 @@ export async function dispatchRealtimeEvent(eventName: string, rawData: unknown)
   // otherwise a headless push would leak message content despite redacted mode being ON.
   await useRedactedModeStore.getState().hydrate();
   setHideNotificationPreview(useRedactedModeStore.getState().enabled);
+  // Same reason: a headless wake hasn't hydrated the feature flags, so load them before notifying
+  // so the "Message Notifications" toggle (and typing/read-receipt gates) are honored killed-app.
+  await useFeatureSettingsStore.getState().hydrate();
   await sharedRouter(db).handle(eventName, rawData, 'fcm');
 }
 
@@ -490,8 +501,9 @@ export async function connect(
  * verified without a server.
  */
 export function sendTyping(chatGuid: string, isTyping: boolean): void {
-  // Respect the "Send Typing Indicators" toggle — when off, never emit our typing state.
-  if (!useFeatureSettingsStore.getState().sendTypingIndicators) return;
+  // Respect the master Private API switch + the "Send Typing Indicators" toggle.
+  const fs = useFeatureSettingsStore.getState();
+  if (!fs.privateApiEnabled || !fs.sendTypingIndicators) return;
   socket?.emit(isTyping ? 'start-typing' : 'stop-typing', { guid: chatGuid });
 }
 
@@ -506,7 +518,8 @@ export async function markRead(chatGuid: string): Promise<void> {
   if (chatId == null) return;
   const newest = await getNewestReceivedGuid(db, chatId);
   if (newest) await setLastReadMessageGuid(db, chatGuid, newest);
-  if (!useFeatureSettingsStore.getState().sendReadReceipts) return;
+  const fs = useFeatureSettingsStore.getState();
+  if (!fs.privateApiEnabled || !fs.sendReadReceipts) return;
   try {
     await chatsApi.markChatRead(http, chatGuid);
   } catch {

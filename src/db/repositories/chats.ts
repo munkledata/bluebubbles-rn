@@ -303,6 +303,41 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
   return rows[0] ?? null;
 }
 
+/** Normalize an address for participant-set comparison: emails lowercased, phones to last 10
+ *  digits (so +1 (555) 123-4567 matches 5551234567). */
+function normalizeAddr(a: string): string {
+  return a.includes('@') ? a.trim().toLowerCase() : a.replace(/\D/g, '').slice(-10);
+}
+
+/**
+ * Find an existing chat whose participant set EXACTLY equals `addresses` (order-independent,
+ * phone-suffix/email-normalized) — so the new-chat screen can offer "continue existing
+ * conversation" instead of spawning a duplicate thread. Returns the chat guid or null.
+ */
+export async function findChatByParticipantAddresses(
+  db: AppDatabase,
+  addresses: string[],
+): Promise<string | null> {
+  const want = new Set(addresses.map(normalizeAddr).filter(Boolean));
+  if (want.size === 0) return null;
+  const rows = await db.all<{ guid: string; address: string }>(sql`
+    SELECT c.guid AS guid, h.address AS address
+      FROM chats c
+      JOIN chat_handles ch ON ch.chat_id = c.id
+      JOIN handles h ON h.id = ch.handle_id
+  `);
+  const byChat = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const set = byChat.get(r.guid) ?? new Set<string>();
+    set.add(normalizeAddr(r.address));
+    byChat.set(r.guid, set);
+  }
+  for (const [guid, set] of byChat) {
+    if (set.size === want.size && [...want].every((a) => set.has(a))) return guid;
+  }
+  return null;
+}
+
 /** A chat's participants with their addresses — for group add/remove (needs the address). */
 export async function getChatParticipants(
   db: AppDatabase,

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MessagePreview } from '@db/repositories';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
@@ -43,6 +44,7 @@ export function Composer({
   onStartVoice,
 }: ComposerProps): React.JSX.Element {
   const theme = useTheme();
+  const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [effectOpen, setEffectOpen] = useState(false);
@@ -269,6 +271,9 @@ export function Composer({
           value={text}
           onChangeText={onChangeText}
           onFocus={() => setTrayOpen(false)}
+          // "Send with Return": Enter submits instead of inserting a newline.
+          submitBehavior={sendWithReturn ? 'submit' : 'newline'}
+          onSubmitEditing={sendWithReturn ? () => submit() : undefined}
           placeholder="iMessage"
           placeholderTextColor={theme.color.tertiaryLabel}
           style={[

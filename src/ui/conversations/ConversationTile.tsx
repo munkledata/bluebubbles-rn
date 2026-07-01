@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { InboxRow } from '@db/repositories';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
@@ -33,6 +34,7 @@ export const ConversationTile = React.memo(function ConversationTile({
 }: ConversationTileProps): React.JSX.Element {
   const theme = useTheme();
   const redacted = useRedactedModeStore((s) => s.enabled);
+  const compact = useFeatureSettingsStore((s) => s.compactChatList);
   const unread = row.unreadCount > 0;
   const title = redactTitle(resolveTitle(row), redacted);
   const preview = redactPreview(buildPreview(row), redacted);
@@ -46,6 +48,7 @@ export const ConversationTile = React.memo(function ConversationTile({
       delayLongPress={350}
       style={({ pressed }) => [
         styles.tile,
+        compact ? styles.tileCompact : null,
         pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
       ]}
       accessibilityRole="button"
@@ -82,7 +85,10 @@ export const ConversationTile = React.memo(function ConversationTile({
         >
           {title}
         </Text>
-        <Text numberOfLines={2} style={[styles.preview, { color: theme.color.secondaryLabel }]}>
+        <Text
+          numberOfLines={compact ? 1 : 2}
+          style={[styles.preview, { color: theme.color.secondaryLabel }]}
+        >
           {preview}
         </Text>
       </View>
@@ -104,6 +110,7 @@ export const ConversationTile = React.memo(function ConversationTile({
 
 const styles = StyleSheet.create({
   tile: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingRight: 12 },
+  tileCompact: { paddingVertical: 6 },
   leading: { flexDirection: 'row', alignItems: 'center', width: 64, paddingLeft: 6 },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 6 },
   dotSpacer: { width: 10, marginRight: 6 },

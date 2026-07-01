@@ -12,33 +12,53 @@ import { kvGet, kvSet } from '@db/repositories';
  * Non-React consumers (services `sendTyping`/`markRead`) read via `getState()`.
  */
 export type FeatureFlag =
+  | 'privateApiEnabled'
   | 'sendTypingIndicators'
   | 'sendReadReceipts'
   | 'autoDownloadAttachments'
-  | 'autoDownloadOnWifiOnly';
+  | 'autoDownloadOnWifiOnly'
+  | 'sendWithReturn'
+  | 'showDeliveryTimestamps'
+  | 'compactChatList'
+  | 'messageNotifications';
 
 const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
+  privateApiEnabled: { key: 'privateApi.enabled', def: true },
   sendTypingIndicators: { key: 'privateApi.sendTypingIndicators', def: true },
   sendReadReceipts: { key: 'privateApi.sendReadReceipts', def: true },
   autoDownloadAttachments: { key: 'attachments.autoDownload', def: true },
   autoDownloadOnWifiOnly: { key: 'attachments.autoDownloadWifiOnly', def: false },
+  sendWithReturn: { key: 'conversation.sendWithReturn', def: false },
+  showDeliveryTimestamps: { key: 'conversation.showDeliveryTimestamps', def: true },
+  compactChatList: { key: 'chatList.compact', def: false },
+  messageNotifications: { key: 'notifications.messages', def: true },
 };
 
 interface FeatureSettingsState {
+  privateApiEnabled: boolean;
   sendTypingIndicators: boolean;
   sendReadReceipts: boolean;
   autoDownloadAttachments: boolean;
   autoDownloadOnWifiOnly: boolean;
+  sendWithReturn: boolean;
+  showDeliveryTimestamps: boolean;
+  compactChatList: boolean;
+  messageNotifications: boolean;
   hydrated: boolean;
   hydrate: () => Promise<void>;
   setFlag: (flag: FeatureFlag, value: boolean) => Promise<void>;
 }
 
 export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
+  privateApiEnabled: FLAGS.privateApiEnabled.def,
   sendTypingIndicators: FLAGS.sendTypingIndicators.def,
   sendReadReceipts: FLAGS.sendReadReceipts.def,
   autoDownloadAttachments: FLAGS.autoDownloadAttachments.def,
   autoDownloadOnWifiOnly: FLAGS.autoDownloadOnWifiOnly.def,
+  sendWithReturn: FLAGS.sendWithReturn.def,
+  showDeliveryTimestamps: FLAGS.showDeliveryTimestamps.def,
+  compactChatList: FLAGS.compactChatList.def,
+  messageNotifications: FLAGS.messageNotifications.def,
   hydrated: false,
   hydrate: async () => {
     try {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   formatSeparatorDate,
@@ -55,10 +56,11 @@ export const MessageRow = React.memo(function MessageRow({
 }: MessageRowProps): React.JSX.Element {
   const theme = useTheme();
   const redacted = useRedactedModeStore((s) => s.enabled);
+  const showTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
   const tail = showTail(msg, newer);
   const header = showSenderHeader(msg, older, isGroup);
   const separator = showDateSeparator(msg, older);
-  const status = isLastOutgoing ? statusFor(msg) : null;
+  const status = isLastOutgoing && showTimestamps ? statusFor(msg) : null;
   const breaksGroup = !older || !sameSender(msg, older);
   // Reaction badges overflow the bubble top; reserve room so they don't clip.
   const hasReactions = (msg.reactions?.length ?? 0) > 0;

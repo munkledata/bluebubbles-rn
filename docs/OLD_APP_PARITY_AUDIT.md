@@ -40,7 +40,18 @@ done.
 - **Messaging (Private API):** _Send Typing Indicators_ gates `sendTyping`; _Send Read Receipts_ gates the server read-receipt in `markRead` (local badge still clears). _(private-api-settings — the master toggle + full panel remain a follow-up)_
 - **Downloads:** _Auto-download Attachments_ + _Only on Wi-Fi_ (via `expo-network`) gate the automatic image fetch. _(attachment-settings)_
 
-**Still open from the high-priority shortlist** (largest / need native or server work): Find My interactive map, real-time Find My socket location, onboarding sync-settings + sync-progress + permissions screens, Android SEND share-target, composer camera capture, new-chat recipient chips + existing-chat detection, App Theme light/dark/system (excluded per request), and the remaining full settings panels (Conversation, Chat-list appearance incl. swipe actions, Notifications).
+### Wave 2 (2026-07-01)
+
+- **Find My interactive map** — an OpenStreetMap/Leaflet map in a WebView (no Google Maps key needed, matching the old app), with markers for every located device/item/person, tap-a-row-to-center, and redacted-mode label masking. _(findmy — map + redacted masking done; real-time socket location still open)_
+- **Composer camera capture** — a Camera button in the attachment tray captures a photo via `expo-image-picker` and stages it. _(sweep)_
+- **new-chat recipient chips + existing-chat detection** — recipients are removable chips (tap suggestion to add, backspace/tap to remove); as they change, the app detects an existing chat with exactly those participants and offers "Open it" to avoid duplicates. _(new-chat)_
+- **Settings panels (new sections, wired to behavior):**
+  - **Messaging:** _Enable Private API Features_ master toggle (gates typing + read receipts). _(private-api-settings — panel + master + the two sub-toggles done; remaining sub-toggles open)_
+  - **Conversation:** _Send with Return Key_ (composer Enter submits) + _Show Delivery Timestamps_ (gates the Sent/Delivered/Read line). _(conversation-settings)_
+  - **Chat List:** _Compact Conversation List_ (denser tiles). _(chat-list-settings)_
+  - **Notifications:** _Message Notifications_ global toggle (gates message notifications foreground + headless; calls/reminders unaffected). _(notifications-settings)_
+
+**Still open** (need native rebuild config, server work, or on-device gesture verification): swipe actions on tiles (needs app-wide `GestureHandlerRootView` + recycling-safe swipeables — deferred to avoid shipping an untested app-wide gesture change blind), real-time Find My socket location (server events), Android SEND share-target (new native module + intent filters + rebuild), onboarding sync-settings + sync-progress + permissions screens (multi-screen flow), attachment-forward (vs text-only today), the remaining Conversation/Chat-list sub-toggles, and App Theme light/dark/system (excluded per request).
 
 ## Screen coverage at a glance
 

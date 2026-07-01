@@ -32,10 +32,15 @@ export default function SettingsScreen(): React.JSX.Element {
   const setRedacted = useRedactedModeStore((s) => s.setEnabled);
   const maxDownloads = useDownloadSettingsStore((s) => s.maxConcurrent);
   const setMaxDownloads = useDownloadSettingsStore((s) => s.setMaxConcurrent);
+  const privateApiEnabled = useFeatureSettingsStore((s) => s.privateApiEnabled);
   const sendTypingIndicators = useFeatureSettingsStore((s) => s.sendTypingIndicators);
   const sendReadReceipts = useFeatureSettingsStore((s) => s.sendReadReceipts);
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
+  const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
+  const showDeliveryTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
+  const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
+  const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
@@ -48,6 +53,9 @@ export default function SettingsScreen(): React.JSX.Element {
     contacts: 'contacts sync names photos address book',
     general: 'general suggested smart replies app lock biometric reminders backup find my location',
     messaging: 'messaging private api typing indicators read receipts',
+    conversation: 'conversation message view send with return enter delivery timestamps',
+    chatlist: 'chat list conversations compact dense appearance',
+    notifications: 'notifications alerts message notifications sound',
     downloads: 'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
     privacy: 'privacy redacted mode hide previews encryption key rotate security',
     server: 'server management restart logs statistics',
@@ -284,10 +292,31 @@ export default function SettingsScreen(): React.JSX.Element {
             <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
               <View style={styles.row}>
                 <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Enable Private API Features
+                </Text>
+                <Switch
+                  value={privateApiEnabled}
+                  onValueChange={(v) => void setFlag('privateApiEnabled', v)}
+                  accessibilityLabel="Enable typing indicators, read receipts, and other Private API features"
+                />
+              </View>
+              <View
+                style={[
+                  styles.row,
+                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.rowLabel,
+                    { color: privateApiEnabled ? theme.color.label : theme.color.tertiaryLabel },
+                  ]}
+                >
                   Send Typing Indicators
                 </Text>
                 <Switch
                   value={sendTypingIndicators}
+                  disabled={!privateApiEnabled}
                   onValueChange={(v) => void setFlag('sendTypingIndicators', v)}
                   accessibilityLabel="Let others see when you are typing"
                 />
@@ -298,13 +327,100 @@ export default function SettingsScreen(): React.JSX.Element {
                   { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
                 ]}
               >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                <Text
+                  style={[
+                    styles.rowLabel,
+                    { color: privateApiEnabled ? theme.color.label : theme.color.tertiaryLabel },
+                  ]}
+                >
                   Send Read Receipts
                 </Text>
                 <Switch
                   value={sendReadReceipts}
+                  disabled={!privateApiEnabled}
                   onValueChange={(v) => void setFlag('sendReadReceipts', v)}
                   accessibilityLabel="Let others see when you have read their messages"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        {match(SECTIONS.conversation) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              CONVERSATION
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Send with Return Key
+                </Text>
+                <Switch
+                  value={sendWithReturn}
+                  onValueChange={(v) => void setFlag('sendWithReturn', v)}
+                  accessibilityLabel="Pressing return sends the message instead of adding a new line"
+                />
+              </View>
+              <View
+                style={[
+                  styles.row,
+                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Show Delivery Timestamps
+                </Text>
+                <Switch
+                  value={showDeliveryTimestamps}
+                  onValueChange={(v) => void setFlag('showDeliveryTimestamps', v)}
+                  accessibilityLabel="Show Sent / Delivered / Read status under messages"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        {match(SECTIONS.chatlist) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              CHAT LIST
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Compact Conversation List
+                </Text>
+                <Switch
+                  value={compactChatList}
+                  onValueChange={(v) => void setFlag('compactChatList', v)}
+                  accessibilityLabel="Use denser conversation tiles"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
+        {match(SECTIONS.notifications) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              NOTIFICATIONS
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Message Notifications
+                </Text>
+                <Switch
+                  value={messageNotifications}
+                  onValueChange={(v) => void setFlag('messageNotifications', v)}
+                  accessibilityLabel="Show notifications for new messages"
                 />
               </View>
             </View>
