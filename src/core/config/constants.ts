@@ -42,6 +42,10 @@ export const SERVER_EVENTS = [
   'ft-call-status-changed',
   'incoming-facetime',
   'imessage-aliases-removed',
+  // Server forwards the helper's outgoing-send failure; surfaced as a message error in-app.
+  'message-send-error',
+  // Server's public URL rotated (zrok tunnel) — the app reconnects to the new origin.
+  'new-server',
 ] as const;
 
 export type ServerEventName = (typeof SERVER_EVENTS)[number];

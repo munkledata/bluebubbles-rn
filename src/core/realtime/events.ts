@@ -40,7 +40,11 @@ export type NormalizedEvent =
   | { type: 'participant-left'; payload: z.infer<typeof GroupChangePayload> }
   | { type: 'ft-call-status-changed'; payload: z.infer<typeof FaceTimeStatusPayload> }
   | { type: 'incoming-facetime'; payload: z.infer<typeof FaceTimeStatusPayload> }
-  | { type: 'imessage-aliases-removed'; payload: Record<string, unknown> };
+  | { type: 'imessage-aliases-removed'; payload: Record<string, unknown> }
+  // The server forwards the helper's outgoing-send failure (Messages.app rejected the send).
+  | { type: 'message-send-error'; payload: Record<string, unknown> }
+  // The server's public URL rotated (e.g. the zrok tunnel) — reconnect to the new origin.
+  | { type: 'new-server'; url: string };
 
 /**
  * Pure, transport-free description of a notification to show (or clear). Emitted

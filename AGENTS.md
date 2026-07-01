@@ -21,7 +21,15 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   (e.g. `CryptoBackend`, `SecureVault`) implemented in `src/native/`.
 - **DB is the source of truth.** Network/FCM write into the encrypted DB; UI observes it.
 - **One auth-injection point:** `HttpClient` puts the password in a header — never the URL.
-- **One realtime entry point:** `EventRouter` normalizes both socket and FCM events.
+- **One realtime entry point:** `EventRouter` normalizes both socket and FCM events. To add a
+  server event: add the name to `SERVER_EVENTS` (constants.ts), a `NormalizedEvent` variant +
+  `normalize()` case (eventRouter.ts), and handle it in a sink (DB write → `DbEventSink`;
+  connection/UI side-effect → a thin injected sink like `ServerUrlEventSink`/`TypingEventSink`).
+  `message-send-error` (→ `markMessageSendError`) and `new-server` (→ `applyNewServerUrl`, reconnect
+  to the rotated tunnel URL) are wired this way. App↔server API/feature parity — including the
+  intentional non-alignments (`imessage-aliases-removed` app-ready but no server source;
+  server-side `scheduled-message-update` vs the app's LOCAL scheduling; participant-collage group
+  avatars vs `group-icon-*`) — is tracked in `docs/APP_SERVER_PARITY.md`.
 - Path aliases: `@core`, `@db`, `@ui`, `@utils`, and `@core/*` etc. (tsconfig + jest mapped;
   Expo Metro resolves tsconfig paths automatically).
 - Strict TS (`noUncheckedIndexedAccess` on). Prefer `charAt`/explicit guards over `!` where

@@ -23,6 +23,8 @@ interface SessionState {
   connected: (origin: string, password: string, info: ServerInfo) => void;
   /** Refresh just the cached server info (e.g. on a hydrated boot, where `connected` never ran). */
   setServerInfo: (info: ServerInfo) => void;
+  /** Point the session at a new origin (e.g. the server's `new-server` tunnel-URL rotation). */
+  setOrigin: (origin: string) => void;
   failed: (message: string) => void;
   /** Clear the session (logout / forget connection). */
   reset: () => void;
@@ -45,6 +47,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   connected: (origin, password, info) =>
     set({ status: 'connected', origin, password, serverInfo: info, error: null }),
   setServerInfo: (info) => set({ serverInfo: info }),
+  setOrigin: (origin) => set({ origin }),
   failed: (message) => set({ status: 'error', error: message }),
   reset: () =>
     set({ status: 'unauthenticated', origin: null, password: null, serverInfo: null, error: null }),

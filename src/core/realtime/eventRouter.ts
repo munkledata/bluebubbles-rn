@@ -119,6 +119,20 @@ export class EventRouter {
           type: 'imessage-aliases-removed',
           payload: (data as Record<string, unknown>) ?? {},
         };
+      case 'message-send-error':
+        return {
+          type: 'message-send-error',
+          payload: (data as Record<string, unknown>) ?? {},
+        };
+      case 'new-server': {
+        // Payload is the new server URL (a bare string, or wrapped as { url } / { server }).
+        const url =
+          typeof data === 'string'
+            ? data
+            : ((data as { url?: unknown; server?: unknown })?.url ??
+                (data as { server?: unknown })?.server);
+        return typeof url === 'string' && url.length > 0 ? { type: 'new-server', url } : null;
+      }
       default:
         return null;
     }

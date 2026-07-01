@@ -38,6 +38,7 @@ import { DbEventSink } from './realtime/dbEventSink';
 import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
+import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
 import { useFaceTimeStore } from '@state/faceTimeStore';
 import { SocketService } from './realtime/socketService';
 import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
@@ -146,7 +147,8 @@ export async function createNewChat(
 // events to UI state; inner layer writes the DB (source of truth) then notifies.
 let realtimeSinkInstance: EventSink | null = null;
 function realtimeSink(db: AppDatabase): EventSink {
-  realtimeSinkInstance ??= new FaceTimeEventSink(
+  realtimeSinkInstance ??= new ServerUrlEventSink(
+    new FaceTimeEventSink(
     new TypingEventSink(
       new NotifyingEventSink(
         new DbEventSink(db),
@@ -166,6 +168,8 @@ function realtimeSink(db: AppDatabase): EventSink {
     ),
     (c) => useFaceTimeStore.getState().ring(c),
     (uuid) => useFaceTimeStore.getState().dismissIncoming(uuid),
+    ),
+    (url) => void applyNewServerUrl(url),
   );
   return realtimeSinkInstance;
 }
@@ -451,6 +455,30 @@ export async function startRealtime(): Promise<void> {
   if (FCM_ENABLED) {
     void import('./notifications/fcmMessaging').then((m) => m.registerFcmToken());
   }
+}
+
+/**
+ * Apply the server's `new-server` event: its public URL rotated (e.g. the zrok tunnel), so
+ * re-point the session + persisted credential at the new origin and reconnect — otherwise the app
+ * keeps hitting the stale URL until a manual reconnect. Scheme-validated (never point auth at a
+ * non-http(s) origin). The HttpClient reads the origin from the session accessors, so updating the
+ * store re-points REST too; `startRealtime` rebuilds the socket against the new origin.
+ */
+export async function applyNewServerUrl(url: string): Promise<void> {
+  const next = url.trim();
+  if (!/^https?:\/\//i.test(next)) {
+    logger.warn('[realtime] ignoring new-server URL with a non-http(s) scheme');
+    return;
+  }
+  if (useSessionStore.getState().origin === next) return; // unchanged
+  logger.info('[realtime] server URL rotated — reconnecting to the new origin');
+  try {
+    await vault.set('serverAddress', next);
+  } catch {
+    // best-effort persist; the in-memory origin still applies this session
+  }
+  useSessionStore.getState().setOrigin(next);
+  await startRealtime();
 }
 
 /**

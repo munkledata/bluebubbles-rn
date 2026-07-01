@@ -357,6 +357,23 @@ export async function reconcileOutgoingError(
     .where(eq(outgoingQueue.tempGuid, tempGuid));
 }
 
+/**
+ * Flip a message to the error state from a SERVER-pushed `message-send-error` (Messages.app
+ * rejected the send after it already left the app). Unlike {@link reconcileOutgoingError} this does
+ * NOT touch the outgoing_queue — it only surfaces the failure on the bubble (error badge + retry).
+ * No-op if the guid doesn't match a local message.
+ */
+export async function markMessageSendError(
+  db: AppDatabase,
+  guid: string,
+  errorCode = 1,
+): Promise<void> {
+  await db
+    .update(messages)
+    .set({ sendState: 'error', error: errorCode })
+    .where(eq(messages.guid, guid));
+}
+
 export interface RetryableOutgoing {
   id: number;
   tempGuid: string;

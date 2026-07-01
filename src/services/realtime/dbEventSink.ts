@@ -4,6 +4,7 @@ import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
   getNewestReceivedGuid,
+  markMessageSendError,
   reconcileEchoByContent,
   setLastReadMessageGuid,
   upsertChats,
@@ -77,6 +78,20 @@ export class DbEventSink implements EventSink {
         if (chatId == null) break;
         const newest = await getNewestReceivedGuid(this.db, chatId);
         if (newest) await setLastReadMessageGuid(this.db, chatGuid, newest);
+        break;
+      }
+      case 'message-send-error': {
+        // The server (helper) reports an outgoing send failed in Messages.app. Match the message
+        // by any guid the payload carries and flip it to the error state so the bubble shows the
+        // error + retry (complements the app's own optimistic-send retry queue).
+        const p = event.payload;
+        const embedded = (p.message ?? {}) as Record<string, unknown>;
+        const guid = [p.guid, p.tempGuid, p.messageGuid, embedded.guid].find(
+          (v): v is string => typeof v === 'string' && v.length > 0,
+        );
+        if (!guid) break;
+        const code = Number(p.error ?? embedded.error ?? 1) || 1;
+        await markMessageSendError(this.db, guid, code);
         break;
       }
       case 'group-name-change':

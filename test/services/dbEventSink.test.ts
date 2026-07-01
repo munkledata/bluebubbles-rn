@@ -30,6 +30,37 @@ describe('DbEventSink (live path)', () => {
     expect(msgs[0]!.text).toBe('incoming!');
   });
 
+  it('marks a message errored on a server message-send-error event', async () => {
+    const { db } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    // Seed a message, then fire the server-pushed send failure referencing its guid.
+    await router.handle(
+      'new-message',
+      JSON.stringify(
+        Message.parse({
+          guid: 'send-fail-1',
+          text: 'hi',
+          dateCreated: 1700000000000,
+          handle: { address: 'a@b.com' },
+          chats: [{ guid: 'cErr', participants: [{ address: 'a@b.com' }] }],
+        }),
+      ),
+      'socket',
+    );
+    await router.handle('message-send-error', JSON.stringify({ guid: 'send-fail-1', error: 22 }), 'socket');
+
+    const chats = (await listChats(db)) as Array<{ id: number; guid: string }>;
+    const chat = chats.find((c) => c.guid === 'cErr')!;
+    const msgs = (await listMessages(db, chat.id)) as Array<{
+      guid: string;
+      error: number;
+      sendState: string;
+    }>;
+    const m = msgs.find((x) => x.guid === 'send-fail-1')!;
+    expect(m.error).toBe(22);
+    expect(m.sendState).toBe('error');
+  });
+
   it('ignores events it does not handle yet (no throw)', async () => {
     const { db } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));

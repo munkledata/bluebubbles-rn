@@ -8,6 +8,22 @@ _Generated 2026-07-01. Bidirectional API/feature reconciliation between the RN a
 
 **44 surface items match** on both sides (the core messaging, sync, group management, FaceTime, Find My, stats, and restart/logs flows all line up).
 
+## ✅ Closed (2026-07-01)
+
+The top gaps have since been wired (app-side; the server already emitted these events):
+
+- **`message-send-error`** — the app now subscribes (SERVER_EVENTS), normalizes it (EventRouter → `NormalizedEvent`), and the DB sink flips the referenced message to the error state (`markMessageSendError`) so a server-detected send failure shows the bubble's error badge + retry. Unit-tested.
+- **`new-server`** (tunnel-URL rotation) — the app now subscribes and, via `ServerUrlEventSink` → `applyNewServerUrl`, scheme-validates the new URL, persists it to the vault, re-points the session origin (HTTP re-points automatically via the session accessors), and reconnects the socket — instead of silently hitting the stale URL until a manual reconnect.
+
+## ⚠️ Intentionally NOT aligned (documented, no action)
+
+These are genuine divergences, each for a concrete reason — not oversights:
+
+- **`imessage-aliases-removed`** — the app is fully wired to handle it (listener + notification), but the **Gator server has no detection source** for Apple-ID alias deregistration (not even declared in `DomainEvents`; 0 hits server-wide). The app handler is harmless + forward-compatible with an upstream server that does emit it; adding a fake server emission with no real source would be misleading. Left as app-ready.
+- **`scheduled-message-update`** — the server emits this for **server-side** scheduled messages; the RN app implements scheduling **locally** (device-side `runDueScheduled`/`scheduled_messages` table), so the server event doesn't map to the app's model. Architectural difference, not a gap.
+- **`group-icon-changed` / `group-icon-removed`** — the app renders group avatars as **participant collages** (`GroupAvatar`) and does not display a server-supplied custom group photo, so there's nothing to refresh. Wiring it would be a no-op until group-photo display is added. Deferred with the (still-open) group-photo feature.
+- **The large admin / config / diagnostics surface** (get-config/set-config, TLS/zrok/VAPID/Cloudflare mgmt, webhooks, permissions, alerts, FCM setup, device list/purge) — untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. Candidates for a future in-app "Server Health/Settings" screen (see the Server → App table below), not correctness gaps.
+
 ## App → Server (does the app call anything the server can't serve?)
 
 **No user-facing breakage.** 0 broken, 3 harmless/degraded. Every app call resolves to a real server route, except these — all already guarded in-app or dead subscriptions:
