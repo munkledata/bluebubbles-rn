@@ -42,11 +42,9 @@ function unwrapChat(res: z.infer<typeof SingleChat>): Chat {
 
 /**
  * POST /api/v1/chat/new — create a chat with the given addresses + an initial message.
- *
- * NOTE: UNIMPLEMENTED on the Gator server (no `/api/v1/chat/new` operation as of this
- * audit — verified against bbd/src/api/operations/*). This call will 404; the new-chat
- * UI alerts on the rejection. The tolerant `{ chat }`-or-bare schema is kept so the app
- * works unchanged if/when the server adds the op.
+ * Implemented on the Gator server (Private API `new-chat` op). The server responds with
+ * `{ guid }`; the rest of the chat hydrates from the chat sync. The tolerant
+ * `{ chat }`-or-bare schema accepts either shape.
  */
 export async function createChat(http: HttpClient, params: CreateChatParams): Promise<Chat> {
   const res = await http.post('/chat/new', SingleChat, {
@@ -62,10 +60,9 @@ export async function createChat(http: HttpClient, params: CreateChatParams): Pr
 
 /**
  * GET /api/v1/chat/{guid} — single chat with participants.
- *
- * NOTE: UNIMPLEMENTED on the Gator server (no single-chat read op — the only chat read is
- * the `POST /chat/query` list). This will 404; callers should fall back to the list.
- * Schema tolerates a `{ chat }` wrapper or a bare chat for forward compatibility.
+ * Implemented on the Gator server (`get-chat` op). Returns `{ chat }`; 404s for an unknown
+ * guid, in which case callers may fall back to the list. Schema tolerates a `{ chat }`
+ * wrapper or a bare chat.
  */
 export async function getChat(http: HttpClient, guid: string): Promise<Chat> {
   const res = await http.get(`/chat/${encodeURIComponent(guid)}`, SingleChat, {
@@ -80,11 +77,10 @@ export function markChatRead(http: HttpClient, guid: string): Promise<unknown> {
 }
 
 // ── Group management ─────────────────────────────────────────────────────────
-// UNIMPLEMENTED on the Gator server: there are NO chat-mutation operations (verified
-// against bbd/src/api/operations/* — the chat surface is only `POST /chat/query` list and
-// the read/action message ops). Every call below 404s; the group-management UI alerts on
-// the rejection, so the app degrades gracefully. The functions + tolerant `{ chat }`-or-
-// bare schema are kept so the app works unchanged if/when the server adds these ops.
+// Implemented on the Gator server via the injected Private-API helper: add/remove
+// participant, rename (PUT), and leave. Each mutation except leave returns the updated
+// { chat } (read back from chat.db with participants). chat.db lags the action slightly, so
+// the returned chat is best-effort; the app re-syncs to the authoritative state afterward.
 
 /** POST /api/v1/chat/{guid}/participant/{add|remove} — add/remove a member by address. */
 export async function updateParticipant(
