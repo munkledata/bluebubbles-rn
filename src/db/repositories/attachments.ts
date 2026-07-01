@@ -58,6 +58,7 @@ export async function upsertAttachments(
         blurhash: att.blurhash ?? null,
         hasLivePhoto: att.hasLivePhoto ?? false,
         isSticker: att.isSticker ?? false,
+        hideAttachment: att.hideAttachment ?? false,
       })),
     )
     .onConflictDoUpdate({
@@ -84,6 +85,7 @@ export interface AttachmentRow {
   blurhash: string | null;
   hasLivePhoto: number;
   isSticker: number;
+  hideAttachment: number;
   localPath: string | null;
 }
 
@@ -103,7 +105,7 @@ export async function listAttachmentsByMessageIds(
       id, guid, message_id AS messageId, mime_type AS mimeType,
       transfer_name AS transferName, total_bytes AS totalBytes,
       height, width, blurhash, has_live_photo AS hasLivePhoto,
-      is_sticker AS isSticker, local_path AS localPath
+      is_sticker AS isSticker, hide_attachment AS hideAttachment, local_path AS localPath
     FROM attachments
     WHERE message_id IN (${inList})
     ORDER BY id ASC
@@ -123,7 +125,8 @@ export async function getAttachmentByGuid(
   const rows = await db.all<AttachmentRow>(sql`
     SELECT id, guid, message_id AS messageId, mime_type AS mimeType,
       transfer_name AS transferName, total_bytes AS totalBytes, height, width, blurhash,
-      has_live_photo AS hasLivePhoto, is_sticker AS isSticker, local_path AS localPath
+      has_live_photo AS hasLivePhoto, is_sticker AS isSticker,
+      hide_attachment AS hideAttachment, local_path AS localPath
     FROM attachments WHERE guid = ${guid} LIMIT 1
   `);
   return rows[0] ?? null;
@@ -147,8 +150,9 @@ export interface ChatMediaByKind {
 /**
  * Shared attachments + links for a chat (for the conversation-details media sections),
  * newest-first. Attachments are joined to their messages and bucketed by MIME via
- * `mediaSection` (Photos / Videos / Documents); stickers and unsent (retracted) messages
- * are excluded. Links are the first http(s) URL of each text message, deduped to the most
+ * `mediaSection` (Photos / Videos / Documents); stickers, hidden rich-link/plugin-payload
+ * attachments, and unsent (retracted) messages are excluded. Links are the first http(s) URL
+ * of each text message, deduped to the most
  * recent occurrence. `limit` caps each bucket so the strip stays lightweight.
  */
 export async function listChatAttachmentsByKind(
@@ -167,12 +171,14 @@ export async function listChatAttachmentsByKind(
       a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
       a.transfer_name AS transferName, a.total_bytes AS totalBytes,
       a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
-      a.is_sticker AS isSticker, a.local_path AS localPath, m.date_created AS dateCreated
+      a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment,
+      a.local_path AS localPath, m.date_created AS dateCreated
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
     JOIN chats c ON c.id = m.chat_id
     WHERE c.guid = ${chatGuid}
       AND a.is_sticker = 0
+      AND a.hide_attachment = 0
       AND m.date_retracted IS NULL
     ORDER BY m.date_created DESC, a.id DESC
     LIMIT ${limit * 4}

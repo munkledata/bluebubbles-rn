@@ -56,6 +56,21 @@ async function seed(db: AppDatabase): Promise<number> {
         ],
       }),
       Message.parse({
+        guid: 'm-hidden',
+        dateCreated: 360,
+        hasAttachments: true,
+        handle: { address: 'a@x.com' },
+        // A rich-link/plugin-payload attachment (URL preview) — hidden, never a real file.
+        attachments: [
+          Attachment.parse({
+            guid: 'a-hidden',
+            mimeType: 'application/octet-stream',
+            transferName: 'x.pluginPayloadAttachment',
+            hideAttachment: true,
+          }),
+        ],
+      }),
+      Message.parse({
         guid: 'm-link1',
         text: 'check https://example.com/a out',
         dateCreated: 400,
@@ -87,7 +102,7 @@ async function seed(db: AppDatabase): Promise<number> {
 }
 
 describe('listChatAttachmentsByKind (2.1)', () => {
-  it('buckets attachments by media kind and excludes stickers', async () => {
+  it('buckets attachments by media kind and excludes stickers + hidden attachments', async () => {
     const { db } = await createTestDb();
     await seed(db);
 
@@ -98,6 +113,8 @@ describe('listChatAttachmentsByKind (2.1)', () => {
     expect(media.documents.map((a) => a.guid)).toEqual(['a-doc']);
     // The sticker is not surfaced as a photo.
     expect(media.photos.some((a) => a.guid === 'a-sticker')).toBe(false);
+    // The hidden rich-link payload is not surfaced as a document.
+    expect(media.documents.some((a) => a.guid === 'a-hidden')).toBe(false);
   });
 
   it('extracts links from message text, newest-first, deduped by url', async () => {

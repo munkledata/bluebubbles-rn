@@ -269,4 +269,12 @@ export const MIGRATIONS: Migration[] = [
          WHERE id IN (SELECT DISTINCT message_id FROM attachments WHERE message_id IS NOT NULL)`,
     ],
   },
+  {
+    // Rich-link / plugin-payload attachments (URL previews, App Store, Apple Music, …) are
+    // flagged hide_attachment=1 by iMessage: they back a rich card, not a real file, and must
+    // NOT render as file boxes. The server sends `hideAttachment`; carry it so the UI can skip
+    // them. Additive; applied transactionally + idempotently by name.
+    name: '0012_attachment_hide',
+    statements: [`ALTER TABLE attachments ADD COLUMN hide_attachment INTEGER DEFAULT 0`],
+  },
 ];

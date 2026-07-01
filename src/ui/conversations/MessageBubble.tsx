@@ -53,7 +53,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isSms = msg.senderService === 'SMS';
   const isError = msg.sendState === 'error' || msg.error !== 0;
   const isSending = msg.sendState === 'sending';
-  const atts = msg.attachments ?? [];
+  // Skip iMessage's hidden rich-link / plugin-payload attachments (URL previews, App Store,
+  // Apple Music, …) — they back a rich card (rendered from the message text below), not a file,
+  // so rendering them would show empty "file box" chips.
+  const atts = (msg.attachments ?? []).filter((a) => !a.hideAttachment);
   const reactions = msg.reactions ?? [];
   // EDITED messages keep their text in attributedBody (the `text` column goes empty), so derive the
   // body from the parsed runs rather than `msg.text` alone — otherwise an edit renders as a blank

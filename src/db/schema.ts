@@ -143,6 +143,8 @@ export const attachments = sqliteTable(
     blurhash: text('blurhash'),
     hasLivePhoto: integer('has_live_photo', { mode: 'boolean' }).default(false),
     isSticker: integer('is_sticker', { mode: 'boolean' }).default(false),
+    /** iMessage's hidden rich-link/plugin-payload attachments — skipped when rendering. */
+    hideAttachment: integer('hide_attachment', { mode: 'boolean' }).default(false),
     /** Local filesystem path once downloaded. */
     localPath: text('local_path'),
   },
