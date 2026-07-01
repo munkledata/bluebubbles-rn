@@ -2,7 +2,11 @@
 // preserves the imperative API we use.
 import * as Contacts from 'expo-contacts/legacy';
 import { getDatabase } from '@db/database';
+import { logger } from '@core/secure';
 import { matchContactsToHandles, upsertContacts, type DeviceContact } from '@db/repositories';
+// Live binding (used only at runtime inside syncContacts) — safe despite the index↔contacts cycle.
+import { http } from '@/services';
+import { backfillServerAvatars } from './serverAvatars';
 
 /** Request READ_CONTACTS. Returns true if granted. */
 export async function requestContactsPermission(): Promise<boolean> {
@@ -43,5 +47,13 @@ export async function syncContacts(): Promise<{ contacts: number; matched: numbe
   const db = getDatabase();
   const contacts = await upsertContacts(db, items);
   const matched = await matchContactsToHandles(db);
+  // Best-effort: fill in avatars from the server for handles the device address book had no
+  // photo for. Fully guarded — a failure here must NOT fail the (already-complete) device sync.
+  try {
+    const filled = await backfillServerAvatars(db, http);
+    if (filled > 0) logger.debug(`[contacts] backfilled ${filled} server avatar(s)`);
+  } catch (e) {
+    logger.debug('[contacts] server-avatar backfill skipped', e);
+  }
   return { contacts, matched };
 }

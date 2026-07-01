@@ -208,8 +208,14 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   hide-preview (redacted) flag is re-synced from the persisted setting inside `dispatchRealtimeEvent`;
   the DB is opened with `ensureDatabase()` (lazy, headless-safe) — never `getDatabase()` (throws if
   never inited). Use `ensureDatabase()` in any background/notification-action handler.
-- **Encrypted FCM payloads** (`encrypted: 'true'`, AES) are NOT yet decrypted in RN — TODO before
-  enabling server-side payload encryption.
+- **Encrypted FCM payloads** (`encrypted: 'true'`) ARE decrypted now, via the shared `AEAD_GCM_V1`
+  scheme (`encryptionType: 'AEAD_GCM_V1'`): AES-256-GCM, key = SHA-256(salt‖password), frame =
+  `ver(1)‖salt(16)‖iv(12)‖tag(16)‖ciphertext` base64. `src/services/notifications/fcmDecrypt.ts` uses
+  expo-crypto's NATIVE AES (`AESSealedData.fromParts` + `aesDecryptAsync`) — so it runs on-device only
+  (not jest); the server's round-trip test proves the frame. Do NOT use libsodium AES here (react-native-
+  libsodium's native layer is XChaCha-only) or CBC/CryptoJS (unavailable in RN). Any OTHER
+  `encryptionType` is logged + skipped (the message still arrives on the next sync). The server side is
+  `packages/bbd/src/notifications/fcm/fcmPayloadCrypto.ts`, gated by the `encryptComs` setting.
 - **App-lock is a UI gate, not key custody:** a headless push decrypts the DB + posts (content gated
   only by redacted/locked mode) even while app-locked. Acceptable for delivery, but the lock does NOT
   withhold the key from the push path — don't claim otherwise. NOTE: `keychainAccessible: WHEN_UNLOCKED`

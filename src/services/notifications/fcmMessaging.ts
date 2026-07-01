@@ -7,6 +7,7 @@ import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { dispatchRealtimeEvent, http, vault } from '@/services';
 import { parseFcmData } from './fcmPayload';
+import { decryptFcmPayload, FCM_ENCRYPTION_TYPE } from './fcmDecrypt';
 import { effectivelyLocked } from './lockGate';
 import { postLockedNotification } from './notifeeService';
 
@@ -21,15 +22,36 @@ import { postLockedNotification } from './notifeeService';
  *
  * The envelope parsing lives in `./fcmPayload` (firebase-free, unit-tested).
  */
-function deliver(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
-  const { eventName, body, encrypted } = parseFcmData(msg.data);
+async function deliver(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
+  const { eventName, body, encrypted, encryptionType } = parseFcmData(msg.data);
   if (encrypted) {
-    // Can't decrypt the server's legacy-AES payload (RN uses libsodium); don't silently
-    // drop it — log and let the next sync deliver the message.
-    logger.warn('[fcm] encrypted push skipped — will arrive on next sync', { event: eventName });
-    return Promise.resolve();
+    // Supported scheme → decrypt the base64 body with the stored server password, then
+    // dispatch as if it had arrived plaintext (coerceData re-parses the JSON string).
+    if (encryptionType === FCM_ENCRYPTION_TYPE && typeof body === 'string') {
+      const password = await vault.get('serverPassword');
+      if (!password) {
+        logger.warn('[fcm] encrypted push but no stored server password — will arrive on next sync', {
+          event: eventName,
+        });
+        return;
+      }
+      try {
+        const plaintext = await decryptFcmPayload(body, password);
+        await dispatchRealtimeEvent(eventName, plaintext);
+      } catch (e) {
+        // Wrong password / corrupt frame — don't drop the message, it arrives on next sync.
+        logger.warn('[fcm] failed to decrypt push — will arrive on next sync', e);
+      }
+      return;
+    }
+    // Unknown/legacy scheme this client can't decrypt; the message arrives on next sync.
+    logger.warn('[fcm] encrypted push with unsupported scheme skipped — will arrive on next sync', {
+      event: eventName,
+      encryptionType,
+    });
+    return;
   }
-  return Promise.resolve(dispatchRealtimeEvent(eventName, body));
+  await dispatchRealtimeEvent(eventName, body);
 }
 
 /**

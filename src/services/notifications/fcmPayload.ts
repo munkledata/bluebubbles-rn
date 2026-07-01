@@ -15,12 +15,17 @@ export interface ParsedFcm {
   eventName: string;
   body: unknown;
   /**
-   * The server encrypted this payload with its legacy AES scheme (`encryptionType: AES_PB`).
-   * This RN client uses libsodium, NOT that scheme, so it cannot decrypt the push — but the
-   * message is not lost: it arrives on the next sync. The caller logs + skips it rather than
-   * failing schema validation silently.
+   * The server encrypted the `data` body (the `encryptComs` setting). When true, `body` is
+   * the base64 ciphertext frame (not JSON) and the caller must decrypt it before dispatch —
+   * see {@link encryptionType}. An UNSUPPORTED scheme is logged + skipped (the message still
+   * arrives on the next sync) rather than failing schema validation silently.
    */
   encrypted: boolean;
+  /**
+   * The encryption scheme id (envelope sibling). `'AEAD_GCM_V1'` is the supported shared
+   * scheme (AES-256-GCM — see {@link file://./fcmDecrypt.ts}); `''` when not encrypted.
+   */
+  encryptionType: string;
 }
 
 export function parseFcmData(data: Record<string, unknown> | undefined): ParsedFcm {
@@ -28,6 +33,7 @@ export function parseFcmData(data: Record<string, unknown> | undefined): ParsedF
     eventName: String(data?.type ?? ''),
     body: hoistChatGuid(data?.data ?? data, data?.chatGuid),
     encrypted: String(data?.encrypted ?? '').toLowerCase() === 'true',
+    encryptionType: String(data?.encryptionType ?? ''),
   };
 }
 

@@ -22,14 +22,29 @@ describe('parseFcmData', () => {
   });
 
   it('handles a missing data map', () => {
-    expect(parseFcmData(undefined)).toEqual({ eventName: '', body: undefined, encrypted: false });
+    expect(parseFcmData(undefined)).toEqual({
+      eventName: '',
+      body: undefined,
+      encrypted: false,
+      encryptionType: '',
+    });
   });
 
-  it('flags an encrypted (legacy-AES) payload so it is skipped, not silently dropped', () => {
-    expect(parseFcmData({ type: 'new-message', data: 'AES…', encrypted: 'true' }).encrypted).toBe(
-      true,
-    );
-    expect(parseFcmData({ type: 'new-message', data: '{"guid":"m1"}' }).encrypted).toBe(false);
+  it('flags an encrypted payload + surfaces its scheme so the caller can decrypt or skip', () => {
+    const enc = parseFcmData({
+      type: 'new-message',
+      data: 'base64frame',
+      encrypted: 'true',
+      encryptionType: 'AEAD_GCM_V1',
+    });
+    expect(enc.encrypted).toBe(true);
+    expect(enc.encryptionType).toBe('AEAD_GCM_V1');
+    // The base64 frame is passed through as the body (not JSON) for the caller to decrypt.
+    expect(enc.body).toBe('base64frame');
+
+    const plain = parseFcmData({ type: 'new-message', data: '{"guid":"m1"}' });
+    expect(plain.encrypted).toBe(false);
+    expect(plain.encryptionType).toBe('');
   });
 
   // Regression: the body used to be read from a non-existent top-level `payload` key,
