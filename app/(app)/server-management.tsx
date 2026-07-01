@@ -226,6 +226,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
             disabled={syncStatus === 'syncing'}
             onPress={onSyncNow}
           />
+          <ActionRow label="Server Health" theme={theme} onPress={() => router.push('/server-health')} />
           <ActionRow
             label="Restart iMessage"
             theme={theme}

@@ -64,7 +64,7 @@ export default function SettingsScreen(): React.JSX.Element {
     downloads: 'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
     sync: 'sync messages per chat initial history',
     privacy: 'privacy redacted mode hide previews encryption key rotate security',
-    server: 'server management restart logs statistics',
+    server: 'server management restart logs statistics health diagnostics private api find my keys push uptime alerts',
     about: 'about server version macos private api disconnect forget',
   } as const;
   const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
@@ -639,6 +639,13 @@ export default function SettingsScreen(): React.JSX.Element {
                 <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
                   Server Management…
                 </Text>
+                <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push('/server-health')}
+                style={[styles.row, { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth }]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Server Health…</Text>
                 <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
               </Pressable>
             </View>

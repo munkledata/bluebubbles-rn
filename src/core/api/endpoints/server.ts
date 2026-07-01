@@ -125,3 +125,106 @@ const ServerLogs = z.object({ logs: z.string().nullish() }).passthrough().nullis
 export function serverLogs(http: HttpClient, count = 500): Promise<string> {
   return adminCommand(http, 'get-logs', ServerLogs, { count }).then((r) => r?.logs ?? '');
 }
+
+// ---- Server health / diagnostics ----
+// All read-only admin-command channels below are NOT in the server's ADMIN_ONLY_CHANNELS, so a
+// remote password-authed client (the app) can read them. They back the Server Health screen.
+
+/** Messages + FaceTime Private-API helper connectivity. */
+const PrivateApiStatus = z
+  .object({
+    connected: z.boolean().nullish(),
+    enabled: z.boolean().nullish(),
+    ft_connected: z.boolean().nullish(),
+    ft_enabled: z.boolean().nullish(),
+  })
+  .passthrough()
+  .nullish();
+export type PrivateApiStatus = z.infer<typeof PrivateApiStatus>;
+export const privateApiStatus = (http: HttpClient): Promise<PrivateApiStatus> =>
+  adminCommand(http, 'get-private-api-status', PrivateApiStatus);
+
+/** Server environment: version, platform, node, and Find My / macOS capability flags. */
+const ServerEnv = z
+  .object({
+    version: z.string().nullish(),
+    platform: z.string().nullish(),
+    node: z.string().nullish(),
+    findmyNeedsKeys: z.boolean().nullish(),
+    isMinMonterey: z.boolean().nullish(),
+  })
+  .passthrough()
+  .nullish();
+export type ServerEnv = z.infer<typeof ServerEnv>;
+export const serverEnv = (http: HttpClient): Promise<ServerEnv> =>
+  adminCommand(http, 'get-env', ServerEnv);
+
+/** Find My decryption-key import status (per key: present + valid). */
+const KeyState = z.object({ present: z.boolean().nullish(), valid: z.boolean().nullish() }).passthrough();
+const FindMyKeysStatus = z
+  .object({ LocalStorage: KeyState.nullish(), FMIP: KeyState.nullish(), FMF: KeyState.nullish() })
+  .passthrough()
+  .nullish();
+export type FindMyKeysStatus = z.infer<typeof FindMyKeysStatus>;
+export const findMyKeysStatus = (http: HttpClient): Promise<FindMyKeysStatus> =>
+  adminCommand(http, 'get-findmy-keys-status', FindMyKeysStatus);
+
+/** FCM (push) configuration status. */
+const FcmStatus = z
+  .object({
+    configured: z.boolean().nullish(),
+    projectId: z.string().nullish(),
+    clientEmail: z.string().nullish(),
+    oauthClientConfigured: z.boolean().nullish(),
+  })
+  .passthrough()
+  .nullish();
+export type FcmStatus = z.infer<typeof FcmStatus>;
+export const fcmStatus = (http: HttpClient): Promise<FcmStatus> =>
+  adminCommand(http, 'get-fcm-status', FcmStatus);
+
+/** zrok tunnel status (running + public URL). */
+const ZrokStatus = z
+  .object({ running: z.boolean().nullish(), url: z.string().nullish(), available: z.boolean().nullish() })
+  .passthrough()
+  .nullish();
+export type ZrokStatus = z.infer<typeof ZrokStatus>;
+export const zrokStatus = (http: HttpClient): Promise<ZrokStatus> =>
+  adminCommand(http, 'get-zrok-status', ZrokStatus);
+
+/** The server's detected public IP (or null). */
+const PublicIp = z.object({ ip: z.string().nullish() }).passthrough().nullish();
+export const publicIp = (http: HttpClient): Promise<string | null> =>
+  adminCommand(http, 'get-public-ip', PublicIp).then((r) => r?.ip ?? null);
+
+/** Active TLS/cert info (loose — domain/expiry/issuer/mode vary by mode). */
+const TlsStatus = z.record(z.string(), z.unknown()).nullish();
+export type TlsStatus = z.infer<typeof TlsStatus>;
+export const tlsStatus = (http: HttpClient): Promise<TlsStatus> =>
+  adminCommand(http, 'get-tls-status', TlsStatus);
+
+/** In-memory server alert log. */
+const ServerAlert = z
+  .object({
+    id: z.string(),
+    type: z.string().nullish(),
+    value: z.string().nullish(),
+    created: z.number().nullish(),
+    isRead: z.boolean().nullish(),
+  })
+  .passthrough();
+export type ServerAlert = z.infer<typeof ServerAlert>;
+const ServerAlerts = z.array(ServerAlert).nullish();
+export const serverAlerts = (http: HttpClient): Promise<ServerAlert[]> =>
+  adminCommand(http, 'get-alerts', ServerAlerts).then((a) => a ?? []);
+export const clearServerAlerts = (http: HttpClient): Promise<unknown> =>
+  adminCommand(http, 'clear-alerts', z.unknown());
+
+/** GET /admin/status — server version + uptime (ms). */
+const AdminStatus = z
+  .object({ version: z.string().nullish(), uptimeMs: z.number().nullish() })
+  .passthrough()
+  .nullish();
+export type AdminStatus = z.infer<typeof AdminStatus>;
+export const adminStatus = (http: HttpClient): Promise<AdminStatus> =>
+  http.get('/admin/status', AdminStatus);
