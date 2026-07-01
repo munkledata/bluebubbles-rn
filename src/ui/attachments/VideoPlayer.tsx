@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import React, { useCallback, useState } from 'react';
-import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { ProgressRing } from './ProgressRing';
 
@@ -100,7 +101,7 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
               { backgroundColor: status === 'error' ? theme.color.destructive : theme.color.tint },
             ]}
           >
-            <Text style={styles.playIcon}>{status === 'error' ? '↻' : '▶'}</Text>
+            <Icon name={status === 'error' ? 'refresh-outline' : 'play'} size={20} color="#fff" />
           </View>
         </View>
       )}
@@ -121,5 +122,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   play: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  playIcon: { color: '#fff', fontSize: 18, marginLeft: 3 },
 });

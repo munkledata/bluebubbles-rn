@@ -13,7 +13,7 @@ import {
   redactTitle,
   resolveTitle,
 } from '@utils';
-import { Avatar, GroupAvatar } from '../primitives';
+import { Avatar, GroupAvatar, Icon } from '../primitives';
 import { useTheme } from '../theme';
 
 interface ConversationTileProps {
@@ -93,7 +93,7 @@ export const ConversationTile = React.memo(function ConversationTile({
         </Text>
         <View style={styles.trailingRow}>
           {muted ? (
-            <Text style={[styles.mute, { color: theme.color.tertiaryLabel }]}>🔕</Text>
+            <Icon name="notifications-off-outline" size={14} color={theme.color.tertiaryLabel} />
           ) : null}
           <Text style={[styles.chevron, { color: theme.color.separator }]}>›</Text>
         </View>
@@ -113,6 +113,5 @@ const styles = StyleSheet.create({
   trailing: { alignItems: 'flex-end', minWidth: 52 },
   time: { fontSize: 13, marginBottom: 4 },
   trailingRow: { flexDirection: 'row', alignItems: 'center' },
-  mute: { fontSize: 12, marginRight: 2 },
   chevron: { fontSize: 18, fontWeight: '600' },
 });

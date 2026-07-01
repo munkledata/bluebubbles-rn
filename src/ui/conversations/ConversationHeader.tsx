@@ -13,7 +13,7 @@ import {
   redactTitle,
   resolveTitle,
 } from '@utils';
-import { Avatar, GroupAvatar } from '../primitives';
+import { Avatar, GroupAvatar, Icon } from '../primitives';
 import { useTheme } from '../theme';
 
 interface ConversationHeaderProps {
@@ -86,7 +86,7 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
           accessibilityRole="button"
           accessibilityLabel="Start FaceTime call"
         >
-          <Text style={styles.icon}>📹</Text>
+          <Icon name="videocam-outline" size={24} color={theme.color.tint} />
         </Pressable>
         <Pressable
           onPress={() => router.push('/scheduled')}
@@ -95,7 +95,7 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
           accessibilityRole="button"
           accessibilityLabel="View scheduled messages"
         >
-          <Text style={styles.icon}>🗓️</Text>
+          <Icon name="calendar-outline" size={24} color={theme.color.tint} />
         </Pressable>
       </View>
     </View>
@@ -123,5 +123,4 @@ const styles = StyleSheet.create({
   back: { fontSize: 34, fontWeight: '300', lineHeight: 36 },
   center: { flex: 1, alignItems: 'center', gap: 2 },
   title: { fontSize: 15, fontWeight: '600', maxWidth: '90%' },
-  icon: { fontSize: 20 },
 });

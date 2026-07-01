@@ -6,6 +6,7 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { shouldAutoDownload } from '@utils';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { ProgressRing } from './ProgressRing';
 
@@ -73,7 +74,7 @@ export function ImageAttachment({
       ) : status === 'error' ? (
         <View style={styles.overlay} pointerEvents="none">
           <View style={styles.retry}>
-            <Text style={styles.retryIcon}>↻</Text>
+            <Icon name="refresh-outline" size={24} color="#fff" />
           </View>
         </View>
       ) : null}
@@ -106,7 +107,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  retryIcon: { color: '#fff', fontSize: 24, fontWeight: '700' },
   liveBadge: {
     position: 'absolute',
     top: 6,

@@ -5,6 +5,7 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { parseVCard, safeOpenUrl, type VCardData } from '@utils';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
 interface ContactCardProps {
@@ -75,8 +76,10 @@ export function ContactCard({ att, isFromMe }: ContactCardProps): React.JSX.Elem
       <View style={[styles.avatar, { backgroundColor: theme.color.tint }]}>
         {status === 'downloading' ? (
           <ActivityIndicator color="#fff" size="small" />
+        ) : initials ? (
+          <Text style={styles.avatarText}>{initials}</Text>
         ) : (
-          <Text style={styles.avatarText}>{initials || '👤'}</Text>
+          <Icon name="person-outline" size={20} color="#fff" />
         )}
       </View>
       <View style={styles.meta}>

@@ -5,6 +5,7 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { parseVLocation, safeOpenUrl, type VLocationData } from '@utils';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
 interface LocationCardProps {
@@ -74,7 +75,7 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
         {status === 'downloading' ? (
           <ActivityIndicator color="#fff" size="small" />
         ) : (
-          <Text style={styles.iconText}>📍</Text>
+          <Icon name="location-outline" size={22} color="#fff" />
         )}
       </View>
       <View style={styles.meta}>
@@ -100,7 +101,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   icon: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  iconText: { fontSize: 20 },
   meta: { flexShrink: 1, flexGrow: 1 },
   name: { fontSize: 15, fontWeight: '600' },
   sub: { fontSize: 12, marginTop: 2 },

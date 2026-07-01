@@ -4,6 +4,7 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { fileTypeLabel, friendlySize, safeOpenUrl } from '@utils';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
 interface FileChipProps {
@@ -40,7 +41,7 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
         {status === 'downloading' ? (
           <ActivityIndicator color="#fff" size="small" />
         ) : status === 'error' ? (
-          <Text style={styles.iconText}>↻</Text>
+          <Icon name="refresh-outline" size={20} color="#fff" />
         ) : (
           <Text style={styles.iconText}>{label.slice(0, 3)}</Text>
         )}

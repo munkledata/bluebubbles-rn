@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MessagePreview } from '@db/repositories';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { EffectPicker } from './effects';
 
@@ -154,7 +155,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Cancel edit"
           >
-            <Text style={[styles.replyCloseText, { color: theme.color.secondaryLabel }]}>✕</Text>
+            <Icon name="close" size={18} color={theme.color.secondaryLabel} />
           </Pressable>
         </View>
       ) : null}
@@ -178,7 +179,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Cancel reply"
           >
-            <Text style={[styles.replyCloseText, { color: theme.color.secondaryLabel }]}>✕</Text>
+            <Icon name="close" size={18} color={theme.color.secondaryLabel} />
           </Pressable>
         </View>
       ) : null}
@@ -192,7 +193,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Attach photo or file"
           >
-            <Text style={[styles.plus, { color: theme.color.tint }]}>+</Text>
+            <Icon name="add" size={28} color={theme.color.tint} />
           </Pressable>
         ) : null}
         <TextInput
@@ -218,7 +219,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Schedule message"
           >
-            <Text style={styles.scheduleIcon}>🗓️</Text>
+            <Icon name="calendar-outline" size={20} color={theme.color.tint} />
           </Pressable>
         ) : null}
         {trimmed ? (
@@ -231,7 +232,7 @@ export function Composer({
             accessibilityLabel="Send message"
             accessibilityHint="Long-press to send with an effect"
           >
-            <Text style={styles.arrow}>↑</Text>
+            <Icon name="arrow-up" size={20} color="#fff" />
           </Pressable>
         ) : null}
         {!trimmed && !isEditing && onStartVoice ? (
@@ -242,7 +243,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Record voice message"
           >
-            <Text style={styles.mic}>🎤</Text>
+            <Icon name="mic-outline" size={22} color={theme.color.tint} />
           </Pressable>
         ) : null}
       </View>
@@ -270,9 +271,7 @@ const styles = StyleSheet.create({
   replyWho: { fontSize: 12, fontWeight: '600' },
   replySnippet: { fontSize: 13, marginTop: 1 },
   replyClose: { padding: 4 },
-  replyCloseText: { fontSize: 15, fontWeight: '600' },
   schedule: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  scheduleIcon: { fontSize: 20 },
   input: {
     flex: 1,
     minHeight: 38,
@@ -285,9 +284,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   send: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  arrow: { color: '#fff', fontSize: 20, fontWeight: '800', lineHeight: 22 },
   attach: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
-  plus: { fontSize: 30, fontWeight: '400', lineHeight: 34 },
   micBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  mic: { fontSize: 22 },
 });

@@ -16,7 +16,7 @@ import { refreshInbox } from '@/services';
 import { useChats } from '@features/conversations/useChats';
 import type { InboxRow } from '@db/repositories';
 import { resolveTitle } from '@utils';
-import { Screen, usePullToRefresh } from '../primitives';
+import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { ChatActionsSheet, type ChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
@@ -86,7 +86,12 @@ export function ConversationListScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="FaceTime"
           >
-            <Text style={styles.compose}>📹</Text>
+            <Icon
+              name="videocam-outline"
+              size={25}
+              color={theme.color.tint}
+              style={styles.headerIcon}
+            />
           </Pressable>
           <Pressable
             onPress={() => router.push('/new-chat')}
@@ -94,7 +99,12 @@ export function ConversationListScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="New message"
           >
-            <Text style={[styles.compose, { color: theme.color.tint }]}>✎</Text>
+            <Icon
+              name="create-outline"
+              size={24}
+              color={theme.color.tint}
+              style={styles.headerIcon}
+            />
           </Pressable>
           <Pressable
             onPress={() => router.push('/settings')}
@@ -102,7 +112,12 @@ export function ConversationListScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="Settings"
           >
-            <Text style={[styles.gear, { color: theme.color.tint }]}>⚙︎</Text>
+            <Icon
+              name="settings-outline"
+              size={24}
+              color={theme.color.tint}
+              style={styles.headerIcon}
+            />
           </Pressable>
         </View>
       </View>
@@ -124,7 +139,10 @@ export function ConversationListScreen(): React.JSX.Element {
       accessibilityRole="button"
       accessibilityLabel="Archived conversations"
     >
-      <Text style={[styles.archivedText, { color: theme.color.secondaryLabel }]}>🗄️ Archived</Text>
+      <View style={styles.archivedInner}>
+        <Icon name="archive-outline" size={16} color={theme.color.secondaryLabel} />
+        <Text style={[styles.archivedText, { color: theme.color.secondaryLabel }]}>Archived</Text>
+      </View>
     </Pressable>
   );
 
@@ -166,7 +184,7 @@ export function ConversationListScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="Clear search"
           >
-            <Text style={[styles.clearIcon, { color: theme.color.tertiaryLabel }]}>✕</Text>
+            <Icon name="close" size={16} color={theme.color.tertiaryLabel} />
           </Pressable>
         ) : null}
       </View>
@@ -230,8 +248,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   largeTitle: { fontSize: 34, fontWeight: '700', marginBottom: 10 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
-  compose: { fontSize: 24, marginBottom: 10 },
-  gear: { fontSize: 26, marginBottom: 10 },
+  headerIcon: { marginBottom: 10 },
   // Bottom search bar. Relative wrapper so the clear ✕ can overlay the field's right edge;
   // paddingRight on the input keeps typed text from running under it.
   searchBar: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
@@ -251,11 +268,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  clearIcon: { fontSize: 16, fontWeight: '600' },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 76 },
   listContent: { paddingBottom: 24 },
   center: { paddingTop: 80, alignItems: 'center' },
   emptyText: { fontSize: 16 },
   archivedRow: { alignItems: 'center', paddingVertical: 16 },
+  archivedInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   archivedText: { fontSize: 15, fontWeight: '500' },
 });

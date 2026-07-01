@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
+import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
 function fmt(sec: number): string {
@@ -64,7 +65,11 @@ export function AudioAttachment({
       ]}
     >
       <View style={[styles.play, { backgroundColor: theme.color.tint }]}>
-        <Text style={styles.playIcon}>{!ready ? '⭳' : status.playing ? '❚❚' : '▶'}</Text>
+        <Icon
+          name={!ready ? 'download-outline' : status.playing ? 'pause' : 'play'}
+          size={16}
+          color="#fff"
+        />
       </View>
       <View style={styles.body}>
         <View style={[styles.track, { backgroundColor: theme.color.separator }]}>
@@ -94,7 +99,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   play: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  playIcon: { color: '#fff', fontSize: 13, fontWeight: '800' },
   body: { flex: 1 },
   track: { height: 4, borderRadius: 2, overflow: 'hidden' },
   fill: { height: 4, borderRadius: 2 },
