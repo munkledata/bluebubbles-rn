@@ -75,7 +75,9 @@ export const MessageBubble = React.memo(function MessageBubble({
     return (
       <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
         <Text style={[styles.tombstone, { color: theme.color.tertiaryLabel }]}>
-          {isFromMe ? 'You unsent a message' : `${msg.senderName ?? 'They'} unsent a message`}
+          {isFromMe
+            ? 'You unsent a message'
+            : `${(redacted ? null : msg.senderName) ?? 'They'} unsent a message`}
         </Text>
       </View>
     );
@@ -104,14 +106,26 @@ export const MessageBubble = React.memo(function MessageBubble({
       {msg.replyPreview && msg.threadOriginatorGuid ? (
         <ReplyQuote preview={msg.replyPreview} isFromMe={isFromMe} onPress={onJumpToReply} />
       ) : null}
-      {atts.map((att, i) => (
-        <AttachmentView
-          key={att.guid}
-          att={att}
-          isFromMe={isFromMe}
-          showTail={showTail && !hasText && i === atts.length - 1}
-        />
-      ))}
+      {redacted && atts.length > 0 ? (
+        // Redacted mode hides attachment content (photos/videos/files) behind a placeholder,
+        // matching the inbox/media-gallery masking — else the thread leaks images on screen-share.
+        <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
+          <View style={[styles.redactedAtt, { backgroundColor: theme.color.secondaryBackground }]}>
+            <Text style={{ color: theme.color.tertiaryLabel, fontSize: 13 }}>
+              {atts.length > 1 ? `${atts.length} attachments` : 'Attachment'}
+            </Text>
+          </View>
+        </View>
+      ) : (
+        atts.map((att, i) => (
+          <AttachmentView
+            key={att.guid}
+            att={att}
+            isFromMe={isFromMe}
+            showTail={showTail && !hasText && i === atts.length - 1}
+          />
+        ))
+      )}
       {hasText ? (
         <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
           <View
@@ -218,6 +232,14 @@ function linkify(text: string, color: string): React.ReactNode {
 
 const styles = StyleSheet.create({
   anchor: { position: 'relative', marginHorizontal: 10, maxWidth: '78%' },
+  redactedAtt: {
+    width: 160,
+    height: 120,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 1,
+  },
   bubble: {
     paddingVertical: 8,
     paddingHorizontal: 14,

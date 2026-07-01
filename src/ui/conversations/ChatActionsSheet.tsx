@@ -2,7 +2,14 @@ import React from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
-import { deleteChatLocal, setChatArchive, setChatMute, setChatPin } from '@db/repositories';
+import {
+  deleteChatLocal,
+  setChatArchive,
+  setChatMute,
+  setChatPin,
+  setChatUnreadLocal,
+} from '@db/repositories';
+import { markRead } from '@/services';
 import { useTheme } from '../theme';
 
 export interface ChatActionTarget {
@@ -11,6 +18,7 @@ export interface ChatActionTarget {
   isPinned: boolean;
   isArchived: boolean;
   muted: boolean;
+  unread: boolean;
 }
 
 interface ChatActionsSheetProps {
@@ -63,6 +71,16 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
               >
                 {target.title}
               </Text>
+              <Row
+                label={target.unread ? 'Mark as Read' : 'Mark as Unread'}
+                color={theme.color.tint}
+                sep={theme.color.separator}
+                onPress={() =>
+                  run(() =>
+                    target.unread ? markRead(target.guid) : setChatUnreadLocal(getDatabase(), target.guid),
+                  )
+                }
+              />
               <Row
                 label={target.isPinned ? 'Unpin' : 'Pin'}
                 color={theme.color.tint}

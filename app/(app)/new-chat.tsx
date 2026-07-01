@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,8 +12,10 @@ export default function NewChatScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // A forwarded message pre-fills the composer (from the chat's "Forward" action).
+  const { forwardText } = useLocalSearchParams<{ forwardText?: string }>();
   const [recipient, setRecipient] = useState('');
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(forwardText ?? '');
   const [service, setService] = useState<'iMessage' | 'SMS'>('iMessage');
   const [suggestions, setSuggestions] = useState<ContactPick[]>([]);
   const [busy, setBusy] = useState(false);

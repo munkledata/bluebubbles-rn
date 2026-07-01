@@ -9,6 +9,7 @@ import {
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
   useDownloadSettingsStore,
 } from '@state/downloadSettingsStore';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -31,6 +32,11 @@ export default function SettingsScreen(): React.JSX.Element {
   const setRedacted = useRedactedModeStore((s) => s.setEnabled);
   const maxDownloads = useDownloadSettingsStore((s) => s.maxConcurrent);
   const setMaxDownloads = useDownloadSettingsStore((s) => s.setMaxConcurrent);
+  const sendTypingIndicators = useFeatureSettingsStore((s) => s.sendTypingIndicators);
+  const sendReadReceipts = useFeatureSettingsStore((s) => s.sendReadReceipts);
+  const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
+  const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
+  const setFlag = useFeatureSettingsStore((s) => s.setFlag);
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const [syncing, setSyncing] = useState(false);
@@ -41,7 +47,8 @@ export default function SettingsScreen(): React.JSX.Element {
     theme: 'theme appearance oled dark gator custom presets colors',
     contacts: 'contacts sync names photos address book',
     general: 'general suggested smart replies app lock biometric reminders backup find my location',
-    downloads: 'downloads parallel concurrent attachments images media bandwidth',
+    messaging: 'messaging private api typing indicators read receipts',
+    downloads: 'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
     privacy: 'privacy redacted mode hide previews encryption key rotate security',
     server: 'server management restart logs statistics',
     about: 'about server version macos private api disconnect forget',
@@ -267,6 +274,43 @@ export default function SettingsScreen(): React.JSX.Element {
           </>
         )}
 
+        {match(SECTIONS.messaging) && (
+          <>
+            <Text
+              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
+            >
+              MESSAGING
+            </Text>
+            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Send Typing Indicators
+                </Text>
+                <Switch
+                  value={sendTypingIndicators}
+                  onValueChange={(v) => void setFlag('sendTypingIndicators', v)}
+                  accessibilityLabel="Let others see when you are typing"
+                />
+              </View>
+              <View
+                style={[
+                  styles.row,
+                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
+                ]}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Send Read Receipts
+                </Text>
+                <Switch
+                  value={sendReadReceipts}
+                  onValueChange={(v) => void setFlag('sendReadReceipts', v)}
+                  accessibilityLabel="Let others see when you have read their messages"
+                />
+              </View>
+            </View>
+          </>
+        )}
+
         {match(SECTIONS.downloads) && (
           <>
             <Text
@@ -276,6 +320,42 @@ export default function SettingsScreen(): React.JSX.Element {
             </Text>
             <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
               <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                  Auto-download Attachments
+                </Text>
+                <Switch
+                  value={autoDownload}
+                  onValueChange={(v) => void setFlag('autoDownloadAttachments', v)}
+                  accessibilityLabel="Automatically download incoming attachments"
+                />
+              </View>
+              <View
+                style={[
+                  styles.row,
+                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.rowLabel,
+                    { color: autoDownload ? theme.color.label : theme.color.tertiaryLabel },
+                  ]}
+                >
+                  Only on Wi-Fi
+                </Text>
+                <Switch
+                  value={autoDownloadWifiOnly}
+                  disabled={!autoDownload}
+                  onValueChange={(v) => void setFlag('autoDownloadOnWifiOnly', v)}
+                  accessibilityLabel="Only auto-download attachments on Wi-Fi"
+                />
+              </View>
+              <View
+                style={[
+                  styles.row,
+                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
+                ]}
+              >
                 <Text style={[styles.rowLabel, { color: theme.color.label }]}>
                   Parallel Downloads
                 </Text>

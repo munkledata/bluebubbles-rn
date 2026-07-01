@@ -329,3 +329,25 @@ export async function setLastReadMessageGuid(
     .set({ lastReadMessageGuid: lastMessageGuid })
     .where(eq(chats.guid, chatGuid));
 }
+
+/**
+ * Mark a chat UNREAD locally: clear the read marker so `unreadCount` (messages newer than the
+ * marker) counts all received messages again and the inbox badge/bold-title returns. Local-only —
+ * there is no server "mark unread". Opening the chat re-marks it read.
+ */
+export async function setChatUnreadLocal(db: AppDatabase, chatGuid: string): Promise<void> {
+  await db.update(chats).set({ lastReadMessageGuid: null }).where(eq(chats.guid, chatGuid));
+}
+
+/**
+ * Mark EVERY chat read locally in one pass: point each chat's read marker at its newest message so
+ * all inbox badges clear. Local-only (does not send per-chat read receipts). Uses `db.run` for the
+ * non-returning bulk UPDATE; the adapter flushes so the reactive inbox refreshes.
+ */
+export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
+  await db.run(sql`
+    UPDATE chats SET last_read_message_guid = (
+      SELECT m.guid FROM messages m WHERE m.chat_id = chats.id ORDER BY m.date_created DESC LIMIT 1
+    ) WHERE id IN (SELECT DISTINCT chat_id FROM messages)
+  `);
+}

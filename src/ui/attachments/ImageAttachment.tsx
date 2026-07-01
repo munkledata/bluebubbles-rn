@@ -1,10 +1,12 @@
 import { Image } from 'expo-image';
+import * as Network from 'expo-network';
 import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { shouldAutoDownload } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
@@ -26,10 +28,17 @@ export function ImageAttachment({
   const router = useRouter();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
+  const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
+  const wifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
+  const netType = Network.useNetworkState().type;
 
   useEffect(() => {
+    // Honor the auto-download setting + the WiFi-only restriction (tapping still downloads on
+    // demand regardless — this only gates the automatic background fetch).
+    if (!autoDownload) return;
+    if (wifiOnly && netType !== Network.NetworkStateType.WIFI) return;
     if (shouldAutoDownload(att)) void download(att);
-  }, [att]);
+  }, [att, autoDownload, wifiOnly, netType]);
 
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;

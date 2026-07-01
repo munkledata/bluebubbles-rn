@@ -17,6 +17,7 @@ import { LockScreen } from '@features/lock/LockScreen';
 import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useThemeStore } from '@state/themeStore';
@@ -35,6 +36,7 @@ export default function RootLayout(): React.JSX.Element {
     void useThemeStore.getState().hydrate();
     void useSmartReplyStore.getState().hydrate();
     void useDownloadSettingsStore.getState().hydrate();
+    void useFeatureSettingsStore.getState().hydrate();
     void useRedactedModeStore
       .getState()
       .hydrate()

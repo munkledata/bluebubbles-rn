@@ -21,6 +21,8 @@ export interface SelectedMessage {
   isTemp: boolean; // not yet on the server → can't edit/unsend
   /** Local send lifecycle of an optimistic message ('sending' | 'error' | 'sent'). */
   sendState: string;
+  /** This message's attachments (for Save-to-device). */
+  attachments: { guid: string; localPath: string | null; mimeType: string | null }[];
 }
 
 interface MessageActionsOverlayProps {
@@ -34,6 +36,12 @@ interface MessageActionsOverlayProps {
   onUnsend: () => void;
   /** Cancel a still-queued/sending (or errored) optimistic message before it confirms. */
   onCancelSend: () => void;
+  /** Copy the message text to the clipboard. */
+  onCopy: () => void;
+  /** Forward the message text to another conversation (opens the new-message composer). */
+  onForward: () => void;
+  /** Save the message's attachment(s) to the device gallery. */
+  onSave: () => void;
 }
 
 // iMessage allows edit/unsend on your own messages for ~15 minutes.
@@ -52,10 +60,15 @@ export function MessageActionsOverlay({
   onEdit,
   onUnsend,
   onCancelSend,
+  onCopy,
+  onForward,
+  onSave,
 }: MessageActionsOverlayProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const mine = new Set(selected?.mine ?? []);
+  const hasText = !!selected?.text && selected.text.trim().length > 0;
+  const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
 
   const canEditUnsend =
     !!selected &&
@@ -111,6 +124,39 @@ export function MessageActionsOverlay({
           >
             <Text style={[styles.actionText, { color: theme.color.tint }]}>Reply</Text>
           </Pressable>
+          {hasText ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onCopy();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Copy</Text>
+            </Pressable>
+          ) : null}
+          {hasText ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onForward();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Forward</Text>
+            </Pressable>
+          ) : null}
+          {hasAttachments ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onSave();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Save to Photos</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={[styles.action, { borderTopColor: theme.color.separator }]}
             onPress={() => {

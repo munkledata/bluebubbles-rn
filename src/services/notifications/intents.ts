@@ -22,6 +22,10 @@ export async function buildMessageIntents(
       const chatGuid = resolveMessageChatGuid(m);
       if (!chatGuid || !m.guid) return [];
       const header = await getChatHeader(db, chatGuid);
+      // Honor the per-chat mute preference: a muted chat still writes the message to the DB
+      // (badge/inbox update via the reactive query) but must NOT raise a notification. The Mute
+      // switch / action sheet persists muteType='mute'; anything else (null) notifies as usual.
+      if (header?.muteType === 'mute') return [];
       // Resolve the sender's CONTACT name from the DB (the DbEventSink has already upserted +
       // contact-linked the handle by the time this runs), matching the in-app UI. The event's
       // `handle.displayName` is the server name (no device contact), so preferring it showed a

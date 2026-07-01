@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Pressable,
@@ -14,7 +15,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { refreshInbox } from '@/services';
 import { useChats } from '@features/conversations/useChats';
-import type { InboxRow } from '@db/repositories';
+import { getDatabase } from '@db/database';
+import { markAllChatsReadLocal, type InboxRow } from '@db/repositories';
 import { resolveTitle } from '@utils';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
@@ -65,7 +67,15 @@ export function ConversationListScreen(): React.JSX.Element {
       isPinned: !!row.isPinned,
       isArchived: !!row.isArchived,
       muted: row.muteType === 'mute',
+      unread: (row.unreadCount ?? 0) > 0,
     });
+  }, []);
+
+  const onMarkAllRead = useCallback((): void => {
+    Alert.alert('Mark All Read', 'Mark every conversation as read?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Mark All Read', onPress: () => void markAllChatsReadLocal(getDatabase()) },
+    ]);
   }, []);
 
   // Typing in the bottom bar replaces the conversation list with the unified search results.
@@ -80,6 +90,19 @@ export function ConversationListScreen(): React.JSX.Element {
       <View style={styles.titleRow}>
         <Text style={[styles.largeTitle, { color: theme.color.label }]}>Messages</Text>
         <View style={styles.headerActions}>
+          <Pressable
+            onPress={onMarkAllRead}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Mark all read"
+          >
+            <Icon
+              name="checkmark-done-outline"
+              size={24}
+              color={theme.color.tint}
+              style={styles.headerIcon}
+            />
+          </Pressable>
           <Pressable
             onPress={() => router.push('/facetime')}
             hitSlop={8}

@@ -2,7 +2,7 @@ import { EventRouter, type NotificationIntent } from '@core/realtime';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
-import { upsertContacts } from '@db/repositories';
+import { setChatMute, upsertContacts } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -74,6 +74,25 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       expect(i.senderName).toBe('Mom');
       expect(i.chatTitle).toBe('Mom'); // 1:1 title falls back to the (contact) sender name
     }
+  });
+
+  it('does not notify for a muted chat (honors mute_type)', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    const msg = (guid: string, text: string) => ({
+      guid,
+      text,
+      dateCreated: guid === 'm1' ? 1 : 2,
+      handle: { address: 'bob@x.com', displayName: 'Bob' },
+      chats: [{ guid: 'cMute', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+    });
+    // The first inbound message creates the chat and notifies as usual.
+    await router.handle('new-message', msg('m1', 'hi'), 'socket');
+    expect(intents).toHaveLength(1);
+    // Once muted, a further inbound message must NOT raise a new notification.
+    await setChatMute(db, 'cMute', 'mute');
+    await router.handle('new-message', msg('m2', 'still there?'), 'socket');
+    expect(intents).toHaveLength(1);
   });
 
   it('does not notify for our own messages', async () => {

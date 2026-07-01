@@ -26,6 +26,7 @@ import { useTypingStore } from '@state/typingStore';
 import { DevPushTransport, type EventSink, EventRouter, FCM_ENABLED } from '@core/realtime';
 import { connectToServer } from './connection';
 import { useRedactedModeStore } from '@state/redactedModeStore';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { buildMessageIntents } from './notifications/intents';
 import {
   postNotification,
@@ -489,16 +490,23 @@ export async function connect(
  * verified without a server.
  */
 export function sendTyping(chatGuid: string, isTyping: boolean): void {
+  // Respect the "Send Typing Indicators" toggle — when off, never emit our typing state.
+  if (!useFeatureSettingsStore.getState().sendTypingIndicators) return;
   socket?.emit(isTyping ? 'start-typing' : 'stop-typing', { guid: chatGuid });
 }
 
-/** Mark a chat read: update the local read marker (clears the badge) and notify the server. */
+/**
+ * Mark a chat read: always update the local read marker (clears the badge), and send the server
+ * read receipt ONLY when the "Send Read Receipts" toggle is on — so disabling receipts still
+ * clears your own unread badge but doesn't tell the other party you read it.
+ */
 export async function markRead(chatGuid: string): Promise<void> {
   const db = getDatabase();
   const chatId = await getChatIdByGuid(db, chatGuid);
   if (chatId == null) return;
   const newest = await getNewestReceivedGuid(db, chatId);
   if (newest) await setLastReadMessageGuid(db, chatGuid, newest);
+  if (!useFeatureSettingsStore.getState().sendReadReceipts) return;
   try {
     await chatsApi.markChatRead(http, chatGuid);
   } catch {

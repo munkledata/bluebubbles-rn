@@ -16,6 +16,32 @@ Only `android`/`cross-platform` items are counted as gaps in the totals below.
 - 54 items marked not-applicable (desktop/iOS/fork-only) — listed per screen, excluded from gap totals
 - 25 screens audited + 1 cross-cutting completeness sweep
 
+## ✅ Shipped since this audit (2026-07-01)
+
+The following gaps have since been closed. The per-screen tables below are the **original audit
+snapshot** and still list these as missing — treat this section as the source of truth for what's
+done.
+
+**Bug fixes**
+- **Per-chat mute now honored** — `buildMessageIntents` skips the notification when `muteType === 'mute'` (still updates the badge). Unit-tested. _(notifications-settings)_
+- **Redacted-mode leaks closed** — group sender **name + avatar** (MessageRow) and **inline attachments** (MessageBubble) are now masked under redacted mode, matching the inbox/gallery. _(redacted-mode)_
+- **Fullscreen video playback** — the media viewer now renders a native video player for video attachments instead of a black `<Image>`. _(media-viewer)_
+
+**Message actions** _(chat-view)_
+- **Copy** message text (added `expo-clipboard`).
+- **Forward** message → opens the new-message composer prefilled with the text (attachment-forward still TODO).
+- **Save to Photos** — saves a message's downloaded attachment(s) to the gallery.
+
+**Inbox** _(inbox)_
+- **Mark as Read / Mark as Unread** per-chat action in the long-press sheet.
+- **Mark All Read** — new inbox header action (checkmark-done) with confirm.
+
+**Settings — new toggles, wired to behavior**
+- **Messaging (Private API):** _Send Typing Indicators_ gates `sendTyping`; _Send Read Receipts_ gates the server read-receipt in `markRead` (local badge still clears). _(private-api-settings — the master toggle + full panel remain a follow-up)_
+- **Downloads:** _Auto-download Attachments_ + _Only on Wi-Fi_ (via `expo-network`) gate the automatic image fetch. _(attachment-settings)_
+
+**Still open from the high-priority shortlist** (largest / need native or server work): Find My interactive map, real-time Find My socket location, onboarding sync-settings + sync-progress + permissions screens, Android SEND share-target, composer camera capture, new-chat recipient chips + existing-chat detection, App Theme light/dark/system (excluded per request), and the remaining full settings panels (Conversation, Chat-list appearance incl. swipe actions, Notifications).
+
 ## Screen coverage at a glance
 
 | Screen | RN status | Genuine gaps | High-priority gaps |

@@ -1,5 +1,7 @@
+import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import * as MediaLibrary from 'expo-media-library';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text } from 'react-native';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
@@ -103,6 +105,7 @@ function ChatScreenInner({
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const markedRef = useRef(false);
   const [selected, setSelected] = useState<SelectedMessage | null>(null);
+  const router = useRouter();
   const [replyTo, setReplyTo] = useState<MessagePreview | null>(null);
   const [editing, setEditing] = useState<{ guid: string; text: string } | null>(null);
   const [recording, setRecording] = useState(false);
@@ -191,6 +194,11 @@ function ChatScreenInner({
       isRetracted: !!msg.dateRetracted,
       isTemp: msg.guid.startsWith('temp-'),
       sendState: msg.sendState,
+      attachments: (msg.attachments ?? []).map((a) => ({
+        guid: a.guid,
+        localPath: a.localPath,
+        mimeType: a.mimeType,
+      })),
     });
   }, []);
 
@@ -257,6 +265,49 @@ function ChatScreenInner({
       senderName: selected.senderName,
       hasAttachments: 0,
     });
+  };
+
+  const onCopySelected = (): void => {
+    if (selected?.text) void Clipboard.setStringAsync(selected.text);
+  };
+
+  // Forward: open the new-message composer pre-filled with this message's text (parity with the
+  // old app's "Forward" → chat creator). Attachment forwarding is not yet supported.
+  const onForwardSelected = (): void => {
+    if (!selected?.text) return;
+    router.push({ pathname: '/new-chat', params: { forwardText: selected.text } });
+  };
+
+  // Save the message's attachment(s) to the device gallery. Saves any already-downloaded local
+  // file; if none is downloaded yet, tells the user to open it first (which triggers the download).
+  const onSaveSelected = (): void => {
+    const atts = selected?.attachments ?? [];
+    if (atts.length === 0) return;
+    void (async () => {
+      try {
+        const perm = await MediaLibrary.requestPermissionsAsync();
+        if (perm.status !== 'granted') {
+          Alert.alert('Save', 'Photos permission is required to save attachments.');
+          return;
+        }
+        let saved = 0;
+        for (const a of atts) {
+          const p = a.localPath;
+          if (p && (p.startsWith('file://') || p.startsWith('/'))) {
+            await MediaLibrary.saveToLibraryAsync(p);
+            saved += 1;
+          }
+        }
+        Alert.alert(
+          'Save',
+          saved > 0
+            ? `Saved ${saved} ${saved === 1 ? 'item' : 'items'} to Photos.`
+            : 'Open the attachment first to download it, then try Save again.',
+        );
+      } catch {
+        Alert.alert('Save', 'Couldn’t save the attachment.');
+      }
+    })();
   };
 
   const onRemindLater = (): void => {
@@ -393,6 +444,9 @@ function ChatScreenInner({
         onEdit={onEditSelected}
         onUnsend={onUnsendSelected}
         onCancelSend={onCancelSelected}
+        onCopy={onCopySelected}
+        onForward={onForwardSelected}
+        onSave={onSaveSelected}
       />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />

@@ -20,6 +20,7 @@ import { useRedactedModeStore } from '@state/redactedModeStore';
 import { isDevServer } from '@utils/isDev';
 import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { ConversationListScreen } from '@ui';
 
 /**
@@ -38,6 +39,7 @@ export default function Home(): React.JSX.Element {
     void useSmartReplyStore.getState().hydrate();
     void useRedactedModeStore.getState().hydrate();
     void useDownloadSettingsStore.getState().hydrate();
+    void useFeatureSettingsStore.getState().hydrate();
     void (async () => {
       try {
         await recoverStuckScheduled();

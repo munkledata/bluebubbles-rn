@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useState } from 'react';
 import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +23,7 @@ export default function MediaViewer(): React.JSX.Element {
   const [att, setAtt] = useState<AttachmentRow | null>(null);
   const win = Dimensions.get('window');
   const local = isLocalFile(att?.localPath);
+  const isVideo = (att?.mimeType ?? '').startsWith('video');
 
   useEffect(() => {
     void getAttachmentByGuid(getDatabase(), guid).then(setAtt);
@@ -50,21 +52,25 @@ export default function MediaViewer(): React.JSX.Element {
 
   return (
     <View style={styles.root}>
-      <ScrollView
-        maximumZoomScale={4}
-        minimumZoomScale={1}
-        centerContent
-        contentContainerStyle={styles.center}
-      >
-        {att?.localPath ? (
-          <Image
-            source={{ uri: att.localPath }}
-            placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
-            contentFit="contain"
-            style={{ width: win.width, height: win.height }}
-          />
-        ) : null}
-      </ScrollView>
+      {att?.localPath && isVideo ? (
+        <FullscreenVideo uri={att.localPath} />
+      ) : (
+        <ScrollView
+          maximumZoomScale={4}
+          minimumZoomScale={1}
+          centerContent
+          contentContainerStyle={styles.center}
+        >
+          {att?.localPath ? (
+            <Image
+              source={{ uri: att.localPath }}
+              placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
+              contentFit="contain"
+              style={{ width: win.width, height: win.height }}
+            />
+          ) : null}
+        </ScrollView>
+      )}
 
       <View style={[styles.bar, { top: insets.top + 6 }]} pointerEvents="box-none">
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.pill}>
@@ -90,6 +96,24 @@ export default function MediaViewer(): React.JSX.Element {
         </View>
       </View>
     </View>
+  );
+}
+
+/** Fullscreen native video with controls; autoplays on mount. useVideoPlayer auto-releases
+ *  on unmount, so no manual cleanup is needed (this screen owns the player for its lifetime). */
+function FullscreenVideo({ uri }: { uri: string }): React.JSX.Element {
+  const win = Dimensions.get('window');
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    p.play();
+  });
+  return (
+    <VideoView
+      player={player}
+      nativeControls
+      contentFit="contain"
+      style={{ width: win.width, height: win.height }}
+    />
   );
 }
 

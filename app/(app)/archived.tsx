@@ -28,6 +28,7 @@ export default function ArchivedScreen(): React.JSX.Element {
       isPinned: !!row.isPinned,
       isArchived: !!row.isArchived,
       muted: row.muteType === 'mute',
+      unread: (row.unreadCount ?? 0) > 0,
     });
   }, []);
 

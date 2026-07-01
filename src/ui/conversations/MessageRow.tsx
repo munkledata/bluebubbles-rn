@@ -1,8 +1,10 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   formatSeparatorDate,
+  redactTitle,
   sameSender,
   showDateSeparator,
   showSenderHeader,
@@ -52,6 +54,7 @@ export const MessageRow = React.memo(function MessageRow({
   isHighlighted,
 }: MessageRowProps): React.JSX.Element {
   const theme = useTheme();
+  const redacted = useRedactedModeStore((s) => s.enabled);
   const tail = showTail(msg, newer);
   const header = showSenderHeader(msg, older, isGroup);
   const separator = showDateSeparator(msg, older);
@@ -80,7 +83,7 @@ export const MessageRow = React.memo(function MessageRow({
 
   const headerNode = header ? (
     <Text style={[styles.sender, { color: theme.color.tertiaryLabel }, scrim]}>
-      {msg.senderName}
+      {redacted ? redactTitle(msg.senderName ?? '', true) : msg.senderName}
     </Text>
   ) : null;
   const bubbleNode = (
@@ -116,7 +119,8 @@ export const MessageRow = React.memo(function MessageRow({
               {tail ? (
                 <Avatar
                   name={msg.senderName ?? msg.senderAddress ?? '?'}
-                  uri={msg.senderAvatar}
+                  uri={redacted ? null : msg.senderAvatar}
+                  seed={redacted ? (msg.senderAddress ?? msg.senderName ?? '?') : undefined}
                   size={26}
                 />
               ) : null}
