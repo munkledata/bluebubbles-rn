@@ -71,6 +71,44 @@ describe('conversation-view repositories', () => {
     expect(rows[2]!.senderName).toBe('Alice');
   });
 
+  it('repairs a null sender on a later hydrated re-sync, and never wipes a good one', async () => {
+    const { db } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'a@x.com', displayName: 'Alice' }]);
+    const map = await upsertChats(db, [Chat.parse({ guid: 'c1', displayName: 'Group' })], handles);
+    const chatId = map.get('c1')!;
+
+    // 1) Handle-less fetch (the old chat-open backfill): message inserted with NO sender.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mX', text: 'hi', dateCreated: 100 })],
+      () => chatId,
+      handles,
+    );
+    let row = (await listMessagesWithSenders(db, chatId)).find((r) => r.guid === 'mX')!;
+    expect(row.senderAddress).toBeNull(); // renders as "?"
+
+    // 2) A later hydrated re-sync carries the sender → COALESCE fills the null handle.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mX', text: 'hi', dateCreated: 100, handle: { address: 'a@x.com' } })],
+      () => chatId,
+      handles,
+    );
+    row = (await listMessagesWithSenders(db, chatId)).find((r) => r.guid === 'mX')!;
+    expect(row.senderAddress).toBe('a@x.com');
+    expect(row.senderName).toBe('Alice');
+
+    // 3) A subsequent handle-less fetch must NOT wipe the resolved sender.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mX', text: 'hi edited', dateCreated: 100 })],
+      () => chatId,
+      handles,
+    );
+    row = (await listMessagesWithSenders(db, chatId)).find((r) => r.guid === 'mX')!;
+    expect(row.senderAddress).toBe('a@x.com');
+  });
+
   it('paginates with beforeDate', async () => {
     const { db } = await createTestDb();
     const chatId = await seed(db);

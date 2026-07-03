@@ -15,6 +15,7 @@ import {
 import { Avatar } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageBubble } from './MessageBubble';
+import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
 interface MessageRowProps {
   msg: EnrichedMessage;
@@ -23,8 +24,8 @@ interface MessageRowProps {
   isGroup: boolean;
   isLastOutgoing: boolean;
   accentColor?: string | null;
-  /** A chat background is set → add a subtle text shadow so these unbacked, non-bubble
-   *  texts (date separator, sender header, status line) stay legible over the image. */
+  /** A chat background is set → back these unbacked, non-bubble texts (date separator,
+   *  sender header, status line) with a frosted pill so they stay legible over the image. */
   hasBackground?: boolean;
   // Take the message so the list can pass STABLE callbacks (the per-row binding
   // happens here, inside the memoized row, not in the list's renderItem).
@@ -66,15 +67,11 @@ export const MessageRow = React.memo(function MessageRow({
   const hasReactions = (msg.reactions?.length ?? 0) > 0;
   const marginTop = separator || breaksGroup ? 8 : 0;
 
-  // Over a chat background these non-bubble texts have no backing, so add a soft scrim
-  // (a contrasting text shadow) ONLY when a background is set. The shadow colour is the
-  // opposite of the text colour so it works on both light + dark backgrounds/themes.
-  const scrim = hasBackground
-    ? ({
-        textShadowColor: theme.mode === 'dark' ? '#000000CC' : '#FFFFFFCC',
-        textShadowRadius: 3,
-      } as const)
-    : null;
+  // Over a wallpaper these non-bubble texts have no backing, so each sits in a frosted pill
+  // (same chip language as the header/composer controls) with the theme label colour — the pill
+  // supplies the contrast, which a bare halo/shadow can't guarantee on a busy photo.
+  const overlay = overlayTextStyle(hasBackground, theme.color.tertiaryLabel, theme.color.label);
+  const pill = overlayPillStyle(hasBackground, theme.color.background);
 
   const originator = msg.threadOriginatorGuid;
   // In a GROUP, received messages get the sender's avatar to their left — but only on the LAST
@@ -84,7 +81,7 @@ export const MessageRow = React.memo(function MessageRow({
   const isEdited = !msg.dateRetracted && !!msg.dateEdited;
 
   const headerNode = header ? (
-    <Text style={[styles.sender, { color: theme.color.tertiaryLabel }, scrim]}>
+    <Text style={[styles.sender, overlay, pill ? [styles.senderPill, pill] : null]}>
       {redacted ? redactTitle(msg.senderName ?? '', true) : msg.senderName}
     </Text>
   ) : null;
@@ -93,6 +90,7 @@ export const MessageRow = React.memo(function MessageRow({
       msg={msg}
       showTail={tail}
       accentColor={accentColor}
+      hasBackground={hasBackground}
       onRetry={onRetry ? () => onRetry(msg) : undefined}
       onLongPress={onLongPress ? () => onLongPress(msg) : undefined}
       onJumpToReply={onJumpToReply && originator ? () => onJumpToReply(originator) : undefined}
@@ -110,7 +108,7 @@ export const MessageRow = React.memo(function MessageRow({
       ]}
     >
       {separator ? (
-        <Text style={[styles.separator, { color: theme.color.tertiaryLabel }, scrim]}>
+        <Text style={[styles.separator, overlay, pill ? [styles.separatorPill, pill] : null]}>
           {formatSeparatorDate(msg.dateCreated)}
         </Text>
       ) : null}
@@ -134,7 +132,7 @@ export const MessageRow = React.memo(function MessageRow({
           </View>
           {/* Below the avatar row so the avatar stays aligned to the bubble, not this label. */}
           {isEdited ? (
-            <Text style={[styles.editedAvatar, { color: theme.color.tertiaryLabel }, scrim]}>
+            <Text style={[styles.editedAvatar, overlay, pill ? [styles.editedPill, pill] : null]}>
               Edited
             </Text>
           ) : null}
@@ -146,7 +144,9 @@ export const MessageRow = React.memo(function MessageRow({
         </>
       )}
       {status ? (
-        <Text style={[styles.status, { color: theme.color.tertiaryLabel }, scrim]}>{status}</Text>
+        <Text style={[styles.status, overlay, pill ? [styles.statusPill, pill] : null]}>
+          {status}
+        </Text>
       ) : null}
     </View>
   );
@@ -165,4 +165,10 @@ const styles = StyleSheet.create({
   // "Edited" for a group received message, rendered under the avatar row and indented past the
   // avatar gutter (32) + the bubble's own margin (≈14) so it sits under the bubble text.
   editedAvatar: { fontSize: 11, marginTop: 2, marginLeft: 46 },
+  // Pill-backed variants (wallpaper set): hug the text instead of stretching full-width, so the
+  // frosted chip wraps the label. Alignment moves from textAlign to alignSelf.
+  senderPill: { alignSelf: 'flex-start' },
+  separatorPill: { alignSelf: 'center' },
+  statusPill: { alignSelf: 'flex-end' },
+  editedPill: { alignSelf: 'flex-start' },
 });

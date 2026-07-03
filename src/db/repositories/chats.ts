@@ -30,6 +30,9 @@ export async function upsertChats(
         isArchived: c.isArchived ?? false,
         isPinned: c.isPinned ?? false,
         muteType: c.muteType ?? null,
+        // Server-owned (macOS 26 synced background): the current channel GUID, or null when the
+        // chat has no background. Refreshed on every sync (unlike the device-local columns below).
+        syncedBackgroundChannel: ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
       })),
     )
     .onConflictDoUpdate({
@@ -38,6 +41,8 @@ export async function upsertChats(
         displayName: sql`excluded.display_name`,
         chatIdentifier: sql`excluded.chat_identifier`,
         style: sql`excluded.style`,
+        // Server-owned → refreshed on re-sync (a changed/removed background propagates).
+        syncedBackgroundChannel: sql`excluded.synced_background_channel`,
         // is_pinned, is_archived, mute_type, custom_name, custom_color are device-local:
         // SEEDED on first insert from the server, but NOT overwritten on a re-sync — the
         // user toggles them locally (pin / archive / mute / customization UI), so they
@@ -156,16 +161,67 @@ export async function setChatTheme(
   await db.update(chats).set(set).where(eq(chats.guid, guid));
 }
 
-/** A chat's per-chat theme override + background uri (null fields → inherit/none). */
+/**
+ * A chat's per-chat theme override + background uris (null fields → inherit/none). Includes
+ * both the device-local `backgroundUri` (the user's pick) and the macOS 26 `syncedBackgroundUri`
+ * (downloaded from the server); the UI resolves the effective background as local ?? synced.
+ */
 export async function getChatTheme(
   db: AppDatabase,
   guid: string,
-): Promise<{ themeTokens: string | null; backgroundUri: string | null } | null> {
-  const rows = await db.all<{ themeTokens: string | null; backgroundUri: string | null }>(
-    sql`SELECT theme_tokens AS themeTokens, background_uri AS backgroundUri
+): Promise<{
+  themeTokens: string | null;
+  backgroundUri: string | null;
+  syncedBackgroundUri: string | null;
+  /** 1 = light wallpaper, 0 = dark, null = unknown/none (raw column value). */
+  backgroundIsLight: number | null;
+} | null> {
+  const rows = await db.all<{
+    themeTokens: string | null;
+    backgroundUri: string | null;
+    syncedBackgroundUri: string | null;
+    backgroundIsLight: number | null;
+  }>(
+    sql`SELECT theme_tokens AS themeTokens, background_uri AS backgroundUri,
+               synced_background_uri AS syncedBackgroundUri,
+               background_is_light AS backgroundIsLight
           FROM chats WHERE guid = ${guid} LIMIT 1`,
   );
   return rows[0] ?? null;
+}
+
+/** Store the effective wallpaper's luminance (true = light → dark overlay text; null = unknown). */
+export async function setBackgroundIsLight(
+  db: AppDatabase,
+  guid: string,
+  isLight: boolean | null,
+): Promise<void> {
+  await db.update(chats).set({ backgroundIsLight: isLight }).where(eq(chats.guid, guid));
+}
+
+/**
+ * The macOS 26 synced-background state for a chat: the server's current `channel` (the version)
+ * and the `uri` of the local file already downloaded for it. The background-sync service compares
+ * them to decide whether to (re)download.
+ */
+export async function getSyncedBackgroundState(
+  db: AppDatabase,
+  guid: string,
+): Promise<{ channel: string | null; uri: string | null } | null> {
+  const rows = await db.all<{ channel: string | null; uri: string | null }>(
+    sql`SELECT synced_background_channel AS channel, synced_background_uri AS uri
+          FROM chats WHERE guid = ${guid} LIMIT 1`,
+  );
+  return rows[0] ?? null;
+}
+
+/** Set (or clear, with null) the local file path of a chat's downloaded synced background. */
+export async function setSyncedBackgroundUri(
+  db: AppDatabase,
+  guid: string,
+  uri: string | null,
+): Promise<void> {
+  await db.update(chats).set({ syncedBackgroundUri: uri }).where(eq(chats.guid, guid));
 }
 
 // ---- Queries ---------------------------------------------------------------

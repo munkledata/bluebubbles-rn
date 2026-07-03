@@ -10,15 +10,43 @@ interface ChatThemeProviderProps {
   children: ReactNode;
 }
 
-/** Reactive raw per-chat theme row (theme tokens JSON + background uri). */
-function useChatTheme(guid: string): { themeTokens: string | null; backgroundUri: string | null } {
+/** Reactive raw per-chat theme row (theme tokens JSON + local & synced background uris + luminance). */
+function useChatTheme(guid: string): {
+  themeTokens: string | null;
+  backgroundUri: string | null;
+  syncedBackgroundUri: string | null;
+  backgroundIsLight: boolean | null;
+} {
   const { data } = useReactiveQuery(() => getChatTheme(getDatabase(), guid), ['chats'], [guid]);
-  return { themeTokens: data?.themeTokens ?? null, backgroundUri: data?.backgroundUri ?? null };
+  return {
+    themeTokens: data?.themeTokens ?? null,
+    backgroundUri: data?.backgroundUri ?? null,
+    syncedBackgroundUri: data?.syncedBackgroundUri ?? null,
+    // Raw column is 0/1/null (getChatTheme uses raw SQL, bypassing drizzle's boolean coercion).
+    backgroundIsLight: data?.backgroundIsLight == null ? null : data.backgroundIsLight === 1,
+  };
 }
 
-/** The chat-background image uri for a chat (null → no background). Reactive. */
+/**
+ * The effective chat-background image uri (null → none). Reactive. The user's own local pick
+ * (`backgroundUri`) wins; otherwise the macOS 26 synced background downloaded from the server
+ * (`syncedBackgroundUri`). A background set by an iMessage participant shows up here without any
+ * change to the render site.
+ */
 export function useChatBackgroundUri(guid: string): string | null {
-  return useChatTheme(guid).backgroundUri;
+  const { backgroundUri, syncedBackgroundUri } = useChatTheme(guid);
+  return backgroundUri ?? syncedBackgroundUri;
+}
+
+/**
+ * Whether the effective wallpaper reads as LIGHT or DARK; `null` when unknown or no wallpaper.
+ * Reactive. Currently unconsumed: overlay labels moved from luminance-picked halo text to frosted
+ * pills (`overlayPillStyle`), which are legible regardless of the image. Kept (with the
+ * `background_is_light` column + luminance sampling) for future wallpaper-aware UI, e.g. status
+ * bar icon styling.
+ */
+export function useChatBackgroundIsLight(guid: string): boolean | null {
+  return useChatTheme(guid).backgroundIsLight;
 }
 
 /**

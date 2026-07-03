@@ -78,6 +78,10 @@ export async function upsertMessages(
         // COALESCE-preserve so a later event that legitimately omits text (e.g. a delivery/read
         // receipt) can't blank out a good body — text is never intentionally cleared to empty.
         text: sql`COALESCE(NULLIF(excluded.text, ''), ${messages.text})`,
+        // Repair the sender on a later hydrated re-sync (a message first inserted via a
+        // handle-less fetch had handle_id NULL → "?" avatar). COALESCE so a fetch that OMITS
+        // the handle (excluded = NULL) can never wipe an already-resolved sender.
+        handleId: sql`COALESCE(excluded.handle_id, ${messages.handleId})`,
         dateRead: sql`excluded.date_read`,
         dateDelivered: sql`excluded.date_delivered`,
         dateEdited: sql`excluded.date_edited`,

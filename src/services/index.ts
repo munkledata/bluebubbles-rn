@@ -42,6 +42,8 @@ import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
 import { useFaceTimeStore } from '@state/faceTimeStore';
 import { SocketService } from './realtime/socketService';
 import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
+export { ensureSyncedBackground } from './backgrounds/syncedBackground';
+export { computeBackgroundIsLight } from './backgrounds/luminance';
 import { startReachabilityWatch, stopReachabilityWatch } from './reachability';
 import { syncContacts } from './contacts/contactsService';
 

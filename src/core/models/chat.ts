@@ -24,6 +24,9 @@ export const Chat = z.object({
   lastMessage: Message.nullish(),
   /** GUID of the last message the local user has read, for unread tracking. */
   lastReadMessageGuid: z.string().nullish(),
+  /** macOS 26 synced "transcript background": present (a channel GUID) only when the chat has a
+   *  background set. Doubles as the version key — re-download the image when it changes. */
+  backgroundChannelGuid: z.string().nullish(),
 });
 export type Chat = z.infer<typeof Chat>;
 

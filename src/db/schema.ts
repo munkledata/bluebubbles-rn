@@ -59,8 +59,15 @@ export const chats = sqliteTable(
     customColor: text('custom_color'),
     /** Per-chat theme override: JSON `ThemeTokens` blob (null → inherit the global theme). */
     themeTokens: text('theme_tokens'),
-    /** Per-chat chat-background image uri (null → no background). */
+    /** Per-chat chat-background image uri (null → no background). Device-local (the user's own
+     *  pick) — never overwritten by a server re-sync. */
     backgroundUri: text('background_uri'),
+    /** macOS 26 synced background: server-owned channel GUID (the version), refreshed on sync. */
+    syncedBackgroundChannel: text('synced_background_channel'),
+    /** macOS 26 synced background: local file downloaded for `syncedBackgroundChannel`. */
+    syncedBackgroundUri: text('synced_background_uri'),
+    /** Luminance of the effective wallpaper (true = light image → dark overlay text). Null = unknown. */
+    backgroundIsLight: integer('background_is_light', { mode: 'boolean' }),
     lastReadMessageGuid: text('last_read_message_guid'),
     /** Denormalized for fast inbox sorting without a join. */
     latestMessageDate: integer('latest_message_date'),

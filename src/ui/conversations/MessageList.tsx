@@ -6,6 +6,7 @@ import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageRow } from './MessageRow';
+import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
 interface MessageListProps {
   chatGuid: string;
@@ -13,8 +14,13 @@ interface MessageListProps {
   /** Newest-first messages (the chat screen owns the single useMessages subscription). */
   messages: EnrichedMessage[];
   accentColor?: string | null;
-  /** A chat background image is set → unbacked overlay text needs a legibility scrim. */
+  /** A chat background image is set → unbacked overlay text needs a legibility pill. */
   hasBackground?: boolean;
+  /** Extra content padding when the list runs under a floating (wallpaper-mode) header, so the
+   *  resting scroll positions clear the bar + its edge fade. Also offsets the refresh spinner. */
+  topInset?: number;
+  /** Same, for the floating composer at the bottom. */
+  bottomInset?: number;
   onLongPressMessage?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
   onRefresh?: () => Promise<unknown>;
@@ -30,6 +36,8 @@ export function MessageList({
   messages,
   accentColor,
   hasBackground,
+  topInset = 0,
+  bottomInset = 0,
   onLongPressMessage,
   onRefresh,
   focusGuid,
@@ -37,7 +45,18 @@ export function MessageList({
   const theme = useTheme();
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
   // memoized inside the hook so FlashList's layout stays stable across the frequent re-renders.
-  const { refreshControl } = usePullToRefresh(onRefresh ?? (() => Promise.resolve()));
+  // The spinner offset drops it below a floating header instead of under it.
+  const { refreshControl } = usePullToRefresh(
+    onRefresh ?? (() => Promise.resolve()),
+    topInset || undefined,
+  );
+
+  // Resting content clears the floating bars + their edge fades; scrolled content still travels
+  // through the padding zones (under the bars), which is what the fades are for.
+  const contentStyle = useMemo(
+    () => ({ paddingTop: 12 + topInset, paddingBottom: 12 + bottomInset }),
+    [topInset, bottomInset],
+  );
 
   // messages is newest-first; reverse to chronological for display.
   const rows = useMemo(() => messages.slice().reverse(), [messages]);
@@ -122,11 +141,17 @@ export function MessageList({
             isHighlighted={item.guid === highlightGuid}
           />
         )}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={contentStyle}
       />
       {rows.length === 0 ? (
         <View style={styles.empty} pointerEvents="none">
-          <Text style={[styles.emptyText, { color: theme.color.tertiaryLabel }]}>
+          <Text
+            style={[
+              styles.emptyText,
+              overlayTextStyle(hasBackground, theme.color.tertiaryLabel, theme.color.label),
+              overlayPillStyle(hasBackground, theme.color.background),
+            ]}
+          >
             No messages yet
           </Text>
         </View>
@@ -137,7 +162,6 @@ export function MessageList({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  content: { paddingVertical: 12 },
   empty: {
     position: 'absolute',
     top: 0,

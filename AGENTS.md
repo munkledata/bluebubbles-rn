@@ -196,6 +196,19 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   `outgoingBackoffMs`; retire at `OUTGOING_MAX_ATTEMPTS`. Run it at boot (home) + the background task — NOT
   per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim because it must read back the claimed
   row (`db.run` works too but returns no rows; use it only for non-returning writes).
+- **Wallpaper-chat chrome: RN 0.85 has BUILT-IN CSS gradients** (`experimental_backgroundImage`,
+  new-arch) — no expo-linear-gradient/masked-view needed. Over a chat background the header/composer
+  go transparent (frosted chips), the message list runs UNDER them (absolute-overlay layout in
+  `chat/[guid].tsx`, bar heights measured via onLayout), and `EdgeFade` veils dissolve rows into
+  the bar zones. The veil's transparent end must be the SAME colour at alpha 0 — `transparent` is
+  black@0 and interpolates a smoky fringe on light themes. Non-bubble labels (sender/date/status/
+  "Edited"/tombstone) get frosted pills (`overlayPillStyle`, theme bg @ 62%) — a text halo/shadow
+  alone does NOT survive busy photos. GOTCHA 1: the wallpaper flag arrives ASYNC (reactive query,
+  null on first render; a participant-set background can land mid-chat) — keep ONE structural tree
+  and flip only STYLES + zIndex. Branching element types (View vs Fragment) on the flag remounts
+  the whole subtree, wiping the composer draft/staged attachments/scroll position. GOTCHA 2:
+  macOS's case-insensitive FS makes tsc reject sibling files differing only in case
+  (`EdgeFade.tsx` + `edgeFade.ts` → TS1261).
 - **Native security modules are dependency-deferred + advisory, so the build stays green pre-rebuild.**
   `react-native-libsodium` (crypto), `jail-monkey` (`deviceIntegrity`), `react-native-ssl-public-key-pinning`
   (`certPinning`) are all installed but only touched via a lazy `import()` inside a `try/catch` (root check)

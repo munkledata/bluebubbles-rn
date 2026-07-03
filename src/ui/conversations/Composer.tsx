@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MessagePreview } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { useTheme, withAlpha } from '../theme';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
 import { EffectPicker } from './effects';
 
@@ -28,6 +28,8 @@ interface ComposerProps {
   onTyping?: (isTyping: boolean) => void;
   /** Start a voice-memo recording (mic button shown when the input is empty). */
   onStartVoice?: () => void;
+  /** A chat wallpaper is set → tint the composer translucent so the image shows through. */
+  translucent?: boolean;
 }
 
 /** iOS message composer: optional reply/edit bar + attach button + input + send button. */
@@ -42,10 +44,14 @@ export function Composer({
   onSchedule,
   onTyping,
   onStartVoice,
+  translucent = false,
 }: ComposerProps): React.JSX.Element {
   const theme = useTheme();
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
   const insets = useSafeAreaInsets();
+  // Over a wallpaper the composer bar disappears; the input pill + each control float as bubbles.
+  const chip = withAlpha(theme.color.background, 0.62);
+  const bubble = translucent ? [styles.ctrlBubble, { backgroundColor: chip }] : null;
   const [text, setText] = useState('');
   const [effectOpen, setEffectOpen] = useState(false);
   const [trayOpen, setTrayOpen] = useState(false);
@@ -166,8 +172,8 @@ export function Composer({
         styles.wrap,
         {
           paddingBottom: insets.bottom + 8,
-          backgroundColor: theme.color.background,
-          borderTopColor: theme.color.separator,
+          backgroundColor: translucent ? 'transparent' : theme.color.background,
+          borderTopColor: translucent ? 'transparent' : theme.color.separator,
         },
       ]}
     >
@@ -263,7 +269,9 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel={trayOpen ? 'Close attachments' : 'Attach photo or file'}
           >
-            <Icon name={trayOpen ? 'close' : 'add'} size={28} color={theme.color.tint} />
+            <View style={bubble}>
+              <Icon name={trayOpen ? 'close' : 'add'} size={28} color={theme.color.tint} />
+            </View>
           </Pressable>
         ) : null}
         <TextInput
@@ -293,7 +301,9 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Schedule message"
           >
-            <Icon name="calendar-outline" size={20} color={theme.color.tint} />
+            <View style={bubble}>
+              <Icon name="calendar-outline" size={20} color={theme.color.tint} />
+            </View>
           </Pressable>
         ) : null}
         {canSend ? (
@@ -317,7 +327,9 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel="Record voice message"
           >
-            <Icon name="mic-outline" size={22} color={theme.color.tint} />
+            <View style={bubble}>
+              <Icon name="mic-outline" size={22} color={theme.color.tint} />
+            </View>
           </Pressable>
         ) : null}
       </View>
@@ -361,6 +373,8 @@ const styles = StyleSheet.create({
   send: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   attach: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
   micBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  // Frosted bubble behind a control when the composer floats over a wallpaper.
+  ctrlBubble: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   pendingRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 10 },
   pendingItem: { width: 60, height: 60 },
   pendingThumb: { width: 60, height: 60, borderRadius: 10 },

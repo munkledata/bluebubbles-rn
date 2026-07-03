@@ -9,6 +9,7 @@ import { useTheme } from '../theme';
 import { AttachmentView } from '../attachments';
 import { BubbleEffectView } from './effects';
 import { ReactionCluster } from './ReactionCluster';
+import { overlayPillStyle, overlayTextStyle } from './overlayText';
 import { ReplyQuote } from './ReplyQuote';
 import { UrlPreviewCard } from './UrlPreviewCard';
 
@@ -31,6 +32,9 @@ interface MessageBubbleProps {
    * down to the label's level; MessageRow renders it under the row instead.
    */
   deferEdited?: boolean;
+  /** A chat wallpaper is set → the bubble's unbacked texts (inline "Edited", the unsent-message
+   *  tombstone) get the frosted-pill treatment so they stay legible over the image. */
+  hasBackground?: boolean;
 }
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
@@ -45,8 +49,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   onLongPress,
   onJumpToReply,
   deferEdited,
+  hasBackground,
 }: MessageBubbleProps): React.JSX.Element {
   const theme = useTheme();
+  // Frosted-pill treatment for the bubble's unbacked texts over a wallpaper (see MessageRow).
+  const overlay = overlayTextStyle(hasBackground, theme.color.tertiaryLabel, theme.color.label);
+  const pill = overlayPillStyle(hasBackground, theme.color.background);
   const redacted = useRedactedModeStore((s) => s.enabled);
   const b = theme.color.bubble;
   const isFromMe = msg.isFromMe === 1;
@@ -74,7 +82,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (isRetracted) {
     return (
       <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
-        <Text style={[styles.tombstone, { color: theme.color.tertiaryLabel }]}>
+        <Text style={[styles.tombstone, overlay, pill]}>
           {isFromMe
             ? 'You unsent a message'
             : `${(redacted ? null : msg.senderName) ?? 'They'} unsent a message`}
@@ -147,7 +155,9 @@ export const MessageBubble = React.memo(function MessageBubble({
         <Text
           style={[
             styles.edited,
-            { color: theme.color.tertiaryLabel, alignSelf: isFromMe ? 'flex-end' : 'flex-start' },
+            overlay,
+            { alignSelf: isFromMe ? 'flex-end' : 'flex-start' },
+            pill,
           ]}
         >
           Edited

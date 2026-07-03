@@ -63,6 +63,10 @@ export const SYNC_BATCH_SIZE = 250;
 export const SYNC_WITH_QUERY = [
   'chats',
   'chats.participants',
+  // The message SENDER — without this the chat-open backfill stored a null handle, so group
+  // sender avatars/names rendered as an unknown "?". The server hydrates it on both the
+  // chat-message and message-query endpoints.
+  'handle',
   'attachments',
   'attributedBody',
   'messageSummaryInfo',

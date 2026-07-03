@@ -3,10 +3,18 @@ import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import type { MessagePreview } from '@db/repositories';
-import { dispatchRealtimeEvent, ensureChatSynced, http, markRead, sendTyping } from '@/services';
+import {
+  dispatchRealtimeEvent,
+  ensureChatSynced,
+  ensureSyncedBackground,
+  http,
+  markRead,
+  sendTyping,
+} from '@/services';
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 import {
@@ -39,12 +47,14 @@ import { isDevServer } from '@utils/isDev';
 import {
   Composer,
   ConversationHeader,
+  EdgeFade,
   MessageActionsOverlay,
   MessageList,
   Screen,
   ScreenEffectOverlay,
   SmartReplyChips,
   TypingBubble,
+  useTheme,
   type PendingAttachment,
   type SelectedMessage,
 } from '@ui';
@@ -120,6 +130,9 @@ function ChatScreenInner({
     // large initial sync hasn't reached it yet (or was interrupted). The reactive query
     // picks up the upserted messages automatically.
     void ensureChatSynced(guid);
+    // Fetch this chat's synced (macOS 26) background if a participant set/changed one — the
+    // reactive `chats` query repaints the background once the downloaded uri is written.
+    void ensureSyncedBackground(http, getDatabase(), guid);
   }, [guid]);
 
   const isDev = isDevServer;
@@ -369,6 +382,58 @@ function ChatScreenInner({
     };
   }, []);
 
+  // Wallpaper mode: the header/composer float transparent over the image, the list runs UNDER
+  // them, and EdgeFade veils dissolve messages into the bar zones instead of hard-clipping them
+  // at the list edge. Bar heights are measured (onLayout) since both vary (insets, reply bar,
+  // smart-reply chips) — and the wrappers are measured in BOTH modes, so real heights already
+  // exist by the time the (async, reactive) wallpaper flag flips the styles. The estimates only
+  // cover the very first frames of a cold mount.
+  const hasWallpaper = !!backgroundUri;
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const [headerH, setHeaderH] = useState(0);
+  const [bottomBarH, setBottomBarH] = useState(0);
+  const topBar = headerH > 0 ? headerH : insets.top + 74;
+  const bottomBar = bottomBarH > 0 ? bottomBarH : insets.bottom + 54;
+
+  const headerNode = <ConversationHeader chatGuid={guid} translucent={hasWallpaper} />;
+  const errorNode = messagesError ? (
+    <Text style={styles.errorBanner}>Couldn’t load messages. Pull to refresh or reopen.</Text>
+  ) : null;
+  const listNode = (
+    <MessageList
+      chatGuid={guid}
+      isGroup={isGroup}
+      messages={messages}
+      accentColor={header.data?.customColor}
+      hasBackground={hasWallpaper}
+      topInset={hasWallpaper ? topBar + EDGE_FADE : 0}
+      bottomInset={hasWallpaper ? bottomBar + EDGE_FADE : 0}
+      onLongPressMessage={onLongPressMessage}
+      onRefresh={() => ensureChatSynced(guid)}
+      focusGuid={focusGuid}
+    />
+  );
+  const bottomStack = (
+    <>
+      {isTyping ? <TypingBubble /> : null}
+      <SmartReplyChips messages={messages} onPick={onSend} />
+      <Composer
+        onSend={onSend}
+        onSendAttachments={(items) => void sendImages({ chatGuid: guid, images: items })}
+        onPickFiles={pickFiles}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+        editingText={editing?.text ?? null}
+        onCancelEdit={() => setEditing(null)}
+        onSchedule={onSchedule}
+        onTyping={(active) => sendTyping(guid, active)}
+        onStartVoice={isDev() ? undefined : () => setRecording(true)}
+        translucent={hasWallpaper}
+      />
+    </>
+  );
+
   return (
     <Screen>
       {backgroundUri ? (
@@ -385,34 +450,47 @@ function ChatScreenInner({
       {/* `padding` consumes the keyboard inset under Android edge-to-edge
           (RN 0.85 / Expo SDK 56 default), keeping the composer above the keyboard. */}
       <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
-        <ConversationHeader chatGuid={guid} />
-        {messagesError ? (
-          <Text style={styles.errorBanner}>Couldn’t load messages. Pull to refresh or reopen.</Text>
-        ) : null}
-        <MessageList
-          chatGuid={guid}
-          isGroup={isGroup}
-          messages={messages}
-          accentColor={header.data?.customColor}
-          hasBackground={!!backgroundUri}
-          onLongPressMessage={onLongPressMessage}
-          onRefresh={() => ensureChatSynced(guid)}
-          focusGuid={focusGuid}
-        />
-        {isTyping ? <TypingBubble /> : null}
-        <SmartReplyChips messages={messages} onPick={onSend} />
-        <Composer
-          onSend={onSend}
-          onSendAttachments={(items) => void sendImages({ chatGuid: guid, images: items })}
-          onPickFiles={pickFiles}
-          replyTo={replyTo}
-          onCancelReply={() => setReplyTo(null)}
-          editingText={editing?.text ?? null}
-          onCancelEdit={() => setEditing(null)}
-          onSchedule={onSchedule}
-          onTyping={(active) => sendTyping(guid, active)}
-          onStartVoice={isDev() ? undefined : () => setRecording(true)}
-        />
+        {/* ONE structural tree for both modes — the wallpaper flag only switches STYLES (bars go
+            absolute, veils appear, the list gains insets). The flag arrives ASYNC (reactive DB
+            read, null on first render; a participant-set background can also land mid-chat), so
+            branching element types here would remount the whole subtree on the flip — wiping the
+            composer draft, staged attachments, and list scroll position.
+            Stacking: the bars need zIndex above the veils, which sit above the list — sibling
+            order alone would draw the veils over the header (it precedes the list in flow order).
+            The absolute bars hang off the unpadded stage view, so the keyboard inset (KAV
+            padding) shrinks the stage and the composer rides up with it. */}
+        <View style={styles.flex}>
+          <View
+            style={hasWallpaper ? styles.overlayTop : null}
+            onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
+          >
+            {headerNode}
+            {errorNode}
+          </View>
+          {listNode}
+          {hasWallpaper ? (
+            <>
+              <EdgeFade
+                edge="top"
+                height={topBar + EDGE_FADE}
+                holdHeight={topBar}
+                color={theme.color.background}
+              />
+              <EdgeFade
+                edge="bottom"
+                height={bottomBar + EDGE_FADE}
+                holdHeight={bottomBar}
+                color={theme.color.background}
+              />
+            </>
+          ) : null}
+          <View
+            style={hasWallpaper ? styles.overlayBottom : null}
+            onLayout={(e) => setBottomBarH(e.nativeEvent.layout.height)}
+          >
+            {bottomStack}
+          </View>
+        </View>
       </KeyboardAvoidingView>
       {recording ? (
         <LoadErrorBoundary fallback={null} onError={() => setRecording(false)}>
@@ -470,8 +548,16 @@ function ChatScreenInner({
   );
 }
 
+// Height of the dissolve band the messages fade across, past the bar zone itself.
+const EDGE_FADE = 28;
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  // Wallpaper mode: bars float over the full-height list instead of framing it. zIndex 2 keeps
+  // the bar chrome above the EdgeFade veils (zIndex 1), which sit above the in-flow list (0) —
+  // the bars precede the list in flow order, so sibling order alone would z-bury them.
+  overlayTop: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2 },
+  overlayBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 2 },
   errorBanner: {
     textAlign: 'center',
     paddingVertical: 6,

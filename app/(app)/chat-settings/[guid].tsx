@@ -23,6 +23,7 @@ import {
   getChatTheme,
   listChatAttachmentsByKind,
   persistServerChat,
+  setBackgroundIsLight,
   setChatCustomization,
   setChatMute,
   setChatTheme,
@@ -31,7 +32,7 @@ import {
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { http } from '@/services';
+import { computeBackgroundIsLight, http } from '@/services';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
 import { Screen, ThemeStudio, useTheme } from '@ui';
@@ -160,6 +161,8 @@ export default function ChatSettingsScreen(): React.JSX.Element {
       // Copy out of the purgeable ImagePicker cache into a stable app dir before storing.
       const stableUri = await persistBackground(guid, res.assets[0]!.uri);
       await setChatTheme(getDatabase(), guid, { backgroundUri: stableUri });
+      // Record the wallpaper's luminance so overlay text stays legible on it.
+      await setBackgroundIsLight(getDatabase(), guid, await computeBackgroundIsLight(stableUri));
     })();
   };
 
@@ -193,11 +196,18 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           'Adaptive theming needs an app update before it can colour-match this image. The background was applied.',
         );
       }
+      // Record the wallpaper's luminance so overlay text stays legible on it.
+      await setBackgroundIsLight(getDatabase(), guid, await computeBackgroundIsLight(uri));
     })();
   };
 
   const clearChatTheme = (): void => {
-    void setChatTheme(getDatabase(), guid, { themeTokens: null, backgroundUri: null });
+    void (async () => {
+      await setChatTheme(getDatabase(), guid, { themeTokens: null, backgroundUri: null });
+      // Cleared the local override → drop its luminance; the synced background (if any) recomputes
+      // its own on the next chat open (ensureSyncedBackground).
+      await setBackgroundIsLight(getDatabase(), guid, null);
+    })();
   };
 
   const [renaming, setRenaming] = useState(false);

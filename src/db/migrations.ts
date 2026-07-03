@@ -277,4 +277,25 @@ export const MIGRATIONS: Migration[] = [
     name: '0012_attachment_hide',
     statements: [`ALTER TABLE attachments ADD COLUMN hide_attachment INTEGER DEFAULT 0`],
   },
+  {
+    // macOS 26 synced "transcript background" (a chat wallpaper that syncs to all iMessage
+    // participants). `synced_background_channel` is SERVER-owned (the server's current
+    // backgroundChannelGuid, refreshed on sync — the version key); `synced_background_uri`
+    // is the LOCAL file the app downloaded for that channel. Distinct from the device-local
+    // `background_uri` (the user's own pick), which the render resolves as local ?? synced.
+    // Additive; applied transactionally + idempotently by name.
+    name: '0013_synced_background',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN synced_background_channel TEXT`,
+      `ALTER TABLE chats ADD COLUMN synced_background_uri TEXT`,
+    ],
+  },
+  {
+    // Legibility: the effective chat wallpaper's luminance (1 = light image, 0 = dark, NULL =
+    // unknown/none), computed once when the background is set. Overlay text (sender names,
+    // timestamps) picks dark-on-light / light-on-dark from this so it stays readable on any
+    // wallpaper. Additive; applied transactionally + idempotently by name.
+    name: '0014_background_luminance',
+    statements: [`ALTER TABLE chats ADD COLUMN background_is_light INTEGER`],
+  },
 ];

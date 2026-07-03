@@ -103,6 +103,27 @@ export const darkTheme: ThemeTokens = {
 
 export const themes: Record<ThemeMode, ThemeTokens> = { light: lightTheme, dark: darkTheme };
 
+/**
+ * A hex colour (`#RGB` / `#RRGGBB`) at a given alpha, as an `rgba()` string. Pure — used to make
+ * the chat header/composer translucent over a wallpaper so it shows through instead of framing it
+ * in solid bars. Returns the input unchanged for a non-hex value (defensive).
+ */
+export function withAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return hex;
+  let h = m[1]!;
+  if (h.length === 3)
+    h = h
+      .split('')
+      .map((c) => c + c)
+      .join('');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const a = Math.max(0, Math.min(1, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 // ---- Named presets (selectable in Settings) -------------------------------
 
 export type PresetKey = 'ios-light' | 'bright-white' | 'oled-dark' | 'nord' | 'gator';
