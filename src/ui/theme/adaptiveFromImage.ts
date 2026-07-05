@@ -171,6 +171,8 @@ function normalizeTint(seedHex: string): string {
 
 /** A pleasant SMS green that nods toward the seed hue but stays unmistakably green. */
 const SMS_GREEN = '#43CC47';
+/** RCS teal — kept fixed (like SMS green) so the service colour reads consistently over any wallpaper. */
+const RCS_TEAL = '#0A8F94';
 
 /**
  * Build a fully-populated, valid `ThemeTokens` from a single seed colour.
@@ -243,6 +245,7 @@ export function generateAdaptiveTokens(seedHex: string, mode: ThemeMode): ThemeT
         receivedBackgroundBottom: receivedBottom,
         receivedText,
         smsBackground: SMS_GREEN,
+        rcsBackground: RCS_TEAL,
       },
     },
     spacing: base.spacing,

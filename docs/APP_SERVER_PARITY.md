@@ -16,6 +16,35 @@ The top gaps have since been wired (app-side; the server already emitted these e
 - **`new-server`** (tunnel-URL rotation) — the app now subscribes and, via `ServerUrlEventSink` → `applyNewServerUrl`, scheme-validates the new URL, persists it to the vault, re-points the session origin (HTTP re-points automatically via the session accessors), and reconnects the socket — instead of silently hitting the stale URL until a manual reconnect.
 - **Server Health screen** (Settings › SERVER › "Server Health…", and from Server Management) — surfaces the previously-untapped **remote-readable diagnostics** the server already exposed: Private-API helper connectivity (Messages + FaceTime), Find My key-import status (`get-findmy-keys-status` + `get-env` `findmyNeedsKeys`, explaining empty Find My tabs), push/FCM config (`get-fcm-status`), environment/uptime (`get-env` + `/admin/status`), tunnel + public IP + TLS (`get-zrok-status`/`get-public-ip`/`get-tls-status`), and the server alert log (`get-alerts` + Clear). No server change needed — all channels were already password-accessible.
 
+## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
+
+The Gator server's RCS bridge (a `libgm` sidecar) serves RCS chats through the **same frozen v1
+endpoints** as iMessage, so the app needs no new sync pipeline — RCS traffic is deliberately
+shaped like iMessage traffic. Prompt 7 made the app **accept + render** it; the send path is
+Prompt 8.
+
+| Direction | Item | Status |
+|---|---|---|
+| Server → App | `get-chats` returns RCS chats: guid `RCS;-;<id>`, `style` 45/43, participants `HandleV1{service:"RCS"}` | ✅ App accepts — `service` is an open `z.string()` (`ServiceType`), so RCS never fails the page parse; `KNOWN_SERVICES` now includes `'RCS'`. |
+| Server → App | RCS `MessageV1` (`service:"RCS"`, `originalROWID:null`, ms dates, status on `isSent`/`isDelivered`/`isRead`) via `get-chat/:guid/message` + realtime `new-message`/`updated-message` | ✅ Flows through the existing chat-open backfill + `EventRouter` unchanged (no service filter drops it). |
+| Server → App | RCS attachment bytes on the **separate** route `GET /api/v1/rcs/attachment/{mediaID}/download` | ✅ App branches on the owning chat's service — `attachmentDownloadUrl(http, guid, service)` builds `/rcs/attachment/…` when `service === 'RCS'`. Service is derived (chat-guid `LIKE 'RCS;-;%'` JOIN) onto `AttachmentRow`. |
+| Server → App | `ServerInfoV1.rcs?: boolean` capability flag | ✅ Added to the `ServerInfo` zod model (nullish → older servers omit it, no throw); `sessionAccessors.rcsEnabled()` / `useRcsEnabled()` gate RCS-specific UI. |
+| App UI | RCS bubble colour + badge | ✅ New `rcsBackground` teal token (distinct from iMessage blue + SMS green) across all presets; `MessageBubble` mirrors the SMS-green branch for `senderService === 'RCS'`; a subtle "RCS" `ServiceBadge` pill shows in `ConversationHeader` + `ConversationTile` (keyed off the `RCS;-;` guid). |
+
+**Intentional non-alignments (RCS):**
+- **RCS is deliberately NOT in `query-messages`** (server-side) — the incremental sync stays
+  iMessage-only to protect the ROWID cursor. RCS chats hydrate via `get-chats` + the
+  chat-messages endpoint and stay live via realtime events, so the app must **not** expect RCS
+  to arrive through the incremental path. No app change needed (the app already backfills on
+  chat-open); noted so a future sync refactor doesn't "fix" the missing RCS rows there.
+- **Send is Prompt 8, not wired yet.** The composer does not crash on an RCS chat — it queues an
+  optimistic message by the `RCS;-;` guid like any chat — but the send op is not yet server-routed
+  to the sidecar, and `createChat` still defaults `service:'iMessage'`. Prompt 8 must: route
+  `send-message`/`mark-chat-read`/typing by the `RCS;-;` prefix, pass `service:'RCS'` from the
+  new-chat toggle, and (app-side polish) colour the **outgoing** RCS bubble teal — from-me rows
+  have no joined handle, so `senderService` is null and the bubble currently renders as the
+  iMessage accent (same pre-existing limitation as from-me SMS).
+
 ## ⚠️ Intentionally NOT aligned (documented, no action)
 
 These are genuine divergences, each for a concrete reason — not oversights:

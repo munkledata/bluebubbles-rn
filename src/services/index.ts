@@ -129,11 +129,13 @@ export async function rotateDatabaseKey(): Promise<void> {
 /**
  * Create a new chat with the given recipient addresses + an initial message, upsert the
  * returned chat locally so it appears immediately, and return its guid (route into it).
+ * `service` accepts 'RCS' (server routes it to the sidecar and mints an `RCS;-;` guid);
+ * defaults to iMessage for existing callers.
  */
 export async function createNewChat(
   addresses: string[],
   message: string,
-  service = 'iMessage',
+  service: 'iMessage' | 'SMS' | 'RCS' = 'iMessage',
 ): Promise<string> {
   const db = await ensureDatabase();
   const chat = await chatsApi.createChat(http, { addresses, message, service });

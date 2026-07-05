@@ -16,13 +16,14 @@ import {
   buildPreview,
   formatChatDate,
   isGroupRow,
+  isRcsChatGuid,
   participantAvatars,
   participantList,
   redactPreview,
   redactTitle,
   resolveTitle,
 } from '@utils';
-import { Avatar, GroupAvatar, Icon } from '../primitives';
+import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
 import { useTheme } from '../theme';
 import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 
@@ -49,6 +50,7 @@ export const ConversationTile = React.memo(function ConversationTile({
   const preview = redactPreview(buildPreview(row), redacted);
   const group = isGroupRow(row);
   const muted = row.muteType === 'mute';
+  const isRcs = isRcsChatGuid(row.guid);
 
   const confirmDelete = (): void => {
     Alert.alert(
@@ -135,12 +137,18 @@ export const ConversationTile = React.memo(function ConversationTile({
       </View>
 
       <View style={styles.center}>
-        <Text
-          numberOfLines={1}
-          style={[styles.title, { color: theme.color.label, fontWeight: unread ? '600' : '500' }]}
-        >
-          {title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.title,
+              { color: theme.color.label, fontWeight: unread ? '600' : '500' },
+            ]}
+          >
+            {title}
+          </Text>
+          {isRcs ? <ServiceBadge label="RCS" /> : null}
+        </View>
         <Text
           numberOfLines={compact ? 1 : 2}
           style={[styles.preview, { color: theme.color.secondaryLabel }]}
@@ -172,7 +180,8 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 6 },
   dotSpacer: { width: 10, marginRight: 6 },
   center: { flex: 1, paddingRight: 8 },
-  title: { fontSize: 17, marginBottom: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  title: { fontSize: 17, flexShrink: 1 },
   preview: { fontSize: 15, lineHeight: 20 },
   trailing: { alignItems: 'flex-end', minWidth: 52 },
   time: { fontSize: 13, marginBottom: 4 },

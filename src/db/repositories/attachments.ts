@@ -87,7 +87,16 @@ export interface AttachmentRow {
   isSticker: number;
   hideAttachment: number;
   localPath: string | null;
+  /**
+   * Owning chat's service — 'RCS' when the attachment belongs to an `RCS;-;` chat, else null.
+   * Derived (via a chat-guid JOIN in the read queries), NOT a stored column. The downloader
+   * branches the byte-fetch URL on this (RCS bytes are on `/rcs/attachment/…`).
+   */
+  service: string | null;
 }
+
+/** SQL fragment: 'RCS' when the joined chat guid is an RCS bridge chat, else NULL. */
+const RCS_SERVICE_CASE = sql`CASE WHEN c.guid LIKE 'RCS;-;%' THEN 'RCS' ELSE NULL END`;
 
 /** Attachments for a set of message ids, grouped by messageId (stable id ASC order). */
 export async function listAttachmentsByMessageIds(
@@ -102,13 +111,16 @@ export async function listAttachmentsByMessageIds(
   );
   const rows = await db.all<AttachmentRow>(sql`
     SELECT
-      id, guid, message_id AS messageId, mime_type AS mimeType,
-      transfer_name AS transferName, total_bytes AS totalBytes,
-      height, width, blurhash, has_live_photo AS hasLivePhoto,
-      is_sticker AS isSticker, hide_attachment AS hideAttachment, local_path AS localPath
-    FROM attachments
-    WHERE message_id IN (${inList})
-    ORDER BY id ASC
+      a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
+      a.transfer_name AS transferName, a.total_bytes AS totalBytes,
+      a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
+      a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment, a.local_path AS localPath,
+      ${RCS_SERVICE_CASE} AS service
+    FROM attachments a
+    JOIN messages m ON m.id = a.message_id
+    JOIN chats c ON c.id = m.chat_id
+    WHERE a.message_id IN (${inList})
+    ORDER BY a.id ASC
   `);
   for (const r of rows) {
     const list = out.get(r.messageId) ?? [];
@@ -123,11 +135,15 @@ export async function getAttachmentByGuid(
   guid: string,
 ): Promise<AttachmentRow | null> {
   const rows = await db.all<AttachmentRow>(sql`
-    SELECT id, guid, message_id AS messageId, mime_type AS mimeType,
-      transfer_name AS transferName, total_bytes AS totalBytes, height, width, blurhash,
-      has_live_photo AS hasLivePhoto, is_sticker AS isSticker,
-      hide_attachment AS hideAttachment, local_path AS localPath
-    FROM attachments WHERE guid = ${guid} LIMIT 1
+    SELECT a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
+      a.transfer_name AS transferName, a.total_bytes AS totalBytes, a.height, a.width, a.blurhash,
+      a.has_live_photo AS hasLivePhoto, a.is_sticker AS isSticker,
+      a.hide_attachment AS hideAttachment, a.local_path AS localPath,
+      ${RCS_SERVICE_CASE} AS service
+    FROM attachments a
+    JOIN messages m ON m.id = a.message_id
+    JOIN chats c ON c.id = m.chat_id
+    WHERE a.guid = ${guid} LIMIT 1
   `);
   return rows[0] ?? null;
 }
@@ -172,7 +188,7 @@ export async function listChatAttachmentsByKind(
       a.transfer_name AS transferName, a.total_bytes AS totalBytes,
       a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
       a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment,
-      a.local_path AS localPath, m.date_created AS dateCreated
+      a.local_path AS localPath, ${RCS_SERVICE_CASE} AS service, m.date_created AS dateCreated
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
     JOIN chats c ON c.id = m.chat_id

@@ -23,6 +23,8 @@ interface MessageRowProps {
   isGroup: boolean;
   isLastOutgoing: boolean;
   accentColor?: string | null;
+  /** The chat's own outgoing service (from its guid) — colours from-me SMS/RCS bubbles. */
+  chatService?: 'iMessage' | 'SMS' | 'RCS' | null;
   /** A chat background is set → add a subtle text shadow so these unbacked, non-bubble
    *  texts (date separator, sender header, status line) stay legible over the image. */
   hasBackground?: boolean;
@@ -48,6 +50,7 @@ export const MessageRow = React.memo(function MessageRow({
   isGroup,
   isLastOutgoing,
   accentColor,
+  chatService,
   hasBackground,
   onRetry,
   onLongPress,
@@ -93,6 +96,7 @@ export const MessageRow = React.memo(function MessageRow({
       msg={msg}
       showTail={tail}
       accentColor={accentColor}
+      chatService={chatService}
       onRetry={onRetry ? () => onRetry(msg) : undefined}
       onLongPress={onLongPress ? () => onLongPress(msg) : undefined}
       onJumpToReply={onJumpToReply && originator ? () => onJumpToReply(originator) : undefined}

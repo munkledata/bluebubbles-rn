@@ -15,6 +15,7 @@ export interface BubbleColors {
   receivedBackgroundBottom: string;
   receivedText: string;
   smsBackground: string; // green SMS bubbles
+  rcsBackground: string; // teal RCS bubbles (distinct from iMessage blue + SMS green)
 }
 
 export interface ThemeTokens {
@@ -41,6 +42,9 @@ export interface ThemeTokens {
 
 const IMESSAGE_BLUE = '#1982FC';
 const SMS_GREEN = '#43CC47';
+// RCS gets its own teal so it reads as neither iMessage (blue) nor carrier SMS (green) — Google
+// Messages itself surfaces RCS distinctly from SMS. Dark enough to carry white bubble text.
+const RCS_TEAL = '#0A8F94';
 
 const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
 const radius = { bubble: 18, tail: 6, card: 12, pill: 999 } as const;
@@ -68,6 +72,7 @@ export const lightTheme: ThemeTokens = {
       receivedBackgroundBottom: '#E5E5EA',
       receivedText: '#000000',
       smsBackground: SMS_GREEN,
+      rcsBackground: RCS_TEAL,
     },
   },
   spacing,
@@ -94,6 +99,7 @@ export const darkTheme: ThemeTokens = {
       receivedBackgroundBottom: '#1C1C1E',
       receivedText: '#FFFFFF',
       smsBackground: SMS_GREEN,
+      rcsBackground: RCS_TEAL,
     },
   },
   spacing,
@@ -133,6 +139,7 @@ export const iosLightTheme: ThemeTokens = {
       receivedBackgroundBottom: '#E5E5EA',
       receivedText: '#000000',
       smsBackground: SMS_GREEN,
+      rcsBackground: RCS_TEAL,
     },
   },
   spacing,
@@ -160,6 +167,7 @@ export const nordTheme: ThemeTokens = {
       receivedBackgroundBottom: '#4C566A',
       receivedText: '#ECEFF4',
       smsBackground: '#A3BE8C',
+      rcsBackground: '#4C7C8C', // muted frost teal, distinct from the green SMS + blue sender
     },
   },
   spacing,
@@ -190,6 +198,7 @@ export const gatorTheme: ThemeTokens = {
       receivedBackgroundBottom: '#16293E',
       receivedText: '#EAF2F8',
       smsBackground: '#3FBF55', // gator green
+      rcsBackground: '#17A2B8', // teal — distinct from the icon's blue sender + gator-green SMS
     },
   },
   spacing,

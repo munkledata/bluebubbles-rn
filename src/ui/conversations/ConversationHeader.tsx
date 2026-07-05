@@ -8,12 +8,13 @@ import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
   isGroupRow,
+  isRcsChatGuid,
   participantAvatars,
   participantList,
   redactTitle,
   resolveTitle,
 } from '@utils';
-import { Avatar, GroupAvatar, Icon } from '../primitives';
+import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
 import { useTheme } from '../theme';
 
 interface ConversationHeaderProps {
@@ -30,6 +31,7 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
   const redacted = useRedactedModeStore((s) => s.enabled);
   const title = redactTitle(data ? resolveTitle(data) : '', redacted);
   const group = data ? isGroupRow(data) : false;
+  const isRcs = isRcsChatGuid(chatGuid);
 
   return (
     <View
@@ -74,9 +76,12 @@ export function ConversationHeader({ chatGuid }: ConversationHeaderProps): React
             />
           )
         ) : null}
-        <Text numberOfLines={1} style={[styles.title, { color: theme.color.label }]}>
-          {title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text numberOfLines={1} style={[styles.title, { color: theme.color.label }]}>
+            {title}
+          </Text>
+          {isRcs ? <ServiceBadge label="RCS" /> : null}
+        </View>
       </Pressable>
       <View style={styles.rightGroup}>
         <Pressable
@@ -122,5 +127,6 @@ const styles = StyleSheet.create({
   side: { width: 44, alignItems: 'center', justifyContent: 'center' },
   back: { fontSize: 34, fontWeight: '300', lineHeight: 36 },
   center: { flex: 1, alignItems: 'center', gap: 2 },
-  title: { fontSize: 15, fontWeight: '600', maxWidth: '90%' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '90%' },
+  title: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
 });

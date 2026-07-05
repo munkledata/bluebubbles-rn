@@ -5,8 +5,8 @@ import { useTheme } from '../theme';
 interface BubbleProps {
   text: string;
   isFromMe: boolean;
-  /** SMS messages render green; iMessage renders blue (sender) / gray (received). */
-  service?: 'iMessage' | 'SMS';
+  /** SMS renders green, RCS teal; iMessage renders blue (sender) / gray (received). */
+  service?: 'iMessage' | 'SMS' | 'RCS';
 }
 
 /**
@@ -21,7 +21,9 @@ export function Bubble({ text, isFromMe, service = 'iMessage' }: BubbleProps): R
   const backgroundColor = isFromMe
     ? service === 'SMS'
       ? b.smsBackground
-      : b.senderBackground
+      : service === 'RCS'
+        ? (b.rcsBackground ?? b.smsBackground)
+        : b.senderBackground
     : b.receivedBackgroundBottom;
   const color = isFromMe ? b.senderText : b.receivedText;
 

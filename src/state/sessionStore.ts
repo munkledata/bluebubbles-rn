@@ -59,4 +59,10 @@ export const sessionAccessors = {
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
   /** Whether the connected server has the BlueBubbles Private API enabled. */
   privateApiEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.private_api,
+  /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
+  rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,
 };
+
+/** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
+export const useRcsEnabled = (): boolean =>
+  useSessionStore((s) => !!s.serverInfo?.rcs);

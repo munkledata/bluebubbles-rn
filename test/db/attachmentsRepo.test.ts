@@ -74,4 +74,46 @@ describe('attachment repositories', () => {
     expect((await getAttachmentByGuid(db, 'att-1'))?.transferName).toBe('a.jpg');
     expect(await getAttachmentByGuid(db, 'nope')).toBeNull();
   });
+
+  it('derives service=null for an iMessage chat and "RCS" for an RCS;-; chat', async () => {
+    const { db } = await createTestDb();
+    const ids = await seed(db); // 'c1' is an ordinary chat guid
+    const imgId = ids.get('m-img')!;
+
+    // Ordinary chat → no RCS service tag.
+    const imsg = await getAttachmentByGuid(db, 'att-1');
+    expect(imsg?.service).toBeNull();
+    const byMsg = await listAttachmentsByMessageIds(db, [imgId]);
+    expect(byMsg.get(imgId)!.every((a) => a.service === null)).toBe(true);
+
+    // Seed an RCS chat + message + attachment; the derived service must be 'RCS' so the
+    // downloader routes bytes to /rcs/attachment/…
+    const handles = await upsertHandles(db, [{ address: '+15551230000', service: 'RCS' }]);
+    const map = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'RCS;-;+15551230000', participants: [{ address: '+15551230000' }] })],
+      handles,
+    );
+    const rcsChatId = map.get('RCS;-;+15551230000')!;
+    const rcsIds = await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'rcs-m1',
+          dateCreated: 300,
+          hasAttachments: true,
+          handle: { address: '+15551230000' },
+          attachments: [
+            Attachment.parse({ guid: 'rcs-media-9', mimeType: 'image/jpeg', transferName: 'r.jpg' }),
+          ],
+        }),
+      ],
+      () => rcsChatId,
+      handles,
+    );
+    const rcsMsgId = rcsIds.get('rcs-m1')!;
+    expect((await getAttachmentByGuid(db, 'rcs-media-9'))?.service).toBe('RCS');
+    const rcsByMsg = await listAttachmentsByMessageIds(db, [rcsMsgId]);
+    expect(rcsByMsg.get(rcsMsgId)!.every((a) => a.service === 'RCS')).toBe(true);
+  });
 });
