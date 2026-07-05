@@ -143,4 +143,25 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     await router.handle('imessage-aliases-removed', { aliases: [] }, 'socket');
     expect(intents).toHaveLength(0);
   });
+
+  it('emits an rcs-bridge-down status intent from the server-supplied title/body', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'rcs-bridge-down',
+      { title: 'RCS bridge down', body: 'Re-authenticate on the server.', reason: 'GAIA_LOGGED_OUT' },
+      'fcm',
+    );
+    expect(intents).toEqual([
+      { kind: 'rcs-bridge-down', title: 'RCS bridge down', body: 'Re-authenticate on the server.' },
+    ]);
+  });
+
+  it('falls back to default copy when the bridge-down push omits title/body', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle('rcs-bridge-down', { reason: 'PHONE_NOT_RESPONDING' }, 'fcm');
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.kind).toBe('rcs-bridge-down');
+  });
 });

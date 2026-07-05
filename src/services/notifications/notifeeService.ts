@@ -63,6 +63,23 @@ export async function postNotification(intent: NotificationIntent): Promise<void
     await postFaceTimeNotification(intent);
     return;
   }
+  if (intent.kind === 'rcs-bridge-down') {
+    await ensureChannel();
+    // A server STATUS notice (RCS bridge dropped / auth expired). Carries no message content, so
+    // no redaction is applied — the server-supplied title/body are shown verbatim. A fixed id
+    // updates in place instead of stacking on repeated pushes.
+    await notifee.displayNotification({
+      id: 'bb-rcs-bridge-down',
+      title: intent.title,
+      body: intent.body,
+      android: {
+        channelId: CHANNEL_NEW_MESSAGE,
+        smallIcon: 'ic_launcher',
+        pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
+      },
+    });
+    return;
+  }
   if (intent.kind === 'alias-removed') {
     await ensureChannel();
     // The alias is the user's OWN address; still honor redacted mode for the body.

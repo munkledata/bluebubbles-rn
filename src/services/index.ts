@@ -39,7 +39,9 @@ import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
 import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
+import { RcsAlertEventSink } from './realtime/rcsAlertEventSink';
 import { useFaceTimeStore } from '@state/faceTimeStore';
+import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { SocketService } from './realtime/socketService';
 import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
 import { startReachabilityWatch, stopReachabilityWatch } from './reachability';
@@ -150,6 +152,7 @@ export async function createNewChat(
 let realtimeSinkInstance: EventSink | null = null;
 function realtimeSink(db: AppDatabase): EventSink {
   realtimeSinkInstance ??= new ServerUrlEventSink(
+    new RcsAlertEventSink(
     new FaceTimeEventSink(
     new TypingEventSink(
       new NotifyingEventSink(
@@ -170,6 +173,8 @@ function realtimeSink(db: AppDatabase): EventSink {
     ),
     (c) => useFaceTimeStore.getState().ring(c),
     (uuid) => useFaceTimeStore.getState().dismissIncoming(uuid),
+    ),
+    (alertType) => useRcsHealthStore.getState().setAlert(alertType),
     ),
     (url) => void applyNewServerUrl(url),
   );

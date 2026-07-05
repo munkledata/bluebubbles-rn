@@ -192,6 +192,33 @@ export type ZrokStatus = z.infer<typeof ZrokStatus>;
 export const zrokStatus = (http: HttpClient): Promise<ZrokStatus> =>
   adminCommand(http, 'get-zrok-status', ZrokStatus);
 
+/**
+ * RCS bridge (Google Messages) live status via the NON-admin `get-rcs-status` channel (registered
+ * like `get-zrok-status`, so a remote password-authed client CAN read it). A disabled bridge →
+ * `{ enabled:false, running:false, paired:false, connected:false, phoneResponding:false,
+ * state:"disabled" }`. `lastAlert` is the raw alertType (`GAIA_LOGGED_OUT`, `PHONE_NOT_RESPONDING`,
+ * `BROWSER_INACTIVE*`, …). Older servers without the channel make `adminCommand` reject or return
+ * the dispatcher's `[]` unknown-channel sentinel (which fails this object schema) — the caller
+ * swallows both and degrades to the capability-only RCS row.
+ */
+const RcsStatus = z
+  .object({
+    enabled: z.boolean().nullish(),
+    running: z.boolean().nullish(),
+    paired: z.boolean().nullish(),
+    connected: z.boolean().nullish(),
+    phoneResponding: z.boolean().nullish(),
+    state: z.string().nullish(),
+    phoneID: z.string().nullish(),
+    browserActive: z.boolean().nullish(),
+    lastAlert: z.string().nullish(),
+  })
+  .passthrough()
+  .nullish();
+export type RcsStatus = z.infer<typeof RcsStatus>;
+export const rcsStatus = (http: HttpClient): Promise<RcsStatus> =>
+  adminCommand(http, 'get-rcs-status', RcsStatus);
+
 /** The server's detected public IP (or null). */
 const PublicIp = z.object({ ip: z.string().nullish() }).passthrough().nullish();
 export const publicIp = (http: HttpClient): Promise<string | null> =>
