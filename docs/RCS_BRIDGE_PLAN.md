@@ -1,20 +1,26 @@
 # RCS via Google Messages web-pairing — orchestration plan
 
-**Status: IN PROGRESS. Researched 2026-07-04 against live sources.**
+**Status: COMPLETE (Prompts 1–10 built, verified, committed 2026-07-04). On-device end-to-end
+run against a live deploy still pending.**
 Format: a Context section, then numbered prompts. Each prompt = concrete task (with file
 paths) + one rationale sentence (so the implementing agent can adapt when reality differs)
 + a verification step (run X, confirm Y) so failure is caught immediately.
 
-**Progress:**
-- ✅ **Prompt 1 (Phase-0 spike) — BUILT & COMPILES.** Lives at
-  `~/github/BB/bluebubbles-server/packages/rcs-sidecar/spike/` (throwaway; only added files;
-  server-repo WIP untouched). `go build`/`go vet` clean.
-- ⏳ **Prompt 1 pairing test — PENDING USER.** The real-world Gaia pairing (cookies + emoji
-  tap on the phone) has not been run yet; it gates Prompt 2. Run with `go run .` (NOT
-  `go run main.go` — that misses `cookies.go`).
-- ⬜ **Prompts 2–10 — NOT STARTED** (audited 2026-07-04: no `packages/bbd/src/rcs`, no
-  `rcsEnabled`/`RcsSidecar`/`RcsListener`/`RcsSender` anywhere; `rcs-sidecar/` contains only
-  `spike/`).
+**Progress — ALL PROMPTS DONE:**
+- ✅ **Prompt 1** — spike LIVE-VALIDATED against the real account (pair via Gaia cookies +
+  emoji, session resume, live event stream, RCS send all confirmed).
+- ✅ **Prompts 2–6 (server bridge)** — sidecar (`packages/rcs-sidecar/`), supervision, pairing
+  UI, read path (cache + fanout), v1 serve. Committed. Prompt 2–4 also live-validated
+  (paired, `connected:true`, real conversations/messages/events through the HTTP API).
+- ✅ **Prompts 7–9 (app + rich features)** — RCS renders (teal bubbles, badge), text send,
+  then media/reactions/typing/read-receipts at iMessage parity (app needed no changes for
+  the rich features — server maps to iMessage shapes).
+- ✅ **Prompt 10 (ops hardening)** — cookie re-auth (no re-pair), bridge alerts + `get-rcs-status`,
+  `rcs-bridge-down` push, `docs/RCS_RUNBOOK.md` (server repo).
+- Test totals at completion: server bbd **375**, app **563**, sidecar `go build`/`vet` clean.
+- **Remaining:** a full on-device run against a live deploy (dashboard pairing → real RCS in
+  the app on the phone) — everything below the app was live-validated via the sidecar HTTP
+  API, but the phone-app-through-server path hasn't been exercised on-device yet.
 
 **Findings locked in from Prompt 1 (feed into later prompts):**
 - Pinned **`go.mau.fi/mautrix-gmessages v0.2605.0`** (CalVer 26.05, latest). Local toolchain
