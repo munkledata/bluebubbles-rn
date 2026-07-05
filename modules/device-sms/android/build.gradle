@@ -1,0 +1,24 @@
+apply plugin: 'com.android.library'
+
+group = 'com.bluegreengatorapps.devicesms'
+version = '0.1.0'
+
+// Local Expo module: apply the expo-modules-core gradle helpers by file path
+// (the published `expo-module-gradle-plugin` id is only available inside Expo's
+// own composite build; local modules resolve it via :expo-modules-core).
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useExpoPublishing()
+
+// Pull compileSdk / minSdk / targetSdk from the root project (safeExtGet fallbacks).
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace "com.bluegreengatorapps.devicesms"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}

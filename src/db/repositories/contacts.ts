@@ -88,6 +88,23 @@ interface ContactMatch {
 }
 
 /**
+ * Best-effort contact display name for a raw address (phone or email), matched by the
+ * normalized key (last-10-digits phone / lowercased email) against synced device
+ * contacts. Returns null when nothing matches or the matched contact has no name.
+ * Used by the device-SMS inbox to name a raw provider address. Reuses the shared
+ * `buildContactIndex`, so it matches exactly like the handle matcher.
+ */
+export async function findContactNameByAddress(
+  db: AppDatabase,
+  address: string,
+): Promise<string | null> {
+  const key = handleKey(address);
+  if (!key) return null;
+  const index = await buildContactIndex(db);
+  return index.get(key)?.displayName ?? null;
+}
+
+/**
  * Build an address-key → contact index from the local contacts table (phones
  * keyed by last-10-digits, emails lowercased). Shared by the full match pass and
  * the opportunistic per-ingestion link.

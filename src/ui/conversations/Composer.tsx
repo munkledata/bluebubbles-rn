@@ -30,6 +30,8 @@ interface ComposerProps {
   onStartVoice?: () => void;
   /** A chat wallpaper is set → tint the composer translucent so the image shows through. */
   translucent?: boolean;
+  /** Input placeholder; defaults to "iMessage". SMS screens pass "Text Message". */
+  placeholder?: string;
 }
 
 /** iOS message composer: optional reply/edit bar + attach button + input + send button. */
@@ -45,6 +47,7 @@ export function Composer({
   onTyping,
   onStartVoice,
   translucent = false,
+  placeholder = 'iMessage',
 }: ComposerProps): React.JSX.Element {
   const theme = useTheme();
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
@@ -282,7 +285,7 @@ export function Composer({
           // "Send with Return": Enter submits instead of inserting a newline.
           submitBehavior={sendWithReturn ? 'submit' : 'newline'}
           onSubmitEditing={sendWithReturn ? () => submit() : undefined}
-          placeholder="iMessage"
+          placeholder={placeholder}
           placeholderTextColor={theme.color.tertiaryLabel}
           style={[
             styles.input,

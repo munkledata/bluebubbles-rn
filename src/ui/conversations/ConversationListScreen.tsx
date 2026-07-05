@@ -130,6 +130,19 @@ export function ConversationListScreen(): React.JSX.Element {
             />
           </Pressable>
           <Pressable
+            onPress={() => router.push('/device-sms')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Phone SMS"
+          >
+            <Icon
+              name="chatbox-ellipses-outline"
+              size={24}
+              color={theme.color.tint}
+              style={styles.headerIcon}
+            />
+          </Pressable>
+          <Pressable
             onPress={() => router.push('/settings')}
             hitSlop={8}
             accessibilityRole="button"

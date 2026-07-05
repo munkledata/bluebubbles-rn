@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
 import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { syncContacts } from '@/services/contacts/contactsService';
+import { syncSmsNotificationPrefs } from '@/services/deviceSms/deviceSmsService';
 import {
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
   useDownloadSettingsStore,
@@ -605,7 +606,12 @@ export default function SettingsScreen(): React.JSX.Element {
                 <Text style={[styles.rowLabel, { color: theme.color.label }]}>Redacted Mode</Text>
                 <Switch
                   value={redacted}
-                  onValueChange={(v) => void setRedacted(v)}
+                  onValueChange={(v) => {
+                    void setRedacted(v);
+                    // Keep the device-SMS killed-app notification hide-preview flag in sync
+                    // with Redacted Mode (setRedacted updates the store synchronously first).
+                    void syncSmsNotificationPrefs();
+                  }}
                   accessibilityLabel="Hide message previews, names, and notification contents"
                 />
               </View>

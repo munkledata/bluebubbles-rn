@@ -36,6 +36,15 @@ const config: ExpoConfig = {
       'android.permission.USE_FULL_SCREEN_INTENT',
       'android.permission.RECORD_AUDIO',
       'android.permission.MODIFY_AUDIO_SETTINGS',
+      // Phone SMS (device-sms local module): read/send/receive SMS on the device's own
+      // SIM. Requested at runtime JS-side via PermissionsAndroid.
+      'android.permission.SEND_SMS',
+      'android.permission.READ_SMS',
+      'android.permission.RECEIVE_SMS',
+      // MMS read/notify: RECEIVE_MMS + RECEIVE_WAP_PUSH let the manifest MMS receiver
+      // (DeviceSmsMmsReceiver) get the killed-app WAP_PUSH_RECEIVED signal for incoming MMS.
+      'android.permission.RECEIVE_MMS',
+      'android.permission.RECEIVE_WAP_PUSH',
     ],
     adaptiveIcon: {
       backgroundColor: '#4990de',
