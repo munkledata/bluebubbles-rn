@@ -8,13 +8,16 @@ import type {
   FcmStatus,
   FindMyKeysStatus,
   PrivateApiStatus,
+  RcsStatus,
   ServerAlert,
   ServerEnv,
   TlsStatus,
   ZrokStatus,
 } from '@core/api/endpoints/server';
+import { deriveRcsHealth, deriveRcsHealthFromStatus, type RcsSeverity } from '@core/realtime';
 import { http } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
+import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { Screen, useTheme } from '@ui';
 
 const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Yes' : 'No');
@@ -38,6 +41,13 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  // RCS bridge (Google Messages): the capability boolean gates the section (absent on older
+  // servers → hidden). The rich, accurate health block comes from the NON-admin `get-rcs-status`
+  // channel (fetched below); the live `rcs-alert` socket event is kept as an immediacy override so
+  // a fresh alert updates the card between refetches.
+  const rcsCapability = serverInfo?.rcs;
+  const rcsLastAlert = useRcsHealthStore((s) => s.lastAlertType);
+  const rcsLastAlertAt = useRcsHealthStore((s) => s.lastAlertAt);
 
   const [pa, setPa] = useState<PrivateApiStatus>(null);
   const [env, setEnv] = useState<ServerEnv>(null);
@@ -48,6 +58,10 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const [tls, setTls] = useState<TlsStatus>(null);
   const [admin, setAdmin] = useState<AdminStatus>(null);
   const [alerts, setAlerts] = useState<ServerAlert[]>([]);
+  // The live `get-rcs-status` block + when it last resolved (to decide whether a socket alert is
+  // fresher than the fetch). `null` block = channel unavailable (older server) → capability-only.
+  const [rcs, setRcs] = useState<RcsStatus>(null);
+  const [rcsFetchedAt, setRcsFetchedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback((): void => {
@@ -63,6 +77,15 @@ export default function ServerHealthScreen(): React.JSX.Element {
       serverApi.tlsStatus(http).then(setTls, () => {}),
       serverApi.adminStatus(http).then(setAdmin, () => {}),
       serverApi.serverAlerts(http).then(setAlerts, () => {}),
+      // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
+      // leave the block null so the RCS row degrades to the capability-only signal.
+      serverApi.rcsStatus(http).then(
+        (r) => {
+          setRcs(r);
+          setRcsFetchedAt(Date.now());
+        },
+        () => {},
+      ),
     ]).finally(() => setRefreshing(false));
   }, []);
 
@@ -175,6 +198,17 @@ export default function ServerHealthScreen(): React.JSX.Element {
           </InfoRow>
         </Section>
 
+        {rcsCapability == null ? null : (
+          <RcsBridgeSection
+            capability={rcsCapability}
+            status={rcs}
+            statusFetchedAt={rcsFetchedAt}
+            lastAlertType={rcsLastAlert}
+            lastAlertAt={rcsLastAlertAt}
+            theme={theme}
+          />
+        )}
+
         <Section label="ALERTS" theme={theme}>
           {alerts.length === 0 ? (
             <InfoRow label="Server alerts" theme={theme}>
@@ -207,6 +241,91 @@ function keyState(k: { present?: boolean | null; valid?: boolean | null } | null
   if (!k || k.present == null) return '—';
   if (!k.present) return 'Not imported';
   return k.valid ? 'Imported ✓' : 'Invalid';
+}
+
+/** Map an RCS-health severity to a status-value colour from the theme (no orange token exists,
+ *  so warn + error both use `destructive`; the distinct copy carries the difference). */
+function severityColor(severity: RcsSeverity, theme: ReturnType<typeof useTheme>): string {
+  switch (severity) {
+    case 'ok':
+      return theme.color.bubble.smsBackground; // green — healthy
+    case 'warn':
+    case 'error':
+      return theme.color.destructive; // red — needs attention
+    case 'off':
+    default:
+      return theme.color.tertiaryLabel; // muted — bridge turned off
+  }
+}
+
+/** The RCS bridge (Google Messages) status row. Only rendered when the server advertises the `rcs`
+ *  capability. Prefers the live `get-rcs-status` block (accurate enabled/paired/connected/
+ *  phoneResponding, plus phoneID) as the source of truth, with the live `rcs-alert` socket signal
+ *  as an immediacy override when it's fresher than the last fetch — so a fresh alert updates the
+ *  card between refetches, and a dashboard re-auth recovers on the next refetch (connected flips
+ *  back true) with NO recovery alert needed. Falls back to the capability-only signal when the
+ *  channel is unavailable (older server). The auth fix lives on the Mac server dashboard (a cookie
+ *  paste), not in the app. */
+function RcsBridgeSection({
+  capability,
+  status,
+  statusFetchedAt,
+  lastAlertType,
+  lastAlertAt,
+  theme,
+}: {
+  capability: boolean;
+  status: RcsStatus;
+  statusFetchedAt: number | null;
+  lastAlertType: string | null;
+  lastAlertAt: number | null;
+  theme: ReturnType<typeof useTheme>;
+}): React.JSX.Element {
+  // A socket alert is an immediacy override only when it arrived AFTER the block was fetched —
+  // otherwise a stale alert would defeat the block's reauth-recovery.
+  const freshAlert =
+    lastAlertType != null &&
+    lastAlertAt != null &&
+    statusFetchedAt != null &&
+    lastAlertAt > statusFetchedAt
+      ? lastAlertType
+      : null;
+  const health =
+    status != null
+      ? deriveRcsHealthFromStatus(status, freshAlert)
+      : // No block (older server / fetch failed): degrade to the capability + last-alert signal.
+        deriveRcsHealth(capability, lastAlertType);
+  const phoneID = status?.phoneID;
+  return (
+    <Section label="RCS BRIDGE" theme={theme}>
+      <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+        <Text style={[styles.rowLabel, { color: theme.color.label }]}>Google Messages</Text>
+        <Text
+          style={[styles.rowValue, { color: severityColor(health.severity, theme) }]}
+          numberOfLines={1}
+          accessibilityLabel={`RCS bridge ${health.status}`}
+        >
+          {health.status}
+        </Text>
+      </View>
+      {phoneID ? (
+        <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+          <Text style={[styles.rowLabel, { color: theme.color.label }]}>Phone</Text>
+          <Text
+            style={[styles.rowValue, { color: theme.color.secondaryLabel }]}
+            numberOfLines={1}
+          >
+            {phoneID}
+          </Text>
+        </View>
+      ) : null}
+      {health.detail ? (
+        <View style={[styles.hintRow, { borderTopColor: theme.color.separator }]}>
+          <Text style={[styles.hint, { color: theme.color.tertiaryLabel }]}>{health.detail}</Text>
+        </View>
+      ) : null}
+    </Section>
+  );
 }
 
 function Section({

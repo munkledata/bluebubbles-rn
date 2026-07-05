@@ -8,6 +8,8 @@ export interface AttachmentFetcher {
     guid: string,
     transferName: string,
     onProgress?: (loaded: number, total: number) => void,
+    /** Owning chat service ('RCS' → the byte-fetch uses the `/rcs/attachment/…` route). */
+    service?: string | null,
   ): Promise<string>;
 }
 
@@ -59,7 +61,7 @@ function release(): void {
 export async function ensureDownloaded(
   db: AppDatabase,
   fetcher: AttachmentFetcher,
-  att: { guid: string; transferName: string | null; localPath: string | null },
+  att: { guid: string; transferName: string | null; localPath: string | null; service?: string | null },
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<string | null> {
   if (att.localPath && fetcher.exists(att.localPath)) return att.localPath;
@@ -69,7 +71,12 @@ export async function ensureDownloaded(
   const task = (async (): Promise<string | null> => {
     await acquire();
     try {
-      const path = await fetcher.download(att.guid, att.transferName ?? att.guid, onProgress);
+      const path = await fetcher.download(
+        att.guid,
+        att.transferName ?? att.guid,
+        onProgress,
+        att.service,
+      );
       await updateAttachmentLocalPath(db, att.guid, path);
       return path;
     } catch {

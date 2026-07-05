@@ -19,6 +19,13 @@ export const ServerInfo = z
     proxy_service: z.string().nullish(),
     /** Whether the server accepts header-based auth (rebuild requirement). */
     supports_header_auth: z.boolean().nullish(),
+    /**
+     * Gator RCS bridge enabled (additive; absent/false on older servers). When true the server
+     * serves RCS chats through the same v1 endpoints (`RCS;-;` guids, `service:"RCS"`). The app
+     * needs no gate to RECEIVE them (they just appear in the list) — this flag lets RCS-specific
+     * UI (e.g. an RCS option in new-chat, Prompt 8) show only when the bridge is live.
+     */
+    rcs: z.boolean().nullish(),
   })
   .transform((s) => ({ ...s, server_version: s.server_version ?? s.version ?? undefined }));
 export type ServerInfo = z.infer<typeof ServerInfo>;

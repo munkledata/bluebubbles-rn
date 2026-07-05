@@ -94,6 +94,14 @@ export async function buildMessageIntents(
       if (aliases.length === 0) return [];
       return [{ kind: 'alias-removed', aliases }];
     }
+    case 'rcs-bridge-down': {
+      // Server-fired bridge-down push. Show the server's title/body verbatim as a status notice —
+      // no message content, so no DB lookup and no redaction. Fall back to sane defaults if the
+      // server omitted a field.
+      const title = event.payload.title ?? 'RCS bridge';
+      const body = event.payload.body ?? 'The RCS bridge went down — reconnect on the server.';
+      return [{ kind: 'rcs-bridge-down', title, body }];
+    }
     default:
       return [];
   }

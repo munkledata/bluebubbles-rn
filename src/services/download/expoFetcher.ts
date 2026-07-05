@@ -24,11 +24,12 @@ export function expoFetcher(http: HttpClient): AttachmentFetcher {
       guid: string,
       transferName: string,
       onProgress?: (loaded: number, total: number) => void,
+      service?: string | null,
     ): Promise<string> {
       const dir = new Directory(Paths.document, 'attachments', guid);
       dir.create({ intermediates: true, idempotent: true });
       const dest = new File(dir, sanitize(transferName));
-      const url = attachmentsApi.attachmentDownloadUrl(http, guid);
+      const url = attachmentsApi.attachmentDownloadUrl(http, guid, service ?? undefined);
       // createDownloadTask streams byte progress; header auth keeps the URL clean.
       // totalBytes === -1 when Content-Length is absent → reported as indeterminate.
       const task = File.createDownloadTask(url, dest, {

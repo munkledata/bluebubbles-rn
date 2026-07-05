@@ -29,7 +29,7 @@ export async function queryChats(http: HttpClient, q: ChatQuery = {}): Promise<C
 export interface CreateChatParams {
   addresses: string[]; // recipient handles (phone/email)
   message: string; // initial message (the server requires one to create the thread)
-  service?: string; // 'iMessage' | 'SMS'
+  service?: string; // 'iMessage' | 'SMS' | 'RCS' (server routes RCS to the sidecar); defaults iMessage
   method?: string; // 'private-api' | 'apple-script'
 }
 

@@ -8,12 +8,13 @@ import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
   isGroupRow,
+  isRcsChatGuid,
   participantAvatars,
   participantList,
   redactTitle,
   resolveTitle,
 } from '@utils';
-import { Avatar, GroupAvatar, Icon } from '../primitives';
+import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
 import { useTheme, withAlpha } from '../theme';
 
 interface ConversationHeaderProps {
@@ -38,6 +39,7 @@ export function ConversationHeader({
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.bubble, { backgroundColor: chip }] : null;
+  const isRcs = isRcsChatGuid(chatGuid);
 
   return (
     <View
@@ -86,16 +88,19 @@ export function ConversationHeader({
             )}
           </View>
         ) : null}
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.title,
-            { color: theme.color.label },
-            translucent ? [styles.titlePill, { backgroundColor: chip }] : null,
-          ]}
-        >
-          {title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.title,
+              { color: theme.color.label },
+              translucent ? [styles.titlePill, { backgroundColor: chip }] : null,
+            ]}
+          >
+            {title}
+          </Text>
+          {isRcs ? <ServiceBadge label="RCS" /> : null}
+        </View>
       </Pressable>
       <View style={styles.rightGroup}>
         <Pressable
@@ -145,7 +150,8 @@ const styles = StyleSheet.create({
   side: { width: 44, alignItems: 'center', justifyContent: 'center' },
   back: { fontSize: 34, fontWeight: '300', lineHeight: 36 },
   center: { flex: 1, alignItems: 'center', gap: 2 },
-  title: { fontSize: 15, fontWeight: '600', maxWidth: '90%' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '90%' },
+  title: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   // Floating-over-wallpaper chrome: each control sits in its own frosted bubble.
   bubble: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   avatarBubble: { borderRadius: 999, padding: 3 },

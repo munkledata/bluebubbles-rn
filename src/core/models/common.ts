@@ -16,11 +16,13 @@ export const epochMillis = z
 
 // Apple service for a handle/message. OPEN string at the wire boundary, NOT a closed enum:
 // chat.db's handle.service column can hold values beyond iMessage/SMS (e.g. "RCS" on newer
-// macOS, legacy carrier strings) and the server emits it verbatim. Because a query/message
-// page is validated as ONE hard array parse, a single unknown service bound to a closed enum
-// would fail the ENTIRE page (a sync stall). Matching the legacy Flutter `String service`
-// contract avoids that; the UI distinguishes only the two known values (else renders iMessage).
-export const KNOWN_SERVICES = ['iMessage', 'SMS'] as const;
+// macOS, legacy carrier strings) and the server emits it verbatim. The Gator RCS bridge
+// reuses this exact field, tagging its handles/messages `service: "RCS"` (chats keyed
+// `RCS;-;<id>`) so they ride the frozen v1 pipeline unchanged. Because a query/message page is
+// validated as ONE hard array parse, a single unknown service bound to a closed enum would fail
+// the ENTIRE page (a sync stall). Matching the legacy Flutter `String service` contract avoids
+// that; the UI distinguishes the known values (else renders iMessage).
+export const KNOWN_SERVICES = ['iMessage', 'SMS', 'RCS'] as const;
 export const ServiceType = z.string();
 export type ServiceType = z.infer<typeof ServiceType>;
 

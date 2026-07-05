@@ -46,6 +46,12 @@ export const SERVER_EVENTS = [
   'message-send-error',
   // Server's public URL rotated (zrok tunnel) — the app reconnects to the new origin.
   'new-server',
+  // Gator RCS bridge (Google Messages) health alert — phone offline / browser inactive / cookies
+  // expired. Surfaced on the Server Health screen; never touches the DB.
+  'rcs-alert',
+  // Server-fired high-priority push when the RCS bridge drops / auth expires — carries a
+  // ready-made { title, body, reason } and posts a content-less status notification (no DB).
+  'rcs-bridge-down',
 ] as const;
 
 export type ServerEventName = (typeof SERVER_EVENTS)[number];

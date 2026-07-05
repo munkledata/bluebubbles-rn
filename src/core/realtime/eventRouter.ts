@@ -4,6 +4,8 @@ import {
   FaceTimeStatusPayload,
   GroupChangePayload,
   ReadStatusPayload,
+  RcsAlertPayload,
+  RcsBridgeDownPayload,
   TypingIndicatorPayload,
   type NormalizedEvent,
   type ServerEventName,
@@ -124,6 +126,14 @@ export class EventRouter {
           type: 'message-send-error',
           payload: (data as Record<string, unknown>) ?? {},
         };
+      case 'rcs-alert': {
+        const p = RcsAlertPayload.safeParse(data);
+        return p.success ? { type: 'rcs-alert', payload: p.data } : null;
+      }
+      case 'rcs-bridge-down': {
+        const p = RcsBridgeDownPayload.safeParse(data);
+        return p.success ? { type: 'rcs-bridge-down', payload: p.data } : null;
+      }
       case 'new-server': {
         // Payload is the new server URL (a bare string, or wrapped as { url } / { server }).
         const url =

@@ -22,6 +22,13 @@ interface MessageBubbleProps {
   showTail: boolean;
   /** Per-chat custom accent color for own bubbles (overrides the theme default). */
   accentColor?: string | null;
+  /**
+   * The chat's own outgoing service ('iMessage' | 'SMS' | 'RCS'), derived from the chat guid by
+   * the chat screen. From-me rows have no joined handle → `senderService` is null, so this is how
+   * an outgoing SMS/RCS bubble picks its green/teal colour. Received rows use their own
+   * `senderService` and ignore this. A stable primitive, so it's memo-safe.
+   */
+  chatService?: 'iMessage' | 'SMS' | 'RCS' | null;
   onRetry?: () => void;
   onLongPress?: () => void;
   /** Tap the reply quote → jump to the original message. */
@@ -45,6 +52,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   msg,
   showTail,
   accentColor,
+  chatService,
   onRetry,
   onLongPress,
   onJumpToReply,
@@ -58,7 +66,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   const redacted = useRedactedModeStore((s) => s.enabled);
   const b = theme.color.bubble;
   const isFromMe = msg.isFromMe === 1;
-  const isSms = msg.senderService === 'SMS';
+  // Received rows carry the sender's service via the joined handle; from-me rows have no handle,
+  // so fall back to the chat's own service (from the guid) — that's what colours an outgoing
+  // SMS/RCS bubble correctly instead of the iMessage-blue accent.
+  const effectiveService = msg.senderService ?? chatService ?? null;
+  const isSms = effectiveService === 'SMS';
+  const isRcs = effectiveService === 'RCS';
   const isError = msg.sendState === 'error' || msg.error !== 0;
   const isSending = msg.sendState === 'sending';
   // Skip iMessage's hidden rich-link / plugin-payload attachments (URL previews, App Store,
@@ -91,9 +104,14 @@ export const MessageBubble = React.memo(function MessageBubble({
     );
   }
 
+  // RCS gets its own teal (mirrors the SMS-green branch); `?? b.smsBackground` guards a custom
+  // theme persisted before the rcsBackground token existed. Both directions now colour: the
+  // received side reads the joined handle's service, the sent side reads the chat's service
+  // (threaded via `chatService`), so from-me SMS/RCS bubbles are green/teal, not iMessage blue.
+  const nonImessageBg = isRcs ? (b.rcsBackground ?? b.smsBackground) : b.smsBackground;
   const backgroundColor = isFromMe
-    ? isSms
-      ? b.smsBackground
+    ? isSms || isRcs
+      ? nonImessageBg
       : resolveBubbleColor(accentColor, b.senderBackground)
     : b.receivedBackgroundBottom;
   const textColor = isFromMe ? b.senderText : b.receivedText;

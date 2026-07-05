@@ -41,6 +41,30 @@ export function resolveTitle(c: TitleInput): string {
   return 'Group'; // a raw chat-guid group with no synced name/members
 }
 
+/**
+ * True when a chat GUID belongs to the Gator RCS bridge. RCS chats are keyed `RCS;-;<id>` (vs
+ * iMessage's `iMessage;-;…` / SMS's `SMS;-;…`), so the guid alone tells the UI to show the RCS
+ * badge + route attachment bytes to the `/rcs/attachment/…` endpoint — no extra data plumbing.
+ */
+export function isRcsChatGuid(guid: string | null | undefined): boolean {
+  return !!guid && guid.startsWith('RCS;-;');
+}
+
+/**
+ * The service a chat's OWN outgoing messages use, derived from the chat guid prefix
+ * (`RCS;-;` → 'RCS', `SMS;-;` → 'SMS', else 'iMessage'). From-me rows carry no joined handle,
+ * so their `senderService` is null and an outgoing bubble can't colour itself from the message
+ * alone — the chat guid is the reliable source. Returns null only when the guid is absent.
+ */
+export function chatServiceFromGuid(
+  guid: string | null | undefined,
+): 'iMessage' | 'SMS' | 'RCS' | null {
+  if (!guid) return null;
+  if (guid.startsWith('RCS;-;')) return 'RCS';
+  if (guid.startsWith('SMS;-;')) return 'SMS';
+  return 'iMessage';
+}
+
 /** A valid 6-digit hex color (e.g. "#1982FC"), used for per-chat accent colors. */
 export function isHexColor(s: string | null | undefined): s is string {
   return !!s && /^#[0-9a-f]{6}$/i.test(s);

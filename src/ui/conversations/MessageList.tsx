@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native';
 import { retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import { chatServiceFromGuid } from '@utils';
 import { usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageRow } from './MessageRow';
@@ -57,6 +58,10 @@ export function MessageList({
     () => ({ paddingTop: 12 + topInset, paddingBottom: 12 + bottomInset }),
     [topInset, bottomInset],
   );
+
+  // The chat's own outgoing service (from its guid) — from-me rows have no joined handle, so this
+  // is what colours an outgoing SMS/RCS bubble. A stable primitive (chatGuid is stable), memo-safe.
+  const chatService = useMemo(() => chatServiceFromGuid(chatGuid), [chatGuid]);
 
   // messages is newest-first; reverse to chronological for display.
   const rows = useMemo(() => messages.slice().reverse(), [messages]);
@@ -133,6 +138,7 @@ export function MessageList({
             newer={rows[index + 1] ?? null}
             isGroup={isGroup}
             accentColor={accentColor}
+            chatService={chatService}
             hasBackground={hasBackground}
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}

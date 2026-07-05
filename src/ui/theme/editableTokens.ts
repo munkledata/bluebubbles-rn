@@ -115,6 +115,14 @@ export const EDITABLE_COLORS: EditableColorField[] = [
       t.color.bubble.smsBackground = v;
     },
   },
+  {
+    key: 'rcsBackground',
+    label: 'RCS bubble (teal)',
+    read: (t) => t.color.bubble.rcsBackground,
+    write: (t, v) => {
+      t.color.bubble.rcsBackground = v;
+    },
+  },
 ];
 
 const HEX_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;

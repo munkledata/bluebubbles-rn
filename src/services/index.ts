@@ -39,7 +39,9 @@ import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
 import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
+import { RcsAlertEventSink } from './realtime/rcsAlertEventSink';
 import { useFaceTimeStore } from '@state/faceTimeStore';
+import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { SocketService } from './realtime/socketService';
 import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
 export { ensureSyncedBackground } from './backgrounds/syncedBackground';
@@ -131,11 +133,13 @@ export async function rotateDatabaseKey(): Promise<void> {
 /**
  * Create a new chat with the given recipient addresses + an initial message, upsert the
  * returned chat locally so it appears immediately, and return its guid (route into it).
+ * `service` accepts 'RCS' (server routes it to the sidecar and mints an `RCS;-;` guid);
+ * defaults to iMessage for existing callers.
  */
 export async function createNewChat(
   addresses: string[],
   message: string,
-  service = 'iMessage',
+  service: 'iMessage' | 'SMS' | 'RCS' = 'iMessage',
 ): Promise<string> {
   const db = await ensureDatabase();
   const chat = await chatsApi.createChat(http, { addresses, message, service });
@@ -150,6 +154,7 @@ export async function createNewChat(
 let realtimeSinkInstance: EventSink | null = null;
 function realtimeSink(db: AppDatabase): EventSink {
   realtimeSinkInstance ??= new ServerUrlEventSink(
+    new RcsAlertEventSink(
     new FaceTimeEventSink(
     new TypingEventSink(
       new NotifyingEventSink(
@@ -170,6 +175,8 @@ function realtimeSink(db: AppDatabase): EventSink {
     ),
     (c) => useFaceTimeStore.getState().ring(c),
     (uuid) => useFaceTimeStore.getState().dismissIncoming(uuid),
+    ),
+    (alertType) => useRcsHealthStore.getState().setAlert(alertType),
     ),
     (url) => void applyNewServerUrl(url),
   );
