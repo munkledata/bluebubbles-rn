@@ -1,6 +1,7 @@
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { sendText } from '@core/api/endpoints/messages';
+import { logger } from '@core/secure';
 import { sendErrorCode } from '@utils';
 import {
   getChatIdByGuid,
@@ -95,7 +96,17 @@ export async function sendTextMessage(
       await markOutgoingSentNoGuid(db, tempGuid);
     }
   } catch (e) {
-    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
+    // Surface WHY the send failed (status + server message) so a failed bubble is
+    // diagnosable from the device log — e.g. an RCS auth-expiry now reads
+    // "...Google login expired... refresh cookies on the dashboard" instead of a
+    // silent errored bubble. The redacting logger scrubs any secret before sinks.
+    const status = e instanceof ApiError ? e.status ?? null : null;
+    const code = sendErrorCode(status);
+    logger.warn(
+      `[send] failed for chat ${args.chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
     await reconcileOutgoingError(db, tempGuid, code);
   }
 
