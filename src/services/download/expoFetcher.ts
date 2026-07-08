@@ -1,10 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { attachmentsApi, type HttpClient } from '@core/api';
 import type { AttachmentFetcher } from './downloadService';
-
-function sanitize(name: string): string {
-  return name.replace(/[/\\]/g, '_');
-}
+import { safePathSegment } from './pathSafety';
 
 /**
  * Real attachment fetcher (expo-file-system new object API). Saves to
@@ -26,9 +23,12 @@ export function expoFetcher(http: HttpClient): AttachmentFetcher {
       onProgress?: (loaded: number, total: number) => void,
       service?: string | null,
     ): Promise<string> {
-      const dir = new Directory(Paths.document, 'attachments', guid);
+      // `guid` and `transferName` are SERVER-controlled — sanitize BOTH before using them as
+      // path segments so a hostile server can't traverse out of {documents}/attachments/…
+      // (the raw `guid` still goes to the download URL below; only the local path is sanitized).
+      const dir = new Directory(Paths.document, 'attachments', safePathSegment(guid));
       dir.create({ intermediates: true, idempotent: true });
-      const dest = new File(dir, sanitize(transferName));
+      const dest = new File(dir, safePathSegment(transferName));
       const url = attachmentsApi.attachmentDownloadUrl(http, guid, service ?? undefined);
       // createDownloadTask streams byte progress; header auth keeps the URL clean.
       // totalBytes === -1 when Content-Length is absent → reported as indeterminate.
