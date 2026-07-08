@@ -77,9 +77,9 @@ per-arch binary bundling already exists for zrok).
   `ConversationEvent`, `TypingEvent`, `UserAlertEvent` (`BROWSER_INACTIVE*`,
   `MOBILE_BATTERY_LOW`, `RCS_CONNECTION`…), synthesized `ClientReady`/`PhoneNotResponding`.
 - **SMS/MMS route through the bridge too** (GM must be the default SMS app; conversations
-  are typed `SMS=1/RCS=2`, messages sms/mms/rcs) — overlap policy with the app's on-device
-  Phone SMS section is decided in Prompt 5 (default: carry everything, badge by service;
-  the on-device section remains the server-down fallback).
+  are typed `SMS=1/RCS=2`, messages sms/mms/rcs). All SMS/RCS is carried by the bridge and
+  badged by service; there is no on-device Phone SMS section (removed — the app no longer
+  sends/reads SMS via the device SIM).
 - **AGPL-3.0** (all of mautrix/gmessages incl. libgm): fine for personal use; if ever
   distributed the **sidecar binary** must be AGPL — keep it a separate program behind
   arm's-length IPC; never import it into the Node code.
@@ -281,6 +281,5 @@ automatic; run the cookie-refresh flow with fresh cookies and confirm the sessio
 | AGPL-3.0 | Sidecar = separate AGPL program, arm's-length IPC; server/app licenses untouched |
 | History depth = phone's local DB | Cache accretes forward from pairing day; set expectations |
 
-**Non-goals (v1):** replacing the on-device Phone SMS section (it stays as the server-down
-fallback); message-deletion sync (device-local in Google's design); Google Fi; running the
-sidecar anywhere but next to bbd.
+**Non-goals (v1):** message-deletion sync (device-local in Google's design); Google Fi;
+running the sidecar anywhere but next to bbd.
