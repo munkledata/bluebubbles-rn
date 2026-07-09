@@ -178,6 +178,17 @@ export async function reconcileOutgoingSuccess(
   // echo (which carries tempGuid); if a caller slips through, no-op rather than corrupt
   // the optimistic row's guid to NULL.
   if (!server.guid) return;
+  // Backstop: an RCS (bridge) send acks back the SAME tempGuid we passed as its correlation
+  // token — NOT a real message guid (the real one, `rcs-<id>`, only arrives on the live
+  // `new-message` fanout). Promoting a row to its OWN temp guid is meaningless AND destructive:
+  // the dup-branch below would find the temp row as its own "duplicate" and DELETE it, taking a
+  // just-sent image's on-disk local_path with it (the picture then re-appears from the fanout with
+  // no local file → a download/reload button). Treat it exactly like the guid-absent AppleScript
+  // fallback: flip to 'sent', drop the queue row, and let the fanout reconcile by content.
+  if (server.guid === tempGuid) {
+    await markOutgoingSentNoGuid(db, tempGuid);
+    return;
+  }
   if (cancelledTempGuids.has(tempGuid)) {
     cancelledTempGuids.delete(tempGuid);
     // The user cancelled mid-flight: drop any trace of this send — the leftover temp row
@@ -239,6 +250,14 @@ export async function markOutgoingSentNoGuid(db: AppDatabase, tempGuid: string):
     await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
     return;
   }
+  // Never downgrade a row the server already told us FAILED. With the RCS bridge's immediate
+  // "sending" ack, a genuine send failure (`message-send-error`) can land just BEFORE this
+  // success ack; promoting to 'sent' would clobber it and hide the failure. 'error' is sticky —
+  // leave the errored row (and its retry-queue entry) exactly as reconcileOutgoingError set them.
+  const cur = await db.all<{ sendState: string }>(
+    sql`SELECT send_state AS sendState FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
+  );
+  if (cur[0]?.sendState === 'error') return;
   await db.update(messages).set({ sendState: 'sent', error: 0 }).where(eq(messages.guid, tempGuid));
   await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
 }
@@ -261,7 +280,7 @@ const ECHO_MATCH_WINDOW_MS = 5 * 60_000;
  * Reconcile the LIVE echo of one of OUR sent messages against its optimistic temp row.
  *
  * Gator's `new-message` is a chat.db ROWID-watcher emission and carries NO tempGuid (unlike
- * upstream BlueBubbles, which correlates it in its message manager) — so we cannot match by
+ * the upstream app, which correlates it in its message manager) — so we cannot match by
  * tempGuid. Instead, an incoming is-from-me message with a REAL guid is matched by CONTENT to
  * a still-pending `temp-…` row in the same chat (same text / reaction / attachment) and that
  * row is promoted IN PLACE to the real guid. The caller's subsequent upsert then UPDATEs the
@@ -316,6 +335,74 @@ export async function reconcileEchoByContent(
   if (wasCancelledInFlight(temp.guid)) return;
   // Drop the queue row BEFORE promoting, so a concurrent retry tick in the gap can't claim and
   // re-POST a send that's already being reconciled.
+  await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
+  await db
+    .update(messages)
+    .set({ guid: m.guid, sendState: 'sent', error: 0 })
+    .where(eq(messages.guid, temp.guid));
+}
+
+/**
+ * Reconcile the SYNC materialization of one of OUR sent ATTACHMENT messages against its optimistic
+ * temp row — the sync-safe sibling of {@link reconcileEchoByContent}.
+ *
+ * Why a SEPARATE helper (and not just calling reconcileEchoByContent on the sync path): RCS messages
+ * carry NO server rowid, so the real `rcs-<id>` row is usually first materialized by a SYNC read —
+ * `syncChatMessages` (thread re-open / pull-to-refresh) or `syncAllChats`'s lastMessage upsert
+ * (reconnect) — NOT the live socket echo. Those sync paths never call reconcileEchoByContent, so the
+ * optimistic picture's MESSAGE row is never promoted in place; upsertAttachments (keyed by
+ * message_id) then can't find the temp `-att` under the new real row and inserts the server
+ * attachment with a NULL local_path — a second, image-less bubble, while the on-disk image is
+ * stranded on an orphaned temp duplicate. Promoting the temp row HERE, before upsertMessages, lets
+ * the existing per-message-id local_path carry-over (see upsertAttachments) preserve the image.
+ *
+ * reconcileEchoByContent is deliberately BANNED on the sync path because it would content-match a
+ * fresh optimistic TEXT send to an OLD identical historical message. This helper is sync-safe: it
+ * only ever matches a still-pending optimistic send that STILL OWNS a `-att` attachment with a
+ * non-null local_path — a historical re-sync has no such pending row, so it can't be hijacked; the
+ * ±window additionally rejects an old identical picture surfaced by a history backfill. It is inert
+ * for iMessage/SMS (their temp row is already promoted in place by the real-guid ack, so no pending
+ * `temp-…` `-att` exists at sync time) and for received messages (not is-from-me).
+ */
+export async function reconcileOutgoingAttachmentByContent(
+  db: AppDatabase,
+  m: EchoMatchFields,
+  chatId: number,
+): Promise<void> {
+  if (!m.isFromMe || m.guid.startsWith('temp-')) return;
+  // Already materialized (a prior sync/echo created it) → leave it to the upsert.
+  const already = await db.all<{ id: number }>(
+    sql`SELECT id FROM messages WHERE guid = ${m.guid} LIMIT 1`,
+  );
+  if (already[0]) return;
+  // Time-bound to a send near the echo's own timestamp (same window as reconcileEchoByContent) so a
+  // history re-sync of an OLD identical picture can't claim a fresh optimistic row.
+  const echoDate = m.dateCreated ?? null;
+  const window =
+    echoDate != null
+      ? sql`AND mm.date_created >= ${echoDate - ECHO_MATCH_WINDOW_MS} AND mm.date_created <= ${echoDate + ECHO_MATCH_WINDOW_MS}`
+      : sql``;
+  // Match a pending optimistic outgoing message that STILL OWNS a local (on-disk) attachment — that
+  // pending-local-`-att` gate is what makes this sync-safe. Match text too (a caption-less picture
+  // and its echo both carry NULL text) so a text send can never claim a picture row. Prefer an
+  // in-flight 'sending' row, then oldest-first, so rapid identical sends promote in send order.
+  const rows = await db.all<{ guid: string }>(sql`
+    SELECT mm.guid FROM messages mm
+    WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 1 AND mm.guid LIKE 'temp-%'
+      AND mm.send_state IN ('sending', 'sent')
+      AND mm.associated_message_type IS NULL AND mm.text IS ${m.text ?? null}
+      AND EXISTS (
+        SELECT 1 FROM attachments a
+        WHERE a.message_id = mm.id AND a.guid LIKE '%-att' AND a.local_path IS NOT NULL
+      )
+      ${window}
+    ORDER BY (mm.send_state = 'sending') DESC, mm.date_created ASC, mm.id ASC LIMIT 1`);
+  const temp = rows[0];
+  if (!temp) return;
+  // Never resurrect a send the user cancelled in flight (same guard as the other reconcile paths).
+  if (wasCancelledInFlight(temp.guid)) return;
+  // Drop the queue row before promoting (a no-op for the RCS case — markOutgoingSentNoGuid already
+  // dropped it — but keeps a concurrent retry tick from re-POSTing a send being reconciled).
   await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
   await db
     .update(messages)

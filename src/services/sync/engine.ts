@@ -5,11 +5,13 @@ import {
   getChatIdByGuid,
   getSyncMarker,
   maxMessageMarker,
+  reconcileOutgoingAttachmentByContent,
   setSyncMarker,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import type { Message } from '@core/models';
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from './types';
 
@@ -47,9 +49,37 @@ export async function syncAllChats(
       batch.flatMap((c) => c.participants ?? []),
     );
     const chatMap = await upsertChats(db, batch, handleMap);
+    // Also persist each chat's lastMessage (chat/query returns it via `with:['lastMessage']`) so
+    // EVERY chat gets a preview + a denormalized latest_message_date. Without this, a chat whose
+    // messages the incremental sync can't page — notably RCS, whose messages carry NO server
+    // rowid and are skipped by the rowid-cursor incremental pass — stays message-less and sinks to
+    // the bottom of the inbox with no date/preview. upsertMessages refreshes latest_message_date,
+    // and is idempotent, so a chat that later backfills its full history is unaffected.
+    const lastMsgs: Message[] = [];
+    const chatIdByMsgGuid = new Map<string, number>();
     for (const chat of batch) {
       const chatId = chatMap.get(chat.guid);
-      if (chatId != null) stored.push({ guid: chat.guid, chatId });
+      if (chatId == null) continue;
+      stored.push({ guid: chat.guid, chatId });
+      if (chat.lastMessage != null) {
+        lastMsgs.push(chat.lastMessage);
+        chatIdByMsgGuid.set(chat.lastMessage.guid, chatId);
+      }
+    }
+    if (lastMsgs.length > 0) {
+      const msgHandleMap = await upsertHandles(
+        db,
+        lastMsgs.flatMap((m) => (m.handle ? [m.handle] : [])),
+      );
+      // Reconcile our own optimistic attachment sends (notably RCS — no server rowid, so it's
+      // materialized here on reconnect rather than by the live echo) BEFORE the upsert, so a
+      // just-sent picture's on-disk local_path is preserved instead of duplicated as an image-less
+      // bubble. Sync-safe: only a still-pending temp send that owns a local attachment can match.
+      for (const m of lastMsgs) {
+        const cid = chatIdByMsgGuid.get(m.guid);
+        if (m.isFromMe && cid != null) await reconcileOutgoingAttachmentByContent(db, m, cid);
+      }
+      await upsertMessages(db, lastMsgs, (m) => chatIdByMsgGuid.get(m.guid), msgHandleMap);
     }
     offset += batch.length;
     if (batch.length < chatPageSize) break;
@@ -140,6 +170,13 @@ export async function syncChatMessages(
       db,
       msgs.flatMap((m) => (m.handle ? [m.handle] : [])),
     );
+    // Reconcile our own optimistic attachment sends (notably RCS — no server rowid, so it's
+    // materialized here on thread re-open / pull-to-refresh rather than by the live echo) BEFORE the
+    // upsert, so a just-sent picture's on-disk local_path is preserved instead of duplicated as an
+    // image-less bubble. Sync-safe: only a still-pending temp send that owns a local attachment matches.
+    for (const m of msgs) {
+      if (m.isFromMe) await reconcileOutgoingAttachmentByContent(db, m, chatId);
+    }
     await upsertMessages(db, msgs, () => chatId, handleMap);
     total += msgs.length;
     offset += msgs.length;

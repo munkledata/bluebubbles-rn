@@ -1,12 +1,13 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { retry } from '@/services/send';
+import { discardMessage, retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { chatServiceFromGuid } from '@utils';
 import { usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageRow } from './MessageRow';
+import { FailedMessageSheet } from './FailedMessageSheet';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
 interface MessageListProps {
@@ -73,10 +74,24 @@ export function MessageList({
 
   // Stable handlers so the memoized MessageRow isn't re-rendered by a fresh
   // closure on every list update (the row binds the message itself).
-  const handleRetry = useCallback(
-    (m: EnrichedMessage) => void retry(m.guid, { chatGuid, text: m.text ?? '' }),
-    [chatGuid],
-  );
+  // Tapping the "!" on a not-delivered message opens a themed sheet (Try Again / Delete) instead
+  // of silently discarding it. Try Again re-sends — and for a failed picture it RE-UPLOADS the
+  // image (from its retained on-disk path), not just the (empty) text.
+  const [failed, setFailed] = useState<EnrichedMessage | null>(null);
+  const handleRetry = useCallback((m: EnrichedMessage) => setFailed(m), []);
+  const failedImage = useMemo(() => {
+    const att = failed?.attachments.find((a) => a.localPath);
+    return att?.localPath
+      ? {
+          uri: att.localPath,
+          name: att.transferName ?? 'attachment',
+          mimeType: att.mimeType ?? 'application/octet-stream',
+          size: att.totalBytes ?? 0,
+          width: att.width ?? undefined,
+          height: att.height ?? undefined,
+        }
+      : undefined;
+  }, [failed]);
 
   // Tap a reply quote → scroll to the original message + briefly highlight it.
   const listRef = useRef<FlashListRef<EnrichedMessage>>(null);
@@ -120,6 +135,24 @@ export function MessageList({
     }, 450);
   }, [focusReady, focusGuid, focusIndex]);
 
+  // Reveal the user's OWN just-sent message even if they'd scrolled up: when a NEW message from me
+  // lands as the chronological tail, jump to the end. (Incoming-while-near-bottom is handled natively
+  // by autoscrollToBottomThreshold on the list below; this covers the scrolled-up sender, where that
+  // threshold won't fire.) Ref-diff because `rows` is a fresh array on every reactive tick — gate on
+  // a genuine append (length grew AND a new tail guid) so in-place updates (sending→sent, localPath
+  // writes, reaction joins) and a temp→real guid swap don't re-fire, and the first population just
+  // sets the baseline (startRenderingFromBottom already positions the cold render at the bottom).
+  const lastTailRef = useRef<{ guid: string | null; len: number }>({ guid: null, len: 0 });
+  useEffect(() => {
+    const prev = lastTailRef.current;
+    const last = rows[rows.length - 1] ?? null;
+    const appended = prev.len > 0 && rows.length > prev.len && !!last && last.guid !== prev.guid;
+    lastTailRef.current = { guid: last?.guid ?? null, len: rows.length };
+    if (appended && last?.isFromMe === 1) {
+      listRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [rows]);
+
   return (
     <View style={styles.flex}>
       <FlashList
@@ -129,7 +162,15 @@ export function MessageList({
         data={rows}
         keyExtractor={(m: EnrichedMessage) => m.guid}
         initialScrollIndex={focusReady ? focusIndex : undefined}
-        maintainVisibleContentPosition={focusReady ? undefined : { startRenderingFromBottom: true }}
+        // startRenderingFromBottom positions the COLD render at the newest message; the threshold is
+        // what makes the list auto-follow appended messages (unset → -1 → FlashList never auto-scrolls).
+        // 0.2 = auto-scroll to a new bottom row only when the user is within ~20% of a screen of the
+        // bottom, so incoming messages reveal themselves without yanking a user reading older history.
+        maintainVisibleContentPosition={
+          focusReady
+            ? undefined
+            : { startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }
+        }
         refreshControl={onRefresh ? refreshControl : undefined}
         renderItem={({ item, index }: { item: EnrichedMessage; index: number }) => (
           <MessageRow
@@ -162,6 +203,17 @@ export function MessageList({
           </Text>
         </View>
       ) : null}
+      <FailedMessageSheet
+        visible={failed !== null}
+        isAttachment={failedImage !== undefined}
+        onClose={() => setFailed(null)}
+        onRetry={() => {
+          if (failed) void retry(failed.guid, { chatGuid, text: failed.text ?? '', image: failedImage });
+        }}
+        onDelete={() => {
+          if (failed) void discardMessage(failed.guid);
+        }}
+      />
     </View>
   );
 }

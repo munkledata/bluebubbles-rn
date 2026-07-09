@@ -1,6 +1,6 @@
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -33,7 +33,9 @@ export function ConversationListScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const { data, isLoading, error } = useChats();
-  const rows = data ?? [];
+  // Memoized so the `data ?? []` fallback isn't a fresh array each render (which would defeat the
+  // pinned/listData useMemos below and re-run them + re-render tiles every tick).
+  const rows = useMemo(() => data ?? [], [data]);
   // Pull-to-refresh: incremental sync. The list sits below the fixed title → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
 
@@ -83,6 +85,28 @@ export function ConversationListScreen(): React.JSX.Element {
   // Pinned chats render in a grid above the list (iOS).
   const pinned = useMemo(() => rows.filter((r) => r.isPinned), [rows]);
   const listData = useMemo(() => rows.filter((r) => !r.isPinned), [rows]);
+
+  // Scroll the inbox to the top when a DIFFERENT chat jumps to position 0 because it just got a
+  // NEWER message — yours or incoming — so the bumped thread is revealed instead of landing above
+  // a scrolled-down viewport (FlashList v2 anchors scroll position by default). Guards: only a
+  // change of the top chat (not a same-chat update or the user's own scrolling) AND a genuinely
+  // newer timestamp (so archiving/deleting the old top, which surfaces an OLDER chat, doesn't
+  // scroll). We advance the baseline every run — including while searching (the list is unmounted
+  // then) — so exiting search never fires a stale scroll; the first run just seeds the baseline.
+  // The inbox stays mounted under an open chat, so sending inside a thread reorders it here in the
+  // background and it's already scrolled up by the time you return.
+  const listRef = useRef<FlashListRef<InboxRow>>(null);
+  const prevTopRef = useRef<{ guid: string; date: number } | null>(null);
+  const topGuid = listData[0]?.guid;
+  const topDate = listData[0]?.latestMessageDate ?? 0;
+  useEffect(() => {
+    const prev = prevTopRef.current;
+    prevTopRef.current = topGuid != null ? { guid: topGuid, date: topDate } : null;
+    if (searching || topGuid == null || prev == null) return;
+    if (prev.guid !== topGuid && topDate > prev.date) {
+      listRef.current?.scrollToTop({ animated: true });
+    }
+  }, [topGuid, topDate, searching]);
 
   // The large title + actions stay PINNED at the top.
   const titleRow = (
@@ -228,6 +252,7 @@ export function ConversationListScreen(): React.JSX.Element {
             <SearchResultsView query={search} />
           ) : (
             <FlashList
+              ref={listRef}
               data={listData}
               keyExtractor={(r: InboxRow) => r.guid}
               refreshControl={refreshControl}
