@@ -1,7 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import {
@@ -114,7 +114,7 @@ export default function NewChatScreen(): React.JSX.Element {
       );
       router.replace(`/chat/${encodeURIComponent(guid)}`);
     } catch {
-      Alert.alert(
+      showDialog(
         'New message',
         'Couldn’t start the conversation. Check the address and your server connection.',
       );

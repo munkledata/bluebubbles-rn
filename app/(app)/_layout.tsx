@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
 import { handleNotificationAction } from '@/services/notifications/actions';
+import { pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 
@@ -22,6 +23,21 @@ export default function AppLayout(): React.JSX.Element {
         s.noteBackgrounded(Date.now());
       } else if (state === 'active' && isLockExpired(s.lastBackgrounded, Date.now(), s.timeoutMs)) {
         s.lock();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Keep realtime warm across the app/background boundary. Android freezes the socket in the
+  // background, so on resume we reconnect it and pull anything missed over HTTP — otherwise
+  // Delivered/new-message updates arrive only via slow FCM. Kept SEPARATE from the app-lock
+  // effect above (which early-returns when lock is disabled, the default).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') {
+        void resumeRealtime();
+      } else if (state === 'background') {
+        pauseRealtime();
       }
     });
     return () => sub.remove();

@@ -261,6 +261,13 @@ export async function hydrateSession(): Promise<void> {
   const store = useSessionStore.getState();
   if (origin && password) {
     store.hydrated({ origin, password });
+    // `hydrated` restores creds but NOT serverInfo (only first-setup `connect` sets it), so
+    // Settings' Version/macOS/Private-API rows stayed blank on every relaunch. Re-fetch it in
+    // the background so those screens populate — best-effort, never blocks boot.
+    void serverApi
+      .serverInfo(http)
+      .then((info) => useSessionStore.getState().setServerInfo(info))
+      .catch((e) => logger.debug('[boot] server-info refresh failed', e));
     void startSync();
     void startRealtime();
   } else {
@@ -464,6 +471,32 @@ export async function startRealtime(): Promise<void> {
   if (FCM_ENABLED) {
     void import('./notifications/fcmMessaging').then((m) => m.registerFcmToken());
   }
+}
+
+/**
+ * Foreground/background lifecycle for the live socket.
+ *
+ * Android freezes the JS thread + the socket while the app is backgrounded, so on resume the
+ * socket can be silently stale — the `updated-message` (Delivered) and `new-message` events then
+ * limp in over slow FCM instead of the fast socket. Tearing the socket down on background makes
+ * the resume a deterministic fresh reconnect (rather than waiting for socket.io to notice the dead
+ * connection via a late ping-timeout). Wired to AppState in `app/(app)/_layout.tsx`.
+ */
+export function pauseRealtime(): void {
+  socket?.disconnect();
+  socket = null;
+}
+
+/**
+ * On foreground: reconnect the socket if it isn't currently connected, and ALWAYS pull anything
+ * missed while backgrounded over HTTP (fast + deterministic) instead of waiting on the socket
+ * handshake or FCM. `maybeResumeSync` is coalesced/throttled, so a quick app-switch is cheap.
+ */
+export async function resumeRealtime(): Promise<void> {
+  const { origin, password } = useSessionStore.getState();
+  if (!origin || !password) return;
+  if (!socket || !socket.connected) await startRealtime();
+  maybeResumeSync();
 }
 
 /**

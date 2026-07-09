@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import {
@@ -40,15 +41,18 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
   };
 
   const confirmDelete = (t: ChatActionTarget): void => {
-    Alert.alert(
+    // Close THIS sheet first: Android reliably shows only one Modal at a time, and the themed
+    // dialog is itself a Modal — so the confirm must not stack on top of the still-open sheet.
+    onClose();
+    showDialog(
       'Delete Conversation',
       `Delete “${t.title}”? This removes it from this device (not from the server).`,
       [
-        { text: 'Cancel', style: 'cancel', onPress: onClose },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => run(() => deleteChatLocal(getDatabase(), t.guid)),
+          onPress: () => void deleteChatLocal(getDatabase(), t.guid),
         },
       ],
     );

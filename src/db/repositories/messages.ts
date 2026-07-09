@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Attachment, Message } from '@core/models';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import { chatHandles, chats, messages, outgoingQueue } from '../schema';
@@ -268,10 +268,50 @@ export interface MessageRow {
   senderService: string | null;
 }
 
+// Shared SELECT (columns + sender join) for message-row reads. Kept in ONE place so the
+// recent-window and anchored-window queries below can't drift apart. Nested into each query.
+const MESSAGE_ROW_SELECT = sql`
+  SELECT
+    m.id, m.guid, m.chat_id AS chatId, m.handle_id AS handleId,
+    m.text, m.attributed_body AS attributedBody,
+    m.subject, m.is_from_me AS isFromMe, m.date_created AS dateCreated,
+    m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
+    m.date_retracted AS dateRetracted,
+    m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
+    m.was_delivered_quietly AS wasDeliveredQuietly,
+    m.did_notify_recipient AS didNotifyRecipient,
+    m.associated_message_guid AS associatedMessageGuid,
+    m.associated_message_type AS associatedMessageType,
+    m.thread_originator_guid AS threadOriginatorGuid,
+    m.expressive_send_style_id AS expressiveSendStyleId,
+    h.address AS senderAddress,
+    COALESCE(h.display_name, h.address) AS senderName,
+    h.avatar AS senderAvatar,
+    h.service AS senderService
+  FROM messages m
+  LEFT JOIN handles h ON h.id = m.handle_id`;
+
+/** Run the shared message SELECT with extra WHERE conditions + an ORDER BY + LIMIT. */
+function queryMessageRows(
+  db: AppDatabase,
+  chatId: number,
+  where: SQL,
+  order: SQL,
+  limit: number,
+): Promise<MessageRow[]> {
+  return db.all<MessageRow>(sql`
+    ${MESSAGE_ROW_SELECT}
+    WHERE m.chat_id = ${chatId} ${where}
+      AND m.associated_message_type IS NULL
+    ${order}
+    LIMIT ${limit}
+  `);
+}
+
 /** Messages for a chat, newest-first (the inverted list wants index 0 = newest).
- *  `sinceDate` widens the load downward (>= that date) so a search/jump target that's older than
- *  the default window is included — capped by `limit`, so a very old target in a very active chat
- *  may still fall outside it (the caller degrades gracefully to no-scroll). */
+ *  `beforeDate` is a paginate-older cursor (strictly older than that date); `sinceDate` widens the
+ *  load downward (>= that date). To open ON a search hit with context around it, use
+ *  {@link listMessagesAround} instead. */
 export async function listMessagesWithSenders(
   db: AppDatabase,
   chatId: number,
@@ -281,31 +321,47 @@ export async function listMessagesWithSenders(
 ): Promise<MessageRow[]> {
   const cursor = beforeDate != null ? sql`AND m.date_created < ${beforeDate}` : sql``;
   const floor = sinceDate != null ? sql`AND m.date_created >= ${sinceDate}` : sql``;
-  return db.all<MessageRow>(sql`
-    SELECT
-      m.id, m.guid, m.chat_id AS chatId, m.handle_id AS handleId,
-      m.text, m.attributed_body AS attributedBody,
-      m.subject, m.is_from_me AS isFromMe, m.date_created AS dateCreated,
-      m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
-      m.date_retracted AS dateRetracted,
-      m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
-      m.was_delivered_quietly AS wasDeliveredQuietly,
-      m.did_notify_recipient AS didNotifyRecipient,
-      m.associated_message_guid AS associatedMessageGuid,
-      m.associated_message_type AS associatedMessageType,
-      m.thread_originator_guid AS threadOriginatorGuid,
-      m.expressive_send_style_id AS expressiveSendStyleId,
-      h.address AS senderAddress,
-      COALESCE(h.display_name, h.address) AS senderName,
-      h.avatar AS senderAvatar,
-      h.service AS senderService
-    FROM messages m
-    LEFT JOIN handles h ON h.id = m.handle_id
-    WHERE m.chat_id = ${chatId} ${cursor} ${floor}
-      AND m.associated_message_type IS NULL
-    ORDER BY m.date_created DESC, m.id DESC
-    LIMIT ${limit}
-  `);
+  return queryMessageRows(
+    db,
+    chatId,
+    sql`${cursor} ${floor}`,
+    sql`ORDER BY m.date_created DESC, m.id DESC`,
+    limit,
+  );
+}
+
+/**
+ * Messages in a WINDOW centered on `anchorDate` (a search/jump target's date_created): up to
+ * `before` messages older-or-equal (including the target itself) AND up to `after` messages newer,
+ * so the thread shows context on BOTH sides of the hit. Returns newest-first (the list contract),
+ * with the target roughly in the middle. This is the fix for "jump to a search hit shows nothing
+ * around it" — the old path loaded the target and everything NEWER only, so a hit near the tail
+ * (e.g. a recent RCS code) opened to just the one message.
+ */
+export async function listMessagesAround(
+  db: AppDatabase,
+  chatId: number,
+  anchorDate: number,
+  before = 150,
+  after = 150,
+): Promise<MessageRow[]> {
+  const older = await queryMessageRows(
+    db,
+    chatId,
+    sql`AND m.date_created <= ${anchorDate}`,
+    sql`ORDER BY m.date_created DESC, m.id DESC`,
+    before + 1, // +1 so the anchor row itself is included alongside `before` older ones
+  );
+  const newer = await queryMessageRows(
+    db,
+    chatId,
+    sql`AND m.date_created > ${anchorDate}`,
+    sql`ORDER BY m.date_created ASC, m.id ASC`,
+    after,
+  );
+  // Newest-first: the newer set (ASC) reversed to DESC, then the older set (already DESC, with
+  // the anchor first). The two sides are disjoint (<= vs >), so no row appears twice.
+  return [...newer.reverse(), ...older];
 }
 
 /**

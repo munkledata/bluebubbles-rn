@@ -37,8 +37,16 @@ export function ImageAttachment({
     // demand regardless — this only gates the automatic background fetch).
     if (!autoDownload) return;
     if (wifiOnly && netType !== Network.NetworkStateType.WIFI) return;
+    // Only auto-fetch when we haven't tried this attachment yet this session. A prior failure
+    // ('error') is left for the user to retry by tapping the retry icon — otherwise a
+    // permanently-failing image (e.g. some RCS/MMS media the server 404s) would re-download on
+    // EVERY reactive flush and hog the 2 concurrency slots, stalling images that WOULD load.
+    if (status !== undefined) return;
     if (shouldAutoDownload(att)) void download(att);
-  }, [att, autoDownload, wifiOnly, netType]);
+    // Keyed on guid/localPath/status — NOT the whole `att`, which useMessages rebuilds as a fresh
+    // object on every reactive flush (that identity churn is what caused the re-download storm).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [att.guid, att.localPath, autoDownload, wifiOnly, netType, status]);
 
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;

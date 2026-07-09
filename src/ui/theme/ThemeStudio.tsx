@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cloneTokens, EDITABLE_COLORS, isValidHex } from './editableTokens';
 import { ThemePreviewCard } from './ThemePreviewCard';
@@ -45,8 +45,9 @@ export interface ThemeStudioProps {
   title?: string;
   /** Show the name field (global themes need a name; a per-chat theme doesn't). */
   showName?: boolean;
-  /** Fires with the built tokens + trimmed name on Apply. */
-  onApply: (tokens: ThemeTokens, name: string) => void;
+  /** Fires with the built tokens + trimmed name on Apply. May be async; a rejection surfaces as
+   *  an inline error inside the editor (it's rendered in a Modal, so a stacked dialog is unreliable). */
+  onApply: (tokens: ThemeTokens, name: string) => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -69,6 +70,10 @@ export function ThemeStudio({
   // Fall back to the active global theme as a starting point when no tokens are passed.
   const seed = initialTokens ?? theme;
   const [draft, setDraft] = useState<Draft>(() => draftFrom(seed, initialName ?? 'My Theme'));
+  // Inline validation / save error. Shown in the editor itself — NOT a dialog: this editor is
+  // rendered inside a Modal, and Android reliably shows only one Modal at a time, so a stacked
+  // dialog would not display (a themed-dialog-over-Modal regression).
+  const [error, setError] = useState<string | null>(null);
 
   // Live preview tokens: built from the draft, but only when every hex is valid;
   // an in-progress (invalid) edit keeps the last good preview rather than crashing.
@@ -77,18 +82,25 @@ export function ThemeStudio({
     return allValid ? tokensFromDraft(draft) : draft.base;
   }, [draft]);
 
-  const apply = (): void => {
+  const apply = async (): Promise<void> => {
     const name = draft.name.trim();
     if (showName && !name) {
-      Alert.alert('Theme', 'Give your theme a name.');
+      setError('Give your theme a name.');
       return;
     }
     const bad = EDITABLE_COLORS.find((f) => !isValidHex(draft.hex[f.key] ?? ''));
     if (bad) {
-      Alert.alert('Theme', `“${bad.label}” needs a valid hex color (e.g. #1982FC).`);
+      setError(`“${bad.label}” needs a valid hex color (e.g. #1982FC).`);
       return;
     }
-    onApply(tokensFromDraft(draft), name);
+    setError(null);
+    try {
+      // Await so a failing save (onApply rejects) surfaces inline instead of leaving the editor
+      // looking like Apply did nothing. onApply keeps the editor open on failure (edits preserved).
+      await onApply(tokensFromDraft(draft), name);
+    } catch {
+      setError('Couldn’t save the theme. Try again.');
+    }
   };
 
   return (
@@ -98,10 +110,15 @@ export function ThemeStudio({
           <Text style={[styles.back, { color: theme.color.tint }]}>Cancel</Text>
         </Pressable>
         <Text style={[styles.title, { color: theme.color.label }]}>{title}</Text>
-        <Pressable onPress={apply} hitSlop={8}>
+        <Pressable onPress={() => void apply()} hitSlop={8}>
           <Text style={[styles.save, { color: theme.color.tint }]}>Apply</Text>
         </Pressable>
       </View>
+      {error ? (
+        <View style={[styles.errorBar, { backgroundColor: theme.color.secondaryBackground }]}>
+          <Text style={[styles.errorText, { color: theme.color.destructive }]}>{error}</Text>
+        </View>
+      ) : null}
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <ThemePreviewCard tokens={previewTokens} />
 
@@ -195,6 +212,8 @@ const styles = StyleSheet.create({
   back: { fontSize: 17 },
   save: { fontSize: 17, fontWeight: '600' },
   title: { fontSize: 17, fontWeight: '600' },
+  errorBar: { paddingHorizontal: 16, paddingVertical: 8 },
+  errorText: { fontSize: 13 },
   content: { padding: 16, paddingBottom: 60, gap: 0 },
   nameInput: {
     fontSize: 17,

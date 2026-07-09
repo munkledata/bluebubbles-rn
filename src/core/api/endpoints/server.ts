@@ -98,15 +98,30 @@ const asCount = (v: number | unknown[] | null | undefined): number => (typeof v 
  * admin-only, so a remote client can read them.
  */
 export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
+  // Per-channel resilience: one failing count channel (e.g. an older server missing it) must NOT
+  // blank the whole table. Each call is swallowed to null and coerced to 0 below. But if EVERY
+  // channel fails, the server isn't answering at all — throw so the caller can show "unavailable"
+  // instead of a misleading all-zeros table.
+  let anyOk = false;
+  const settle = async <T>(p: Promise<T>): Promise<T | null> => {
+    try {
+      const v = await p;
+      anyOk = true;
+      return v;
+    } catch {
+      return null;
+    }
+  };
   const [messages, chats, handles, attachments, images, videos, locations] = await Promise.all([
-    adminCommand(http, 'get-message-count', CountNum),
-    adminCommand(http, 'get-chat-count', CountNum),
-    adminCommand(http, 'get-handle-count', CountNum),
-    adminCommand(http, 'get-chat-attachment-count', MediaCount),
-    adminCommand(http, 'get-chat-image-count', MediaCount),
-    adminCommand(http, 'get-chat-video-count', MediaCount),
-    adminCommand(http, 'get-chat-location-count', MediaCount),
+    settle(adminCommand(http, 'get-message-count', CountNum)),
+    settle(adminCommand(http, 'get-chat-count', CountNum)),
+    settle(adminCommand(http, 'get-handle-count', CountNum)),
+    settle(adminCommand(http, 'get-chat-attachment-count', MediaCount)),
+    settle(adminCommand(http, 'get-chat-image-count', MediaCount)),
+    settle(adminCommand(http, 'get-chat-video-count', MediaCount)),
+    settle(adminCommand(http, 'get-chat-location-count', MediaCount)),
   ]);
+  if (!anyOk) throw new Error('Server statistics unavailable');
   return {
     messages: asCount(messages),
     chats: asCount(chats),

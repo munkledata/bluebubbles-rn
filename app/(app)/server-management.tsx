@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
@@ -38,6 +39,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const [latency, setLatency] = useState<number | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [totals, setTotals] = useState<Totals | null>(null);
+  const [statsError, setStatsError] = useState(false);
   const [logs, setLogs] = useState<string | null>(null);
 
   // Measure round-trip latency on mount; guard against setState after unmount.
@@ -64,15 +66,21 @@ export default function ServerManagementScreen(): React.JSX.Element {
   }, []);
 
   // Statistics ARE served on the password path (admin-command dispatcher) — load them on mount.
-  // Best-effort: on failure the section just shows placeholders, not an error.
+  // On total failure we flag an INLINE error in the section (no modal alert); a partial result
+  // (some channels missing on an older server) still shows the numbers it could load.
   useEffect(() => {
     let alive = true;
     void serverApi
       .serverStatTotals(http)
       .then((t) => {
-        if (alive) setTotals(t);
+        if (alive) {
+          setTotals(t);
+          setStatsError(false);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setStatsError(true);
+      });
     return () => {
       alive = false;
     };
@@ -106,8 +114,8 @@ export default function ServerManagementScreen(): React.JSX.Element {
     if (busy) return;
     setBusy(label);
     void fn()
-      .then(() => Alert.alert('Server', okMsg))
-      .catch((e: unknown) => Alert.alert('Server', failCopy(label, e)))
+      .then(() => showDialog('Server', okMsg))
+      .catch((e: unknown) => showDialog('Server', failCopy(label, e)))
       .finally(() => setBusy(null));
   };
 
@@ -118,7 +126,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
     okMsg: string,
     destructive = false,
   ): void => {
-    Alert.alert(label, message, [
+    showDialog(label, message, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: label,
@@ -133,8 +141,11 @@ export default function ServerManagementScreen(): React.JSX.Element {
     setBusy('Load Stats');
     void serverApi
       .serverStatTotals(http)
-      .then((res) => setTotals((res as Totals) ?? {}))
-      .catch((e: unknown) => Alert.alert('Server', failCopy('Load statistics', e)))
+      .then((res) => {
+        setTotals((res as Totals) ?? {});
+        setStatsError(false);
+      })
+      .catch(() => setStatsError(true))
       .finally(() => setBusy(null));
   };
 
@@ -144,7 +155,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
     void serverApi
       .serverLogs(http, 500)
       .then((res) => setLogs(res.trim() ? res : 'No recent log lines.'))
-      .catch((e: unknown) => Alert.alert('Server', failCopy('Fetch logs', e)))
+      .catch((e: unknown) => showDialog('Server', failCopy('Fetch logs', e)))
       .finally(() => setBusy(null));
   };
 
@@ -302,6 +313,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
           <InfoRow label="Locations" theme={theme}>
             {statVal(totals?.locations)}
           </InfoRow>
+          {statsError ? (
+            <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+              <Text style={[styles.errorText, { color: theme.color.destructive }]}>
+                Couldn’t load statistics. Check your connection, then tap Refresh.
+              </Text>
+            </View>
+          ) : null}
           <ActionRow
             label="Refresh Statistics"
             theme={theme}
@@ -431,6 +449,7 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
+  errorText: { fontSize: 14, flex: 1, lineHeight: 19 },
   logBody: { padding: 14 },
   logText: { fontSize: 11, fontFamily: 'Menlo', lineHeight: 16 },
 });

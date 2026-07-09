@@ -3,7 +3,8 @@ import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import type { MessagePreview } from '@db/repositories';
@@ -102,16 +103,12 @@ function ChatScreenInner({
   const header = useChatHeader(guid);
   const backgroundUri = useChatBackgroundUri(guid);
   const isGroup = header.data ? isGroupRow(header.data) : false;
-  // When focusing a search hit, widen the load down to its date (and raise the cap) so it's present
-  // to scroll to; otherwise the normal recent window. ONE message subscription for the whole screen
+  // When focusing a search hit, load a window CENTERED on it (context on both sides) instead of the
+  // recent window; otherwise the normal recent window. ONE message subscription for the whole screen
   // — fed to the list, smart-reply chips, and the screen-effect trigger (avoids 3× the query work).
-  const sinceDateNum = focusDate ? Number(focusDate) : NaN;
-  const sinceDate = Number.isFinite(sinceDateNum) ? sinceDateNum : undefined;
-  const { data: messagesData, error: messagesError } = useMessages(
-    guid,
-    sinceDate != null ? 1500 : 250,
-    sinceDate,
-  );
+  const anchorNum = focusDate ? Number(focusDate) : NaN;
+  const anchorDate = Number.isFinite(anchorNum) ? anchorNum : undefined;
+  const { data: messagesData, error: messagesError } = useMessages(guid, 250, anchorDate);
   const messages = messagesData ?? [];
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const markedRef = useRef(false);
@@ -225,7 +222,7 @@ function ChatScreenInner({
   const onUnsendSelected = (): void => {
     if (!selected) return;
     const g = selected.guid;
-    Alert.alert('Unsend message?', 'This removes it for you and retracts it.', [
+    showDialog('Unsend message?', 'This removes it for you and retracts it.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Unsend',
@@ -242,7 +239,7 @@ function ChatScreenInner({
     if (!selected) return;
     const g = selected.guid;
     const sending = selected.sendState === 'sending';
-    Alert.alert(
+    showDialog(
       sending ? 'Cancel sending?' : 'Remove message?',
       sending
         ? 'Stop sending this message and remove it.'
@@ -301,7 +298,7 @@ function ChatScreenInner({
       try {
         const perm = await MediaLibrary.requestPermissionsAsync();
         if (perm.status !== 'granted') {
-          Alert.alert('Save', 'Photos permission is required to save attachments.');
+          showDialog('Save', 'Photos permission is required to save attachments.');
           return;
         }
         let saved = 0;
@@ -312,14 +309,14 @@ function ChatScreenInner({
             saved += 1;
           }
         }
-        Alert.alert(
+        showDialog(
           'Save',
           saved > 0
             ? `Saved ${saved} ${saved === 1 ? 'item' : 'items'} to Photos.`
             : 'Open the attachment first to download it, then try Save again.',
         );
       } catch {
-        Alert.alert('Save', 'Couldn’t save the attachment.');
+        showDialog('Save', 'Couldn’t save the attachment.');
       }
     })();
   };
@@ -340,9 +337,9 @@ function ChatScreenInner({
           scheduledFor: when,
           now: Date.now(),
         });
-        Alert.alert('Reminder set', 'You’ll be reminded about this message.');
+        showDialog('Reminder set', 'You’ll be reminded about this message.');
       } catch {
-        Alert.alert('Reminder', 'Couldn’t set the reminder.');
+        showDialog('Reminder', 'Couldn’t set the reminder.');
       }
     })();
   };
@@ -366,7 +363,7 @@ function ChatScreenInner({
         size: a.size ?? 0,
       }));
     } catch {
-      Alert.alert('Attach', 'Couldn’t open the file picker.');
+      showDialog('Attach', 'Couldn’t open the file picker.');
       return [];
     }
   };

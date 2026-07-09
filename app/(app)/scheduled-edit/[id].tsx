@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import { getScheduledById } from '@db/repositories';
@@ -43,7 +44,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
     // server update rethrows so we surface it instead of silently diverging.
     void editScheduled(schedId, { text: trimmed, scheduledFor: when ?? undefined })
       .then(() => router.back())
-      .catch(() => Alert.alert('Scheduled', 'Couldn’t update — the server is unreachable.'));
+      .catch(() => showDialog('Scheduled', 'Couldn’t update — the server is unreachable.'));
   };
 
   return (

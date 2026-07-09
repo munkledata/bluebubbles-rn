@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import {
   deleteChatLocal,
@@ -14,9 +15,10 @@ import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
   buildPreview,
+  chatServiceFromGuid,
+  dedupeParticipants,
   formatChatDate,
   isGroupRow,
-  isRcsChatGuid,
   participantAvatars,
   participantList,
   redactPreview,
@@ -50,10 +52,25 @@ export const ConversationTile = React.memo(function ConversationTile({
   const preview = redactPreview(buildPreview(row), redacted);
   const group = isGroupRow(row);
   const muted = row.muteType === 'mute';
-  const isRcs = isRcsChatGuid(row.guid);
+  // Service pill (iMessage / SMS / RCS) — same treatment for all three, coloured to match the
+  // bubble palette. De-duplicated participant photos for the group collage (a contact with two
+  // handles otherwise renders twice).
+  const service = chatServiceFromGuid(row.guid);
+  const badge =
+    service === 'RCS'
+      ? { label: 'RCS', color: theme.color.bubble.rcsBackground }
+      : service === 'SMS'
+        ? { label: 'SMS', color: theme.color.bubble.smsBackground }
+        : service === 'iMessage'
+          ? { label: 'iMessage', color: theme.color.bubble.senderBackground }
+          : null;
+  const groupParts = dedupeParticipants(
+    participantList(row.participantNames),
+    participantAvatars(row.participantAvatars),
+  );
 
   const confirmDelete = (): void => {
-    Alert.alert(
+    showDialog(
       'Delete Conversation',
       `Delete “${title}”? This removes it from this device (not from the server).`,
       [
@@ -123,8 +140,8 @@ export const ConversationTile = React.memo(function ConversationTile({
           <GroupAvatar
             // Redacted mode masks the monogram + photo with deterministic seeded tiles
             // (distinct per person, but revealing neither name nor photo).
-            names={redacted ? ['Contact', 'Contact'] : participantList(row.participantNames)}
-            uris={redacted ? [] : participantAvatars(row.participantAvatars)}
+            names={redacted ? ['Contact', 'Contact'] : groupParts.names}
+            uris={redacted ? [] : groupParts.uris}
             seeds={redacted ? participantList(row.participantNames) : undefined}
           />
         ) : (
@@ -147,7 +164,7 @@ export const ConversationTile = React.memo(function ConversationTile({
           >
             {title}
           </Text>
-          {isRcs ? <ServiceBadge label="RCS" /> : null}
+          {badge ? <ServiceBadge label={badge.label} color={badge.color} /> : null}
         </View>
         <Text
           numberOfLines={compact ? 1 : 2}

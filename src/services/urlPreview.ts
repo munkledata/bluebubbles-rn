@@ -133,7 +133,10 @@ export async function fetchOgMetadata(url: string): Promise<OgMetadata | null> {
       const r = await fetch(current, {
         signal: ac.signal,
         redirect: 'manual', // follow manually so each hop is re-validated
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gator/1.0)', Accept: 'text/html' },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; Gator/1.0)',
+          Accept: 'text/html,application/xhtml+xml',
+        },
       });
       if (r.status >= 300 && r.status < 400) {
         const loc = r.headers.get('location');
@@ -149,8 +152,14 @@ export async function fetchOgMetadata(url: string): Promise<OgMetadata | null> {
       break;
     }
     if (!res || !res.ok) return null; // includes "too many redirects"
+    // On device RN auto-follows redirects (it ignores `redirect: 'manual'`), so the per-hop
+    // re-validation above may not run — re-check the FINAL URL's host here so a redirect can't
+    // land the fetch on a private/internal address.
+    if (res.url && !isSafePreviewUrl(res.url)) return null;
     const ctype = res.headers.get('content-type') ?? '';
-    if (!ctype.includes('text/html')) return null; // SECURITY: only parse HTML
+    // Only parse HTML(-ish) documents. xhtml+xml is HTML-shaped and safe to regex; other
+    // content types (json/images/pdf) are rejected so we never mis-parse binary as HTML.
+    if (!ctype.includes('text/html') && !ctype.includes('application/xhtml+xml')) return null;
     if (Number(res.headers.get('content-length') ?? '0') > MAX_BYTES) return null; // reject oversized
     const html = (await res.text()).slice(0, MAX_BYTES);
     return parseOgMetadata(html, current);

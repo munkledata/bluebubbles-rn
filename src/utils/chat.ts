@@ -120,3 +120,28 @@ export function participantAvatars(s: string | null): (string | null)[] {
   if (!s) return [];
   return s.split('|||').map((u) => (u && u.length > 0 ? u : null));
 }
+
+/**
+ * Collapse duplicate participants in the two positionally-aligned name/uri arrays (from the
+ * inbox `group_concat`s). A group member reachable via multiple handles (phone + email, two
+ * numbers) is stored as multiple handle rows that all carry the SAME contact name + photo, so
+ * the collage would draw the same person twice. Keying on name+uri collapses those repeats
+ * while keeping genuinely different people (their names — or unresolved addresses — differ).
+ */
+export function dedupeParticipants(
+  names: string[],
+  uris: (string | null)[],
+): { names: string[]; uris: (string | null)[] } {
+  const seen = new Set<string>();
+  const outNames: string[] = [];
+  const outUris: (string | null)[] = [];
+  names.forEach((name, i) => {
+    const uri = uris[i] ?? null;
+    const key = JSON.stringify([name, uri]); // collision-proof + printable (keeps the file text)
+    if (seen.has(key)) return;
+    seen.add(key);
+    outNames.push(name);
+    outUris.push(uri);
+  });
+  return { names: outNames, uris: outUris };
+}

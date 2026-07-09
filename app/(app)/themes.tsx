@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import {
@@ -51,25 +52,25 @@ export default function ThemesScreen(): React.JSX.Element {
 
   const onApply = async (tokens: ThemeTokens, name: string): Promise<void> => {
     const blob = JSON.stringify(tokens);
-    try {
-      const db = getDatabase();
-      if (editing?.row == null) {
-        const id = await createCustomTheme(db, { name, mode: tokens.mode, tokens: blob });
-        await setCustomTheme(id, tokens); // activate the new theme
-      } else {
-        const id = editing.row.id;
-        await updateCustomTheme(db, id, { name, mode: tokens.mode, tokens: blob });
-        if (id === activeId) await reloadCustomTokens(); // live recolor
-      }
-      setEditing(null);
-      await refresh();
-    } catch {
-      Alert.alert('Theme', 'Couldn’t save the theme.');
+    // NOTE: no try/catch here — a failed save must REJECT so ThemeStudio shows the error inline
+    // (the editor is in a Modal, where a stacked dialog is unreliable on Android) and keeps the
+    // editor open with the user's edits. On success setEditing(null) closes it; refresh is
+    // fire-and-forget (the theme is already saved, a refresh hiccup must not report a false error).
+    const db = getDatabase();
+    if (editing?.row == null) {
+      const id = await createCustomTheme(db, { name, mode: tokens.mode, tokens: blob });
+      await setCustomTheme(id, tokens); // activate the new theme
+    } else {
+      const id = editing.row.id;
+      await updateCustomTheme(db, id, { name, mode: tokens.mode, tokens: blob });
+      if (id === activeId) await reloadCustomTokens(); // live recolor
     }
+    setEditing(null);
+    void refresh();
   };
 
   const onDelete = (row: CustomThemeRow): void => {
-    Alert.alert('Delete theme', `Delete “${row.name}”?`, [
+    showDialog('Delete theme', `Delete “${row.name}”?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -81,7 +82,7 @@ export default function ThemesScreen(): React.JSX.Element {
               if (row.id === activeId) await clearCustomTheme(); // revert to preset
               await refresh();
             } catch {
-              Alert.alert('Theme', 'Couldn’t delete the theme.');
+              showDialog('Theme', 'Couldn’t delete the theme.');
             }
           })();
         },
@@ -129,7 +130,7 @@ export default function ThemesScreen(): React.JSX.Element {
                 onPress={() => {
                   const tokens = safeParseTokens(row.tokens);
                   if (!tokens) {
-                    Alert.alert('Theme', 'This theme is corrupted and can’t be applied.');
+                    showDialog('Theme', 'This theme is corrupted and can’t be applied.');
                     return;
                   }
                   void setCustomTheme(row.id, tokens);

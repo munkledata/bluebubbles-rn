@@ -4,7 +4,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -14,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chatsApi } from '@core/api';
 import { getDatabase } from '@db/database';
@@ -93,7 +93,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
 
   // SERVER-GATED (private API): leave on the server, then drop the chat locally.
   const leaveGroup = (): void => {
-    Alert.alert('Leave Group', 'Leave this conversation on the server and remove it here?', [
+    showDialog('Leave Group', 'Leave this conversation on the server and remove it here?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Leave',
@@ -105,7 +105,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
               await deleteChatLocal(getDatabase(), guid);
               router.back();
             } catch {
-              Alert.alert(
+              showDialog(
                 'Leave Group',
                 'Couldn’t leave — the server needs the private API enabled.',
               );
@@ -191,7 +191,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
         });
       } else {
         await setChatTheme(getDatabase(), guid, { backgroundUri: uri });
-        Alert.alert(
+        showDialog(
           'Background set',
           'Adaptive theming needs an app update before it can colour-match this image. The background was applied.',
         );
@@ -217,7 +217,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
 
   const groupError = (): void =>
-    Alert.alert('Group', 'Couldn’t update — the server needs the Private API enabled.');
+    showDialog('Group', 'Couldn’t update — the server needs the Private API enabled.');
 
   const doRename = (): void => {
     if (!groupName.trim() || busy) return;
@@ -246,7 +246,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
       .finally(() => setBusy(false));
   };
   const doRemove = (address: string, who: string): void => {
-    Alert.alert('Remove', `Remove ${who} from the group?`, [
+    showDialog('Remove', `Remove ${who} from the group?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',

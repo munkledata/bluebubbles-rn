@@ -7,8 +7,9 @@ import { useFaceTime } from '@features/facetime/useFaceTime';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
+  chatServiceFromGuid,
+  dedupeParticipants,
   isGroupRow,
-  isRcsChatGuid,
   participantAvatars,
   participantList,
   redactTitle,
@@ -39,7 +40,21 @@ export function ConversationHeader({
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.bubble, { backgroundColor: chip }] : null;
-  const isRcs = isRcsChatGuid(chatGuid);
+  const service = chatServiceFromGuid(chatGuid);
+  const badge =
+    service === 'RCS'
+      ? { label: 'RCS', color: theme.color.bubble.rcsBackground }
+      : service === 'SMS'
+        ? { label: 'SMS', color: theme.color.bubble.smsBackground }
+        : service === 'iMessage'
+          ? { label: 'iMessage', color: theme.color.bubble.senderBackground }
+          : null;
+  const parts = data
+    ? dedupeParticipants(
+        participantList(data.participantNames),
+        participantAvatars(data.participantAvatars),
+      )
+    : { names: [] as string[], uris: [] as (string | null)[] };
 
   return (
     <View
@@ -74,11 +89,7 @@ export function ConversationHeader({
         {data ? (
           <View style={translucent ? [styles.avatarBubble, { backgroundColor: chip }] : null}>
             {group ? (
-              <GroupAvatar
-                names={participantList(data.participantNames)}
-                uris={participantAvatars(data.participantAvatars)}
-                size={30}
-              />
+              <GroupAvatar names={parts.names} uris={parts.uris} size={30} />
             ) : (
               <Avatar
                 name={avatarSeed(data)}
@@ -99,7 +110,7 @@ export function ConversationHeader({
           >
             {title}
           </Text>
-          {isRcs ? <ServiceBadge label="RCS" /> : null}
+          {badge ? <ServiceBadge label={badge.label} color={badge.color} /> : null}
         </View>
       </Pressable>
       <View style={styles.rightGroup}>

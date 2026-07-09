@@ -4,6 +4,7 @@ import {
   getChatIdByGuid,
   getNewestReceivedGuid,
   listChatsForInbox,
+  listMessagesAround,
   listMessagesWithSenders,
   setLastReadMessageGuid,
   upsertChats,
@@ -114,6 +115,31 @@ describe('conversation-view repositories', () => {
     const chatId = await seed(db);
     const older = await listMessagesWithSenders(db, chatId, 100, 300); // strictly older than m3
     expect(older.map((r) => r.guid)).toEqual(['m2', 'm1']);
+  });
+
+  it('listMessagesAround centers on the anchor with context on both sides', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    // Anchor on the middle message (m2 @ 200): both the newer (m3) and older (m1) appear.
+    const rows = await listMessagesAround(db, chatId, 200);
+    expect(rows.map((r) => r.guid)).toEqual(['m3', 'm2', 'm1']); // newest-first, anchor centered
+  });
+
+  it('listMessagesAround on the NEWEST message still loads older context (the bug repro)', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    // Old bug: jumping to a hit that's the newest message showed just that one message. The
+    // window must still pull the older ones below it.
+    const rows = await listMessagesAround(db, chatId, 300);
+    expect(rows.map((r) => r.guid)).toEqual(['m3', 'm2', 'm1']);
+  });
+
+  it('listMessagesAround respects the before/after window caps', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    // Anchor m1 (@100) with before=0, after=1 → only the anchor + one newer (m3 excluded).
+    const rows = await listMessagesAround(db, chatId, 100, 0, 1);
+    expect(rows.map((r) => r.guid)).toEqual(['m2', 'm1']);
   });
 
   it('getNewestReceivedGuid ignores outgoing', async () => {

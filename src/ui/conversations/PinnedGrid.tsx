@@ -4,6 +4,7 @@ import type { InboxRow } from '@db/repositories';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
+  dedupeParticipants,
   isGroupRow,
   participantAvatars,
   participantList,
@@ -32,6 +33,10 @@ export function PinnedGrid({
     <View style={styles.grid}>
       {rows.map((row) => {
         const title = redactTitle(resolveTitle(row), redacted);
+        const parts = dedupeParticipants(
+          participantList(row.participantNames),
+          participantAvatars(row.participantAvatars),
+        );
         return (
           <Pressable
             key={row.guid}
@@ -44,8 +49,8 @@ export function PinnedGrid({
           >
             {isGroupRow(row) ? (
               <GroupAvatar
-                names={redacted ? ['Contact', 'Contact'] : participantList(row.participantNames)}
-                uris={redacted ? [] : participantAvatars(row.participantAvatars)}
+                names={redacted ? ['Contact', 'Contact'] : parts.names}
+                uris={redacted ? [] : parts.uris}
                 seeds={redacted ? participantList(row.participantNames) : undefined}
                 size={64}
               />

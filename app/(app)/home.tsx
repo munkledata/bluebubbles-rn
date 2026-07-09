@@ -22,6 +22,7 @@ import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
+import { useThemeStore } from '@state/themeStore';
 import { ConversationListScreen } from '@ui';
 
 /**
@@ -42,6 +43,10 @@ export default function Home(): React.JSX.Element {
     void useDownloadSettingsStore.getState().hydrate();
     void useFeatureSettingsStore.getState().hydrate();
     void useSyncSettingsStore.getState().hydrate();
+    // The theme preset is persisted in kv but its first hydrate (root layout) runs
+    // BEFORE the DB is open and silently fails — re-hydrate here so a picked preset
+    // survives a restart. See src/state/themeStore.ts.
+    void useThemeStore.getState().hydrate();
     void (async () => {
       try {
         await recoverStuckScheduled();

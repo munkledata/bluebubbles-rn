@@ -1,7 +1,8 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import { listAllScheduled, type ScheduledRow } from '@db/repositories';
@@ -62,7 +63,7 @@ export default function ScheduledScreen(): React.JSX.Element {
             <Pressable
               onPress={() =>
                 void cancelScheduled(item).catch(() =>
-                  Alert.alert('Scheduled', 'Couldn’t cancel that message.'),
+                  showDialog('Scheduled', 'Couldn’t cancel that message.'),
                 )
               }
               hitSlop={8}

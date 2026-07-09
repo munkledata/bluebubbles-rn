@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Pressable,
@@ -12,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { refreshInbox } from '@/services';
 import { useChats } from '@features/conversations/useChats';
@@ -74,7 +74,7 @@ export function ConversationListScreen(): React.JSX.Element {
   }, []);
 
   const onMarkAllRead = useCallback((): void => {
-    Alert.alert('Mark All Read', 'Mark every conversation as read?', [
+    showDialog('Mark All Read', 'Mark every conversation as read?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Mark All Read', onPress: () => void markAllChatsReadLocal(getDatabase()) },
     ]);

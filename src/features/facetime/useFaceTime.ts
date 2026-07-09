@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { Alert, Linking } from 'react-native';
+import { Linking } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import * as WebBrowser from 'expo-web-browser';
 import { faceTimeApi } from '@core/api';
 import { isFaceTimeLink } from '@core/facetime';
@@ -86,7 +87,7 @@ export function useFaceTime(): {
         await openFaceTimeLink(link);
       } catch (err) {
         logger.warn('[facetime] failed to start call', err);
-        Alert.alert('FaceTime', 'Couldn’t start the call. Make sure your server is connected.');
+        showDialog('FaceTime', 'Couldn’t start the call. Make sure your server is connected.');
       }
     },
     [open],
@@ -96,7 +97,7 @@ export function useFaceTime(): {
     async ({ addresses, video }: StartCallToArgs): Promise<void> => {
       const clean = addresses.map((a) => a.trim()).filter((a) => a.length > 0);
       if (clean.length === 0) {
-        Alert.alert('FaceTime', 'Enter a phone number or email to call.');
+        showDialog('FaceTime', 'Enter a phone number or email to call.');
         return;
       }
       try {
@@ -116,7 +117,7 @@ export function useFaceTime(): {
         await openFaceTimeLink(link);
       } catch (err) {
         logger.warn('[facetime] start failed', err);
-        Alert.alert('FaceTime', 'Couldn’t start the call. Make sure your server is connected.');
+        showDialog('FaceTime', 'Couldn’t start the call. Make sure your server is connected.');
       }
     },
     [open],

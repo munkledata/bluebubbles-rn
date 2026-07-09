@@ -1,19 +1,24 @@
 import { Image } from 'expo-image';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useUrlPreview } from '@features/conversations/useUrlPreview';
+import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
 
 interface UrlPreviewCardProps {
   url: string;
+  /** The already-fetched preview row (the parent bubble owns the hook so it runs once). */
+  preview: UrlPreviewRow | null;
   isFromMe: boolean;
 }
 
 /** A compact Open Graph link card under a message bubble; hidden until metadata loads. */
-export function UrlPreviewCard({ url, isFromMe }: UrlPreviewCardProps): React.JSX.Element | null {
+export function UrlPreviewCard({
+  url,
+  preview,
+  isFromMe,
+}: UrlPreviewCardProps): React.JSX.Element | null {
   const theme = useTheme();
-  const preview = useUrlPreview(url);
 
   // Nothing useful yet (loading or negative cache) → render nothing.
   if (!preview || preview.error === 1 || (!preview.title && !preview.imageUrl)) return null;

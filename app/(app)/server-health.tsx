@@ -63,30 +63,45 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const [rcs, setRcs] = useState<RcsStatus>(null);
   const [rcsFetchedAt, setRcsFetchedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // True when EVERY read failed → the server isn't answering the health channels at all (offline
+  // or too old). Shown as a banner so an empty screen reads as a server issue, not an app bug.
+  const [allFailed, setAllFailed] = useState(false);
 
   const load = useCallback((): void => {
     setRefreshing(true);
     // Each read is independent — a failure just leaves that card at "—", never blocks the rest.
+    // `ok` also records that at least one read succeeded, so we can tell "server said nothing"
+    // (some cards are null) apart from "server is unreachable" (all reads rejected).
+    let anyOk = false;
+    const ok =
+      <T,>(set: (v: T) => void) =>
+      (v: T): void => {
+        anyOk = true;
+        set(v);
+      };
     void Promise.allSettled([
-      serverApi.privateApiStatus(http).then(setPa, () => {}),
-      serverApi.serverEnv(http).then(setEnv, () => {}),
-      serverApi.findMyKeysStatus(http).then(setKeys, () => {}),
-      serverApi.fcmStatus(http).then(setFcm, () => {}),
-      serverApi.zrokStatus(http).then(setZrok, () => {}),
-      serverApi.publicIp(http).then(setIp, () => {}),
-      serverApi.tlsStatus(http).then(setTls, () => {}),
-      serverApi.adminStatus(http).then(setAdmin, () => {}),
-      serverApi.serverAlerts(http).then(setAlerts, () => {}),
+      serverApi.privateApiStatus(http).then(ok(setPa), () => {}),
+      serverApi.serverEnv(http).then(ok(setEnv), () => {}),
+      serverApi.findMyKeysStatus(http).then(ok(setKeys), () => {}),
+      serverApi.fcmStatus(http).then(ok(setFcm), () => {}),
+      serverApi.zrokStatus(http).then(ok(setZrok), () => {}),
+      serverApi.publicIp(http).then(ok(setIp), () => {}),
+      serverApi.tlsStatus(http).then(ok(setTls), () => {}),
+      serverApi.adminStatus(http).then(ok(setAdmin), () => {}),
+      serverApi.serverAlerts(http).then(ok(setAlerts), () => {}),
       // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
       // leave the block null so the RCS row degrades to the capability-only signal.
       serverApi.rcsStatus(http).then(
-        (r) => {
+        ok((r: RcsStatus) => {
           setRcs(r);
           setRcsFetchedAt(Date.now());
-        },
+        }),
         () => {},
       ),
-    ]).finally(() => setRefreshing(false));
+    ]).finally(() => {
+      setAllFailed(!anyOk);
+      setRefreshing(false);
+    });
   }, []);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional on-mount fetch (sets
@@ -125,6 +140,14 @@ export default function ServerHealthScreen(): React.JSX.Element {
           <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.color.tint} />
         }
       >
+        {allFailed ? (
+          <View style={[styles.banner, { backgroundColor: theme.color.secondaryBackground }]}>
+            <Text style={[styles.hint, { color: theme.color.destructive }]}>
+              The server isn’t responding to health checks. It may be offline, or running an older
+              version that doesn’t report these details.
+            </Text>
+          </View>
+        ) : null}
         <Section label="PRIVATE API" theme={theme}>
           <InfoRow label="Messages helper" theme={theme}>
             {pa?.enabled === false ? 'Disabled' : okBad(pa?.connected)}
@@ -392,5 +415,6 @@ const styles = StyleSheet.create({
   rowValue: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
   hintRow: { paddingVertical: 10, paddingHorizontal: 14, borderTopWidth: StyleSheet.hairlineWidth },
   hint: { fontSize: 12, lineHeight: 17 },
+  banner: { marginHorizontal: 16, marginTop: 6, borderRadius: 12, padding: 14 },
   alertText: { fontSize: 14, flex: 1 },
 });

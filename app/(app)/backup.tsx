@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { exportEncryptedBackup, importBackupAuto } from '@/services/backup/backupService';
 import { Screen, useTheme } from '@ui';
@@ -22,11 +23,11 @@ export default function BackupScreen(): React.JSX.Element {
 
   const onExport = async (): Promise<void> => {
     if (pass.length < MIN_PASS) {
-      Alert.alert('Backup', `Choose a passphrase of at least ${MIN_PASS} characters.`);
+      showDialog('Backup', `Choose a passphrase of at least ${MIN_PASS} characters.`);
       return;
     }
     if (pass !== pass2) {
-      Alert.alert('Backup', 'Passphrases do not match.');
+      showDialog('Backup', 'Passphrases do not match.');
       return;
     }
     setBusy(true);
@@ -35,7 +36,7 @@ export default function BackupScreen(): React.JSX.Element {
       setPass('');
       setPass2('');
     } catch (e) {
-      Alert.alert(
+      showDialog(
         'Backup',
         e instanceof Error && e.message === 'sharing-unavailable'
           ? 'Sharing is not available on this device.'
@@ -53,12 +54,12 @@ export default function BackupScreen(): React.JSX.Element {
       const r = await importBackupAuto(paste.trim(), restorePass);
       setPaste('');
       setRestorePass('');
-      Alert.alert(
+      showDialog(
         'Restored',
         `Settings: ${r.kv}, themes: ${r.themes}, chats: ${r.chatCustomizations}.`,
       );
     } catch {
-      Alert.alert(
+      showDialog(
         'Restore',
         'Couldn’t restore — check your passphrase and that the backup is valid.',
       );

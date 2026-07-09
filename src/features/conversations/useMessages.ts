@@ -3,6 +3,7 @@ import {
   getChatIdByGuid,
   getMessagePreviewByGuid,
   listAttachmentsByMessageIds,
+  listMessagesAround,
   listMessagesWithSenders,
   listReactionsByMessageGuids,
   type AttachmentRow,
@@ -28,21 +29,24 @@ export interface EnrichedMessage extends MessageWithAttachments {
 
 /**
  * Live, newest-first messages for a chat with attachments, reactions, and reply quotes.
- * `sinceDate` (set when opening from a search hit) widens the loaded window down to that date so
- * the target message is present to scroll to — capped by `limit`, so a very old hit in a very
- * active chat may still fall outside it (the list then just opens without auto-scrolling).
+ * `anchorDate` (set when opening from a search hit) loads a WINDOW centered on that message —
+ * context on both sides — instead of the recent `limit` window, so the hit isn't stranded with
+ * nothing around it.
  */
 export function useMessages(
   chatGuid: string,
   limit = 100,
-  sinceDate?: number,
+  anchorDate?: number,
 ): ReactiveState<EnrichedMessage[]> {
   return useReactiveQuery<EnrichedMessage[]>(
     async () => {
       const db = getDatabase();
       const chatId = await getChatIdByGuid(db, chatGuid);
       if (chatId == null) return [];
-      const msgs = await listMessagesWithSenders(db, chatId, limit, undefined, sinceDate);
+      const msgs =
+        anchorDate != null
+          ? await listMessagesAround(db, chatId, anchorDate)
+          : await listMessagesWithSenders(db, chatId, limit);
 
       // Load attachments by actual stored rows, NOT by gating on `hasAttachments`: the server
       // omits that flag, so it persists as 0 and this filter excluded every message — which is
@@ -78,6 +82,6 @@ export function useMessages(
       }));
     },
     TABLES,
-    [chatGuid, limit, sinceDate],
+    [chatGuid, limit, anchorDate],
   );
 }

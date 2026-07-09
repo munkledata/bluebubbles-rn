@@ -78,6 +78,33 @@ describe('serverStatTotals reads stats via the admin-command dispatcher', () => 
     });
     expect(mockKy).toHaveBeenCalledTimes(7);
   });
+
+  it('degrades to PARTIAL totals when some channels fail — a single failure no longer blanks all', async () => {
+    // message OK, chat fails, handle OK, attachment fails, image OK, video fails, location fails.
+    mockKy
+      .mockResolvedValueOnce(envelope(1234))
+      .mockRejectedValueOnce(new Error('nope'))
+      .mockResolvedValueOnce(envelope(78))
+      .mockRejectedValueOnce(new Error('nope'))
+      .mockResolvedValueOnce(envelope([{ media_count: 42 }]))
+      .mockRejectedValueOnce(new Error('nope'))
+      .mockRejectedValueOnce(new Error('nope'));
+    const res = await serverApi.serverStatTotals(client());
+    expect(res).toEqual({
+      messages: 1234,
+      chats: 0, // failed → 0, not a rejected Promise.all that blanks everything
+      handles: 78,
+      attachments: 0,
+      images: 42,
+      videos: 0,
+      locations: 0,
+    });
+  });
+
+  it('throws when EVERY channel fails, so the UI can show "unavailable" not all-zeros', async () => {
+    mockKy.mockRejectedValue(new Error('server down'));
+    await expect(serverApi.serverStatTotals(client())).rejects.toThrow();
+  });
 });
 
 describe('findMy endpoints unwrap the named-key list payload', () => {

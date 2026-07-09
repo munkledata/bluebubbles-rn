@@ -1,6 +1,7 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Reminder } from '@core/models';
 import { getDatabase } from '@db/database';
@@ -30,14 +31,14 @@ export default function RemindersScreen(): React.JSX.Element {
       try {
         await rescheduleReminder(getDatabase(), r, when);
       } catch {
-        Alert.alert('Reminder', 'Couldn’t reschedule the reminder.');
+        showDialog('Reminder', 'Couldn’t reschedule the reminder.');
       }
     })();
   };
 
   const onCancel = (r: Reminder): void => {
     void cancelReminder(getDatabase(), r).catch(() =>
-      Alert.alert('Reminder', 'Couldn’t cancel the reminder.'),
+      showDialog('Reminder', 'Couldn’t cancel the reminder.'),
     );
   };
 

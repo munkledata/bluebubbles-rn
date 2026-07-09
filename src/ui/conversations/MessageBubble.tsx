@@ -4,6 +4,7 @@ import { bubbleEffectOf } from '@core/effects';
 import { parseAttributedRuns, type TextRun } from '@core/richtext';
 import type { AttachmentRow, MessagePreview, MessageRow, ReactionRow } from '@db/repositories';
 import { useRedactedModeStore } from '@state/redactedModeStore';
+import { useUrlPreview } from '@features/conversations/useUrlPreview';
 import { errorTitleForCode, firstUrl, resolveBubbleColor, safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
 import { AttachmentView } from '../attachments';
@@ -90,6 +91,18 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isEdited = !isRetracted && !!msg.dateEdited;
   // Redacted mode also suppresses the link preview (it would leak the URL/title).
   const previewUrl = !redacted && hasText && !isRetracted ? firstUrl(bodyText) : null;
+  // Own the preview lookup here (not inside the card) so we can also decide whether to draw the
+  // raw link text. When the WHOLE message is just a URL and its card loaded, hide the text so we
+  // don't show a blue link AND a card (matching iMessage). If the preview failed, keep the link
+  // so it's still tappable. Hook is called unconditionally (null url → null) to keep hook order.
+  const preview = useUrlPreview(previewUrl);
+  const previewLoaded =
+    !!preview && preview.error !== 1 && (!!preview.title || !!preview.imageUrl);
+  const urlOnly =
+    previewUrl != null &&
+    bodyText.replace(previewUrl, '').trim().replace(/^[).,!?;:'"]+$/, '') === '';
+  // Keep the text bubble if it carries a reaction — the reaction cluster anchors to it.
+  const showText = hasText && !(urlOnly && previewLoaded && (msg.reactions?.length ?? 0) === 0);
 
   // Unsent: replace the whole bubble (incl. reactions/quote/attachments) with a tombstone.
   if (isRetracted) {
@@ -152,7 +165,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           />
         ))
       )}
-      {hasText ? (
+      {showText ? (
         <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
           <View
             style={[
@@ -181,7 +194,9 @@ export const MessageBubble = React.memo(function MessageBubble({
           Edited
         </Text>
       ) : null}
-      {previewUrl ? <UrlPreviewCard url={previewUrl} isFromMe={isFromMe} /> : null}
+      {previewUrl ? (
+        <UrlPreviewCard url={previewUrl} preview={preview} isFromMe={isFromMe} />
+      ) : null}
     </Pressable>
   );
 

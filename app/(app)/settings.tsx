@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
 import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
@@ -71,14 +72,14 @@ export default function SettingsScreen(): React.JSX.Element {
   const anyMatch = Object.values(SECTIONS).some(match);
 
   const onDisconnect = (): void => {
-    Alert.alert('Disconnect', 'Forget this server and clear stored credentials?', [
+    showDialog('Disconnect', 'Forget this server and clear stored credentials?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Disconnect', style: 'destructive', onPress: () => void forget() },
     ]);
   };
 
   const onRotateKey = (): void => {
-    Alert.alert(
+    showDialog(
       'Rotate encryption key',
       'Re-encrypt the local database with a fresh key? Your data is unchanged; this is crash-safe.',
       [
@@ -87,8 +88,8 @@ export default function SettingsScreen(): React.JSX.Element {
           text: 'Rotate',
           onPress: () =>
             void rotateDatabaseKey()
-              .then(() => Alert.alert('Encryption key', 'Database key rotated.'))
-              .catch(() => Alert.alert('Encryption key', 'Couldn’t rotate the key.')),
+              .then(() => showDialog('Encryption key', 'Database key rotated.'))
+              .catch(() => showDialog('Encryption key', 'Couldn’t rotate the key.')),
         },
       ],
     );
@@ -97,7 +98,7 @@ export default function SettingsScreen(): React.JSX.Element {
   // Enabling requires enrolled biometrics, else the user could lock themselves out.
   const onToggleAppLock = async (next: boolean): Promise<void> => {
     if (next && !(await isBiometricAvailable())) {
-      Alert.alert(
+      showDialog(
         'Biometrics required',
         'Set up a fingerprint, face unlock, or device PIN before enabling App Lock.',
       );
@@ -110,9 +111,9 @@ export default function SettingsScreen(): React.JSX.Element {
     setSyncing(true);
     try {
       const { contacts, matched } = await syncContacts();
-      Alert.alert('Contacts synced', `Read ${contacts} contacts, matched ${matched}.`);
+      showDialog('Contacts synced', `Read ${contacts} contacts, matched ${matched}.`);
     } catch (e) {
-      Alert.alert(
+      showDialog(
         'Contacts',
         e instanceof Error && e.message === 'contacts-permission-denied'
           ? 'Permission denied. Enable Contacts access in system settings to show names and photos.'
