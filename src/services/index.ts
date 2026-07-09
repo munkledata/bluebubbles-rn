@@ -72,6 +72,9 @@ function candidateClient(origin: string, password: string): HttpClient {
 }
 
 let socket: SocketService | null = null;
+// Guards the ONE-TIME realtime setup (notification/FCM permission + token registration) so it
+// runs on the FIRST connect only — never on a foreground reconnect. See startRealtime().
+let realtimeOneTimeSetupDone = false;
 
 // ── Authenticated encryption (XChaCha20-Poly1305 + Argon2id) ───────────────────
 // The native libsodium backend is pulled in via a dynamic import so it is evaluated
@@ -464,12 +467,20 @@ export async function startRealtime(): Promise<void> {
   // frequently can't re-establish) this lightweight ping-on-a-timer is what actually brings sync
   // back without a manual pull. `ping` is non-retrying, so it detects "down" fast.
   startReachabilityWatch(() => serverApi.ping(http), maybeResumeSync);
-  void requestNotificationPermission();
-  // Now that we're connected, register this device's FCM token with the server so it
-  // can push to us. Firebase is dynamically imported to keep it out of the test/static
-  // graph (and a no-op until FCM is enabled).
-  if (FCM_ENABLED) {
-    void import('./notifications/fcmMessaging').then((m) => m.registerFcmToken());
+  // ONE-TIME setup only. Requesting notification permission (notifee + FCM) launches the system
+  // permission dialog, and that dialog itself fires an AppState change → the foreground
+  // `resumeRealtime()` listener → `startRealtime()` again. Doing it on EVERY (re)connect created
+  // an INFINITE permission-request loop the first time the app foregrounded (the UI froze; logcat
+  // showed GrantPermissionsActivity launched tens of thousands of times). Request it once; a
+  // foreground reconnect just re-opens the socket.
+  if (!realtimeOneTimeSetupDone) {
+    realtimeOneTimeSetupDone = true;
+    void requestNotificationPermission();
+    // Register this device's FCM token with the server so it can push to us. Firebase is
+    // dynamically imported to keep it out of the test/static graph (a no-op until FCM is enabled).
+    if (FCM_ENABLED) {
+      void import('./notifications/fcmMessaging').then((m) => m.registerFcmToken());
+    }
   }
 }
 
