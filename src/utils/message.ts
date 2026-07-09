@@ -9,6 +9,16 @@ export interface PreviewInput {
   lastAssociatedType: string | null;
 }
 
+/**
+ * iMessage/RCS attachment messages carry U+FFFC (OBJECT REPLACEMENT CHARACTER) in their text
+ * as a placeholder for each inline attachment — it renders as an empty box. Strip those (and
+ * surrounding whitespace) so previews/notifications show real text or fall through to an
+ * attachment label instead of a box. Returns '' when the text was only placeholders/blank.
+ */
+export function stripAttachmentPlaceholder(text: string | null | undefined): string {
+  return (text ?? '').replace(/\uFFFC/g, '').trim();
+}
+
 const REACTION_LABELS: Record<string, string> = {
   love: 'Loved a message',
   like: 'Liked a message',
@@ -35,7 +45,7 @@ export function buildPreview(row: PreviewInput): string {
     return row.lastIsFromMe ? `You ${label.charAt(0).toLowerCase()}${label.slice(1)}` : label;
   }
 
-  let body = (row.lastText ?? row.lastSubject ?? '').trim();
+  let body = stripAttachmentPlaceholder(row.lastText ?? row.lastSubject);
   if (!body && row.lastHasAttachments) body = '📎 Attachment';
   if (!body) return '';
 

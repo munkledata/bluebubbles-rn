@@ -7,6 +7,7 @@ import {
   TUNNEL_SKIP_HEADERS,
 } from '@core/config/constants';
 import { apiResponse } from '@core/models/common';
+import { logger } from '@core/secure';
 import { ApiError } from './errors';
 import { withRetry, type RetryPolicy } from './retry';
 
@@ -141,6 +142,14 @@ export class HttpClient {
     const url = this.buildUrl(path);
     const search = this.buildSearch(opts.query);
 
+    // Multipart uploads take a SEPARATE path: RN's raw `fetch` streams a FormData file part from
+    // disk, whereas `ky` mishandles React Native's FormData (its body/timeout machinery breaks the
+    // native stream, surfacing as an opaque "connection refused"). Raw fetch also drops the 30s
+    // timeout, which would otherwise kill a large video mid-upload. Never retried (double-send).
+    if (opts.form) {
+      return this.uploadMultipart(method, path, url, search, schema, opts);
+    }
+
     // One full attempt: send, map transport/status/parse failures to a typed ApiError, return data.
     // Headers are rebuilt per attempt so a retry picks up a refreshed origin/password.
     const run = async (): Promise<z.infer<S>> => {
@@ -150,8 +159,7 @@ export class HttpClient {
           method,
           headers: this.buildHeaders(),
           searchParams: search,
-          json: opts.form ? undefined : opts.json,
-          body: opts.form,
+          json: opts.json,
           signal: opts.signal,
           timeout: this.cfg.timeoutMs ?? 30_000,
           retry: 0,
@@ -164,34 +172,76 @@ export class HttpClient {
         }
         throw new ApiError('no_connection', 'Network request failed', undefined, err);
       }
-
-      if (!response.ok) {
-        throw ApiError.fromStatus(response.status, `${method} ${path} failed`);
-      }
-
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch (err) {
-        throw new ApiError('parse_error', 'Response was not valid JSON', response.status, err);
-      }
-
-      const parsed = apiResponse(schema).safeParse(body);
-      if (!parsed.success) {
-        throw new ApiError(
-          'parse_error',
-          `Response did not match schema for ${path}`,
-          response.status,
-          parsed.error,
-        );
-      }
-      return parsed.data.data;
+      return this.parseResponse(response, method, path, schema);
     };
 
-    // Retry idempotent GETs by default; writes only when explicitly opted in; never multipart
-    // uploads; never when `retry: false`.
+    // Retry idempotent GETs by default; writes only when explicitly opted in; never when
+    // `retry: false`.
     const wantsRetry =
-      opts.retry !== false && !opts.form && (method === 'GET' || opts.retry !== undefined);
+      opts.retry !== false && (method === 'GET' || opts.retry !== undefined);
     return wantsRetry ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined) : run();
+  }
+
+  /**
+   * Streamed multipart upload via RN's raw `fetch` (not `ky`). We deliberately do NOT set a
+   * Content-Type header — RN's networking fills in `multipart/form-data; boundary=…` and streams
+   * the file part from disk, so a large video is never buffered. No timeout (uploads can run for
+   * minutes) and no retry (a retried upload would double-send).
+   */
+  private async uploadMultipart<S extends z.ZodTypeAny>(
+    method: string,
+    path: string,
+    url: string,
+    search: URLSearchParams,
+    schema: S,
+    opts: RequestOptions,
+  ): Promise<z.infer<S>> {
+    const qs = search.toString();
+    const fullUrl = qs ? `${url}?${qs}` : url;
+    const fetchImpl = this.cfg.fetch ?? fetch;
+    let response: Response;
+    try {
+      response = await fetchImpl(fullUrl, {
+        method,
+        headers: this.buildHeaders(),
+        body: opts.form,
+        signal: opts.signal,
+      });
+    } catch (err) {
+      // Log the REAL native cause inline (RN's "Network request failed" Error has no enumerable
+      // fields, so logging it as an object yields `{}`). Include the URL for context.
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      logger.warn(`[http] multipart upload failed url=${fullUrl} err=${detail}`);
+      throw new ApiError('no_connection', 'Upload request failed', undefined, err);
+    }
+    return this.parseResponse(response, method, path, schema);
+  }
+
+  /** Shared response handling: status check → JSON parse → envelope/schema validation. */
+  private async parseResponse<S extends z.ZodTypeAny>(
+    response: Response,
+    method: string,
+    path: string,
+    schema: S,
+  ): Promise<z.infer<S>> {
+    if (!response.ok) {
+      throw ApiError.fromStatus(response.status, `${method} ${path} failed`);
+    }
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (err) {
+      throw new ApiError('parse_error', 'Response was not valid JSON', response.status, err);
+    }
+    const parsed = apiResponse(schema).safeParse(body);
+    if (!parsed.success) {
+      throw new ApiError(
+        'parse_error',
+        `Response did not match schema for ${path}`,
+        response.status,
+        parsed.error,
+      );
+    }
+    return parsed.data.data;
   }
 }

@@ -2,6 +2,7 @@ import { resolveMessageChatGuid } from '@core/models';
 import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
 import { getChatHeader, getHandleName } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { stripAttachmentPlaceholder } from '@utils';
 
 /**
  * Pure projection: a normalized event → the notifications to show/clear. Reads
@@ -46,7 +47,9 @@ export async function buildMessageIntents(
           chatTitle,
           senderName,
           senderHandle: m.handle?.address ?? 'unknown',
-          body: m.text ?? '📎 Attachment',
+          // Attachment messages carry U+FFFC placeholder text (renders as an empty box); strip it
+          // and fall back to a generic label so the notification never shows a bare box.
+          body: stripAttachmentPlaceholder(m.text) || '📎 Attachment',
           messageGuid: m.guid,
           timestamp: m.dateCreated ?? Date.now(),
           isGroup,

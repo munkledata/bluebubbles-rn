@@ -1,6 +1,7 @@
-import { sendAttachment } from '@core/api/endpoints/attachments';
+import type { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
+import { logger } from '@core/secure';
 import { sendErrorCode } from '@utils';
 import {
   getChatIdByGuid,
@@ -22,23 +23,31 @@ export interface PickedImage {
 }
 
 /**
- * Reads a file at `uri` and returns its bytes base64-encoded. Injected so this module stays
- * Node-testable (no expo-file-system import on the test path); the production reader uses the
- * expo-file-system `File` object API (see `expoBase64Reader` in the UI-facing wiring).
+ * Streams the picked file to the server's multipart upload route and returns the send ack.
+ * Injected so this module stays Node-testable (the production uploader uses a native streaming
+ * upload — `expo-file-system`'s `uploadAsync` — which reads the file from disk and never buffers
+ * it in JS memory, so a 1 GB video uploads with flat memory use). See `expoAttachmentUploader`.
  */
-export type FileBase64Reader = (uri: string) => Promise<string>;
+export type AttachmentUploader = (args: {
+  http: HttpClient;
+  chatGuid: string;
+  tempGuid: string;
+  name: string;
+  uri: string;
+  mimeType: string;
+}) => Promise<SendAck>;
 
 /**
- * Optimistic image send: inserts a local attachment row (renders immediately from
- * disk), reads the file as base64, uploads it as JSON, then reconciles message +
- * attachment guids. Mirrors `sendTextMessage`; pure orchestration (the file read is
- * injected) so it is Node-testable.
+ * Optimistic image send: inserts a local attachment row (renders immediately from disk), streams
+ * the file to the server, then reconciles message + attachment guids. Mirrors `sendTextMessage`;
+ * pure orchestration (the upload is injected) so it is Node-testable. The file is streamed from
+ * disk by the native layer, so a large video is never read into JS memory.
  */
 export async function sendImageMessage(
   db: AppDatabase,
   http: HttpClient,
   args: { chatGuid: string; image: PickedImage },
-  readBase64: FileBase64Reader,
+  upload: AttachmentUploader,
   now: number = Date.now(),
 ): Promise<{ tempGuid: string }> {
   const chatId = await getChatIdByGuid(db, args.chatGuid);
@@ -61,13 +70,14 @@ export async function sendImageMessage(
   });
 
   try {
-    // Read the file bytes as base64 (the server has no multipart parser — it wants JSON).
-    const data = await readBase64(args.image.uri);
-    const server = await sendAttachment(http, {
+    // Stream the file to the server (native upload — never buffered in JS memory).
+    const server = await upload({
+      http,
       chatGuid: args.chatGuid,
       tempGuid,
       name: args.image.name,
-      data,
+      uri: args.image.uri,
+      mimeType: args.image.mimeType,
     });
     // The server ack carries only the message GUID (no attachment guid). Promote the message
     // row when the GUID is present; the optimistic attachment row keeps its local guid +
@@ -84,6 +94,7 @@ export async function sendImageMessage(
       await markOutgoingSentNoGuid(db, tempGuid);
     }
   } catch (e) {
+    logger.warn(`[send-attachment] failed: ${e instanceof Error ? e.message : String(e)}`);
     const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
     await reconcileOutgoingError(db, tempGuid, code);
   }

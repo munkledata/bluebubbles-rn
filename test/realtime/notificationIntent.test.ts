@@ -40,6 +40,45 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     }
   });
 
+  it('shows an attachment label (not a U+FFFC box) for an attachment-only message', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    // Attachment messages carry the object-replacement char as placeholder text — the
+    // notification must not render it as a bare box.
+    await router.handle(
+      'new-message',
+      {
+        guid: 'att1',
+        text: '\uFFFC',
+        dateCreated: 1700000000002,
+        handle: { address: 'bob@x.com', displayName: 'Bob' },
+        chats: [{ guid: 'cAtt', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+      },
+      'socket',
+    );
+    const i = intents[0]!;
+    expect(i.kind).toBe('message');
+    if (i.kind === 'message') expect(i.body).toBe('📎 Attachment');
+  });
+
+  it('strips a U+FFFC placeholder but keeps a real caption', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'att2',
+        text: '\uFFFCcheck this out',
+        dateCreated: 1700000000003,
+        handle: { address: 'bob@x.com', displayName: 'Bob' },
+        chats: [{ guid: 'cAtt2', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+      },
+      'socket',
+    );
+    const i = intents[0]!;
+    if (i.kind === 'message') expect(i.body).toBe('check this out');
+  });
+
   it('uses the contact-matched name (not the bare address) when the event carries no displayName', async () => {
     const { db } = await createTestDb();
     // A device contact is synced for this number, but the inbound event has NO handle

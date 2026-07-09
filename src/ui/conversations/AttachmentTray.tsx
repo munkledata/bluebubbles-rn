@@ -112,22 +112,26 @@ export function AttachmentTray({ onPick, onPickFiles }: AttachmentTrayProps): Re
   };
 
   const pick = async (asset: MediaLibrary.Asset): Promise<void> => {
+    const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
+    // getAssetInfoAsync resolves a readable file:// localUri (the raw asset uri can be a
+    // non-readable content/ph reference). It can THROW under Android scoped storage / limited
+    // photo access — if it does, fall back to the asset's own uri so the pick STILL stages
+    // instead of silently vanishing (which reads to the user as "tapping does nothing").
+    let uri = asset.uri;
     try {
-      // getAssetInfoAsync resolves a readable file:// localUri (the raw asset uri can be a
-      // non-readable content/ph reference) — required to upload the bytes.
       const info = await MediaLibrary.getAssetInfoAsync(asset);
-      const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
-      onPick({
-        uri: info.localUri ?? asset.uri,
-        name: asset.filename,
-        mimeType: mimeFromName(asset.filename, isVideo),
-        size: 0,
-        width: asset.width,
-        height: asset.height,
-      });
+      if (info.localUri) uri = info.localUri;
     } catch (e) {
-      logger.warn('[attachment-tray] could not resolve asset', e);
+      logger.warn('[attachment-tray] getAssetInfoAsync failed; staging raw asset uri', e);
     }
+    onPick({
+      uri,
+      name: asset.filename,
+      mimeType: mimeFromName(asset.filename, isVideo),
+      size: 0,
+      width: asset.width,
+      height: asset.height,
+    });
   };
 
   return (

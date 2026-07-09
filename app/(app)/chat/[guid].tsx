@@ -44,6 +44,7 @@ import { useMessages } from '@features/conversations/useMessages';
 import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 import { scheduleReminder } from '@/services/notifications/remindersService';
 import { isDevServer } from '@utils/isDev';
+import { chatServiceFromGuid } from '@utils';
 import {
   Composer,
   ConversationHeader,
@@ -172,7 +173,7 @@ function ChatScreenInner({
 
   const onSend = (text: string, effectId?: string): void => {
     // DEV: when on the local dev session, simulate the server round-trip so the
-    // optimistic → sent flow is visible without a real BlueBubbles server.
+    // optimistic → sent flow is visible without a real Gator server.
     if (editing) {
       const g = editing.guid;
       setEditing(null);
@@ -333,7 +334,7 @@ function ChatScreenInner({
         await scheduleReminder(getDatabase(), {
           chatGuid: guid,
           messageGuid: msg.guid,
-          chatTitle: header.data ? resolveTitle(header.data) : 'BlueBubbles',
+          chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
           messagePreview: msg.text,
           senderName: msg.senderName,
           scheduledFor: when,
@@ -419,6 +420,13 @@ function ChatScreenInner({
       {isTyping ? <TypingBubble /> : null}
       <SmartReplyChips messages={messages} onPick={onSend} />
       <Composer
+        placeholder={
+          chatServiceFromGuid(guid) === 'RCS'
+            ? 'RCS Message'
+            : chatServiceFromGuid(guid) === 'SMS'
+              ? 'Text Message'
+              : 'iMessage'
+        }
         onSend={onSend}
         onSendAttachments={(items) => void sendImages({ chatGuid: guid, images: items })}
         onPickFiles={pickFiles}

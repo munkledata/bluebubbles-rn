@@ -16,38 +16,25 @@ export function attachmentDownloadUrl(http: HttpClient, guid: string, service?: 
   );
 }
 
-export interface SendAttachmentParams {
-  chatGuid: string;
-  /** Message temp guid (also the attachment temp guid server-side). */
-  tempGuid: string;
-  /** Display/transfer name of the file. */
-  name: string;
-  /** The file bytes, base64-encoded (read at the uri by the caller). */
-  data: string;
-  /** Send method; 'private-api' for stock attachment sends. */
-  method?: string;
+/** The request body for an attachment send — a streamed multipart form (production). */
+export interface AttachmentRequestBody {
+  /** Multipart form with the file part + fields (RN streams the file from disk). */
+  form?: FormData;
+  /** JSON body (test/legacy shape) — inspected by tests; production uses `form`. */
+  json?: unknown;
 }
 
 /**
- * POST /api/v1/message/attachment (application/json) → the send ack `{ guid? }` (the real
- * message GUID; attachment sends require the Private API, so it's present on success), NOT a
- * Message — see {@link SendAck}. The attachment's own server guid is not acked here; the
- * optimistic attachment row keeps its local guid until the socket `new-message` echo carries
- * the real one.
+ * POST /api/v1/message/attachment/upload (multipart/form-data) → the send ack `{ guid? }` (the
+ * real message GUID; attachment sends require the Private API, so it's present on success), NOT a
+ * Message — see {@link SendAck}. The attachment's own server guid is not acked here; the optimistic
+ * attachment row keeps its local guid until the socket `new-message` echo carries the real one.
  *
- * Server contract: it has NO multipart parser — it accepts JSON `{ chatGuid, name, data,
- * tempGuid, method }` with the file bytes base64-encoded in `data` (the old multipart body
- * was silently rejected). The caller reads the base64 (expo-file-system) and passes it in, so
- * this stays Node-pure / unit-testable with a fake http.
+ * The file is STREAMED as a multipart upload (RN reads it from disk during the request), so large
+ * videos are never held in JS memory — restoring the original app's large-file support that the
+ * base64-in-JSON path had capped. The caller builds the body (multipart form in production, an
+ * inspectable JSON object in tests), keeping this Node-pure / unit-testable with a fake http.
  */
-export function sendAttachment(http: HttpClient, p: SendAttachmentParams): Promise<SendAck> {
-  return http.post('/message/attachment', SendAck, {
-    json: {
-      chatGuid: p.chatGuid,
-      tempGuid: p.tempGuid,
-      name: p.name,
-      data: p.data,
-      method: p.method ?? 'private-api',
-    },
-  });
+export function sendAttachment(http: HttpClient, body: AttachmentRequestBody): Promise<SendAck> {
+  return http.post('/message/attachment/upload', SendAck, body);
 }

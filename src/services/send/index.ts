@@ -15,7 +15,7 @@ import { sendReactionMessage, type SendReactionArgs } from './sendReactionServic
 import { sendEdit, sendUnsend } from './sendEditService';
 import { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 import { sendImageMessage, type PickedImage } from './sendAttachmentService';
-import { expoBase64Reader } from './fileBase64';
+import { expoAttachmentUploader } from './attachmentUpload';
 import { runOutgoingQueue } from './outgoingQueueService';
 
 export { runOutgoingQueue } from './outgoingQueueService';
@@ -31,7 +31,7 @@ export function sendImage(args: {
   chatGuid: string;
   image: PickedImage;
 }): Promise<{ tempGuid: string }> {
-  return sendImageMessage(getDatabase(), http, args, expoBase64Reader);
+  return sendImageMessage(getDatabase(), http, args, expoAttachmentUploader);
 }
 
 /** UI-facing multi-image send: one optimistic message + attachment per picked asset. */
@@ -41,7 +41,7 @@ export function sendImages(args: {
 }): Promise<{ tempGuid: string }[]> {
   return Promise.all(
     args.images.map((image) =>
-      sendImageMessage(getDatabase(), http, { chatGuid: args.chatGuid, image }, expoBase64Reader),
+      sendImageMessage(getDatabase(), http, { chatGuid: args.chatGuid, image }, expoAttachmentUploader),
     ),
   );
 }
@@ -196,10 +196,26 @@ export function recoverOutgoing(now = Date.now()): Promise<{ eligible: number; s
 /** Retry a failed send: drop the errored temp row, then re-send. */
 export async function retry(
   oldTempGuid: string,
-  args: SendTextArgs,
+  args: SendTextArgs & { image?: PickedImage },
 ): Promise<{ tempGuid: string }> {
+  // Drop the old errored row, then re-send. A failed ATTACHMENT must be re-uploaded as an
+  // attachment (re-streaming its on-disk file) — the old code only re-sent text, so retrying a
+  // failed picture just deleted it and sent nothing. When an image is supplied, re-send that.
   await deleteMessageByGuid(getDatabase(), oldTempGuid);
+  if (args.image) {
+    return sendImageMessage(
+      getDatabase(),
+      http,
+      { chatGuid: args.chatGuid, image: args.image },
+      expoAttachmentUploader,
+    );
+  }
   return sendTextMessage(getDatabase(), http, args);
+}
+
+/** Discard a failed/optimistic message (the "Delete" choice on a not-delivered message). */
+export function discardMessage(guid: string): Promise<void> {
+  return deleteMessageByGuid(getDatabase(), guid);
 }
 
 /**

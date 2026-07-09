@@ -7,6 +7,7 @@ import {
   insertOutgoingText,
   listAttachmentsByMessageIds,
   listMessages,
+  markMessageSendError,
   markOutgoingSentNoGuid,
   reconcileOutgoingSuccess,
   upsertChats,
@@ -244,5 +245,31 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       .sort();
     // The stale temp row is NOT hijacked (outside the ±window); the foreign echo stands alone.
     expect(guids).toEqual(['real-6', 'temp-fff66666']);
+  });
+
+  it('a late success-ack does NOT clobber an already-failed row (RCS immediate-ack race)', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db, 'cRace');
+
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-race00001',
+      attachmentGuid: 'temp-race00001-att',
+      chatId,
+      chatGuid: 'cRace',
+      localPath: 'file:///race.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'race.jpg',
+      totalBytes: 10,
+      now: 6000,
+    });
+    // The genuine send FAILURE (message-send-error) lands first, keyed by tempGuid.
+    await markMessageSendError(db, 'temp-race00001', 502);
+    // The RCS bridge's immediate "sending" success-ack arrives LATE — it must NOT overwrite 'error'.
+    await markOutgoingSentNoGuid(db, 'temp-race00001');
+
+    const msgs = (await listMessages(db, chatId)) as Array<{ guid: string; sendState: string }>;
+    expect(msgs).toHaveLength(1);
+    // Failure is sticky: the late ack does not mask it back to 'sent'.
+    expect(msgs[0]!.sendState).toBe('error');
   });
 });
