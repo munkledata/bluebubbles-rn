@@ -23,7 +23,7 @@ export function LockScreen({ onUnlock }: LockScreenProps = {}): React.JSX.Elemen
 
   const tryUnlock = async (): Promise<void> => {
     setFailed(false);
-    const ok = await authenticate('Unlock BlueBubbles');
+    const ok = await authenticate('Unlock Gator');
     if (ok) await (onUnlock ?? storeUnlock)();
     else setFailed(true);
   };
@@ -40,7 +40,7 @@ export function LockScreen({ onUnlock }: LockScreenProps = {}): React.JSX.Elemen
     >
       <View style={styles.center}>
         <Text style={styles.lock}>🔒</Text>
-        <Text style={[styles.title, { color: theme.color.label }]}>BlueBubbles is locked</Text>
+        <Text style={[styles.title, { color: theme.color.label }]}>Gator is locked</Text>
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>
           Authenticate to continue
         </Text>

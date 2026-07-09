@@ -1,4 +1,4 @@
-# BlueBubbles RN — Gap & Security Analysis (RETIRED)
+# Gator RN — Gap & Security Analysis (RETIRED)
 
 > **This document is retired.** It was a point-in-time snapshot (2026-06-20) that the code has
 > since outgrown — it described FCM as disabled and the firebase/crypto/native pieces as absent,

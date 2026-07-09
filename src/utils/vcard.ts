@@ -14,7 +14,7 @@ function unfold(content: string): string[] {
 }
 
 /**
- * Parse a vCard (.vcf / text/vcard) into a contact. Mirrors the BlueBubbles server's
+ * Parse a vCard (.vcf / text/vcard) into a contact. Mirrors the Gator server's
  * Apple-contact format (FN / N / TEL / EMAIL / ORG). Pure + Node-testable. PHOTO is
  * intentionally skipped (multi-line base64 isn't reliably parseable and isn't needed
  * for the card). Falls back to the structured N name, then ORG, then "Unknown".

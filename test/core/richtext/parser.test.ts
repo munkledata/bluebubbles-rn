@@ -1,6 +1,6 @@
 import { hasMention, parseAttributedRuns, plainTextFromAttributedBody } from '@core/richtext';
 
-// A realistic BlueBubbles attributedBody for "Hey @Alice!" where "@Alice" is a
+// A realistic Gator attributedBody for "Hey @Alice!" where "@Alice" is a
 // confirmed mention. range is NSRange [start, length]; the only meaningful
 // attribute keys are messagePart, the mention, and the attachment GUID.
 const MENTION_BODY = JSON.stringify([

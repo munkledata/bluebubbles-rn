@@ -29,7 +29,7 @@ export default function Welcome(): React.JSX.Element {
       >
         <View style={styles.hero}>
           <Text style={styles.emoji}>🫧</Text>
-          <Text style={[styles.title, { color: theme.color.label }]}>BlueBubbles</Text>
+          <Text style={[styles.title, { color: theme.color.label }]}>Gator</Text>
           <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
             iMessage on Android, reimagined.
           </Text>

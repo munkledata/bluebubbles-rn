@@ -6,7 +6,7 @@
 export const API_BASE_PATH = '/api/v1';
 
 /**
- * Minimum BlueBubbles Server version required by this client.
+ * Minimum Gator Server version required by this client.
  *
  * The rebuild moves the auth token out of the URL query string and into an
  * `Authorization` header / socket `auth` payload, and adopts AEAD payload

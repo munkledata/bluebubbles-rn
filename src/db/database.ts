@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/op-sqlite';
 import { runMigrations, type SqlRunner } from './migrate';
 import type { AppDatabase } from './types';
 
-const DB_NAME = 'bluebubbles.db';
+const DB_NAME = 'gator.db';
 
 type RawDb = ReturnType<typeof open>;
 

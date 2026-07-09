@@ -44,7 +44,7 @@ export default function Manual(): React.JSX.Element {
         >
           <Text style={[styles.title, { color: theme.color.label }]}>Server details</Text>
           <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-            Enter your BlueBubbles Server URL and password.
+            Enter your Gator Server URL and password.
           </Text>
           <TextField
             label="Server URL"

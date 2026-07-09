@@ -8,7 +8,7 @@ export interface SocketAuthOptions {
   headers?: Record<string, string>;
   /**
    * When true, send the password as a `?guid=` handshake query (what a stock/old
-   * BlueBubbles server reads — `socket.handshake.query.guid`) instead of the secure
+   * server reads — `socket.handshake.query.guid`) instead of the secure
    * `auth` payload. Drive this from `HttpClient.usesHeaderAuth()` so REST and socket
    * stay in the same mode. Legacy mode puts the password in the (WSS-encrypted) URL,
    * so use it only against servers that don't support `handshake.auth`.

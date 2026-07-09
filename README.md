@@ -1,6 +1,6 @@
-# BlueBubbles RN
+# Gator RN
 
-A ground-up **React Native + TypeScript** rebuild of the BlueBubbles iMessage client
+A ground-up **React Native + TypeScript** rebuild of the iMessage client
 (originally Flutter/Dart). Android-only, iOS-styled UI, with the architectural and
 security weaknesses of the original addressed from day one.
 
@@ -61,7 +61,7 @@ security weaknesses of the original addressed from day one.
 > `0006` adds a `reminders` table; a Reminders screen lists/reschedules/cancels them); **rich-text
 > mentions** (a pure parser turns a message's `attributedBody` into styled runs — @mentions in the
 > accent color, with gap-filling so no text is ever dropped; scope-cut to mentions+links because
-> BlueBubbles carries no bold/italic data); and **suggested replies** (rule-based chips above the
+> the upstream format carries no bold/italic data); and **suggested replies** (rule-based chips above the
 > composer when the last message is inbound, gated by a Settings toggle, behind a swappable
 > `SmartReplyProvider` so on-device ML Kit can drop in later). All JS-only — **no native rebuild**
 > (the two migrations run automatically). An adversarial multi-agent review then hardened the set:
@@ -73,7 +73,7 @@ security weaknesses of the original addressed from day one.
 > chat-customization repo incl. no-clobber + photo-only, the backup round-trip incl. the secret-export
 > guard, the reminders state machine incl. reschedule-failure-intact, the rule-reply engine) against
 > better-sqlite3; typecheck + expo-doctor (21/21) pass. On-device: a chat shows a custom name + green
-> bubbles + mute; a backup shares `bluebubbles-backup.json`; a reminder persists to its list; and
+> bubbles + mute; a backup shares `gator-backup.json`; a reminder persists to its list; and
 > tapping a suggested-reply chip sends it. Tracked follow-ups: lift the duplicate per-chat message
 > subscription, reverting a handle to its server name when a device contact is deleted, and an ML Kit
 > smart-reply provider (no Expo-compatible native module exists today). See `AGENTS.md` for gotchas.
@@ -134,7 +134,7 @@ test/       Jest unit tests for the core layer
 ```
 
 `core/` imports no React/React Native, so it runs in Node (tests) and the headless FCM
-handler, and could be extracted into a standalone `@bluebubbles/sdk`.
+handler, and could be extracted into a standalone `@gator/sdk`.
 
 | Concern | Choice |
 |---|---|
@@ -177,7 +177,7 @@ eas build -p android --profile development
 | Unencrypted local DB | SQLCipher full-DB encryption; key in the vault |
 | FCM tokens / `guid` leaked to logs | `RedactingLogger` scrubs secrets before any sink |
 
-The header-auth and AEAD-payload changes require a matching **BlueBubbles Server** version
+The header-auth and AEAD-payload changes require a matching **Gator Server** version
 (we control the server); setup gates on `MIN_SERVER_VERSION`.
 
 ## Docs

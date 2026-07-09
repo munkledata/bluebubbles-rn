@@ -162,7 +162,7 @@ export async function postLockedNotification(): Promise<void> {
   await ensureChannel();
   await notifee.displayNotification({
     id: 'bb-locked-messages',
-    title: 'BlueBubbles',
+    title: 'Gator',
     body: 'You have new messages',
     android: {
       channelId: CHANNEL_NEW_MESSAGE,

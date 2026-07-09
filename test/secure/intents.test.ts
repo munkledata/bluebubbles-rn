@@ -13,7 +13,7 @@ jest.mock('expo-crypto', () => {
   return { getRandomBytes: (len: number) => new Uint8Array(len).fill((n++ % 254) + 1) };
 });
 
-const ACTION = ALLOWED_ACTIONS[0]; // 'com.bluebubbles.external.GET_SERVER_URL'
+const ACTION = ALLOWED_ACTIONS[0]; // 'com.gator.external.GET_SERVER_URL'
 
 describe('automation token', () => {
   it('mints + persists on first use and is idempotent', async () => {

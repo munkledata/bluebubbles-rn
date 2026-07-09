@@ -1,4 +1,4 @@
-# RN rewrite vs. BlueBubbles Flutter `development`
+# RN rewrite vs. the upstream Flutter `development`
 
 > **STATUS UPDATE (2026-06-30):** Many gaps flagged below are now CLOSED — socket backoff +
 > reconnect escalation, incremental per-page sync, reactive group membership, conversation-details

@@ -10,7 +10,7 @@ function str(v: unknown): string | null {
 /**
  * Normalize a raw Find My device. Tolerates both shapes: the Gator fork emits
  * `{ name, deviceModel, batteryLevel, coordinates: [lat, lng] }` (no id/address); upstream
- * BlueBubbles emits `location: { latitude, longitude }` + an `address` string/object.
+ * emits `location: { latitude, longitude }` + an `address` string/object.
  */
 export function normalizeDevice(raw: unknown, index: number): FindMyDevice {
   const o = (raw ?? {}) as Record<string, unknown>;

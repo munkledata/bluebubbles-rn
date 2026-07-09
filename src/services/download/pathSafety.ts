@@ -3,7 +3,7 @@
  *
  * Attachment `guid` and `transferName` both come straight from the server. expo-file-system's
  * `resolve()` keeps a leading `..` (unlike Node's `path.resolve`), so a hostile/compromised
- * server sending `guid: "../../databases"` + `transferName: "bluebubbles.db"` could otherwise
+ * server sending `guid: "../../databases"` + `transferName: "gator.db"` could otherwise
  * escape `{documents}/attachments/…` and overwrite the SQLCipher DB (permanent message loss).
  *
  * We neutralize BOTH escape routes: path separators (so a value can never introduce a new path

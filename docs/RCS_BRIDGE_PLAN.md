@@ -41,7 +41,7 @@ paths) + one rationale sentence (so the implementing agent can adapt when realit
 
 ## Context — the goal and the why
 
-**Goal:** full two-way **RCS (plus Google-Messages-held SMS/MMS)** in the BlueBubbles RN app,
+**Goal:** full two-way **RCS (plus Google-Messages-held SMS/MMS)** in the Gator RN app,
 by running a **Go sidecar embedding `libgm`** (the reverse-engineered "Messages for Web"
 protocol library from [mautrix/gmessages](https://github.com/mautrix/gmessages)) on the Mac
 mini next to the Gator server (`~/github/BB/bluebubbles-server`). The sidecar pairs with
@@ -239,7 +239,7 @@ confirm that path is unaffected.
 
 ### Prompt 9 — Rich RCS features: media, reactions, typing, receipts
 **Task:** Media send: route `send-attachment` (base64 envelope → sidecar `POST /send-media`
-→ `UploadMedia` → `MediaContent` in the send request). Reactions: map BlueBubbles tapback
+→ `UploadMedia` → `MediaContent` in the send request). Reactions: map Gator tapback
 types (`associatedMessageType` in `send-reaction`) ↔ `SendReaction` emoji both directions,
 including inbound reaction events → `updated-message`. Typing: inbound `TypingEvent` →
 the daemon's existing typing relay → app typing indicator. Read receipts: app's

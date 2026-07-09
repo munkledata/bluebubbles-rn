@@ -89,7 +89,7 @@ export async function setChatMute(
 }
 
 /**
- * Pin / unpin a chat. Client-local — BlueBubbles pin is a device state, not a server
+ * Pin / unpin a chat. Client-local — Gator pin is a device state, not a server
  * concept; kept out of `upsertChats`' conflict set so a re-sync can't clobber it.
  * The inbox sorts pinned chats first (see `listChatsForInbox`).
  */

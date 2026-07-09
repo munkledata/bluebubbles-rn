@@ -19,7 +19,7 @@ import type { SecureVault } from './vault';
  */
 
 /** Automation actions the app will service. Anything else is rejected (default-deny). */
-export const ALLOWED_ACTIONS = ['com.bluebubbles.external.GET_SERVER_URL'] as const;
+export const ALLOWED_ACTIONS = ['com.gator.external.GET_SERVER_URL'] as const;
 export type AutomationAction = (typeof ALLOWED_ACTIONS)[number];
 
 function isAllowedAction(action: string): action is AutomationAction {
@@ -93,7 +93,7 @@ export function sanitizeIntentParams(
   raw: Record<string, unknown>,
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  if (action === 'com.bluebubbles.external.GET_SERVER_URL') {
+  if (action === 'com.gator.external.GET_SERVER_URL') {
     // Only an opaque caller `id` is echoed back to the automation.
     const id = sanitizeOpaque(raw['id']);
     if (id) out['id'] = id;

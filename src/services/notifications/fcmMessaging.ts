@@ -105,7 +105,7 @@ export async function startFcm(): Promise<void> {
   }
 }
 
-const DEVICE_NAME = `BlueBubbles RN (Android ${Platform.Version})`;
+const DEVICE_NAME = `Gator (Android ${Platform.Version})`;
 
 /**
  * Register this device's FCM token with the connected server so it can push to us. The

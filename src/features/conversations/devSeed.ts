@@ -263,7 +263,7 @@ export async function seedFixtures(): Promise<number> {
         // URL preview demo (Phase 7b): an OG-rich link renders a card on render.
         Message.parse({
           guid: 'cr-url-1',
-          text: 'Project is here: https://github.com/BlueBubblesApp',
+          text: 'Project is here: https://github.com/munkledata',
           isFromMe: false,
           dateCreated: now - 25 * 3600_000,
           originalROWID: 222,

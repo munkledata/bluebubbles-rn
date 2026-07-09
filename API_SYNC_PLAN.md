@@ -35,7 +35,7 @@ widened enum→open string (a closed enum failed the WHOLE page on an `RCS`/unkn
 contract tests added so this class can't silently regress.
 
 **🔴 BIG DISCOVERY — outgoing reconcile architecture (DONE, app master):** Gator's `new-message` is a
-chat.db ROWID-watcher emission that carries **no `tempGuid`** (unlike upstream BlueBubbles). So the optimistic
+chat.db ROWID-watcher emission that carries **no `tempGuid`** (unlike the upstream project). So the optimistic
 send→echo reconcile cannot match by tempGuid. Built `reconcileEchoByContent` (live `DbEventSink` path ONLY —
 never sync, which would false-match historical messages): content-matches the `temp-…` row, promotes it in
 place (id + attachments + `local_path` preserved), honoring cancellation + a ±5min window to defeat
@@ -57,7 +57,7 @@ typedstream decoding); os_version on `server/info`.
 
 ## TL;DR — the core problem
 
-The RN app was ported against **upstream BlueBubbles**'s `/api/v1`. Your server is the **Gator
+The RN app was ported against **the upstream project**'s `/api/v1`. Your server is the **Gator
 fork**, a leaner re-implementation that **claims `protocol/v1` is "frozen / byte-compatible forever"**
 but in practice **diverges from it** (renamed paths, missing fields, changed shapes). Net: **the app
 breaks against Gator today** in several spots. There is also **no shared typed contract for the
@@ -138,7 +138,7 @@ the server). This makes "the serializer and the contract agree" a build error if
    zod + the `apiResponse` unwrap; this just points them at the fixtures.)
 3. **Reverse check (optional).** A server test asserts each serializer's output still matches its
    `protocol/v1` interface + the committed fixture, so the server can't drift silently either.
-4. Publish `@bluebubbles/protocol` (or git-submodule/path-dep it) so the app can eventually import the
+4. Publish `@gator/protocol` (or git-submodule/path-dep it) so the app can eventually import the
    **types** directly and hand-mirror only the zod (or codegen zod from the interfaces via
    `ts-to-zod`).
 

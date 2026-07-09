@@ -11,7 +11,7 @@ _Living checklist of what's NOT yet done, as of 2026-06-21 (after merging the pa
 to master). See [ROADMAP.md](./ROADMAP.md) for the full feature plan and [COMPARISON.md](./COMPARISON.md)
 for the RN-vs-Flutter gap analysis._
 
-## 1. On-device / real-server verification (needs a device + a real BlueBubbles server)
+## 1. On-device / real-server verification (needs a device + a real Gator server)
 Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the **dev-session bypass**
 (`isDevServer()`) means many flows can only be *fully* exercised against a real server.
 - [ ] **Adaptive-from-image theming** — install EAS dev build **`a4bb0781`** (links `react-native-image-colors`),
@@ -80,7 +80,7 @@ are FIXED and merged. These are the deliberate deferrals + the things static rev
 - [ ] 🔴 **F1 realtime** — confirm a socket/FCM-pushed message now BOTH persists to the DB AND posts a
       notification on-device (server hydration + app `chatGuid` fallback).
 - [ ] 🟡 Helper-sourced live event shapes (typing / read-status / group / facetime) vs the app zod schemas —
-      validate against the running BlueBubbles helper dylib (not in either repo).
+      validate against the running Gator helper dylib (not in either repo).
 
 **Recommended — recurrence prevention:**
 - [ ] Extend the contract-test gate to (a) feed the **actual outgoing request JSON** through the server's

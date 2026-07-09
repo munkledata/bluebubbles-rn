@@ -6,7 +6,7 @@ export interface ParsedSetupQr {
 }
 
 /**
- * Parse a BlueBubbles setup QR code.
+ * Parse a Gator setup QR code.
  *
  * The server encodes a JSON array `[password, serverURL, ...]` (matching the
  * Flutter app's `jsonDecode(response)` in server_credentials.dart). We validate
@@ -23,7 +23,7 @@ export function parseSetupQr(raw: string | null | undefined): ParsedSetupQr {
   try {
     decoded = JSON.parse(raw);
   } catch {
-    throw new Error('Scanned code was not a valid BlueBubbles QR code.');
+    throw new Error('Scanned code was not a valid Gator QR code.');
   }
 
   if (!Array.isArray(decoded) || decoded.length < 2) {

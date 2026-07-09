@@ -24,7 +24,7 @@ function attrPresent(attrs: Record<string, unknown> | null | undefined, key: str
  * flagged so the bubble can skip them in text. Unknown attributes are ignored
  * (forward-compatible). Any malformed input falls back to a single plain run.
  *
- * NOTE (Android-only v1): BlueBubbles' data carries no bold/italic/underline
+ * NOTE (Android-only v1): Gator's data carries no bold/italic/underline
  * styling attributes, so only mentions + attachment placeholders are extracted;
  * links are still handled downstream by the bubble's linkify.
  */

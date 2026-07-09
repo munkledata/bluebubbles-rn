@@ -4,7 +4,7 @@ import type { SecureVault } from '@core/secure';
 const KEY_BYTES = 32;
 // MUST match database.ts DB_NAME (kept here so this module never imports the op-sqlite
 // top-level handle — it would break the pure-Node test path).
-const DB_NAME = 'bluebubbles.db';
+const DB_NAME = 'gator.db';
 
 /** Minimal raw-DB surface the rotation needs (the open op-sqlite handle). */
 interface RawExec {

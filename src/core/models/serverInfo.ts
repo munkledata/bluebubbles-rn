@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Subset of GET /api/v1/server/info used for version gating and discovery.
  *
- * Wire-shape tolerance: upstream BlueBubbles emits `server_version` (+ os_version,
+ * Wire-shape tolerance: the upstream app emits `server_version` (+ os_version,
  * private_api, proxy_service); the Gator fork's `coreOperations` emits only `{ version }`.
  * We accept either and coalesce into `server_version` so a Gator server parses (previously
  * the required `server_version` made `.parse` throw → connect failed). Fields the Gator

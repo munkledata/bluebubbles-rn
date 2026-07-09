@@ -101,7 +101,7 @@ export function getSecretBox(): Promise<SecretBox> {
 export async function runCryptoSelfTest(): Promise<{ ok: boolean; detail: string }> {
   try {
     const box = await getSecretBox();
-    const secret = 'bluebubbles-crypto-self-test-✅';
+    const secret = 'gator-crypto-self-test-✅';
     const sealed = await box.seal(secret, 'correct horse battery staple');
     const opened = await box.open(sealed, 'correct horse battery staple');
     let tamperRejected = false;

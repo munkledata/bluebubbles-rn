@@ -7,7 +7,7 @@ import type { ExpoConfig } from 'expo/config';
  * one that needs native config is registered in `plugins` below.
  */
 const config: ExpoConfig = {
-  name: 'BlueBubbles',
+  name: 'Gator',
   slug: 'bluegreengatorappsmessages',
   // EAS account/org that owns the build/project (matches the app package + Firebase
   // project naming; your personal `bluegreengator` account is the alternative).
@@ -17,7 +17,7 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   // Deep-link / protocol activation scheme (mirrors the Flutter app's imessage:// handling).
-  scheme: ['bluebubbles', 'imessage'],
+  scheme: ['gator', 'imessage'],
   assetBundlePatterns: ['**/*'],
   android: {
     package: 'com.bluegreengatorapps.messages',
@@ -38,7 +38,7 @@ const config: ExpoConfig = {
       'android.permission.MODIFY_AUDIO_SETTINGS',
     ],
     adaptiveIcon: {
-      backgroundColor: '#4990de',
+      backgroundColor: '#193154',
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundImage: './assets/android-icon-background.png',
       monochromeImage: './assets/android-icon-monochrome.png',
@@ -60,7 +60,7 @@ const config: ExpoConfig = {
       'expo-camera',
       {
         // QR-code setup scanning only; no microphone.
-        cameraPermission: 'BlueBubbles uses the camera to scan your server’s setup QR code.',
+        cameraPermission: 'Gator uses the camera to scan your server’s setup QR code.',
         recordAudioAndroid: false,
       },
     ],
@@ -68,7 +68,7 @@ const config: ExpoConfig = {
       'expo-image-picker',
       {
         photosPermission:
-          'BlueBubbles needs access to your photos so you can send images in your conversations.',
+          'Gator needs access to your photos so you can send images in your conversations.',
       },
     ],
     [
@@ -84,7 +84,7 @@ const config: ExpoConfig = {
       'expo-audio',
       {
         // Voice-memo recording (the in-bubble player needs no permission).
-        microphonePermission: 'BlueBubbles uses the microphone to record voice messages.',
+        microphonePermission: 'Gator uses the microphone to record voice messages.',
       },
     ],
     [
@@ -93,9 +93,9 @@ const config: ExpoConfig = {
         // Save-to-gallery AND the inline attachment tray, which browses recent photos/videos
         // (getAssetsAsync). The plugin adds the Android READ_MEDIA_IMAGES/VIDEO perms by default.
         savePhotosPermission:
-          'BlueBubbles needs permission to save photos and videos from your conversations to your gallery.',
+          'Gator needs permission to save photos and videos from your conversations to your gallery.',
         photosPermission:
-          'BlueBubbles needs access to your photos so you can attach them to conversations.',
+          'Gator needs access to your photos so you can attach them to conversations.',
         isAccessMediaLocationEnabled: false,
       },
     ],
@@ -104,7 +104,7 @@ const config: ExpoConfig = {
       {
         // Requested only on an explicit "Sync Contacts" tap; adds READ_CONTACTS.
         contactsPermission:
-          'BlueBubbles uses your contacts to show names and photos for your conversations.',
+          'Gator uses your contacts to show names and photos for your conversations.',
       },
     ],
     '@react-native-community/datetimepicker',

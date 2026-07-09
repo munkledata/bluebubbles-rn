@@ -1,7 +1,7 @@
 /**
  * SocketService auth-mode wiring. The secure default puts the password in the
  * handshake `auth` payload (never the URL); legacy mode falls back to a `?guid=`
- * query for a stock/old BlueBubbles server that only reads the legacy param. These
+ * query for a stock/old server that only reads the legacy param. These
  * tests assert the exact `io()` options for each mode so a regression can't silently
  * leak the password into the URL (or break stock-server connectivity).
  */

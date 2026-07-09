@@ -1,4 +1,4 @@
-# Security & Functional Audit — BlueBubbles RN app ↔ Gator server
+# Security & Functional Audit — Gator RN app ↔ Gator server
 
 > **STATUS UPDATE (2026-06-30):** Every APP-SIDE finding is remediated or a documented intentional
 > decision — F1 chat-association fallback, F2–F7 send/edit/unsend/reaction/attachment wire shapes,
@@ -162,7 +162,7 @@ This is a deliberately *hardened* fork. Verified correct:
 
 ## 6. Coverage gaps (need live-host validation)
 - Send-text empty-body (F3) fails silently — must be confirmed on a live Gator + macOS host.
-- The macOS BlueBubbles-helper dylib isn't in this repo — helper-sourced live event shapes (typing/read-status/group/facetime) need on-device validation.
+- The macOS Gator-helper dylib isn't in this repo — helper-sourced live event shapes (typing/read-status/group/facetime) need on-device validation.
 - WebPush SSRF exploitability/gating and the cross-transport dedup double-alert want one device check each.
 - DNS-rebinding residual on webhook/WebPush isn't catchable from JS.
 - The `db.run`-on-device claim and crypto/SQLCipher self-tests want one empirical device check before rewriting project memory.

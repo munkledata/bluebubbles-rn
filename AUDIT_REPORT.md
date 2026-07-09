@@ -1,4 +1,4 @@
-# BlueBubbles RN — Audit Report (rebuild vs. Flutter original)
+# Gator RN — Audit Report (rebuild vs. Flutter original)
 
 > **STATUS UPDATE (2026-06-30):** Re-verified against the current code — most findings are now
 > RESOLVED. The one CRITICAL item (F-1, no compose/new-chat) is fully built (`app/(app)/new-chat.tsx`

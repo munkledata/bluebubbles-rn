@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Shared zod helpers. BlueBubbles timestamps arrive as epoch-millis numbers
+ * Shared zod helpers. Gator timestamps arrive as epoch-millis numbers
  * (sometimes as numeric strings); coerce defensively at the boundary so the
  * rest of the app works with `number | null`.
  */
@@ -26,7 +26,7 @@ export const KNOWN_SERVICES = ['iMessage', 'SMS', 'RCS'] as const;
 export const ServiceType = z.string();
 export type ServiceType = z.infer<typeof ServiceType>;
 
-/** Envelope every BlueBubbles REST response is wrapped in: { status, data, message }. */
+/** Envelope every Gator REST response is wrapped in: { status, data, message }. */
 export function apiResponse<T extends z.ZodTypeAny>(data: T) {
   return z.object({
     status: z.number(),

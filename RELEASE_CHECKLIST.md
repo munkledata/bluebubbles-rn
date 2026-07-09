@@ -59,7 +59,7 @@ The transport ([FcmPushTransport](./src/core/realtime/pushTransport.ts)) and the
 deferred until you have it.
 
 **Left to do (you), in order:**
-- [ ] Create a Firebase project, add an Android app with the BlueBubbles package id, download
+- [ ] Create a Firebase project, add an Android app with the Gator package id, download
       **`google-services.json`** into the repo root.
 - [ ] `npx expo install @react-native-firebase/app @react-native-firebase/messaging`
 - [ ] In [app.config.ts](./app.config.ts): add `'@react-native-firebase/app'` to `plugins`, and set
@@ -104,7 +104,7 @@ payload, never the URL) and now **coherent across both transports**.
   [test/realtime/socketAuth.test.ts](./test/realtime/socketAuth.test.ts).
 
 **Left to do (you) — pick the path that matches your server:**
-- [ ] **Modified/secure server (recommended, the plan's premise):** make the BlueBubbles server read the
+- [ ] **Modified/secure server (recommended, the plan's premise):** make the Gator server read the
       password from the `Authorization` header (REST) and `socket.handshake.auth.password` (socket).
       Then the app connects securely with no URL-borne credentials. Set the min server version gate
       accordingly.
@@ -225,7 +225,7 @@ callback + per-row `isHighlighted` so the memoized rows hold. Verified the chat 
 ## 4.3 Typing indicators (SEND) — **code-complete; server-gated**
 The Composer debounces a `started/stopped-typing` emit ([Composer.tsx](./src/ui/conversations/Composer.tsx) →
 `onTyping`) → `sendTyping` → `SocketService.emit` (`{chatGuid}`). Covered by a socket-emit test. **Needs the
-BlueBubbles private API** on the server to relay it — can't be verified without a live server.
+Gator private API** on the server to relay it — can't be verified without a live server.
 
 ## 4.4 Group management — **endpoints + leave/roster done; add/remove/rename UI is a follow-up**
 - Endpoints added ([chats.ts](./src/core/api/endpoints/chats.ts)): `updateParticipant` (add/remove),
@@ -262,7 +262,7 @@ receipts like the Flutter app.
 - [ ] **Voice-memo recording** — `expo-audio` recorder + `RECORD_AUDIO` permission + a mic UI. **Native-gated.**
 - [ ] **Document send** — JS-completable WITHOUT a new module: `expo-file-system` `File.pickFileAsync({ multipleFiles })`
       → the (MIME-agnostic) `sendImageMessage` path. A focused follow-up (needs a device to test the picker).
-- [ ] **Android share-intent / content-URI** receive (share a photo *into* BlueBubbles) — needs an
+- [ ] **Android share-intent / content-URI** receive (share a photo *into* Gator) — needs an
       `ACTION_SEND` intent filter + a content-URI→file bridge. **Native-gated.**
 - [ ] **LocationCard static-map thumbnail** + **live-photo video sidecar playback** — need a Maps key /
       `expo-video` sidecar respectively (see the Find My + native-rebuild notes).

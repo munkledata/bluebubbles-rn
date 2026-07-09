@@ -1,7 +1,7 @@
 # iMessage Transcript Backgrounds (iOS/macOS 26) — Reverse-Engineering Runbook
 
 Goal: replicate Apple's iOS/macOS 26 "Backgrounds" feature (a chat wallpaper that syncs to all
-iMessage participants) in BlueBubbles/Gator. This doc records what was proven on a real Tahoe box
+iMessage participants) in Gator. This doc records what was proven on a real Tahoe box
 so the build (and future OS bumps) don't have to rediscover it.
 
 **Environment proven on:** macOS **26.5.2 (25F84)**, **arm64**, Messages **26.0**. Feature is
@@ -46,7 +46,7 @@ The config lives in the **`chat.properties`** BLOB (NSKeyedArchiver / binary pli
    - Native alternative (inside injected helper): `-[IMChat transcriptBackgroundPath]` /
      `+[IMDChatRecord transcriptBackgroundFileURLFromProperties:]` return the local file URL directly.
    - **Fallback** when the cache isn't populated yet: download `trabar`, AES-256-decrypt with `trabak`
-     (drop the 1 tag byte), verify `trabas` — same MMCS path BlueBubbles already uses for attachments.
+     (drop the 1 tag byte), verify `trabas` — same MMCS path Gator already uses for attachments.
 3. **Serve + render:** server exposes the JPEG + a server-owned `backgroundChannelGuid` on ChatV1;
    RN stores a NEW `synced_background_uri` column (do NOT reuse device-local `background_uri` — it's
    deliberately excluded from the upsert conflict set) and renders via the existing

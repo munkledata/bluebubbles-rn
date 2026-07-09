@@ -17,7 +17,7 @@ describe('parseSetupQr', () => {
   });
 
   it('throws on non-JSON', () => {
-    expect(() => parseSetupQr('not-json')).toThrow(/valid BlueBubbles QR/);
+    expect(() => parseSetupQr('not-json')).toThrow(/valid Gator QR/);
   });
 
   it('throws when the array is too short', () => {

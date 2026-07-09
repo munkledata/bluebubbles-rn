@@ -1,6 +1,6 @@
-# BlueBubbles RN — agent orientation
+# Gator RN — agent orientation
 
-A React Native (Expo) + TypeScript rebuild of the Flutter BlueBubbles iMessage client.
+A React Native (Expo) + TypeScript rebuild of the Flutter iMessage client.
 Android-only, iOS-styled. See `README.md` for the full picture and `docs/` for the spikes
 and per-phase dependency plan. The authoritative rebuild plan lives at
 `~/.claude/plans/i-ve-changed-to-the-robust-pine.md`.
@@ -120,7 +120,7 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
 - **attributedBody runs may not tile the whole string** — iMessage often emits a single mention run
   inside a longer message, leaving gaps. A parser that only emits each run's range silently DROPS the
   uncovered text. Track a cursor and emit `[cursor, run.start)` + the trailing remainder as plain runs
-  (see `parseAttributedRuns`). BlueBubbles carries NO bold/italic/underline attributes (grep the
+  (see `parseAttributedRuns`). The upstream format carries NO bold/italic/underline attributes (grep the
   Flutter `lib/` for `kIMText*` → zero hits), so rich text is mentions + links only.
 - **Backups must filter secret-looking kv keys + delete the cache export file.** The export reads only
   `kv`/`themes`/whitelisted `chats` columns (never SecureVault/messages/handles) and drops any key

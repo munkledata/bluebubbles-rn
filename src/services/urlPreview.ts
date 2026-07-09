@@ -119,7 +119,7 @@ export function isSafePreviewUrl(raw: string): boolean {
 /**
  * IMPURE: securely fetch a URL and parse its OG metadata. http(s) only, HTML only,
  * size/time-capped, with an SSRF guard validating the host on EVERY redirect hop (manual
- * redirects). Returns null on any failure (→ negative cache). Does NOT use the BlueBubbles
+ * redirects). Returns null on any failure (→ negative cache). Does NOT use the Gator
  * HttpClient, so the server auth header never leaks to third-party sites.
  */
 export async function fetchOgMetadata(url: string): Promise<OgMetadata | null> {
@@ -133,7 +133,7 @@ export async function fetchOgMetadata(url: string): Promise<OgMetadata | null> {
       const r = await fetch(current, {
         signal: ac.signal,
         redirect: 'manual', // follow manually so each hop is re-validated
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BlueBubbles/1.0)', Accept: 'text/html' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gator/1.0)', Accept: 'text/html' },
       });
       if (r.status >= 300 && r.status < 400) {
         const loc = r.headers.get('location');

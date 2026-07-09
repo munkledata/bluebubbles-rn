@@ -2,7 +2,7 @@ import { safePathSegment } from '@/services/download/pathSafety';
 
 describe('safePathSegment (attachment path-traversal guard)', () => {
   it('neutralizes the reported exploit: a multi-level traversal guid', () => {
-    // Hostile server: guid "../../databases" + transferName "bluebubbles.db" would otherwise
+    // Hostile server: guid "../../databases" + transferName "gator.db" would otherwise
     // overwrite the SQLCipher DB. After sanitizing, the guid is a single harmless segment.
     const out = safePathSegment('../../databases');
     expect(out).not.toMatch(/[/\\]/); // no path separators survive

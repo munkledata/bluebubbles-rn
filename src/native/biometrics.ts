@@ -14,7 +14,7 @@ export async function isBiometricAvailable(): Promise<boolean> {
 }
 
 /** Prompt for biometrics/passcode. Returns true on success. */
-export async function authenticate(reason = 'Unlock BlueBubbles'): Promise<boolean> {
+export async function authenticate(reason = 'Unlock Gator'): Promise<boolean> {
   const result = await LocalAuthentication.authenticateAsync({
     promptMessage: reason,
     // Allow falling back to device PIN/pattern if biometrics fail.

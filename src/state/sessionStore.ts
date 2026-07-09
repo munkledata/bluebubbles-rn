@@ -57,7 +57,7 @@ export const useSessionStore = create<SessionState>((set) => ({
 export const sessionAccessors = {
   getOrigin: (): string => useSessionStore.getState().origin ?? '',
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
-  /** Whether the connected server has the BlueBubbles Private API enabled. */
+  /** Whether the connected server has the Gator Private API enabled. */
   privateApiEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.private_api,
   /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
   rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,

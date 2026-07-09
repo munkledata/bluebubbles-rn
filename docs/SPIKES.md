@@ -22,7 +22,7 @@ foundation pass (which is Node-only). Each has a binary pass/fail gate.
 
 ## 3. Header-auth negotiation against the server
 **Goal:** prove the auth token can move out of the URL into a header end-to-end.
-- Point `HttpClient` at a modified BlueBubbles Server advertising header auth.
+- Point `HttpClient` at a modified Gator Server advertising header auth.
 - **Pass:** authenticated requests succeed with `Authorization: Bearer …` and **no**
   `?guid=` in any URL; a packet/proxy capture confirms the token never appears in a URL.
 

@@ -1,11 +1,11 @@
-# BlueBubbles RN — Data Caching Architecture
+# Gator RN — Data Caching Architecture
 
 *Reference notes, generated 2026-06-24 from a code-verified subsystem audit.*
 
 ## TL;DR
 
 The app is **offline-first with one source of truth: an encrypted on-device SQLite
-database** (`bluebubbles.db`, op-sqlite + SQLCipher). The network never feeds the UI
+database** (`gator.db`, op-sqlite + SQLCipher). The network never feeds the UI
 directly — the sync engine and the realtime (FCM/socket) path **write** into the DB; the
 UI **reads** the DB reactively. Layered on top: secrets in the Android Keystore,
 downloaded media files on disk, a key-value prefs table, in-memory zustand stores, and an
@@ -20,7 +20,7 @@ FTS5 search index.
 
 - op-sqlite compiled with `sqlcipher: true` + `fts5: true` (package.json). AES-encrypted
   at rest; unreadable without the vault's DB key.
-- `initDatabase(key)` opens once via `open({ name: 'bluebubbles.db', encryptionKey })`,
+- `initDatabase(key)` opens once via `open({ name: 'gator.db', encryptionKey })`,
   sets `PRAGMA foreign_keys=ON`, runs transactional name-guarded migrations, then wraps the
   handle in `drizzle(drizzleAdapter(rawDb))`.
 - The **drizzleAdapter Proxy** shims the op-sqlite v17 ↔ drizzle-orm API mismatch and calls

@@ -1,7 +1,7 @@
 /**
  * FaceTime join-link validation.
  *
- * A FaceTime link is supplied by the BlueBubbles/Gator server (the answer + link-mint
+ * A FaceTime link is supplied by the Gator server (the answer + link-mint
  * ops) and carried in Notifee action data — both attacker-influenceable. Before we ever
  * `Linking.openURL` it OR load it in the in-app call WebView, we confirm it's a real
  * FaceTime link, never an arbitrary scheme/Intent (a compromised server could otherwise

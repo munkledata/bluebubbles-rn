@@ -1,5 +1,5 @@
 /**
- * Parse a BlueBubbles FCM data message into (eventName, body) for the EventRouter.
+ * Parse a Gator FCM data message into (eventName, body) for the EventRouter.
  *
  * The server's FCM envelope is `{ type: '<event>', data: '<JSON body>', ...metadata }`:
  * the event name is under `type`, and the body is nested under `data` (a JSON string),

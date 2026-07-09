@@ -19,9 +19,9 @@ describe('bytes', () => {
   });
 
   it('decodes standard base64 produced by Buffer', () => {
-    const original = Buffer.from('hello bluebubbles 🫧', 'utf8');
+    const original = Buffer.from('hello gator 🫧', 'utf8');
     const decoded = fromBase64(original.toString('base64'));
-    expect(Buffer.from(decoded).toString('utf8')).toBe('hello bluebubbles 🫧');
+    expect(Buffer.from(decoded).toString('utf8')).toBe('hello gator 🫧');
   });
 
   it('utf8 round-trips', () => {

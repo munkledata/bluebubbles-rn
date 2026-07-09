@@ -23,7 +23,7 @@ export async function exportBackup(now: number): Promise<void> {
     appVersion: Constants.expoConfig?.version,
   });
   const json = JSON.stringify(backup, null, 2);
-  const file = new File(Paths.cache, 'bluebubbles-backup.json');
+  const file = new File(Paths.cache, 'gator-backup.json');
   if (file.exists) file.delete();
   file.create();
   file.write(json);
@@ -35,7 +35,7 @@ export async function exportBackup(now: number): Promise<void> {
   try {
     await Sharing.shareAsync(file.uri, {
       mimeType: 'application/json',
-      dialogTitle: 'Export BlueBubbles backup',
+      dialogTitle: 'Export Gator backup',
     });
   } finally {
     // Don't leave the plaintext export lingering in the cache directory.
@@ -50,7 +50,7 @@ export async function importBackupText(text: string): Promise<RestoreResult> {
 }
 
 /**
- * Build, encrypt under `passphrase`, and share an encrypted backup file (.bbbackup).
+ * Build, encrypt under `passphrase`, and share an encrypted backup file (.gatorbackup).
  * The cache file is deleted in a finally so nothing lingers. This is the secure default
  * — the encrypted blob is the only thing that leaves the device.
  */
@@ -61,7 +61,7 @@ export async function exportEncryptedBackup(passphrase: string, now: number): Pr
   });
   const box = await getSecretBox();
   const sealed = await sealBackup(box, backup, passphrase);
-  const file = new File(Paths.cache, 'bluebubbles-backup.bbbackup');
+  const file = new File(Paths.cache, 'gator-backup.gatorbackup');
   if (file.exists) file.delete();
   file.create();
   file.write(sealed);
@@ -73,7 +73,7 @@ export async function exportEncryptedBackup(passphrase: string, now: number): Pr
   try {
     await Sharing.shareAsync(file.uri, {
       mimeType: 'application/octet-stream',
-      dialogTitle: 'Export BlueBubbles backup',
+      dialogTitle: 'Export Gator backup',
     });
   } finally {
     if (file.exists) file.delete();
@@ -91,7 +91,7 @@ export async function importEncryptedBackup(
 }
 
 /**
- * Restore from pasted/loaded text, auto-detecting encrypted (.bbbackup) vs legacy
+ * Restore from pasted/loaded text, auto-detecting encrypted (.gatorbackup) vs legacy
  * plaintext JSON. Legacy plaintext needs no passphrase; encrypted requires it.
  */
 export async function importBackupAuto(text: string, passphrase: string): Promise<RestoreResult> {

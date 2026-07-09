@@ -6,7 +6,7 @@ import { ensureDatabase, http } from '@/services';
 import { runOutgoingQueue } from '@/services/send';
 import { httpSyncApi, incrementalSync } from '@/services/sync';
 
-export const BG_SYNC_TASK = 'bluebubbles-bg-sync';
+export const BG_SYNC_TASK = 'gator-bg-sync';
 
 /**
  * Background catch-up: an incremental sync run by WorkManager (~15-min floor,

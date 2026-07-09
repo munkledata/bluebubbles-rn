@@ -4,7 +4,7 @@ import type { AttachmentFetcher } from './downloadService';
 /**
  * DEV-ONLY fetcher: downloads a real public image (picsum, HTTPS) with byte
  * progress, so the on-device progress ring/retry path is exercised without a
- * BlueBubbles server. Installed via setAttachmentFetcher() on the dev session.
+ * Gator server. Installed via setAttachmentFetcher() on the dev session.
  */
 export const devProgressFetcher: AttachmentFetcher = {
   exists(localPath: string | null): boolean {

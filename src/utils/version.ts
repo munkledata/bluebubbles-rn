@@ -1,6 +1,6 @@
 /**
  * Minimal dotted-numeric version comparison (no pre-release semantics needed for
- * BlueBubbles server versions like "1.9.5"). Non-numeric segments are treated
+ * Gator server versions like "1.9.5"). Non-numeric segments are treated
  * as 0 and extra segments are zero-padded.
  */
 export function compareVersions(a: string, b: string): -1 | 0 | 1 {
