@@ -15,7 +15,6 @@ import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
   buildPreview,
-  chatServiceFromGuid,
   dedupeParticipants,
   formatChatDate,
   isGroupRow,
@@ -23,6 +22,7 @@ import {
   participantList,
   redactPreview,
   redactTitle,
+  resolveChatService,
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
@@ -53,9 +53,10 @@ export const ConversationTile = React.memo(function ConversationTile({
   const group = isGroupRow(row);
   const muted = row.muteType === 'mute';
   // Service pill (iMessage / SMS / RCS) — same treatment for all three, coloured to match the
-  // bubble palette. De-duplicated participant photos for the group collage (a contact with two
-  // handles otherwise renders twice).
-  const service = chatServiceFromGuid(row.guid);
+  // bubble palette. Resolved from the participant handle service (not just the guid prefix) so an
+  // SMS-only contact/shortcode reads SMS even when its guid was reported as iMessage. De-duplicated
+  // participant photos for the group collage (a contact with two handles otherwise renders twice).
+  const service = resolveChatService(row.guid, row.handleServices);
   const badge =
     service === 'RCS'
       ? { label: 'RCS', color: theme.color.bubble.rcsBackground }

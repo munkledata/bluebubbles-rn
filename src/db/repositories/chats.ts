@@ -270,6 +270,8 @@ export interface InboxRow {
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
+  /** Comma-joined participant handle services ('iMessage'/'SMS'), for `resolveChatService`. */
+  handleServices: string | null;
   unreadCount: number;
 }
 
@@ -308,6 +310,9 @@ export async function listChatsForInbox(
       (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS participantAvatars,
+      (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS handleServices,
       (SELECT COUNT(*) FROM messages um
          WHERE um.chat_id = c.id AND um.is_from_me = 0 AND um.associated_message_type IS NULL
            AND um.date_created > COALESCE(
@@ -341,6 +346,8 @@ export interface ChatHeaderRow {
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
+  /** Comma-joined participant handle services ('iMessage'/'SMS'), for `resolveChatService`. */
+  handleServices: string | null;
 }
 
 export async function getChatHeader(db: AppDatabase, guid: string): Promise<ChatHeaderRow | null> {
@@ -353,7 +360,10 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
         WHERE ch.chat_id = c.id) AS participantNames,
       (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantAvatars
+        WHERE ch.chat_id = c.id) AS participantAvatars,
+      (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS handleServices
     FROM chats c WHERE c.guid = ${guid} LIMIT 1
   `);
   return rows[0] ?? null;

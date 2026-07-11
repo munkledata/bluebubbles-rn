@@ -4,6 +4,7 @@ import { logger } from '@core/secure';
 import {
   getChatTheme,
   getSyncedBackgroundState,
+  persistServerChat,
   setBackgroundIsLight,
   setSyncedBackgroundUri,
 } from '@db/repositories';
@@ -33,6 +34,18 @@ export async function ensureSyncedBackground(
   guid: string,
 ): Promise<void> {
   try {
+    // Refresh THIS chat's metadata FIRST. The version key (server `backgroundChannelGuid` →
+    // `synced_background_channel`) is written ONLY by upsertChats, which the chat-open path never
+    // runs (it syncs messages only). Without this, a background a participant set/changed after the
+    // last full sync is invisible on open — a null/stale channel makes the compare below a no-op —
+    // until some unrelated sync happens. The server always serializes the channel on the chat, so
+    // one small GET refreshes it; the `alreadyCurrent` check still skips a redundant re-download.
+    try {
+      await persistServerChat(db, await chatsApi.getChat(http, guid));
+    } catch {
+      // best-effort: proceed with whatever channel we already have if the refresh fails.
+    }
+
     const state = await getSyncedBackgroundState(db, guid);
     const channel = state?.channel ?? null;
 

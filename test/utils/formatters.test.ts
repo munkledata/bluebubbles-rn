@@ -5,6 +5,7 @@ import {
   dedupeParticipants,
   formatChatDate,
   isGroupRow,
+  resolveChatService,
   resolveTitle,
 } from '@utils';
 
@@ -188,5 +189,30 @@ describe('chatServiceFromGuid', () => {
     expect(chatServiceFromGuid('SMS;-;+15551234567')).toBe('SMS');
     expect(chatServiceFromGuid('iMessage;-;+15551234567')).toBe('iMessage');
     expect(chatServiceFromGuid(null)).toBeNull();
+  });
+});
+
+describe('resolveChatService', () => {
+  it('trusts an RCS or real SMS guid regardless of handle services', () => {
+    expect(resolveChatService('RCS;-;123', 'SMS')).toBe('RCS');
+    expect(resolveChatService('SMS;-;+15551234567', 'iMessage')).toBe('SMS');
+    expect(resolveChatService(null, 'SMS')).toBeNull();
+  });
+
+  it('keeps iMessage when the guid says iMessage and handles agree (or are unknown)', () => {
+    expect(resolveChatService('iMessage;-;+1', 'iMessage')).toBe('iMessage');
+    expect(resolveChatService('iMessage;-;+1', null)).toBe('iMessage');
+    expect(resolveChatService('iMessage;-;+1', '')).toBe('iMessage');
+  });
+
+  it('overrides an iMessage guid to SMS when EVERY participant handle is SMS', () => {
+    // The reported bug: an SMS-only contact / shortcode reported with an iMessage guid.
+    expect(resolveChatService('iMessage;-;433768', 'SMS')).toBe('SMS');
+    expect(resolveChatService('iMessage;-;+1', 'SMS,SMS')).toBe('SMS');
+  });
+
+  it('does NOT downgrade a mixed group (any iMessage handle keeps it iMessage)', () => {
+    expect(resolveChatService('iMessage;-;chat9', 'iMessage,SMS')).toBe('iMessage');
+    expect(resolveChatService('iMessage;-;chat9', 'SMS,,SMS')).toBe('SMS'); // blanks ignored
   });
 });

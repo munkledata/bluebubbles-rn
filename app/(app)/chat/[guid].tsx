@@ -45,7 +45,7 @@ import { useMessages } from '@features/conversations/useMessages';
 import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 import { scheduleReminder } from '@/services/notifications/remindersService';
 import { isDevServer } from '@utils/isDev';
-import { chatServiceFromGuid } from '@utils';
+import { resolveChatService } from '@utils';
 import {
   Composer,
   ConversationHeader,
@@ -103,6 +103,9 @@ function ChatScreenInner({
   const header = useChatHeader(guid);
   const backgroundUri = useChatBackgroundUri(guid);
   const isGroup = header.data ? isGroupRow(header.data) : false;
+  // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
+  // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
+  const chatService = resolveChatService(guid, header.data?.handleServices);
   // When focusing a search hit, load a window CENTERED on it (context on both sides) instead of the
   // recent window; otherwise the normal recent window. ONE message subscription for the whole screen
   // — fed to the list, smart-reply chips, and the screen-effect trigger (avoids 3× the query work).
@@ -404,6 +407,7 @@ function ChatScreenInner({
       isGroup={isGroup}
       messages={messages}
       accentColor={header.data?.customColor}
+      chatService={chatService}
       hasBackground={hasWallpaper}
       topInset={hasWallpaper ? topBar + EDGE_FADE : 0}
       bottomInset={hasWallpaper ? bottomBar + EDGE_FADE : 0}
@@ -418,9 +422,9 @@ function ChatScreenInner({
       <SmartReplyChips messages={messages} onPick={onSend} />
       <Composer
         placeholder={
-          chatServiceFromGuid(guid) === 'RCS'
+          chatService === 'RCS'
             ? 'RCS Message'
-            : chatServiceFromGuid(guid) === 'SMS'
+            : chatService === 'SMS'
               ? 'Text Message'
               : 'iMessage'
         }

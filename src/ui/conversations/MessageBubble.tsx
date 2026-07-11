@@ -67,10 +67,13 @@ export const MessageBubble = React.memo(function MessageBubble({
   const redacted = useRedactedModeStore((s) => s.enabled);
   const b = theme.color.bubble;
   const isFromMe = msg.isFromMe === 1;
-  // Received rows carry the sender's service via the joined handle; from-me rows have no handle,
-  // so fall back to the chat's own service (from the guid) — that's what colours an outgoing
-  // SMS/RCS bubble correctly instead of the iMessage-blue accent.
-  const effectiveService = msg.senderService ?? chatService ?? null;
+  // From-me bubbles colour from the CHAT's service only — never the joined-handle `senderService`.
+  // On a 1:1 chat an outgoing row DOES carry the recipient's handle (the "no handle for from-me"
+  // assumption is false there), and that handle's service loads/updates asynchronously from the
+  // reactive query, so letting it win the `??` paints a transient green then flips to blue once the
+  // re-sync settles. `chatService` is the stable, authoritative source for own bubbles. Received
+  // bubbles are gray regardless of service, so their `senderService` never affects colour.
+  const effectiveService = isFromMe ? (chatService ?? null) : (msg.senderService ?? chatService ?? null);
   const isSms = effectiveService === 'SMS';
   const isRcs = effectiveService === 'RCS';
   const isError = msg.sendState === 'error' || msg.error !== 0;

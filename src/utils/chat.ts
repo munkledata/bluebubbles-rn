@@ -65,6 +65,32 @@ export function chatServiceFromGuid(
   return 'iMessage';
 }
 
+/**
+ * The service to BADGE/COLOUR a chat with — prefers the authoritative participant handle service
+ * over the guid prefix. The guid is a good first guess, but the server sometimes reports an
+ * `iMessage;-;` guid for a thread whose participants are actually SMS-only (plain texters, or a
+ * shortcode like "433768") — those must read SMS. iMessage links each chat only to handles of its
+ * OWN service, so "every linked participant is an SMS handle" reliably means an SMS/MMS thread.
+ * RCS (the bridge) is always keyed by guid, so it wins first; a real `SMS;-;` guid is trusted as-is.
+ *
+ * @param handleServices comma-joined participant handle services (the inbox/header query's
+ *   `group_concat` of `handles.service`); empty/absent → fall back to the guid prefix.
+ */
+export function resolveChatService(
+  guid: string | null | undefined,
+  handleServices: string | null | undefined,
+): 'iMessage' | 'SMS' | 'RCS' | null {
+  const fromGuid = chatServiceFromGuid(guid);
+  if (fromGuid !== 'iMessage') return fromGuid; // null / RCS / real-SMS guid are already correct
+  // guid says iMessage — override to SMS only when the handles are present AND unanimously SMS.
+  const services = (handleServices ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (services.length > 0 && services.every((s) => s === 'SMS')) return 'SMS';
+  return 'iMessage';
+}
+
 /** A valid 6-digit hex color (e.g. "#1982FC"), used for per-chat accent colors. */
 export function isHexColor(s: string | null | undefined): s is string {
   return !!s && /^#[0-9a-f]{6}$/i.test(s);

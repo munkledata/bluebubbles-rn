@@ -16,6 +16,12 @@ interface MessageListProps {
   /** Newest-first messages (the chat screen owns the single useMessages subscription). */
   messages: EnrichedMessage[];
   accentColor?: string | null;
+  /**
+   * The chat's own outgoing service, resolved by the chat screen from the guid AND the participant
+   * handle service (so an SMS-only thread reported with an `iMessage;-;` guid still colours its
+   * from-me bubbles green). Omit → fall back to the guid prefix alone.
+   */
+  chatService?: 'iMessage' | 'SMS' | 'RCS' | null;
   /** A chat background image is set → unbacked overlay text needs a legibility pill. */
   hasBackground?: boolean;
   /** Extra content padding when the list runs under a floating (wallpaper-mode) header, so the
@@ -37,6 +43,7 @@ export function MessageList({
   isGroup,
   messages,
   accentColor,
+  chatService: chatServiceProp,
   hasBackground,
   topInset = 0,
   bottomInset = 0,
@@ -60,9 +67,9 @@ export function MessageList({
     [topInset, bottomInset],
   );
 
-  // The chat's own outgoing service (from its guid) — from-me rows have no joined handle, so this
-  // is what colours an outgoing SMS/RCS bubble. A stable primitive (chatGuid is stable), memo-safe.
-  const chatService = useMemo(() => chatServiceFromGuid(chatGuid), [chatGuid]);
+  // The chat's own outgoing service — from-me rows have no joined handle, so this is what colours an
+  // outgoing SMS/RCS bubble. Prefer the handle-resolved value the screen passes; else the guid prefix.
+  const chatService = chatServiceProp ?? chatServiceFromGuid(chatGuid);
 
   // messages is newest-first; reverse to chronological for display.
   const rows = useMemo(() => messages.slice().reverse(), [messages]);
