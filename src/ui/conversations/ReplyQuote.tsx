@@ -1,6 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import type { MessagePreview } from '@db/repositories';
+import { useRedactedModeStore } from '@state/redactedModeStore';
+import { redactMessageText, redactTitle } from '@utils/privacy';
 import { useTheme } from '../theme';
 
 interface ReplyQuoteProps {
@@ -13,8 +15,13 @@ interface ReplyQuoteProps {
 /** A dimmed preview of the original message, shown above a reply bubble. Tappable. */
 export function ReplyQuote({ preview, isFromMe, onPress }: ReplyQuoteProps): React.JSX.Element {
   const theme = useTheme();
-  const who = preview.isFromMe === 1 ? 'You' : (preview.senderName ?? 'Unknown');
-  const text = preview.text || (preview.hasAttachments === 1 ? '📎 Attachment' : '');
+  const redacted = useRedactedModeStore((s) => s.enabled);
+  // Redacted mode masks the quoted sender + text like every other content path ("You" reveals
+  // nothing and stays, mirroring the tombstone in MessageBubble).
+  const who =
+    preview.isFromMe === 1 ? 'You' : redactTitle(preview.senderName ?? 'Unknown', redacted);
+  const text =
+    redactMessageText(preview.text, redacted) || (preview.hasAttachments === 1 ? '📎 Attachment' : '');
 
   return (
     <Pressable

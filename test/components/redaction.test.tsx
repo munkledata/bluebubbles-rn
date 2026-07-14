@@ -15,7 +15,7 @@
 import React from 'react';
 import { renderWithTheme, screen } from './support/renderWithTheme';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import type { InboxRow, MessageRow } from '@db/repositories';
+import type { InboxRow, MessagePreview, MessageRow } from '@db/repositories';
 
 // ConversationTile imports markRead from the @/services barrel (pulls native modules at import);
 // MessageBubble renders attachments through @ui/attachments (transitively ky, an untransformed ESM
@@ -67,7 +67,9 @@ function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
   };
 }
 
-function makeMsg(over: Partial<MessageRow> = {}): MessageRow {
+type BubbleMsg = MessageRow & { replyPreview?: MessagePreview | null };
+
+function makeMsg(over: Partial<BubbleMsg> = {}): BubbleMsg {
   return {
     id: 1,
     guid: 'msg-1',
@@ -154,5 +156,51 @@ describe('Redacted mode — MessageBubble', () => {
     await renderWithTheme(<MessageBubble msg={makeMsg({ text: SECRET_TEXT })} showTail />);
     expect(screen.getByText(SECRET_TEXT)).toBeTruthy();
     expect(screen.queryByText('Message')).toBeNull();
+  });
+});
+
+describe('Redacted mode — ReplyQuote (via a reply bubble)', () => {
+  const SECRET_QUOTE = 'the safe combination is 4815162342';
+  const replyMsg = () =>
+    makeMsg({
+      text: SECRET_TEXT,
+      threadOriginatorGuid: 'orig-1',
+      replyPreview: {
+        guid: 'orig-1',
+        text: SECRET_QUOTE,
+        senderName: SECRET_NAME,
+        isFromMe: 0,
+        hasAttachments: 0,
+      },
+    });
+
+  it('masks the quoted sender + text and leaks neither anywhere in the tree', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(<MessageBubble msg={replyMsg()} showTail />);
+
+    // The quote shows generic placeholders…
+    expect(screen.getByText('Contact')).toBeTruthy();
+    expect(screen.getAllByText('Message').length).toBeGreaterThanOrEqual(1);
+    // …and the quoted sender/text appear NOWHERE (incl. the quote's accessibility label).
+    const tree = serializeTree();
+    expect(tree).not.toContain(SECRET_NAME);
+    expect(tree).not.toContain(SECRET_QUOTE);
+    expect(tree).not.toContain(SECRET_TEXT);
+  });
+
+  it('keeps "You" for an own quoted message (reveals nothing) while masking its text', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    const msg = replyMsg();
+    msg.replyPreview!.isFromMe = 1;
+    await renderWithTheme(<MessageBubble msg={msg} showTail />);
+    expect(screen.getByText('You')).toBeTruthy();
+    expect(serializeTree()).not.toContain(SECRET_QUOTE);
+  });
+
+  it('shows the real quoted sender + text when redacted mode is off', async () => {
+    await renderWithTheme(<MessageBubble msg={replyMsg()} showTail />);
+    expect(screen.getByText(SECRET_NAME)).toBeTruthy();
+    expect(screen.getByText(SECRET_QUOTE)).toBeTruthy();
+    expect(screen.queryByText('Contact')).toBeNull();
   });
 });
