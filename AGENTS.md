@@ -262,7 +262,31 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
 ## Verify before claiming done
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # jest (core layer, Node-only)
+npm test            # jest — runs BOTH projects (node + components)
 ```
 On-device behavior (DB, FCM, screens) is verified via the spikes in `docs/SPIKES.md` once
 the Android toolchain / EAS is available.
+
+### Component tests (jest-expo + React Native Testing Library)
+- `npm test` now runs TWO jest projects: `node` (ts-jest, `.test.ts`, the React-free core/db/services
+  layer) and `components` (jest-expo, `test/components/**/*.test.tsx`, the RN/RNTL world). The
+  **file extension is the router** — `.test.ts` → node, `.test.tsx` → components.
+- **`renderWithTheme(ui, { preset? })` is the entry point** (`test/components/support/renderWithTheme.tsx`):
+  it wraps RNTL `render()` in a hydrated `ThemeProvider` and re-exports every RNTL helper, so a test
+  imports from that ONE module. The shared setup (`support/setup.ts`) mocks `@db/database` and resets
+  the theme store after each test.
+- **`__DEV__` IS defined here** (unlike the ts-jest `node` project where it's undefined) — jest-expo
+  provides it. Don't "fix" a `typeof __DEV__ !== 'undefined'` guard on the components side.
+- **RNTL 14 under React 19 is ASYNC — always `await`:** `render()` (via `renderWithTheme`) returns a
+  Promise; `cleanup()` and unmount-effect flushes are async too. After a `fireEvent`, assert via
+  `findBy*`/`waitFor`.
+- **Store mutations that re-render a MOUNTED tree need `await act(async () => …)`** (a bare sync `act()`
+  drops the "not wrapped in act" warning on the floor). **Reset stores in `beforeEach`, not `afterEach`**
+  — an afterEach setState fires on the still-mounted tree and trips an act warning.
+- **NEVER assert `jest.getTimerCount() === 0`.** The jest-expo `Animated` mock leaves residual
+  frame-loop timers regardless of mounting. Either measure a baseline in-situ and drain back TO it
+  (see `messageBubble.test.tsx`) or assert the cleanup contract via start/stop spies
+  (see `typingBubble.test.tsx` / `bubbleEffectCleanup.test.tsx`).
+- **Regression guards for the UI gotchas above** live in `test/components/`: memo-with-stable-callbacks
+  (`conversations/messageRowMemo.test.tsx`), effect cleanup on FlashList recycle
+  (`conversations/bubbleEffectCleanup.test.tsx`), and redacted-mode masking (`redaction.test.tsx`).
