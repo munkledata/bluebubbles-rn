@@ -290,3 +290,15 @@ the Android toolchain / EAS is available.
 - **Regression guards for the UI gotchas above** live in `test/components/`: memo-with-stable-callbacks
   (`conversations/messageRowMemo.test.tsx`), effect cleanup on FlashList recycle
   (`conversations/bubbleEffectCleanup.test.tsx`), and redacted-mode masking (`redaction.test.tsx`).
+- **UI coverage floor: `npm run coverage:ui` must stay ≥ 70%** (statements over `src/ui/**`, barrel
+  `index.ts` files excluded; both jest projects count — see `docs/UI_COVERAGE_70_PLAN.md`, met at
+  ~74% in 2026-07). Files intentionally below the line are native-mock territory (VoiceRecorder,
+  VideoPlayer, AudioAttachment, ThemeStudio, FindMyMap) — don't chase them with mock-testing-a-mock
+  tests; on-device verification covers them.
+- **An un-awaited `fireEvent` can corrupt every LATER test in the file** (React 19 "overlapping
+  act()"), especially for components rendering inside a RN `Modal` — the failures appear only in
+  full-file runs, never in isolation. `await waitFor(...)`/`findBy*` after EVERY state-mutating
+  fireEvent. Related VM limits: `React.lazy`/dynamic `import()` REJECTS under jest (test the lazy
+  child directly; the boundary fallback is the only reachable branch), and helpers doing
+  `await import('react-native')` (e.g. `safeOpenUrl`) are unobservable — mock at the helper
+  boundary via `jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }))`.

@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
+    "coverage:ui": "jest --coverage --collectCoverageFrom='src/ui/**/*.{ts,tsx}' --collectCoverageFrom='!src/ui/**/index.ts' --coverageReporters=text --coverageReporters=json-summary",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src app",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\""
