@@ -1,5 +1,5 @@
-import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PICKER_ORDER,
@@ -14,8 +14,10 @@ export interface SelectedMessage {
   text: string | null;
   isFromMe: boolean;
   senderName: string | null;
-  /** Reaction types the current user has already applied to this message. */
+  /** Classic reaction types the current user has already applied to this message. */
   mine: ReactionBaseType[];
+  /** Arbitrary-emoji tapback glyphs the current user has already applied. */
+  myEmojis?: string[];
   dateCreated: number | null; // for the "recent" edit/unsend gate
   isRetracted: boolean;
   isTemp: boolean; // not yet on the server → can't edit/unsend
@@ -28,8 +30,8 @@ export interface SelectedMessage {
 interface MessageActionsOverlayProps {
   selected: SelectedMessage | null;
   onClose: () => void;
-  /** reaction is a base type ('love') or a removal ('-love'). */
-  onReact: (reaction: string) => void;
+  /** reaction is a base type ('love'), a removal ('-love'), or 'emoji'/'-emoji' with a glyph. */
+  onReact: (reaction: string, emoji?: string) => void;
   onReply: () => void;
   onRemindLater: () => void;
   onEdit: () => void;
@@ -67,6 +69,14 @@ export function MessageActionsOverlay({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const mine = new Set(selected?.mine ?? []);
+  const myEmojis = selected?.myEmojis ?? [];
+  const [emojiDraft, setEmojiDraft] = useState('');
+  const [showEmojiInput, setShowEmojiInput] = useState(false);
+  // Fresh input state each time the menu opens for a (different) message.
+  useEffect(() => {
+    setEmojiDraft('');
+    setShowEmojiInput(false);
+  }, [selected?.guid]);
   const hasText = !!selected?.text && selected.text.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
 
@@ -92,6 +102,19 @@ export function MessageActionsOverlay({
     onClose();
   };
 
+  const pickEmoji = (glyph: string): void => {
+    // Same toggle for an arbitrary-emoji tapback; the glyph rides separately.
+    onReact(myEmojis.includes(glyph) ? removalType('emoji') : 'emoji', glyph);
+    onClose();
+  };
+
+  const submitEmojiDraft = (): void => {
+    const glyph = emojiDraft.trim();
+    // Reject empty or obviously-not-an-emoji input (letters/digits); leave the field open.
+    if (!glyph || /[A-Za-z0-9]/.test(glyph)) return;
+    pickEmoji(glyph);
+  };
+
   return (
     <Modal visible={!!selected} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -114,7 +137,47 @@ export function MessageActionsOverlay({
                 <Text style={styles.emoji}>{reactionMeta(t).emoji}</Text>
               </Pressable>
             ))}
+            {myEmojis.map((g) => (
+              <Pressable
+                key={`emoji-${g}`}
+                onPress={() => pickEmoji(g)}
+                style={[styles.tap, { backgroundColor: theme.color.tint }]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: true }}
+                accessibilityLabel={`Remove ${g} reaction`}
+              >
+                <Text style={styles.emoji}>{g}</Text>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => setShowEmojiInput((v) => !v)}
+              style={styles.tap}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showEmojiInput }}
+              accessibilityLabel="React with any emoji"
+            >
+              <Text style={[styles.plus, { color: theme.color.secondaryLabel }]}>+</Text>
+            </Pressable>
           </View>
+          {showEmojiInput ? (
+            <TextInput
+              value={emojiDraft}
+              onChangeText={setEmojiDraft}
+              onSubmitEditing={submitEmojiDraft}
+              placeholder="Type an emoji…"
+              placeholderTextColor={theme.color.secondaryLabel}
+              autoFocus
+              returnKeyType="send"
+              accessibilityLabel="Emoji reaction input"
+              style={[
+                styles.emojiInput,
+                {
+                  backgroundColor: theme.color.secondaryBackground,
+                  color: theme.color.label,
+                },
+              ]}
+            />
+          ) : null}
           <Pressable
             style={[styles.action, { borderTopColor: theme.color.separator }]}
             onPress={() => {
@@ -212,12 +275,15 @@ const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 16, paddingTop: 16, gap: 12 },
   picker: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     borderRadius: 28,
     padding: 8,
   },
   tap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   emoji: { fontSize: 22 },
+  plus: { fontSize: 26, fontWeight: '300', lineHeight: 30 },
+  emojiInput: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 17 },
   action: { paddingVertical: 14, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
   actionText: { fontSize: 17, fontWeight: '500' },
 });

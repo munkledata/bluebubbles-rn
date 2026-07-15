@@ -19,6 +19,7 @@ import type { ReactionBaseType } from '@core/reactions/reactionType';
 function reaction(over: Partial<ReactionRow> & { baseType: ReactionBaseType }): ReactionRow {
   return {
     targetGuid: 'msg-1',
+    emoji: null,
     isFromMe: 0,
     senderName: null,
     dateCreated: 1_000,

@@ -31,6 +31,7 @@ function m(partial: Partial<MessageRow>): MessageRow {
     didNotifyRecipient: 0,
     associatedMessageGuid: null,
     associatedMessageType: null,
+    associatedMessageEmoji: null,
     threadOriginatorGuid: null,
     expressiveSendStyleId: null,
     senderAddress: null,

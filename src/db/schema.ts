@@ -118,6 +118,8 @@ export const messages = sqliteTable(
     hasAttachments: integer('has_attachments', { mode: 'boolean' }).default(false),
     associatedMessageGuid: text('associated_message_guid'),
     associatedMessageType: text('associated_message_type'),
+    /** Glyph of an arbitrary-emoji tapback (associatedMessageType 'emoji'/'-emoji'). */
+    associatedMessageEmoji: text('associated_message_emoji'),
     threadOriginatorGuid: text('thread_originator_guid'),
     expressiveSendStyleId: text('expressive_send_style_id'),
     error: integer('error').default(0),

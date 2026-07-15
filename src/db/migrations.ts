@@ -298,4 +298,12 @@ export const MIGRATIONS: Migration[] = [
     name: '0014_background_luminance',
     statements: [`ALTER TABLE chats ADD COLUMN background_is_light INTEGER`],
   },
+  {
+    // Arbitrary-emoji tapbacks (iOS 18 / macOS 15): the server sends
+    // associatedMessageType 'emoji'/'-emoji' with the glyph in associatedMessageEmoji.
+    // Persist the glyph so the reaction cluster can render it (and removals can match
+    // per-glyph). Additive; applied transactionally + idempotently by name.
+    name: '0015_message_assoc_emoji',
+    statements: [`ALTER TABLE messages ADD COLUMN associated_message_emoji TEXT`],
+  },
 ];

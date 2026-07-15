@@ -15,8 +15,10 @@ import { generateTempGuid } from './sendService';
 export interface SendReactionArgs {
   chatGuid: string;
   targetGuid: string;
-  /** 'love' | 'like' | … or '-love' etc. to remove an existing one. */
+  /** 'love' | 'like' | … or '-love' etc. to remove; 'emoji'/'-emoji' for an arbitrary emoji. */
   reaction: string;
+  /** The glyph for an 'emoji'/'-emoji' tapback (required then, absent for classic types). */
+  emoji?: string;
   selectedMessageText?: string;
 }
 
@@ -42,6 +44,7 @@ export async function sendReactionMessage(
     chatGuid: args.chatGuid,
     targetGuid: args.targetGuid,
     reaction: args.reaction,
+    emoji: args.emoji,
     selectedMessageText: args.selectedMessageText,
     now,
   });
@@ -51,6 +54,7 @@ export async function sendReactionMessage(
       chatGuid: args.chatGuid,
       selectedMessageGuid: args.targetGuid,
       reaction: args.reaction,
+      emoji: args.emoji,
     });
     // Reactions require the Private API, so the ack carries the real GUID on success.
     // If it's ever absent, flip to 'sent' + drop the queue row (no spurious retry); the live

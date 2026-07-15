@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { reactionMeta } from '@core/reactions/reactionType';
+import { reactionMeta, type ReactionBaseType } from '@core/reactions/reactionType';
 import type { ReactionRow } from '@db/repositories';
 import { useTheme } from '../theme';
 
@@ -20,25 +20,32 @@ export function ReactionCluster({
 }: ReactionClusterProps): React.JSX.Element | null {
   const theme = useTheme();
   if (reactions.length === 0) return null;
-  const types = [...new Set(reactions.map((r) => r.baseType))];
-  const mine = new Set(reactions.filter((r) => r.isFromMe).map((r) => r.baseType));
+  // One badge per distinct classic type OR distinct emoji glyph ('emoji::<glyph>' keys).
+  const keyOf = (r: (typeof reactions)[number]): string =>
+    r.baseType === 'emoji' ? `emoji::${r.emoji ?? ''}` : r.baseType;
+  const glyphOf = (key: string): string =>
+    key.startsWith('emoji::')
+      ? key.slice('emoji::'.length)
+      : reactionMeta(key as ReactionBaseType).emoji;
+  const keys = [...new Set(reactions.map(keyOf))];
+  const mine = new Set(reactions.filter((r) => r.isFromMe).map(keyOf));
 
   return (
     <View style={[styles.row, isFromMe ? styles.left : styles.right]} pointerEvents="none">
-      {types.map((t) => (
+      {keys.map((k) => (
         <View
-          key={t}
+          key={k}
           style={[
             styles.badge,
             {
-              backgroundColor: mine.has(t)
+              backgroundColor: mine.has(k)
                 ? theme.color.tint
                 : theme.color.bubble.receivedBackgroundBottom,
               borderColor: theme.color.background,
             },
           ]}
         >
-          <Text style={styles.emoji}>{reactionMeta(t).emoji}</Text>
+          <Text style={styles.emoji}>{glyphOf(k)}</Text>
         </View>
       ))}
     </View>

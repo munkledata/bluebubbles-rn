@@ -21,6 +21,7 @@ interface TextPayload {
 interface ReactionPayload {
   selectedMessageGuid: string;
   reaction: string;
+  emoji?: string;
   selectedMessageText?: string;
 }
 
@@ -48,6 +49,7 @@ async function resend(
         chatGuid: row.chatGuid,
         selectedMessageGuid: p.selectedMessageGuid,
         reaction: p.reaction,
+        emoji: p.emoji,
       });
     } else {
       // Attachment re-upload from the queue isn't supported yet (needs the file at

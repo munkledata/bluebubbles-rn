@@ -195,15 +195,19 @@ function ChatScreenInner({
   // memoized message rows aren't re-rendered by a fresh closure each render.
   const onLongPressMessage = useCallback((msg: EnrichedMessage): void => {
     const mine = msg.reactions
-      .filter((r) => r.isFromMe)
+      .filter((r) => r.isFromMe && r.baseType !== 'emoji')
       .map((r) => r.baseType)
       .filter((t): t is ReactionBaseType => !!parseReactionType(t));
+    const myEmojis = msg.reactions
+      .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
+      .map((r) => r.emoji as string);
     setSelected({
       guid: msg.guid,
       text: msg.text,
       isFromMe: msg.isFromMe === 1,
       senderName: msg.senderName,
       mine,
+      myEmojis,
       dateCreated: msg.dateCreated,
       isRetracted: !!msg.dateRetracted,
       isTemp: msg.guid.startsWith('temp-'),
@@ -258,15 +262,16 @@ function ChatScreenInner({
     );
   };
 
-  const onReact = (reaction: string): void => {
+  const onReact = (reaction: string, emoji?: string): void => {
     if (!selected) return;
     const args = {
       chatGuid: guid,
       targetGuid: selected.guid,
       reaction,
+      emoji,
       selectedMessageText: selected.text ?? '',
     };
-    if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction);
+    if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction, emoji);
     else void react(args);
   };
 

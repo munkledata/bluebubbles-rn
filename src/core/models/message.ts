@@ -50,6 +50,8 @@ export const Message = z.object({
   /** Reaction/threading linkage. */
   associatedMessageGuid: z.string().nullish(),
   associatedMessageType: z.string().nullish(),
+  /** Glyph of an arbitrary-emoji tapback (associatedMessageType 'emoji'/'-emoji'). */
+  associatedMessageEmoji: z.string().nullish(),
   threadOriginatorGuid: z.string().nullish(),
 
   /** iMessage expressive send effect id (effectMap in constants.dart). */

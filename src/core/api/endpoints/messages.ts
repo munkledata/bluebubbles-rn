@@ -111,8 +111,10 @@ export interface SendReactionParams {
   chatGuid: string;
   /** Server GUID of the message being reacted to. */
   selectedMessageGuid: string;
-  /** 'love' | 'like' | … or '-love' etc. to remove. */
+  /** 'love' | 'like' | … or '-love' etc. to remove; 'emoji'/'-emoji' for an arbitrary-emoji tapback. */
   reaction: string;
+  /** The glyph for an 'emoji'/'-emoji' tapback. REQUIRED then; must be ABSENT for classic types. */
+  emoji?: string;
   /** Target part for multipart messages; defaults to 0. */
   partIndex?: number;
 }
@@ -132,6 +134,9 @@ export function sendReaction(http: HttpClient, params: SendReactionParams): Prom
       chatGuid: params.chatGuid,
       messageGuid: params.selectedMessageGuid,
       reactionType: params.reaction,
+      // The server REJECTS reactionEmoji on classic tapbacks (and requires it on
+      // 'emoji'/'-emoji'), so the key must be ABSENT — not null — unless a glyph is given.
+      ...(params.emoji ? { reactionEmoji: params.emoji } : {}),
       partIndex: params.partIndex ?? 0,
     },
   });

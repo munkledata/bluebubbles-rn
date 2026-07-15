@@ -94,6 +94,8 @@ export async function insertOutgoingReaction(
     chatGuid: string;
     targetGuid: string;
     reaction: string;
+    /** Glyph for an 'emoji'/'-emoji' tapback; persisted so the optimistic badge renders it. */
+    emoji?: string;
     selectedMessageText?: string;
     now: number;
   },
@@ -108,6 +110,7 @@ export async function insertOutgoingReaction(
     error: 0,
     associatedMessageGuid: args.targetGuid,
     associatedMessageType: args.reaction,
+    associatedMessageEmoji: args.emoji ?? null,
   });
   await db.insert(outgoingQueue).values({
     tempGuid: args.tempGuid,
@@ -116,6 +119,7 @@ export async function insertOutgoingReaction(
     payload: JSON.stringify({
       selectedMessageGuid: args.targetGuid,
       reaction: args.reaction,
+      ...(args.emoji ? { emoji: args.emoji } : {}),
       selectedMessageText: args.selectedMessageText ?? '',
     }),
   });

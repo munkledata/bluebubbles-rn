@@ -59,6 +59,7 @@ export async function upsertMessages(
           hasAttachments: m.hasAttachments ?? (m.attachments?.length ?? 0) > 0,
           associatedMessageGuid: m.associatedMessageGuid ?? null,
           associatedMessageType: m.associatedMessageType ?? null,
+          associatedMessageEmoji: m.associatedMessageEmoji ?? null,
           threadOriginatorGuid: m.threadOriginatorGuid ?? null,
           expressiveSendStyleId: m.expressiveSendStyleId ?? null,
           error: m.error ?? 0,
@@ -96,6 +97,9 @@ export async function upsertMessages(
         // A later hydrated re-sync can flip a stale 0 → 1; never downgrade 1 → 0 when a fetch
         // omits attachments (excluded = 0), so MAX with the already-stored value.
         hasAttachments: sql`MAX(excluded.has_attachments, ${messages.hasAttachments})`,
+        // COALESCE-preserve the emoji-tapback glyph: a later event that omits it (delivery
+        // receipt re-upsert) must not blank a stored glyph.
+        associatedMessageEmoji: sql`COALESCE(excluded.associated_message_emoji, ${messages.associatedMessageEmoji})`,
       },
     })
     .returning({ id: messages.id, guid: messages.guid });
@@ -260,6 +264,7 @@ export interface MessageRow {
   didNotifyRecipient: number;
   associatedMessageGuid: string | null;
   associatedMessageType: string | null;
+  associatedMessageEmoji: string | null;
   threadOriginatorGuid: string | null;
   expressiveSendStyleId: string | null;
   senderAddress: string | null;
@@ -282,6 +287,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.did_notify_recipient AS didNotifyRecipient,
     m.associated_message_guid AS associatedMessageGuid,
     m.associated_message_type AS associatedMessageType,
+    m.associated_message_emoji AS associatedMessageEmoji,
     m.thread_originator_guid AS threadOriginatorGuid,
     m.expressive_send_style_id AS expressiveSendStyleId,
     h.address AS senderAddress,

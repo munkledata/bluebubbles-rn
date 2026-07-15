@@ -1,10 +1,12 @@
 import { sql } from 'drizzle-orm';
-import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
+import { parseReactionType, type ReactionKind } from '@core/reactions/reactionType';
 import type { AppDatabase } from '../types';
 
 export interface ReactionRow {
   targetGuid: string;
-  baseType: ReactionBaseType;
+  baseType: ReactionKind;
+  /** Glyph of an arbitrary-emoji tapback (baseType 'emoji'); null for classic tapbacks. */
+  emoji: string | null;
   isFromMe: number;
   senderName: string | null;
   dateCreated: number | null;
@@ -29,12 +31,14 @@ export async function listReactionsByMessageGuids(
   const rows = await db.all<{
     targetGuid: string;
     assocType: string;
+    assocEmoji: string | null;
     isFromMe: number;
     senderName: string | null;
     dateCreated: number | null;
     handleId: number | null;
   }>(sql`
     SELECT m.associated_message_guid AS targetGuid, m.associated_message_type AS assocType,
+           m.associated_message_emoji AS assocEmoji,
            m.is_from_me AS isFromMe, m.handle_id AS handleId, m.date_created AS dateCreated,
            COALESCE(h.display_name, h.address) AS senderName
     FROM messages m
@@ -44,17 +48,23 @@ export async function listReactionsByMessageGuids(
     ORDER BY m.date_created ASC, m.id ASC
   `);
 
-  // Collapse per (target, sender, baseType): last write wins.
+  // Collapse per (target, sender, kind[, glyph]): last write wins. Emoji tapbacks key on
+  // the glyph too — different emojis from one sender coexist, and a '-emoji' removal only
+  // clears its own glyph.
   const latest = new Map<string, { row: ReactionRow; isRemoval: boolean }>();
   for (const r of rows) {
     const parsed = parseReactionType(r.assocType);
     if (!parsed) continue;
+    const emoji = parsed.baseType === 'emoji' ? (r.assocEmoji ?? null) : null;
+    if (parsed.baseType === 'emoji' && !emoji) continue; // glyph-less emoji row is unrenderable
     const senderKey = r.isFromMe ? 'me' : `h${r.handleId ?? '?'}`;
-    latest.set(`${r.targetGuid}::${senderKey}::${parsed.baseType}`, {
+    const kindKey = emoji ? `emoji::${emoji}` : parsed.baseType;
+    latest.set(`${r.targetGuid}::${senderKey}::${kindKey}`, {
       isRemoval: parsed.isRemoval,
       row: {
         targetGuid: r.targetGuid,
         baseType: parsed.baseType,
+        emoji,
         isFromMe: r.isFromMe,
         senderName: r.isFromMe ? null : r.senderName,
         dateCreated: r.dateCreated,
