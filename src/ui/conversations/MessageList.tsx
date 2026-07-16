@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native';
 import { discardMessage, retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
-import { chatServiceFromGuid } from '@utils';
+import { chatServiceFromGuid, isGroupEvent } from '@utils';
 import { usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageRow } from './MessageRow';
@@ -30,10 +30,18 @@ interface MessageListProps {
   /** Same, for the floating composer at the bottom. */
   bottomInset?: number;
   onLongPressMessage?: (msg: EnrichedMessage) => void;
+  /** Swipe a bubble right past the threshold → set it as the reply target. */
+  onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
   onRefresh?: () => Promise<unknown>;
+  /** Scrolled to the OLDEST loaded message → grow the window (load older history). Omit or return
+   *  when there's nothing more to load. */
+  onLoadOlder?: () => void;
   /** A message guid to scroll to + highlight once on open (set when arriving from a search hit). */
   focusGuid?: string;
+  /** Multi-select mode: the selected guids (null/undefined = off) + the toggle callback. */
+  selectedGuids?: Set<string> | null;
+  onToggleSelect?: (msg: EnrichedMessage) => void;
 }
 
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
@@ -48,8 +56,12 @@ export function MessageList({
   topInset = 0,
   bottomInset = 0,
   onLongPressMessage,
+  onSwipeReply,
   onRefresh,
+  onLoadOlder,
   focusGuid,
+  selectedGuids,
+  onToggleSelect,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
@@ -73,9 +85,10 @@ export function MessageList({
 
   // messages is newest-first; reverse to chronological for display.
   const rows = useMemo(() => messages.slice().reverse(), [messages]);
-  // Newest outgoing message = the LAST isFromMe in chronological order.
+  // Newest outgoing message = the LAST isFromMe in chronological order. Skip group events (an own
+  // "You named the conversation" is isFromMe but carries no delivery status).
   const lastOutgoingId = useMemo(
-    () => rows.reduce<number>((acc, r) => (r.isFromMe === 1 ? r.id : acc), -1),
+    () => rows.reduce<number>((acc, r) => (r.isFromMe === 1 && !isGroupEvent(r) ? r.id : acc), -1),
     [rows],
   );
 
@@ -127,13 +140,15 @@ export function MessageList({
   const focusReady = focusGuid != null && focusIndex >= 0;
   // Highlight the target once it's mounted in view (once per target); nudge it toward center.
   const focusedRef = useRef<string | null>(null);
+  const focusScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!focusReady || focusedRef.current === focusGuid) return;
     focusedRef.current = focusGuid ?? null;
     setHighlightGuid(focusGuid ?? null);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 3000);
-    setTimeout(() => {
+    if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
+    focusScrollTimer.current = setTimeout(() => {
       try {
         listRef.current?.scrollToIndex({ index: focusIndex, animated: false, viewPosition: 0.35 });
       } catch {
@@ -141,6 +156,15 @@ export function MessageList({
       }
     }, 450);
   }, [focusReady, focusGuid, focusIndex]);
+
+  // Unmount: clear both delayed one-shots so a late fire can't setState/scroll a dead list.
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
+    },
+    [],
+  );
 
   // Reveal the user's OWN just-sent message even if they'd scrolled up: when a NEW message from me
   // lands as the chronological tail, jump to the end. (Incoming-while-near-bottom is handled natively
@@ -179,6 +203,11 @@ export function MessageList({
             : { startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }
         }
         refreshControl={onRefresh ? refreshControl : undefined}
+        // Reaching the START of the (chronological) data = scrolled to the oldest loaded message →
+        // load older history. maintainVisibleContentPosition keeps the viewport pinned as the
+        // newly-prepended older rows come in, so the scroll doesn't jump.
+        onStartReached={onLoadOlder}
+        onStartReachedThreshold={0.5}
         renderItem={({ item, index }: { item: EnrichedMessage; index: number }) => (
           <MessageRow
             msg={item}
@@ -191,6 +220,10 @@ export function MessageList({
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}
             onLongPress={onLongPressMessage}
+            onSwipeReply={onSwipeReply}
+            selecting={selectedGuids != null}
+            isSelected={selectedGuids?.has(item.guid) ?? false}
+            onToggleSelect={onToggleSelect}
             onJumpToReply={jumpToReply}
             isHighlighted={item.guid === highlightGuid}
           />
@@ -215,7 +248,8 @@ export function MessageList({
         isAttachment={failedImage !== undefined}
         onClose={() => setFailed(null)}
         onRetry={() => {
-          if (failed) void retry(failed.guid, { chatGuid, text: failed.text ?? '', image: failedImage });
+          if (failed)
+            void retry(failed.guid, { chatGuid, text: failed.text ?? '', image: failedImage });
         }}
         onDelete={() => {
           if (failed) void discardMessage(failed.guid);

@@ -1,78 +1,115 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
-import { listAllScheduled, type ScheduledRow } from '@db/repositories';
+import {
+  deleteScheduledHistory,
+  listAllScheduled,
+  listScheduledHistory,
+  type ScheduledRow,
+} from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { cancelScheduled, syncScheduledFromServer } from '@/services/send';
-import { Screen, useTheme } from '@ui';
+import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { formatChatDate, formatTime } from '@utils';
 
-/** Pending scheduled messages, reactive; each row can be cancelled. */
+/** One flat-list item: a scheduled row or the COMPLETED section header. */
+type ListItem = { kind: 'header'; key: string; label: string } | { kind: 'row'; row: ScheduledRow };
+
+/**
+ * Scheduled messages: PENDING rows (tap to edit, Cancel to drop) plus a COMPLETED history of
+ * sent/errored one-time sends — previously a failed scheduled send silently vanished from the UI.
+ */
 export default function ScheduledScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   // Reconcile server-scheduled rows on open so the list reflects what the server is tracking.
   useEffect(() => {
     void syncScheduledFromServer();
   }, []);
-  const { data } = useReactiveQuery<ScheduledRow[]>(
-    () => listAllScheduled(getDatabase()),
+  const { data } = useReactiveQuery<{ pending: ScheduledRow[]; history: ScheduledRow[] }>(
+    async () => ({
+      pending: await listAllScheduled(getDatabase()),
+      history: await listScheduledHistory(getDatabase()),
+    }),
     ['scheduled_messages'],
     [],
   );
-  const rows = data ?? [];
+  const pending = data?.pending ?? [];
+  const history = data?.history ?? [];
+  const items: ListItem[] = [
+    ...pending.map((row): ListItem => ({ kind: 'row', row })),
+    ...(history.length > 0
+      ? [{ kind: 'header', key: 'completed', label: 'COMPLETED' } as ListItem]
+      : []),
+    ...history.map((row): ListItem => ({ kind: 'row', row })),
+  ];
+
+  const statusLine = (row: ScheduledRow): { label: string; color: string } => {
+    if (row.status === 'sent') return { label: '✓ Sent', color: theme.color.tint };
+    if (row.status === 'error')
+      return { label: '✕ Failed to send', color: theme.color.destructive };
+    return {
+      label: `${formatChatDate(row.scheduledFor)} · ${formatTime(row.scheduledFor)}`,
+      color: theme.color.secondaryLabel,
+    };
+  };
+
+  const isPendingRow = (row: ScheduledRow): boolean =>
+    row.status === 'pending' || row.status === 'sending';
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Scheduled</Text>
-        <View style={styles.spacer} />
-      </View>
+      <ScreenHeader title="Scheduled" onBack={() => router.back()} />
 
       <FlashList
-        data={rows}
-        keyExtractor={(r: ScheduledRow) => String(r.id)}
-        renderItem={({ item }: { item: ScheduledRow }) => (
-          <View style={[styles.row, { borderBottomColor: theme.color.separator }]}>
-            <Pressable
-              style={styles.rowText}
-              onPress={() => router.push(`/scheduled-edit/${item.id}`)}
-              accessibilityRole="button"
-              accessibilityLabel={`Edit scheduled message: ${item.text}`}
-            >
-              <Text numberOfLines={2} style={[styles.text, { color: theme.color.label }]}>
-                {item.text}
+        data={items}
+        keyExtractor={(it: ListItem) => (it.kind === 'header' ? it.key : `r-${it.row.id}`)}
+        renderItem={({ item }: { item: ListItem }) => {
+          if (item.kind === 'header') {
+            return (
+              <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>
+                {item.label}
               </Text>
-              <Text style={[styles.when, { color: theme.color.secondaryLabel }]}>
-                {formatChatDate(item.scheduledFor)} · {formatTime(item.scheduledFor)}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() =>
-                void cancelScheduled(item).catch(() =>
-                  showDialog('Scheduled', 'Couldn’t cancel that message.'),
-                )
+            );
+          }
+          const row = item.row;
+          const status = statusLine(row);
+          const pendingRow = isPendingRow(row);
+          return (
+            <ActionListRow
+              title={row.text}
+              subtitle={`${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}`}
+              subtitleColor={status.color}
+              disabled={!pendingRow}
+              onPress={() => router.push(`/scheduled-edit/${row.id}`)}
+              accessibilityLabel={
+                pendingRow
+                  ? `Edit scheduled message: ${row.text}`
+                  : `Scheduled message ${status.label}: ${row.text}`
               }
-              hitSlop={8}
-              style={styles.cancel}
-            >
-              <Text style={[styles.cancelText, { color: theme.color.destructive }]}>Cancel</Text>
-            </Pressable>
-          </View>
-        )}
+              action={
+                pendingRow
+                  ? {
+                      label: 'Cancel',
+                      color: theme.color.destructive,
+                      onPress: () =>
+                        void cancelScheduled(row).catch(() =>
+                          showDialog('Scheduled', 'Couldn’t cancel that message.'),
+                        ),
+                    }
+                  : {
+                      label: 'Clear',
+                      color: theme.color.tertiaryLabel,
+                      onPress: () => void deleteScheduledHistory(getDatabase(), row.id),
+                      accessibilityLabel: 'Remove from history',
+                    }
+              }
+            />
+          );
+        }}
         ListEmptyComponent={
           <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
             No scheduled messages
@@ -84,28 +121,6 @@ export default function ScheduledScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17, width: 70 },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
-  spacer: { width: 70 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  rowText: { flex: 1 },
-  text: { fontSize: 16 },
-  when: { fontSize: 13, marginTop: 3 },
-  cancel: { padding: 4 },
-  cancelText: { fontSize: 15, fontWeight: '500' },
+  sectionLabel: { fontSize: 13, marginTop: 24, marginBottom: 4, marginLeft: 16 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 15 },
 });

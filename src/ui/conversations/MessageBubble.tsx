@@ -1,13 +1,13 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
 import { parseAttributedRuns, type TextRun } from '@core/richtext';
 import type { AttachmentRow, MessagePreview, MessageRow, ReactionRow } from '@db/repositories';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useUrlPreview } from '@features/conversations/useUrlPreview';
-import { errorTitleForCode, firstUrl, resolveBubbleColor, safeOpenUrl } from '@utils';
+import { errorTitleForCode, firstUrl, isBigEmoji, resolveBubbleColor, safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
-import { AttachmentView } from '../attachments';
+import { AttachmentGalleryGrid, AttachmentView } from '../attachments';
 import { BubbleEffectView } from './effects';
 import { ReactionCluster } from './ReactionCluster';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
@@ -73,7 +73,9 @@ export const MessageBubble = React.memo(function MessageBubble({
   // reactive query, so letting it win the `??` paints a transient green then flips to blue once the
   // re-sync settles. `chatService` is the stable, authoritative source for own bubbles. Received
   // bubbles are gray regardless of service, so their `senderService` never affects colour.
-  const effectiveService = isFromMe ? (chatService ?? null) : (msg.senderService ?? chatService ?? null);
+  const effectiveService = isFromMe
+    ? (chatService ?? null)
+    : (msg.senderService ?? chatService ?? null);
   const isSms = effectiveService === 'SMS';
   const isRcs = effectiveService === 'RCS';
   const isError = msg.sendState === 'error' || msg.error !== 0;
@@ -87,25 +89,63 @@ export const MessageBubble = React.memo(function MessageBubble({
   // body from the parsed runs rather than `msg.text` alone — otherwise an edit renders as a blank
   // bubble. `bodyTextOf` strips the U+FFFC attachment placeholder so an attachment-only message
   // isn't a stray-glyph bubble.
-  const runs = parseAttributedRuns(msg.attributedBody, msg.text);
-  const bodyText = bodyTextOf(runs);
+  // Memoized on the source PRIMITIVES (not the row's identity) — parsing runs a JSON.parse, so
+  // it must not re-run on every render of a recycling list row.
+  const { runs, bodyText } = useMemo(() => {
+    const parsed = parseAttributedRuns(msg.attributedBody, msg.text);
+    return { runs: parsed, bodyText: bodyTextOf(parsed) };
+  }, [msg.attributedBody, msg.text]);
   const hasText = bodyText.trim().length > 0;
   const isRetracted = !!msg.dateRetracted;
   const isEdited = !isRetracted && !!msg.dateEdited;
   // Redacted mode also suppresses the link preview (it would leak the URL/title).
-  const previewUrl = !redacted && hasText && !isRetracted ? firstUrl(bodyText) : null;
+  const previewUrl = useMemo(
+    () => (!redacted && hasText && !isRetracted ? firstUrl(bodyText) : null),
+    [redacted, hasText, isRetracted, bodyText],
+  );
   // Own the preview lookup here (not inside the card) so we can also decide whether to draw the
   // raw link text. When the WHOLE message is just a URL and its card loaded, hide the text so we
   // don't show a blue link AND a card (matching iMessage). If the preview failed, keep the link
   // so it's still tappable. Hook is called unconditionally (null url → null) to keep hook order.
   const preview = useUrlPreview(previewUrl);
-  const previewLoaded =
-    !!preview && preview.error !== 1 && (!!preview.title || !!preview.imageUrl);
-  const urlOnly =
-    previewUrl != null &&
-    bodyText.replace(previewUrl, '').trim().replace(/^[).,!?;:'"]+$/, '') === '';
+  const previewLoaded = !!preview && preview.error !== 1 && (!!preview.title || !!preview.imageUrl);
+  const urlOnly = useMemo(
+    () =>
+      previewUrl != null &&
+      bodyText
+        .replace(previewUrl, '')
+        .trim()
+        .replace(/^[).,!?;:'"]+$/, '') === '',
+    [previewUrl, bodyText],
+  );
   // Keep the text bubble if it carries a reaction — the reaction cluster anchors to it.
   const showText = hasText && !(urlOnly && previewLoaded && (msg.reactions?.length ?? 0) === 0);
+  // Subject line (Private API): a bold line above the body. Hidden under redacted mode.
+  const subjectText = msg.subject?.trim() ?? '';
+  const hasSubject = !redacted && subjectText.length > 0;
+  // Emoji-only message (no attachments, no subject) → enlarged, bubble-less (matches iMessage).
+  const emojiOnly = useMemo(() => isBigEmoji(bodyText), [bodyText]);
+  const bigEmoji = !redacted && !hasSubject && atts.length === 0 && emojiOnly;
+  // Reactions anchor to the text/subject/emoji bubble when there is one; for an attachment-ONLY
+  // message they must anchor to the attachment instead, or a tapback on a photo shows nothing.
+  const attsReactionAnchor =
+    reactions.length > 0 && atts.length > 0 && !showText && !hasSubject && !bigEmoji;
+  // A message that is ONLY images (≥2) collapses into a single two-column gallery grid bubble
+  // (iMessage-style) instead of a tall vertical stack. Mixed image+file messages keep the stack.
+  const imageOnlyGallery =
+    atts.length >= 2 && atts.every((a) => (a.mimeType ?? '').startsWith('image/'));
+  const attachmentsNode = imageOnlyGallery ? (
+    <AttachmentGalleryGrid atts={atts} isFromMe={isFromMe} />
+  ) : (
+    atts.map((att, i) => (
+      <AttachmentView
+        key={att.guid}
+        att={att}
+        isFromMe={isFromMe}
+        showTail={showTail && !hasText && i === atts.length - 1}
+      />
+    ))
+  );
 
   // Unsent: replace the whole bubble (incl. reactions/quote/attachments) with a tombstone.
   if (isRetracted) {
@@ -158,17 +198,36 @@ export const MessageBubble = React.memo(function MessageBubble({
             </Text>
           </View>
         </View>
+      ) : attsReactionAnchor ? (
+        // Attachment-only message with a tapback: wrap in a relative anchor so the (absolutely
+        // positioned) reaction cluster pins to the attachment's top corner.
+        <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
+          {attachmentsNode}
+          <ReactionCluster reactions={reactions} isFromMe={isFromMe} />
+        </View>
       ) : (
-        atts.map((att, i) => (
-          <AttachmentView
-            key={att.guid}
-            att={att}
-            isFromMe={isFromMe}
-            showTail={showTail && !hasText && i === atts.length - 1}
-          />
-        ))
+        attachmentsNode
       )}
-      {showText ? (
+      {bigEmoji && showText ? (
+        // Emoji-only: enlarged, no bubble background.
+        <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
+          <Text
+            style={[
+              styles.bigEmoji,
+              {
+                color: textColor,
+                fontSize: theme.font.size.body * 3,
+                lineHeight: theme.font.size.body * 3.4,
+              },
+            ]}
+          >
+            {bodyText}
+          </Text>
+          {reactions.length > 0 ? (
+            <ReactionCluster reactions={reactions} isFromMe={isFromMe} />
+          ) : null}
+        </View>
+      ) : showText || hasSubject ? (
         <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
           <View
             style={[
@@ -176,9 +235,16 @@ export const MessageBubble = React.memo(function MessageBubble({
               { backgroundColor, borderRadius: theme.radius.bubble, ...corners },
             ]}
           >
-            <Text style={[styles.text, { color: textColor, fontSize: theme.font.size.body }]}>
-              {redacted ? 'Message' : renderRuns(runs, textColor, theme.color.tint)}
-            </Text>
+            {hasSubject ? (
+              <Text style={[styles.subject, { color: textColor, fontSize: theme.font.size.body }]}>
+                {subjectText}
+              </Text>
+            ) : null}
+            {showText ? (
+              <Text style={[styles.text, { color: textColor, fontSize: theme.font.size.body }]}>
+                {redacted ? 'Message' : renderRuns(runs, textColor, theme.color.tint)}
+              </Text>
+            ) : null}
           </View>
           {reactions.length > 0 ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} />
@@ -292,6 +358,10 @@ const styles = StyleSheet.create({
     marginVertical: 1,
   },
   text: { lineHeight: 22 },
+  // Bold subject line above the body inside a bubble.
+  subject: { fontWeight: '700', marginBottom: 2 },
+  // Emoji-only message: enlarged, no bubble; sits where the bubble would.
+  bigEmoji: { marginHorizontal: 6, marginVertical: 2 },
   tombstone: { fontStyle: 'italic', fontSize: 13, marginHorizontal: 14, marginVertical: 4 },
   edited: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },
   errorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },

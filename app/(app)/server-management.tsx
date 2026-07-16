@@ -1,30 +1,19 @@
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import { http, startSync } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
-import { Screen, useTheme } from '@ui';
-
-type Totals = {
-  messages?: number;
-  chats?: number;
-  handles?: number;
-  attachments?: number;
-  images?: number;
-  videos?: number;
-  locations?: number;
-};
+import { InfoRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const setServerInfo = useSessionStore((s) => s.setServerInfo);
   const origin = useSessionStore((s) => s.origin);
@@ -36,71 +25,45 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const syncMessages = useSyncStore((s) => s.messages);
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
-  const [latency, setLatency] = useState<number | null>(null);
-  const [reachable, setReachable] = useState<boolean | null>(null);
-  const [totals, setTotals] = useState<Totals | null>(null);
-  const [statsError, setStatsError] = useState(false);
   const [logs, setLogs] = useState<string | null>(null);
 
-  // Measure round-trip latency on mount; guard against setState after unmount.
-  useEffect(() => {
-    let alive = true;
-    const t0 = Date.now();
-    void serverApi
-      .ping(http)
-      .then(() => {
-        if (alive) {
-          setLatency(Date.now() - t0);
-          setReachable(true);
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setReachable(false);
-          setLatency(null);
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Round-trip latency probe. `retry: false` mirrors the endpoint's fail-fast intent — a
+  // reachability check must not mask a down server by silently retrying, and
+  // `staleTime: 0` makes every visit re-probe instead of showing a cached answer.
+  const pingQuery = useQuery({
+    queryKey: ['server', 'ping'],
+    queryFn: async () => {
+      const t0 = Date.now();
+      await serverApi.ping(http);
+      return Date.now() - t0;
+    },
+    retry: false,
+    staleTime: 0,
+  });
+  const latency = pingQuery.data ?? null;
+  const reachable = pingQuery.isSuccess ? true : pingQuery.isError ? false : null;
 
-  // Statistics ARE served on the password path (admin-command dispatcher) — load them on mount.
+  // Statistics ARE served on the password path (admin-command dispatcher) — loaded on mount.
   // On total failure we flag an INLINE error in the section (no modal alert); a partial result
   // (some channels missing on an older server) still shows the numbers it could load.
-  useEffect(() => {
-    let alive = true;
-    void serverApi
-      .serverStatTotals(http)
-      .then((t) => {
-        if (alive) {
-          setTotals(t);
-          setStatsError(false);
-        }
-      })
-      .catch(() => {
-        if (alive) setStatsError(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const statsQuery = useQuery({
+    queryKey: ['server', 'stats'],
+    queryFn: () => serverApi.serverStatTotals(http),
+  });
+  const totals = statsQuery.data ?? null;
+  const statsError = statsQuery.isError;
 
   // Refresh the cached server info (version / macOS / private-API). On a hydrated boot the
   // `connected` action never ran, so the session store still has serverInfo=null → "Unknown";
   // fetching it here populates the STATUS section (and the app-wide `privateApiEnabled` gate).
+  const infoQuery = useQuery({
+    queryKey: ['server', 'info'],
+    queryFn: () => serverApi.serverInfo(http),
+  });
+  const latestServerInfo = infoQuery.data;
   useEffect(() => {
-    let alive = true;
-    void serverApi
-      .serverInfo(http)
-      .then((info) => {
-        if (alive) setServerInfo(info);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [setServerInfo]);
+    if (latestServerInfo) setServerInfo(latestServerInfo);
+  }, [latestServerInfo, setServerInfo]);
 
   // Distinguish "this server doesn't support the action" from a real connection failure so
   // the copy isn't misleading (the old code blamed every 404 on the connection).
@@ -139,14 +102,8 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const onLoadStats = (): void => {
     if (busy) return;
     setBusy('Load Stats');
-    void serverApi
-      .serverStatTotals(http)
-      .then((res) => {
-        setTotals((res as Totals) ?? {});
-        setStatsError(false);
-      })
-      .catch(() => setStatsError(true))
-      .finally(() => setBusy(null));
+    // `refetch` never rejects — success/failure land in `statsQuery.data` / `.isError`.
+    void statsQuery.refetch().finally(() => setBusy(null));
   };
 
   const onViewLogs = (): void => {
@@ -175,72 +132,51 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Server Management</Text>
-        <View style={styles.spacer} />
-      </View>
+      <ScreenHeader title="Server Management" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.content}>
-        <Section label="STATUS" theme={theme}>
-          <InfoRow label="Connection" theme={theme}>
-            {reachable == null ? 'Checking…' : reachable ? 'Reachable' : 'Unreachable'}
-            {latency != null ? ` · ${latency} ms` : ''}
-          </InfoRow>
-          <InfoRow label="Server version" theme={theme}>
-            {serverInfo?.server_version ?? 'Unknown'}
-          </InfoRow>
-          <InfoRow label="macOS" theme={theme}>
-            {serverInfo?.os_version ?? 'Unknown'}
-          </InfoRow>
-          <InfoRow label="Private API" theme={theme}>
-            {serverInfo?.private_api ? 'Enabled' : 'Disabled'}
-          </InfoRow>
-          <InfoRow label="Proxy" theme={theme}>
-            {serverInfo?.proxy_service ?? 'Direct'}
-          </InfoRow>
-          <Pressable
-            onPress={onShareUrl}
-            disabled={!origin}
-            style={[styles.row, { borderTopColor: theme.color.separator }]}
-          >
+        <SettingsSection label="STATUS">
+          <InfoRow
+            label="Connection"
+            value={`${reachable == null ? 'Checking…' : reachable ? 'Reachable' : 'Unreachable'}${
+              latency != null ? ` · ${latency} ms` : ''
+            }`}
+          />
+          <InfoRow label="Server version" value={serverInfo?.server_version ?? 'Unknown'} />
+          <InfoRow label="macOS" value={serverInfo?.os_version ?? 'Unknown'} />
+          <InfoRow label="Private API" value={serverInfo?.private_api ? 'Enabled' : 'Disabled'} />
+          <InfoRow label="Proxy" value={serverInfo?.proxy_service ?? 'Direct'} />
+          <Pressable onPress={onShareUrl} disabled={!origin} style={styles.row}>
             <Text style={[styles.rowLabel, { color: theme.color.label }]}>Server URL</Text>
             <Text
-              style={[styles.rowValue, { color: origin ? theme.color.tint : theme.color.secondaryLabel }]}
+              style={[
+                styles.rowValue,
+                { color: origin ? theme.color.tint : theme.color.secondaryLabel },
+              ]}
               numberOfLines={1}
             >
               {origin ?? 'Unknown'}
             </Text>
           </Pressable>
-          <InfoRow label="Sync" theme={theme}>
-            {syncStatus === 'syncing'
-              ? `Syncing… (${syncChats} chats, ${syncMessages} msgs)`
-              : syncStatus === 'done'
-                ? `Up to date (${syncMessages} msgs)`
-                : syncStatus === 'error'
-                  ? 'Error'
-                  : 'Idle'}
-          </InfoRow>
-        </Section>
-
-        <Section label="ACTIONS" theme={theme}>
-          <ActionRow
-            label="Sync Now"
-            theme={theme}
-            disabled={syncStatus === 'syncing'}
-            onPress={onSyncNow}
+          <InfoRow
+            label="Sync"
+            value={
+              syncStatus === 'syncing'
+                ? `Syncing… (${syncChats} chats, ${syncMessages} msgs)`
+                : syncStatus === 'done'
+                  ? `Up to date (${syncMessages} msgs)`
+                  : syncStatus === 'error'
+                    ? 'Error'
+                    : 'Idle'
+            }
           />
-          <ActionRow label="Server Health" theme={theme} onPress={() => router.push('/server-health')} />
+        </SettingsSection>
+
+        <SettingsSection label="ACTIONS" style={styles.gap}>
+          <ActionRow label="Sync Now" disabled={syncStatus === 'syncing'} onPress={onSyncNow} />
+          <ActionRow label="Server Health" onPress={() => router.push('/server-health')} />
           <ActionRow
             label="Restart iMessage"
-            theme={theme}
             disabled={!!busy}
             busy={busy === 'Restart iMessage'}
             onPress={() =>
@@ -254,7 +190,6 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
           <ActionRow
             label="Restart Services"
-            theme={theme}
             disabled={!!busy}
             busy={busy === 'Restart Services'}
             onPress={() =>
@@ -268,7 +203,6 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
           <ActionRow
             label="Restart Server"
-            theme={theme}
             destructive
             disabled={!!busy}
             busy={busy === 'Restart Server'}
@@ -284,37 +218,22 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
           <ActionRow
             label="View Server Logs"
-            theme={theme}
             disabled={!!busy}
             busy={busy === 'View Logs'}
             onPress={onViewLogs}
           />
-        </Section>
+        </SettingsSection>
 
-        <Section label="STATISTICS" theme={theme}>
-          <InfoRow label="Messages" theme={theme}>
-            {statVal(totals?.messages)}
-          </InfoRow>
-          <InfoRow label="Chats" theme={theme}>
-            {statVal(totals?.chats)}
-          </InfoRow>
-          <InfoRow label="iMessage Numbers" theme={theme}>
-            {statVal(totals?.handles)}
-          </InfoRow>
-          <InfoRow label="Attachments" theme={theme}>
-            {statVal(totals?.attachments)}
-          </InfoRow>
-          <InfoRow label="Photos" theme={theme}>
-            {statVal(totals?.images)}
-          </InfoRow>
-          <InfoRow label="Videos" theme={theme}>
-            {statVal(totals?.videos)}
-          </InfoRow>
-          <InfoRow label="Locations" theme={theme}>
-            {statVal(totals?.locations)}
-          </InfoRow>
+        <SettingsSection label="STATISTICS" style={styles.gap}>
+          <InfoRow label="Messages" value={statVal(totals?.messages)} />
+          <InfoRow label="Chats" value={statVal(totals?.chats)} />
+          <InfoRow label="iMessage Numbers" value={statVal(totals?.handles)} />
+          <InfoRow label="Attachments" value={statVal(totals?.attachments)} />
+          <InfoRow label="Photos" value={statVal(totals?.images)} />
+          <InfoRow label="Videos" value={statVal(totals?.videos)} />
+          <InfoRow label="Locations" value={statVal(totals?.locations)} />
           {statsError ? (
-            <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+            <View style={styles.row}>
               <Text style={[styles.errorText, { color: theme.color.destructive }]}>
                 Couldn’t load statistics. Check your connection, then tap Refresh.
               </Text>
@@ -322,28 +241,28 @@ export default function ServerManagementScreen(): React.JSX.Element {
           ) : null}
           <ActionRow
             label="Refresh Statistics"
-            theme={theme}
             disabled={!!busy}
             busy={busy === 'Load Stats'}
             onPress={onLoadStats}
           />
-        </Section>
+        </SettingsSection>
       </ScrollView>
 
       <Modal visible={logs != null} animationType="slide" onRequestClose={() => setLogs(null)}>
         <Screen>
-          <View
-            style={[
-              styles.header,
-              { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-            ]}
-          >
-            <Pressable onPress={() => setLogs(null)} hitSlop={8}>
-              <Text style={[styles.back, { color: theme.color.tint }]}>Done</Text>
-            </Pressable>
-            <Text style={[styles.title, { color: theme.color.label }]}>Server Logs</Text>
-            <View style={styles.spacer} />
-          </View>
+          <ScreenHeader
+            title="Server Logs"
+            right={
+              <Pressable
+                onPress={() => setLogs(null)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Close server logs"
+              >
+                <Text style={[styles.done, { color: theme.color.tint }]}>Done</Text>
+              </Pressable>
+            }
+          />
           <ScrollView contentContainerStyle={styles.logBody} horizontal={false}>
             <Text style={[styles.logText, { color: theme.color.secondaryLabel }]} selectable>
               {logs}
@@ -355,65 +274,27 @@ export default function ServerManagementScreen(): React.JSX.Element {
   );
 }
 
-function Section({
-  label,
-  theme,
-  children,
-}: {
-  label: string;
-  theme: ReturnType<typeof useTheme>;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <>
-      <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>{label}</Text>
-      <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-        {children}
-      </View>
-    </>
-  );
-}
-
-function InfoRow({
-  label,
-  theme,
-  children,
-}: {
-  label: string;
-  theme: ReturnType<typeof useTheme>;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
-      <Text style={[styles.rowLabel, { color: theme.color.label }]}>{label}</Text>
-      <Text style={[styles.rowValue, { color: theme.color.secondaryLabel }]} numberOfLines={1}>
-        {children}
-      </Text>
-    </View>
-  );
-}
-
+/** Tinted/destructive action row (kit padding): busy shows '…' in place of the chevron. */
 function ActionRow({
   label,
-  theme,
   onPress,
   disabled,
   busy,
   destructive,
 }: {
   label: string;
-  theme: ReturnType<typeof useTheme>;
   onPress: () => void;
   disabled?: boolean;
   busy?: boolean;
   destructive?: boolean;
 }): React.JSX.Element {
+  const theme = useTheme();
   const color = destructive ? theme.color.destructive : theme.color.tint;
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={[styles.row, { borderTopColor: theme.color.separator, opacity: disabled ? 0.4 : 1 }]}
+      style={[styles.row, { opacity: disabled ? 0.4 : 1 }]}
     >
       <Text style={[styles.rowLabel, { color }]}>{label}</Text>
       <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
@@ -424,32 +305,20 @@ function ActionRow({
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17 },
-  title: { fontSize: 17, fontWeight: '600' },
-  spacer: { width: 50 },
-  content: { paddingVertical: 12, paddingBottom: 40 },
-  sectionLabel: { fontSize: 13, marginLeft: 30, marginBottom: 6, marginTop: 22 },
-  group: { marginHorizontal: 16, borderRadius: 12, overflow: 'hidden' },
+  content: { padding: 16, paddingBottom: 40 },
+  gap: { marginTop: 24 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     gap: 12,
   },
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
   errorText: { fontSize: 14, flex: 1, lineHeight: 19 },
+  done: { fontSize: 17, textAlign: 'right' },
   logBody: { padding: 14 },
   logText: { fontSize: 11, fontFamily: 'Menlo', lineHeight: 16 },
 });

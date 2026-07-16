@@ -14,14 +14,10 @@ import { startFcm } from '@/services/notifications/fcmMessaging';
 import { FCM_ENABLED } from '@core/realtime';
 import { setHideNotificationPreview } from '@/services/notifications/notifeeService';
 import { LockScreen } from '@features/lock/LockScreen';
+import { hydrateAllStores } from '@state/hydrateStores';
 import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
-import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
-import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { useSmartReplyStore } from '@state/smartReplyStore';
-import { useThemeStore } from '@state/themeStore';
 import { AppDialog, ErrorBoundary, ThemeProvider } from '@ui';
 
 /**
@@ -34,15 +30,9 @@ export default function RootLayout(): React.JSX.Element {
   const locked = useLockStore((s) => s.locked);
 
   useEffect(() => {
-    void useThemeStore.getState().hydrate();
-    void useSmartReplyStore.getState().hydrate();
-    void useDownloadSettingsStore.getState().hydrate();
-    void useFeatureSettingsStore.getState().hydrate();
-    void useSyncSettingsStore.getState().hydrate();
-    void useRedactedModeStore
-      .getState()
-      .hydrate()
-      .then(() => setHideNotificationPreview(useRedactedModeStore.getState().enabled));
+    void hydrateAllStores().then(() =>
+      setHideNotificationPreview(useRedactedModeStore.getState().enabled),
+    );
     void boot();
     void registerBackgroundSync();
     // Foreground FCM (permission + onMessage); the background handler is already

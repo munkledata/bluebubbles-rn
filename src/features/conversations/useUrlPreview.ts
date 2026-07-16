@@ -47,6 +47,8 @@ export function useUrlPreview(url: string | null): UrlPreviewRow | null {
     },
     TABLES,
     [url],
+    // No URL → no query AND no url_previews subscription (every bubble mounts this hook).
+    { enabled: url != null },
   );
   return data ?? null;
 }

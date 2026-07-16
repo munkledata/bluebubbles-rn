@@ -9,12 +9,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FindMyDevice, FindMyFriend } from '@core/findmy';
 import { useFindMyStore } from '@state/findmyStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { redactTitle } from '@utils';
-import { Screen, useTheme } from '@ui';
+import { Screen, ScreenHeader, useTheme } from '@ui';
 import { FindMyMap, type MapMarker } from '@ui/findmy/FindMyMap';
 
 function openInMaps(lat: number | null, lng: number | null, label: string): void {
@@ -26,8 +25,14 @@ function openInMaps(lat: number | null, lng: number | null, label: string): void
 export default function FindMyScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { devices, friends, items, loading, refreshing, error, load, refresh } = useFindMyStore();
+  const devices = useFindMyStore((s) => s.devices);
+  const friends = useFindMyStore((s) => s.friends);
+  const items = useFindMyStore((s) => s.items);
+  const loading = useFindMyStore((s) => s.loading);
+  const refreshing = useFindMyStore((s) => s.refreshing);
+  const error = useFindMyStore((s) => s.error);
+  const load = useFindMyStore((s) => s.load);
+  const refresh = useFindMyStore((s) => s.refresh);
   const redacted = useRedactedModeStore((s) => s.enabled);
   const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -51,7 +56,13 @@ export default function FindMyScreen(): React.JSX.Element {
   // Every located entity becomes a map marker; redacted mode masks the popup label.
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = [];
-    const push = (id: string, lat: number | null, lng: number | null, name: string, kind: string) => {
+    const push = (
+      id: string,
+      lat: number | null,
+      lng: number | null,
+      name: string,
+      kind: string,
+    ) => {
       if (lat != null && lng != null) out.push({ id, lat, lng, label: redacted ? kind : name });
     };
     devices.forEach((d) => push(midDevice(d, 'd'), d.latitude, d.longitude, d.name, 'Device'));
@@ -64,22 +75,17 @@ export default function FindMyScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Find My</Text>
-        <Pressable onPress={() => void refresh()} hitSlop={8} disabled={refreshing}>
-          <Text style={[styles.refresh, { color: theme.color.tint }]}>
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Find My"
+        onBack={() => router.back()}
+        right={
+          <Pressable onPress={() => void refresh()} hitSlop={8} disabled={refreshing}>
+            <Text numberOfLines={1} style={[styles.refresh, { color: theme.color.tint }]}>
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </Text>
+          </Pressable>
+        }
+      />
 
       {markers.length > 0 ? <FindMyMap markers={markers} focusId={focusId} /> : null}
 
@@ -183,10 +189,7 @@ function DeviceRow({
         </Text>
       </View>
       {hasLoc ? (
-        <Pressable
-          onPress={() => openInMaps(device.latitude, device.longitude, name)}
-          hitSlop={10}
-        >
+        <Pressable onPress={() => openInMaps(device.latitude, device.longitude, name)} hitSlop={10}>
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}
@@ -215,14 +218,15 @@ function FriendRow({
       <View style={styles.rowText}>
         <Text style={[styles.name, { color: theme.color.label }]}>{name}</Text>
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>
-          {redacted ? (hasLoc ? 'Location available' : 'No location') : (friend.address ?? 'No location')}
+          {redacted
+            ? hasLoc
+              ? 'Location available'
+              : 'No location'
+            : (friend.address ?? 'No location')}
         </Text>
       </View>
       {hasLoc ? (
-        <Pressable
-          onPress={() => openInMaps(friend.latitude, friend.longitude, name)}
-          hitSlop={10}
-        >
+        <Pressable onPress={() => openInMaps(friend.latitude, friend.longitude, name)} hitSlop={10}>
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}
@@ -231,17 +235,7 @@ function FriendRow({
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17 },
-  title: { fontSize: 17, fontWeight: '600' },
-  refresh: { fontSize: 15 },
+  refresh: { fontSize: 15, textAlign: 'right' },
   tabs: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   tabText: { fontSize: 15, fontWeight: '600' },

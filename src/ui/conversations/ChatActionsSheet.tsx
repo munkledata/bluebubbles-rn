@@ -9,8 +9,10 @@ import {
   setChatMute,
   setChatPin,
   setChatUnreadLocal,
+  type InboxRow,
 } from '@db/repositories';
 import { markRead } from '@/services';
+import { resolveTitle } from '@utils';
 import { useTheme } from '../theme';
 
 export interface ChatActionTarget {
@@ -20,6 +22,18 @@ export interface ChatActionTarget {
   isArchived: boolean;
   muted: boolean;
   unread: boolean;
+}
+
+/** Map an inbox row to the sheet's target (shared by every conversation list's long-press). */
+export function toChatActionTarget(row: InboxRow): ChatActionTarget {
+  return {
+    guid: row.guid,
+    title: resolveTitle(row),
+    isPinned: !!row.isPinned,
+    isArchived: !!row.isArchived,
+    muted: row.muteType === 'mute',
+    unread: (row.unreadCount ?? 0) > 0,
+  };
 }
 
 interface ChatActionsSheetProps {
@@ -81,7 +95,9 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 sep={theme.color.separator}
                 onPress={() =>
                   run(() =>
-                    target.unread ? markRead(target.guid) : setChatUnreadLocal(getDatabase(), target.guid),
+                    target.unread
+                      ? markRead(target.guid)
+                      : setChatUnreadLocal(getDatabase(), target.guid),
                   )
                 }
               />

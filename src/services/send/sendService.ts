@@ -1,17 +1,9 @@
-import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { sendText } from '@core/api/endpoints/messages';
-import { logger } from '@core/secure';
-import { sendErrorCode } from '@utils';
-import {
-  getChatIdByGuid,
-  insertOutgoingText,
-  markOutgoingSentNoGuid,
-  reconcileOutgoingError,
-  reconcileOutgoingSuccess,
-} from '@db/repositories';
+import { sendText, type MessageMention } from '@core/api/endpoints/messages';
+import { getChatIdByGuid, insertOutgoingText } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { sessionAccessors } from '@state/sessionStore';
+import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 
 /**
  * Pick the send method (mirrors Flutter http_service): effects/replies/edits REQUIRE the
@@ -36,6 +28,10 @@ export interface SendTextArgs {
   text: string;
   selectedMessageGuid?: string;
   effectId?: string;
+  /** Private-API iMessage subject line (bold header above the body). */
+  subject?: string;
+  /** @mention spans in `text` (Private API only — the server builds multipart parts). */
+  mentions?: MessageMention[];
 }
 
 /**
@@ -66,11 +62,16 @@ export async function sendTextMessage(
     // bubble shows its quote before the server echo.
     threadOriginatorGuid: args.selectedMessageGuid,
     effectId: args.effectId,
+    // Persist the subject so the optimistic bubble shows it before the server echo.
+    subject: args.subject,
+    // Into the queue payload only, so a crash-recovery resend keeps the spans.
+    mentions: args.mentions,
   });
 
   try {
+    // Subject lines + mentions, like replies/effects, are Private-API-only features.
     const method = chooseSendMethod(
-      !!args.selectedMessageGuid || !!args.effectId,
+      !!args.selectedMessageGuid || !!args.effectId || !!args.subject || !!args.mentions?.length,
       sessionAccessors.privateApiEnabled(),
     );
     const server = await sendText(http, {
@@ -79,35 +80,13 @@ export async function sendTextMessage(
       message: args.text,
       selectedMessageGuid: args.selectedMessageGuid,
       effectId: args.effectId,
+      subject: args.subject,
+      mentions: args.mentions,
       method,
     });
-    // The server ack carries the real GUID only on the Private-API path. On the
-    // AppleScript fallback (stock server, no helper) the guid is ABSENT — flip the optimistic
-    // row to 'sent' and drop the queue row (no spurious retry); the live socket `new-message`
-    // echo then reconciles it to the real guid by content (Gator emits no tempGuid). Never
-    // call reconcileOutgoingSuccess with an undefined guid.
-    if (server.guid) {
-      await reconcileOutgoingSuccess(db, tempGuid, {
-        guid: server.guid,
-        dateCreated: now,
-        dateDelivered: null,
-      });
-    } else {
-      await markOutgoingSentNoGuid(db, tempGuid);
-    }
+    await reconcileSendOutcome(db, tempGuid, server, now);
   } catch (e) {
-    // Surface WHY the send failed (status + server message) so a failed bubble is
-    // diagnosable from the device log — e.g. an RCS auth-expiry now reads
-    // "...Google login expired... refresh cookies on the dashboard" instead of a
-    // silent errored bubble. The redacting logger scrubs any secret before sinks.
-    const status = e instanceof ApiError ? e.status ?? null : null;
-    const code = sendErrorCode(status);
-    logger.warn(
-      `[send] failed for chat ${args.chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
-        e instanceof Error ? e.message : String(e)
-      }`,
-    );
-    await reconcileOutgoingError(db, tempGuid, code);
+    await handleSendFailure(db, tempGuid, e, 'send', args.chatGuid);
   }
 
   return { tempGuid };

@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Keyboard,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -17,11 +16,13 @@ import { refreshInbox } from '@/services';
 import { useChats } from '@features/conversations/useChats';
 import { getDatabase } from '@db/database';
 import { markAllChatsReadLocal, type InboxRow } from '@db/repositories';
-import { resolveTitle } from '@utils';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
-import { ChatActionsSheet, type ChatActionTarget } from './ChatActionsSheet';
+import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
+import { InboxSeparator } from './FilteredChatListScreen';
 import { PinnedGrid } from './PinnedGrid';
 import { SearchResultsView } from './SearchResultsView';
 
@@ -42,15 +43,7 @@ export function ConversationListScreen(): React.JSX.Element {
   // Only let the KeyboardAvoidingView add padding WHILE the keyboard is up. When it's down the KAV
   // is disabled (contributes 0), so it can't leave the nav-bar-sized residual gap under the bar that
   // Android edge-to-edge otherwise produces after a show/hide cycle.
-  const [kbVisible, setKbVisible] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setKbVisible(true));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKbVisible(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
+  const kbVisible = useKeyboardVisible();
 
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(
@@ -63,14 +56,7 @@ export function ConversationListScreen(): React.JSX.Element {
   // Long-press a tile → pin/mute/archive/delete sheet. Stable so the memoized tiles hold.
   const [actionTarget, setActionTarget] = useState<ChatActionTarget | null>(null);
   const onLongPress = useCallback((row: InboxRow): void => {
-    setActionTarget({
-      guid: row.guid,
-      title: resolveTitle(row),
-      isPinned: !!row.isPinned,
-      isArchived: !!row.isArchived,
-      muted: row.muteType === 'mute',
-      unread: (row.unreadCount ?? 0) > 0,
-    });
+    setActionTarget(toChatActionTarget(row));
   }, []);
 
   const onMarkAllRead = useCallback((): void => {
@@ -82,9 +68,16 @@ export function ConversationListScreen(): React.JSX.Element {
 
   // Typing in the bottom bar replaces the conversation list with the unified search results.
   const searching = search.trim().length > 0;
+  // "Filter Unknown Senders": contact-less chats leave the main inbox for the Unknown Senders list.
+  const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
+  const visible = useMemo(
+    () => (filterUnknown ? rows.filter((r) => r.hasKnownSender === 1) : rows),
+    [rows, filterUnknown],
+  );
+  const unknownCount = filterUnknown ? rows.length - visible.length : 0;
   // Pinned chats render in a grid above the list (iOS).
-  const pinned = useMemo(() => rows.filter((r) => r.isPinned), [rows]);
-  const listData = useMemo(() => rows.filter((r) => !r.isPinned), [rows]);
+  const pinned = useMemo(() => visible.filter((r) => r.isPinned), [visible]);
+  const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
 
   // Scroll the inbox to the top when a DIFFERENT chat jumps to position 0 because it just got a
   // NEWER message — yours or incoming — so the bumped thread is revealed instead of landing above
@@ -180,17 +173,34 @@ export function ConversationListScreen(): React.JSX.Element {
     ) : null;
 
   const ListFooter = (
-    <Pressable
-      onPress={() => router.push('/archived')}
-      style={styles.archivedRow}
-      accessibilityRole="button"
-      accessibilityLabel="Archived conversations"
-    >
-      <View style={styles.archivedInner}>
-        <Icon name="archive-outline" size={16} color={theme.color.secondaryLabel} />
-        <Text style={[styles.archivedText, { color: theme.color.secondaryLabel }]}>Archived</Text>
-      </View>
-    </Pressable>
+    <>
+      {unknownCount > 0 ? (
+        <Pressable
+          onPress={() => router.push('/unknown-senders')}
+          style={styles.archivedRow}
+          accessibilityRole="button"
+          accessibilityLabel={`Unknown senders, ${unknownCount} conversations`}
+        >
+          <View style={styles.archivedInner}>
+            <Icon name="help-circle-outline" size={16} color={theme.color.secondaryLabel} />
+            <Text style={[styles.archivedText, { color: theme.color.secondaryLabel }]}>
+              Unknown Senders ({unknownCount})
+            </Text>
+          </View>
+        </Pressable>
+      ) : null}
+      <Pressable
+        onPress={() => router.push('/archived')}
+        style={styles.archivedRow}
+        accessibilityRole="button"
+        accessibilityLabel="Archived conversations"
+      >
+        <View style={styles.archivedInner}>
+          <Icon name="archive-outline" size={16} color={theme.color.secondaryLabel} />
+          <Text style={[styles.archivedText, { color: theme.color.secondaryLabel }]}>Archived</Text>
+        </View>
+      </Pressable>
+    </>
   );
 
   // The search bar lives at the BOTTOM, inside the KeyboardAvoidingView below — its `padding`
@@ -261,9 +271,7 @@ export function ConversationListScreen(): React.JSX.Element {
               )}
               ListHeaderComponent={listHeader}
               ListFooterComponent={listData.length > 0 ? ListFooter : null}
-              ItemSeparatorComponent={() => (
-                <View style={[styles.separator, { backgroundColor: theme.color.separator }]} />
-              )}
+              ItemSeparatorComponent={InboxSeparator}
               ListEmptyComponent={
                 isLoading ? (
                   <View style={styles.center}>
@@ -316,7 +324,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: 76 },
   listContent: { paddingBottom: 24 },
   center: { paddingTop: 80, alignItems: 'center' },
   emptyText: { fontSize: 16 },

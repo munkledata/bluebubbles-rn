@@ -1,27 +1,18 @@
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { serverApi } from '@core/api';
-import type {
-  AdminStatus,
-  FcmStatus,
-  FindMyKeysStatus,
-  PrivateApiStatus,
-  RcsStatus,
-  ServerAlert,
-  ServerEnv,
-  TlsStatus,
-  ZrokStatus,
-} from '@core/api/endpoints/server';
+import type { RcsStatus, ServerAlert } from '@core/api/endpoints/server';
 import { deriveRcsHealth, deriveRcsHealthFromStatus, type RcsSeverity } from '@core/realtime';
 import { http } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
-import { Screen, useTheme } from '@ui';
+import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Yes' : 'No');
-const okBad = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Connected' : 'Not connected');
+const okBad = (v: boolean | null | undefined): string =>
+  v == null ? '—' : v ? 'Connected' : 'Not connected';
 
 function formatUptime(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return '—';
@@ -39,7 +30,6 @@ function formatUptime(ms: number | null | undefined): string {
 export default function ServerHealthScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const serverInfo = useSessionStore((s) => s.serverInfo);
   // RCS bridge (Google Messages): the capability boolean gates the section (absent on older
   // servers → hidden). The rich, accurate health block comes from the NON-admin `get-rcs-status`
@@ -49,90 +39,103 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const rcsLastAlert = useRcsHealthStore((s) => s.lastAlertType);
   const rcsLastAlertAt = useRcsHealthStore((s) => s.lastAlertAt);
 
-  const [pa, setPa] = useState<PrivateApiStatus>(null);
-  const [env, setEnv] = useState<ServerEnv>(null);
-  const [keys, setKeys] = useState<FindMyKeysStatus>(null);
-  const [fcm, setFcm] = useState<FcmStatus>(null);
-  const [zrok, setZrok] = useState<ZrokStatus>(null);
-  const [ip, setIp] = useState<string | null>(null);
-  const [tls, setTls] = useState<TlsStatus>(null);
-  const [admin, setAdmin] = useState<AdminStatus>(null);
-  const [alerts, setAlerts] = useState<ServerAlert[]>([]);
+  // Each read is its own query — a failure just leaves that card at "—" (data stays undefined),
+  // never blocks the rest. The `?? null` coercions matter: most of these endpoints can resolve
+  // `undefined` (nullish zod schemas), which TanStack Query treats as an error.
+  const queryClient = useQueryClient();
+  const healthQueries = useQueries({
+    queries: [
+      {
+        queryKey: ['server', 'health', 'private-api'],
+        queryFn: async () => (await serverApi.privateApiStatus(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'env'],
+        queryFn: async () => (await serverApi.serverEnv(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'findmy-keys'],
+        queryFn: async () => (await serverApi.findMyKeysStatus(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'fcm'],
+        queryFn: async () => (await serverApi.fcmStatus(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'zrok'],
+        queryFn: async () => (await serverApi.zrokStatus(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'public-ip'],
+        queryFn: () => serverApi.publicIp(http),
+      },
+      {
+        queryKey: ['server', 'health', 'tls'],
+        queryFn: async () => (await serverApi.tlsStatus(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'admin'],
+        queryFn: async () => (await serverApi.adminStatus(http)) ?? null,
+      },
+      {
+        queryKey: ['server', 'health', 'alerts'],
+        queryFn: () => serverApi.serverAlerts(http),
+      },
+      // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
+      // the query stays errored so the RCS row degrades to the capability-only signal.
+      {
+        queryKey: ['server', 'health', 'rcs'],
+        queryFn: async () => (await serverApi.rcsStatus(http)) ?? null,
+      },
+    ],
+  });
+  const [paQ, envQ, keysQ, fcmQ, zrokQ, ipQ, tlsQ, adminQ, alertsQ, rcsQ] = healthQueries;
+  const pa = paQ.data;
+  const env = envQ.data;
+  const keys = keysQ.data;
+  const fcm = fcmQ.data;
+  const zrok = zrokQ.data;
+  const ip = ipQ.data ?? null;
+  const tls = tlsQ.data;
+  const admin = adminQ.data;
+  const alerts = alertsQ.data ?? [];
   // The live `get-rcs-status` block + when it last resolved (to decide whether a socket alert is
-  // fresher than the fetch). `null` block = channel unavailable (older server) → capability-only.
-  const [rcs, setRcs] = useState<RcsStatus>(null);
-  const [rcsFetchedAt, setRcsFetchedAt] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  // fresher than the fetch). No data = channel unavailable (older server) → capability-only.
+  const rcs = rcsQ.data ?? null;
+  const rcsFetchedAt = rcsQ.dataUpdatedAt > 0 ? rcsQ.dataUpdatedAt : null;
+  const refreshing = healthQueries.some((q) => q.isFetching);
   // True when EVERY read failed → the server isn't answering the health channels at all (offline
   // or too old). Shown as a banner so an empty screen reads as a server issue, not an app bug.
-  const [allFailed, setAllFailed] = useState(false);
+  const allFailed = healthQueries.every((q) => q.isError);
 
   const load = useCallback((): void => {
-    setRefreshing(true);
-    // Each read is independent — a failure just leaves that card at "—", never blocks the rest.
-    // `ok` also records that at least one read succeeded, so we can tell "server said nothing"
-    // (some cards are null) apart from "server is unreachable" (all reads rejected).
-    let anyOk = false;
-    const ok =
-      <T,>(set: (v: T) => void) =>
-      (v: T): void => {
-        anyOk = true;
-        set(v);
-      };
-    void Promise.allSettled([
-      serverApi.privateApiStatus(http).then(ok(setPa), () => {}),
-      serverApi.serverEnv(http).then(ok(setEnv), () => {}),
-      serverApi.findMyKeysStatus(http).then(ok(setKeys), () => {}),
-      serverApi.fcmStatus(http).then(ok(setFcm), () => {}),
-      serverApi.zrokStatus(http).then(ok(setZrok), () => {}),
-      serverApi.publicIp(http).then(ok(setIp), () => {}),
-      serverApi.tlsStatus(http).then(ok(setTls), () => {}),
-      serverApi.adminStatus(http).then(ok(setAdmin), () => {}),
-      serverApi.serverAlerts(http).then(ok(setAlerts), () => {}),
-      // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
-      // leave the block null so the RCS row degrades to the capability-only signal.
-      serverApi.rcsStatus(http).then(
-        ok((r: RcsStatus) => {
-          setRcs(r);
-          setRcsFetchedAt(Date.now());
-        }),
-        () => {},
-      ),
-    ]).finally(() => {
-      setAllFailed(!anyOk);
-      setRefreshing(false);
-    });
-  }, []);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional on-mount fetch (sets
-  // the refreshing flag, then fills each card as its read resolves).
-  useEffect(() => load(), [load]);
+    void queryClient.invalidateQueries({ queryKey: ['server', 'health'] });
+  }, [queryClient]);
 
   const onClearAlerts = (): void => {
-    void serverApi.clearServerAlerts(http).finally(() => setAlerts([]));
+    void serverApi
+      .clearServerAlerts(http)
+      .finally(() => queryClient.setQueryData<ServerAlert[]>(['server', 'health', 'alerts'], []));
   };
 
-  const tlsMode = tls ? String(tls.mode ?? tls.tls_mode ?? (tls.enabled ? 'enabled' : 'off')) : null;
+  const tlsMode = tls
+    ? String(tls.mode ?? tls.tls_mode ?? (tls.enabled ? 'enabled' : 'off'))
+    : null;
   const tlsDomain = tls ? (tls.domain ?? tls.tls_domain ?? tls.commonName) : null;
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Server Health</Text>
-        <Pressable onPress={load} hitSlop={8} disabled={refreshing}>
-          <Text style={[styles.action, { color: theme.color.tint }]}>
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Server Health"
+        onBack={() => router.back()}
+        right={
+          <Pressable onPress={load} hitSlop={8} disabled={refreshing}>
+            <Text style={[styles.action, { color: theme.color.tint }]} numberOfLines={1}>
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </Text>
+          </Pressable>
+        }
+      />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -148,78 +151,55 @@ export default function ServerHealthScreen(): React.JSX.Element {
             </Text>
           </View>
         ) : null}
-        <Section label="PRIVATE API" theme={theme}>
-          <InfoRow label="Messages helper" theme={theme}>
-            {pa?.enabled === false ? 'Disabled' : okBad(pa?.connected)}
-          </InfoRow>
-          <InfoRow label="FaceTime helper" theme={theme}>
-            {pa?.ft_enabled === false ? 'Disabled' : okBad(pa?.ft_connected)}
-          </InfoRow>
-        </Section>
+        <SettingsSection label="PRIVATE API">
+          <InfoRow
+            label="Messages helper"
+            value={pa?.enabled === false ? 'Disabled' : okBad(pa?.connected)}
+          />
+          <InfoRow
+            label="FaceTime helper"
+            value={pa?.ft_enabled === false ? 'Disabled' : okBad(pa?.ft_connected)}
+          />
+        </SettingsSection>
 
-        <Section label="FIND MY KEYS" theme={theme}>
-          <InfoRow label="LocalStorage (friends)" theme={theme}>
-            {keyState(keys?.LocalStorage)}
-          </InfoRow>
-          <InfoRow label="FMIP (devices)" theme={theme}>
-            {keyState(keys?.FMIP)}
-          </InfoRow>
-          <InfoRow label="FMF (people cache)" theme={theme}>
-            {keyState(keys?.FMF)}
-          </InfoRow>
+        <SettingsSection label="FIND MY KEYS" style={styles.gap}>
+          <InfoRow label="LocalStorage (friends)" value={keyState(keys?.LocalStorage)} />
+          <InfoRow label="FMIP (devices)" value={keyState(keys?.FMIP)} />
+          <InfoRow label="FMF (people cache)" value={keyState(keys?.FMF)} />
           {env?.findmyNeedsKeys ? (
-            <View style={[styles.hintRow, { borderTopColor: theme.color.separator }]}>
-              <Text style={[styles.hint, { color: theme.color.tertiaryLabel }]}>
-                macOS 14.4+ encrypts the Find My caches — import keys on the server console if a
-                key above is missing, or Find My tabs stay empty.
-              </Text>
-            </View>
+            <NoteRow text="macOS 14.4+ encrypts the Find My caches — import keys on the server console if a key above is missing, or Find My tabs stay empty." />
           ) : null}
-        </Section>
+        </SettingsSection>
 
-        <Section label="PUSH (FCM)" theme={theme}>
-          <InfoRow label="Configured" theme={theme}>
-            {yesNo(fcm?.configured)}
-          </InfoRow>
-          {fcm?.projectId ? (
-            <InfoRow label="Project" theme={theme}>
-              {fcm.projectId}
-            </InfoRow>
-          ) : null}
-        </Section>
+        <SettingsSection label="PUSH (FCM)" style={styles.gap}>
+          <InfoRow label="Configured" value={yesNo(fcm?.configured)} />
+          {fcm?.projectId ? <InfoRow label="Project" value={fcm.projectId} /> : null}
+        </SettingsSection>
 
-        <Section label="ENVIRONMENT" theme={theme}>
-          <InfoRow label="Server version" theme={theme}>
-            {env?.version ?? serverInfo?.server_version ?? 'Unknown'}
-          </InfoRow>
-          <InfoRow label="macOS" theme={theme}>
-            {serverInfo?.os_version ?? 'Unknown'}
-          </InfoRow>
-          <InfoRow label="Node" theme={theme}>
-            {env?.node ?? 'Unknown'}
-          </InfoRow>
-          <InfoRow label="Uptime" theme={theme}>
-            {formatUptime(admin?.uptimeMs)}
-          </InfoRow>
-        </Section>
+        <SettingsSection label="ENVIRONMENT" style={styles.gap}>
+          <InfoRow
+            label="Server version"
+            value={env?.version ?? serverInfo?.server_version ?? 'Unknown'}
+          />
+          <InfoRow label="macOS" value={serverInfo?.os_version ?? 'Unknown'} />
+          <InfoRow label="Node" value={env?.node ?? 'Unknown'} />
+          <InfoRow label="Uptime" value={formatUptime(admin?.uptimeMs)} />
+        </SettingsSection>
 
-        <Section label="CONNECTION" theme={theme}>
-          <InfoRow label="Tunnel (zrok)" theme={theme}>
-            {zrok?.running ? 'Running' : zrok?.available ? 'Available' : 'Off'}
-          </InfoRow>
-          {zrok?.url ? (
-            <InfoRow label="Tunnel URL" theme={theme}>
-              {zrok.url}
-            </InfoRow>
-          ) : null}
-          <InfoRow label="Public IP" theme={theme}>
-            {ip ?? '—'}
-          </InfoRow>
-          <InfoRow label="TLS" theme={theme}>
-            {tlsMode ?? '—'}
-            {typeof tlsDomain === 'string' && tlsDomain ? ` · ${tlsDomain}` : ''}
-          </InfoRow>
-        </Section>
+        <SettingsSection label="CONNECTION" style={styles.gap}>
+          <InfoRow
+            label="Tunnel (zrok)"
+            value={zrok?.running ? 'Running' : zrok?.available ? 'Available' : 'Off'}
+          />
+          {zrok?.url ? <InfoRow label="Tunnel URL" value={zrok.url} /> : null}
+          <InfoRow label="Public IP" value={ip ?? '—'} />
+          <InfoRow
+            label="TLS"
+            value={`${tlsMode ?? '—'}${
+              typeof tlsDomain === 'string' && tlsDomain ? ` · ${tlsDomain}` : ''
+            }`}
+          />
+        </SettingsSection>
 
         {rcsCapability == null ? null : (
           <RcsBridgeSection
@@ -228,39 +208,33 @@ export default function ServerHealthScreen(): React.JSX.Element {
             statusFetchedAt={rcsFetchedAt}
             lastAlertType={rcsLastAlert}
             lastAlertAt={rcsLastAlertAt}
-            theme={theme}
           />
         )}
 
-        <Section label="ALERTS" theme={theme}>
+        <SettingsSection label="ALERTS" style={styles.gap}>
           {alerts.length === 0 ? (
-            <InfoRow label="Server alerts" theme={theme}>
-              None
-            </InfoRow>
+            <InfoRow label="Server alerts" value="None" />
           ) : (
-            <>
-              {alerts.map((a) => (
-                <View key={a.id} style={[styles.row, { borderTopColor: theme.color.separator }]}>
-                  <Text style={[styles.alertText, { color: theme.color.label }]} numberOfLines={3}>
-                    {a.value ?? a.type ?? 'Alert'}
-                  </Text>
-                </View>
-              ))}
-              <Pressable
-                onPress={onClearAlerts}
-                style={[styles.row, { borderTopColor: theme.color.separator }]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Clear Alerts</Text>
-              </Pressable>
-            </>
+            alerts.map((a) => (
+              <View key={a.id} style={styles.row}>
+                <Text style={[styles.alertText, { color: theme.color.label }]} numberOfLines={3}>
+                  {a.value ?? a.type ?? 'Alert'}
+                </Text>
+              </View>
+            ))
           )}
-        </Section>
+          {alerts.length > 0 ? (
+            <NavRow label="Clear Alerts" chevron={false} onPress={onClearAlerts} />
+          ) : null}
+        </SettingsSection>
       </ScrollView>
     </Screen>
   );
 }
 
-function keyState(k: { present?: boolean | null; valid?: boolean | null } | null | undefined): string {
+function keyState(
+  k: { present?: boolean | null; valid?: boolean | null } | null | undefined,
+): string {
   if (!k || k.present == null) return '—';
   if (!k.present) return 'Not imported';
   return k.valid ? 'Imported ✓' : 'Invalid';
@@ -295,15 +269,14 @@ function RcsBridgeSection({
   statusFetchedAt,
   lastAlertType,
   lastAlertAt,
-  theme,
 }: {
   capability: boolean;
   status: RcsStatus;
   statusFetchedAt: number | null;
   lastAlertType: string | null;
   lastAlertAt: number | null;
-  theme: ReturnType<typeof useTheme>;
 }): React.JSX.Element {
+  const theme = useTheme();
   // A socket alert is an immediacy override only when it arrived AFTER the block was fetched —
   // otherwise a stale alert would defeat the block's reauth-recovery.
   const freshAlert =
@@ -320,8 +293,8 @@ function RcsBridgeSection({
         deriveRcsHealth(capability, lastAlertType);
   const phoneID = status?.phoneID;
   return (
-    <Section label="RCS BRIDGE" theme={theme}>
-      <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
+    <SettingsSection label="RCS BRIDGE" style={styles.gap}>
+      <View style={styles.row}>
         <Text style={[styles.rowLabel, { color: theme.color.label }]}>Google Messages</Text>
         <Text
           style={[styles.rowValue, { color: severityColor(health.severity, theme) }]}
@@ -331,90 +304,27 @@ function RcsBridgeSection({
           {health.status}
         </Text>
       </View>
-      {phoneID ? (
-        <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
-          <Text style={[styles.rowLabel, { color: theme.color.label }]}>Phone</Text>
-          <Text
-            style={[styles.rowValue, { color: theme.color.secondaryLabel }]}
-            numberOfLines={1}
-          >
-            {phoneID}
-          </Text>
-        </View>
-      ) : null}
-      {health.detail ? (
-        <View style={[styles.hintRow, { borderTopColor: theme.color.separator }]}>
-          <Text style={[styles.hint, { color: theme.color.tertiaryLabel }]}>{health.detail}</Text>
-        </View>
-      ) : null}
-    </Section>
-  );
-}
-
-function Section({
-  label,
-  theme,
-  children,
-}: {
-  label: string;
-  theme: ReturnType<typeof useTheme>;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <>
-      <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>{label}</Text>
-      <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>{children}</View>
-    </>
-  );
-}
-
-function InfoRow({
-  label,
-  theme,
-  children,
-}: {
-  label: string;
-  theme: ReturnType<typeof useTheme>;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <View style={[styles.row, { borderTopColor: theme.color.separator }]}>
-      <Text style={[styles.rowLabel, { color: theme.color.label }]}>{label}</Text>
-      <Text style={[styles.rowValue, { color: theme.color.secondaryLabel }]} numberOfLines={1}>
-        {children}
-      </Text>
-    </View>
+      {phoneID ? <InfoRow label="Phone" value={phoneID} /> : null}
+      {health.detail ? <NoteRow text={health.detail} /> : null}
+    </SettingsSection>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17 },
-  title: { fontSize: 17, fontWeight: '600' },
-  action: { fontSize: 15 },
-  content: { paddingVertical: 12, paddingBottom: 40 },
-  sectionLabel: { fontSize: 13, marginLeft: 30, marginBottom: 6, marginTop: 22 },
-  group: { marginHorizontal: 16, borderRadius: 12, overflow: 'hidden' },
+  action: { fontSize: 15, textAlign: 'right' },
+  content: { padding: 16, paddingBottom: 40 },
+  gap: { marginTop: 24 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     gap: 12,
   },
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
-  hintRow: { paddingVertical: 10, paddingHorizontal: 14, borderTopWidth: StyleSheet.hairlineWidth },
   hint: { fontSize: 12, lineHeight: 17 },
-  banner: { marginHorizontal: 16, marginTop: 6, borderRadius: 12, padding: 14 },
+  banner: { borderRadius: 12, padding: 14, marginBottom: 8 },
   alertText: { fontSize: 14, flex: 1 },
 });

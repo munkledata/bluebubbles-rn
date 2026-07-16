@@ -1,23 +1,17 @@
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
-import {
-  findChatByParticipantAddresses,
-  searchContactAddresses,
-  type ContactPick,
-} from '@db/repositories';
-import { createNewChat } from '@/services';
-import { Screen, useTheme } from '@ui';
+import { findChatByParticipantAddresses } from '@db/repositories';
+import { createNewChat, http } from '@/services';
+import { sendImages } from '@/services/send';
+import { checkIMessageAvailability } from '@core/api/endpoints/handles';
+import { useContactSearch } from '@features/contacts/useContactSearch';
+import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
+import { Icon, Screen, ScreenHeader, useTheme } from '@ui';
+import { ContactSuggestionList } from '@ui/ContactSuggestionList';
 
 /** A chosen recipient chip: an address plus its best display name. */
 interface Recipient {
@@ -29,34 +23,62 @@ interface Recipient {
 export default function NewChatScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   // A forwarded message pre-fills the composer (from the chat's "Forward" action).
   const { forwardText } = useLocalSearchParams<{ forwardText?: string }>();
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [query, setQuery] = useState('');
   const [message, setMessage] = useState(forwardText ?? '');
   const [service, setService] = useState<'iMessage' | 'SMS'>('iMessage');
-  const [suggestions, setSuggestions] = useState<ContactPick[]>([]);
   const [existingGuid, setExistingGuid] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Files shared INTO the app (Android share sheet) — staged to send after the chat is created.
+  const [staged, setStaged] = useState<SharedAttachment[]>([]);
+
+  // Consume any content shared into the app (via the share sheet) once on mount: prefill the
+  // message with shared text/URL and stage shared files, then clear the store.
+  useEffect(() => {
+    const { text, files, clear } = useShareIntentStore.getState();
+    if (text) setMessage((m) => m || text);
+    if (files.length > 0) setStaged(files);
+    if (text || files.length > 0) clear();
+  }, []);
+
+  // Per-recipient iMessage availability (advisory): true → blue chip, false → green (SMS),
+  // undefined → probe pending/failed (neutral). Any confirmed-false recipient auto-switches the
+  // compose to SMS so the send routes correctly without guessing.
+  const [availability, setAvailability] = useState<Record<string, boolean>>({});
+  // Each address is probed at most once per screen (the ref survives recipient changes, so
+  // re-runs don't discard + re-issue in-flight probes); an in-flight result still lands after
+  // the list changes — a setState after unmount is a safe no-op in React 19.
+  const probedRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const r of recipients) {
+      if (probedRef.current.has(r.address)) continue;
+      probedRef.current.add(r.address);
+      void checkIMessageAvailability(http, r.address)
+        .then((available) => {
+          setAvailability((cur) => ({ ...cur, [r.address]: available }));
+        })
+        .catch(() => {
+          // Advisory only (helper down / older server) — leave the chip neutral.
+        });
+    }
+  }, [recipients]);
+  // Auto-pick the service from availability UNTIL the user manually taps the toggle. Deriving both
+  // directions (SMS when any recipient is confirmed SMS-only, else iMessage) means removing the
+  // SMS-only recipient reverts to iMessage instead of getting stuck on SMS; the `touched` guard
+  // stops a later probe from clobbering the user's explicit choice.
+  const serviceTouchedRef = useRef(false);
+  useEffect(() => {
+    if (serviceTouchedRef.current) return;
+    const anySmsOnly = recipients.some((r) => availability[r.address] === false);
+    setService(anySmsOnly ? 'SMS' : 'iMessage');
+  }, [recipients, availability]);
 
   const chosen = new Set(recipients.map((r) => r.address.toLowerCase()));
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const r = await searchContactAddresses(getDatabase(), query, 30);
-        if (active) setSuggestions(r.filter((c) => !chosen.has(c.address.toLowerCase())));
-      } catch {
-        if (active) setSuggestions([]);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, recipients]);
+  // Already-chosen recipients are filtered out of the shared hook's suggestions.
+  const suggestions = useContactSearch(query).filter((c) => !chosen.has(c.address.toLowerCase()));
 
   // Detect whether a chat with exactly these recipients already exists → offer to continue it.
   useEffect(() => {
@@ -68,9 +90,13 @@ export default function NewChatScreen(): React.JSX.Element {
     void findChatByParticipantAddresses(
       getDatabase(),
       recipients.map((r) => r.address),
-    ).then((g) => {
-      if (active) setExistingGuid(g);
-    });
+    )
+      .then((g) => {
+        if (active) setExistingGuid(g);
+      })
+      .catch(() => {
+        if (active) setExistingGuid(null);
+      });
     return () => {
       active = false;
     };
@@ -84,6 +110,10 @@ export default function NewChatScreen(): React.JSX.Element {
 
   const removeRecipient = (address: string): void => {
     setRecipients((prev) => prev.filter((r) => r.address !== address));
+  };
+
+  const removeStaged = (uri: string): void => {
+    setStaged((prev) => prev.filter((f) => f.uri !== uri));
   };
 
   // Backspace on an empty input removes the last chip (iOS token-field behavior).
@@ -100,7 +130,9 @@ export default function NewChatScreen(): React.JSX.Element {
     addRecipient({ address: raw, name: raw });
   };
 
-  const canStart = !busy && recipients.length > 0 && message.trim().length > 0;
+  // A staged shared file can be sent even with no typed message.
+  const canStart =
+    !busy && recipients.length > 0 && (message.trim().length > 0 || staged.length > 0);
 
   const onStart = async (): Promise<void> => {
     if (!canStart) return;
@@ -112,6 +144,8 @@ export default function NewChatScreen(): React.JSX.Element {
         message.trim(),
         service,
       );
+      // Send any shared files into the new (or matched) chat.
+      if (staged.length > 0) await sendImages({ chatGuid: guid, images: staged });
       router.replace(`/chat/${encodeURIComponent(guid)}`);
     } catch {
       showDialog(
@@ -124,43 +158,48 @@ export default function NewChatScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>New Message</Text>
-        <Pressable onPress={() => void onStart()} disabled={!canStart} accessibilityRole="button">
-          <Text
-            style={[
-              styles.start,
-              { color: canStart ? theme.color.tint : theme.color.tertiaryLabel },
-            ]}
-          >
-            Start
-          </Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="New Message"
+        onBack={() => router.back()}
+        right={
+          <Pressable onPress={() => void onStart()} disabled={!canStart} accessibilityRole="button">
+            <Text
+              style={[
+                styles.start,
+                { color: canStart ? theme.color.tint : theme.color.tertiaryLabel },
+              ]}
+            >
+              Start
+            </Text>
+          </Pressable>
+        }
+      />
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <View style={[styles.toLine, { borderBottomColor: theme.color.separator }]}>
           <Text style={[styles.toLabel, { color: theme.color.secondaryLabel }]}>To:</Text>
           <View style={styles.chipsWrap}>
-            {recipients.map((r) => (
-              <Pressable
-                key={r.address}
-                onPress={() => removeRecipient(r.address)}
-                style={[styles.chip, { backgroundColor: theme.color.tint }]}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${r.name}`}
-              >
-                <Text style={styles.chipText}>{r.name} ✕</Text>
-              </Pressable>
-            ))}
+            {recipients.map((r) => {
+              const avail = availability[r.address];
+              // Blue = confirmed iMessage, green = SMS-only, gray = unknown (probe pending/failed).
+              const chipColor =
+                avail === true
+                  ? theme.color.tint
+                  : avail === false
+                    ? '#34C759'
+                    : theme.color.tertiaryLabel;
+              return (
+                <Pressable
+                  key={r.address}
+                  onPress={() => removeRecipient(r.address)}
+                  style={[styles.chip, { backgroundColor: chipColor }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${r.name}${avail === false ? ' (SMS only)' : ''}`}
+                >
+                  <Text style={styles.chipText}>{r.name} ✕</Text>
+                </Pressable>
+              );
+            })}
             <TextInput
               value={query}
               onChangeText={(t) => {
@@ -195,7 +234,10 @@ export default function NewChatScreen(): React.JSX.Element {
           {(['iMessage', 'SMS'] as const).map((s) => (
             <Pressable
               key={s}
-              onPress={() => setService(s)}
+              onPress={() => {
+                serviceTouchedRef.current = true;
+                setService(s);
+              }}
               style={[
                 styles.serviceChip,
                 {
@@ -211,10 +253,52 @@ export default function NewChatScreen(): React.JSX.Element {
           ))}
         </View>
 
+        {staged.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.stagedRow}
+            keyboardShouldPersistTaps="handled"
+          >
+            {staged.map((f) => (
+              <View key={f.uri} style={styles.stagedItem}>
+                {f.mimeType.startsWith('image/') ? (
+                  <Image source={{ uri: f.uri }} style={styles.stagedThumb} contentFit="cover" />
+                ) : (
+                  <View
+                    style={[
+                      styles.stagedThumb,
+                      styles.stagedFile,
+                      { backgroundColor: theme.color.secondaryBackground },
+                    ]}
+                  >
+                    <Icon
+                      name={
+                        f.mimeType.startsWith('video/') ? 'videocam-outline' : 'document-outline'
+                      }
+                      size={22}
+                      color={theme.color.secondaryLabel}
+                    />
+                  </View>
+                )}
+                <Pressable
+                  onPress={() => removeStaged(f.uri)}
+                  hitSlop={6}
+                  style={styles.stagedRemove}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove attachment"
+                >
+                  <Icon name="close-circle" size={20} color="#fff" />
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
+
         <TextInput
           value={message}
           onChangeText={setMessage}
-          placeholder="Message"
+          placeholder={staged.length > 0 ? 'Add a message (optional)' : 'Message'}
           placeholderTextColor={theme.color.tertiaryLabel}
           multiline
           style={[
@@ -223,43 +307,17 @@ export default function NewChatScreen(): React.JSX.Element {
           ]}
         />
 
-        {suggestions.length > 0 ? (
-          <View style={styles.suggestions}>
-            {suggestions.map((c, i) => (
-              <Pressable
-                key={`${c.address}-${i}`}
-                onPress={() => addRecipient({ address: c.address, name: c.name || c.address })}
-                style={[styles.suggestion, { borderBottomColor: theme.color.separator }]}
-              >
-                <Text style={[styles.suggestionName, { color: theme.color.label }]}>
-                  {c.name || c.address}
-                </Text>
-                {c.name ? (
-                  <Text style={[styles.suggestionAddr, { color: theme.color.secondaryLabel }]}>
-                    {c.address}
-                  </Text>
-                ) : null}
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
+        <ContactSuggestionList
+          suggestions={suggestions}
+          onPick={(c) => addRecipient({ address: c.address, name: c.name || c.address })}
+        />
       </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17 },
-  title: { fontSize: 17, fontWeight: '600' },
-  start: { fontSize: 17, fontWeight: '600' },
+  start: { fontSize: 17, fontWeight: '600', textAlign: 'right' },
   content: { padding: 16, gap: 12 },
   toLine: {
     flexDirection: 'row',
@@ -277,8 +335,15 @@ const styles = StyleSheet.create({
   serviceRow: { flexDirection: 'row', gap: 8 },
   serviceChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 },
   message: { minHeight: 90, borderRadius: 12, padding: 14, fontSize: 16, textAlignVertical: 'top' },
-  suggestions: { borderRadius: 12, overflow: 'hidden' },
-  suggestion: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  suggestionName: { fontSize: 16 },
-  suggestionAddr: { fontSize: 13, marginTop: 2 },
+  stagedRow: { gap: 10, paddingVertical: 2 },
+  stagedItem: { width: 64, height: 64 },
+  stagedThumb: { width: 64, height: 64, borderRadius: 10 },
+  stagedFile: { alignItems: 'center', justifyContent: 'center' },
+  stagedRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 11,
+  },
 });

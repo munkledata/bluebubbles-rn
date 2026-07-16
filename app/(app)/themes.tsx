@@ -2,7 +2,6 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import {
   createCustomTheme,
@@ -12,7 +11,7 @@ import {
   type CustomThemeRow,
 } from '@db/repositories';
 import { useThemeStore } from '@state/themeStore';
-import { Screen, ThemeStudio, useTheme } from '@ui';
+import { Screen, ScreenHeader, ThemeStudio, useTheme } from '@ui';
 import { resolvePreset, safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
 /** Which theme the studio is editing: a new one, or an existing row. */
@@ -22,7 +21,6 @@ type Editing = { row: CustomThemeRow | null };
 export default function ThemesScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const activeId = useThemeStore((s) => s.customThemeId);
   const setCustomTheme = useThemeStore((s) => s.setCustomTheme);
   const clearCustomTheme = useThemeStore((s) => s.clearCustomTheme);
@@ -92,20 +90,15 @@ export default function ThemesScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Custom Themes</Text>
-        <Pressable onPress={() => setEditing({ row: null })} hitSlop={8}>
-          <Text style={[styles.add, { color: theme.color.tint }]}>＋</Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Custom Themes"
+        onBack={() => router.back()}
+        right={
+          <Pressable onPress={() => setEditing({ row: null })} hitSlop={8}>
+            <Text style={[styles.add, { color: theme.color.tint }]}>＋</Text>
+          </Pressable>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.content}>
         {rows.length === 0 ? (
@@ -181,17 +174,7 @@ export default function ThemesScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17 },
-  add: { fontSize: 26, fontWeight: '400' },
-  title: { fontSize: 17, fontWeight: '600' },
+  add: { fontSize: 26, fontWeight: '400', textAlign: 'right' },
   content: { paddingVertical: 12 },
   empty: { textAlign: 'center', marginTop: 40, marginHorizontal: 24, fontSize: 15, lineHeight: 21 },
   group: { marginHorizontal: 16, borderRadius: 12, overflow: 'hidden' },

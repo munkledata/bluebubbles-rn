@@ -1,22 +1,16 @@
 import type { HttpClient } from '@core/api/http';
-import { ApiError } from '@core/api/errors';
-import { sendReaction, sendText } from '@core/api/endpoints/messages';
+import { sendReaction, sendText, type MessageMention } from '@core/api/endpoints/messages';
 import { logger } from '@core/secure';
-import { sendErrorCode } from '@utils';
-import {
-  claimOutgoing,
-  listRetryableOutgoing,
-  markOutgoingSentNoGuid,
-  reconcileOutgoingError,
-  reconcileOutgoingSuccess,
-  type RetryableOutgoing,
-} from '@db/repositories';
+import { claimOutgoing, listRetryableOutgoing, type RetryableOutgoing } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 
 interface TextPayload {
   message: string;
   selectedMessageGuid?: string;
   effectId?: string;
+  subject?: string;
+  mentions?: MessageMention[];
 }
 interface ReactionPayload {
   selectedMessageGuid: string;
@@ -42,6 +36,8 @@ async function resend(
         message: p.message,
         selectedMessageGuid: p.selectedMessageGuid,
         effectId: p.effectId,
+        subject: p.subject,
+        mentions: p.mentions,
       });
     } else if (row.kind === 'reaction') {
       const p = JSON.parse(row.payload) as ReactionPayload;
@@ -57,22 +53,10 @@ async function resend(
       logger.debug(`[queue] skipping retry of unsupported kind: ${row.kind}`);
       return false;
     }
-    // The Private-API path acks a real GUID → promote in place. The AppleScript fallback
-    // returns no guid → mark sent + clear the queue, leaving the socket echo to reconcile
-    // (never reconcile with an undefined guid).
-    if (server.guid) {
-      await reconcileOutgoingSuccess(db, row.tempGuid, {
-        guid: server.guid,
-        dateCreated: now,
-        dateDelivered: null,
-      });
-    } else {
-      await markOutgoingSentNoGuid(db, row.tempGuid);
-    }
+    await reconcileSendOutcome(db, row.tempGuid, server, now);
     return true;
   } catch (e) {
-    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
-    await reconcileOutgoingError(db, row.tempGuid, code, now);
+    await handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, now);
     return false;
   }
 }

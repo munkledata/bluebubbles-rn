@@ -1,16 +1,8 @@
 import type { SendAck } from '@core/api/endpoints/messages';
-import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { logger } from '@core/secure';
-import { sendErrorCode } from '@utils';
-import {
-  getChatIdByGuid,
-  insertOutgoingAttachment,
-  markOutgoingSentNoGuid,
-  reconcileOutgoingError,
-  reconcileOutgoingSuccess,
-} from '@db/repositories';
+import { getChatIdByGuid, insertOutgoingAttachment } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 
 export interface PickedImage {
@@ -79,24 +71,12 @@ export async function sendImageMessage(
       uri: args.image.uri,
       mimeType: args.image.mimeType,
     });
-    // The server ack carries only the message GUID (no attachment guid). Promote the message
-    // row when the GUID is present; the optimistic attachment row keeps its local guid +
-    // local_path until the live socket `new-message` echo reconciles the attachment guid in
-    // place (upsertAttachments). On the no-guid path, flip to 'sent' + drop the queue row (no
-    // spurious retry) and let the content-matched echo promote it. Never reconcile w/ undefined.
-    if (server.guid) {
-      await reconcileOutgoingSuccess(db, tempGuid, {
-        guid: server.guid,
-        dateCreated: now,
-        dateDelivered: null,
-      });
-    } else {
-      await markOutgoingSentNoGuid(db, tempGuid);
-    }
+    // The server ack carries only the message GUID (no attachment guid) — the optimistic
+    // attachment row keeps its local guid + local_path until the live socket `new-message`
+    // echo reconciles the attachment guid in place (upsertAttachments).
+    await reconcileSendOutcome(db, tempGuid, server, now);
   } catch (e) {
-    logger.warn(`[send-attachment] failed: ${e instanceof Error ? e.message : String(e)}`);
-    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
-    await reconcileOutgoingError(db, tempGuid, code);
+    await handleSendFailure(db, tempGuid, e, 'send-attachment', args.chatGuid);
   }
 
   return { tempGuid };

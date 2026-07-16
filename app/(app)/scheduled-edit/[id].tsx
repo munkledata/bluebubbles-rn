@@ -1,12 +1,12 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { logger } from '@core/secure';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import { getScheduledById } from '@db/repositories';
 import { editScheduled } from '@/services/send';
-import { Screen, useTheme } from '@ui';
+import { Screen, ScreenHeader, useTheme } from '@ui';
 import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
 import { formatChatDate, formatTime } from '@utils';
 
@@ -14,21 +14,28 @@ import { formatChatDate, formatTime } from '@utils';
 export default function ScheduledEditScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const schedId = Number(id);
   const [text, setText] = useState('');
   const [when, setWhen] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      const row = await getScheduledById(getDatabase(), schedId);
-      if (row) {
-        setText(row.text);
-        setWhen(row.scheduledFor);
+      try {
+        const row = await getScheduledById(getDatabase(), schedId);
+        if (row) {
+          setText(row.text);
+          setWhen(row.scheduledFor);
+        }
+      } catch (e) {
+        // A failed read must not leave the screen permanently blank (loaded stuck false).
+        logger.warn('[scheduled-edit] could not load scheduled message', e);
+        setLoadError('Couldn’t load this scheduled message.');
+      } finally {
+        setLoaded(true);
       }
-      setLoaded(true);
     })();
   }, [schedId]);
 
@@ -49,29 +56,27 @@ export default function ScheduledEditScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Edit Scheduled</Text>
-        <Pressable onPress={save} disabled={!text.trim()} accessibilityRole="button">
-          <Text
-            style={[
-              styles.save,
-              { color: text.trim() ? theme.color.tint : theme.color.tertiaryLabel },
-            ]}
-          >
-            Save
-          </Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Edit Scheduled"
+        onBack={() => router.back()}
+        right={
+          <Pressable onPress={save} disabled={!text.trim()} accessibilityRole="button">
+            <Text
+              style={[
+                styles.save,
+                { color: text.trim() ? theme.color.tint : theme.color.tertiaryLabel },
+              ]}
+            >
+              Save
+            </Text>
+          </Pressable>
+        }
+      />
 
-      {loaded ? (
+      {loaded && loadError ? (
+        <Text style={[styles.loadError, { color: theme.color.destructive }]}>{loadError}</Text>
+      ) : null}
+      {loaded && !loadError ? (
         <View style={styles.content}>
           <TextInput
             value={text}
@@ -102,18 +107,9 @@ export default function ScheduledEditScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17 },
-  title: { fontSize: 17, fontWeight: '600' },
-  save: { fontSize: 17, fontWeight: '600' },
+  save: { fontSize: 17, fontWeight: '600', textAlign: 'right' },
   content: { padding: 16, gap: 12 },
+  loadError: { textAlign: 'center', marginTop: 40, fontSize: 15, paddingHorizontal: 16 },
   input: { minHeight: 90, borderRadius: 12, padding: 14, fontSize: 16, textAlignVertical: 'top' },
   timeRow: {
     flexDirection: 'row',

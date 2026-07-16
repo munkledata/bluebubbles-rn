@@ -25,15 +25,6 @@ export function EffectPicker({ visible, onClose, onPick }: EffectPickerProps): R
     onClose();
   };
 
-  const Chip = ({ id, label }: { id: string; label: string }): React.JSX.Element => (
-    <Pressable
-      onPress={() => pick(id)}
-      style={[styles.chip, { backgroundColor: theme.color.secondaryBackground }]}
-    >
-      <Text style={[styles.chipText, { color: theme.color.label }]}>{label}</Text>
-    </Pressable>
-  );
-
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -42,14 +33,14 @@ export function EffectPicker({ visible, onClose, onPick }: EffectPickerProps): R
           <Text style={[styles.section, { color: theme.color.secondaryLabel }]}>BUBBLE</Text>
           <View style={styles.grid}>
             {bubbles.map((e) => (
-              <Chip key={e.id} id={e.id} label={e.label} />
+              <Chip key={e.id} label={e.label} onPress={() => pick(e.id)} />
             ))}
           </View>
           <Text style={[styles.section, { color: theme.color.secondaryLabel }]}>SCREEN</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={styles.grid}>
               {screens.map((e) => (
-                <Chip key={e.id} id={e.id} label={e.label} />
+                <Chip key={e.id} label={e.label} onPress={() => pick(e.id)} />
               ))}
             </View>
           </ScrollView>
@@ -59,6 +50,20 @@ export function EffectPicker({ visible, onClose, onPick }: EffectPickerProps): R
         </View>
       </Pressable>
     </Modal>
+  );
+}
+
+// Module-scope (not nested in EffectPicker): a nested component is a fresh TYPE every render,
+// which would unmount/remount every chip on each parent render.
+function Chip({ label, onPress }: { label: string; onPress: () => void }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.chip, { backgroundColor: theme.color.secondaryBackground }]}
+    >
+      <Text style={[styles.chipText, { color: theme.color.label }]}>{label}</Text>
+    </Pressable>
   );
 }
 

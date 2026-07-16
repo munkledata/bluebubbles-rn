@@ -15,7 +15,7 @@
  * forwarded into the mocked repo fns).
  */
 import { renderHook, waitFor } from '../support/renderWithTheme';
-import { useMessages } from '@features/conversations/useMessages';
+import { useMessages, type EnrichedMessage } from '@features/conversations/useMessages';
 import {
   getChatIdByGuid,
   getMessagePreviewByGuid,
@@ -29,8 +29,13 @@ import {
 } from '@db/repositories';
 import { mkMessage } from './_fixtures';
 
-// Captured args from the (mocked) reactive layer — name is `mock*` so the factory may close over it.
-const mockReactiveArgs: { tables: string[]; deps: unknown[] } = { tables: [], deps: [] };
+// Captured args from the (mocked) reactive layer — name is `mock*` so the factory may close over
+// it. `run` is kept so identity tests can re-invoke the query fn (simulating a reactive flush).
+const mockReactiveArgs: {
+  tables: string[];
+  deps: unknown[];
+  run: (() => Promise<unknown>) | null;
+} = { tables: [], deps: [], run: null };
 
 jest.mock('@db/useReactiveQuery', () => {
   const React = require('react');
@@ -39,6 +44,7 @@ jest.mock('@db/useReactiveQuery', () => {
     useReactiveQuery: (run: () => Promise<unknown>, tables: string[], deps: unknown[]) => {
       mockReactiveArgs.tables = tables;
       mockReactiveArgs.deps = deps;
+      mockReactiveArgs.run = run;
       const [state, setState] = React.useState({ data: null, isLoading: true, error: null });
       React.useEffect(() => {
         let cancelled = false;
@@ -110,7 +116,14 @@ function mkReaction(over: Partial<ReactionRow> = {}): ReactionRow {
 }
 
 function mkPreview(over: Partial<MessagePreview> = {}): MessagePreview {
-  return { guid: 'orig-1', text: 'original', senderName: 'Alice', isFromMe: 0, hasAttachments: 0, ...over };
+  return {
+    guid: 'orig-1',
+    text: 'original',
+    senderName: 'Alice',
+    isFromMe: 0,
+    hasAttachments: 0,
+    ...over,
+  };
 }
 
 beforeEach(() => {
@@ -191,6 +204,38 @@ describe('useMessages', () => {
 
     expect(mAround).toHaveBeenCalledWith(undefined, 10, 77777);
     expect(mRecent).not.toHaveBeenCalled();
+  });
+
+  it('preserves row identity across re-queries when nothing changed', async () => {
+    mRecent.mockResolvedValue([mkMessage({ id: 1, guid: 'msg-1', sendState: 'sending' })]);
+    const { result } = await renderHook(() => useMessages('iMessage;-;c1'));
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    const first = result.current.data![0]!;
+
+    // Simulate a reactive flush: re-run the captured query fn. The enrichment map builds a FRESH
+    // object per pass; the identity cache must hand back the previous one when nothing changed,
+    // or every flush defeats the memoized MessageRow/MessageBubble.
+    const second = (await mockReactiveArgs.run!()) as EnrichedMessage[];
+    expect(second[0]).toBe(first);
+
+    // A mutable column changed (sendState) → a NEW object.
+    mRecent.mockResolvedValue([mkMessage({ id: 1, guid: 'msg-1', sendState: 'sent' })]);
+    const third = (await mockReactiveArgs.run!()) as EnrichedMessage[];
+    expect(third[0]).not.toBe(first);
+    expect(third[0]!.sendState).toBe('sent');
+  });
+
+  it('a reactions change produces a new row object (nested content is fingerprinted)', async () => {
+    mRecent.mockResolvedValue([mkMessage({ id: 1, guid: 'msg-1' })]);
+    const { result } = await renderHook(() => useMessages('iMessage;-;c1'));
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    const first = result.current.data![0]!;
+    expect(first.reactions).toEqual([]);
+
+    mReactions.mockResolvedValue(new Map([['msg-1', [mkReaction({ targetGuid: 'msg-1' })]]]));
+    const second = (await mockReactiveArgs.run!()) as EnrichedMessage[];
+    expect(second[0]).not.toBe(first);
+    expect(second[0]!.reactions).toHaveLength(1);
   });
 
   it('uses the recent window (listMessagesWithSenders) with no anchorDate', async () => {

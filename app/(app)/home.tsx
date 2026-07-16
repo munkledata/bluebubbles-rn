@@ -16,13 +16,8 @@ import {
   devSendFakeReply,
   injectMessage,
 } from '@features/conversations/devSeed';
-import { useRedactedModeStore } from '@state/redactedModeStore';
+import { hydrateAllStores } from '@state/hydrateStores';
 import { isDevServer } from '@utils/isDev';
-import { useSmartReplyStore } from '@state/smartReplyStore';
-import { useDownloadSettingsStore } from '@state/downloadSettingsStore';
-import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-import { useSyncSettingsStore } from '@state/syncSettingsStore';
-import { useThemeStore } from '@state/themeStore';
 import { ConversationListScreen } from '@ui';
 
 /**
@@ -36,17 +31,10 @@ export default function Home(): React.JSX.Element {
   // after first recovering rows interrupted mid-send by a prior crash/kill.
   useEffect(() => {
     const isDev = isDevServer;
-    // The DB is open by the time the inbox mounts; (re)hydrate prefs that the
-    // root layout may have skipped pre-connect.
-    void useSmartReplyStore.getState().hydrate();
-    void useRedactedModeStore.getState().hydrate();
-    void useDownloadSettingsStore.getState().hydrate();
-    void useFeatureSettingsStore.getState().hydrate();
-    void useSyncSettingsStore.getState().hydrate();
-    // The theme preset is persisted in kv but its first hydrate (root layout) runs
-    // BEFORE the DB is open and silently fails — re-hydrate here so a picked preset
-    // survives a restart. See src/state/themeStore.ts.
-    void useThemeStore.getState().hydrate();
+    // The DB is open by the time the inbox mounts; re-hydrate the kv-backed prefs
+    // stores that the root layout's pre-connect pass silently skipped (e.g. the theme
+    // preset — see src/state/themeStore.ts and src/state/hydrateStores.ts).
+    void hydrateAllStores();
     void (async () => {
       try {
         await recoverStuckScheduled();

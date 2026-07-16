@@ -1,15 +1,8 @@
-import { ApiError } from '@core/api/errors';
 import { sendReaction } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { sendErrorCode } from '@utils';
-import {
-  getChatIdByGuid,
-  insertOutgoingReaction,
-  markOutgoingSentNoGuid,
-  reconcileOutgoingError,
-  reconcileOutgoingSuccess,
-} from '@db/repositories';
+import { getChatIdByGuid, insertOutgoingReaction } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 
 export interface SendReactionArgs {
@@ -57,20 +50,9 @@ export async function sendReactionMessage(
       emoji: args.emoji,
     });
     // Reactions require the Private API, so the ack carries the real GUID on success.
-    // If it's ever absent, flip to 'sent' + drop the queue row (no spurious retry); the live
-    // echo reconciles by content (never reconcile with an undefined guid).
-    if (server.guid) {
-      await reconcileOutgoingSuccess(db, tempGuid, {
-        guid: server.guid,
-        dateCreated: now,
-        dateDelivered: null,
-      });
-    } else {
-      await markOutgoingSentNoGuid(db, tempGuid);
-    }
+    await reconcileSendOutcome(db, tempGuid, server, now);
   } catch (e) {
-    const code = sendErrorCode(e instanceof ApiError ? e.status ?? null : null);
-    await reconcileOutgoingError(db, tempGuid, code);
+    await handleSendFailure(db, tempGuid, e, 'send-reaction', args.chatGuid);
   }
 
   return { tempGuid };

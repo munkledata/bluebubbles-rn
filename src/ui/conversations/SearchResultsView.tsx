@@ -1,6 +1,6 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SearchResultRow } from '@db/repositories';
 import { useChatMatches } from '@features/search/useChatMatches';
@@ -43,16 +43,23 @@ export function SearchResultsView({ query }: { query: string }): React.JSX.Eleme
   const searching = query.trim().length >= 2;
   const chatRows = (searching ? (matched.data ?? []) : []).slice(0, MAX_CHAT_RESULTS);
 
-  const openChat = (guid: string): void => {
-    router.push(`/chat/${encodeURIComponent(guid)}`);
-  };
+  // Stable so the memoized ConversationTile doesn't re-render every list update.
+  const openChat = useCallback(
+    (guid: string): void => {
+      router.push(`/chat/${encodeURIComponent(guid)}`);
+    },
+    [router],
+  );
   // Open the chat focused on the matched message (the chat screen scrolls to + highlights it).
-  const openMessage = (r: SearchResultRow): void => {
-    const date = r.dateCreated != null ? `&focusDate=${r.dateCreated}` : '';
-    router.push(
-      `/chat/${encodeURIComponent(r.chatGuid)}?focus=${encodeURIComponent(r.guid)}${date}`,
-    );
-  };
+  const openMessage = useCallback(
+    (r: SearchResultRow): void => {
+      const date = r.dateCreated != null ? `&focusDate=${r.dateCreated}` : '';
+      router.push(
+        `/chat/${encodeURIComponent(r.chatGuid)}?focus=${encodeURIComponent(r.guid)}${date}`,
+      );
+    },
+    [router],
+  );
 
   const sectionLabel = (label: string): React.JSX.Element => (
     <Text style={[styles.section, { color: theme.color.secondaryLabel }]}>{label}</Text>

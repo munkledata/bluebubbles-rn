@@ -47,6 +47,14 @@ export function fileTypeLabel(mimeType: string | null, transferName: string | nu
   return 'FILE';
 }
 
+/**
+ * A downloaded local file (a `file://` URI) can be shared/saved; a remote/dev URL cannot.
+ * Every production writer emits `file://` URIs, so that scheme is the whole test.
+ */
+export function isLocalFileUri(path: string | null | undefined): path is string {
+  return !!path && path.startsWith('file://');
+}
+
 export const AUTO_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /** Images under the cap auto-download; everything else is tap-to-download. */

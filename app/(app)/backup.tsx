@@ -1,10 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { exportEncryptedBackup, importBackupAuto } from '@/services/backup/backupService';
-import { Screen, useTheme } from '@ui';
+import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 const MIN_PASS = 6;
 
@@ -12,7 +11,6 @@ const MIN_PASS = 6;
 export default function BackupScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');
@@ -47,6 +45,29 @@ export default function BackupScreen(): React.JSX.Element {
     }
   };
 
+  // Pick a backup FILE (the exported .gatorbackup / .json) via the OS document picker and load its
+  // contents into the restore field — so a user who exported a file can restore it without opening
+  // it elsewhere and copy-pasting the whole ciphertext. They then enter the passphrase and Restore.
+  const onPickFile = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const DocumentPicker = await import('expo-document-picker');
+      const res = await DocumentPicker.getDocumentAsync({
+        // .gatorbackup has no registered MIME, so allow any file and validate on restore.
+        type: ['application/json', 'application/octet-stream', '*/*'],
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets[0]) return;
+      const { File } = await import('expo-file-system');
+      const content = await new File(res.assets[0].uri).text();
+      setPaste(content.trim());
+    } catch {
+      showDialog('Restore', 'Couldn’t open the backup file.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onImport = async (): Promise<void> => {
     if (!paste.trim()) return;
     setBusy(true);
@@ -68,25 +89,11 @@ export default function BackupScreen(): React.JSX.Element {
     }
   };
 
-  const inputStyle = [
-    styles.input,
-    { color: theme.color.label, borderColor: theme.color.separator },
-  ];
+  const inputStyle = [styles.input, { color: theme.color.label }];
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Backup</Text>
-        <View style={styles.spacer} />
-      </View>
+      <ScreenHeader title="Backup" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
@@ -94,7 +101,7 @@ export default function BackupScreen(): React.JSX.Element {
           The file is encrypted with a passphrase you choose; keep it safe, it can’t be recovered.
         </Text>
 
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+        <SettingsSection>
           <TextInput
             value={pass}
             onChangeText={setPass}
@@ -123,16 +130,21 @@ export default function BackupScreen(): React.JSX.Element {
               Export encrypted backup…
             </Text>
           </Pressable>
-        </View>
+        </SettingsSection>
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          RESTORE
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+        <SettingsSection label="RESTORE" style={styles.gap}>
+          <NavRow
+            label="Choose a backup file…"
+            chevron={false}
+            disabled={busy}
+            onPress={() => void onPickFile()}
+          />
+        </SettingsSection>
+        <SettingsSection style={styles.gapSm}>
           <TextInput
             value={paste}
             onChangeText={setPaste}
-            placeholder="Paste backup contents here"
+            placeholder="…or paste backup contents here"
             placeholderTextColor={theme.color.tertiaryLabel}
             multiline
             autoCapitalize="none"
@@ -147,13 +159,8 @@ export default function BackupScreen(): React.JSX.Element {
             autoCapitalize="none"
             style={inputStyle}
           />
-        </View>
-        <View
-          style={[
-            styles.group,
-            { backgroundColor: theme.color.secondaryBackground, marginTop: 12 },
-          ]}
-        >
+        </SettingsSection>
+        <SettingsSection style={styles.gapSm}>
           <Pressable
             onPress={() => void onImport()}
             disabled={busy || !paste.trim()}
@@ -168,34 +175,19 @@ export default function BackupScreen(): React.JSX.Element {
               Restore from backup
             </Text>
           </Pressable>
-        </View>
+        </SettingsSection>
       </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17, width: 70 },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
-  spacer: { width: 70 },
   content: { padding: 16 },
   note: { fontSize: 13, marginBottom: 16, marginHorizontal: 4, lineHeight: 18 },
-  sectionLabel: { fontSize: 13, marginBottom: 6, marginLeft: 12 },
-  group: { borderRadius: 12, overflow: 'hidden' },
+  gap: { marginTop: 24 },
+  gapSm: { marginTop: 12 },
   row: { paddingHorizontal: 16, paddingVertical: 14 },
   rowLabel: { fontSize: 16 },
-  input: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
+  input: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 16 },
   paste: { minHeight: 100, padding: 14, fontSize: 13, textAlignVertical: 'top' },
 });

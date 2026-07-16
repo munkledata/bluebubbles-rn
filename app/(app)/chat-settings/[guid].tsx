@@ -1,20 +1,18 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chatsApi } from '@core/api';
 import { getDatabase } from '@db/database';
 import {
@@ -27,15 +25,24 @@ import {
   setChatCustomization,
   setChatMute,
   setChatTheme,
-  type AttachmentRow,
   type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import { computeBackgroundIsLight, http } from '@/services';
+import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
+import { removeGroupIcon, uploadGroupIcon } from '@/services/chat/groupIcon';
 import { useChatHeader } from '@features/conversations/useChatHeader';
-import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
-import { Screen, ThemeStudio, useTheme } from '@ui';
+import { isGroupRow, resolveTitle } from '@utils';
+import {
+  NavRow,
+  Screen,
+  ScreenHeader,
+  SettingsSection,
+  SwitchRow,
+  ThemeStudio,
+  useTheme,
+} from '@ui';
+import { MediaSections } from '@ui/conversations/MediaSections';
 import { adaptiveTokensFromImage } from '@ui/theme/adaptiveFromImage';
 import { safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
 
@@ -73,7 +80,6 @@ async function persistBackground(guid: string, srcUri: string): Promise<string> 
 export default function ChatSettingsScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { guid } = useLocalSearchParams<{ guid: string }>();
   const { data } = useChatHeader(guid);
 
@@ -86,10 +92,6 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   const serverTitle = data ? resolveTitle({ ...data, customName: null }) : '';
 
   const isGroup = data ? isGroupRow(data) : false;
-  const divider = {
-    borderTopColor: theme.color.separator,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  };
 
   // SERVER-GATED (private API): leave on the server, then drop the chat locally.
   const leaveGroup = (): void => {
@@ -273,6 +275,42 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   const toggleMute = (on: boolean): void => {
     void setChatMute(getDatabase(), guid, on ? 'mute' : null);
   };
+  // Pick a new group photo and upload it to the server (Private API sends it to everyone).
+  const onChangeGroupPhoto = (): void => {
+    void (async () => {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') return;
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.9,
+      });
+      if (res.canceled || !res.assets[0]) return;
+      const a = res.assets[0];
+      try {
+        await uploadGroupIcon(http, guid, {
+          uri: a.uri,
+          name: a.fileName ?? 'group-icon.jpg',
+          mimeType: a.mimeType ?? 'image/jpeg',
+        });
+        showDialog('Group Photo', 'Photo updated — it may take a moment to sync to everyone.');
+      } catch {
+        showDialog('Group Photo', 'Couldn’t update the group photo.');
+      }
+    })();
+  };
+  const onRemoveGroupPhoto = (): void => {
+    showDialog('Remove Photo', 'Remove this group’s photo?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () =>
+          void removeGroupIcon(http, guid)
+            .then(() => showDialog('Group Photo', 'Photo removed.'))
+            .catch(() => showDialog('Group Photo', 'Couldn’t remove the group photo.')),
+      },
+    ]);
+  };
   const resetAll = (): void => {
     setName('');
     void setChatCustomization(getDatabase(), guid, { customName: null, customColor: null });
@@ -281,22 +319,10 @@ export default function ChatSettingsScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Details</Text>
-        <View style={styles.spacer} />
-      </View>
+      <ScreenHeader title="Details" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>NAME</Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+        <SettingsSection label="NAME">
           <TextInput
             value={customName}
             onChangeText={saveName}
@@ -304,97 +330,99 @@ export default function ChatSettingsScreen(): React.JSX.Element {
             placeholderTextColor={theme.color.tertiaryLabel}
             style={[styles.input, { color: theme.color.label }]}
           />
-        </View>
+        </SettingsSection>
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          BUBBLE COLOR
-        </Text>
-        <View
-          style={[
-            styles.group,
-            styles.swatchRow,
-            { backgroundColor: theme.color.secondaryBackground },
-          ]}
-        >
-          <Pressable
-            onPress={() => pickColor(null)}
-            style={[
-              styles.swatch,
-              styles.defaultSwatch,
-              { borderColor: theme.color.separator },
-              accent == null && styles.swatchOn,
-            ]}
-          >
-            <Text style={[styles.defaultMark, { color: theme.color.secondaryLabel }]}>✕</Text>
-          </Pressable>
-          {SWATCHES.map((c) => (
+        <SettingsSection label="BUBBLE COLOR" style={styles.gap}>
+          <View style={styles.swatchRow}>
             <Pressable
-              key={c}
-              onPress={() => pickColor(c)}
-              style={[styles.swatch, { backgroundColor: c }, accent === c && styles.swatchOn]}
-            />
-          ))}
-        </View>
+              onPress={() => pickColor(null)}
+              style={[
+                styles.swatch,
+                styles.defaultSwatch,
+                { borderColor: theme.color.separator },
+                accent == null && styles.swatchOn,
+              ]}
+            >
+              <Text style={[styles.defaultMark, { color: theme.color.secondaryLabel }]}>✕</Text>
+            </Pressable>
+            {SWATCHES.map((c) => (
+              <Pressable
+                key={c}
+                onPress={() => pickColor(c)}
+                style={[styles.swatch, { backgroundColor: c }, accent === c && styles.swatchOn]}
+              />
+            ))}
+          </View>
+        </SettingsSection>
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          CHAT THEME
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+        <SettingsSection label="CHAT THEME" style={styles.gap}>
           <Pressable onPress={() => setStudioOpen(true)} style={styles.row}>
             <Text style={[styles.rowLabel, { color: theme.color.label }]}>Chat Theme…</Text>
             <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
               {hasChatTheme ? 'Custom' : 'Default'}
             </Text>
           </Pressable>
-          <Pressable onPress={pickBackground} style={[styles.row, divider]}>
+          <Pressable onPress={pickBackground} style={styles.row}>
             <Text style={[styles.rowLabel, { color: theme.color.label }]}>Set Background…</Text>
             <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
               {hasBackground ? 'On' : 'None'}
             </Text>
           </Pressable>
-          <Pressable onPress={generateThemeFromBackground} style={[styles.row, divider]}>
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-              Generate theme from background
-            </Text>
-          </Pressable>
+          <NavRow
+            label="Generate theme from background"
+            color="label"
+            chevron={false}
+            onPress={generateThemeFromBackground}
+          />
           {hasChatTheme || hasBackground ? (
-            <Pressable onPress={clearChatTheme} style={[styles.row, divider]}>
-              <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>
-                Clear chat theme / background
-              </Text>
-            </Pressable>
+            <NavRow
+              label="Clear chat theme / background"
+              color="destructive"
+              chevron={false}
+              onPress={clearChatTheme}
+            />
           ) : null}
-        </View>
+        </SettingsSection>
 
         <MediaSections
           media={mediaData}
           onOpenMedia={(g) => router.push(`/media/${encodeURIComponent(g)}`)}
         />
 
-        <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}>
-          NOTIFICATIONS
-        </Text>
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          <View style={styles.row}>
-            <Text style={[styles.rowLabel, { color: theme.color.label }]}>Mute</Text>
-            <Switch
-              value={muted}
-              onValueChange={toggleMute}
-              accessibilityLabel="Mute notifications for this chat"
+        <SettingsSection label="NOTIFICATIONS" style={styles.gap}>
+          <SwitchRow
+            label="Mute"
+            value={muted}
+            onValueChange={toggleMute}
+            accessibilityLabel="Mute notifications for this chat"
+          />
+          {Platform.OS === 'android' ? (
+            <NavRow
+              label="Notification Settings…"
+              onPress={() =>
+                void openChatNotificationSettings(guid, data ? resolveTitle(data) : 'Conversation')
+              }
+              accessibilityLabel="Open system notification settings for this conversation"
             />
-          </View>
-        </View>
+          ) : null}
+        </SettingsSection>
 
         {isGroup ? (
           <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              GROUP · {members.length} PEOPLE
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
+            <SettingsSection label="GROUP PHOTO" style={styles.gap}>
+              <NavRow label="Change Photo…" onPress={onChangeGroupPhoto} disabled={busy} />
+              <NavRow
+                label="Remove Photo"
+                color="destructive"
+                chevron={false}
+                onPress={onRemoveGroupPhoto}
+                disabled={busy}
+              />
+            </SettingsSection>
+
+            <SettingsSection label={`GROUP · ${members.length} PEOPLE`} style={styles.gap}>
               {members.map((m, i) => (
-                <View key={`${m.address}-${i}`} style={[styles.row, i > 0 && divider]}>
+                <View key={`${m.address}-${i}`} style={styles.row}>
                   <Text
                     numberOfLines={1}
                     style={[styles.rowLabel, { color: theme.color.label, flex: 1 }]}
@@ -414,7 +442,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
               ))}
 
               {adding ? (
-                <View style={[styles.row, divider]}>
+                <View style={styles.row}>
                   <TextInput
                     value={addAddress}
                     onChangeText={setAddAddress}
@@ -437,13 +465,11 @@ export default function ChatSettingsScreen(): React.JSX.Element {
                   </Pressable>
                 </View>
               ) : (
-                <Pressable onPress={() => setAdding(true)} style={[styles.row, divider]}>
-                  <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Add Person…</Text>
-                </Pressable>
+                <NavRow label="Add Person…" chevron={false} onPress={() => setAdding(true)} />
               )}
 
               {renaming ? (
-                <View style={[styles.row, divider]}>
+                <View style={styles.row}>
                   <TextInput
                     value={groupName}
                     onChangeText={setGroupName}
@@ -464,22 +490,17 @@ export default function ChatSettingsScreen(): React.JSX.Element {
                   </Pressable>
                 </View>
               ) : (
-                <Pressable onPress={() => setRenaming(true)} style={[styles.row, divider]}>
-                  <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Rename Group…</Text>
-                </Pressable>
+                <NavRow label="Rename Group…" chevron={false} onPress={() => setRenaming(true)} />
               )}
 
-              <Pressable
+              <NavRow
+                label="Leave Group"
+                color="destructive"
+                chevron={false}
                 onPress={leaveGroup}
-                style={[styles.row, divider]}
-                accessibilityRole="button"
                 accessibilityLabel="Leave group"
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>
-                  Leave Group
-                </Text>
-              </Pressable>
-            </View>
+              />
+            </SettingsSection>
           </>
         ) : null}
 
@@ -510,184 +531,9 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   );
 }
 
-/** A single attachment thumbnail in the shared-media strip (image preview or kind glyph). */
-function MediaThumb({
-  att,
-  kind,
-  glyph,
-  redacted,
-  onPress,
-}: {
-  att: AttachmentRow;
-  kind: 'photo' | 'video';
-  glyph: string;
-  redacted: boolean;
-  onPress?: () => void;
-}): React.JSX.Element {
-  const theme = useTheme();
-  // Redacted mode: never render the actual media (shoulder-surf / screenshot safety) —
-  // show a neutral glyph tile instead. expo-image can't decode a video file, so a video
-  // renders ONLY its blurhash poster (no file source) or the ▶ glyph fallback; feeding
-  // the video uri to <Image source> would just show a blank tile.
-  const showImage = !redacted && kind === 'photo' && !!att.localPath;
-  const videoPoster = !redacted && kind === 'video' && !!att.blurhash;
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={!onPress}
-      style={[styles.thumb, { backgroundColor: theme.color.groupedBackground }]}
-      accessibilityRole="image"
-    >
-      {showImage ? (
-        <Image
-          source={{ uri: att.localPath! }}
-          placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
-          contentFit="cover"
-          style={styles.thumbImg}
-        />
-      ) : videoPoster ? (
-        // Poster-only: blurhash as the image (NO video source) with a play glyph overlay.
-        <>
-          <Image
-            placeholder={{ blurhash: att.blurhash! }}
-            contentFit="cover"
-            style={styles.thumbImg}
-          />
-          <Text style={[styles.thumbGlyph, styles.thumbGlyphOverlay]}>▶</Text>
-        </>
-      ) : (
-        <Text style={styles.thumbGlyph}>{glyph}</Text>
-      )}
-    </Pressable>
-  );
-}
-
-/**
- * Conversation-details shared media (Phase 2.1): horizontal thumbnail strips for
- * Photos + Videos (tap → media viewer), and count rows for Documents + Links
- * (links open via the safe URL opener). Renders nothing when the chat has no media.
- */
-function MediaSections({
-  media,
-  onOpenMedia,
-}: {
-  media: ChatMediaByKind | null | undefined;
-  onOpenMedia: (attachmentGuid: string) => void;
-}): React.JSX.Element | null {
-  const theme = useTheme();
-  // Redacted (privacy) mode: mirror the rest of the app — never surface link URLs or
-  // photo/video previews here. Thumbnails fall back to neutral kind tiles (MediaThumb)
-  // and link URLs are replaced by a placeholder so a screenshot leaks nothing.
-  const redacted = useRedactedModeStore((s) => s.enabled);
-  if (!media) return null;
-  const { photos, videos, documents, links } = media;
-  if (!photos.length && !videos.length && !documents.length && !links.length) return null;
-
-  const labelStyle = [styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }];
-  const rowValueStyle = [styles.rowValue, { color: theme.color.tertiaryLabel }];
-
-  return (
-    <>
-      <Text style={labelStyle}>SHARED MEDIA</Text>
-      {photos.length > 0 ? (
-        <>
-          <Text style={[styles.mediaStripLabel, { color: theme.color.tertiaryLabel }]}>
-            Photos · {photos.length}
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
-            {photos.map((a) => (
-              <MediaThumb
-                key={a.guid}
-                att={a}
-                kind="photo"
-                glyph="🖼"
-                redacted={redacted}
-                onPress={() => onOpenMedia(a.guid)}
-              />
-            ))}
-          </ScrollView>
-        </>
-      ) : null}
-      {videos.length > 0 ? (
-        <>
-          <Text style={[styles.mediaStripLabel, { color: theme.color.tertiaryLabel }]}>
-            Videos · {videos.length}
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
-            {videos.map((a) => (
-              <MediaThumb
-                key={a.guid}
-                att={a}
-                kind="video"
-                glyph="▶"
-                redacted={redacted}
-                onPress={() => onOpenMedia(a.guid)}
-              />
-            ))}
-          </ScrollView>
-        </>
-      ) : null}
-      {documents.length > 0 || links.length > 0 ? (
-        <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          {documents.length > 0 ? (
-            <View style={styles.row}>
-              <Text style={[styles.rowLabel, { color: theme.color.label }]}>Documents</Text>
-              <Text style={rowValueStyle}>{documents.length}</Text>
-            </View>
-          ) : null}
-          {links.length > 0 ? (
-            <View>
-              <View
-                style={[
-                  styles.row,
-                  documents.length > 0 && {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Links</Text>
-                <Text style={rowValueStyle}>{links.length}</Text>
-              </View>
-              {links.slice(0, 5).map((l) => (
-                <Pressable
-                  key={l.messageGuid}
-                  onPress={() => void safeOpenUrl(l.url)}
-                  style={[
-                    styles.row,
-                    {
-                      borderTopColor: theme.color.separator,
-                      borderTopWidth: StyleSheet.hairlineWidth,
-                    },
-                  ]}
-                >
-                  <Text numberOfLines={1} style={[styles.linkText, { color: theme.color.tint }]}>
-                    {redacted ? '[link]' : l.url}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17, width: 70 },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
-  spacer: { width: 70 },
   content: { padding: 16 },
-  sectionLabel: { fontSize: 13, marginBottom: 6, marginLeft: 12 },
-  group: { borderRadius: 12, overflow: 'hidden' },
+  gap: { marginTop: 24 },
   input: { paddingHorizontal: 16, paddingVertical: 14, fontSize: 16 },
   swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, padding: 16 },
   swatch: { width: 36, height: 36, borderRadius: 18 },
@@ -703,32 +549,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 14,
   },
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15 },
   remove: { fontSize: 18, paddingHorizontal: 4 },
   reset: { alignItems: 'center', paddingVertical: 24 },
   resetText: { fontSize: 16 },
-  mediaStripLabel: { fontSize: 13, marginLeft: 12, marginBottom: 6, marginTop: 4 },
-  strip: { marginBottom: 8 },
-  thumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
-    marginRight: 8,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  thumbImg: { width: '100%', height: '100%' },
-  thumbGlyph: { fontSize: 26 },
-  // Play glyph drawn over a video's blurhash poster (the strip tile is centered).
-  thumbGlyphOverlay: {
-    position: 'absolute',
-    color: '#FFFFFF',
-    textShadowColor: '#000000',
-    textShadowRadius: 3,
-  },
-  linkText: { fontSize: 15, flex: 1 },
 });

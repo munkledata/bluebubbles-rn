@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useChatHeader } from '@features/conversations/useChatHeader';
+import type { ChatHeaderRow } from '@db/repositories';
 import { useFaceTime } from '@features/facetime/useFaceTime';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
@@ -20,6 +20,8 @@ import { useTheme, withAlpha } from '../theme';
 
 interface ConversationHeaderProps {
   chatGuid: string;
+  /** Header row from the screen's single useChatHeader subscription (null while loading). */
+  data: ChatHeaderRow | null;
   /** A chat wallpaper is set → tint the bar translucent so the image shows through (no black bar). */
   translucent?: boolean;
 }
@@ -27,12 +29,12 @@ interface ConversationHeaderProps {
 /** iOS conversation nav bar: back chevron + centered avatar + title. */
 export function ConversationHeader({
   chatGuid,
+  data,
   translucent = false,
 }: ConversationHeaderProps): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { data } = useChatHeader(chatGuid);
   const { startCall } = useFaceTime();
   const redacted = useRedactedModeStore((s) => s.enabled);
   const title = redactTitle(data ? resolveTitle(data) : '', redacted);
@@ -164,7 +166,13 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '90%' },
   title: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   // Floating-over-wallpaper chrome: each control sits in its own frosted bubble.
-  bubble: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  bubble: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarBubble: { borderRadius: 999, padding: 3 },
   titlePill: {
     paddingHorizontal: 10,

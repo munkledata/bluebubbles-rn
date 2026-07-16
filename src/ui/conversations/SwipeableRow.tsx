@@ -33,11 +33,20 @@ const OPEN_THRESHOLD = 40; // drag past this (px) to snap open on release
  *
  * NOTE: needs on-device verification of the gesture feel + FlashList scroll interaction.
  */
-export function SwipeableRow({ left, right, resetKey, children }: SwipeableRowProps): React.JSX.Element {
+export function SwipeableRow({
+  left,
+  right,
+  resetKey,
+  children,
+}: SwipeableRowProps): React.JSX.Element {
   const tx = useRef(new Animated.Value(0)).current;
   const offset = useRef(0); // committed open offset (0 = closed)
   const leftW = (left?.length ?? 0) * ACTION_W;
   const rightW = (right?.length ?? 0) * ACTION_W;
+  // The responder is created once; ref the CURRENT widths so a later change to the action sets
+  // (same MessageSwipeWrapper onReplyRef pattern) isn't stale inside its closures.
+  const widthsRef = useRef({ leftW, rightW });
+  widthsRef.current = { leftW, rightW };
 
   const snap = (to: number): void => {
     offset.current = to;
@@ -60,13 +69,14 @@ export function SwipeableRow({ left, right, resetKey, children }: SwipeableRowPr
       onPanResponderMove: (_e, g) => {
         let next = offset.current + g.dx;
         // Clamp to the available action width per side (no overscroll past the panel).
-        next = Math.max(-rightW, Math.min(leftW, next));
+        next = Math.max(-widthsRef.current.rightW, Math.min(widthsRef.current.leftW, next));
         tx.setValue(next);
       },
       onPanResponderRelease: (_e, g) => {
         const next = offset.current + g.dx;
-        if (next <= -OPEN_THRESHOLD && rightW > 0) snap(-rightW);
-        else if (next >= OPEN_THRESHOLD && leftW > 0) snap(leftW);
+        const { leftW: lw, rightW: rw } = widthsRef.current;
+        if (next <= -OPEN_THRESHOLD && rw > 0) snap(-rw);
+        else if (next >= OPEN_THRESHOLD && lw > 0) snap(lw);
         else snap(0);
       },
       onPanResponderTerminate: () => snap(0),
@@ -117,7 +127,11 @@ function ActionButton({
       accessibilityRole="button"
       accessibilityLabel={action.label}
     >
-      <Icon name={action.icon as React.ComponentProps<typeof Icon>['name']} size={20} color="#fff" />
+      <Icon
+        name={action.icon as React.ComponentProps<typeof Icon>['name']}
+        size={20}
+        color="#fff"
+      />
       <Text style={styles.actionLabel}>{action.label}</Text>
     </Pressable>
   );

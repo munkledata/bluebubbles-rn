@@ -1,4 +1,10 @@
-import { attachmentKind, fileTypeLabel, friendlySize, shouldAutoDownload } from '@utils';
+import {
+  attachmentKind,
+  fileTypeLabel,
+  friendlySize,
+  isLocalFileUri,
+  shouldAutoDownload,
+} from '@utils';
 
 describe('attachmentKind', () => {
   it('dispatches by MIME', () => {
@@ -29,6 +35,17 @@ describe('fileTypeLabel', () => {
     expect(fileTypeLabel('application/pdf', 'Q3-Report.pdf')).toBe('PDF');
     expect(fileTypeLabel('application/zip', null)).toBe('ZIP');
     expect(fileTypeLabel(null, 'noext')).toBe('FILE');
+  });
+});
+
+describe('isLocalFileUri', () => {
+  it('accepts only file:// URIs (the only scheme production writers emit)', () => {
+    expect(isLocalFileUri('file:///data/att/a.jpg')).toBe(true);
+    expect(isLocalFileUri('/data/att/a.jpg')).toBe(false); // bare paths never occur
+    expect(isLocalFileUri('https://dev.local/a.jpg')).toBe(false);
+    expect(isLocalFileUri('')).toBe(false);
+    expect(isLocalFileUri(null)).toBe(false);
+    expect(isLocalFileUri(undefined)).toBe(false);
   });
 });
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { getDatabase } from '@db/database';
 import {
   getChatIdByGuid,
@@ -12,6 +13,7 @@ import {
   type ReactionRow,
 } from '@db/repositories';
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
+import { createRowIdentityCache } from './rowIdentity';
 
 // Bubbles depend on message rows (which also hold reactions + replies), sender
 // handles, and attachments — all already in these tables, so a reaction add/
@@ -38,6 +40,12 @@ export function useMessages(
   limit = 100,
   anchorDate?: number,
 ): ReactiveState<EnrichedMessage[]> {
+  // Every reactive flush rebuilds every row object; reconcile against the previous pass so an
+  // UNCHANGED message keeps its identity and the memoized MessageRow/MessageBubble don't re-render
+  // (the same churn that caused the ImageAttachment re-download storm). Keyed by guid, fingerprinted
+  // over the whole enriched row (attachments/reactions/replyPreview included).
+  // Lazy initializer — useRef(create()) would re-invoke the factory every render.
+  const [reconcile] = useState(() => createRowIdentityCache<EnrichedMessage>((m) => m.guid));
   return useReactiveQuery<EnrichedMessage[]>(
     async () => {
       const db = getDatabase();
@@ -72,14 +80,16 @@ export function useMessages(
         }),
       );
 
-      return msgs.map((m) => ({
-        ...m,
-        attachments: attByMsg.get(m.id) ?? [],
-        reactions: reactionsByGuid.get(m.guid) ?? [],
-        replyPreview: m.threadOriginatorGuid
-          ? (previews.get(m.threadOriginatorGuid) ?? null)
-          : null,
-      }));
+      return reconcile(
+        msgs.map((m) => ({
+          ...m,
+          attachments: attByMsg.get(m.id) ?? [],
+          reactions: reactionsByGuid.get(m.guid) ?? [],
+          replyPreview: m.threadOriginatorGuid
+            ? (previews.get(m.threadOriginatorGuid) ?? null)
+            : null,
+        })),
+      );
     },
     TABLES,
     [chatGuid, limit, anchorDate],

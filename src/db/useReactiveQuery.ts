@@ -24,15 +24,22 @@ const DEBOUNCE_MS = 24;
  *
  * Pass `deps` for inputs that should re-create the subscription/query. `run` is
  * read from a ref, so it need not be memoized.
+ *
+ * `options.enabled` (default true) gates the whole thing: when false, neither the
+ * initial exec nor the reactive subscription runs (data null, isLoading false) —
+ * so e.g. a bubble with no URL doesn't open a url_previews subscription. Flipping
+ * it true later starts the query/subscription normally.
  */
 export function useReactiveQuery<T>(
   run: () => Promise<T>,
   tables: string[],
   deps: unknown[] = [],
+  options: { enabled?: boolean } = {},
 ): ReactiveState<T> {
+  const enabled = options.enabled !== false;
   const [state, setState] = useState<ReactiveState<T>>({
     data: null,
-    isLoading: true,
+    isLoading: enabled,
     error: null,
   });
   const runRef = useRef(run);
@@ -40,6 +47,23 @@ export function useReactiveQuery<T>(
   const tablesKey = tables.join(',');
 
   useEffect(() => {
+    if (!enabled) {
+      // Idle state; the functional update bails (same object) when already idle.
+      setState((s) =>
+        s.data === null && !s.isLoading && s.error === null
+          ? s
+          : { data: null, isLoading: false, error: null },
+      );
+      return;
+    }
+    // Re-entering from the disabled-idle state (data null, not loading): reflect the
+    // in-flight initial exec so consumers reading isLoading see a real loading state.
+    // On a normal enabled mount isLoading is already true, so this bails (same object).
+    setState((s) =>
+      s.data === null && !s.isLoading && s.error === null
+        ? { data: null, isLoading: true, error: null }
+        : s,
+    );
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -82,7 +106,7 @@ export function useReactiveQuery<T>(
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tablesKey, ...deps]);
+  }, [tablesKey, enabled, ...deps]);
 
   return state;
 }

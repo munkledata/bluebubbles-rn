@@ -1,13 +1,18 @@
-import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
-import * as MediaLibrary from 'expo-media-library';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
-import type { MessagePreview } from '@db/repositories';
+import {
+  getChatIdByGuid,
+  getChatParticipants,
+  getFirstUnreadInChat,
+  kvGet,
+  kvSet,
+  type MessagePreview,
+} from '@db/repositories';
+import { useReactiveQuery } from '@db/useReactiveQuery';
 import {
   dispatchRealtimeEvent,
   ensureChatSynced,
@@ -19,33 +24,26 @@ import {
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 import {
-  cancelOutgoing,
   editText,
   fireDueScheduled,
-  react,
   reply,
   runDueScheduled,
   schedule,
   send,
   sendImage,
   sendImages,
-  unsend,
 } from '@/services/send';
 import {
   devEditFake,
   devInjectEffect,
   devSendFake,
-  devSendFakeReaction,
   devSendFakeReply,
-  devUnsendFake,
 } from '@features/conversations/devSeed';
-import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { useChatHeader } from '@features/conversations/useChatHeader';
+import { useMessageActions } from '@features/conversations/useMessageActions';
 import { useMessages } from '@features/conversations/useMessages';
 import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
-import { scheduleReminder } from '@/services/notifications/remindersService';
 import { isDevServer } from '@utils/isDev';
-import { resolveChatService } from '@utils';
 import {
   Composer,
   ConversationHeader,
@@ -53,18 +51,19 @@ import {
   MessageActionsOverlay,
   MessageList,
   Screen,
+  ThreadSheet,
   ScreenEffectOverlay,
   SmartReplyChips,
   TypingBubble,
   useTheme,
   type PendingAttachment,
-  type SelectedMessage,
 } from '@ui';
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
-import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
+import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useTypingStore } from '@state/typingStore';
-import { isGroupRow, resolveTitle } from '@utils';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
 
 // Lazy: expo-audio (native) is only pulled in when the user actually records a voice memo,
 // so the chat opens fine on a build that hasn't linked the module yet.
@@ -110,22 +109,70 @@ function ChatScreenInner({
   // recent window; otherwise the normal recent window. ONE message subscription for the whole screen
   // — fed to the list, smart-reply chips, and the screen-effect trigger (avoids 3× the query work).
   const anchorNum = focusDate ? Number(focusDate) : NaN;
-  const anchorDate = Number.isFinite(anchorNum) ? anchorNum : undefined;
-  const { data: messagesData, error: messagesError } = useMessages(guid, 250, anchorDate);
+  const routeAnchorDate = Number.isFinite(anchorNum) ? anchorNum : undefined;
+  // "Jump to oldest unread" reuses the search-hit anchor plumbing: tapping the chip anchors the
+  // window on the first unread message (declared here, above useMessages, for hook order).
+  const [jump, setJump] = useState<{ guid: string; dateCreated: number } | null>(null);
+  const anchorDate = routeAnchorDate ?? jump?.dateCreated;
+  const effFocusGuid = focusGuid ?? jump?.guid;
+  // The message window grows as the user scrolls back through history (see onLoadOlder). Starts at
+  // one screen-worth+ and pages by PAGE_SIZE. In search-anchor mode the window is centered on the
+  // hit instead (limit is ignored), so pagination is disabled there.
+  const [limit, setLimit] = useState(250);
+  const { data: messagesData, error: messagesError } = useMessages(guid, limit, anchorDate);
   const messages = messagesData ?? [];
+  // Load older history when the list reaches the top. Guarded so repeated onStartReached fires (and
+  // the async reactive re-query) can't stack several page-grows at once: the ref is set on grow and
+  // cleared when the message count actually changes (new page arrived). Growth stops once a load
+  // returns fewer rows than requested — that means the start of history is reached.
+  const loadingOlderRef = useRef(false);
+  useEffect(() => {
+    loadingOlderRef.current = false;
+  }, [messages.length]);
+  const onLoadOlder = useCallback((): void => {
+    if (anchorDate != null || loadingOlderRef.current) return;
+    if (messages.length < limit) return;
+    loadingOlderRef.current = true;
+    setLimit((n) => n + 200);
+  }, [anchorDate, messages.length, limit]);
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
-  const markedRef = useRef(false);
-  const [selected, setSelected] = useState<SelectedMessage | null>(null);
-  const router = useRouter();
+  const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
+  // Group participants for @mention autocomplete (reactive so contact-sync name updates flow in).
+  const { data: participants } = useReactiveQuery<{ address: string; name: string }[]>(
+    async () => (isGroup ? getChatParticipants(getDatabase(), guid) : []),
+    ['chat_handles', 'handles'],
+    [guid, isGroup],
+  );
   const [replyTo, setReplyTo] = useState<MessagePreview | null>(null);
   const [editing, setEditing] = useState<{ guid: string; text: string } | null>(null);
   const [recording, setRecording] = useState(false);
   const screenEffect = useNewScreenEffect(guid, messages);
+  // "Jump to oldest unread": captured BEFORE markRead moves the read marker. The chip shows only
+  // when the backlog is deep enough that the oldest unread sits off-screen above the opening view.
+  const [firstUnread, setFirstUnread] = useState<{
+    guid: string;
+    dateCreated: number;
+    count: number;
+  } | null>(null);
 
+  // Runs once per guid (the deps are exactly [guid]) — no once-ref, so a reused screen
+  // instance that receives a NEW guid marks the new chat read/synced too.
   useEffect(() => {
-    if (markedRef.current || !guid) return;
-    markedRef.current = true;
-    void markRead(guid);
+    if (!guid) return;
+    void (async () => {
+      // Capture the oldest-unread target BEFORE markRead clears the marker.
+      try {
+        const db = getDatabase();
+        const chatId = await getChatIdByGuid(db, guid);
+        if (chatId != null) {
+          const fu = await getFirstUnreadInChat(db, chatId);
+          if (fu && fu.count >= JUMP_UNREAD_MIN) setFirstUnread(fu);
+        }
+      } catch {
+        // best-effort — the chip just doesn't show
+      }
+      void markRead(guid);
+    })();
     clearChatNotification(guid); // dismiss any tray notification for this chat
     // Backfill this thread's history from the server on open, so it fills in even if the
     // large initial sync hasn't reached it yet (or was interrupted). The reactive query
@@ -165,197 +212,116 @@ function ChatScreenInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onSchedule = (text: string, scheduledFor: number): void => {
-    // Capture the active reply target so a scheduled reply still threads.
-    void schedule({ chatGuid: guid, text, scheduledFor, selectedMessageGuid: replyTo?.guid });
-    setReplyTo(null);
-  };
-
-  const onSend = (text: string, effectId?: string): void => {
-    // DEV: when on the local dev session, simulate the server round-trip so the
-    // optimistic → sent flow is visible without a real Gator server.
-    if (editing) {
-      const g = editing.guid;
-      setEditing(null);
-      if (isDev()) void devEditFake(g, text);
-      else void editText({ messageGuid: g, newText: text, chatGuid: guid });
-      return;
-    }
-    if (replyTo) {
-      if (isDev()) void devSendFakeReply(guid, text, replyTo.guid, effectId);
-      else void reply({ chatGuid: guid, text, replyToGuid: replyTo.guid, effectId });
+  // useCallback-stable: these feed the memoized Composer (and SmartReplyChips), so a reactive
+  // tick re-rendering the screen doesn't re-render the composer through fresh closures.
+  const onSchedule = useCallback(
+    (text: string, scheduledFor: number): void => {
+      // Capture the active reply target so a scheduled reply still threads.
+      void schedule({ chatGuid: guid, text, scheduledFor, selectedMessageGuid: replyTo?.guid });
       setReplyTo(null);
-      return;
-    }
-    if (isDev()) void devSendFake(guid, text, effectId);
-    else void send({ chatGuid: guid, text, effectId });
-  };
+    },
+    [guid, replyTo],
+  );
 
-  // Long-press a bubble → open the tapback/reply/edit menu. Stable so the
-  // memoized message rows aren't re-rendered by a fresh closure each render.
-  const onLongPressMessage = useCallback((msg: EnrichedMessage): void => {
-    const mine = msg.reactions
-      .filter((r) => r.isFromMe && r.baseType !== 'emoji')
-      .map((r) => r.baseType)
-      .filter((t): t is ReactionBaseType => !!parseReactionType(t));
-    const myEmojis = msg.reactions
-      .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
-      .map((r) => r.emoji as string);
-    setSelected({
-      guid: msg.guid,
-      text: msg.text,
-      isFromMe: msg.isFromMe === 1,
-      senderName: msg.senderName,
-      mine,
-      myEmojis,
-      dateCreated: msg.dateCreated,
-      isRetracted: !!msg.dateRetracted,
-      isTemp: msg.guid.startsWith('temp-'),
-      sendState: msg.sendState,
-      attachments: (msg.attachments ?? []).map((a) => ({
-        guid: a.guid,
-        localPath: a.localPath,
-        mimeType: a.mimeType,
-      })),
-    });
-  }, []);
+  const onSend = useCallback(
+    (
+      text: string,
+      effectId?: string,
+      subject?: string,
+      mentions?: { start: number; length: number; address: string }[],
+    ): void => {
+      // DEV: when on the local dev session, simulate the server round-trip so the
+      // optimistic → sent flow is visible without a real Gator server.
+      if (editing) {
+        const g = editing.guid;
+        setEditing(null);
+        if (isDev()) void devEditFake(g, text);
+        else void editText({ messageGuid: g, newText: text, chatGuid: guid });
+        return;
+      }
+      if (replyTo) {
+        if (isDev()) void devSendFakeReply(guid, text, replyTo.guid, effectId);
+        else void reply({ chatGuid: guid, text, replyToGuid: replyTo.guid, effectId });
+        setReplyTo(null);
+        return;
+      }
+      if (isDev()) void devSendFake(guid, text, effectId);
+      else void send({ chatGuid: guid, text, effectId, subject, mentions });
+    },
+    [guid, editing, replyTo, isDev],
+  );
 
-  const onEditSelected = (): void => {
-    if (!selected) return;
-    setReplyTo(null);
-    setEditing({ guid: selected.guid, text: selected.text ?? '' });
-  };
+  // The long-press menu / multi-select / swipe-reply handlers (selected, selectedGuids, and
+  // threadFor state live in the hook). onLongPressMessage / onSwipeReply / onToggleSelect are
+  // STABLE — they feed the memoized MessageList → MessageRow chain (see useMessageActions).
+  const {
+    selected,
+    setSelected,
+    selectedGuids,
+    setSelectedGuids,
+    threadFor,
+    setThreadFor,
+    onLongPressMessage,
+    onSwipeReply,
+    onToggleSelect,
+    onEnterSelect,
+    onBulkCopy,
+    onBulkDelete,
+    onViewThreadSelected,
+    onEditSelected,
+    onUnsendSelected,
+    onCancelSelected,
+    onReact,
+    onReplyToSelected,
+    onCopySelected,
+    onShareSelected,
+    onDeleteSelected,
+    onForwardSelected,
+    onSaveSelected,
+    onRemindLater,
+  } = useMessageActions({
+    guid,
+    messages,
+    chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
+    setReplyTo,
+    setEditing,
+  });
 
-  const onUnsendSelected = (): void => {
-    if (!selected) return;
-    const g = selected.guid;
-    showDialog('Unsend message?', 'This removes it for you and retracts it.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Unsend',
-        style: 'destructive',
-        onPress: () => {
-          if (isDev()) void devUnsendFake(g);
-          else void unsend({ messageGuid: g, chatGuid: guid });
-        },
-      },
-    ]);
-  };
-
-  const onCancelSelected = (): void => {
-    if (!selected) return;
-    const g = selected.guid;
-    const sending = selected.sendState === 'sending';
-    showDialog(
-      sending ? 'Cancel sending?' : 'Remove message?',
-      sending
-        ? 'Stop sending this message and remove it.'
-        : 'Remove this unsent message from the conversation.',
-      [
-        { text: 'Keep', style: 'cancel' },
-        {
-          text: sending ? 'Cancel Sending' : 'Remove',
-          style: 'destructive',
-          onPress: () => void cancelOutgoing(g),
-        },
-      ],
-    );
-  };
-
-  const onReact = (reaction: string, emoji?: string): void => {
-    if (!selected) return;
-    const args = {
-      chatGuid: guid,
-      targetGuid: selected.guid,
-      reaction,
-      emoji,
-      selectedMessageText: selected.text ?? '',
+  // Per-chat draft: restore on open, persist (debounced in the Composer) via kv `draft.<guid>`.
+  const [draft, setDraft] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void kvGet(getDatabase(), `draft.${guid}`)
+      .then((v) => {
+        if (alive) setDraft(v ?? '');
+      })
+      .catch(() => {
+        if (alive) setDraft('');
+      });
+    return () => {
+      alive = false;
     };
-    if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction, emoji);
-    else void react(args);
-  };
-
-  const onReplyToSelected = (): void => {
-    if (!selected) return;
-    setReplyTo({
-      guid: selected.guid,
-      text: selected.text,
-      isFromMe: selected.isFromMe ? 1 : 0,
-      senderName: selected.senderName,
-      hasAttachments: 0,
-    });
-  };
-
-  const onCopySelected = (): void => {
-    if (selected?.text) void Clipboard.setStringAsync(selected.text);
-  };
-
-  // Forward: open the new-message composer pre-filled with this message's text (parity with the
-  // old app's "Forward" → chat creator). Attachment forwarding is not yet supported.
-  const onForwardSelected = (): void => {
-    if (!selected?.text) return;
-    router.push({ pathname: '/new-chat', params: { forwardText: selected.text } });
-  };
-
-  // Save the message's attachment(s) to the device gallery. Saves any already-downloaded local
-  // file; if none is downloaded yet, tells the user to open it first (which triggers the download).
-  const onSaveSelected = (): void => {
-    const atts = selected?.attachments ?? [];
-    if (atts.length === 0) return;
-    void (async () => {
-      try {
-        const perm = await MediaLibrary.requestPermissionsAsync();
-        if (perm.status !== 'granted') {
-          showDialog('Save', 'Photos permission is required to save attachments.');
-          return;
-        }
-        let saved = 0;
-        for (const a of atts) {
-          const p = a.localPath;
-          if (p && (p.startsWith('file://') || p.startsWith('/'))) {
-            await MediaLibrary.saveToLibraryAsync(p);
-            saved += 1;
-          }
-        }
-        showDialog(
-          'Save',
-          saved > 0
-            ? `Saved ${saved} ${saved === 1 ? 'item' : 'items'} to Photos.`
-            : 'Open the attachment first to download it, then try Save again.',
-        );
-      } catch {
-        showDialog('Save', 'Couldn’t save the attachment.');
-      }
-    })();
-  };
-
-  const onRemindLater = (): void => {
-    if (!selected) return;
-    const msg = selected;
-    void (async () => {
-      const when = await pickFutureDateTime();
-      if (when == null) return;
-      try {
-        await scheduleReminder(getDatabase(), {
-          chatGuid: guid,
-          messageGuid: msg.guid,
-          chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
-          messagePreview: msg.text,
-          senderName: msg.senderName,
-          scheduledFor: when,
-          now: Date.now(),
-        });
-        showDialog('Reminder set', 'You’ll be reminded about this message.');
-      } catch {
-        showDialog('Reminder', 'Couldn’t set the reminder.');
-      }
-    })();
-  };
+  }, [guid]);
+  const onDraftChange = useCallback(
+    (text: string): void => {
+      // Keep the local `draft` state in lockstep with kv. Entering multi-select UNMOUNTS the
+      // Composer (bottomStack swaps to the selection bar); on exit it REMOUNTS and restores from
+      // `initialText={draft}`. Without this setDraft, `draft` stays frozen at the chat-open value
+      // and the remounted Composer comes up stale/empty — then its own unmount flush writes '' back
+      // over the real kv draft. The Composer's unmount flush calls this before it unmounts, so
+      // `draft` is fresh by the time it remounts.
+      setDraft(text);
+      void kvSet(getDatabase(), `draft.${guid}`, text).catch(() => {
+        // best-effort — losing a draft persist is not worth surfacing
+      });
+    },
+    [guid],
+  );
 
   // The inline tray's "Files" button — pick documents and return them to STAGE as pending
   // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
   // beyond the OS document picker itself.
-  const pickFiles = async (): Promise<PendingAttachment[]> => {
+  const pickFiles = useCallback(async (): Promise<PendingAttachment[]> => {
     try {
       // Lazy import: expo-document-picker is a native module, kept off the chat-open path.
       const DocumentPicker = await import('expo-document-picker');
@@ -374,19 +340,21 @@ function ChatScreenInner({
       showDialog('Attach', 'Couldn’t open the file picker.');
       return [];
     }
-  };
+  }, []);
+
+  // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
+  const onSendAttachments = useCallback(
+    (items: PendingAttachment[]): void => void sendImages({ chatGuid: guid, images: items }),
+    [guid],
+  );
+  const onCancelReply = useCallback((): void => setReplyTo(null), []);
+  const onCancelEdit = useCallback((): void => setEditing(null), []);
+  const onTyping = useCallback((active: boolean): void => void sendTyping(guid, active), [guid]);
+  const onStartVoice = useCallback((): void => setRecording(true), []);
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
-  const [kbVisible, setKbVisible] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setKbVisible(true));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKbVisible(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
+  const kbVisible = useKeyboardVisible();
 
   // Wallpaper mode: the header/composer float transparent over the image, the list runs UNDER
   // them, and EdgeFade veils dissolve messages into the bar zones instead of hard-clipping them
@@ -402,10 +370,27 @@ function ChatScreenInner({
   const topBar = headerH > 0 ? headerH : insets.top + 74;
   const bottomBar = bottomBarH > 0 ? bottomBarH : insets.bottom + 54;
 
-  const headerNode = <ConversationHeader chatGuid={guid} translucent={hasWallpaper} />;
+  const headerNode = (
+    <ConversationHeader chatGuid={guid} data={header.data} translucent={hasWallpaper} />
+  );
   const errorNode = messagesError ? (
     <Text style={styles.errorBanner}>Couldn’t load messages. Pull to refresh or reopen.</Text>
   ) : null;
+  // "N unread — jump to first" chip under the header; tap anchors the list on the oldest unread.
+  const unreadChipNode =
+    firstUnread && !jump ? (
+      <Pressable
+        onPress={() => {
+          setJump({ guid: firstUnread.guid, dateCreated: firstUnread.dateCreated });
+          setFirstUnread(null);
+        }}
+        style={[styles.unreadChip, { backgroundColor: theme.color.tint }]}
+        accessibilityRole="button"
+        accessibilityLabel={`Jump to the first of ${firstUnread.count} unread messages`}
+      >
+        <Text style={styles.unreadChipText}>↑ {firstUnread.count} unread — jump to first</Text>
+      </Pressable>
+    ) : null;
   const listNode = (
     <MessageList
       chatGuid={guid}
@@ -417,11 +402,39 @@ function ChatScreenInner({
       topInset={hasWallpaper ? topBar + EDGE_FADE : 0}
       bottomInset={hasWallpaper ? bottomBar + EDGE_FADE : 0}
       onLongPressMessage={onLongPressMessage}
+      onSwipeReply={onSwipeReply}
       onRefresh={() => ensureChatSynced(guid)}
-      focusGuid={focusGuid}
+      onLoadOlder={onLoadOlder}
+      focusGuid={effFocusGuid}
+      selectedGuids={selectedGuids}
+      onToggleSelect={onToggleSelect}
     />
   );
-  const bottomStack = (
+  // Multi-select replaces the composer with a selection action bar. The Composer's unmount flush
+  // persists any in-progress draft to kv AND to `draft` state (via onDraftChange), so exiting
+  // select mode remounts the Composer with a fresh `initialText` and restores the draft.
+  const selectionBar = selectedGuids ? (
+    <View style={[styles.selectBar, { borderTopColor: theme.color.separator }]}>
+      <Text style={[styles.selectCount, { color: theme.color.label }]}>
+        {selectedGuids.size} selected
+      </Text>
+      <View style={styles.selectActions}>
+        <Pressable onPress={onBulkCopy} hitSlop={8} accessibilityRole="button">
+          <Text style={[styles.selectAction, { color: theme.color.tint }]}>Copy</Text>
+        </Pressable>
+        <Pressable onPress={onBulkDelete} hitSlop={8} accessibilityRole="button">
+          <Text style={[styles.selectAction, { color: theme.color.destructive }]}>Delete</Text>
+        </Pressable>
+        <Pressable onPress={() => setSelectedGuids(null)} hitSlop={8} accessibilityRole="button">
+          <Text style={[styles.selectAction, { color: theme.color.tint }]}>Done</Text>
+        </Pressable>
+      </View>
+    </View>
+  ) : null;
+
+  const bottomStack = selectedGuids ? (
+    selectionBar
+  ) : (
     <>
       {isTyping ? <TypingBubble /> : null}
       <SmartReplyChips messages={messages} onPick={onSend} />
@@ -434,16 +447,22 @@ function ChatScreenInner({
               : 'iMessage'
         }
         onSend={onSend}
-        onSendAttachments={(items) => void sendImages({ chatGuid: guid, images: items })}
+        onSendAttachments={onSendAttachments}
         onPickFiles={pickFiles}
         replyTo={replyTo}
-        onCancelReply={() => setReplyTo(null)}
+        onCancelReply={onCancelReply}
         editingText={editing?.text ?? null}
-        onCancelEdit={() => setEditing(null)}
+        onCancelEdit={onCancelEdit}
         onSchedule={onSchedule}
-        onTyping={(active) => sendTyping(guid, active)}
-        onStartVoice={isDev() ? undefined : () => setRecording(true)}
+        onTyping={onTyping}
+        onStartVoice={isDev() ? undefined : onStartVoice}
         translucent={hasWallpaper}
+        subjectEnabled={sendSubjectLines && chatService === 'iMessage'}
+        mentionParticipants={
+          isGroup && chatService === 'iMessage' ? (participants ?? NO_PARTICIPANTS) : undefined
+        }
+        initialText={draft ?? undefined}
+        onDraftChange={onDraftChange}
       />
     </>
   );
@@ -480,6 +499,7 @@ function ChatScreenInner({
           >
             {headerNode}
             {errorNode}
+            {unreadChipNode}
           </View>
           {listNode}
           {hasWallpaper ? (
@@ -539,6 +559,15 @@ function ChatScreenInner({
         onCopy={onCopySelected}
         onForward={onForwardSelected}
         onSave={onSaveSelected}
+        onShare={onShareSelected}
+        onDelete={onDeleteSelected}
+        onViewThread={onViewThreadSelected}
+        onSelect={onEnterSelect}
+      />
+      <ThreadSheet
+        originatorGuid={threadFor}
+        onClose={() => setThreadFor(null)}
+        onJump={(m) => setJump({ guid: m.guid, dateCreated: m.dateCreated })}
       />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />
@@ -565,6 +594,14 @@ function ChatScreenInner({
 // Height of the dissolve band the messages fade across, past the bar zone itself.
 const EDGE_FADE = 28;
 
+// Stable empty fallback for mentionParticipants — a fresh [] each render would defeat the
+// memoized Composer's shallow prop compare.
+const NO_PARTICIPANTS: { address: string; name: string }[] = [];
+
+// Show the "jump to oldest unread" chip only for a backlog deep enough that the oldest unread
+// message sits above the opening (bottom-anchored) view — a handful of unread is already visible.
+const JUMP_UNREAD_MIN = 6;
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   // Wallpaper mode: bars float over the full-height list instead of framing it. zIndex 2 keeps
@@ -579,6 +616,27 @@ const styles = StyleSheet.create({
     color: '#FF453A',
     backgroundColor: '#FF453A22',
   },
+  // Multi-select action bar (replaces the composer while selecting).
+  selectBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  selectCount: { fontSize: 15, fontWeight: '600' },
+  selectActions: { flexDirection: 'row', gap: 24 },
+  selectAction: { fontSize: 16, fontWeight: '600' },
+  // "N unread — jump to first" pill under the header.
+  unreadChip: {
+    alignSelf: 'center',
+    marginTop: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+  },
+  unreadChipText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   // DEV-only: inject a send-effect message into this chat to demo effects.
   devFx: {
     position: 'absolute',
