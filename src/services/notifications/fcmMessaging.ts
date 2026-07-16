@@ -1,11 +1,18 @@
-import messaging from '@react-native-firebase/messaging';
-import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import {
+  getMessaging,
+  setBackgroundMessageHandler,
+  onMessage,
+  onTokenRefresh,
+  getToken,
+} from '@react-native-firebase/messaging';
+import type { RemoteMessage } from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
 import { fcmApi } from '@core/api';
 import { logger } from '@core/secure';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
-import { dispatchRealtimeEvent, http, vault } from '@/services';
+import { http, vault } from '../clients';
+import { dispatchRealtimeEvent } from '../realtimeControl';
 import { parseFcmData } from './fcmPayload';
 import { decryptFcmPayload, FCM_ENCRYPTION_TYPE } from './fcmDecrypt';
 import { effectivelyLocked } from './lockGate';
@@ -22,7 +29,7 @@ import { postLockedNotification } from './notifeeService';
  *
  * The envelope parsing lives in `./fcmPayload` (firebase-free, unit-tested).
  */
-async function deliver(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
+async function deliver(msg: RemoteMessage): Promise<void> {
   const { eventName, body, encrypted, encryptionType } = parseFcmData(msg.data);
   if (encrypted) {
     // Supported scheme → decrypt the base64 body with the stored server password, then
@@ -30,9 +37,12 @@ async function deliver(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void>
     if (encryptionType === FCM_ENCRYPTION_TYPE && typeof body === 'string') {
       const password = await vault.get('serverPassword');
       if (!password) {
-        logger.warn('[fcm] encrypted push but no stored server password — will arrive on next sync', {
-          event: eventName,
-        });
+        logger.warn(
+          '[fcm] encrypted push but no stored server password — will arrive on next sync',
+          {
+            event: eventName,
+          },
+        );
         return;
       }
       try {
@@ -59,7 +69,7 @@ async function deliver(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void>
  * reveal sender/content — it posts a content-less notification instead. The headless DB
  * open otherwise bypasses the lock entirely.
  */
-async function deliverRespectingLock(msg: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
+async function deliverRespectingLock(msg: RemoteMessage): Promise<void> {
   // Fail CLOSED: if we can't determine the lock state we assume LOCKED, so a vault failure
   // can never leak sender/content. This does NOT drop delivery — postLockedNotification()
   // still posts a content-less notice; we just withhold the body until the user unlocks.
@@ -83,7 +93,7 @@ async function deliverRespectingLock(msg: FirebaseMessagingTypes.RemoteMessage):
 // in try/catch so a misconfigured Firebase project degrades to socket-only instead of
 // crashing app boot (the import + this call run on the startup path).
 try {
-  messaging().setBackgroundMessageHandler(deliverRespectingLock);
+  setBackgroundMessageHandler(getMessaging(), deliverRespectingLock);
 } catch (e) {
   logger.warn('[fcm] setBackgroundMessageHandler unavailable — push disabled', e);
 }
@@ -97,9 +107,11 @@ try {
  */
 export async function startFcm(): Promise<void> {
   try {
-    await messaging().requestPermission();
-    messaging().onMessage(deliverRespectingLock);
-    messaging().onTokenRefresh(() => void registerFcmToken());
+    // POST_NOTIFICATIONS is requested via requestNotificationPermission() in notifeeService.ts
+    // on the boot path, so the deprecated messaging().requestPermission() is redundant here.
+    const m = getMessaging();
+    onMessage(m, deliverRespectingLock);
+    onTokenRefresh(m, () => void registerFcmToken());
   } catch (e) {
     logger.warn('[fcm] startFcm failed — falling back to socket-only', e);
   }
@@ -115,7 +127,7 @@ const DEVICE_NAME = `Gator (Android ${Platform.Version})`;
 export async function registerFcmToken(): Promise<void> {
   if (!useSessionStore.getState().origin) return;
   try {
-    const token = await messaging().getToken();
+    const token = await getToken(getMessaging());
     if (token) await fcmApi.registerDevice(http, DEVICE_NAME, token);
   } catch (e) {
     logger.warn('[fcm] device token registration failed', e);

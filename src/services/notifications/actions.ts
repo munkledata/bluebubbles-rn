@@ -1,10 +1,12 @@
-import notifee, { type EventDetail } from '@notifee/react-native';
+import notifee, { type EventDetail } from 'react-native-notify-kit';
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
 import { isFaceTimeLink } from '@core/facetime';
 import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
-import { ensureDatabase, http, markRead } from '@/services';
+import { http } from '../clients';
+import { markRead } from '../chatActions';
+import { ensureDatabase } from '../databaseControl';
 import { sendTextMessage } from '@/services/send/sendService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import {

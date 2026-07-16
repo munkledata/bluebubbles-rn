@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { Message } from '@core/models';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
 import type { HttpClient } from '../http';
@@ -22,11 +22,11 @@ export const MessageList = z.object({ messages: z.array(Message).nullish() });
  */
 export const SendAck = z
   .object({ guid: z.string().nullish(), viaPrivateApi: z.boolean().nullish() })
-  .passthrough();
+  .loose();
 export type SendAck = z.infer<typeof SendAck>;
 
 /** `unsend-message` returns a status object `{ unsent: true }`, not a Message. */
-export const UnsendAck = z.object({ unsent: z.boolean().nullish() }).passthrough();
+export const UnsendAck = z.object({ unsent: z.boolean().nullish() }).loose();
 export type UnsendAck = z.infer<typeof UnsendAck>;
 
 /** GET /api/v1/chat/{guid}/message — messages for a chat, newest first. */
@@ -46,6 +46,16 @@ export async function chatMessages(
   return res.messages ?? [];
 }
 
+/** An @mention: a span `[start, start+length)` in the message text pointing at a participant. */
+export interface MessageMention {
+  /** Start index (UTF-16) of the mentioned span in the message text. */
+  start: number;
+  /** Length of the mentioned span. */
+  length: number;
+  /** The mentioned participant's handle address. */
+  address: string;
+}
+
 export interface SendTextParams {
   chatGuid: string;
   /** Client-generated temp GUID for optimistic send + reconciliation. */
@@ -55,6 +65,8 @@ export interface SendTextParams {
   /** Reply target. */
   selectedMessageGuid?: string;
   effectId?: string;
+  /** @mention spans — the server assembles the Private-API multipart `parts` from these. */
+  mentions?: MessageMention[];
   /** 'private-api' (effects/replies) or 'apple-script' (stock server). */
   method?: string;
 }
@@ -78,6 +90,8 @@ export function sendText(http: HttpClient, params: SendTextParams): Promise<Send
       subject: params.subject,
       selectedMessageGuid: params.selectedMessageGuid,
       effectId: params.effectId,
+      // Only sent when non-empty so the server keeps the plain send-message path otherwise.
+      mentions: params.mentions?.length ? params.mentions : undefined,
     },
   });
 }

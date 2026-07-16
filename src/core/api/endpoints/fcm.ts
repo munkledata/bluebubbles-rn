@@ -1,8 +1,8 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import type { HttpClient } from '../http';
 
 // Gator's register-device op returns `{ id }` (the new device row's id) post-unwrap.
-const RegisterAck = z.object({ id: z.string().nullish() }).passthrough();
+const RegisterAck = z.object({ id: z.string().nullish() }).loose();
 
 /**
  * POST /api/v1/devices — register this device for push so the server can notify us.

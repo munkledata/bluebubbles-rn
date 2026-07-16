@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import type { HttpClient } from '@core/api/http';
 import {
   MessageList,
@@ -32,7 +32,7 @@ function fixture(name: string): unknown {
 /** A fake HttpClient that ignores path/schema and returns the given pre-parsed payload,
  *  but still runs it through the endpoint's schema (so a schema mismatch throws). */
 function httpReturning(payload: unknown): HttpClient {
-  const respond = (_path: string, schema: z.ZodTypeAny) => schema.parseAsync(payload);
+  const respond = (_path: string, schema: z.ZodType) => schema.parseAsync(payload);
   return {
     get: respond,
     post: respond,

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { epochMillis } from './common';
 import { Handle } from './handle';
 import { Attachment } from './attachment';
@@ -57,6 +57,17 @@ export const Message = z.object({
   /** iMessage expressive send effect id (effectMap in constants.dart). */
   expressiveSendStyleId: z.string().nullish(),
 
+  /**
+   * Group/chat-event metadata. `itemType` > 0 marks a system event (participant add/remove,
+   * rename, leave, photo change, location, kept audio, FaceTime); `groupActionType`
+   * disambiguates within a type; `groupTitle` is the new name on a rename; `otherHandle` is the
+   * affected participant's server ROWID. Rendered as a centered event line (utils/groupEvent.ts).
+   */
+  itemType: z.number().nullish(),
+  groupActionType: z.number().nullish(),
+  groupTitle: z.string().nullish(),
+  otherHandle: z.number().nullish(),
+
   error: z.number().nullish(),
 });
 export type Message = z.infer<typeof Message>;
@@ -73,8 +84,6 @@ export function isReaction(m: Pick<Message, 'associatedMessageType'>): boolean {
  * when the server didn't embed `chats[]`. Returns null when neither is present (the
  * caller logs + skips rather than silently dropping the event — see DbEventSink).
  */
-export function resolveMessageChatGuid(
-  m: Pick<Message, 'chats' | 'chatGuid'>,
-): string | undefined {
+export function resolveMessageChatGuid(m: Pick<Message, 'chats' | 'chatGuid'>): string | undefined {
   return m.chats?.[0]?.guid ?? m.chatGuid ?? undefined;
 }

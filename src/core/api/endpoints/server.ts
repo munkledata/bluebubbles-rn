@@ -1,10 +1,10 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { ServerInfo } from '@core/models';
 import { UnimplementedEndpointError } from '../errors';
 import type { HttpClient } from '../http';
 
 /** GET /api/v1/ping — health check. The server returns `data: { pong: true }`. */
-const Pong = z.object({ pong: z.boolean() }).passthrough();
+const Pong = z.object({ pong: z.boolean() }).loose();
 export type Pong = z.infer<typeof Pong>;
 /** `retry: false` — a health/reachability probe must fail fast, not mask a down server by retrying. */
 export function ping(http: HttpClient): Promise<Pong> {
@@ -65,7 +65,7 @@ const UpdateCheck = z
     available: z.boolean().nullish(),
     metadata: z.record(z.string(), z.unknown()).nullish(),
   })
-  .passthrough()
+  .loose()
   .nullish();
 export type UpdateCheck = z.infer<typeof UpdateCheck>;
 
@@ -85,12 +85,13 @@ export interface StatTotals {
 
 // The dispatcher's stat channels: get-message-count / get-chat-count / get-handle-count → a
 // plain number; the media counts (attachment/image/video/location) → [{ media_count }].
-const MediaCount = z.array(z.object({ media_count: z.number() }).passthrough()).nullish();
+const MediaCount = z.array(z.object({ media_count: z.number() }).loose()).nullish();
 // Tolerate the dispatcher's `[]` unknown-channel sentinel (an older server without a given count
 // channel): accept a number OR an array, and `asCount` coerces a non-number to 0 — so version
 // skew degrades gracefully instead of throwing and breaking the whole stats fetch.
 const CountNum = z.union([z.number(), z.array(z.unknown())]).nullish();
-const asCount = (v: number | unknown[] | null | undefined): number => (typeof v === 'number' ? v : 0);
+const asCount = (v: number | unknown[] | null | undefined): number =>
+  typeof v === 'number' ? v : 0;
 
 /**
  * Server statistics via the admin-command dispatcher (password-authed): total messages, chats,
@@ -134,7 +135,7 @@ export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
 }
 
 /** The `get-logs` channel returns `{ logs: string }` (a newline-joined, timestamped tail). */
-const ServerLogs = z.object({ logs: z.string().nullish() }).passthrough().nullish();
+const ServerLogs = z.object({ logs: z.string().nullish() }).loose().nullish();
 
 /** Recent server log lines via the admin-command dispatcher (password-authed). */
 export function serverLogs(http: HttpClient, count = 500): Promise<string> {
@@ -153,7 +154,7 @@ const PrivateApiStatus = z
     ft_connected: z.boolean().nullish(),
     ft_enabled: z.boolean().nullish(),
   })
-  .passthrough()
+  .loose()
   .nullish();
 export type PrivateApiStatus = z.infer<typeof PrivateApiStatus>;
 export const privateApiStatus = (http: HttpClient): Promise<PrivateApiStatus> =>
@@ -168,17 +169,17 @@ const ServerEnv = z
     findmyNeedsKeys: z.boolean().nullish(),
     isMinMonterey: z.boolean().nullish(),
   })
-  .passthrough()
+  .loose()
   .nullish();
 export type ServerEnv = z.infer<typeof ServerEnv>;
 export const serverEnv = (http: HttpClient): Promise<ServerEnv> =>
   adminCommand(http, 'get-env', ServerEnv);
 
 /** Find My decryption-key import status (per key: present + valid). */
-const KeyState = z.object({ present: z.boolean().nullish(), valid: z.boolean().nullish() }).passthrough();
+const KeyState = z.object({ present: z.boolean().nullish(), valid: z.boolean().nullish() }).loose();
 const FindMyKeysStatus = z
   .object({ LocalStorage: KeyState.nullish(), FMIP: KeyState.nullish(), FMF: KeyState.nullish() })
-  .passthrough()
+  .loose()
   .nullish();
 export type FindMyKeysStatus = z.infer<typeof FindMyKeysStatus>;
 export const findMyKeysStatus = (http: HttpClient): Promise<FindMyKeysStatus> =>
@@ -192,7 +193,7 @@ const FcmStatus = z
     clientEmail: z.string().nullish(),
     oauthClientConfigured: z.boolean().nullish(),
   })
-  .passthrough()
+  .loose()
   .nullish();
 export type FcmStatus = z.infer<typeof FcmStatus>;
 export const fcmStatus = (http: HttpClient): Promise<FcmStatus> =>
@@ -200,8 +201,12 @@ export const fcmStatus = (http: HttpClient): Promise<FcmStatus> =>
 
 /** zrok tunnel status (running + public URL). */
 const ZrokStatus = z
-  .object({ running: z.boolean().nullish(), url: z.string().nullish(), available: z.boolean().nullish() })
-  .passthrough()
+  .object({
+    running: z.boolean().nullish(),
+    url: z.string().nullish(),
+    available: z.boolean().nullish(),
+  })
+  .loose()
   .nullish();
 export type ZrokStatus = z.infer<typeof ZrokStatus>;
 export const zrokStatus = (http: HttpClient): Promise<ZrokStatus> =>
@@ -228,14 +233,14 @@ const RcsStatus = z
     browserActive: z.boolean().nullish(),
     lastAlert: z.string().nullish(),
   })
-  .passthrough()
+  .loose()
   .nullish();
 export type RcsStatus = z.infer<typeof RcsStatus>;
 export const rcsStatus = (http: HttpClient): Promise<RcsStatus> =>
   adminCommand(http, 'get-rcs-status', RcsStatus);
 
 /** The server's detected public IP (or null). */
-const PublicIp = z.object({ ip: z.string().nullish() }).passthrough().nullish();
+const PublicIp = z.object({ ip: z.string().nullish() }).loose().nullish();
 export const publicIp = (http: HttpClient): Promise<string | null> =>
   adminCommand(http, 'get-public-ip', PublicIp).then((r) => r?.ip ?? null);
 
@@ -254,7 +259,7 @@ const ServerAlert = z
     created: z.number().nullish(),
     isRead: z.boolean().nullish(),
   })
-  .passthrough();
+  .loose();
 export type ServerAlert = z.infer<typeof ServerAlert>;
 const ServerAlerts = z.array(ServerAlert).nullish();
 export const serverAlerts = (http: HttpClient): Promise<ServerAlert[]> =>
@@ -265,7 +270,7 @@ export const clearServerAlerts = (http: HttpClient): Promise<unknown> =>
 /** GET /admin/status — server version + uptime (ms). */
 const AdminStatus = z
   .object({ version: z.string().nullish(), uptimeMs: z.number().nullish() })
-  .passthrough()
+  .loose()
   .nullish();
 export type AdminStatus = z.infer<typeof AdminStatus>;
 export const adminStatus = (http: HttpClient): Promise<AdminStatus> =>

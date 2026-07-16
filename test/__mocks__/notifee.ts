@@ -1,4 +1,4 @@
-// Runtime stub for @notifee/react-native (a native module that can't load under
+// Runtime stub for react-native-notify-kit (a native module that can't load under
 // Node). ts-jest still type-checks against the real .d.ts via tsconfig paths;
 // jest swaps in this stub at runtime via moduleNameMapper. Only the values used
 // at module-eval / call time need to exist.

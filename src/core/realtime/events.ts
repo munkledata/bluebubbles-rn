@@ -1,21 +1,21 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { Message } from '@core/models';
 import type { ServerEventName } from '@core/config/constants';
 
 /**
- * Zod schemas for realtime event payloads. Kept permissive (`.passthrough()` /
+ * Zod schemas for realtime event payloads. Kept permissive (`.loose()` /
  * nullish) because payload shape varies slightly across server versions and
  * transports (socket vs FCM). We validate just enough to route safely.
  */
 export const TypingIndicatorPayload = z
   .object({ guid: z.string().nullish(), chatGuid: z.string().nullish(), display: z.boolean() })
-  .passthrough();
+  .loose();
 
 export const ReadStatusPayload = z
   .object({ chatGuid: z.string(), read: z.boolean().nullish() })
-  .passthrough();
+  .loose();
 
-export const GroupChangePayload = z.object({ chats: z.array(z.unknown()).nullish() }).passthrough();
+export const GroupChangePayload = z.object({ chats: z.array(z.unknown()).nullish() }).loose();
 
 /**
  * The Gator RCS bridge's health alert (`rcs-alert`), relayed from the sidecar's `/events` stream.
@@ -23,7 +23,7 @@ export const GroupChangePayload = z.object({ chats: z.array(z.unknown()).nullish
  * `GAIA_LOGGED_OUT`, `PHONE_NOT_RESPONDING`, `BROWSER_INACTIVE`). Permissive: newer bridge builds
  * may add alert types the app hasn't seen.
  */
-export const RcsAlertPayload = z.object({ alertType: z.string().nullish() }).passthrough();
+export const RcsAlertPayload = z.object({ alertType: z.string().nullish() }).loose();
 
 /**
  * The server's `rcs-bridge-down` FCM push — fired (high priority) when the RCS bridge drops or its
@@ -37,7 +37,7 @@ export const RcsBridgeDownPayload = z
     body: z.string().nullish(),
     reason: z.string().nullish(),
   })
-  .passthrough();
+  .loose();
 
 export const FaceTimeStatusPayload = z
   .object({
@@ -45,10 +45,10 @@ export const FaceTimeStatusPayload = z
     address: z.string().nullish(), // caller display (number/email)
     caller: z.string().nullish(), // legacy incoming-facetime caller
     is_audio: z.boolean().nullish(),
-    handle: z.object({ address: z.string().nullish() }).passthrough().nullish(),
+    handle: z.object({ address: z.string().nullish() }).loose().nullish(),
     status_id: z.number().nullish(), // 4 = incoming, 6 = ended
   })
-  .passthrough();
+  .loose();
 
 /** A validated, transport-agnostic event ready for the app to act on. */
 export type NormalizedEvent =

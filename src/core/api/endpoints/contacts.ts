@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import type { HttpClient } from '../http';
 
 /** A contact as returned by the Gator server's contacts endpoints. */
@@ -34,6 +34,10 @@ export async function queryContactsByAddress(
  * with `http.buildHeaders()` (header auth keeps the password off the URL), e.g. via
  * `File.createDownloadTask(url, dest, { headers })` or `<Image source={{ uri, headers }}>`.
  */
-export function contactAvatarUrl(http: HttpClient, id: string, size: 'thumb' | 'full' = 'thumb'): string {
+export function contactAvatarUrl(
+  http: HttpClient,
+  id: string,
+  size: 'thumb' | 'full' = 'thumb',
+): string {
   return http.buildUrl(`/contact/${encodeURIComponent(id)}/avatar?size=${size}`);
 }

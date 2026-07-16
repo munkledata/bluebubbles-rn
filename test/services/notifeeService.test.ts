@@ -15,7 +15,7 @@
  * (the shared runtime stub in test/__mocks__/notifee.ts isn't spyable and lacks AndroidCategory
  * / AlarmType). This is a pure `node`-project test.
  */
-import notifee from '@notifee/react-native';
+import notifee from 'react-native-notify-kit';
 import type { NotificationIntent } from '@core/realtime';
 import {
   ACTION_DECLINE_FACETIME,
@@ -29,7 +29,9 @@ import {
   PRESS_REMINDER,
   cancelForChat,
   cancelReminderNotification,
+  chatChannelId,
   clearChatNotification,
+  openChatNotificationSettings,
   postLockedNotification,
   postNotification,
   requestNotificationPermission,
@@ -38,7 +40,7 @@ import {
 } from '@/services/notifications/notifeeService';
 
 const ALARM_IDLE = 3;
-jest.mock('@notifee/react-native', () => ({
+jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
   AndroidImportance: { NONE: 0, MIN: 1, LOW: 2, DEFAULT: 3, HIGH: 4 },
   AndroidStyle: { BIGPICTURE: 0, BIGTEXT: 1, INBOX: 2, MESSAGING: 3 },
@@ -53,6 +55,9 @@ jest.mock('@notifee/react-native', () => ({
     createTriggerNotification: jest.fn(async () => undefined),
     cancelNotification: jest.fn(async () => undefined),
     cancelTriggerNotification: jest.fn(async () => undefined),
+    // Default: no per-chat channel exists → notifications route to the shared channel.
+    getChannel: jest.fn(async () => null),
+    openNotificationSettings: jest.fn(async () => undefined),
   },
 }));
 
@@ -62,6 +67,8 @@ const mockCreateTrigger = notifee.createTriggerNotification as jest.Mock;
 const mockCancel = notifee.cancelNotification as jest.Mock;
 const mockCancelTrigger = notifee.cancelTriggerNotification as jest.Mock;
 const mockRequestPermission = notifee.requestPermission as jest.Mock;
+const mockGetChannel = notifee.getChannel as jest.Mock;
+const mockOpenSettings = notifee.openNotificationSettings as jest.Mock;
 
 /** The android block of the last displayNotification() call. */
 function lastNotif() {
@@ -105,6 +112,35 @@ describe('requestNotificationPermission', () => {
     expect(await requestNotificationPermission()).toBe(true);
     mockRequestPermission.mockResolvedValueOnce({ authorizationStatus: 0 });
     expect(await requestNotificationPermission()).toBe(false);
+  });
+});
+
+describe('per-chat notification channel', () => {
+  it('chatChannelId derives a safe, stable id from the guid', () => {
+    expect(chatChannelId('a;b')).toBe(`${CHANNEL_NEW_MESSAGE}.chat.a_b`);
+    // No unsafe characters survive (Android channel ids need a restricted charset).
+    expect(chatChannelId('iMessage;-;+15551234567')).toMatch(/^[\w.]+$/);
+  });
+
+  it('openChatNotificationSettings creates the per-chat channel and opens its OS settings', async () => {
+    const guid = 'iMessage;-;+15551234567';
+    await openChatNotificationSettings(guid, 'Alice');
+    const id = chatChannelId(guid);
+    expect(mockCreateChannel).toHaveBeenCalledWith(expect.objectContaining({ id, name: 'Alice' }));
+    expect(mockOpenSettings).toHaveBeenCalledWith(id);
+  });
+
+  it('routes a message notification to the per-chat channel when one exists', async () => {
+    const id = chatChannelId('chat-1');
+    mockGetChannel.mockResolvedValueOnce({ id }); // a customized channel exists for this chat
+    await postNotification(messageIntent());
+    expect(lastNotif().android?.channelId).toBe(id);
+  });
+
+  it('falls back to the shared channel when no per-chat channel exists', async () => {
+    mockGetChannel.mockResolvedValueOnce(null);
+    await postNotification(messageIntent());
+    expect(lastNotif().android?.channelId).toBe(CHANNEL_NEW_MESSAGE);
   });
 });
 
@@ -312,7 +348,8 @@ describe('channel promises do not memoize a rejection', () => {
   it('reminder channel: a failed createChannel is retried on the next call', async () => {
     // Fresh module instance so the reminder-channel memo starts null regardless of test order.
     await jest.isolateModulesAsync(async () => {
-      const svc = require('@/services/notifications/notifeeService') as typeof import('@/services/notifications/notifeeService');
+      const svc =
+        require('@/services/notifications/notifeeService') as typeof import('@/services/notifications/notifeeService');
       const reminder = {
         notificationId: 'r-x',
         chatGuid: 'c',
@@ -332,7 +369,8 @@ describe('channel promises do not memoize a rejection', () => {
 
   it('facetime channel: a failed createChannel is retried on the next call', async () => {
     await jest.isolateModulesAsync(async () => {
-      const svc = require('@/services/notifications/notifeeService') as typeof import('@/services/notifications/notifeeService');
+      const svc =
+        require('@/services/notifications/notifeeService') as typeof import('@/services/notifications/notifeeService');
       const call = {
         kind: 'facetime-call' as const,
         uuid: 'ft-retry',

@@ -6,9 +6,9 @@ and per-phase dependency plan. The authoritative rebuild plan lives at
 `~/.claude/plans/i-ve-changed-to-the-robust-pine.md`.
 
 ## Expo HAS CHANGED
-This project targets **Expo SDK 56** (React Native 0.85, React 19). Read the exact
-versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/config code.
-- **`expo-contacts` root API throws in SDK 56.** The imperative `getContactsAsync` (and
+This project targets **Expo SDK 57** (React Native 0.86, React 19). Read the exact
+versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/config code.
+- **`expo-contacts` root API throws in SDK 57.** The imperative `getContactsAsync` (and
   friends) from the package root are deprecated and now *throw* (the error message is the
   deprecation/migration text, so it surfaces as a runtime failure, not a warning). Import from
   `expo-contacts/legacy` to keep the imperative API, or move to the new class-based API. The
@@ -65,7 +65,7 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   `db.insert(t).values({…}).returning({…})`).
 
 ## UI gotchas
-- **Android edge-to-edge keyboard:** Expo SDK 56 / RN 0.85 enable edge-to-edge by default, so
+- **Android edge-to-edge keyboard:** Expo SDK 57 / RN 0.86 enable edge-to-edge by default, so
   legacy `windowSoftInputMode=adjustResize` does NOT push content up — a bottom composer hides
   behind the keyboard. Wrap chat-style screens in `<KeyboardAvoidingView behavior="padding">`
   (not `undefined`/`height`) to consume the keyboard inset. See `app/(app)/chat/[guid].tsx`.
@@ -80,21 +80,23 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   `createDownloadTask({onProgress})` → `downloadStore` (zustand) → ring/spinner. The actual
   image/video swap MUST stay driven by the reactive `localPath` DB write (`updateAttachmentLocalPath`),
   never the store — rendering from store state bypasses the op-sqlite reactive flush.
-- **Notifee has no Expo config plugin.** Do NOT add `@notifee/react-native` to `plugins` — it's
-  autolinked (and adds POST_NOTIFICATIONS at build). It ships its native `app.notifee:core` AAR as
-  a LOCAL maven repo (`node_modules/@notifee/react-native/android/libs`), which Expo doesn't register
-  at the app level → `Could not find app.notifee:core`. Fix: add it via expo-build-properties
-  `android.extraMavenRepos: ['../../node_modules/@notifee/react-native/android/libs']` (the url
-  resolves relative to the `:app` dir, hence `../../`). Notifee needs no Google Play Services.
+- **Notifications use `react-native-notify-kit`** (the Invertase-recommended, TurboModules-only drop-in
+  fork of the archived `@notifee/react-native`; the named exports + API are 100% identical, so imports
+  are just `from 'react-native-notify-kit'`). It's autolinked and, since 9.2.0, its native core COMPILES
+  FROM SOURCE — so there is NO local `app.notifee:core` AAR and NO `extraMavenRepos` workaround (the old
+  notifee note here was obsolete and is deleted). Its Expo config plugin is NOT needed either — the plugin
+  only covers iOS extensions / an Android foregroundService, neither of which this app uses. GOTCHA: unlike
+  notifee it does NOT auto-merge `POST_NOTIFICATIONS`, so that permission is declared EXPLICITLY in
+  `app.config` `android.permissions` (API 33+ runtime notification permission). Needs no Google Play Services.
 - **RN/Metro can't do dynamic `import(variable)`** — a `const x='lit'; import(x)` is constant-folded
   and resolved (fails for uninstalled pkgs), and a runtime-built specifier throws "Invalid call".
   For a deferred/optional native module (e.g. the gated FCM transport), don't import it at all —
   inject the dependency (pass the module instance into a constructor) so the bundle never references it.
-- **Notifee `AndroidStyle.MESSAGING` person.icon must be a string when present.** Passing
+- **notify-kit `AndroidStyle.MESSAGING` person.icon must be a string when present.** Passing
   `icon: undefined` throws at displayNotification; spread it conditionally. EventType values differ
   from some docs — always compare against the `EventType.ACTION_PRESS` constant, never a literal.
-- **Notifee background handler + TaskManager.defineTask must be module top-level**, imported for
-  side effect at the top of `app/_layout.tsx` — not inside a component — or killed-app delivery drops.
+- **notify-kit background handler (`onBackgroundEvent`) + TaskManager.defineTask must be module top-level**,
+  imported for side effect at the top of `app/_layout.tsx` — not inside a component — or killed-app delivery drops.
 - **Additive migrations are appended to `MIGRATIONS` by name** (`src/db/migrations.ts`); `runMigrations`
   skips already-applied names and wraps each in BEGIN/COMMIT. Use `ALTER TABLE ADD COLUMN` (no
   `IF NOT EXISTS` — SQLite lacks it; the name-guard is the idempotency). Never edit an applied migration.
@@ -107,7 +109,7 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
 - **URL-preview fetch hits an attacker-controlled URL** — guard it: http(s)-only, `content-type: text/html`,
   size + AbortController-timeout caps, render as plain `<Text>` (no HTML interpretation), and do NOT route it
   through `HttpClient` (keeps the server auth header off third-party sites). RN `fetch` is not CORS-limited.
-- **Notifee `TimestampTrigger.timestamp` must be STRICTLY in the future** — it throws
+- **notify-kit `TimestampTrigger.timestamp` must be STRICTLY in the future** — it throws
   `'trigger.timestamp' date must be in the future` otherwise (device-only; the jest mock can't catch
   it). A minute-granularity picker that floors to `:00` yields a past timestamp once seconds elapse,
   so clamp the picked time to `max(picked, now + 60s)` before scheduling (see `pickFutureDateTime`).
@@ -138,7 +140,7 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   endpoint returns a `link` (zod `z.string()`); a compromised server could return `intent://`/`tel:`/a
   deep link. Whitelist (`facetime:` / `https://facetime.apple.com/`) before `openURL`. Same principle as
   the URL-preview hardening — never trust server/3rd-party content blindly.
-- **Every notification body must honor the `hidePreview` toggle.** When adding a new Notifee path
+- **Every notification body must honor the `hidePreview` toggle.** When adding a new notify-kit path
   (FaceTime caller name, etc.), redact under `hidePreview` like `postNotification`/the reminder path do —
   it's easy to leak identity on the lock screen by forgetting it. Android full-screen-intent call
   notifications (`fullScreenAction`, `AndroidCategory.CALL`) need `USE_FULL_SCREEN_INTENT` in
@@ -154,7 +156,7 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   RETURNING id`): exactly one caller gets the row back, the rest skip — this is the real lock (a component
   `useRef` only de-dupes within one screen). Pair it with an `attempts` cap → `status='error'` so a row whose
   send always throws (deleted chat) stops retrying, and a startup `sending → pending` reset to recover crashes.
-  See `runDueScheduled` + `claimScheduled`/`markScheduledFailed`/`resetStuckScheduled` (`src/db/repositories.ts`).
+  See `runDueScheduled` (`src/services/send/scheduleService.ts`) + `claimScheduled`/`markScheduledFailed`/`resetStuckScheduled` (`src/db/repositories/scheduled.ts`).
 - **`React.memo` on a list row is INERT unless the list passes STABLE callbacks.** Memoizing `MessageRow`/
   `MessageBubble`/`ConversationTile` does nothing if `renderItem` hands them a fresh `() => …` closure each
   render (the new function fails the shallow prop compare). Pattern: wrap the parent handler in `useCallback`
@@ -181,8 +183,8 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   `typeof __DEV__ !== 'undefined' && __DEV__` (see `ConsoleSink`).
 - **App-lock cold-boot DB-key gating: the lock-enabled flag lives in the VAULT, not the encrypted DB/kv.**
   Chicken-and-egg — to withhold the SQLCipher key until biometric auth, you must read the setting BEFORE
-  opening the DB, so it can't live in the encrypted kv table. `boot()` (`src/services/index.ts`) reads it from
-  the vault first and only calls `hydrateSession()` (which opens the DB via `getOrCreateDbKey`) when NOT
+  opening the DB, so it can't live in the encrypted kv table. `boot()` (`src/services/bootstrap.ts`, re-exported
+  from the `src/services/index.ts` barrel) reads it from the vault first and only calls `hydrateSession()` (which opens the DB via `getOrCreateDbKey`) when NOT
   locked; `completeUnlock()` opens the DB + routes after a successful auth. The lock gate is a **root-layout
   overlay** (`app/_layout.tsx`), not the `(app)` layout — it must cover the pre-DB boot, where `(app)` hasn't
   mounted. Enabling app-lock requires `isBiometricAvailable()` (else a user with no enrolled biometric locks
@@ -196,7 +198,7 @@ versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/
   `outgoingBackoffMs`; retire at `OUTGOING_MAX_ATTEMPTS`. Run it at boot (home) + the background task — NOT
   per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim because it must read back the claimed
   row (`db.run` works too but returns no rows; use it only for non-returning writes).
-- **Wallpaper-chat chrome: RN 0.85 has BUILT-IN CSS gradients** (`experimental_backgroundImage`,
+- **Wallpaper-chat chrome: RN 0.86 has BUILT-IN CSS gradients** (`experimental_backgroundImage`,
   new-arch) — no expo-linear-gradient/masked-view needed. Over a chat background the header/composer
   go transparent (frosted chips), the message list runs UNDER them (absolute-overlay layout in
   `chat/[guid].tsx`, bar heights measured via onLayout), and `EdgeFade` veils dissolve rows into

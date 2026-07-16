@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 /** Backup file format. version is bumped if the shape ever changes. */
 export const BackupSchema = z.object({

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import type { HttpClient } from '../http';
 
 // Gator's FaceTime ops return status objects (post {status,message,data} unwrap, `data`
@@ -7,12 +7,12 @@ import type { HttpClient } from '../http';
 //   POST /facetime/:uuid/leave  → { left: true }
 //   POST /facetime/link         → { link: string | null }   (mint a NEW FaceTime link)
 //   POST /facetime/call         → { call_uuid, link }        (place an OUTGOING call)
-const AnsweredAck = z.object({ answered: z.boolean().nullish() }).passthrough();
-const LeftAck = z.object({ left: z.boolean().nullish() }).passthrough();
-const FaceTimeLink = z.object({ link: z.string().nullish() }).passthrough();
+const AnsweredAck = z.object({ answered: z.boolean().nullish() }).loose();
+const LeftAck = z.object({ left: z.boolean().nullish() }).loose();
+const FaceTimeLink = z.object({ link: z.string().nullish() }).loose();
 const StartCallResult = z
   .object({ call_uuid: z.string().nullish(), link: z.string().nullish() })
-  .passthrough();
+  .loose();
 
 /**
  * Answer an incoming FaceTime call (Private API). Returns whether the server acked the

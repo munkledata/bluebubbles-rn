@@ -4,7 +4,7 @@ jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 import ky from 'ky';
 import { HttpClient } from '@core/api/http';
 import { ApiError } from '@core/api/errors';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 const mockKy = ky as unknown as jest.Mock;
 

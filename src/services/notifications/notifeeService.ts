@@ -6,7 +6,7 @@ import notifee, {
   AuthorizationStatus,
   TriggerType,
   type TimestampTrigger,
-} from '@notifee/react-native';
+} from 'react-native-notify-kit';
 import type { NotificationIntent } from '@core/realtime';
 import { logger } from '@core/secure';
 import { redactTitle } from '@utils';
@@ -36,6 +36,27 @@ function ensureChannel(): Promise<string> {
     importance: AndroidImportance.HIGH,
   });
   return channelReady;
+}
+
+/** Stable per-chat notification channel id (Android channel ids allow only a safe charset). */
+export function chatChannelId(chatGuid: string): string {
+  return `${CHANNEL_NEW_MESSAGE}.chat.${chatGuid.replace(/[^a-zA-Z0-9]/g, '_')}`;
+}
+
+/**
+ * Create a per-conversation notification channel (if absent) and open its Android system settings,
+ * so the user can set a custom sound / importance / vibration for THIS chat. Once created, that
+ * chat's message notifications route to it (see `postNotification`). Parity with the old app's
+ * per-chat "Notification Settings" tile. Android-only; a no-op elsewhere.
+ */
+export async function openChatNotificationSettings(chatGuid: string, title: string): Promise<void> {
+  const id = chatChannelId(chatGuid);
+  await notifee.createChannel({
+    id,
+    name: title || 'Conversation',
+    importance: AndroidImportance.HIGH,
+  });
+  await notifee.openNotificationSettings(id);
 }
 
 /** Request POST_NOTIFICATIONS (Android 13+). Returns true if allowed. */
@@ -101,6 +122,13 @@ export async function postNotification(intent: NotificationIntent): Promise<void
     return;
   }
   await ensureChannel();
+  // Route to this chat's OWN channel if the user has customized it (created via
+  // openChatNotificationSettings); else the shared "New Messages" channel. getChannel returns null
+  // for an uncreated channel, so this is a cheap per-post check with no persisted bookkeeping.
+  const perChatId = chatChannelId(intent.chatGuid);
+  const channelId = (await notifee.getChannel(perChatId).catch(() => null))
+    ? perChatId
+    : CHANNEL_NEW_MESSAGE;
   // Redacted mode hides BOTH content and who: mask the body, the chat title, and the
   // sender name, and drop the avatar — otherwise the notification still reveals the
   // contact. `redactTitle` returns the generic placeholder when the flag is on.
@@ -113,7 +141,7 @@ export async function postNotification(intent: NotificationIntent): Promise<void
     body,
     data: { chatGuid: intent.chatGuid, messageGuid: intent.messageGuid },
     android: {
-      channelId: CHANNEL_NEW_MESSAGE,
+      channelId,
       smallIcon: 'ic_launcher',
       pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
       style: {

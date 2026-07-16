@@ -1,5 +1,7 @@
 import type { ExpoConfig } from 'expo/config';
 
+import pkg from './package.json';
+
 /**
  * Expo app config (Android-only target, iOS-styled UI).
  *
@@ -12,7 +14,10 @@ const config: ExpoConfig = {
   // EAS account/org that owns the build/project (matches the app package + Firebase
   // project naming; your personal `bluegreengator` account is the alternative).
   owner: 'bluegreengatorapps',
-  version: '0.1.0',
+  // Single source of truth for the user-visible version is package.json; the
+  // release:android[:local] scripts bump it (npm version patch) on every release.
+  // The Play versionCode is separate and managed remotely by EAS (autoIncrement).
+  version: pkg.version,
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
@@ -31,11 +36,18 @@ const config: ExpoConfig = {
     // notification degrades to heads-up without it.
     // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS: the in-app FaceTime call WebView needs mic
     // capture (getUserMedia); CAMERA is already declared by the expo-camera plugin.
+    // REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: lets the Settings "Disable battery optimization"
+    // action show the one-tap OS allow-dialog (via expo-intent-launcher) instead of only the
+    // battery-optimization list — for reliable background FCM/notification delivery under Doze.
     // All need a native rebuild to take effect.
     permissions: [
       'android.permission.USE_FULL_SCREEN_INTENT',
+      // notify-kit does NOT auto-merge POST_NOTIFICATIONS (notifee did), so add it
+      // explicitly for the API 33+ runtime notification permission.
+      'android.permission.POST_NOTIFICATIONS',
       'android.permission.RECORD_AUDIO',
       'android.permission.MODIFY_AUDIO_SETTINGS',
+      'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
     ],
     adaptiveIcon: {
       backgroundColor: '#193154',
@@ -51,8 +63,22 @@ const config: ExpoConfig = {
     // into the native build (the receive pipeline is already in JS).
     '@react-native-firebase/app',
     '@react-native-firebase/messaging',
-    // Notifee is autolinked (no config plugin); it adds POST_NOTIFICATIONS at build
-    // time. No Google Play Services required.
+    // react-native-notify-kit is autolinked (no config plugin needed here — the plugin is
+    // only for iOS extensions / Android foregroundService, neither of which this app uses;
+    // the native core compiles from source). Unlike notifee it does NOT auto-merge
+    // POST_NOTIFICATIONS, so that permission is declared explicitly in android.permissions
+    // above. No Google Play Services required.
+    // Android share-target: registers SEND / SEND_MULTIPLE intent filters so Gator appears in the
+    // system share sheet for text, images, video, AND any file (*/*, e.g. a PDF from Downloads).
+    // iOS share extension disabled — this is an Android-only app. Needs a native rebuild.
+    [
+      'expo-share-intent',
+      {
+        disableIOS: true,
+        androidIntentFilters: ['text/*', 'image/*', 'video/*', '*/*'],
+        androidMultiIntentFilters: ['image/*', 'video/*', '*/*'],
+      },
+    ],
     // Background catch-up sync (WorkManager).
     'expo-task-manager',
     'expo-background-task',
@@ -120,10 +146,9 @@ const config: ExpoConfig = {
           // HTTPS / a tunnel remains the recommended path, especially for remote access.
           usesCleartextTraffic: true,
           minSdkVersion: 24,
-          // Notifee ships its `app.notifee:core` AAR as a local maven repo; register
-          // it so `:app` can resolve it. The url resolves relative to the :app project
-          // dir (android/app), so two levels up reaches the project-root node_modules.
-          extraMavenRepos: ['../../node_modules/@notifee/react-native/android/libs'],
+          // react-native-notify-kit needs no extraMavenRepos: since 9.2.0 the native
+          // core compiles from source (autolinked), so the old notifee local-AAR maven
+          // repo workaround is gone.
         },
       },
     ],

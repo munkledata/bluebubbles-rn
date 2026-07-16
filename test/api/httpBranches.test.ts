@@ -8,7 +8,7 @@ jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
 import ky from 'ky';
 import { HttpClient } from '@core/api/http';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 const mockKy = ky as unknown as jest.Mock;
 
@@ -37,9 +37,9 @@ describe('verbs + accessors', () => {
   });
 
   it('usesHeaderAuth() reflects the injected config (default true, false when disabled)', () => {
-    expect(
-      new HttpClient({ getOrigin: () => 'x', getPassword: () => 'p' }).usesHeaderAuth(),
-    ).toBe(true);
+    expect(new HttpClient({ getOrigin: () => 'x', getPassword: () => 'p' }).usesHeaderAuth()).toBe(
+      true,
+    );
     expect(
       new HttpClient({
         getOrigin: () => 'x',

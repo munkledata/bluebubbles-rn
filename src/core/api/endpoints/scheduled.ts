@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import type { HttpClient } from '../http';
 
 /**
@@ -27,15 +27,13 @@ export const ScheduledItem = z
     scheduledFor: z.number(),
     status: z.string().nullish(), // 'pending' | 'sent' | 'failed'
   })
-  .passthrough();
+  .loose();
 export type ScheduledItem = z.infer<typeof ScheduledItem>;
 
 // GET returns the list under `scheduledMessages`; POST returns the bare item.
-const ListResponse = z
-  .object({ scheduledMessages: z.array(ScheduledItem).nullish() })
-  .passthrough();
+const ListResponse = z.object({ scheduledMessages: z.array(ScheduledItem).nullish() }).loose();
 const ItemResponse = ScheduledItem;
-const DeleteResponse = z.object({ removed: z.boolean().nullish() }).passthrough().nullish();
+const DeleteResponse = z.object({ removed: z.boolean().nullish() }).loose().nullish();
 
 export interface ScheduledArgs {
   chatGuid: string;

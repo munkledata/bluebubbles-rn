@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 /**
  * Subset of GET /api/v1/server/info used for version gating and discovery.

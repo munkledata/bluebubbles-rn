@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { ServiceType } from './common';
 
 /** A phone number or email address that participates in chats (Flutter: Handle). */

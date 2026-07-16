@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { Chat } from '@core/models';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
 import type { HttpClient } from '../http';

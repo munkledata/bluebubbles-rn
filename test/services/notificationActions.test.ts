@@ -13,14 +13,15 @@
  * Node (`node` project) unit test. The ACTION and PRESS constants come from the REAL
  * `./notifeeService` module (a relative import, not mocked).
  */
-import type { EventDetail } from '@notifee/react-native';
-import notifee from '@notifee/react-native';
+import type { EventDetail } from 'react-native-notify-kit';
+import notifee from 'react-native-notify-kit';
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
 import { getDatabase } from '@db/database';
 import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
-import { ensureDatabase, markRead } from '@/services';
+import { ensureDatabase } from '@/services/databaseControl';
+import { markRead } from '@/services/chatActions';
 import { sendTextMessage } from '@/services/send/sendService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { devSendFake, devSendFakeReaction } from '@features/conversations/devSeed';
@@ -36,16 +37,18 @@ import {
 import { handleNotificationAction } from '@/services/notifications/actions';
 
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
-jest.mock('@notifee/react-native', () => ({
+jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
   default: { cancelNotification: jest.fn(async () => undefined) },
 }));
 // A sentinel DB handle so we can prove ensureDatabase()'s value is threaded to the writes.
 // Must be `mock`-prefixed — jest.mock factories are hoisted and may only reference such vars.
 const mockDb = { __db: true };
-jest.mock('@/services', () => ({
+jest.mock('@/services/databaseControl', () => ({
   ensureDatabase: jest.fn(async () => mockDb),
-  http: { __http: true },
+}));
+jest.mock('@/services/clients', () => ({ http: { __http: true } }));
+jest.mock('@/services/chatActions', () => ({
   markRead: jest.fn(async () => undefined),
 }));
 // The EAGER getDatabase() (from @db/database) throws if boot never opened the DB — a headless
@@ -56,11 +59,15 @@ jest.mock('@db/database', () => ({
     throw new Error('Database not initialized — getDatabase must not run in a headless handler');
   }),
 }));
-jest.mock('@/services/send/sendService', () => ({ sendTextMessage: jest.fn(async () => undefined) }));
+jest.mock('@/services/send/sendService', () => ({
+  sendTextMessage: jest.fn(async () => undefined),
+}));
 jest.mock('@/services/send/sendReactionService', () => ({
   sendReactionMessage: jest.fn(async () => undefined),
 }));
-jest.mock('@db/repositories', () => ({ deleteReminderByNotificationId: jest.fn(async () => undefined) }));
+jest.mock('@db/repositories', () => ({
+  deleteReminderByNotificationId: jest.fn(async () => undefined),
+}));
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => false) }));
 jest.mock('@core/api', () => ({
   faceTimeApi: {
@@ -153,9 +160,7 @@ describe('handleNotificationAction — mark-read', () => {
 
 describe('handleNotificationAction — love (tapback)', () => {
   it('sends a love reaction for the notification message, then clears the notif', async () => {
-    await handleNotificationAction(
-      chatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
-    );
+    await handleNotificationAction(chatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }));
     expect(mockSendReaction).toHaveBeenCalledWith(mockDb, expect.anything(), {
       chatGuid: 'c2',
       targetGuid: 'm2',
@@ -228,9 +233,7 @@ describe('handleNotificationAction — ignored / no-op cases', () => {
 
 describe('handleNotificationAction — FaceTime answer/decline', () => {
   it('decline just clears the ringing notification (ft-<uuid>), no server call', async () => {
-    await handleNotificationAction(
-      chatDetail(ACTION_DECLINE_FACETIME, { faceTimeUuid: 'u1' }),
-    );
+    await handleNotificationAction(chatDetail(ACTION_DECLINE_FACETIME, { faceTimeUuid: 'u1' }));
     expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-u1');
     expect(mockAnswerFaceTime).not.toHaveBeenCalled();
     expect(mockLinkingOpen).not.toHaveBeenCalled();

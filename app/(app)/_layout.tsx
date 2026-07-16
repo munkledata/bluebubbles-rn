@@ -1,4 +1,4 @@
-import notifee, { EventType } from '@notifee/react-native';
+import notifee, { EventType } from 'react-native-notify-kit';
 import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -7,6 +7,7 @@ import { handleNotificationAction } from '@/services/notifications/actions';
 import { pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
+import { ShareIntentHandler } from '@ui/ShareIntentHandler';
 
 /**
  * Layout for the connected app. Drives the resume re-lock (the gate itself is
@@ -55,6 +56,8 @@ export default function AppLayout(): React.JSX.Element {
   return (
     <>
       <Stack screenOptions={{ headerShown: false }} />
+      {/* Captures content shared INTO Gator from the Android share sheet → new-chat creator. */}
+      <ShareIntentHandler />
       {/* App-wide so an incoming call rings on any screen; the in-call WebView overlay
           takes over once answered (and is also opened by outgoing calls from the chat). */}
       <IncomingFaceTimeOverlay />

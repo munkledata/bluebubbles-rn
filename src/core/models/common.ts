@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 /**
  * Shared zod helpers. Gator timestamps arrive as epoch-millis numbers
@@ -27,7 +27,7 @@ export const ServiceType = z.string();
 export type ServiceType = z.infer<typeof ServiceType>;
 
 /** Envelope every Gator REST response is wrapped in: { status, data, message }. */
-export function apiResponse<T extends z.ZodTypeAny>(data: T) {
+export function apiResponse<T extends z.ZodType>(data: T) {
   return z.object({
     status: z.number(),
     message: z.string().optional(),

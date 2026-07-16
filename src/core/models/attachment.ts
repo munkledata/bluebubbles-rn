@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 /** A file/media attachment on a message (Flutter: Attachment). */
 export const Attachment = z.object({
@@ -21,6 +21,6 @@ export const Attachment = z.object({
    */
   hideAttachment: z.boolean().nullish(),
   blurhash: z.string().nullish(),
-  metadata: z.record(z.unknown()).nullish(),
+  metadata: z.record(z.string(), z.unknown()).nullish(),
 });
 export type Attachment = z.infer<typeof Attachment>;

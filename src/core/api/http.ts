@@ -1,5 +1,5 @@
 import ky from 'ky';
-import type { z } from 'zod';
+import type { z } from 'zod/v4';
 import {
   API_BASE_PATH,
   AUTH_HEADER,
@@ -54,7 +54,7 @@ export interface RequestOptions {
 export class HttpClient {
   constructor(private readonly cfg: HttpClientConfig) {}
 
-  get<S extends z.ZodTypeAny>(
+  get<S extends z.ZodType>(
     path: string,
     schema: S,
     opts: RequestOptions = {},
@@ -62,7 +62,7 @@ export class HttpClient {
     return this.request('GET', path, schema, opts);
   }
 
-  post<S extends z.ZodTypeAny>(
+  post<S extends z.ZodType>(
     path: string,
     schema: S,
     opts: RequestOptions = {},
@@ -70,7 +70,7 @@ export class HttpClient {
     return this.request('POST', path, schema, opts);
   }
 
-  put<S extends z.ZodTypeAny>(
+  put<S extends z.ZodType>(
     path: string,
     schema: S,
     opts: RequestOptions = {},
@@ -78,7 +78,7 @@ export class HttpClient {
     return this.request('PUT', path, schema, opts);
   }
 
-  delete<S extends z.ZodTypeAny>(
+  delete<S extends z.ZodType>(
     path: string,
     schema: S,
     opts: RequestOptions = {},
@@ -133,7 +133,7 @@ export class HttpClient {
     return this.useHeaderAuth();
   }
 
-  private async request<S extends z.ZodTypeAny>(
+  private async request<S extends z.ZodType>(
     method: string,
     path: string,
     schema: S,
@@ -177,9 +177,10 @@ export class HttpClient {
 
     // Retry idempotent GETs by default; writes only when explicitly opted in; never when
     // `retry: false`.
-    const wantsRetry =
-      opts.retry !== false && (method === 'GET' || opts.retry !== undefined);
-    return wantsRetry ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined) : run();
+    const wantsRetry = opts.retry !== false && (method === 'GET' || opts.retry !== undefined);
+    return wantsRetry
+      ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined)
+      : run();
   }
 
   /**
@@ -188,7 +189,7 @@ export class HttpClient {
    * the file part from disk, so a large video is never buffered. No timeout (uploads can run for
    * minutes) and no retry (a retried upload would double-send).
    */
-  private async uploadMultipart<S extends z.ZodTypeAny>(
+  private async uploadMultipart<S extends z.ZodType>(
     method: string,
     path: string,
     url: string,
@@ -218,7 +219,7 @@ export class HttpClient {
   }
 
   /** Shared response handling: status check → JSON parse → envelope/schema validation. */
-  private async parseResponse<S extends z.ZodTypeAny>(
+  private async parseResponse<S extends z.ZodType>(
     response: Response,
     method: string,
     path: string,
@@ -242,6 +243,8 @@ export class HttpClient {
         parsed.error,
       );
     }
-    return parsed.data.data;
+    // zod v4's object output type can't surface `.data` when the payload field is
+    // the generic `S`; the validated envelope's `data` is `z.infer<S>` at runtime.
+    return (parsed.data as { data: z.infer<S> }).data;
   }
 }
