@@ -306,4 +306,49 @@ export const MIGRATIONS: Migration[] = [
     name: '0015_message_assoc_emoji',
     statements: [`ALTER TABLE messages ADD COLUMN associated_message_emoji TEXT`],
   },
+  {
+    // A handle's identity is (address, service) — Apple's chat.db keeps SEPARATE handle rows
+    // for the same number on iMessage vs SMS. Keying by address alone made every incoming
+    // message overwrite the one row's `service` (last-writer-wins), so an SMS from a person
+    // flipped their iMessage chat's badge/bubble colour to SMS and back. NULL services are
+    // normalized to '' first because SQLite unique indexes treat NULLs as always-distinct,
+    // which would break the ON CONFLICT upsert. Safe: address was globally unique before,
+    // so (address, service) cannot collide.
+    name: '0016_handle_service_identity',
+    statements: [
+      `UPDATE handles SET service = '' WHERE service IS NULL`,
+      `DROP INDEX IF EXISTS handles_address_idx`,
+      `CREATE UNIQUE INDEX handles_address_service_idx ON handles (address, service)`,
+    ],
+  },
+  {
+    // Cleanup for a 0016 side effect: message-sender linking could attach BOTH service-variant
+    // rows of the same person to one chat (participant synced as iMessage, a fallback message's
+    // sender handle as SMS), rendering the person twice in the tile collage. Keep one link per
+    // (chat, address) — which variant survives doesn't matter for display, and the next chat
+    // sync replaces links with the canonical participant set anyway. The write path now guards
+    // against re-adding (upsertMessages links by address, not handle id).
+    name: '0017_dedupe_chat_participant_links',
+    statements: [
+      `DELETE FROM chat_handles WHERE rowid NOT IN (
+        SELECT MIN(ch.rowid) FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        GROUP BY ch.chat_id, h.address
+      )`,
+    ],
+  },
+  {
+    // Group / chat-event system messages: iMessage emits in-thread events (someone was
+    // added/removed, the group was named/renamed, the photo changed, someone left, a location
+    // was shared, an audio was kept, a FaceTime started) as messages carrying `item_type` +
+    // `group_action_type` (+ `group_title` for a rename, `other_handle` = the affected
+    // participant's server ROWID). Persist them so the thread can render a centered event line
+    // instead of silently dropping the message. Additive; applied transactionally + by name.
+    name: '0018_message_group_event',
+    statements: [
+      `ALTER TABLE messages ADD COLUMN item_type INTEGER DEFAULT 0`,
+      `ALTER TABLE messages ADD COLUMN group_action_type INTEGER DEFAULT 0`,
+      `ALTER TABLE messages ADD COLUMN group_title TEXT`,
+      `ALTER TABLE messages ADD COLUMN other_handle INTEGER`,
+    ],
+  },
 ];

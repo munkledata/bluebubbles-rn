@@ -11,6 +11,7 @@ export * from './AttachmentTray';
 export * from './ReactionCluster';
 export * from './ReplyQuote';
 export * from './MessageActionsOverlay';
+export * from './ThreadSheet';
 export * from './UrlPreviewCard';
 export * from './SmartReplyChips';
 export * from './TypingBubble';

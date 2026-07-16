@@ -53,7 +53,12 @@ describe('syncAllChats — embedded lastMessage', () => {
                   guid: 'cMine',
                   participants: [{ address: 'b@x.com' }],
                   // is-from-me lastMessage exercises the reconcileOutgoingAttachmentByContent call.
-                  lastMessage: { guid: 'lm-mine', text: 'my preview', dateCreated: 600, isFromMe: true },
+                  lastMessage: {
+                    guid: 'lm-mine',
+                    text: 'my preview',
+                    dateCreated: 600,
+                    isFromMe: true,
+                  },
                 }),
               ]
             : [],
@@ -61,7 +66,11 @@ describe('syncAllChats — embedded lastMessage', () => {
     );
     expect(stored.map((s) => s.guid).sort()).toEqual(['cMine', 'cRecv']);
 
-    const cRecv = (await listChats(db)) as Array<{ id: number; guid: string; latestMessageDate: number | null }>;
+    const cRecv = (await listChats(db)) as Array<{
+      id: number;
+      guid: string;
+      latestMessageDate: number | null;
+    }>;
     const recv = cRecv.find((c) => c.guid === 'cRecv')!;
     expect(await listMessages(db, recv.id)).toHaveLength(1); // lastMessage materialized
     expect(recv.latestMessageDate).toBe(500); // denormalized preview date refreshed
@@ -73,7 +82,9 @@ describe('syncAllChats — embedded lastMessage', () => {
       db,
       api({
         fetchChats: async (offset) =>
-          offset === 0 ? [Chat.parse({ guid: 'cEmpty', participants: [{ address: 'a@x.com' }] })] : [],
+          offset === 0
+            ? [Chat.parse({ guid: 'cEmpty', participants: [{ address: 'a@x.com' }] })]
+            : [],
       }),
     );
     expect(stored).toEqual([{ guid: 'cEmpty', chatId: (await getChatIdByGuid(db, 'cEmpty'))! }]);
@@ -90,7 +101,11 @@ describe('syncChatMessages — on-demand backfill', () => {
   it('pages a synced chat’s messages and stops at the cap', async () => {
     const { db } = await createTestDb();
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-    await upsertChats(db, [Chat.parse({ guid: 'cBk', participants: [{ address: 'a@x.com' }] })], hm);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cBk', participants: [{ address: 'a@x.com' }] })],
+      hm,
+    );
     const chatId = (await getChatIdByGuid(db, 'cBk'))!;
 
     const pages: Record<number, Message[]> = {
@@ -99,7 +114,12 @@ describe('syncChatMessages — on-demand backfill', () => {
         Message.parse({ guid: 'b2', text: 'two', dateCreated: 2, handle: { address: 'a@x.com' } }),
       ],
       2: [
-        Message.parse({ guid: 'b3', text: 'three', dateCreated: 3, handle: { address: 'a@x.com' } }),
+        Message.parse({
+          guid: 'b3',
+          text: 'three',
+          dateCreated: 3,
+          handle: { address: 'a@x.com' },
+        }),
         Message.parse({ guid: 'b4', text: 'four', dateCreated: 4, handle: { address: 'a@x.com' } }),
       ],
     };
@@ -116,7 +136,11 @@ describe('syncChatMessages — on-demand backfill', () => {
   it('promotes an optimistic RCS picture in place on the sync path (local_path preserved, no dup)', async () => {
     const { db } = await createTestDb();
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-    await upsertChats(db, [Chat.parse({ guid: 'cRcs', participants: [{ address: 'a@x.com' }] })], hm);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cRcs', participants: [{ address: 'a@x.com' }] })],
+      hm,
+    );
     const chatId = (await getChatIdByGuid(db, 'cRcs'))!;
     // Optimistic outgoing picture (RCS: materialized by sync, not the live echo).
     await insertOutgoingAttachment(db, {

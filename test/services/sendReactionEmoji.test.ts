@@ -7,7 +7,12 @@
 import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
-import { listReactionsByMessageGuids, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import {
+  listReactionsByMessageGuids,
+  upsertChats,
+  upsertHandles,
+  upsertMessages,
+} from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { createTestDb } from '../support/testDb';
@@ -48,11 +53,20 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-react', dateCreated: 1000 };
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'emoji', emoji: '🔥', selectedMessageText: 'hi' },
+      {
+        chatGuid: 'c1',
+        targetGuid: 'mt',
+        reaction: 'emoji',
+        emoji: '🔥',
+        selectedMessageText: 'hi',
+      },
     );
 
     expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'emoji', reactionEmoji: '🔥' });
-    const row = one(raw, "SELECT associated_message_emoji AS e FROM messages WHERE guid = 'real-react'");
+    const row = one(
+      raw,
+      "SELECT associated_message_emoji AS e FROM messages WHERE guid = 'real-react'",
+    );
     expect(row.e).toBe('🔥');
     // And the reactions repo renders it as an own emoji badge.
     const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];

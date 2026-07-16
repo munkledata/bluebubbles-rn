@@ -1,7 +1,7 @@
 import { getDatabase } from '@db/database';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
-import { http } from '@/services';
+import { http } from '../clients';
 import { ensureDownloaded, type AttachmentFetcher } from './downloadService';
 import { expoFetcher } from './expoFetcher';
 

@@ -22,6 +22,5 @@ interface RcsHealthState {
 export const useRcsHealthStore = create<RcsHealthState>((set) => ({
   lastAlertType: null,
   lastAlertAt: null,
-  setAlert: (alertType) =>
-    set({ lastAlertType: alertType ?? null, lastAlertAt: Date.now() }),
+  setAlert: (alertType) => set({ lastAlertType: alertType ?? null, lastAlertAt: Date.now() }),
 }));

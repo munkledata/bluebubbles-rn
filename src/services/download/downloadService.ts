@@ -61,7 +61,12 @@ function release(): void {
 export async function ensureDownloaded(
   db: AppDatabase,
   fetcher: AttachmentFetcher,
-  att: { guid: string; transferName: string | null; localPath: string | null; service?: string | null },
+  att: {
+    guid: string;
+    transferName: string | null;
+    localPath: string | null;
+    service?: string | null;
+  },
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<string | null> {
   if (att.localPath && fetcher.exists(att.localPath)) return att.localPath;

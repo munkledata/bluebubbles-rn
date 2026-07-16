@@ -25,7 +25,10 @@ function preview(over: Partial<MessagePreview> = {}): MessagePreview {
 describe('ReplyQuote who/text rendering', () => {
   it('shows the sender name and the quoted text for a received original', async () => {
     await renderWithTheme(
-      <ReplyQuote preview={preview({ senderName: 'Dana', text: 'original text' })} isFromMe={false} />,
+      <ReplyQuote
+        preview={preview({ senderName: 'Dana', text: 'original text' })}
+        isFromMe={false}
+      />,
     );
     expect(screen.getByText('Dana')).toBeTruthy();
     expect(screen.getByText('original text')).toBeTruthy();
@@ -58,15 +61,15 @@ describe('ReplyQuote tap-to-jump affordance', () => {
       <ReplyQuote preview={preview({ senderName: 'Dana' })} isFromMe={false} onPress={onPress} />,
     );
     const button = screen.getByRole('button');
-    expect(button.props.accessibilityLabel).toBe(
-      'Reply to Dana. Tap to jump to the original.',
-    );
+    expect(button.props.accessibilityLabel).toBe('Reply to Dana. Tap to jump to the original.');
     fireEvent.press(button);
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
   it('is not a button (disabled, no jump label) when onPress is absent', async () => {
-    await renderWithTheme(<ReplyQuote preview={preview({ senderName: 'Dana' })} isFromMe={false} />);
+    await renderWithTheme(
+      <ReplyQuote preview={preview({ senderName: 'Dana' })} isFromMe={false} />,
+    );
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByLabelText('Reply to Dana. Tap to jump to the original.')).toBeNull();
   });

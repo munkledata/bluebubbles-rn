@@ -15,12 +15,7 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen, fireEvent, act, waitFor } from '../support/renderWithTheme';
 import { AppDialog } from '@ui/dialog/AppDialog';
-import {
-  useDialogStore,
-  showDialog,
-  showAlert,
-  showConfirm,
-} from '@ui/dialog/dialogStore';
+import { useDialogStore, showDialog, showAlert, showConfirm } from '@ui/dialog/dialogStore';
 import { resolvePreset, DEFAULT_PRESET } from '@ui/theme/tokens';
 
 // The harness default preset — used to derive the EXPECTED button colors from the source tokens

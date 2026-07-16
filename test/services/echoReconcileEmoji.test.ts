@@ -39,9 +39,7 @@ async function seed(db: AppDatabase): Promise<number> {
 }
 
 const count = (raw: Database.Database, where: string, ...args: unknown[]): number =>
-  (
-    raw.prepare(`SELECT COUNT(*) c FROM messages WHERE ${where}`).get(...args) as { c: number }
-  ).c;
+  (raw.prepare(`SELECT COUNT(*) c FROM messages WHERE ${where}`).get(...args) as { c: number }).c;
 
 describe('live echo reconcile — emoji tapback', () => {
   it('promotes the optimistic emoji row in place; glyph survives + one own badge (no duplicate)', async () => {

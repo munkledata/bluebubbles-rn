@@ -63,6 +63,7 @@ function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
     participantAvatars: null,
     handleServices: null,
     unreadCount: 0,
+    hasKnownSender: 1,
     ...overrides,
   };
 }

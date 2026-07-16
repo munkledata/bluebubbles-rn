@@ -48,9 +48,13 @@ export async function backfillServerAvatars(db: AppDatabase, http: HttpClient): 
       // Name the file by (id, etag) so a changed photo re-downloads; reuse an existing file.
       const dest = new File(dir, `${sanitize(c.id)}-${sanitize(c.avatarEtag ?? 'v0')}.img`);
       if (!dest.exists) {
-        const task = File.createDownloadTask(contactsApi.contactAvatarUrl(http, c.id, 'thumb'), dest, {
-          headers,
-        });
+        const task = File.createDownloadTask(
+          contactsApi.contactAvatarUrl(http, c.id, 'thumb'),
+          dest,
+          {
+            headers,
+          },
+        );
         const file = await task.downloadAsync();
         if (!file) continue;
       }

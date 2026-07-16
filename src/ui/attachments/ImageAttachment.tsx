@@ -16,6 +16,9 @@ interface ImageAttachmentProps {
   att: AttachmentRow;
   isFromMe: boolean;
   showTail: boolean;
+  /** Render as a fixed square grid cell (gallery grid) instead of a self-sized bubble image —
+   *  the parent grid owns spacing + corner rounding; download/tap behavior is unchanged. */
+  cellSize?: number;
 }
 
 /** In-bubble image with an expo-image blurhash placeholder + download progress/retry. */
@@ -23,6 +26,7 @@ export function ImageAttachment({
   att,
   isFromMe,
   showTail,
+  cellSize,
 }: ImageAttachmentProps): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
@@ -51,11 +55,22 @@ export function ImageAttachment({
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
   const aspect = att.width && att.height ? att.width / att.height : 0.78;
-  const width = Math.max(120, Math.min(att.width ?? maxW, maxW));
-  const height = Math.max(80, Math.min(width / aspect, win.height * 0.55));
+  const width = cellSize ?? Math.max(120, Math.min(att.width ?? maxW, maxW));
+  const height = cellSize ?? Math.max(80, Math.min(width / aspect, win.height * 0.55));
 
   const tail = showTail ? theme.radius.tail : theme.radius.bubble;
-  const corners = isFromMe ? { borderBottomRightRadius: tail } : { borderBottomLeftRadius: tail };
+  // Grid-cell mode: the parent grid owns margins, alignment, and corner rounding — so DON'T emit a
+  // tail corner. A per-corner radius overrides the `borderRadius: 0` shorthand on the native side
+  // regardless of merge order, so leaving `corners` in would keep one rounded corner per cell,
+  // notching the grid at the joins.
+  const corners = cellSize
+    ? null
+    : isFromMe
+      ? { borderBottomRightRadius: tail }
+      : { borderBottomLeftRadius: tail };
+  const cellOverrides = cellSize
+    ? { marginVertical: 0, marginHorizontal: 0, borderRadius: 0 }
+    : null;
 
   const onPress = (): void => {
     if (att.localPath) router.push(`/media/${encodeURIComponent(att.guid)}`);
@@ -75,6 +90,7 @@ export function ImageAttachment({
           backgroundColor: theme.color.secondaryBackground,
           ...corners,
         },
+        cellOverrides,
       ]}
     >
       <Image

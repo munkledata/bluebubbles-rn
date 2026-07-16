@@ -11,10 +11,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import {
-  sendImageMessage,
-  type AttachmentUploader,
-} from '@/services/send/sendAttachmentService';
+import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendAttachmentService';
 import { createTestDb } from '../support/testDb';
 
 const dummyHttp = {} as unknown as HttpClient;
@@ -172,7 +169,8 @@ describe('sendImageMessage', () => {
     // Live fanout (DbEventSink path): the real message + attachment arrive under real guids.
     // reconcileEchoByContent promotes the optimistic row in place; upsertMessages/Attachments then
     // reconcile the temp attachment → real guid, preserving local_path (no duplicate, no download).
-    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number }).id;
+    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number })
+      .id;
     const echo = Message.parse({
       guid: 'rcs-99',
       isFromMe: true,
@@ -205,7 +203,8 @@ describe('sendImageMessage', () => {
     await sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload, 1000);
     const tempGuid = up.captured!.tempGuid;
 
-    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number }).id;
+    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number })
+      .id;
     const echo = Message.parse({
       guid: 'rcs-99',
       isFromMe: true,
@@ -239,7 +238,8 @@ describe('sendImageMessage', () => {
     await sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload, 10_000_000);
     const tempGuid = up.captured!.tempGuid;
 
-    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number }).id;
+    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number })
+      .id;
     const old = Message.parse({
       guid: 'rcs-old',
       isFromMe: true,

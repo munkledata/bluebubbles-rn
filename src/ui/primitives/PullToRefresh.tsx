@@ -20,7 +20,11 @@ import { useTheme } from '../theme';
 export function usePullToRefresh(
   run: () => Promise<unknown>,
   progressViewOffset?: number,
-): { refreshing: boolean; onRefresh: () => void; refreshControl: React.ReactElement<RefreshControlProps> } {
+): {
+  refreshing: boolean;
+  onRefresh: () => void;
+  refreshControl: React.ReactElement<RefreshControlProps>;
+} {
   const theme = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const inFlight = useRef(false);

@@ -34,6 +34,11 @@ export function mkMessage(over: Partial<EnrichedMessage> = {}): EnrichedMessage 
     associatedMessageEmoji: null,
     threadOriginatorGuid: null,
     expressiveSendStyleId: null,
+    itemType: 0,
+    groupActionType: 0,
+    groupTitle: null,
+    otherHandle: null,
+    otherHandleName: null,
     senderAddress: '+15550001111',
     senderName: 'Alice',
     senderAvatar: null,
@@ -73,6 +78,7 @@ export function mkInboxRow(over: Partial<InboxRow> = {}): InboxRow {
     participantAvatars: null,
     handleServices: 'iMessage',
     unreadCount: 0,
+    hasKnownSender: 1,
     ...over,
   };
 }

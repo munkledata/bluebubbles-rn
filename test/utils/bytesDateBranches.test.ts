@@ -7,7 +7,8 @@ import { fromBase64, toBase64 } from '@utils/bytes';
 
 // Fixed "now": Wed 2024-01-17 12:00 local.
 const NOW = new Date(2024, 0, 17, 12, 0, 0).getTime();
-const at = (y: number, m: number, d: number, h = 12, min = 0) => new Date(y, m, d, h, min).getTime();
+const at = (y: number, m: number, d: number, h = 12, min = 0) =>
+  new Date(y, m, d, h, min).getTime();
 
 describe('formatTime', () => {
   it('returns empty for null/0', () => {

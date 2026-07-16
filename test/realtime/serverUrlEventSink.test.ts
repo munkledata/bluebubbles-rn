@@ -27,7 +27,10 @@ describe('ServerUrlEventSink', () => {
   it('propagates an inner-sink failure (does not swallow it)', async () => {
     const inner: EventSink = { onEvent: jest.fn().mockRejectedValue(new Error('db write failed')) };
     await expect(
-      new ServerUrlEventSink(inner, jest.fn()).onEvent(ev({ type: 'new-message', payload: {} }), 'socket'),
+      new ServerUrlEventSink(inner, jest.fn()).onEvent(
+        ev({ type: 'new-message', payload: {} }),
+        'socket',
+      ),
     ).rejects.toThrow('db write failed');
   });
 });

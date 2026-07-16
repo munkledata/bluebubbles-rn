@@ -1,6 +1,7 @@
 import { Chat, Message } from '@core/models';
 import {
   getSyncMarker,
+  handleMapKey,
   listChats,
   listMessages,
   maxMessageMarker,
@@ -30,15 +31,15 @@ function message(
 }
 
 describe('repositories', () => {
-  it('upserts handles and returns address→id, deduping within a batch', async () => {
+  it('upserts handles and returns (address,service)→id, deduping within a batch', async () => {
     const { db } = await createTestDb();
     const map = await upsertHandles(db, [
       { address: 'a@x.com' },
       { address: 'b@x.com' },
-      { address: 'a@x.com', displayName: 'Alice' }, // duplicate address
+      { address: 'a@x.com', displayName: 'Alice' }, // duplicate address+service
     ]);
     expect(map.size).toBe(2);
-    expect(map.get('a@x.com')).toBeGreaterThan(0);
+    expect(map.get(handleMapKey({ address: 'a@x.com' }))).toBeGreaterThan(0);
   });
 
   it('upserts chats, links participants, and is idempotent on guid', async () => {

@@ -164,6 +164,26 @@ export async function getScheduledById(db: AppDatabase, id: number): Promise<Sch
   return rows[0] ? mapScheduled(rows[0]) : null;
 }
 
+/**
+ * Completed history: sent + errored rows, newest-first. Previously these vanished from the UI the
+ * moment they left 'pending' — a permanently-failing send (status='error') disappeared silently,
+ * so the user never learned it didn't go out. The list screen shows these under COMPLETED.
+ */
+export async function listScheduledHistory(db: AppDatabase, limit = 50): Promise<ScheduledRow[]> {
+  const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
+    sql`SELECT ${SCHED_COLS} FROM scheduled_messages WHERE status IN ('sent', 'error')
+        ORDER BY scheduled_for DESC LIMIT ${limit}`,
+  );
+  return rows.map(mapScheduled);
+}
+
+/** Delete a COMPLETED (sent/error) row from the local history list. */
+export async function deleteScheduledHistory(db: AppDatabase, id: number): Promise<void> {
+  await db
+    .delete(scheduledMessages)
+    .where(and(eq(scheduledMessages.id, id), inArray(scheduledMessages.status, ['sent', 'error'])));
+}
+
 export async function listAllScheduled(db: AppDatabase): Promise<ScheduledRow[]> {
   const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
     sql`SELECT ${SCHED_COLS} FROM scheduled_messages WHERE status = 'pending' ORDER BY scheduled_for ASC`,

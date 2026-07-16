@@ -45,8 +45,7 @@ describe('EventRouter dedup-by-GUID', () => {
     expect(b?.type).toBe('updated-message'); // NOT dropped as a "duplicate"
     expect(events).toHaveLength(2);
     expect(events.map((e) => (e.type === 'updated-message' ? e.message.dateRead : null))).toEqual([
-      0,
-      1234,
+      0, 1234,
     ]);
   });
 });

@@ -26,12 +26,7 @@
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { ChatActionsSheet, type ChatActionTarget } from '@ui/conversations/ChatActionsSheet';
-import {
-  setChatPin,
-  setChatMute,
-  setChatArchive,
-  setChatUnreadLocal,
-} from '@db/repositories';
+import { setChatPin, setChatMute, setChatArchive, setChatUnreadLocal } from '@db/repositories';
 import { markRead } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 

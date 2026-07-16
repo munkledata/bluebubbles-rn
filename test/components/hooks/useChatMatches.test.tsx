@@ -53,7 +53,9 @@ afterEach(() => {
 describe('useChatMatches', () => {
   it('returns all rows for an empty query and passes reactive state through', async () => {
     mockUseChats.mockReturnValue({ data: ROWS, isLoading: true, error: null });
-    const { result } = await renderHook(({ q }: { q: string }) => useChatMatches(q), { initialProps: { q: '' } });
+    const { result } = await renderHook(({ q }: { q: string }) => useChatMatches(q), {
+      initialProps: { q: '' },
+    });
 
     expect(result.current.data).toBe(ROWS);
     expect(result.current.isLoading).toBe(true); // passed through untouched
@@ -90,9 +92,12 @@ describe('useChatMatches', () => {
   });
 
   it('never runs the content search when contentMatches is false', async () => {
-    const { result } = await renderHook(({ q }: { q: string }) => useChatMatches(q, { contentMatches: false }), {
-      initialProps: { q: 'work' },
-    });
+    const { result } = await renderHook(
+      ({ q }: { q: string }) => useChatMatches(q, { contentMatches: false }),
+      {
+        initialProps: { q: 'work' },
+      },
+    );
     await advance(200);
     expect(mockGuidSearch).not.toHaveBeenCalled();
     // Still name-matches row 2 ("Work").

@@ -26,7 +26,10 @@ export function backoffWithJitter(
   policy: RetryPolicy = {},
   rnd: () => number = policy.random ?? Math.random,
 ): number {
-  const capped = Math.min((policy.baseMs ?? 400) * 2 ** Math.max(0, attempt - 1), policy.maxMs ?? 8000);
+  const capped = Math.min(
+    (policy.baseMs ?? 400) * 2 ** Math.max(0, attempt - 1),
+    policy.maxMs ?? 8000,
+  );
   return Math.round(capped * (0.5 + 0.5 * rnd()));
 }
 

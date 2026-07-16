@@ -93,7 +93,11 @@ describe('FileChip — name + subtitle rendering', () => {
   it('uppercases a file extension as the type label (docx → DOCX)', async () => {
     await renderWithTheme(
       <FileChip
-        att={makeAtt({ transferName: 'notes.docx', mimeType: 'application/octet-stream', totalBytes: null })}
+        att={makeAtt({
+          transferName: 'notes.docx',
+          mimeType: 'application/octet-stream',
+          totalBytes: null,
+        })}
         isFromMe={false}
       />,
     );

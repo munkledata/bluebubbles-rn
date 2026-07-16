@@ -4,8 +4,8 @@ import * as Contacts from 'expo-contacts/legacy';
 import { getDatabase } from '@db/database';
 import { logger } from '@core/secure';
 import { matchContactsToHandles, upsertContacts, type DeviceContact } from '@db/repositories';
-// Live binding (used only at runtime inside syncContacts) — safe despite the index↔contacts cycle.
-import { http } from '@/services';
+// The session-bound HTTP client (used only at runtime inside syncContacts).
+import { http } from '../clients';
 import { backfillServerAvatars } from './serverAvatars';
 
 /** Request READ_CONTACTS. Returns true if granted. */

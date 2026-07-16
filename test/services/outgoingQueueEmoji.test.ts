@@ -78,7 +78,12 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
   it("re-POSTs an emoji tapback with reactionType 'emoji' + the glyph, then reconciles + dequeues", async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);
-    await seedFailedReaction(db, raw, { chatId, tempGuid: 'temp-emo', reaction: 'emoji', emoji: '🔥' });
+    await seedFailedReaction(db, raw, {
+      chatId,
+      tempGuid: 'temp-emo',
+      reaction: 'emoji',
+      emoji: '🔥',
+    });
 
     let body: Record<string, unknown> | undefined;
     const res = await runOutgoingQueue(
@@ -96,7 +101,9 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
     // Reconciled to the real guid, glyph preserved, queue row cleared.
     expect(queueCount(raw)).toBe(0);
     const row = raw
-      .prepare("SELECT send_state s, associated_message_emoji e FROM messages WHERE guid = 'real-emo'")
+      .prepare(
+        "SELECT send_state s, associated_message_emoji e FROM messages WHERE guid = 'real-emo'",
+      )
       .get() as { s: string; e: string };
     expect(row.s).toBe('sent');
     expect(row.e).toBe('🔥');

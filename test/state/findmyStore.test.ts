@@ -99,7 +99,12 @@ describe('prod load()', () => {
 
     expect(api.getDevices).toHaveBeenCalledWith({});
     expect(s.loading).toBe(false);
-    expect(s.devices[0]).toMatchObject({ name: 'iPhone 15', latitude: 37.3, longitude: -122.0, batteryLevel: 0.8 });
+    expect(s.devices[0]).toMatchObject({
+      name: 'iPhone 15',
+      latitude: 37.3,
+      longitude: -122.0,
+      batteryLevel: 0.8,
+    });
     expect(s.friends[0]).toMatchObject({ name: 'Mom', address: 'Home', lastUpdated: 123 });
     expect(s.items[0]).toMatchObject({ name: 'Keys', latitude: 1, longitude: 2 });
   });

@@ -34,6 +34,12 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Google Play service-account key (eas submit reads it locally; never upload it)
+play-service-account.json
+
+# Play Store build artifacts (regenerated per release)
+*.aab
+
 # typescript
 *.tsbuildinfo
 

@@ -1,9 +1,4 @@
-import {
-  showAlert,
-  showConfirm,
-  showDialog,
-  useDialogStore,
-} from '@ui/dialog/dialogStore';
+import { showAlert, showConfirm, showDialog, useDialogStore } from '@ui/dialog/dialogStore';
 
 beforeEach(() => {
   useDialogStore.setState({ current: null, queue: [] });

@@ -9,6 +9,7 @@ import {
   findChatByParticipantAddresses,
   getChatIdByGuid,
   getChatParticipants,
+  handleMapKey,
   handlesNeedingAvatar,
   markAllChatsReadLocal,
   persistServerChat,
@@ -49,9 +50,9 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
       }),
     );
     // Different formatting + case + order — still the same set.
-    expect(
-      await findChatByParticipantAddresses(db, ['Craig@Apple.com', '+1 (555) 111-2222']),
-    ).toBe('g1');
+    expect(await findChatByParticipantAddresses(db, ['Craig@Apple.com', '+1 (555) 111-2222'])).toBe(
+      'g1',
+    );
   });
 
   it('returns null for an empty address list and for a non-matching set', async () => {
@@ -94,9 +95,11 @@ describe('local read / unread markers', () => {
   }
 
   const readGuid = (raw: import('better-sqlite3').Database) =>
-    (raw.prepare("SELECT last_read_message_guid g FROM chats WHERE guid='g1'").get() as {
-      g: string | null;
-    }).g;
+    (
+      raw.prepare("SELECT last_read_message_guid g FROM chats WHERE guid='g1'").get() as {
+        g: string | null;
+      }
+    ).g;
 
   it('setChatUnreadLocal clears the read marker; markAllChatsReadLocal re-points it at the newest', async () => {
     const { db, raw } = await seedChatWithMessage();
@@ -116,7 +119,7 @@ describe('server-avatar helpers', () => {
   it('handlesNeedingAvatar lists photo-less handles; setHandleServerAvatar fills one', async () => {
     const { db } = await createTestDb();
     const ids = await upsertHandles(db, [{ address: '+15551112222' }]);
-    const handleId = ids.get('+15551112222')!;
+    const handleId = ids.get(handleMapKey({ address: '+15551112222' }))!;
 
     let needing = await handlesNeedingAvatar(db);
     expect(needing.map((h) => h.address)).toContain('+15551112222');

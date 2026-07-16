@@ -45,7 +45,13 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
   it('no-ops on an empty guid (never promote a row to NULL identity)', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-1', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-1',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     await reconcileOutgoingSuccess(db, 'temp-1', { guid: '', dateCreated: 1, dateDelivered: null });
     // Row untouched: still the temp guid, still sending, queue row intact.
     expect(msgState(raw, 'temp-1')?.s).toBe('sending');
@@ -55,7 +61,13 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
   it('treats guid===tempGuid (RCS self-ack) like the no-guid path: sent + dequeue, not promote', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-rcs', chatId, chatGuid: 'c1', text: 'yo', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-rcs',
+      chatId,
+      chatGuid: 'c1',
+      text: 'yo',
+      now: 1,
+    });
     await reconcileOutgoingSuccess(db, 'temp-rcs', {
       guid: 'temp-rcs',
       dateCreated: 1,
@@ -70,15 +82,33 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     // Optimistic TEXT (no attachment → no local_path to carry over).
-    await insertOutgoingText(db, { tempGuid: 'temp-d', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-d',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     // Echo already inserted the real message directly (dup-branch precondition).
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'real-d', isFromMe: true, dateCreated: 1, text: 'hi', chats: [{ guid: 'c1' }] })],
+      [
+        Message.parse({
+          guid: 'real-d',
+          isFromMe: true,
+          dateCreated: 1,
+          text: 'hi',
+          chats: [{ guid: 'c1' }],
+        }),
+      ],
       () => chatId,
       new Map(),
     );
-    await reconcileOutgoingSuccess(db, 'temp-d', { guid: 'real-d', dateCreated: 1, dateDelivered: null });
+    await reconcileOutgoingSuccess(db, 'temp-d', {
+      guid: 'real-d',
+      dateCreated: 1,
+      dateDelivered: null,
+    });
     const guids = ((await listMessages(db, chatId)) as Array<{ guid: string }>).map((m) => m.guid);
     expect(guids).toEqual(['real-d']); // temp dropped, no duplicate
   });
@@ -94,7 +124,13 @@ describe('cancelOutgoing — branches', () => {
   it('clears a STRANDED queue row that has no matching temp message', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-s', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-s',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     // Delete only the message, leaving the queue row stranded.
     raw.prepare('DELETE FROM messages WHERE guid = ?').run('temp-s');
     expect(await cancelOutgoing(db, 'temp-s')).toBe(true);
@@ -104,7 +140,13 @@ describe('cancelOutgoing — branches', () => {
   it("an 'error' cancel deletes the row but does NOT arm the cancelled-in-flight suppression", async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-err', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-err',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     raw.prepare("UPDATE messages SET send_state = 'error' WHERE guid = ?").run('temp-err');
     expect(await cancelOutgoing(db, 'temp-err')).toBe(true);
     expect(msgState(raw, 'temp-err')).toBeUndefined(); // message deleted
@@ -114,17 +156,35 @@ describe('cancelOutgoing — branches', () => {
   it("a 'sending' cancel arms suppression, and the later success-ack erases the server echo", async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-snd', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-snd',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     expect(await cancelOutgoing(db, 'temp-snd')).toBe(true);
     expect(wasCancelledInFlight('temp-snd')).toBe(true);
     // The in-flight POST resolves late: reconcile must drop BOTH the temp row and the real echo.
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'real-snd', isFromMe: true, dateCreated: 1, text: 'hi', chats: [{ guid: 'c1' }] })],
+      [
+        Message.parse({
+          guid: 'real-snd',
+          isFromMe: true,
+          dateCreated: 1,
+          text: 'hi',
+          chats: [{ guid: 'c1' }],
+        }),
+      ],
       () => chatId,
       new Map(),
     );
-    await reconcileOutgoingSuccess(db, 'temp-snd', { guid: 'real-snd', dateCreated: 1, dateDelivered: null });
+    await reconcileOutgoingSuccess(db, 'temp-snd', {
+      guid: 'real-snd',
+      dateCreated: 1,
+      dateDelivered: null,
+    });
     expect(await listMessages(db, chatId)).toHaveLength(0); // cancelled stays cancelled
     expect(wasCancelledInFlight('temp-snd')).toBe(false); // consumed
   });
@@ -132,7 +192,13 @@ describe('cancelOutgoing — branches', () => {
   it('a late NO-GUID (AppleScript) ack after a cancel erases the row instead of resurrecting it', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-ng', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-ng',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     expect(await cancelOutgoing(db, 'temp-ng')).toBe(true); // 'sending' → arms suppression + deletes
     expect(wasCancelledInFlight('temp-ng')).toBe(true);
     // The AppleScript fallback resolves late with no guid → markOutgoingSentNoGuid's cancelled
@@ -148,7 +214,13 @@ describe('reconcileOutgoingError — attempts + backoff', () => {
   it('marks errored, bumps attempts to 1, and schedules a backoff on the queue row', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-e', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-e',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
     await reconcileOutgoingError(db, 'temp-e', 42, 1_000);
     expect(msgState(raw, 'temp-e')).toEqual({ s: 'error', e: 42 });
     const q = raw
@@ -163,8 +235,18 @@ describe('reconcileEchoByContent — guard clauses', () => {
   it('returns early for a received (not-from-me) echo', async () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-g', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
-    await reconcileEchoByContent(db, { guid: 'real-x', isFromMe: false, text: 'hi', dateCreated: 1 }, chatId);
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-g',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
+    await reconcileEchoByContent(
+      db,
+      { guid: 'real-x', isFromMe: false, text: 'hi', dateCreated: 1 },
+      chatId,
+    );
     // temp row untouched (still the temp guid).
     expect(((await listMessages(db, chatId)) as Array<{ guid: string }>)[0]!.guid).toBe('temp-g');
   });
@@ -172,8 +254,18 @@ describe('reconcileEchoByContent — guard clauses', () => {
   it('returns early when the echo carries a temp- guid (nothing real to reconcile to)', async () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-h', chatId, chatGuid: 'c1', text: 'hi', now: 1 });
-    await reconcileEchoByContent(db, { guid: 'temp-h', isFromMe: true, text: 'hi', dateCreated: 1 }, chatId);
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-h',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
+    await reconcileEchoByContent(
+      db,
+      { guid: 'temp-h', isFromMe: true, text: 'hi', dateCreated: 1 },
+      chatId,
+    );
     expect(((await listMessages(db, chatId)) as Array<{ guid: string }>)[0]!.guid).toBe('temp-h');
   });
 
@@ -182,19 +274,37 @@ describe('reconcileEchoByContent — guard clauses', () => {
     const chatId = await seedChat(db, 'c1');
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'real-y', isFromMe: true, dateCreated: 1, text: 'hi', chats: [{ guid: 'c1' }] })],
+      [
+        Message.parse({
+          guid: 'real-y',
+          isFromMe: true,
+          dateCreated: 1,
+          text: 'hi',
+          chats: [{ guid: 'c1' }],
+        }),
+      ],
       () => chatId,
       new Map(),
     );
     // No temp row to promote AND the guid exists → pure no-op (no throw, no extra row).
-    await reconcileEchoByContent(db, { guid: 'real-y', isFromMe: true, text: 'hi', dateCreated: 1 }, chatId);
+    await reconcileEchoByContent(
+      db,
+      { guid: 'real-y', isFromMe: true, text: 'hi', dateCreated: 1 },
+      chatId,
+    );
     expect(await listMessages(db, chatId)).toHaveLength(1);
   });
 
   it('matches with NO date window when the echo omits dateCreated', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-nw', chatId, chatGuid: 'c1', text: 'ping', now: 5 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-nw',
+      chatId,
+      chatGuid: 'c1',
+      text: 'ping',
+      now: 5,
+    });
     // dateCreated undefined → the `window` fragment is empty; content match alone promotes.
     await reconcileEchoByContent(db, { guid: 'real-nw', isFromMe: true, text: 'ping' }, chatId);
     expect(msgState(raw, 'real-nw')?.s).toBe('sent');
@@ -223,7 +333,9 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
       chatId,
     );
     expect(msgState(raw, 'rcs-real-1')?.s).toBe('sent');
-    const id = (raw.prepare('SELECT id FROM messages WHERE guid = ?').get('rcs-real-1') as { id: number }).id;
+    const id = (
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('rcs-real-1') as { id: number }
+    ).id;
     const atts = (await listAttachmentsByMessageIds(db, [id])).get(id)!;
     expect(atts[0]!.localPath).toBe('file:///p.jpg'); // on-disk file preserved through the promote
   });
@@ -231,7 +343,13 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
   it('does NOT match a text-only pending send (no local attachment to protect)', async () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, { tempGuid: 'temp-txt', chatId, chatGuid: 'c1', text: 'hi', now: 100 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-txt',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 100,
+    });
     await reconcileOutgoingAttachmentByContent(
       db,
       { guid: 'rcs-real-2', isFromMe: true, text: 'hi', dateCreated: 100 },
@@ -245,15 +363,30 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     // not-from-me guard:
-    await reconcileOutgoingAttachmentByContent(db, { guid: 'r', isFromMe: false, dateCreated: 1 }, chatId);
+    await reconcileOutgoingAttachmentByContent(
+      db,
+      { guid: 'r', isFromMe: false, dateCreated: 1 },
+      chatId,
+    );
     // already-exists guard:
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'exists-1', isFromMe: true, dateCreated: 1, chats: [{ guid: 'c1' }] })],
+      [
+        Message.parse({
+          guid: 'exists-1',
+          isFromMe: true,
+          dateCreated: 1,
+          chats: [{ guid: 'c1' }],
+        }),
+      ],
       () => chatId,
       new Map(),
     );
-    await reconcileOutgoingAttachmentByContent(db, { guid: 'exists-1', isFromMe: true, dateCreated: 1 }, chatId);
+    await reconcileOutgoingAttachmentByContent(
+      db,
+      { guid: 'exists-1', isFromMe: true, dateCreated: 1 },
+      chatId,
+    );
     expect(await listMessages(db, chatId)).toHaveLength(1);
   });
 });

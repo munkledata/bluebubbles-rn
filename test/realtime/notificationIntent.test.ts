@@ -115,6 +115,38 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     }
   });
 
+  it("carries the sender's contact photo so the expanded notification shows it (not a placeholder)", async () => {
+    const { db } = await createTestDb();
+    await upsertContacts(db, [
+      {
+        sourceId: 'c-dad',
+        displayName: 'Dad',
+        givenName: null,
+        familyName: null,
+        phones: ['+15559876543'],
+        emails: [],
+        avatar: 'file:///contacts/dad.png',
+      },
+    ]);
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'n3',
+        text: 'call me',
+        dateCreated: 1700000000002,
+        handle: { address: '+15559876543' },
+        chats: [{ guid: 'cDad', participants: [{ address: '+15559876543' }] }],
+      },
+      'socket',
+    );
+    const i = intents[0]!;
+    expect(i.kind).toBe('message');
+    if (i.kind === 'message') {
+      expect(i.avatarUri).toBe('file:///contacts/dad.png');
+    }
+  });
+
   it('does not notify for a muted chat (honors mute_type)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
@@ -188,7 +220,11 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     const { intents, router } = wire(db);
     await router.handle(
       'rcs-bridge-down',
-      { title: 'RCS bridge down', body: 'Re-authenticate on the server.', reason: 'GAIA_LOGGED_OUT' },
+      {
+        title: 'RCS bridge down',
+        body: 'Re-authenticate on the server.',
+        reason: 'GAIA_LOGGED_OUT',
+      },
       'fcm',
     );
     expect(intents).toEqual([

@@ -2,7 +2,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
 import { getDatabase } from '@db/database';
-import { getSecretBox } from '@/services';
+import { getSecretBox } from '../clients';
 import {
   buildBackup,
   openBackup,

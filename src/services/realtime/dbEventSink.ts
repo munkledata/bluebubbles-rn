@@ -49,7 +49,10 @@ export class DbEventSink implements EventSink {
         }
         // The chat may already exist locally (from a prior sync) even when this event didn't
         // embed it — resolve its id from the upsert map first, then the DB as a fallback.
-        const chatId = chatMap.get(targetChatGuid) ?? (await getChatIdByGuid(this.db, targetChatGuid)) ?? undefined;
+        const chatId =
+          chatMap.get(targetChatGuid) ??
+          (await getChatIdByGuid(this.db, targetChatGuid)) ??
+          undefined;
         if (chatId == null) {
           // We have a guid but no local chat row yet (event carried only chatGuid, chat unsynced).
           // Skip the write rather than orphan the message; the next sync hydrates the chat + message.

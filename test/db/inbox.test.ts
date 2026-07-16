@@ -1,5 +1,11 @@
 import { Chat, Message } from '@core/models';
-import { listChatsForInbox, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import {
+  applyLocalUnsend,
+  listChatsForInbox,
+  upsertChats,
+  upsertHandles,
+  upsertMessages,
+} from '@db/repositories';
 import { createTestDb } from '../support/testDb';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
@@ -139,6 +145,26 @@ describe('listChatsForInbox', () => {
     expect(byGuid.partial).toBe(1);
     expect(byGuid.fresh).toBe(2);
     expect(byGuid.mine).toBe(0);
+  });
+
+  it('excludes a retracted (unsent) inbound message from the unread count', async () => {
+    // The badge must agree with the in-chat unread chip (getFirstUnreadInChat), which drops
+    // retracted rows — otherwise a sender unsending a message leaves a phantom unread on the tile.
+    const t = await createTestDb();
+    await seedChat(t, 'c', {
+      participants: ['a@x.com'],
+      readGuid: null,
+      messages: [
+        { guid: 'u1', text: 'a', date: 100 },
+        { guid: 'u2', text: 'b', date: 200 },
+      ],
+    });
+    const before = await listChatsForInbox(t.db);
+    expect(before[0]!.unreadCount).toBe(2);
+
+    await applyLocalUnsend(t.db, 'u2', 9000);
+    const after = await listChatsForInbox(t.db);
+    expect(after[0]!.unreadCount).toBe(1);
   });
 
   it('reports participant count/names and toggles archived', async () => {

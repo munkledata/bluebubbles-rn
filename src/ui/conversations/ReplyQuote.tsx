@@ -21,7 +21,8 @@ export function ReplyQuote({ preview, isFromMe, onPress }: ReplyQuoteProps): Rea
   const who =
     preview.isFromMe === 1 ? 'You' : redactTitle(preview.senderName ?? 'Unknown', redacted);
   const text =
-    redactMessageText(preview.text, redacted) || (preview.hasAttachments === 1 ? '📎 Attachment' : '');
+    redactMessageText(preview.text, redacted) ||
+    (preview.hasAttachments === 1 ? '📎 Attachment' : '');
 
   return (
     <Pressable

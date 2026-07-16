@@ -112,81 +112,87 @@ export const ConversationTile = React.memo(function ConversationTile({
       color: '#8E8E93',
       onPress: () => void setChatArchive(getDatabase(), row.guid, !row.isArchived),
     },
-    { key: 'delete', label: 'Delete', icon: 'trash-outline', color: '#FF3B30', onPress: confirmDelete },
+    {
+      key: 'delete',
+      label: 'Delete',
+      icon: 'trash-outline',
+      color: '#FF3B30',
+      onPress: confirmDelete,
+    },
   ];
 
   return (
     <SwipeableRow resetKey={row.guid} left={leftActions} right={rightActions}>
-    <Pressable
-      onPress={() => onPress(row.guid)}
-      onLongPress={onLongPress ? () => onLongPress(row) : undefined}
-      delayLongPress={350}
-      style={({ pressed }) => [
-        styles.tile,
-        compact ? styles.tileCompact : null,
-        { backgroundColor: theme.color.background },
-        pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={`${title}. ${unread ? 'Unread. ' : ''}${preview}`}
-      accessibilityHint="Double tap to open, or long press for actions"
-    >
-      <View style={styles.leading}>
-        {unread ? (
-          <View style={[styles.dot, { backgroundColor: theme.color.tint }]} />
-        ) : (
-          <View style={styles.dotSpacer} />
-        )}
-        {group ? (
-          <GroupAvatar
-            // Redacted mode masks the monogram + photo with deterministic seeded tiles
-            // (distinct per person, but revealing neither name nor photo).
-            names={redacted ? ['Contact', 'Contact'] : groupParts.names}
-            uris={redacted ? [] : groupParts.uris}
-            seeds={redacted ? participantList(row.participantNames) : undefined}
-          />
-        ) : (
-          <Avatar
-            name={avatarSeed(row)}
-            uri={redacted ? null : participantAvatars(row.participantAvatars)[0]}
-            seed={redacted ? avatarSeed(row) : undefined}
-          />
-        )}
-      </View>
+      <Pressable
+        onPress={() => onPress(row.guid)}
+        onLongPress={onLongPress ? () => onLongPress(row) : undefined}
+        delayLongPress={350}
+        style={({ pressed }) => [
+          styles.tile,
+          compact ? styles.tileCompact : null,
+          { backgroundColor: theme.color.background },
+          pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={`${title}. ${unread ? 'Unread. ' : ''}${preview}`}
+        accessibilityHint="Double tap to open, or long press for actions"
+      >
+        <View style={styles.leading}>
+          {unread ? (
+            <View style={[styles.dot, { backgroundColor: theme.color.tint }]} />
+          ) : (
+            <View style={styles.dotSpacer} />
+          )}
+          {group ? (
+            <GroupAvatar
+              // Redacted mode masks the monogram + photo with deterministic seeded tiles
+              // (distinct per person, but revealing neither name nor photo).
+              names={redacted ? ['Contact', 'Contact'] : groupParts.names}
+              uris={redacted ? [] : groupParts.uris}
+              seeds={redacted ? participantList(row.participantNames) : undefined}
+            />
+          ) : (
+            <Avatar
+              name={avatarSeed(row)}
+              uri={redacted ? null : participantAvatars(row.participantAvatars)[0]}
+              seed={redacted ? avatarSeed(row) : undefined}
+            />
+          )}
+        </View>
 
-      <View style={styles.center}>
-        <View style={styles.titleRow}>
+        <View style={styles.center}>
+          <View style={styles.titleRow}>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.title,
+                { color: theme.color.label, fontWeight: unread ? '600' : '500' },
+              ]}
+            >
+              {title}
+            </Text>
+            {badge ? <ServiceBadge label={badge.label} color={badge.color} /> : null}
+          </View>
           <Text
-            numberOfLines={1}
-            style={[
-              styles.title,
-              { color: theme.color.label, fontWeight: unread ? '600' : '500' },
-            ]}
+            numberOfLines={compact ? 1 : 2}
+            style={[styles.preview, { color: theme.color.secondaryLabel }]}
           >
-            {title}
+            {preview}
           </Text>
-          {badge ? <ServiceBadge label={badge.label} color={badge.color} /> : null}
         </View>
-        <Text
-          numberOfLines={compact ? 1 : 2}
-          style={[styles.preview, { color: theme.color.secondaryLabel }]}
-        >
-          {preview}
-        </Text>
-      </View>
 
-      <View style={styles.trailing}>
-        <Text style={[styles.time, { color: theme.color.tertiaryLabel }]}>
-          {formatChatDate(row.lastDate)}
-        </Text>
-        <View style={styles.trailingRow}>
-          {muted ? (
-            <Icon name="notifications-off-outline" size={14} color={theme.color.tertiaryLabel} />
-          ) : null}
-          <Text style={[styles.chevron, { color: theme.color.separator }]}>›</Text>
+        <View style={styles.trailing}>
+          <Text style={[styles.time, { color: theme.color.tertiaryLabel }]}>
+            {formatChatDate(row.lastDate)}
+          </Text>
+          <View style={styles.trailingRow}>
+            {muted ? (
+              <Icon name="notifications-off-outline" size={14} color={theme.color.tertiaryLabel} />
+            ) : null}
+            <Text style={[styles.chevron, { color: theme.color.separator }]}>›</Text>
+          </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
     </SwipeableRow>
   );
 });

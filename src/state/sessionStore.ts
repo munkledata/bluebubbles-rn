@@ -64,5 +64,4 @@ export const sessionAccessors = {
 };
 
 /** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
-export const useRcsEnabled = (): boolean =>
-  useSessionStore((s) => !!s.serverInfo?.rcs);
+export const useRcsEnabled = (): boolean => useSessionStore((s) => !!s.serverInfo?.rcs);

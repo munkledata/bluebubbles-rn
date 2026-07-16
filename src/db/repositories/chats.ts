@@ -3,13 +3,17 @@ import type { Chat, ChatSummary } from '@core/models';
 import { chatHandles, chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
-import { upsertHandles } from './handles';
+import { handleMapKey, upsertHandles } from './handles';
 
-/** Upsert chats by guid and link participants; returns guid → row id. */
+/**
+ * Upsert chats by guid and link participants; returns guid → row id.
+ * `handleIdByKey` is the map `upsertHandles` returned for these chats' participants
+ * (keyed by `handleMapKey`, i.e. address + service).
+ */
 export async function upsertChats(
   db: AppDatabase,
   items: Array<Chat | ChatSummary>,
-  handleIdByAddress: Map<string, number>,
+  handleIdByKey: Map<string, number>,
 ): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   const deduped = dedupeBy(
@@ -32,7 +36,8 @@ export async function upsertChats(
         muteType: c.muteType ?? null,
         // Server-owned (macOS 26 synced background): the current channel GUID, or null when the
         // chat has no background. Refreshed on every sync (unlike the device-local columns below).
-        syncedBackgroundChannel: ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
+        syncedBackgroundChannel:
+          ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
       })),
     )
     .onConflictDoUpdate({
@@ -63,7 +68,7 @@ export async function upsertChats(
     if (chatId == null || c.participants == null) continue;
     await db.delete(chatHandles).where(eq(chatHandles.chatId, chatId));
     for (const p of c.participants) {
-      const handleId = handleIdByAddress.get(p.address);
+      const handleId = handleIdByKey.get(handleMapKey(p));
       if (handleId != null) links.push({ chatId, handleId });
     }
   }
@@ -273,6 +278,8 @@ export interface InboxRow {
   /** Comma-joined participant handle services ('iMessage'/'SMS'), for `resolveChatService`. */
   handleServices: string | null;
   unreadCount: number;
+  /** 1 when any participant matched a device contact — the "unknown senders" filter signal. */
+  hasKnownSender: number;
 }
 
 /**
@@ -315,14 +322,32 @@ export async function listChatsForInbox(
         WHERE ch.chat_id = c.id) AS handleServices,
       (SELECT COUNT(*) FROM messages um
          WHERE um.chat_id = c.id AND um.is_from_me = 0 AND um.associated_message_type IS NULL
+           AND um.date_retracted IS NULL
            AND um.date_created > COALESCE(
              (SELECT lm.date_created FROM messages lm WHERE lm.guid = c.last_read_message_guid), 0)
-      ) AS unreadCount
+      ) AS unreadCount,
+      EXISTS(SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
+              WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL) AS hasKnownSender
     FROM chats c
     LEFT JOIN last l ON l.chat_id = c.id
     ${whereArchived}
     ORDER BY c.is_pinned DESC, c.latest_message_date DESC
   `);
+}
+
+/**
+ * True when any participant of the chat matched a device contact. The "unknown senders"
+ * feature treats contact-less chats as unknown (separate list + muted notifications).
+ */
+export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise<boolean> {
+  const rows = await db.all<{ known: number }>(sql`
+    SELECT EXISTS(
+      SELECT 1 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+       WHERE ch.chat_id = (SELECT id FROM chats WHERE guid = ${guid} LIMIT 1)
+         AND h.contact_id IS NOT NULL
+    ) AS known
+  `);
+  return rows[0]?.known === 1;
 }
 
 // ---- Conversation view -----------------------------------------------------

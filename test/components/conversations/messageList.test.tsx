@@ -35,7 +35,11 @@ jest.mock('@shopify/flash-list', () => {
   const ReactLib = require('react');
   const { View } = require('react-native');
   const FlashList = ReactLib.forwardRef(function FlashList(
-    props: { data?: unknown[]; renderItem?: (a: { item: unknown; index: number }) => unknown; keyExtractor?: (i: unknown) => string },
+    props: {
+      data?: unknown[];
+      renderItem?: (a: { item: unknown; index: number }) => unknown;
+      keyExtractor?: (i: unknown) => string;
+    },
     _ref: unknown,
   ) {
     const { data = [], renderItem, keyExtractor } = props;
@@ -58,7 +62,11 @@ jest.mock('@ui/conversations/MessageBubble', () => {
   const ReactLib = require('react');
   const { View, Text, Pressable } = require('react-native');
   return {
-    MessageBubble: (props: { msg: EnrichedMessage; onLongPress?: () => void; onRetry?: () => void }) =>
+    MessageBubble: (props: {
+      msg: EnrichedMessage;
+      onLongPress?: () => void;
+      onRetry?: () => void;
+    }) =>
       ReactLib.createElement(
         View,
         null,
@@ -93,7 +101,11 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
             View,
             null,
             ReactLib.createElement(Text, { testID: 'sheet' }, 'sheet-open'),
-            ReactLib.createElement(Text, { testID: 'sheet-attachment' }, String(!!props.isAttachment)),
+            ReactLib.createElement(
+              Text,
+              { testID: 'sheet-attachment' },
+              String(!!props.isAttachment),
+            ),
             ReactLib.createElement(
               Pressable,
               { testID: 'sheet-retry', onPress: props.onRetry },
@@ -204,8 +216,24 @@ describe('MessageList — date separators (showDateSeparator)', () => {
 describe('MessageList — sender-name visibility (group rules)', () => {
   it('shows a sender header at each sender break in a group', async () => {
     const messages = [
-      make({ id: 2, guid: 'b', text: 'hi', isFromMe: 0, handleId: 20, senderName: 'Bob', dateCreated: 2_000 }),
-      make({ id: 1, guid: 'a', text: 'hi', isFromMe: 0, handleId: 10, senderName: 'Alice', dateCreated: 1_000 }),
+      make({
+        id: 2,
+        guid: 'b',
+        text: 'hi',
+        isFromMe: 0,
+        handleId: 20,
+        senderName: 'Bob',
+        dateCreated: 2_000,
+      }),
+      make({
+        id: 1,
+        guid: 'a',
+        text: 'hi',
+        isFromMe: 0,
+        handleId: 10,
+        senderName: 'Alice',
+        dateCreated: 1_000,
+      }),
     ];
     await renderWithTheme(
       <MessageList chatGuid="iMessage;-;chat123" isGroup messages={messages} />,
@@ -216,8 +244,24 @@ describe('MessageList — sender-name visibility (group rules)', () => {
 
   it('collapses the header for consecutive same-sender messages in a group', async () => {
     const messages = [
-      make({ id: 2, guid: 'a2', text: 'hi', isFromMe: 0, handleId: 10, senderName: 'Alice', dateCreated: 1_060_000 }),
-      make({ id: 1, guid: 'a1', text: 'hi', isFromMe: 0, handleId: 10, senderName: 'Alice', dateCreated: 1_000_000 }),
+      make({
+        id: 2,
+        guid: 'a2',
+        text: 'hi',
+        isFromMe: 0,
+        handleId: 10,
+        senderName: 'Alice',
+        dateCreated: 1_060_000,
+      }),
+      make({
+        id: 1,
+        guid: 'a1',
+        text: 'hi',
+        isFromMe: 0,
+        handleId: 10,
+        senderName: 'Alice',
+        dateCreated: 1_000_000,
+      }),
     ];
     await renderWithTheme(
       <MessageList chatGuid="iMessage;-;chat123" isGroup messages={messages} />,

@@ -35,14 +35,18 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       headers: http.buildHeaders(),
     });
   } catch (err) {
-    logger.warn(`[upload] streaming upload failed err=${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `[upload] streaming upload failed err=${err instanceof Error ? err.message : String(err)}`,
+    );
     throw new ApiError('no_connection', 'Upload request failed', undefined, err);
   }
 
   if (result.status < 200 || result.status >= 300) {
     // Log the server's exact status + error body (the daemon's own log is too buffered to read
     // live). This surfaces e.g. "helper not connected" (iMessage) vs an RCS bridge error.
-    logger.warn(`[upload] server rejected status=${result.status} body=${(result.body ?? '').slice(0, 300)}`);
+    logger.warn(
+      `[upload] server rejected status=${result.status} body=${(result.body ?? '').slice(0, 300)}`,
+    );
     throw ApiError.fromStatus(result.status, 'attachment upload failed');
   }
 
@@ -54,7 +58,12 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   }
   const parsed = apiResponse(SendAck).safeParse(json);
   if (!parsed.success) {
-    throw new ApiError('parse_error', 'Upload response did not match schema', result.status, parsed.error);
+    throw new ApiError(
+      'parse_error',
+      'Upload response did not match schema',
+      result.status,
+      parsed.error,
+    );
   }
   return parsed.data.data;
 };

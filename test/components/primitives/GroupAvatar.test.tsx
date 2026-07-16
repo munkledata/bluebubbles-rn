@@ -31,10 +31,7 @@ describe('GroupAvatar', () => {
   it('after dedupeParticipants collapses a repeated person, the collage shows two DISTINCT people', async () => {
     // Same person reachable via two handles (same name+photo) collapses to one entry, so the
     // second tile is the genuinely different next person — not a duplicate of the first.
-    const { names } = dedupeParticipants(
-      ['Alice', 'Alice', 'Bob'],
-      [null, null, null],
-    );
+    const { names } = dedupeParticipants(['Alice', 'Alice', 'Bob'], [null, null, null]);
     expect(names).toEqual(['Alice', 'Bob']);
     await renderWithTheme(<GroupAvatar names={names} />);
     expect(screen.getByText('A')).toBeTruthy();
@@ -43,9 +40,7 @@ describe('GroupAvatar', () => {
 
   it('redacted seeds override names with deterministic tiles', async () => {
     // Deterministic (same 31-hash the source uses): 'seed-A' -> '5A', 'seed-B' -> '4A'.
-    await renderWithTheme(
-      <GroupAvatar names={['Alice', 'Bob']} seeds={['seed-A', 'seed-B']} />,
-    );
+    await renderWithTheme(<GroupAvatar names={['Alice', 'Bob']} seeds={['seed-A', 'seed-B']} />);
     expect(screen.getByText('5A')).toBeTruthy();
     expect(screen.getByText('4A')).toBeTruthy();
     expect(screen.queryByText('A')).toBeNull(); // real initials never leak

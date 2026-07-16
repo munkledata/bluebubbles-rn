@@ -175,7 +175,9 @@ export function AttachmentTray({ onPick, onPickFiles }: AttachmentTrayProps): Re
               onPress={() => void pick(a)}
               style={styles.thumbWrap}
               accessibilityRole="button"
-              accessibilityLabel={a.mediaType === MediaLibrary.MediaType.video ? 'Attach video' : 'Attach photo'}
+              accessibilityLabel={
+                a.mediaType === MediaLibrary.MediaType.video ? 'Attach video' : 'Attach photo'
+              }
             >
               <Image source={{ uri: a.uri }} style={styles.thumb} contentFit="cover" />
               {a.mediaType === MediaLibrary.MediaType.video ? (

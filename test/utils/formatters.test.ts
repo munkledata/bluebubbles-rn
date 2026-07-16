@@ -158,10 +158,7 @@ describe('chat resolution', () => {
 describe('dedupeParticipants', () => {
   it('collapses a member that appears twice (two handles, same photo)', () => {
     // Carol is reachable via two handles → same name + same avatar repeated.
-    const parts = dedupeParticipants(
-      ['Carol', 'Carol', 'Bob'],
-      ['c.jpg', 'c.jpg', 'b.jpg'],
-    );
+    const parts = dedupeParticipants(['Carol', 'Carol', 'Bob'], ['c.jpg', 'c.jpg', 'b.jpg']);
     expect(parts.names).toEqual(['Carol', 'Bob']);
     expect(parts.uris).toEqual(['c.jpg', 'b.jpg']);
   });

@@ -47,7 +47,11 @@ describe('DbEventSink (live path)', () => {
       ),
       'socket',
     );
-    await router.handle('message-send-error', JSON.stringify({ guid: 'send-fail-1', error: 22 }), 'socket');
+    await router.handle(
+      'message-send-error',
+      JSON.stringify({ guid: 'send-fail-1', error: 22 }),
+      'socket',
+    );
 
     const chats = (await listChats(db)) as Array<{ id: number; guid: string }>;
     const chat = chats.find((c) => c.guid === 'cErr')!;
@@ -101,7 +105,11 @@ describe('DbEventSink (live path)', () => {
     // …and the notification intent builds off the same fallback chatGuid.
     const intents = await buildMessageIntents(db, normalized!);
     expect(intents).toHaveLength(1);
-    expect(intents[0]).toMatchObject({ kind: 'message', chatGuid: 'cBare', body: 'no chats[] here' });
+    expect(intents[0]).toMatchObject({
+      kind: 'message',
+      chatGuid: 'cBare',
+      body: 'no chats[] here',
+    });
   });
 
   it('F-1: a message with NEITHER chats[] nor chatGuid is skipped (not crashed, no row)', async () => {

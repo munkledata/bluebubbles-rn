@@ -67,8 +67,14 @@ describe('EventRouter', () => {
 
   it('normalizes an rcs-alert and forwards its alertType to the sink', async () => {
     const { events } = collector();
-    const router = new EventRouter({ onEvent: (event) => void events.push({ event, source: 's' }) });
-    const out = await router.handle('rcs-alert', { kind: 'alert', alertType: 'GAIA_LOGGED_OUT' }, 'socket');
+    const router = new EventRouter({
+      onEvent: (event) => void events.push({ event, source: 's' }),
+    });
+    const out = await router.handle(
+      'rcs-alert',
+      { kind: 'alert', alertType: 'GAIA_LOGGED_OUT' },
+      'socket',
+    );
     expect(out?.type).toBe('rcs-alert');
     if (out?.type === 'rcs-alert') expect(out.payload.alertType).toBe('GAIA_LOGGED_OUT');
     expect(events).toHaveLength(1);

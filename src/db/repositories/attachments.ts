@@ -148,6 +148,38 @@ export async function getAttachmentByGuid(
   return rows[0] ?? null;
 }
 
+/**
+ * All IMAGE attachments in the same chat as `guid`, chronological, plus the index of `guid` among
+ * them — for the fullscreen swipe-carousel (page left/right through every photo in the chat).
+ * Stickers, hidden rich-link payloads, and retracted messages are excluded. Videos/documents are
+ * NOT included (a tapped video opens singly). `index` is -1 when `guid` isn't an image in the set.
+ */
+export async function listChatImageAttachmentsByAttachmentGuid(
+  db: AppDatabase,
+  guid: string,
+): Promise<{ items: AttachmentRow[]; index: number }> {
+  const rows = await db.all<AttachmentRow>(sql`
+    SELECT a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
+      a.transfer_name AS transferName, a.total_bytes AS totalBytes, a.height, a.width, a.blurhash,
+      a.has_live_photo AS hasLivePhoto, a.is_sticker AS isSticker,
+      a.hide_attachment AS hideAttachment, a.local_path AS localPath,
+      ${RCS_SERVICE_CASE} AS service
+    FROM attachments a
+    JOIN messages m ON m.id = a.message_id
+    JOIN chats c ON c.id = m.chat_id
+    WHERE m.chat_id = (
+        SELECT chat_id FROM messages
+        WHERE id = (SELECT message_id FROM attachments WHERE guid = ${guid})
+      )
+      AND a.mime_type LIKE 'image/%'
+      AND a.is_sticker = 0
+      AND a.hide_attachment = 0
+      AND m.date_retracted IS NULL
+    ORDER BY m.date_created ASC, a.id ASC
+  `);
+  return { items: rows, index: rows.findIndex((r: AttachmentRow) => r.guid === guid) };
+}
+
 /** A shared link surfaced in conversation details (derived from message text). */
 export interface ChatLink {
   url: string;

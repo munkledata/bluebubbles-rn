@@ -19,8 +19,7 @@ export default function Connect(): React.JSX.Element {
         <View style={styles.header}>
           <Text style={[styles.title, { color: theme.color.label }]}>Connect</Text>
           <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-            Scan the QR code shown on your Gator Server, or enter the URL and password
-            manually.
+            Scan the QR code shown on your Gator Server, or enter the URL and password manually.
           </Text>
         </View>
         <View style={styles.actions}>

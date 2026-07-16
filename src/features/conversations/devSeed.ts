@@ -456,7 +456,15 @@ export async function devSendFakeReaction(
   if (chatId == null) return;
   const tempGuid = generateTempGuid();
   const now = Date.now();
-  await insertOutgoingReaction(db, { tempGuid, chatId, chatGuid, targetGuid, reaction, emoji, now });
+  await insertOutgoingReaction(db, {
+    tempGuid,
+    chatId,
+    chatGuid,
+    targetGuid,
+    reaction,
+    emoji,
+    now,
+  });
   setTimeout(() => {
     void reconcileOutgoingSuccess(db, tempGuid, {
       guid: `real-${tempGuid}`,

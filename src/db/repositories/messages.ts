@@ -5,6 +5,7 @@ import { chatHandles, chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
 import { dedupeBy, toFtsQuery } from './_shared';
 import { upsertAttachments } from './attachments';
+import { handleMapKey } from './handles';
 
 /**
  * Upsert messages. `resolveChatId` maps a message to its local chat id; messages
@@ -15,7 +16,7 @@ export async function upsertMessages(
   db: AppDatabase,
   items: Message[],
   resolveChatId: (m: Message) => number | undefined,
-  handleIdByAddress: Map<string, number>,
+  handleIdByKey: Map<string, number>,
 ): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   const deduped = dedupeBy(
@@ -44,7 +45,7 @@ export async function upsertMessages(
           guid: m.guid,
           originalRowId: m.originalROWID ?? null,
           chatId,
-          handleId: m.handle?.address ? (handleIdByAddress.get(m.handle.address) ?? null) : null,
+          handleId: m.handle?.address ? (handleIdByKey.get(handleMapKey(m.handle)) ?? null) : null,
           text,
           subject: m.subject ?? null,
           attributedBody,
@@ -62,6 +63,12 @@ export async function upsertMessages(
           associatedMessageEmoji: m.associatedMessageEmoji ?? null,
           threadOriginatorGuid: m.threadOriginatorGuid ?? null,
           expressiveSendStyleId: m.expressiveSendStyleId ?? null,
+          // Group/chat-event metadata (see utils/groupEvent.ts). NULL when the event omits them
+          // so the COALESCE-preserve on conflict can't wipe a previously-stored value.
+          itemType: m.itemType ?? null,
+          groupActionType: m.groupActionType ?? null,
+          groupTitle: m.groupTitle ?? null,
+          otherHandle: m.otherHandle ?? null,
           error: m.error ?? 0,
           // NULL (not false) when the event omits the flag, so the COALESCE on conflict
           // (below) can keep a previously-stored `true` instead of being handed a 0 that
@@ -100,6 +107,12 @@ export async function upsertMessages(
         // COALESCE-preserve the emoji-tapback glyph: a later event that omits it (delivery
         // receipt re-upsert) must not blank a stored glyph.
         associatedMessageEmoji: sql`COALESCE(excluded.associated_message_emoji, ${messages.associatedMessageEmoji})`,
+        // Group-event metadata is set once at insert and never changes; COALESCE-preserve so a
+        // later re-sync that omits these (a delivery/read receipt re-upsert) can't blank them.
+        itemType: sql`COALESCE(excluded.item_type, ${messages.itemType})`,
+        groupActionType: sql`COALESCE(excluded.group_action_type, ${messages.groupActionType})`,
+        groupTitle: sql`COALESCE(excluded.group_title, ${messages.groupTitle})`,
+        otherHandle: sql`COALESCE(excluded.other_handle, ${messages.otherHandle})`,
       },
     })
     .returning({ id: messages.id, guid: messages.guid });
@@ -111,17 +124,37 @@ export async function upsertMessages(
   // would otherwise render as "Group" / a raw chat-guid. Only received messages carry a sender
   // handle (sent/own messages have none). onConflictDoNothing keeps it idempotent and never
   // disturbs a canonical participant list that upsertChats may have set from a participants payload.
+  // Keyed by chatId:ADDRESS (not handle id): the same person can have one handle row per
+  // service (iMessage + SMS variants of the same number), and linking a second variant into
+  // a chat that already lists the person would render them twice (duplicate collage avatar,
+  // "Alice, Alice"). One key per person per chat also dedupes variants within this batch.
   const participantLinks = new Map<string, { chatId: number; handleId: number }>();
   for (const { m, chatId } of withChat) {
-    const addr = m.handle?.address;
-    const handleId = addr ? handleIdByAddress.get(addr) : undefined;
-    if (handleId != null) participantLinks.set(`${chatId}:${handleId}`, { chatId, handleId });
+    const h = m.handle;
+    if (!h?.address) continue;
+    const handleId = handleIdByKey.get(handleMapKey(h));
+    if (handleId != null) participantLinks.set(`${chatId}:${h.address}`, { chatId, handleId });
   }
   if (participantLinks.size > 0) {
-    await db
-      .insert(chatHandles)
-      .values([...participantLinks.values()])
-      .onConflictDoNothing();
+    // Skip senders whose ADDRESS the chat already links (via any service-variant row) —
+    // exact-row duplicates alone are not enough, that's what onConflictDoNothing covers.
+    const chatIds = [...new Set([...participantLinks.values()].map((l) => l.chatId))];
+    const inList = sql.join(
+      chatIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const existing: Array<{ chatId: number; address: string }> = await db.all(
+      sql`SELECT ch.chat_id AS chatId, h.address AS address
+          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+          WHERE ch.chat_id IN (${inList})`,
+    );
+    const alreadyLinked = new Set(existing.map((r) => `${r.chatId}:${r.address}`));
+    const fresh = [...participantLinks.entries()]
+      .filter(([key]) => !alreadyLinked.has(key))
+      .map(([, link]) => link);
+    if (fresh.length > 0) {
+      await db.insert(chatHandles).values(fresh).onConflictDoNothing();
+    }
   }
 
   // Upsert nested attachments now that we have message ids.
@@ -229,6 +262,56 @@ export async function searchMessagesEnriched(
   `);
 }
 
+/**
+ * All messages of a reply thread: the originator plus every reply targeting it, chronological.
+ * Powers the "View Thread" popup (the bubble's reply quote shows only the immediate parent).
+ */
+export async function listThreadMessages(
+  db: AppDatabase,
+  originatorGuid: string,
+): Promise<MessageRow[]> {
+  return db.all<MessageRow>(sql`
+    ${MESSAGE_ROW_SELECT}
+    WHERE (m.guid = ${originatorGuid} OR m.thread_originator_guid = ${originatorGuid})
+      AND m.associated_message_type IS NULL
+    ORDER BY m.date_created ASC, m.id ASC
+  `);
+}
+
+/**
+ * The OLDEST unread received message in a chat + how many are unread — for the "jump to oldest
+ * unread" chip. Unread = received (not mine) and newer than the last-read marker's message; a
+ * never-read chat counts every received message. Reactions and retracted rows are excluded.
+ * Call BEFORE markRead (which moves the marker to the newest message).
+ */
+export async function getFirstUnreadInChat(
+  db: AppDatabase,
+  chatId: number,
+): Promise<{ guid: string; dateCreated: number; count: number } | null> {
+  const marker = await db.all<{ lastReadMessageGuid: string | null }>(
+    sql`SELECT last_read_message_guid AS lastReadMessageGuid FROM chats WHERE id = ${chatId} LIMIT 1`,
+  );
+  const lastReadGuid = marker[0]?.lastReadMessageGuid ?? null;
+  let readDate = 0;
+  if (lastReadGuid) {
+    const r = await db.all<{ d: number | null }>(
+      sql`SELECT date_created AS d FROM messages WHERE guid = ${lastReadGuid} LIMIT 1`,
+    );
+    readDate = r[0]?.d ?? 0;
+  }
+  const rows = await db.all<{ guid: string; dateCreated: number; count: number }>(sql`
+    SELECT guid, date_created AS dateCreated,
+      (SELECT COUNT(*) FROM messages mm
+        WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 0 AND mm.date_created > ${readDate}
+          AND mm.associated_message_type IS NULL AND mm.date_retracted IS NULL) AS count
+    FROM messages
+    WHERE chat_id = ${chatId} AND is_from_me = 0 AND date_created > ${readDate}
+      AND associated_message_type IS NULL AND date_retracted IS NULL
+    ORDER BY date_created ASC, id ASC LIMIT 1
+  `);
+  return rows[0] ?? null;
+}
+
 /** Newest received (inbound) message guid in a chat — the correct mark-read target. */
 export async function getNewestReceivedGuid(
   db: AppDatabase,
@@ -271,6 +354,14 @@ export interface MessageRow {
   senderName: string | null;
   senderAvatar: string | null;
   senderService: string | null;
+  // Group/chat-event fields (utils/groupEvent.ts). Optional so hand-built test literals need not
+  // set them; the SELECT below always provides them at runtime. `otherHandleName` is resolved from
+  // `other_handle` (a server ROWID) to the affected participant's display name.
+  itemType?: number | null;
+  groupActionType?: number | null;
+  groupTitle?: string | null;
+  otherHandle?: number | null;
+  otherHandleName?: string | null;
 }
 
 // Shared SELECT (columns + sender join) for message-row reads. Kept in ONE place so the
@@ -290,10 +381,16 @@ const MESSAGE_ROW_SELECT = sql`
     m.associated_message_emoji AS associatedMessageEmoji,
     m.thread_originator_guid AS threadOriginatorGuid,
     m.expressive_send_style_id AS expressiveSendStyleId,
+    m.item_type AS itemType,
+    m.group_action_type AS groupActionType,
+    m.group_title AS groupTitle,
+    m.other_handle AS otherHandle,
+    (SELECT COALESCE(h2.display_name, h2.address) FROM handles h2
+       WHERE h2.original_row_id = m.other_handle LIMIT 1) AS otherHandleName,
     h.address AS senderAddress,
     COALESCE(h.display_name, h.address) AS senderName,
     h.avatar AS senderAvatar,
-    h.service AS senderService
+    NULLIF(h.service, '') AS senderService
   FROM messages m
   LEFT JOIN handles h ON h.id = m.handle_id`;
 

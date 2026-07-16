@@ -214,7 +214,9 @@ export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
  * Handles with NO avatar yet (device sync didn't find a photo) + a non-empty address —
  * candidates for a server-sourced contact avatar. Read-only; never touches device photos.
  */
-export async function handlesNeedingAvatar(db: AppDatabase): Promise<{ id: number; address: string }[]> {
+export async function handlesNeedingAvatar(
+  db: AppDatabase,
+): Promise<{ id: number; address: string }[]> {
   return db.all<{ id: number; address: string }>(
     sql`SELECT id, address FROM handles WHERE avatar IS NULL AND address <> ''`,
   );
@@ -225,6 +227,10 @@ export async function handlesNeedingAvatar(db: AppDatabase): Promise<{ id: numbe
  * contact_id, which stay device-contact-owned). Used by the server-avatar backfill for
  * handles a device contact didn't supply a photo for.
  */
-export async function setHandleServerAvatar(db: AppDatabase, handleId: number, uri: string): Promise<void> {
+export async function setHandleServerAvatar(
+  db: AppDatabase,
+  handleId: number,
+  uri: string,
+): Promise<void> {
   await db.update(handles).set({ avatar: uri }).where(eq(handles.id, handleId));
 }

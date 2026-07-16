@@ -1,7 +1,12 @@
 import { createScheduled, deleteScheduled, getScheduled } from '@core/api/endpoints/scheduled';
 import type { HttpClient } from '@core/api/http';
 
-const item = { id: 'uuid-1', chatGuid: 'iMessage;-;+1555', text: 'hi', scheduledFor: 1_700_000_000_000 };
+const item = {
+  id: 'uuid-1',
+  chatGuid: 'iMessage;-;+1555',
+  text: 'hi',
+  scheduledFor: 1_700_000_000_000,
+};
 
 describe('scheduledApi', () => {
   it('getScheduled GETs /scheduled-message and unwraps scheduledMessages', async () => {

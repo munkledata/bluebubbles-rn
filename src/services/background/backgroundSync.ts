@@ -2,7 +2,8 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { logger } from '@core/secure';
 import { useSessionStore } from '@state/sessionStore';
-import { ensureDatabase, http } from '@/services';
+import { http } from '../clients';
+import { ensureDatabase } from '../databaseControl';
 import { runOutgoingQueue } from '@/services/send';
 import { httpSyncApi, incrementalSync } from '@/services/sync';
 

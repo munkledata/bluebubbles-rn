@@ -1,7 +1,9 @@
 import { Chat, Message } from '@core/models';
 import {
   getChatHeader,
+  listThreadMessages,
   getChatIdByGuid,
+  getFirstUnreadInChat,
   getNewestReceivedGuid,
   listChatsForInbox,
   listMessagesAround,
@@ -12,6 +14,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { buildGroupEventText } from '@utils';
 import { createTestDb } from '../support/testDb';
 
 async function seed(db: AppDatabase) {
@@ -70,6 +73,111 @@ describe('conversation-view repositories', () => {
     expect(rows[0]!.senderName).toBe('Bob');
     expect(rows[1]!.isFromMe).toBe(1);
     expect(rows[2]!.senderName).toBe('Alice');
+  });
+
+  it('listThreadMessages returns the originator + all its replies chronologically', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db); // m1 recv@100, m2 mine@200, m3 recv@300
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'r1',
+          text: 'first reply',
+          dateCreated: 400,
+          threadOriginatorGuid: 'm1',
+          handle: { address: 'a@x.com' },
+        }),
+        Message.parse({
+          guid: 'r2',
+          text: 'second reply',
+          isFromMe: true,
+          dateCreated: 500,
+          threadOriginatorGuid: 'm1',
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    const thread = await listThreadMessages(db, 'm1');
+    expect(thread.map((m) => m.guid)).toEqual(['m1', 'r1', 'r2']); // originator first, then replies
+    // Unrelated messages (m2/m3) are excluded.
+    expect(thread.some((m) => m.guid === 'm3')).toBe(false);
+  });
+
+  it('getFirstUnreadInChat finds the oldest RECEIVED message past the read marker + count', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db); // m1 recv@100, m2 mine@200, m3 recv@300
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm4',
+          text: 'newest',
+          dateCreated: 400,
+          handle: { address: 'a@x.com' },
+        }),
+      ],
+      () => chatId,
+      await upsertHandles(db, [{ address: 'a@x.com' }]),
+    );
+
+    // Marker at m1 → the first unread is m3 (m2 is OWN, never unread); count = m3 + m4.
+    await setLastReadMessageGuid(db, 'c1', 'm1');
+    const fu = await getFirstUnreadInChat(db, chatId);
+    expect(fu).toMatchObject({ guid: 'm3', dateCreated: 300, count: 2 });
+
+    // Never-read chat → everything received is unread, starting at m1.
+    await setLastReadMessageGuid(db, 'c1', '');
+    const never = await getFirstUnreadInChat(db, chatId);
+    expect(never).toMatchObject({ guid: 'm1', count: 3 });
+
+    // Fully read → null.
+    await setLastReadMessageGuid(db, 'c1', 'm4');
+    expect(await getFirstUnreadInChat(db, chatId)).toBeNull();
+  });
+
+  it('persists group-event columns and resolves other_handle → participant name', async () => {
+    const { db } = await createTestDb();
+    const handles = await upsertHandles(db, [
+      { address: 'a@x.com', displayName: 'Alice' },
+      { address: 'b@x.com', displayName: 'Bob', originalROWID: 42 },
+    ]);
+    const map = await upsertChats(
+      db,
+      [
+        Chat.parse({
+          guid: 'c1',
+          displayName: 'Group',
+          participants: [{ address: 'a@x.com' }, { address: 'b@x.com' }],
+        }),
+      ],
+      handles,
+    );
+    const chatId = map.get('c1')!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'ge1',
+          text: '',
+          dateCreated: 500,
+          handle: { address: 'a@x.com' },
+          itemType: 1, // participant add/remove
+          groupActionType: 0, // add
+          otherHandle: 42, // Bob's server ROWID
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    const row = (await listMessagesWithSenders(db, chatId)).find((r) => r.guid === 'ge1')!;
+    expect(row.itemType).toBe(1);
+    expect(row.groupActionType).toBe(0);
+    expect(row.otherHandleName).toBe('Bob'); // resolved from other_handle via original_row_id
+    expect(row.senderName).toBe('Alice');
+    expect(buildGroupEventText(row)).toBe('Alice added Bob to the conversation.');
   });
 
   it('repairs a null sender on a later hydrated re-sync, and never wipes a good one', async () => {

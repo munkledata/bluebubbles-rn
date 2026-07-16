@@ -16,7 +16,12 @@ interface GroupAvatarProps {
 }
 
 /** Two overlapped avatars for group chats (back top-left, front bottom-right). */
-export function GroupAvatar({ names, size = 40, uris, seeds }: GroupAvatarProps): React.JSX.Element {
+export function GroupAvatar({
+  names,
+  size = 40,
+  uris,
+  seeds,
+}: GroupAvatarProps): React.JSX.Element {
   const theme = useTheme();
   const inner = Math.round(size * 0.66);
   const back = names[0] ?? '?';

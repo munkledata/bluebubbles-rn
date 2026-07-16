@@ -44,7 +44,8 @@ export function FindMyMap({ markers, focusId, height = 260 }: FindMyMapProps): R
         domStorageEnabled
         // Recenter once the map is ready if a row is already selected.
         onLoadEnd={() => {
-          if (focusId) ref.current?.injectJavaScript(`focusMarker(${JSON.stringify(focusId)});true;`);
+          if (focusId)
+            ref.current?.injectJavaScript(`focusMarker(${JSON.stringify(focusId)});true;`);
         }}
         style={styles.web}
         // Don't let the map's own scroll/zoom fight the outer ScrollView until tapped.

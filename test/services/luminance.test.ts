@@ -23,9 +23,16 @@ beforeEach(() => mockGetColors.mockReset());
 
 describe('computeBackgroundIsLight', () => {
   it('android: a near-white average reads as LIGHT (true)', async () => {
-    mockGetColors.mockResolvedValue({ platform: 'android', average: '#FFFFFF', dominant: '#000000' });
+    mockGetColors.mockResolvedValue({
+      platform: 'android',
+      average: '#FFFFFF',
+      dominant: '#000000',
+    });
     expect(await computeBackgroundIsLight('file:///w.jpg')).toBe(true);
-    expect(mockGetColors).toHaveBeenCalledWith('file:///w.jpg', { cache: true, key: 'file:///w.jpg' });
+    expect(mockGetColors).toHaveBeenCalledWith('file:///w.jpg', {
+      cache: true,
+      key: 'file:///w.jpg',
+    });
   });
 
   it('android: a black average reads as DARK (false)', async () => {

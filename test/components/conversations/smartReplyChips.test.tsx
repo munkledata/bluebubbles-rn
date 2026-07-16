@@ -49,9 +49,7 @@ describe('SmartReplyChips', () => {
 
   it('renders nothing when there are no suggestions', async () => {
     setSuggestions([]);
-    const { toJSON } = await renderWithTheme(
-      <SmartReplyChips messages={[]} onPick={jest.fn()} />,
-    );
+    const { toJSON } = await renderWithTheme(<SmartReplyChips messages={[]} onPick={jest.fn()} />);
 
     expect(toJSON()).toBeNull();
     expect(screen.queryByText('Yes')).toBeNull();

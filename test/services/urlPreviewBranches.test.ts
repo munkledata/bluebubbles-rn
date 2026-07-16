@@ -38,7 +38,12 @@ beforeEach(() => {
 describe('fetchOgMetadata', () => {
   it('fetches a public HTML page and returns parsed OG metadata', async () => {
     mockFetch.mockResolvedValue(
-      resp({ status: 200, url: 'https://example.com/p', headers: { 'content-type': 'text/html' }, text: async () => HTML }),
+      resp({
+        status: 200,
+        url: 'https://example.com/p',
+        headers: { 'content-type': 'text/html' },
+        text: async () => HTML,
+      }),
     );
     const meta = await fetchOgMetadata('https://example.com/p');
     expect(meta).toMatchObject({ title: 'Hello', domain: 'example.com' });
@@ -50,13 +55,18 @@ describe('fetchOgMetadata', () => {
   });
 
   it('returns null for a non-HTML content type', async () => {
-    mockFetch.mockResolvedValue(resp({ status: 200, headers: { 'content-type': 'application/json' } }));
+    mockFetch.mockResolvedValue(
+      resp({ status: 200, headers: { 'content-type': 'application/json' } }),
+    );
     expect(await fetchOgMetadata('https://example.com')).toBeNull();
   });
 
   it('returns null for an oversized document (content-length cap)', async () => {
     mockFetch.mockResolvedValue(
-      resp({ status: 200, headers: { 'content-type': 'text/html', 'content-length': String(2 * 1024 * 1024) } }),
+      resp({
+        status: 200,
+        headers: { 'content-type': 'text/html', 'content-length': String(2 * 1024 * 1024) },
+      }),
     );
     expect(await fetchOgMetadata('https://example.com')).toBeNull();
   });
@@ -68,9 +78,16 @@ describe('fetchOgMetadata', () => {
 
   it('follows a redirect to another safe host and parses the final page', async () => {
     mockFetch
-      .mockResolvedValueOnce(resp({ status: 302, headers: { location: 'https://example.org/final' } }))
       .mockResolvedValueOnce(
-        resp({ status: 200, url: 'https://example.org/final', headers: { 'content-type': 'text/html' }, text: async () => HTML }),
+        resp({ status: 302, headers: { location: 'https://example.org/final' } }),
+      )
+      .mockResolvedValueOnce(
+        resp({
+          status: 200,
+          url: 'https://example.org/final',
+          headers: { 'content-type': 'text/html' },
+          text: async () => HTML,
+        }),
       );
     const meta = await fetchOgMetadata('https://example.com/start');
     expect(meta).toMatchObject({ title: 'Hello' });
@@ -78,7 +95,9 @@ describe('fetchOgMetadata', () => {
   });
 
   it('rejects a redirect that points at a private host', async () => {
-    mockFetch.mockResolvedValueOnce(resp({ status: 302, headers: { location: 'http://192.168.1.5/' } }));
+    mockFetch.mockResolvedValueOnce(
+      resp({ status: 302, headers: { location: 'http://192.168.1.5/' } }),
+    );
     expect(await fetchOgMetadata('https://example.com/start')).toBeNull();
   });
 
@@ -89,7 +108,12 @@ describe('fetchOgMetadata', () => {
 
   it('re-validates the FINAL url host (device auto-follow guard) and rejects a private landing', async () => {
     mockFetch.mockResolvedValue(
-      resp({ status: 200, url: 'http://127.0.0.1/secret', headers: { 'content-type': 'text/html' }, text: async () => HTML }),
+      resp({
+        status: 200,
+        url: 'http://127.0.0.1/secret',
+        headers: { 'content-type': 'text/html' },
+        text: async () => HTML,
+      }),
     );
     expect(await fetchOgMetadata('https://example.com/p')).toBeNull();
   });

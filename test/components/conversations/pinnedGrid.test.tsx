@@ -42,6 +42,7 @@ function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
     participantAvatars: null,
     handleServices: null,
     unreadCount: 0,
+    hasKnownSender: 1,
     ...overrides,
   };
 }
@@ -91,9 +92,7 @@ describe('PinnedGrid', () => {
   it('fires onLongPress with the row when a cell is long-pressed', async () => {
     const onLongPress = jest.fn();
     const row = makeRow({ guid: 'g-alice', participantNames: 'Alice' });
-    await renderWithTheme(
-      <PinnedGrid rows={[row]} onPress={() => {}} onLongPress={onLongPress} />,
-    );
+    await renderWithTheme(<PinnedGrid rows={[row]} onPress={() => {}} onLongPress={onLongPress} />);
     fireEvent(screen.getByLabelText('Pinned conversation: Alice'), 'longPress');
     expect(onLongPress).toHaveBeenCalledWith(row);
   });

@@ -36,9 +36,18 @@ yarn-error.*
 # Firebase config (machine/project-specific; EAS uses the GOOGLE_SERVICES_JSON secret)
 google-services.json
 
+# Google Play service-account key (used by `eas submit` — secret, never commit)
+play-service-account.json
+
+# Play Store build artifacts (regenerated per release)
+*.aab
+
 # typescript
 *.tsbuildinfo
 
 # generated native folders
 /ios
 /android
+
+# generated coverage output
+coverage/

@@ -72,6 +72,34 @@ describe('runOutgoingQueue', () => {
     expect(stateOf(raw, 'real-1')).toBe('sent'); // temp promoted to the real guid
   });
 
+  it('re-sends the subject line and mention spans persisted in the queue payload', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const now = 10_000_000;
+    const chatId = await getChatIdByGuid(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-subj',
+      chatId: chatId!,
+      chatGuid: 'c1',
+      text: 'body',
+      now: now - 200_000,
+      subject: 'Important',
+      mentions: [{ start: 0, length: 4, address: 'a@b.com' }],
+    });
+    raw
+      .prepare('UPDATE outgoing_queue SET created_at = ? WHERE temp_guid = ?')
+      .run(now - 200_000, 'temp-subj');
+
+    let wire: Record<string, unknown> | undefined;
+    const http = fakeHttp(async (json) => {
+      wire = json as Record<string, unknown>;
+      return { guid: 'real-subj', dateCreated: now, dateDelivered: null };
+    });
+    expect((await runOutgoingQueue(db, http, now)).sent).toBe(1);
+    expect(wire?.subject).toBe('Important');
+    expect(wire?.mentions).toEqual([{ start: 0, length: 4, address: 'a@b.com' }]);
+  });
+
   it('does not touch a FRESH in-flight row (within the grace window)', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');

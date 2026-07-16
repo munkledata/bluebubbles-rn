@@ -72,17 +72,18 @@ describe('useSmartReplies', () => {
   });
 
   it('recomputes when a new inbound message arrives', async () => {
-    const { result, rerender } = await renderHook(({ msgs }: { msgs: EnrichedMessage[] }) => useSmartReplies(msgs), {
-      initialProps: { msgs: [mkMessage({ id: 1, isFromMe: 0, text: 'Are we still on?' })] },
-    });
+    const { result, rerender } = await renderHook(
+      ({ msgs }: { msgs: EnrichedMessage[] }) => useSmartReplies(msgs),
+      {
+        initialProps: { msgs: [mkMessage({ id: 1, isFromMe: 0, text: 'Are we still on?' })] },
+      },
+    );
     await waitFor(() => expect(result.current).toEqual(['Yes', 'No', 'Maybe'])); // question branch
 
     await act(async () => {
       rerender({ msgs: [mkMessage({ id: 2, isFromMe: 0, text: 'thanks so much' })] });
     });
-    await waitFor(() =>
-      expect(result.current).toEqual(["You're welcome!", 'No problem', '👍']),
-    ); // thanks branch
+    await waitFor(() => expect(result.current).toEqual(["You're welcome!", 'No problem', '👍'])); // thanks branch
   });
 
   it('clears suggestions when the feature is turned off on a mounted tree', async () => {

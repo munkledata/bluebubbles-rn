@@ -27,7 +27,9 @@ function veilStyle(r: RenderResult): Record<string, unknown> {
 describe('EdgeFade', () => {
   it('renders the top veil with a "to bottom" gradient of the expected stops', async () => {
     const color = '#0B1A2B';
-    const r = await renderWithTheme(<EdgeFade edge="top" height={100} holdHeight={40} color={color} />);
+    const r = await renderWithTheme(
+      <EdgeFade edge="top" height={100} holdHeight={40} color={color} />,
+    );
 
     const style = veilStyle(r);
     expect(style.height).toBe(100);
@@ -50,13 +52,18 @@ describe('EdgeFade', () => {
     );
 
     const style = veilStyle(r);
-    const bg = style.experimental_backgroundImage as Array<{ direction: string; colorStops: unknown }>;
+    const bg = style.experimental_backgroundImage as Array<{
+      direction: string;
+      colorStops: unknown;
+    }>;
     expect(bg[0]!.direction).toBe('to top');
     expect(bg[0]!.colorStops).toEqual(edgeFadeStops('#FFFFFF', 20 / 80));
   });
 
   it('guards a zero height (holdFraction → 0)', async () => {
-    const r = await renderWithTheme(<EdgeFade edge="top" height={0} holdHeight={40} color="#000000" />);
+    const r = await renderWithTheme(
+      <EdgeFade edge="top" height={0} holdHeight={40} color="#000000" />,
+    );
 
     const style = veilStyle(r);
     expect(style.height).toBe(0);

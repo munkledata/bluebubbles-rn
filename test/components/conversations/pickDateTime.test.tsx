@@ -43,7 +43,13 @@ afterEach(() => {
 });
 
 /** Config object handed to the Nth `DateTimePickerAndroid.open` call. */
-function cfgOf(callIndex: number): { value: Date; mode: string; onChange: Function; is24Hour?: boolean; minimumDate?: Date } {
+function cfgOf(callIndex: number): {
+  value: Date;
+  mode: string;
+  onChange: Function;
+  is24Hour?: boolean;
+  minimumDate?: Date;
+} {
   return openMock.mock.calls[callIndex]![0];
 }
 

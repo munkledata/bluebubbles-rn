@@ -22,12 +22,16 @@ import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const attempts = (raw: Database.Database, id: number): number =>
-  (raw.prepare('SELECT attempts a FROM scheduled_messages WHERE id = ?').get(id) as { a: number }).a;
+  (raw.prepare('SELECT attempts a FROM scheduled_messages WHERE id = ?').get(id) as { a: number })
+    .a;
 const statusOf = (raw: Database.Database, id: number): string | undefined =>
   (raw.prepare('SELECT status s FROM scheduled_messages WHERE id = ?').get(id) as { s: string })?.s;
 const rawServerId = (raw: Database.Database, id: number): string | null =>
-  (raw.prepare('SELECT server_id s FROM scheduled_messages WHERE id = ?').get(id) as { s: string | null })
-    .s;
+  (
+    raw.prepare('SELECT server_id s FROM scheduled_messages WHERE id = ?').get(id) as {
+      s: string | null;
+    }
+  ).s;
 
 describe('scheduled reads', () => {
   it('listScheduledByChat returns only that chat’s pending rows, soonest first', async () => {
@@ -109,7 +113,11 @@ describe('reconcileServerScheduled', () => {
       ],
       ['srv-3', 'srv-4'],
     );
-    const localOnly = await insertScheduled(db, { chatGuid: 'cA', text: 'localonly', scheduledFor: 100 });
+    const localOnly = await insertScheduled(db, {
+      chatGuid: 'cA',
+      text: 'localonly',
+      scheduledFor: 100,
+    });
     // Server now only reports srv-3 → srv-4 is pruned, srv-3 + the local-only row remain.
     await reconcileServerScheduled(
       db,

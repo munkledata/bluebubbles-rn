@@ -36,9 +36,19 @@ jest.mock('@shopify/flash-list', () => {
   const React_ = require('react') as typeof import('react');
   const { View } = require('react-native');
   const asNode = (c: unknown): React.ReactNode =>
-    c == null ? null : React_.isValidElement(c) ? c : React_.createElement(c as React.ComponentType);
+    c == null
+      ? null
+      : React_.isValidElement(c)
+        ? c
+        : React_.createElement(c as React.ComponentType);
   return {
-    FlashList: ({ data, renderItem, keyExtractor, ListHeaderComponent, ListEmptyComponent }: any) => {
+    FlashList: ({
+      data,
+      renderItem,
+      keyExtractor,
+      ListHeaderComponent,
+      ListEmptyComponent,
+    }: any) => {
       const rows = data ?? [];
       return React_.createElement(
         View,
@@ -162,7 +172,9 @@ describe('SearchResultsView — message hits', () => {
 
   it('tapping a hit navigates to the chat focused on the message (with focusDate)', async () => {
     mockUseSearch.mockReturnValue({
-      results: [makeResult({ guid: 'msg-guid-1', chatGuid: 'iMessage;-;+15551230000', dateCreated: 42 })],
+      results: [
+        makeResult({ guid: 'msg-guid-1', chatGuid: 'iMessage;-;+15551230000', dateCreated: 42 }),
+      ],
       loading: false,
     });
     await renderWithTheme(<SearchResultsView query="beach" />);

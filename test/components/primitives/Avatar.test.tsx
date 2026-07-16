@@ -36,9 +36,7 @@ describe('Avatar rendering modes', () => {
 
   it('redacted seed overrides name/photo with a deterministic 2-char tile', async () => {
     // seededRedacted('secret-seed') => label 'UE' (same 31-hash the source uses).
-    await renderWithTheme(
-      <Avatar name="Alice Bob" uri="file:///photo.jpg" seed="secret-seed" />,
-    );
+    await renderWithTheme(<Avatar name="Alice Bob" uri="file:///photo.jpg" seed="secret-seed" />);
     expect(screen.getByText('UE')).toBeTruthy();
     expect(screen.queryByText('AB')).toBeNull(); // real initials never leak
   });

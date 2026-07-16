@@ -44,7 +44,14 @@ jest.mock('@shopify/flash-list', () => {
     },
     _ref: unknown,
   ) {
-    const { data = [], renderItem, keyExtractor, ListHeaderComponent, ListEmptyComponent, ListFooterComponent } = props;
+    const {
+      data = [],
+      renderItem,
+      keyExtractor,
+      ListHeaderComponent,
+      ListEmptyComponent,
+      ListFooterComponent,
+    } = props;
     const body =
       data.length === 0
         ? asNode(ListEmptyComponent)
@@ -55,7 +62,13 @@ jest.mock('@shopify/flash-list', () => {
               renderItem ? renderItem({ item, index }) : null,
             ),
           );
-    return ReactLib.createElement(View, null, asNode(ListHeaderComponent), body, asNode(ListFooterComponent));
+    return ReactLib.createElement(
+      View,
+      null,
+      asNode(ListHeaderComponent),
+      body,
+      asNode(ListFooterComponent),
+    );
   });
   return { FlashList };
 });
@@ -71,7 +84,11 @@ jest.mock('@ui/conversations/ConversationTile', () => {
   const ReactLib = require('react');
   const { Pressable, Text } = require('react-native');
   return {
-    ConversationTile: (props: { row: { guid: string }; onPress: (g: string) => void; onLongPress?: (r: unknown) => void }) =>
+    ConversationTile: (props: {
+      row: { guid: string };
+      onPress: (g: string) => void;
+      onLongPress?: (r: unknown) => void;
+    }) =>
       ReactLib.createElement(
         Pressable,
         {
@@ -106,15 +123,25 @@ jest.mock('@ui/conversations/PinnedGrid', () => {
 jest.mock('@ui/conversations/SearchResultsView', () => {
   const ReactLib = require('react');
   const { Text } = require('react-native');
-  return { SearchResultsView: (props: { query: string }) => ReactLib.createElement(Text, { testID: 'search' }, `search:${props.query}`) };
+  return {
+    SearchResultsView: (props: { query: string }) =>
+      ReactLib.createElement(Text, { testID: 'search' }, `search:${props.query}`),
+  };
 });
 
 jest.mock('@ui/conversations/ChatActionsSheet', () => {
   const ReactLib = require('react');
   const { Text } = require('react-native');
   return {
+    // The screen maps rows through the REAL toChatActionTarget; only the sheet is probed.
+    toChatActionTarget: jest.requireActual('@ui/conversations/ChatActionsSheet')
+      .toChatActionTarget,
     ChatActionsSheet: (props: { target: { guid: string } | null }) =>
-      ReactLib.createElement(Text, { testID: 'actions' }, props.target ? props.target.guid : 'none'),
+      ReactLib.createElement(
+        Text,
+        { testID: 'actions' },
+        props.target ? props.target.guid : 'none',
+      ),
   };
 });
 
@@ -152,12 +179,17 @@ function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
     participantAvatars: null,
     handleServices: null,
     unreadCount: 0,
+    hasKnownSender: 1,
     ...overrides,
   };
 }
 
 function setChats(state: { data?: InboxRow[]; isLoading?: boolean; error?: unknown }): void {
-  useChatsMock.mockReturnValue({ data: state.data, isLoading: state.isLoading ?? false, error: state.error ?? null });
+  useChatsMock.mockReturnValue({
+    data: state.data,
+    isLoading: state.isLoading ?? false,
+    error: state.error ?? null,
+  });
 }
 
 describe('ConversationListScreen — pinned/list split', () => {

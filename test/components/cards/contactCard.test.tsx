@@ -79,14 +79,17 @@ function makeAtt(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
 beforeEach(() => {
   // Only the theme store is reset by the shared setup; this suite owns the download store + mocks.
   useDownloadStore.setState({ progress: {}, status: {} });
-  mockVcfText = 'BEGIN:VCARD\nFN:John Smith\nTEL;type=CELL:+1-555-1234\nEMAIL:john@example.com\nEND:VCARD';
+  mockVcfText =
+    'BEGIN:VCARD\nFN:John Smith\nTEL;type=CELL:+1-555-1234\nEMAIL:john@example.com\nEND:VCARD';
   (download as jest.Mock).mockClear();
   (safeOpenUrl as jest.Mock).mockClear();
 });
 
 describe('ContactCard — parsed vCard once local', () => {
   it('renders the displayName, first phone, initials and a11y label', async () => {
-    await renderWithTheme(<ContactCard att={makeAtt({ localPath: 'file:///c/contact.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <ContactCard att={makeAtt({ localPath: 'file:///c/contact.vcf' })} isFromMe={false} />,
+    );
     // The effect reads + parses async → wait for the parsed name.
     expect(await screen.findByText('John Smith')).toBeTruthy();
     expect(screen.getByText('+1-555-1234')).toBeTruthy(); // first phone is the subtitle
@@ -96,14 +99,18 @@ describe('ContactCard — parsed vCard once local', () => {
 
   it('falls back to the first email as subtitle when there is no phone', async () => {
     mockVcfText = 'BEGIN:VCARD\nFN:Jane Roe\nEMAIL:jane@example.com\nEND:VCARD';
-    await renderWithTheme(<ContactCard att={makeAtt({ localPath: 'file:///c/j.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <ContactCard att={makeAtt({ localPath: 'file:///c/j.vcf' })} isFromMe={false} />,
+    );
     expect(await screen.findByText('Jane Roe')).toBeTruthy();
     expect(screen.getByText('jane@example.com')).toBeTruthy();
   });
 
   it('shows "Contact card" subtitle when the vCard has neither phone nor email', async () => {
     mockVcfText = 'BEGIN:VCARD\nFN:No Contact\nEND:VCARD';
-    await renderWithTheme(<ContactCard att={makeAtt({ localPath: 'file:///c/n.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <ContactCard att={makeAtt({ localPath: 'file:///c/n.vcf' })} isFromMe={false} />,
+    );
     expect(await screen.findByText('No Contact')).toBeTruthy();
     expect(screen.getByText('Contact card')).toBeTruthy();
   });
@@ -111,7 +118,10 @@ describe('ContactCard — parsed vCard once local', () => {
   it('a read failure leaves the contact null → falls back to transferName + status text', async () => {
     mockVcfText = () => Promise.reject(new Error('read failed'));
     await renderWithTheme(
-      <ContactCard att={makeAtt({ localPath: 'file:///c/bad.vcf', transferName: 'bob.vcf' })} isFromMe={false} />,
+      <ContactCard
+        att={makeAtt({ localPath: 'file:///c/bad.vcf', transferName: 'bob.vcf' })}
+        isFromMe={false}
+      />,
     );
     // contact stays null → title = transferName, subtitle = idle status text.
     expect(await screen.findByText('bob.vcf')).toBeTruthy();
@@ -121,7 +131,9 @@ describe('ContactCard — parsed vCard once local', () => {
 
 describe('ContactCard — not-yet-local (status-driven subtitle)', () => {
   it('idle: title from transferName and "Tap to view contact"', async () => {
-    await renderWithTheme(<ContactCard att={makeAtt({ transferName: 'bob.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <ContactCard att={makeAtt({ transferName: 'bob.vcf' })} isFromMe={false} />,
+    );
     expect(screen.getByText('bob.vcf')).toBeTruthy();
     expect(screen.getByText('Tap to view contact')).toBeTruthy();
   });
@@ -154,7 +166,9 @@ describe('ContactCard — tap contract', () => {
   });
 
   it('localPath present → safeOpenUrl(localPath) opens the card, no download', async () => {
-    await renderWithTheme(<ContactCard att={makeAtt({ localPath: 'file:///c/contact.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <ContactCard att={makeAtt({ localPath: 'file:///c/contact.vcf' })} isFromMe={false} />,
+    );
     await screen.findByText('John Smith');
     fireEvent.press(screen.getByLabelText('Contact: John Smith'));
     expect(safeOpenUrl).toHaveBeenCalledWith('file:///c/contact.vcf');
@@ -164,7 +178,8 @@ describe('ContactCard — tap contract', () => {
 
 describe('ContactCard — alignment follows isFromMe', () => {
   const alignOf = (): ViewStyle['alignSelf'] =>
-    (StyleSheet.flatten(screen.getByLabelText('Contact: Contact').props.style) as ViewStyle).alignSelf;
+    (StyleSheet.flatten(screen.getByLabelText('Contact: Contact').props.style) as ViewStyle)
+      .alignSelf;
 
   it('flex-end when from me', async () => {
     await renderWithTheme(<ContactCard att={makeAtt({ transferName: null })} isFromMe={true} />);

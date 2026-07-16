@@ -25,12 +25,20 @@ import {
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
-async function seedChat(db: AppDatabase, guid = 'c1'): Promise<{ chatId: number; hm: Map<string, number> }> {
+async function seedChat(
+  db: AppDatabase,
+  guid = 'c1',
+): Promise<{ chatId: number; hm: Map<string, number> }> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
   return { chatId: (await getChatIdByGuid(db, guid))!, hm };
 }
-async function put(db: AppDatabase, chatId: number, hm: Map<string, number>, m: Record<string, unknown>) {
+async function put(
+  db: AppDatabase,
+  chatId: number,
+  hm: Map<string, number>,
+  m: Record<string, unknown>,
+) {
   await upsertMessages(db, [Message.parse(m)], () => chatId, hm);
 }
 const col = (raw: Database.Database, guid: string, c: string): unknown =>
@@ -40,7 +48,12 @@ describe('upsertMessages — COALESCE/MAX preserve on conflict', () => {
   it('a later event with empty text does NOT blank a stored body', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
-    await put(db, chatId, hm, { guid: 'm1', text: 'hello', dateCreated: 1, handle: { address: 'a@x.com' } });
+    await put(db, chatId, hm, {
+      guid: 'm1',
+      text: 'hello',
+      dateCreated: 1,
+      handle: { address: 'a@x.com' },
+    });
     // A delivery-receipt re-upsert carries no text.
     await put(db, chatId, hm, { guid: 'm1', dateCreated: 1, dateDelivered: 2 });
     expect(col(raw, 'm1', 'text')).toBe('hello'); // preserved
@@ -50,7 +63,12 @@ describe('upsertMessages — COALESCE/MAX preserve on conflict', () => {
   it('a later handle-less re-sync does NOT wipe an already-resolved sender', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
-    await put(db, chatId, hm, { guid: 'm2', text: 'hi', dateCreated: 1, handle: { address: 'a@x.com' } });
+    await put(db, chatId, hm, {
+      guid: 'm2',
+      text: 'hi',
+      dateCreated: 1,
+      handle: { address: 'a@x.com' },
+    });
     const handleId = col(raw, 'm2', 'handle_id');
     expect(handleId).not.toBeNull();
     await put(db, chatId, new Map(), { guid: 'm2', text: 'hi', dateCreated: 1 }); // no handle in map
@@ -100,7 +118,12 @@ describe('upsertMessages — COALESCE/MAX preserve on conflict', () => {
   it('a genuine edit (dateEdited + new text) still overwrites on conflict', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
-    await put(db, chatId, hm, { guid: 'm5', text: 'before', dateCreated: 1, handle: { address: 'a@x.com' } });
+    await put(db, chatId, hm, {
+      guid: 'm5',
+      text: 'before',
+      dateCreated: 1,
+      handle: { address: 'a@x.com' },
+    });
     await put(db, chatId, hm, { guid: 'm5', text: 'after', dateCreated: 1, dateEdited: 9 });
     expect(col(raw, 'm5', 'text')).toBe('after'); // non-empty excluded overwrites
     expect(col(raw, 'm5', 'date_edited')).toBe(9);
@@ -136,7 +159,12 @@ describe('read-null helpers + edit/unsend + delete', () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
     expect(await getMessagePreviewByGuid(db, 'ghost')).toBeNull();
-    await put(db, chatId, hm, { guid: 'p1', text: 'preview', dateCreated: 1, handle: { address: 'a@x.com' } });
+    await put(db, chatId, hm, {
+      guid: 'p1',
+      text: 'preview',
+      dateCreated: 1,
+      handle: { address: 'a@x.com' },
+    });
     expect(await getMessagePreviewByGuid(db, 'p1')).toMatchObject({ guid: 'p1', text: 'preview' });
   });
 
@@ -157,7 +185,7 @@ describe('read-null helpers + edit/unsend + delete', () => {
     expect(await getMessageTextByGuid(db, 'missing')).toBeNull();
 
     await applyLocalUnsend(db, 'e1', 12);
-    expect((await getMessageTextByGuid(db, 'e1'))).not.toBeNull(); // row still there
+    expect(await getMessageTextByGuid(db, 'e1')).not.toBeNull(); // row still there
     await clearLocalUnsend(db, 'e1'); // revert an optimistic unsend
     const around = await listMessagesWithSenders(db, chatId);
     expect(around.find((m) => m.guid === 'e1')?.dateRetracted).toBeNull();
@@ -166,10 +194,18 @@ describe('read-null helpers + edit/unsend + delete', () => {
   it('deleteMessageByGuid removes the message AND its outgoing_queue row', async () => {
     const { db, raw } = await createTestDb();
     const { chatId } = await seedChat(db);
-    await insertOutgoingText(db, { tempGuid: 'temp-del', chatId, chatGuid: 'c1', text: 'bye', now: 1 });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-del',
+      chatId,
+      chatGuid: 'c1',
+      text: 'bye',
+      now: 1,
+    });
     await deleteMessageByGuid(db, 'temp-del');
     expect(col(raw, 'temp-del', 'guid')).toBeUndefined();
-    const q = raw.prepare('SELECT COUNT(*) c FROM outgoing_queue WHERE temp_guid = ?').get('temp-del') as {
+    const q = raw
+      .prepare('SELECT COUNT(*) c FROM outgoing_queue WHERE temp_guid = ?')
+      .get('temp-del') as {
       c: number;
     };
     expect(q.c).toBe(0);

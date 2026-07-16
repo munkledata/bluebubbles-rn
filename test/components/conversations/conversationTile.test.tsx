@@ -62,6 +62,7 @@ function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
     participantAvatars: null,
     handleServices: null,
     unreadCount: 0,
+    hasKnownSender: 1,
     ...overrides,
   };
 }
@@ -81,7 +82,11 @@ describe('ConversationTile — title (resolveTitle semantics)', () => {
   it('shows a custom chat name above everything else', async () => {
     await renderWithTheme(
       <ConversationTile
-        row={makeRow({ customName: 'Weekend Crew', displayName: 'ignored', participantNames: 'Alice, Bob' })}
+        row={makeRow({
+          customName: 'Weekend Crew',
+          displayName: 'ignored',
+          participantNames: 'Alice, Bob',
+        })}
         onPress={() => {}}
       />,
     );
@@ -103,7 +108,12 @@ describe('ConversationTile — title (resolveTitle semantics)', () => {
   it('shows "Group" for a group with no usable name or members', async () => {
     await renderWithTheme(
       <ConversationTile
-        row={makeRow({ style: 43, displayName: 'chat999', chatIdentifier: 'chat999', participantNames: null })}
+        row={makeRow({
+          style: 43,
+          displayName: 'chat999',
+          chatIdentifier: 'chat999',
+          participantNames: null,
+        })}
         onPress={() => {}}
       />,
     );
@@ -113,14 +123,18 @@ describe('ConversationTile — title (resolveTitle semantics)', () => {
 
 describe('ConversationTile — unread state', () => {
   it('read row: no "Unread." in the a11y label and a lighter (500) title weight', async () => {
-    await renderWithTheme(<ConversationTile row={makeRow({ unreadCount: 0 })} onPress={() => {}} />);
+    await renderWithTheme(
+      <ConversationTile row={makeRow({ unreadCount: 0 })} onPress={() => {}} />,
+    );
     // The full accessibility label is `${title}. ${preview}` with no "Unread." segment.
     expect(screen.getByLabelText('Alice. hey there')).toBeTruthy();
     expect(titleWeight('Alice')).toBe('500');
   });
 
   it('unread row: inserts "Unread." into the a11y label and bolds (600) the title', async () => {
-    await renderWithTheme(<ConversationTile row={makeRow({ unreadCount: 3 })} onPress={() => {}} />);
+    await renderWithTheme(
+      <ConversationTile row={makeRow({ unreadCount: 3 })} onPress={() => {}} />,
+    );
     expect(screen.getByLabelText('Alice. Unread. hey there')).toBeTruthy();
     expect(titleWeight('Alice')).toBe('600');
   });
@@ -165,7 +179,10 @@ describe('ConversationTile — redacted (privacy) mode', () => {
   it('masks the title to "Contact" and the preview to "Message", hiding the real name/text', async () => {
     useRedactedModeStore.setState({ enabled: true, hydrated: true });
     await renderWithTheme(
-      <ConversationTile row={makeRow({ participantNames: 'Alice', lastText: 'hey there' })} onPress={() => {}} />,
+      <ConversationTile
+        row={makeRow({ participantNames: 'Alice', lastText: 'hey there' })}
+        onPress={() => {}}
+      />,
     );
     expect(screen.getByText('Contact')).toBeTruthy();
     expect(screen.getByText('Message')).toBeTruthy();
@@ -186,7 +203,9 @@ describe('ConversationTile — redacted (privacy) mode', () => {
 describe('ConversationTile — press callbacks', () => {
   it('fires onPress with the row guid when tapped', async () => {
     const onPress = jest.fn();
-    await renderWithTheme(<ConversationTile row={makeRow({ guid: 'iMessage;-;+15551230000' })} onPress={onPress} />);
+    await renderWithTheme(
+      <ConversationTile row={makeRow({ guid: 'iMessage;-;+15551230000' })} onPress={onPress} />,
+    );
     fireEvent.press(screen.getByLabelText('Alice. hey there'));
     expect(onPress).toHaveBeenCalledWith('iMessage;-;+15551230000');
   });
@@ -194,7 +213,9 @@ describe('ConversationTile — press callbacks', () => {
   it('fires onLongPress with the row when long-pressed', async () => {
     const onLongPress = jest.fn();
     const row = makeRow();
-    await renderWithTheme(<ConversationTile row={row} onPress={() => {}} onLongPress={onLongPress} />);
+    await renderWithTheme(
+      <ConversationTile row={row} onPress={() => {}} onLongPress={onLongPress} />,
+    );
     fireEvent(screen.getByLabelText('Alice. hey there'), 'longPress');
     expect(onLongPress).toHaveBeenCalledWith(row);
   });

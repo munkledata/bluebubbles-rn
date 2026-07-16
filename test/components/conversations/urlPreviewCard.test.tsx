@@ -9,7 +9,7 @@
  * loading / negative-cache / no-metadata "render nothing" branches and the domain fallback.
  */
 import React from 'react';
-import { renderWithTheme, screen } from '../support/renderWithTheme';
+import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
 import type { UrlPreviewRow } from '@db/repositories';
 
@@ -131,5 +131,49 @@ describe('UrlPreviewCard', () => {
     );
 
     expect(toJSON()).toBeNull();
+  });
+
+  it('renders the image when the row has an imageUrl', async () => {
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row({ imageUrl: 'https://img/x.png' })}
+        isFromMe={false}
+      />,
+    );
+    expect(screen.getByTestId('url-preview-image')).toBeTruthy();
+  });
+
+  it('collapses the image but keeps the card when the OG image fails to load', async () => {
+    // The blank-box bug: a failed OG image used to leave an empty 140px box. onError collapses it.
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row({ title: 'A Title', imageUrl: 'https://img/broken.png' })}
+        isFromMe={false}
+      />,
+    );
+    fireEvent(screen.getByTestId('url-preview-image'), 'error', {
+      nativeEvent: { error: 'load failed' },
+    });
+    await waitFor(() => expect(screen.queryByTestId('url-preview-image')).toBeNull());
+    // Title still shows → the card degrades to text-only rather than a blank box.
+    expect(screen.getByText('A Title')).toBeTruthy();
+  });
+
+  it('renders nothing when an image-only card (no title) has a failing image', async () => {
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row({ title: null, siteName: null, imageUrl: 'https://img/broken.png' })}
+        isFromMe={false}
+      />,
+    );
+    fireEvent(screen.getByTestId('url-preview-image'), 'error', {
+      nativeEvent: { error: 'load failed' },
+    });
+    // No title + no loadable image → the whole card disappears.
+    await waitFor(() => expect(screen.queryByTestId('url-preview-image')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('example.com')).toBeNull());
   });
 });

@@ -13,7 +13,11 @@ const tokens = (tint: string) => JSON.stringify({ mode: 'dark', color: { tint } 
 describe('custom themes repository', () => {
   it('creates a theme and reads it back by id', async () => {
     const t = await createTestDb();
-    const id = await createCustomTheme(t.db, { name: 'Mine', mode: 'dark', tokens: tokens('#f00') });
+    const id = await createCustomTheme(t.db, {
+      name: 'Mine',
+      mode: 'dark',
+      tokens: tokens('#f00'),
+    });
     expect(await getCustomThemeById(t.db, id)).toEqual({
       id,
       name: 'Mine',

@@ -16,9 +16,7 @@ import { EffectPicker } from '@ui/conversations/effects/EffectPicker';
 
 describe('EffectPicker', () => {
   it('renders a chip for every effect option with its label', async () => {
-    await renderWithTheme(
-      <EffectPicker visible onClose={jest.fn()} onPick={jest.fn()} />,
-    );
+    await renderWithTheme(<EffectPicker visible onClose={jest.fn()} onPick={jest.fn()} />);
 
     expect(screen.getByText('Send with effect')).toBeTruthy();
     expect(screen.getByText('BUBBLE')).toBeTruthy();

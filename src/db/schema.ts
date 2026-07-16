@@ -38,7 +38,10 @@ export const handles = sqliteTable(
     contactId: integer('contact_id'),
   },
   (t) => ({
-    addressIdx: uniqueIndex('handles_address_idx').on(t.address),
+    // Identity is (address, service): the same number is a DIFFERENT handle on iMessage vs
+    // SMS (mirrors Apple's chat.db). Unknown service is stored as '' — never NULL — because
+    // SQLite unique indexes treat NULLs as distinct, which would break the upsert.
+    addressServiceIdx: uniqueIndex('handles_address_service_idx').on(t.address, t.service),
   }),
 );
 
@@ -122,6 +125,15 @@ export const messages = sqliteTable(
     associatedMessageEmoji: text('associated_message_emoji'),
     threadOriginatorGuid: text('thread_originator_guid'),
     expressiveSendStyleId: text('expressive_send_style_id'),
+    /** iMessage group/chat-event metadata. item_type 0 = a normal message; >0 = a system event
+        (1 add/remove participant, 2 rename, 3 leave/photo change, 4 location, 5 kept audio,
+        6 FaceTime). group_action_type disambiguates within a type (e.g. add vs remove).
+        group_title carries the new name on a rename; other_handle is the affected participant's
+        server ROWID (resolved to a name at read time). See utils/groupEvent.ts. */
+    itemType: integer('item_type').default(0),
+    groupActionType: integer('group_action_type').default(0),
+    groupTitle: text('group_title'),
+    otherHandle: integer('other_handle'),
     error: integer('error').default(0),
     /** Local send lifecycle for optimistic outgoing messages. */
     sendState: text('send_state').default('sent'),

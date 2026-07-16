@@ -27,10 +27,7 @@ const SENSITIVE_KEY_NAMES = [
 const SENSITIVE_KEYS = new RegExp(`^(${SENSITIVE_KEY_NAMES.join('|')})$`, 'i');
 
 // `?guid=…` / `&apikey=…` etc. — the same key list, matched as a URL query param.
-const SENSITIVE_QUERY = new RegExp(
-  `([?&])(${SENSITIVE_KEY_NAMES.join('|')})=[^&\\s]+`,
-  'gi',
-);
+const SENSITIVE_QUERY = new RegExp(`([?&])(${SENSITIVE_KEY_NAMES.join('|')})=[^&\\s]+`, 'gi');
 
 /** Strip sensitive query params (notably `guid`) AND bearer tokens from any string. */
 export function redactUrls(input: string): string {

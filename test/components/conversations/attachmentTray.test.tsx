@@ -53,8 +53,22 @@ const requestCamera = ImagePicker.requestCameraPermissionsAsync as unknown as je
 const launchCamera = ImagePicker.launchCameraAsync as unknown as jest.Mock;
 
 /** A device photo asset as expo-media-library/legacy returns it. */
-const PHOTO = { id: 'p1', uri: 'ph://p1', filename: 'IMG_1.jpg', mediaType: 'photo', width: 100, height: 80 };
-const VIDEO = { id: 'v1', uri: 'ph://v1', filename: 'clip.mov', mediaType: 'video', width: 640, height: 480 };
+const PHOTO = {
+  id: 'p1',
+  uri: 'ph://p1',
+  filename: 'IMG_1.jpg',
+  mediaType: 'photo',
+  width: 100,
+  height: 80,
+};
+const VIDEO = {
+  id: 'v1',
+  uri: 'ph://v1',
+  filename: 'clip.mov',
+  mediaType: 'video',
+  width: 640,
+  height: 480,
+};
 
 function grantWith(assets: unknown[]): void {
   requestPerm.mockResolvedValue({ granted: true, accessPrivileges: 'all' });
@@ -161,7 +175,15 @@ describe('AttachmentTray — camera capture', () => {
     launchCamera.mockResolvedValue({
       canceled: false,
       assets: [
-        { uri: 'file://cap.jpg', fileName: 'cap.jpg', mimeType: 'image/jpeg', type: 'image', fileSize: 123, width: 10, height: 20 },
+        {
+          uri: 'file://cap.jpg',
+          fileName: 'cap.jpg',
+          mimeType: 'image/jpeg',
+          type: 'image',
+          fileSize: 123,
+          width: 10,
+          height: 20,
+        },
       ],
     });
     const onPick = jest.fn();

@@ -3,10 +3,12 @@ import type { HttpClient } from '@core/api/http';
 import {
   claimScheduled,
   deleteScheduled,
+  deleteScheduledHistory,
   getScheduledById,
   insertScheduled,
   listAllScheduled,
   listDueScheduled,
+  listScheduledHistory,
   markScheduledFailed,
   markScheduledSent,
   reconcileServerScheduled,
@@ -66,6 +68,31 @@ describe('scheduled messages repo', () => {
     await insertScheduled(db, { chatGuid: 'c1', text: 'soon', scheduledFor: now + 60_000 });
     const due = await listDueScheduled(db, now);
     expect(due.map((d) => d.id)).toEqual([past]);
+  });
+
+  it('listScheduledHistory surfaces sent + errored rows (newest-first) and Clear removes them', async () => {
+    const { db } = await createTestDb();
+    const sent = await insertScheduled(db, { chatGuid: 'c1', text: 'went out', scheduledFor: 100 });
+    await markScheduledSent(db, sent);
+    const failed = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'no luck',
+      scheduledFor: 200,
+    });
+    // Exhaust attempts → retired to status='error' (the silently-vanishing case this fixes).
+    for (let i = 0; i < SCHED_MAX_ATTEMPTS; i++) await markScheduledFailed(db, failed);
+    await insertScheduled(db, { chatGuid: 'c1', text: 'still pending', scheduledFor: 300 });
+
+    const history = await listScheduledHistory(db);
+    expect(history.map((r) => r.status)).toEqual(['error', 'sent']); // newest-first, no pending
+    expect(history.map((r) => r.text)).toEqual(['no luck', 'went out']);
+
+    await deleteScheduledHistory(db, failed);
+    expect((await listScheduledHistory(db)).map((r) => r.id)).toEqual([sent]);
+    // Clear never touches a pending row.
+    const pendingRow = (await listAllScheduled(db))[0]!;
+    await deleteScheduledHistory(db, pendingRow.id);
+    expect(await listAllScheduled(db)).toHaveLength(1);
   });
 
   it('markScheduledSent removes a row from pending + due lists', async () => {

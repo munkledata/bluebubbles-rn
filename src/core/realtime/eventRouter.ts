@@ -140,7 +140,7 @@ export class EventRouter {
           typeof data === 'string'
             ? data
             : ((data as { url?: unknown; server?: unknown })?.url ??
-                (data as { server?: unknown })?.server);
+              (data as { server?: unknown })?.server);
         return typeof url === 'string' && url.length > 0 ? { type: 'new-server', url } : null;
       }
       default:

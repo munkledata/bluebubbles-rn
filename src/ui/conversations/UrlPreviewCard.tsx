@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
@@ -19,9 +19,21 @@ export function UrlPreviewCard({
   isFromMe,
 }: UrlPreviewCardProps): React.JSX.Element | null {
   const theme = useTheme();
+  // Many OG images fail to load on device (hotlink/403 protection, dead/relative URLs). Without a
+  // placeholder this left a persistent blank 140px box; track a load error so a failed image
+  // collapses (to a text-only card, or nothing) instead of showing an empty box. Reset when the
+  // image URL changes — MessageBubble is memoized inside a RECYCLING FlashList, so the same card
+  // instance is reused across messages (also why the <Image> below needs a recyclingKey).
+  const [imgFailed, setImgFailed] = useState(false);
+  const imageUrl = preview?.imageUrl ?? null;
+  useEffect(() => {
+    setImgFailed(false);
+  }, [imageUrl]);
+  const showImage = !!imageUrl && !imgFailed;
 
-  // Nothing useful yet (loading or negative cache) → render nothing.
-  if (!preview || preview.error === 1 || (!preview.title && !preview.imageUrl)) return null;
+  // Nothing useful to show (loading, negative cache, or an image-only card whose image failed to
+  // load) → render nothing rather than a blank box.
+  if (!preview || preview.error === 1 || (!preview.title && !showImage)) return null;
 
   let domain = url;
   try {
@@ -42,8 +54,18 @@ export function UrlPreviewCard({
         },
       ]}
     >
-      {preview.imageUrl ? (
-        <Image source={{ uri: preview.imageUrl }} contentFit="cover" style={styles.image} />
+      {showImage && imageUrl ? (
+        <Image
+          testID="url-preview-image"
+          source={{ uri: imageUrl }}
+          // Keyed by the URL so a recycled row loads the NEW image instead of showing the
+          // previous message's (or a blank) native view.
+          recyclingKey={imageUrl}
+          onError={() => setImgFailed(true)}
+          contentFit="cover"
+          transition={150}
+          style={[styles.image, { backgroundColor: theme.color.separator }]}
+        />
       ) : null}
       <View style={styles.body}>
         <Text numberOfLines={2} style={[styles.title, { color: theme.color.label }]}>

@@ -61,7 +61,9 @@ afterEach(() => {
 
 describe('useSearch', () => {
   it('gates a sub-2-char query: no DB read, empty + not loading', async () => {
-    const { result } = await renderHook(({ q }: { q: string }) => useSearch(q), { initialProps: { q: ' a ' } });
+    const { result } = await renderHook(({ q }: { q: string }) => useSearch(q), {
+      initialProps: { q: ' a ' },
+    });
 
     expect(result.current.results).toEqual([]);
     expect(result.current.loading).toBe(false);
@@ -74,7 +76,9 @@ describe('useSearch', () => {
     const rows = [mkResult({ id: 7, guid: 'm-7' })];
     mockSearch.mockResolvedValue(rows);
 
-    const { result } = await renderHook(({ q }: { q: string }) => useSearch(q), { initialProps: { q: 'hello' } });
+    const { result } = await renderHook(({ q }: { q: string }) => useSearch(q), {
+      initialProps: { q: 'hello' },
+    });
 
     // Effect ran: loading raised, but the 250ms timer hasn't fired yet → no DB read.
     expect(result.current.loading).toBe(true);
@@ -99,7 +103,9 @@ describe('useSearch', () => {
 
   it('swallows a rejected search: empty results, loading cleared, never throws', async () => {
     mockSearch.mockRejectedValue(new Error('fts blew up'));
-    const { result } = await renderHook(({ q }: { q: string }) => useSearch(q), { initialProps: { q: 'boom' } });
+    const { result } = await renderHook(({ q }: { q: string }) => useSearch(q), {
+      initialProps: { q: 'boom' },
+    });
 
     await advance(250);
     expect(result.current.loading).toBe(false);

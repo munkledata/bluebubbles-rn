@@ -25,7 +25,12 @@ const base: TitleInput = {
 describe('resolveTitle', () => {
   it('prefers the local custom name over everything', () => {
     expect(
-      resolveTitle({ ...base, customName: ' Fam ', displayName: 'Family', participantNames: 'Alice' }),
+      resolveTitle({
+        ...base,
+        customName: ' Fam ',
+        displayName: 'Family',
+        participantNames: 'Alice',
+      }),
     ).toBe('Fam');
   });
 
@@ -37,7 +42,11 @@ describe('resolveTitle', () => {
 
   it('skips a raw chat-guid display name in favor of participant names', () => {
     expect(
-      resolveTitle({ ...base, displayName: 'chat947991747861991169', participantNames: 'Alice, Bob' }),
+      resolveTitle({
+        ...base,
+        displayName: 'chat947991747861991169',
+        participantNames: 'Alice, Bob',
+      }),
     ).toBe('Alice, Bob');
   });
 
@@ -62,9 +71,9 @@ describe('resolveTitle', () => {
   });
 
   it('never surfaces a raw chat-guid — returns "Group" when nothing else is usable', () => {
-    expect(
-      resolveTitle({ ...base, displayName: 'chat123', chatIdentifier: 'chat123' }),
-    ).toBe('Group');
+    expect(resolveTitle({ ...base, displayName: 'chat123', chatIdentifier: 'chat123' })).toBe(
+      'Group',
+    );
     expect(resolveTitle(base)).toBe('Group');
   });
 });

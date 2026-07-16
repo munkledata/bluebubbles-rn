@@ -20,7 +20,14 @@
  * feature-settings stores are the REAL zustand stores, seeded via setState.
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent, act, type RenderResult } from '../support/renderWithTheme';
+import { StyleSheet } from 'react-native';
+import {
+  renderWithTheme,
+  screen,
+  fireEvent,
+  act,
+  type RenderResult,
+} from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import type { AttachmentRow } from '@db/repositories';
@@ -40,7 +47,11 @@ jest.mock('expo-image', () => {
   const r = require('react');
   return {
     Image: (props: Record<string, unknown>) =>
-      r.createElement(RN.View, { testID: 'expo-image', source: props.source, placeholder: props.placeholder }),
+      r.createElement(RN.View, {
+        testID: 'expo-image',
+        source: props.source,
+        placeholder: props.placeholder,
+      }),
   };
 });
 jest.mock('expo-network', () => ({
@@ -104,7 +115,9 @@ describe('ImageAttachment — image swap is driven by localPath (the DB prop), n
   it('renders a null source (placeholder only) until a localPath lands', async () => {
     // Suppress auto-download so nothing races; the point here is the source value.
     useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(source()).toBeNull();
   });
 
@@ -119,14 +132,18 @@ describe('ImageAttachment — image swap is driven by localPath (the DB prop), n
     // The critical regression guard: downloading status + a progress ratio must NOT produce an
     // image — only the reactive localPath write does. The ring shows; the source stays null.
     useDownloadStore.setState({ status: { 'img-1': 'downloading' }, progress: { 'img-1': 0.5 } });
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(source()).toBeNull();
     expect(screen.getByText('50%')).toBeTruthy(); // ProgressRing (real) is up
   });
 
   it('passes the blurhash through as the placeholder', async () => {
     useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(screen.getByTestId('expo-image').props.placeholder).toEqual({
       blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
     });
@@ -165,14 +182,22 @@ describe('ImageAttachment — download-state overlays', () => {
 describe('ImageAttachment — live-photo badge', () => {
   it('renders a "LIVE" badge when the attachment carries a live photo', async () => {
     await renderWithTheme(
-      <ImageAttachment att={makeImg({ localPath: '/data/photo.jpg', hasLivePhoto: 1 })} isFromMe={false} showTail />,
+      <ImageAttachment
+        att={makeImg({ localPath: '/data/photo.jpg', hasLivePhoto: 1 })}
+        isFromMe={false}
+        showTail
+      />,
     );
     expect(screen.getByText('◉ LIVE')).toBeTruthy();
   });
 
   it('omits the badge for a plain image', async () => {
     await renderWithTheme(
-      <ImageAttachment att={makeImg({ localPath: '/data/photo.jpg', hasLivePhoto: 0 })} isFromMe={false} showTail />,
+      <ImageAttachment
+        att={makeImg({ localPath: '/data/photo.jpg', hasLivePhoto: 0 })}
+        isFromMe={false}
+        showTail
+      />,
     );
     expect(screen.queryByText('◉ LIVE')).toBeNull();
   });
@@ -181,7 +206,11 @@ describe('ImageAttachment — live-photo badge', () => {
 describe('ImageAttachment — tap dispatch', () => {
   it('opens the media viewer (router.push) when the image is already downloaded', async () => {
     await renderWithTheme(
-      <ImageAttachment att={makeImg({ guid: 'img-1', localPath: '/data/photo.jpg' })} isFromMe={false} showTail />,
+      <ImageAttachment
+        att={makeImg({ guid: 'img-1', localPath: '/data/photo.jpg' })}
+        isFromMe={false}
+        showTail
+      />,
     );
     fireEvent.press(screen.getByTestId('expo-image'));
     expect(mockPush).toHaveBeenCalledWith('/media/img-1');
@@ -211,43 +240,91 @@ describe('ImageAttachment — tap dispatch', () => {
   });
 });
 
+describe('ImageAttachment — gallery cell corner rounding', () => {
+  // The Pressable wrapper is the image marker's parent; its flattened style carries the corners.
+  const wrapStyle = (): Record<string, unknown> =>
+    StyleSheet.flatten(screen.getByTestId('expo-image').parent!.props.style) as Record<
+      string,
+      unknown
+    >;
+
+  it('a grid cell is a flat square — no leaked tail corner notches the grid', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+    await renderWithTheme(
+      <ImageAttachment
+        att={makeImg({ localPath: '/data/p.jpg' })}
+        isFromMe
+        showTail={false}
+        cellSize={100}
+      />,
+    );
+    const wrap = wrapStyle();
+    expect(wrap.borderRadius).toBe(0);
+    // The from-me tail corner must NOT survive into a cell (it overrides borderRadius natively).
+    expect(wrap.borderBottomRightRadius).toBeUndefined();
+    expect(wrap.borderBottomLeftRadius).toBeUndefined();
+  });
+
+  it('a normal (non-cell) from-me bubble still keeps its rounded tail corner', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: '/data/p.jpg' })} isFromMe showTail />,
+    );
+    expect(wrapStyle().borderBottomRightRadius).toBeGreaterThan(0);
+  });
+});
+
 describe('ImageAttachment — auto-download effect', () => {
   it('auto-downloads a small, undownloaded image on mount with default settings', async () => {
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(mockDownload).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT auto-download when the autoDownload setting is off', async () => {
     useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(mockDownload).not.toHaveBeenCalled();
   });
 
   it('does NOT auto-download over cellular when WiFi-only is enabled', async () => {
     useFeatureSettingsStore.setState({ autoDownloadOnWifiOnly: true });
     mockNet.type = 'CELLULAR';
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(mockDownload).not.toHaveBeenCalled();
   });
 
   it('DOES auto-download over WiFi when WiFi-only is enabled', async () => {
     useFeatureSettingsStore.setState({ autoDownloadOnWifiOnly: true });
     mockNet.type = 'WIFI';
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(mockDownload).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT auto-download once a status already exists (a prior attempt/failure)', async () => {
     // A previously-errored image must be left for a manual retry — never re-fetched on every flush.
     useDownloadStore.setState({ status: { 'img-1': 'error' }, progress: {} });
-    await renderWithTheme(<ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />);
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
     expect(mockDownload).not.toHaveBeenCalled();
   });
 
   it('does NOT auto-download a non-image (would exceed shouldAutoDownload)', async () => {
     // shouldAutoDownload only greenlights image/* — a video row should not auto-fetch here.
     await renderWithTheme(
-      <ImageAttachment att={makeImg({ localPath: null, mimeType: 'video/mp4' })} isFromMe={false} showTail />,
+      <ImageAttachment
+        att={makeImg({ localPath: null, mimeType: 'video/mp4' })}
+        isFromMe={false}
+        showTail
+      />,
     );
     expect(mockDownload).not.toHaveBeenCalled();
   });

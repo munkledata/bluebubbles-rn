@@ -130,9 +130,12 @@ describe('useNewScreenEffect', () => {
   });
 
   it('produces no effect when there are no messages', async () => {
-    const { result } = await renderHook(({ msgs }: { msgs: Msgs }) => useNewScreenEffect('c1', msgs), {
-      initialProps: { msgs: [] as ReturnType<typeof mkMessage>[] },
-    });
+    const { result } = await renderHook(
+      ({ msgs }: { msgs: Msgs }) => useNewScreenEffect('c1', msgs),
+      {
+        initialProps: { msgs: [] as ReturnType<typeof mkMessage>[] },
+      },
+    );
     await act(async () => {
       await Promise.resolve();
     });

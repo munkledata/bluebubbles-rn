@@ -64,7 +64,13 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
   it('returns an emoji reaction with its glyph', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);
-    await react(db, chatId, hm, { guid: 'r1', type: 'emoji', emoji: '🔥', from: 'a@x.com', date: 200 });
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 200,
+    });
 
     const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(1);
@@ -74,8 +80,20 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
   it('distinct glyphs from the SAME sender coexist (unlike classic types)', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);
-    await react(db, chatId, hm, { guid: 'r1', type: 'emoji', emoji: '🔥', from: 'a@x.com', date: 200 });
-    await react(db, chatId, hm, { guid: 'r2', type: 'emoji', emoji: '🫡', from: 'a@x.com', date: 300 });
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 200,
+    });
+    await react(db, chatId, hm, {
+      guid: 'r2',
+      type: 'emoji',
+      emoji: '🫡',
+      from: 'a@x.com',
+      date: 300,
+    });
 
     const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
     expect(rows.map((r) => r.emoji).sort()).toEqual(['🫡', '🔥'].sort());
@@ -84,9 +102,27 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
   it("a '-emoji' removal clears ONLY its own glyph", async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);
-    await react(db, chatId, hm, { guid: 'r1', type: 'emoji', emoji: '🔥', from: 'a@x.com', date: 200 });
-    await react(db, chatId, hm, { guid: 'r2', type: 'emoji', emoji: '🫡', from: 'a@x.com', date: 300 });
-    await react(db, chatId, hm, { guid: 'r3', type: '-emoji', emoji: '🔥', from: 'a@x.com', date: 400 });
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 200,
+    });
+    await react(db, chatId, hm, {
+      guid: 'r2',
+      type: 'emoji',
+      emoji: '🫡',
+      from: 'a@x.com',
+      date: 300,
+    });
+    await react(db, chatId, hm, {
+      guid: 'r3',
+      type: '-emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 400,
+    });
 
     const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(1);
@@ -96,8 +132,20 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
   it('the same glyph from DIFFERENT senders stays two rows (one per sender)', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);
-    await react(db, chatId, hm, { guid: 'r1', type: 'emoji', emoji: '🔥', from: 'a@x.com', date: 200 });
-    await react(db, chatId, hm, { guid: 'r2', type: 'emoji', emoji: '🔥', from: 'b@x.com', date: 300 });
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 200,
+    });
+    await react(db, chatId, hm, {
+      guid: 'r2',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'b@x.com',
+      date: 300,
+    });
 
     const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(2);
@@ -107,7 +155,13 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);
     await react(db, chatId, hm, { guid: 'r1', type: 'love', from: 'a@x.com', date: 200 });
-    await react(db, chatId, hm, { guid: 'r2', type: 'emoji', emoji: '🔥', from: 'a@x.com', date: 300 });
+    await react(db, chatId, hm, {
+      guid: 'r2',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 300,
+    });
     await react(db, chatId, hm, { guid: 'r3', type: '-love', from: 'a@x.com', date: 400 });
 
     const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
@@ -127,7 +181,13 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
   it('emoji reactions never appear as chat rows (associated filter unchanged)', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, hm } = await setup(db);
-    await react(db, chatId, hm, { guid: 'r1', type: 'emoji', emoji: '🔥', from: 'a@x.com', date: 200 });
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'emoji',
+      emoji: '🔥',
+      from: 'a@x.com',
+      date: 200,
+    });
     // The visible-message queries all filter associated_message_type IS NULL.
     const visible = raw
       .prepare('SELECT guid FROM messages WHERE associated_message_type IS NULL')

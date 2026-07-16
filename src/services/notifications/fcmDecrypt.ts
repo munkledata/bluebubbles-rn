@@ -37,7 +37,9 @@ export async function decryptFcmPayload(b64Frame: string, password: string): Pro
   const digestInput = concatBytes(salt, utf8Encode(password));
   const digestAb = new ArrayBuffer(digestInput.byteLength);
   new Uint8Array(digestAb).set(digestInput);
-  const keyBytes = new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, digestAb));
+  const keyBytes = new Uint8Array(
+    await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, digestAb),
+  );
   const key = await AESEncryptionKey.import(keyBytes);
   const sealed = AESSealedData.fromParts(iv, ciphertext, tag);
   const plaintext = await aesDecryptAsync(sealed, key, { output: 'bytes' });

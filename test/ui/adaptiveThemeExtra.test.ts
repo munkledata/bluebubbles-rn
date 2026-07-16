@@ -39,7 +39,11 @@ describe('parseHex throw branch (via public helpers)', () => {
 
 describe('adaptiveTokensFromImage', () => {
   it('passes the uri + fallback/cache/key config to the extractor', async () => {
-    mockGetColors.mockResolvedValue({ platform: 'android', vibrant: '#34C759', dominant: '#111111' });
+    mockGetColors.mockResolvedValue({
+      platform: 'android',
+      vibrant: '#34C759',
+      dominant: '#111111',
+    });
     await adaptiveTokensFromImage('file:///pic.jpg', 'light');
     expect(mockGetColors).toHaveBeenCalledWith('file:///pic.jpg', {
       fallback: SEED_FALLBACK,
@@ -107,7 +111,12 @@ describe('adaptiveTokensFromImage', () => {
   });
 
   it('empty extracted seed falls back to SEED_FALLBACK', async () => {
-    mockGetColors.mockResolvedValue({ platform: 'android', darkVibrant: '', vibrant: '', dominant: '' });
+    mockGetColors.mockResolvedValue({
+      platform: 'android',
+      darkVibrant: '',
+      vibrant: '',
+      dominant: '',
+    });
     const tokens = await adaptiveTokensFromImage('x', 'dark');
     expect(tokens).toEqual(generateAdaptiveTokens(SEED_FALLBACK, 'dark'));
   });
@@ -120,7 +129,11 @@ describe('adaptiveTokensFromImage', () => {
   it.each<ThemeMode>(['light', 'dark'])(
     'produces a fully-valid token set for a real extracted seed (%s)',
     async (mode) => {
-      mockGetColors.mockResolvedValue({ platform: 'android', vibrant: '#AF52DE', dominant: '#AF52DE' });
+      mockGetColors.mockResolvedValue({
+        platform: 'android',
+        vibrant: '#AF52DE',
+        dominant: '#AF52DE',
+      });
       const tokens = await adaptiveTokensFromImage('x', mode);
       expect(tokens).not.toBeNull();
       expect(tokens!.mode).toBe(mode);

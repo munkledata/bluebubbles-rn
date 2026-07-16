@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import type { MessageMention } from '@core/api/endpoints/messages';
 import { chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
 
@@ -53,12 +54,15 @@ export async function insertOutgoingText(
     selectedMessageGuid?: string;
     threadOriginatorGuid?: string;
     effectId?: string;
+    subject?: string;
+    mentions?: MessageMention[];
   },
 ): Promise<void> {
   await db.insert(messages).values({
     guid: args.tempGuid,
     chatId: args.chatId,
     text: args.text,
+    subject: args.subject ?? null,
     isFromMe: true,
     dateCreated: args.now,
     sendState: 'sending',
@@ -76,6 +80,10 @@ export async function insertOutgoingText(
       message: args.text,
       selectedMessageGuid: args.selectedMessageGuid,
       effectId: args.effectId,
+      subject: args.subject,
+      // Persisted so a crash-recovery resend keeps the subject + mention spans
+      // (the queue re-POST builds its request from this payload alone).
+      mentions: args.mentions?.length ? args.mentions : undefined,
     }),
   });
   await db.update(chats).set({ latestMessageDate: args.now }).where(eq(chats.id, args.chatId));

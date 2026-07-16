@@ -1,5 +1,7 @@
 export * from './AttachmentView';
+export * from './AttachmentGalleryGrid';
 export * from './ImageAttachment';
+export * from './ZoomableImage';
 export * from './FileChip';
 export * from './VideoPlayer';
 export * from './ContactCard';

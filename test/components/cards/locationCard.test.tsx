@@ -85,14 +85,19 @@ beforeEach(() => {
 
 describe('LocationCard — parsed location once local', () => {
   it('renders transferName as the title and the lat,lon subtitle', async () => {
-    await renderWithTheme(<LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+    );
     expect(await screen.findByText('37.7749, -122.4194')).toBeTruthy();
     expect(screen.getByText('Current Location.loc.vcf')).toBeTruthy();
   });
 
   it('title defaults to "Location" when there is no transferName', async () => {
     await renderWithTheme(
-      <LocationCard att={makeAtt({ transferName: null, localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+      <LocationCard
+        att={makeAtt({ transferName: null, localPath: 'file:///l/loc.vcf' })}
+        isFromMe={false}
+      />,
     );
     expect(await screen.findByText('37.7749, -122.4194')).toBeTruthy();
     expect(screen.getByText('Location')).toBeTruthy();
@@ -100,7 +105,9 @@ describe('LocationCard — parsed location once local', () => {
 
   it('an unparseable location leaves loc null → status subtitle ("Tap to open")', async () => {
     mockLocText = 'BEGIN:VCARD\nFN:Not a location\nEND:VCARD';
-    await renderWithTheme(<LocationCard att={makeAtt({ localPath: 'file:///l/bad.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/bad.vcf' })} isFromMe={false} />,
+    );
     // loc stays null → subtitle is the idle status text (no coordinates rendered).
     expect(await screen.findByText('Tap to open')).toBeTruthy();
   });
@@ -135,7 +142,9 @@ describe('LocationCard — tap contract', () => {
   });
 
   it('localPath + parsed loc → opens a geo: URL with lat,lon (and query)', async () => {
-    await renderWithTheme(<LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+    );
     await screen.findByText('37.7749, -122.4194');
     fireEvent.press(screen.getByLabelText('Location'));
     expect(safeOpenUrl).toHaveBeenCalledWith('geo:37.7749,-122.4194?q=37.7749,-122.4194');
@@ -144,7 +153,9 @@ describe('LocationCard — tap contract', () => {
 
   it('localPath but unparseable loc → does nothing (no open, no download)', async () => {
     mockLocText = 'BEGIN:VCARD\nFN:Not a location\nEND:VCARD';
-    await renderWithTheme(<LocationCard att={makeAtt({ localPath: 'file:///l/bad.vcf' })} isFromMe={false} />);
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/bad.vcf' })} isFromMe={false} />,
+    );
     await screen.findByText('Tap to open');
     fireEvent.press(screen.getByLabelText('Location'));
     expect(safeOpenUrl).not.toHaveBeenCalled();

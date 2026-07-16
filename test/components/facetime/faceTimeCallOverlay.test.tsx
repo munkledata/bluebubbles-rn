@@ -29,7 +29,11 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
-const CALL = { link: 'https://facetime.apple.com/join#abc', chatGuid: 'iMessage;-;+1', video: true };
+const CALL = {
+  link: 'https://facetime.apple.com/join#abc',
+  chatGuid: 'iMessage;-;+1',
+  video: true,
+};
 
 beforeEach(() => {
   useFaceTimeStore.setState({ call: null, incoming: null });

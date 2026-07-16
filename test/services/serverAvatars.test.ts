@@ -85,7 +85,9 @@ describe('backfillServerAvatars', () => {
     expect(await backfillServerAvatars(t.db, http)).toBe(1);
     expect(MockFile.createDownloadTask).toHaveBeenCalledTimes(1);
     const avatar = (
-      t.raw.prepare("SELECT avatar a FROM handles WHERE address='+15551234567'").get() as { a: string }
+      t.raw.prepare("SELECT avatar a FROM handles WHERE address='+15551234567'").get() as {
+        a: string;
+      }
     ).a;
     expect(avatar).toBe('file:///doc/c1-e1.img');
   });

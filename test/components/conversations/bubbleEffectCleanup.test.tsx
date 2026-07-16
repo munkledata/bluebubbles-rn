@@ -40,7 +40,7 @@ function spyParallel(): { handles: CompositeHandle[]; restore: () => void } {
 }
 
 describe('BubbleEffectView effect cleanup on unmount', () => {
-  it("slam: starts the entrance animation on mount and stops it on unmount", async () => {
+  it('slam: starts the entrance animation on mount and stops it on unmount', async () => {
     const { handles, restore } = spyParallel();
     try {
       const { unmount } = await renderWithTheme(

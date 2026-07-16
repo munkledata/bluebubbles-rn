@@ -13,7 +13,10 @@
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { ReactionCluster } from '@ui/conversations/ReactionCluster';
-import { MessageActionsOverlay, type SelectedMessage } from '@ui/conversations/MessageActionsOverlay';
+import {
+  MessageActionsOverlay,
+  type SelectedMessage,
+} from '@ui/conversations/MessageActionsOverlay';
 import type { ReactionRow } from '@db/repositories';
 
 jest.mock('react-native-safe-area-context', () => ({
@@ -58,7 +61,14 @@ describe('ReactionCluster — emoji glyph badges', () => {
       <ReactionCluster
         reactions={[
           emojiRow('🔥'),
-          { targetGuid: 'msg-1', baseType: 'love', emoji: null, isFromMe: 1, senderName: null, dateCreated: 1 },
+          {
+            targetGuid: 'msg-1',
+            baseType: 'love',
+            emoji: null,
+            isFromMe: 1,
+            senderName: null,
+            dateCreated: 1,
+          },
         ]}
         isFromMe={false}
       />,
@@ -80,6 +90,8 @@ function handlers() {
     onCopy: jest.fn(),
     onForward: jest.fn(),
     onSave: jest.fn(),
+    onShare: jest.fn(),
+    onDelete: jest.fn(),
   };
 }
 
@@ -108,7 +120,9 @@ describe('MessageActionsOverlay — emoji tapback input', () => {
     fireEvent.press(screen.getByLabelText('React with any emoji'));
     const input = await screen.findByLabelText('Emoji reaction input');
     fireEvent.changeText(input, '🔥');
-    await waitFor(() => expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥'),
+    );
     fireEvent(input, 'submitEditing');
     await waitFor(() => expect(h.onReact).toHaveBeenCalledWith('emoji', '🔥'));
     expect(h.onClose).toHaveBeenCalled();
@@ -121,7 +135,9 @@ describe('MessageActionsOverlay — emoji tapback input', () => {
     fireEvent.press(screen.getByLabelText('React with any emoji'));
     const input = await screen.findByLabelText('Emoji reaction input');
     fireEvent.changeText(input, 'lol');
-    await waitFor(() => expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('lol'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('lol'),
+    );
     fireEvent(input, 'submitEditing');
     await waitFor(() => expect(screen.getByLabelText('Emoji reaction input')).toBeTruthy());
     expect(h.onReact).not.toHaveBeenCalled();

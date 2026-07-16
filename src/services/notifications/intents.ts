@@ -1,6 +1,6 @@
 import { resolveMessageChatGuid } from '@core/models';
 import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
-import { getChatHeader, getHandleName } from '@db/repositories';
+import { getChatHeader, getHandleProfile } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { stripAttachmentPlaceholder } from '@utils';
 
@@ -32,11 +32,8 @@ export async function buildMessageIntents(
       // `handle.displayName` is the server name (no device contact), so preferring it showed a
       // bare phone number even when the contact is known locally.
       const address = m.handle?.address;
-      const senderName =
-        (address ? await getHandleName(db, address) : null) ??
-        m.handle?.displayName ??
-        address ??
-        'Unknown';
+      const profile = address ? await getHandleProfile(db, address) : null;
+      const senderName = profile?.name ?? m.handle?.displayName ?? address ?? 'Unknown';
       const isGroup = (header?.participantCount ?? 0) > 1;
       const chatTitle =
         header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
@@ -47,6 +44,10 @@ export async function buildMessageIntents(
           chatTitle,
           senderName,
           senderHandle: m.handle?.address ?? 'unknown',
+          // The stored contact photo (file:// uri) — without it Android's expanded
+          // MessagingStyle draws a generic person-silhouette placeholder. The Notifee
+          // layer drops it again under redacted mode.
+          avatarUri: profile?.avatar ?? undefined,
           // Attachment messages carry U+FFFC placeholder text (renders as an empty box); strip it
           // and fall back to a generic label so the notification never shows a bare box.
           body: stripAttachmentPlaceholder(m.text) || '📎 Attachment',

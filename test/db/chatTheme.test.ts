@@ -100,11 +100,19 @@ describe('synced background (macOS 26)', () => {
   it('upsert tracks the server channel; it is server-owned (refreshed on re-sync)', async () => {
     const t = await createTestDb();
     // Server says this chat has a background.
-    await upsertChats(t.db, [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })], new Map());
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })],
+      new Map(),
+    );
     expect(await getSyncedBackgroundState(t.db, 'g1')).toEqual({ channel: 'CH-1', uri: null });
 
     // The participant changed the background → new channel wins on re-sync.
-    await upsertChats(t.db, [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-2' })], new Map());
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-2' })],
+      new Map(),
+    );
     expect((await getSyncedBackgroundState(t.db, 'g1'))?.channel).toBe('CH-2');
 
     // Background removed on the server (field omitted) → channel clears.
@@ -114,12 +122,18 @@ describe('synced background (macOS 26)', () => {
 
   it('setSyncedBackgroundUri points the chat at the downloaded file; it surfaces via getChatTheme', async () => {
     const t = await createTestDb();
-    await upsertChats(t.db, [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })], new Map());
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })],
+      new Map(),
+    );
     await setSyncedBackgroundUri(t.db, 'g1', 'file:///synced/g1-CH-1.jpg');
     expect(await getSyncedBackgroundState(t.db, 'g1')).toEqual({
       channel: 'CH-1',
       uri: 'file:///synced/g1-CH-1.jpg',
     });
-    expect((await getChatTheme(t.db, 'g1'))?.syncedBackgroundUri).toBe('file:///synced/g1-CH-1.jpg');
+    expect((await getChatTheme(t.db, 'g1'))?.syncedBackgroundUri).toBe(
+      'file:///synced/g1-CH-1.jpg',
+    );
   });
 });

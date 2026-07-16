@@ -28,13 +28,7 @@
  *     return zero insets.
  */
 import React from 'react';
-import {
-  renderWithTheme,
-  screen,
-  fireEvent,
-  act,
-  waitFor,
-} from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, act, waitFor } from '../support/renderWithTheme';
 import type { PendingAttachment } from '@ui/conversations/AttachmentTray';
 import type { MessagePreview } from '@db/repositories';
 
@@ -112,11 +106,31 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 const openMock = DateTimePickerAndroid.open as unknown as jest.Mock;
 
 /** The two items the mock tray stages via onPick (must equal the mock's A/B by value). */
-const ITEM_A: PendingAttachment = { uri: 'file://a.jpg', name: 'a.jpg', mimeType: 'image/jpeg', size: 10 };
-const ITEM_B: PendingAttachment = { uri: 'file://b.jpg', name: 'b.jpg', mimeType: 'image/jpeg', size: 20 };
+const ITEM_A: PendingAttachment = {
+  uri: 'file://a.jpg',
+  name: 'a.jpg',
+  mimeType: 'image/jpeg',
+  size: 10,
+};
+const ITEM_B: PendingAttachment = {
+  uri: 'file://b.jpg',
+  name: 'b.jpg',
+  mimeType: 'image/jpeg',
+  size: 20,
+};
 /** Two file items resolved by an onPickFiles prop (exercises handlePickFiles + addPending). */
-const FILE_A: PendingAttachment = { uri: 'file://a.pdf', name: 'a.pdf', mimeType: 'application/pdf', size: 10 };
-const FILE_B: PendingAttachment = { uri: 'file://b.mp4', name: 'b.mp4', mimeType: 'video/mp4', size: 20 };
+const FILE_A: PendingAttachment = {
+  uri: 'file://a.pdf',
+  name: 'a.pdf',
+  mimeType: 'application/pdf',
+  size: 10,
+};
+const FILE_B: PendingAttachment = {
+  uri: 'file://b.mp4',
+  name: 'b.mp4',
+  mimeType: 'video/mp4',
+  size: 20,
+};
 
 beforeEach(() => {
   // setup.ts resets only the theme store; the feature-settings flag is this suite's to control.
@@ -146,7 +160,7 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await renderWithTheme(<Composer onSend={onSend} />);
     fireEvent.changeText(input(), '  hey there  ');
     fireEvent.press(await screen.findByLabelText('Send message'));
-    expect(onSend).toHaveBeenCalledWith('hey there', undefined);
+    expect(onSend).toHaveBeenCalledWith('hey there', undefined, undefined, undefined);
     await waitFor(() => expect(input().props.value).toBe(''));
     // The send button disappears once the field is empty again (canSend false).
     await waitFor(() => expect(screen.queryByLabelText('Send message')).toBeNull());
@@ -155,6 +169,80 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
   it('uses a custom placeholder when provided', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} placeholder="Text Message" />);
     expect(screen.getByPlaceholderText('Text Message')).toBeTruthy();
+  });
+
+  it('hides the subject field unless subjectEnabled', async () => {
+    await renderWithTheme(<Composer onSend={jest.fn()} />);
+    expect(screen.queryByPlaceholderText('Subject')).toBeNull();
+  });
+
+  it('carries the subject line when subjectEnabled and a subject is typed', async () => {
+    const onSend = jest.fn();
+    await renderWithTheme(<Composer onSend={onSend} subjectEnabled />);
+    // Flush each controlled-value re-render before the next act-wrapped event (React 19 overlapping
+    // act() — see the send-with-return tests).
+    fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Re: lunch');
+    await screen.findByDisplayValue('Re: lunch');
+    fireEvent.changeText(input(), 'you around?');
+    await screen.findByDisplayValue('you around?');
+    fireEvent.press(await screen.findByLabelText('Send message'));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('you around?', undefined, 'Re: lunch', undefined),
+    );
+    // The subject field clears after send.
+    await waitFor(() => expect(screen.getByPlaceholderText('Subject').props.value).toBe(''));
+  });
+
+  it('restores a persisted draft into an empty composer', async () => {
+    await renderWithTheme(<Composer onSend={jest.fn()} initialText="half-typed thought" />);
+    expect(await screen.findByDisplayValue('half-typed thought')).toBeTruthy();
+  });
+
+  it('clears the draft immediately on send', async () => {
+    const onDraftChange = jest.fn();
+    await renderWithTheme(<Composer onSend={jest.fn()} onDraftChange={onDraftChange} />);
+    fireEvent.changeText(input(), 'about to send');
+    fireEvent.press(await screen.findByLabelText('Send message'));
+    await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith(''));
+  });
+
+  it('persists the draft after the typing debounce', async () => {
+    jest.useFakeTimers();
+    try {
+      const onDraftChange = jest.fn();
+      await renderWithTheme(<Composer onSend={jest.fn()} onDraftChange={onDraftChange} />);
+      // Under fake timers every state-mutating event must be act-wrapped (see the typing tests),
+      // or React's scheduled work is discarded by useRealTimers and later tests can't mount.
+      await act(async () => {
+        fireEvent.changeText(input(), 'brb');
+      });
+      expect(onDraftChange).not.toHaveBeenCalled(); // debounced
+      await act(async () => {
+        jest.advanceTimersByTime(600);
+      });
+      expect(onDraftChange).toHaveBeenCalledWith('brb');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('inserts an @mention from the picker and sends the resolved span', async () => {
+    const onSend = jest.fn();
+    await renderWithTheme(
+      <Composer onSend={onSend} mentionParticipants={[{ address: 'a@x.com', name: 'Alice' }]} />,
+    );
+    fireEvent.changeText(input(), '@Al');
+    await screen.findByDisplayValue('@Al');
+    // The picker keys off the caret — feed a selectionChange so the @query is detected.
+    fireEvent(input(), 'selectionChange', { nativeEvent: { selection: { start: 3, end: 3 } } });
+    fireEvent.press(await screen.findByLabelText('Mention Alice'));
+    await screen.findByDisplayValue('@Alice ');
+    fireEvent.press(await screen.findByLabelText('Send message'));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenCalledWith('@Alice', undefined, undefined, [
+        { start: 0, length: 6, address: 'a@x.com' },
+      ]),
+    );
   });
 });
 
@@ -177,13 +265,20 @@ describe('Composer — send-with-return feature flag (real store)', () => {
     fireEvent.changeText(input(), 'via return');
     await screen.findByDisplayValue('via return'); // flush before submitEditing (see note above)
     fireEvent(input(), 'submitEditing');
-    expect(onSend).toHaveBeenCalledWith('via return', undefined);
+    expect(onSend).toHaveBeenCalledWith('via return', undefined, undefined, undefined);
   });
 });
 
 describe('Composer — reply banner', () => {
   function reply(over: Partial<MessagePreview> = {}): MessagePreview {
-    return { guid: 'orig', text: 'the original', senderName: 'Carol', isFromMe: 0, hasAttachments: 0, ...over };
+    return {
+      guid: 'orig',
+      text: 'the original',
+      senderName: 'Carol',
+      isFromMe: 0,
+      hasAttachments: 0,
+      ...over,
+    };
   }
 
   it('renders "Replying to <name>" with the snippet and fires onCancelReply on dismiss', async () => {
@@ -217,7 +312,11 @@ describe('Composer — reply banner', () => {
 
   it('falls back to "Unknown" when a received reply has no sender name', async () => {
     await renderWithTheme(
-      <Composer onSend={jest.fn()} replyTo={reply({ senderName: null })} onCancelReply={jest.fn()} />,
+      <Composer
+        onSend={jest.fn()}
+        replyTo={reply({ senderName: null })}
+        onCancelReply={jest.fn()}
+      />,
     );
     expect(screen.getByText('Replying to Unknown')).toBeTruthy();
   });
@@ -244,17 +343,21 @@ describe('Composer — edit mode', () => {
 
   it('confirm (send) fires onSend with the edited text and clears', async () => {
     const onSend = jest.fn();
-    await renderWithTheme(<Composer onSend={onSend} editingText="original" onCancelEdit={jest.fn()} />);
+    await renderWithTheme(
+      <Composer onSend={onSend} editingText="original" onCancelEdit={jest.fn()} />,
+    );
     await screen.findByDisplayValue('original');
     fireEvent.changeText(input(), 'edited body');
     fireEvent.press(await screen.findByLabelText('Send message'));
-    expect(onSend).toHaveBeenCalledWith('edited body', undefined);
+    expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
     await waitFor(() => expect(input().props.value).toBe(''));
   });
 
   it('cancel fires onCancelEdit and clears the input', async () => {
     const onCancelEdit = jest.fn();
-    await renderWithTheme(<Composer onSend={jest.fn()} editingText="original" onCancelEdit={onCancelEdit} />);
+    await renderWithTheme(
+      <Composer onSend={jest.fn()} editingText="original" onCancelEdit={onCancelEdit} />,
+    );
     await screen.findByDisplayValue('original');
     fireEvent.press(screen.getByLabelText('Cancel edit'));
     expect(onCancelEdit).toHaveBeenCalledTimes(1);
@@ -262,10 +365,59 @@ describe('Composer — edit mode', () => {
   });
 
   it('does not open the effect picker on long-press while editing', async () => {
-    await renderWithTheme(<Composer onSend={jest.fn()} editingText="original" onCancelEdit={jest.fn()} />);
+    await renderWithTheme(
+      <Composer onSend={jest.fn()} editingText="original" onCancelEdit={jest.fn()} />,
+    );
     const send = await screen.findByLabelText('Send message');
     fireEvent(send, 'longPress');
     expect(screen.queryByText('Send with effect')).toBeNull();
+  });
+
+  // Regression: starting an edit must not eat an in-progress draft. Before the fix, editing
+  // overwrote the input with the edited message and then cleared it to '' on cancel/send,
+  // losing the draft (and later persisting '' over kv).
+  it('restores the in-progress draft when an edit is cancelled', async () => {
+    const { rerender } = await renderWithTheme(
+      <Composer onSend={jest.fn()} onCancelEdit={jest.fn()} initialText="draft I was writing" />,
+    );
+    await screen.findByDisplayValue('draft I was writing');
+    // The parent starts an edit → the input prefills with the message being edited.
+    rerender(
+      <Composer onSend={jest.fn()} onCancelEdit={jest.fn()} editingText="original message" />,
+    );
+    await screen.findByDisplayValue('original message');
+    fireEvent.press(screen.getByLabelText('Cancel edit'));
+    // The displaced draft comes back — not a blank box.
+    await waitFor(() => expect(input().props.value).toBe('draft I was writing'));
+  });
+
+  it('restores the draft after an edit is sent, and never persists it as empty', async () => {
+    const onSend = jest.fn();
+    const onDraftChange = jest.fn();
+    const { rerender } = await renderWithTheme(
+      <Composer
+        onSend={onSend}
+        onCancelEdit={jest.fn()}
+        onDraftChange={onDraftChange}
+        initialText="draft text"
+      />,
+    );
+    await screen.findByDisplayValue('draft text');
+    rerender(
+      <Composer
+        onSend={onSend}
+        onCancelEdit={jest.fn()}
+        onDraftChange={onDraftChange}
+        editingText="edit this"
+      />,
+    );
+    await screen.findByDisplayValue('edit this');
+    fireEvent.changeText(input(), 'edited body');
+    fireEvent.press(await screen.findByLabelText('Send message'));
+    expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
+    // The draft is restored, and the edit never clobbers kv with '' (that would wipe the draft).
+    await waitFor(() => expect(input().props.value).toBe('draft text'));
+    expect(onDraftChange).not.toHaveBeenCalledWith('');
   });
 });
 
@@ -344,7 +496,12 @@ describe('Composer — send-effect long-press', () => {
     fireEvent(await screen.findByLabelText('Send message'), 'longPress');
     expect(await screen.findByText('Send with effect')).toBeTruthy();
     fireEvent.press(screen.getByText('Slam'));
-    expect(onSend).toHaveBeenCalledWith('party', 'com.apple.MobileSMS.expressivesend.impact');
+    expect(onSend).toHaveBeenCalledWith(
+      'party',
+      'com.apple.MobileSMS.expressivesend.impact',
+      undefined,
+      undefined,
+    );
     await waitFor(() => expect(input().props.value).toBe(''));
   });
 
@@ -354,7 +511,7 @@ describe('Composer — send-effect long-press', () => {
     fireEvent.changeText(input(), 'plain');
     fireEvent(await screen.findByLabelText('Send message'), 'longPress');
     fireEvent.press(await screen.findByText('Send without effect'));
-    expect(onSend).toHaveBeenCalledWith('plain', undefined);
+    expect(onSend).toHaveBeenCalledWith('plain', undefined, undefined, undefined);
   });
 });
 
@@ -422,7 +579,12 @@ describe('Composer — schedule (two-step native picker)', () => {
 
   it('does not show the schedule button while editing', async () => {
     await renderWithTheme(
-      <Composer onSend={jest.fn()} onSchedule={jest.fn()} editingText="x" onCancelEdit={jest.fn()} />,
+      <Composer
+        onSend={jest.fn()}
+        onSchedule={jest.fn()}
+        editingText="x"
+        onCancelEdit={jest.fn()}
+      />,
     );
     await screen.findByDisplayValue('x');
     expect(screen.queryByLabelText('Schedule message')).toBeNull();
@@ -447,7 +609,12 @@ describe('Composer — voice/mic affordance', () => {
 
   it('hides the mic while editing', async () => {
     await renderWithTheme(
-      <Composer onSend={jest.fn()} onStartVoice={jest.fn()} editingText="x" onCancelEdit={jest.fn()} />,
+      <Composer
+        onSend={jest.fn()}
+        onStartVoice={jest.fn()}
+        editingText="x"
+        onCancelEdit={jest.fn()}
+      />,
     );
     await screen.findByDisplayValue('x');
     expect(screen.queryByLabelText('Record voice message')).toBeNull();
@@ -495,7 +662,9 @@ describe('Composer — typing indicator (debounced emit)', () => {
     jest.useFakeTimers();
     try {
       const onTyping = jest.fn();
-      const { unmount } = await renderWithTheme(<Composer onSend={jest.fn()} onTyping={onTyping} />);
+      const { unmount } = await renderWithTheme(
+        <Composer onSend={jest.fn()} onTyping={onTyping} />,
+      );
       await act(async () => {
         fireEvent.changeText(input(), 'hi'); // typingActive → true
       });

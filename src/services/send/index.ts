@@ -9,7 +9,7 @@ import {
   resetStuckScheduled,
   updateScheduled,
 } from '@db/repositories';
-import { http } from '@/services';
+import { http } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
 import { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
 import { sendEdit, sendUnsend } from './sendEditService';
@@ -41,7 +41,12 @@ export function sendImages(args: {
 }): Promise<{ tempGuid: string }[]> {
   return Promise.all(
     args.images.map((image) =>
-      sendImageMessage(getDatabase(), http, { chatGuid: args.chatGuid, image }, expoAttachmentUploader),
+      sendImageMessage(
+        getDatabase(),
+        http,
+        { chatGuid: args.chatGuid, image },
+        expoAttachmentUploader,
+      ),
     ),
   );
 }

@@ -1,6 +1,7 @@
 import { Attachment, Chat, Message } from '@core/models';
 import {
   listChatAttachmentsByKind,
+  listChatImageAttachmentsByAttachmentGuid,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -143,5 +144,63 @@ describe('listChatAttachmentsByKind (2.1)', () => {
     const media = await listChatAttachmentsByKind(db, 'empty');
 
     expect(media).toEqual({ photos: [], videos: [], documents: [], links: [] });
+  });
+});
+
+describe('listChatImageAttachmentsByAttachmentGuid (fullscreen carousel)', () => {
+  async function seedImages(db: AppDatabase): Promise<void> {
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const map = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
+      handles,
+    );
+    const chatId = map.get('c1')!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm1',
+          dateCreated: 100,
+          hasAttachments: true,
+          handle: { address: 'a@x.com' },
+          attachments: [Attachment.parse({ guid: 'img-1', mimeType: 'image/jpeg' })],
+        }),
+        Message.parse({
+          guid: 'm2',
+          dateCreated: 200,
+          hasAttachments: true,
+          handle: { address: 'a@x.com' },
+          attachments: [Attachment.parse({ guid: 'img-2', mimeType: 'image/png' })],
+        }),
+        Message.parse({
+          guid: 'm3',
+          dateCreated: 300,
+          hasAttachments: true,
+          handle: { address: 'a@x.com' },
+          attachments: [Attachment.parse({ guid: 'img-3', mimeType: 'image/heic' })],
+        }),
+        // A video is NOT part of the image carousel.
+        Message.parse({
+          guid: 'mv',
+          dateCreated: 250,
+          hasAttachments: true,
+          handle: { address: 'a@x.com' },
+          attachments: [Attachment.parse({ guid: 'vid-1', mimeType: 'video/mp4' })],
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+  }
+
+  it('lists all chat images chronologically with the tapped one indexed, excluding video', async () => {
+    const { db } = await createTestDb();
+    await seedImages(db);
+
+    const g = await listChatImageAttachmentsByAttachmentGuid(db, 'img-2');
+    expect(g.items.map((a) => a.guid)).toEqual(['img-1', 'img-2', 'img-3']); // chronological
+    expect(g.index).toBe(1); // the tapped photo
+    expect(g.items.some((a) => a.guid === 'vid-1')).toBe(false); // video excluded
   });
 });

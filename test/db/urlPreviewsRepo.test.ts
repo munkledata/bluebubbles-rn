@@ -14,7 +14,12 @@ describe('url preview cache repository', () => {
     await setUrlPreview(
       t.db,
       URL,
-      { title: 'Title', description: 'Desc', imageUrl: 'https://example.com/og.png', siteName: 'Example' },
+      {
+        title: 'Title',
+        description: 'Desc',
+        imageUrl: 'https://example.com/og.png',
+        siteName: 'Example',
+      },
       1_000,
     );
     expect(await getUrlPreview(t.db, URL)).toEqual({

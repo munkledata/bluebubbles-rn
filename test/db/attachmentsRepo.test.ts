@@ -104,7 +104,11 @@ describe('attachment repositories', () => {
           hasAttachments: true,
           handle: { address: '+15551230000' },
           attachments: [
-            Attachment.parse({ guid: 'rcs-media-9', mimeType: 'image/jpeg', transferName: 'r.jpg' }),
+            Attachment.parse({
+              guid: 'rcs-media-9',
+              mimeType: 'image/jpeg',
+              transferName: 'r.jpg',
+            }),
           ],
         }),
       ],

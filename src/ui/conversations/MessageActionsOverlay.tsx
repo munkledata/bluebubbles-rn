@@ -25,6 +25,10 @@ export interface SelectedMessage {
   sendState: string;
   /** This message's attachments (for Save-to-device). */
   attachments: { guid: string; localPath: string | null; mimeType: string | null }[];
+  /** Part of a reply thread (is a reply, or has replies) → offers "View Thread". */
+  inThread?: boolean;
+  /** The thread originator's guid when this message is a reply (else it IS the originator). */
+  threadOriginatorGuid?: string | null;
 }
 
 interface MessageActionsOverlayProps {
@@ -44,6 +48,14 @@ interface MessageActionsOverlayProps {
   onForward: () => void;
   /** Save the message's attachment(s) to the device gallery. */
   onSave: () => void;
+  /** Share the message's attachment file or text via the OS share sheet. */
+  onShare: () => void;
+  /** Delete this message from the local device (any delivered/received message). */
+  onDelete: () => void;
+  /** Open the reply-thread sheet (shown only when the message is in a thread). */
+  onViewThread?: () => void;
+  /** Enter multi-select mode seeded with this message. */
+  onSelect?: () => void;
 }
 
 // iMessage allows edit/unsend on your own messages for ~15 minutes.
@@ -65,6 +77,10 @@ export function MessageActionsOverlay({
   onCopy,
   onForward,
   onSave,
+  onShare,
+  onDelete,
+  onViewThread,
+  onSelect,
 }: MessageActionsOverlayProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -95,6 +111,11 @@ export function MessageActionsOverlay({
     selected.isFromMe &&
     !selected.isRetracted &&
     (selected.sendState === 'sending' || selected.sendState === 'error');
+
+  // Any confirmed message (sent, received, or an unsent tombstone) can be removed from the local
+  // device. An optimistic in-flight/errored own message uses Cancel Sending/Remove (canCancel)
+  // instead, so Delete is offered only when that path doesn't apply.
+  const canDelete = !!selected && !canCancel;
 
   const pick = (base: ReactionBaseType): void => {
     // Tapping a type you already applied removes it (toggle).
@@ -220,6 +241,39 @@ export function MessageActionsOverlay({
               <Text style={[styles.actionText, { color: theme.color.tint }]}>Save to Photos</Text>
             </Pressable>
           ) : null}
+          {hasText || hasAttachments ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onShare();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Share…</Text>
+            </Pressable>
+          ) : null}
+          {onViewThread && selected?.inThread ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onViewThread();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>View Thread</Text>
+            </Pressable>
+          ) : null}
+          {onSelect ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onSelect();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Select</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={[styles.action, { borderTopColor: theme.color.separator }]}
             onPress={() => {
@@ -262,6 +316,17 @@ export function MessageActionsOverlay({
               <Text style={[styles.actionText, { color: theme.color.destructive }]}>
                 {selected?.sendState === 'error' ? 'Remove' : 'Cancel Sending'}
               </Text>
+            </Pressable>
+          ) : null}
+          {canDelete ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onDelete();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.destructive }]}>Delete</Text>
             </Pressable>
           ) : null}
         </View>

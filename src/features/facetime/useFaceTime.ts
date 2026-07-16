@@ -102,7 +102,11 @@ export function useFaceTime(): {
       }
       try {
         if (isDevServer()) {
-          open({ link: `https://facetime.apple.com/join#v=1&p=dev&k=${Date.now()}`, chatGuid: '', video });
+          open({
+            link: `https://facetime.apple.com/join#v=1&p=dev&k=${Date.now()}`,
+            chatGuid: '',
+            video,
+          });
           return;
         }
         // Invite the recipient(s) into the link (arrives in their FaceTime), text it as a

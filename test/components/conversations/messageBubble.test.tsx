@@ -15,18 +15,22 @@
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import {
-  renderWithTheme,
-  screen,
-  fireEvent,
-  act,
-} from '../support/renderWithTheme';
-import type { MessageRow, MessagePreview, ReactionRow } from '@db/repositories';
+import { renderWithTheme, screen, fireEvent, act } from '../support/renderWithTheme';
+import type { AttachmentRow, MessageRow, MessagePreview, ReactionRow } from '@db/repositories';
+import { reactionMeta } from '@core/reactions/reactionType';
 
 // AttachmentView pulls in the download/API services (and transitively `ky`, an ESM module the
 // component-project transform doesn't process). These tests render text bubbles only — no
 // attachments — so stub it to a no-op to keep the module graph off the native/ESM services.
-jest.mock('@ui/attachments', () => ({ AttachmentView: () => null }));
+jest.mock('@ui/attachments', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    // Distinguishable markers so the stack-vs-gallery routing is assertable.
+    AttachmentView: () => React.createElement(Text, null, 'ATT'),
+    AttachmentGalleryGrid: () => React.createElement(Text, null, 'GRID'),
+  };
+});
 
 // eslint-disable-next-line import/first
 import { MessageBubble } from '@ui/conversations/MessageBubble';
@@ -92,7 +96,9 @@ describe('MessageBubble text rendering', () => {
   it('renders a confirmed @mention in the accent color and semibold', async () => {
     // "Hi @Alice!" → runs: "Hi " (gap), "@Alice" (mention), "!" (trailing)
     const body = mentionBody('Hi @Alice!', 3, 6);
-    await renderWithTheme(<MessageBubble msg={makeMsg({ text: '', attributedBody: body })} showTail />);
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: '', attributedBody: body })} showTail />,
+    );
 
     const mention = screen.getByText('@Alice');
     const style = StyleSheet.flatten(mention.props.style);
@@ -106,9 +112,74 @@ describe('MessageBubble text rendering', () => {
     // Edited messages keep their body only in attributedBody; the bubble must still show it.
     const body = JSON.stringify([{ string: 'the edited body', runs: [] }]);
     await renderWithTheme(
-      <MessageBubble msg={makeMsg({ text: '', attributedBody: body, dateEdited: 5_000 })} showTail />,
+      <MessageBubble
+        msg={makeMsg({ text: '', attributedBody: body, dateEdited: 5_000 })}
+        showTail
+      />,
     );
     expect(screen.getByText('the edited body')).toBeTruthy();
+  });
+
+  it('renders the Private-API subject line above the body', async () => {
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ subject: 'Important', text: 'read this' })} showTail />,
+    );
+    expect(screen.getByText('Important')).toBeTruthy();
+    expect(screen.getByText('read this')).toBeTruthy();
+  });
+
+  it('renders an emoji-only message enlarged (big emoji, no bubble)', async () => {
+    await renderWithTheme(<MessageBubble msg={makeMsg({ text: '😀😍' })} showTail />);
+    const node = screen.getByText('😀😍');
+    const style = StyleSheet.flatten(node.props.style);
+    expect(style.fontSize).toBeGreaterThan(darkTheme.font.size.body); // ~3× the body size
+  });
+
+  it('collapses an image-only multi-attachment message into the gallery grid', async () => {
+    const msg = {
+      ...makeMsg({ text: '' }),
+      attachments: [
+        { guid: 'g1', mimeType: 'image/jpeg' } as AttachmentRow,
+        { guid: 'g2', mimeType: 'image/png' } as AttachmentRow,
+        { guid: 'g3', mimeType: 'image/heic' } as AttachmentRow,
+      ],
+    };
+    await renderWithTheme(<MessageBubble msg={msg} showTail />);
+    expect(screen.getByText('GRID')).toBeTruthy();
+    expect(screen.queryByText('ATT')).toBeNull(); // grid replaces the stack
+  });
+
+  it('keeps the vertical stack for a mixed image+file message', async () => {
+    const msg = {
+      ...makeMsg({ text: '' }),
+      attachments: [
+        { guid: 'g1', mimeType: 'image/jpeg' } as AttachmentRow,
+        { guid: 'g2', mimeType: 'application/pdf' } as AttachmentRow,
+      ],
+    };
+    await renderWithTheme(<MessageBubble msg={msg} showTail />);
+    expect(screen.queryByText('GRID')).toBeNull();
+    expect(screen.getAllByText('ATT')).toHaveLength(2);
+  });
+
+  it('renders a tapback on an attachment-only message (anchored to the attachment)', async () => {
+    // Regression for "react to a photo shows no badge": the ReactionCluster used to live only in
+    // the text-bubble branch. AttachmentView is mocked to null here, but the cluster sibling must
+    // still render for a reacted, text-less message that has an attachment.
+    const reaction: ReactionRow = {
+      targetGuid: 'msg-1',
+      baseType: 'love',
+      emoji: null,
+      isFromMe: 0,
+      senderName: 'Bob',
+      dateCreated: 1000,
+    };
+    const msg = {
+      ...makeMsg({ text: '', reactions: [reaction] }),
+      attachments: [{ guid: 'a1', mimeType: 'image/jpeg', localPath: '/x.jpg' } as AttachmentRow],
+    };
+    await renderWithTheme(<MessageBubble msg={msg} showTail />);
+    expect(screen.getByText(reactionMeta('love').emoji)).toBeTruthy();
   });
 });
 
@@ -172,9 +243,7 @@ describe('MessageBubble send-error state', () => {
 
   it('does not show the error UI for a received message even if error != 0', async () => {
     // The error affordance is from-me only (isFromMe && isError).
-    await renderWithTheme(
-      <MessageBubble msg={makeMsg({ isFromMe: 0, error: 22 })} showTail />,
-    );
+    await renderWithTheme(<MessageBubble msg={makeMsg({ isFromMe: 0, error: 22 })} showTail />);
     expect(screen.queryByText('!')).toBeNull();
     expect(screen.queryByText('iMessage Error (Code 22)')).toBeNull();
   });
@@ -190,10 +259,7 @@ describe('MessageBubble reply quote passthrough', () => {
       hasAttachments: 0,
     };
     await renderWithTheme(
-      <MessageBubble
-        msg={makeMsg({ threadOriginatorGuid: 'orig', replyPreview })}
-        showTail
-      />,
+      <MessageBubble msg={makeMsg({ threadOriginatorGuid: 'orig', replyPreview })} showTail />,
     );
     expect(screen.getByText('Carol')).toBeTruthy();
     expect(screen.getByText('the original message')).toBeTruthy();
@@ -241,9 +307,7 @@ describe('MessageBubble bubble-effect cleanup on unmount (FlashList recycling)',
 
       // No "state update on an unmounted component" / not-wrapped-in-act warnings from a leaked callback.
       const messages = [...errSpy.mock.calls, ...warnSpy.mock.calls].map((c) => String(c[0] ?? ''));
-      expect(
-        messages.some((m) => /unmounted|not wrapped in act/i.test(m)),
-      ).toBe(false);
+      expect(messages.some((m) => /unmounted|not wrapped in act/i.test(m))).toBe(false);
     } finally {
       errSpy.mockRestore();
       warnSpy.mockRestore();

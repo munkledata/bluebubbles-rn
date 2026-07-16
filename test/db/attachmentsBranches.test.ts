@@ -84,7 +84,12 @@ describe('listChatAttachmentsByKind — bucketing + early break + link dedup', (
       });
     }
     // One link (the newest) — the per-bucket `limit` caps links too.
-    await putMsg(db, chatId, { guid: 'L1', text: 'see https://a.com/x', dateCreated: 200, chats: [{ guid: 'cMedia' }] });
+    await putMsg(db, chatId, {
+      guid: 'L1',
+      text: 'see https://a.com/x',
+      dateCreated: 200,
+      chats: [{ guid: 'cMedia' }],
+    });
 
     const res = await listChatAttachmentsByKind(db, 'cMedia', 1);
     expect(res.photos).toHaveLength(1);
@@ -102,9 +107,24 @@ describe('listChatAttachmentsByKind — bucketing + early break + link dedup', (
     const chatId = await seedChat(db, 'cLinks');
     // Two messages share a URL (dedup → one entry), one distinct URL. A high limit keeps the
     // loop from breaking early so the seen-URL `continue` branch is exercised.
-    await putMsg(db, chatId, { guid: 'L1', text: 'see https://a.com/x', dateCreated: 200, chats: [{ guid: 'cLinks' }] });
-    await putMsg(db, chatId, { guid: 'L2', text: 'also https://a.com/x again', dateCreated: 190, chats: [{ guid: 'cLinks' }] });
-    await putMsg(db, chatId, { guid: 'L3', text: 'new https://b.com/y', dateCreated: 180, chats: [{ guid: 'cLinks' }] });
+    await putMsg(db, chatId, {
+      guid: 'L1',
+      text: 'see https://a.com/x',
+      dateCreated: 200,
+      chats: [{ guid: 'cLinks' }],
+    });
+    await putMsg(db, chatId, {
+      guid: 'L2',
+      text: 'also https://a.com/x again',
+      dateCreated: 190,
+      chats: [{ guid: 'cLinks' }],
+    });
+    await putMsg(db, chatId, {
+      guid: 'L3',
+      text: 'new https://b.com/y',
+      dateCreated: 180,
+      chats: [{ guid: 'cLinks' }],
+    });
     const res = await listChatAttachmentsByKind(db, 'cLinks', 5);
     expect(res.links.map((l) => l.url)).toEqual(['https://a.com/x', 'https://b.com/y']);
     expect(res.links[0]!.messageGuid).toBe('L1'); // most-recent occurrence of the deduped URL
@@ -127,13 +147,17 @@ describe('upsertAttachments — temp→real reconcile DELETE branch', () => {
       totalBytes: 10,
       now: 1,
     });
-    const messageId = (raw.prepare('SELECT id FROM messages WHERE guid = ?').get('temp-m') as { id: number }).id;
+    const messageId = (
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('temp-m') as { id: number }
+    ).id;
     // The REAL attachment already exists on the same message (raw-insert so this doesn't itself reconcile).
     raw
       .prepare('INSERT INTO attachments (guid, message_id, mime_type) VALUES (?, ?, ?)')
       .run('real-att', messageId, 'image/jpeg');
     // Now the echo upsert arrives for the real att → temp found + real exists → DELETE temp branch.
-    await upsertAttachments(db, [{ att: Attachment.parse({ guid: 'real-att', mimeType: 'image/jpeg' }), messageId }]);
+    await upsertAttachments(db, [
+      { att: Attachment.parse({ guid: 'real-att', mimeType: 'image/jpeg' }), messageId },
+    ]);
 
     const atts = (await listAttachmentsByMessageIds(db, [messageId])).get(messageId)!;
     expect(atts.map((a) => a.guid)).toEqual(['real-att']); // temp-m-att deleted, no duplicate
@@ -175,7 +199,9 @@ describe('promoteAttachmentGuid — dup vs update branches', () => {
       totalBytes: 10,
       now: 1,
     });
-    const messageId = (raw.prepare('SELECT id FROM messages WHERE guid = ?').get('temp-d') as { id: number }).id;
+    const messageId = (
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('temp-d') as { id: number }
+    ).id;
     raw
       .prepare('INSERT INTO attachments (guid, message_id, mime_type) VALUES (?, ?, ?)')
       .run('server-d', messageId, 'image/jpeg');

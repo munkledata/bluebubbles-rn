@@ -24,7 +24,10 @@
  */
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
-import { MessageActionsOverlay, type SelectedMessage } from '@ui/conversations/MessageActionsOverlay';
+import {
+  MessageActionsOverlay,
+  type SelectedMessage,
+} from '@ui/conversations/MessageActionsOverlay';
 import type { ReactionBaseType } from '@core/reactions/reactionType';
 
 // Zero insets so useSafeAreaInsets() resolves without a SafeAreaProvider.
@@ -45,6 +48,10 @@ function handlers() {
     onCopy: jest.fn(),
     onForward: jest.fn(),
     onSave: jest.fn(),
+    onShare: jest.fn(),
+    onDelete: jest.fn(),
+    onViewThread: jest.fn(),
+    onSelect: jest.fn(),
   };
 }
 
@@ -128,6 +135,20 @@ describe('MessageActionsOverlay — always-present actions', () => {
       expect(h.onClose).toHaveBeenCalledTimes(1);
     });
   });
+
+  it('Delete fires onDelete + onClose for a delivered message', async () => {
+    const h = await renderOverlay(makeSelected());
+    await pressAndFlush(screen.getByText('Delete'), () => {
+      expect(h.onDelete).toHaveBeenCalledTimes(1);
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('hides Delete on an optimistic in-flight own message (Cancel Sending is offered instead)', async () => {
+    await renderOverlay(makeSelected({ isFromMe: true, sendState: 'sending' }));
+    expect(screen.queryByText('Delete')).toBeNull();
+    expect(screen.getByText('Cancel Sending')).toBeTruthy();
+  });
 });
 
 describe('MessageActionsOverlay — text-gated actions (Copy / Forward)', () => {
@@ -149,7 +170,10 @@ describe('MessageActionsOverlay — text-gated actions (Copy / Forward)', () => 
 
   it('hides Copy + Forward when text is null (attachment-only message)', async () => {
     await renderOverlay(
-      makeSelected({ text: null, attachments: [{ guid: 'a1', localPath: null, mimeType: 'image/jpeg' }] }),
+      makeSelected({
+        text: null,
+        attachments: [{ guid: 'a1', localPath: null, mimeType: 'image/jpeg' }],
+      }),
     );
     expect(screen.queryByText('Copy')).toBeNull();
     expect(screen.queryByText('Forward')).toBeNull();
@@ -173,9 +197,63 @@ describe('MessageActionsOverlay — Save to Photos (attachment-gated)', () => {
   });
 });
 
+describe('MessageActionsOverlay — View Thread + Select', () => {
+  it('shows View Thread only for a message in a thread, and fires onViewThread', async () => {
+    const h = await renderOverlay(makeSelected({ inThread: true }));
+    await pressAndFlush(screen.getByText('View Thread'), () => {
+      expect(h.onViewThread).toHaveBeenCalledTimes(1);
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('hides View Thread for a message with no thread', async () => {
+    await renderOverlay(makeSelected({ inThread: false }));
+    expect(screen.queryByText('View Thread')).toBeNull();
+  });
+
+  it('Select fires onSelect + onClose (multi-select entry)', async () => {
+    const h = await renderOverlay(makeSelected());
+    await pressAndFlush(screen.getByText('Select'), () => {
+      expect(h.onSelect).toHaveBeenCalledTimes(1);
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('MessageActionsOverlay — Share', () => {
+  it('shows Share and fires onShare for a message with text', async () => {
+    const h = await renderOverlay(makeSelected({ text: 'hi there' }));
+    await pressAndFlush(screen.getByText('Share…'), () => {
+      expect(h.onShare).toHaveBeenCalledTimes(1);
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows Share for an attachment-only message (no text)', async () => {
+    await renderOverlay(
+      makeSelected({
+        text: null,
+        attachments: [{ guid: 'a1', localPath: '/x.jpg', mimeType: 'image/jpeg' }],
+      }),
+    );
+    expect(screen.getByText('Share…')).toBeTruthy();
+  });
+
+  it('hides Share when the message has neither text nor attachments', async () => {
+    await renderOverlay(makeSelected({ text: null, attachments: [] }));
+    expect(screen.queryByText('Share…')).toBeNull();
+  });
+});
+
 describe('MessageActionsOverlay — Edit / Unsend (own recent message)', () => {
   const ownRecent = (o: Partial<SelectedMessage> = {}) =>
-    makeSelected({ isFromMe: true, isTemp: false, isRetracted: false, dateCreated: Date.now(), ...o });
+    makeSelected({
+      isFromMe: true,
+      isTemp: false,
+      isRetracted: false,
+      dateCreated: Date.now(),
+      ...o,
+    });
 
   it('shows Edit + Unsend for an own recent iMessage with text and fires the callbacks', async () => {
     const h = await renderOverlay(ownRecent({ text: 'edit me' }));
@@ -188,7 +266,10 @@ describe('MessageActionsOverlay — Edit / Unsend (own recent message)', () => {
 
   it('hides Edit (no text) but still shows Unsend for an own recent attachment-only message', async () => {
     await renderOverlay(
-      ownRecent({ text: null, attachments: [{ guid: 'a1', localPath: '/x.jpg', mimeType: 'image/jpeg' }] }),
+      ownRecent({
+        text: null,
+        attachments: [{ guid: 'a1', localPath: '/x.jpg', mimeType: 'image/jpeg' }],
+      }),
     );
     expect(screen.queryByText('Edit')).toBeNull();
     expect(screen.getByText('Unsend')).toBeTruthy();
