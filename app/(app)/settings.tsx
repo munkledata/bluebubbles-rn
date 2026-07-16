@@ -1,23 +1,34 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
 import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
+import { requestDisableBatteryOptimization } from '@/services/battery';
 import { syncContacts } from '@/services/contacts/contactsService';
 import {
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
-  useDownloadSettingsStore,
-} from '@state/downloadSettingsStore';
-import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+  useFeatureSettingsStore,
+} from '@state/featureSettingsStore';
 import { MESSAGES_PER_CHAT_OPTIONS, useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
 import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useThemeStore } from '@state/themeStore';
-import { Screen, useTheme } from '@ui';
+import {
+  CheckRow,
+  InfoRow,
+  NavRow,
+  NoteRow,
+  Screen,
+  ScreenHeader,
+  SettingsSection,
+  StepperRow,
+  SwitchRow,
+  useTheme,
+} from '@ui';
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
 
 /** Settings: theme presets + contacts sync (more sections land in later phases). */
@@ -32,16 +43,18 @@ export default function SettingsScreen(): React.JSX.Element {
   const appLock = useLockStore((s) => s.enabled);
   const redacted = useRedactedModeStore((s) => s.enabled);
   const setRedacted = useRedactedModeStore((s) => s.setEnabled);
-  const maxDownloads = useDownloadSettingsStore((s) => s.maxConcurrent);
-  const setMaxDownloads = useDownloadSettingsStore((s) => s.setMaxConcurrent);
+  const maxDownloads = useFeatureSettingsStore((s) => s.maxConcurrentDownloads);
+  const setMaxDownloads = useFeatureSettingsStore((s) => s.setMaxConcurrentDownloads);
   const privateApiEnabled = useFeatureSettingsStore((s) => s.privateApiEnabled);
   const sendTypingIndicators = useFeatureSettingsStore((s) => s.sendTypingIndicators);
   const sendReadReceipts = useFeatureSettingsStore((s) => s.sendReadReceipts);
+  const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
   const showDeliveryTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
+  const filterUnknownSenders = useFeatureSettingsStore((s) => s.filterUnknownSenders);
   const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
   const messagesPerChat = useSyncSettingsStore((s) => s.messagesPerChat);
@@ -58,15 +71,18 @@ export default function SettingsScreen(): React.JSX.Element {
     theme: 'theme appearance oled dark gator custom presets colors',
     contacts: 'contacts sync names photos address book',
     general: 'general suggested smart replies app lock biometric reminders backup find my location',
-    messaging: 'messaging private api typing indicators read receipts',
+    messaging: 'messaging private api typing indicators read receipts subject lines',
     conversation: 'conversation message view send with return enter delivery timestamps',
-    chatlist: 'chat list conversations compact dense appearance',
-    notifications: 'notifications alerts message notifications sound',
-    downloads: 'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
+    chatlist: 'chat list conversations compact dense appearance unknown senders filter spam',
+    notifications:
+      'notifications alerts message notifications sound battery optimization background doze delivery reliable',
+    downloads:
+      'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
     sync: 'sync messages per chat initial history',
     privacy: 'privacy redacted mode hide previews encryption key rotate security',
-    server: 'server management restart logs statistics health diagnostics private api find my keys push uptime alerts',
-    about: 'about server version macos private api disconnect forget',
+    server:
+      'server management restart logs statistics health diagnostics private api find my keys push uptime alerts account alias apple id imessage start chats using',
+    about: 'about server version macos private api disconnect forget app logs debug diagnostics',
   } as const;
   const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
   const anyMatch = Object.values(SECTIONS).some(match);
@@ -126,18 +142,7 @@ export default function SettingsScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + 8, borderBottomColor: theme.color.separator },
-        ]}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text style={[styles.back, { color: theme.color.tint }]}>‹ Back</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.color.label }]}>Settings</Text>
-        <View style={styles.spacer} />
-      </View>
+      <ScreenHeader title="Settings" onBack={() => router.back()} />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
@@ -159,535 +164,239 @@ export default function SettingsScreen(): React.JSX.Element {
 
         {match(SECTIONS.theme) && (
           <>
-            <Text style={[styles.sectionLabel, { color: theme.color.secondaryLabel }]}>THEME</Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              {PRESET_ORDER.map((key, i) => (
-                <Pressable
+            <SettingsSection label="THEME">
+              {PRESET_ORDER.map((key) => (
+                <CheckRow
                   key={key}
+                  label={PRESETS[key].label}
+                  checked={preset === key}
                   onPress={() => void setPreset(key)}
-                  style={[
-                    styles.row,
-                    i > 0 && {
-                      borderTopColor: theme.color.separator,
-                      borderTopWidth: StyleSheet.hairlineWidth,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                    {PRESETS[key].label}
-                  </Text>
-                  {preset === key ? (
-                    <Text style={[styles.check, { color: theme.color.tint }]}>✓</Text>
-                  ) : null}
-                </Pressable>
+                />
               ))}
-            </View>
-            <View
-              style={[
-                styles.group,
-                { backgroundColor: theme.color.secondaryBackground, marginTop: 8 },
-              ]}
-            >
-              <Pressable onPress={() => router.push('/themes')} style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Custom Themes…</Text>
-                <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
-              </Pressable>
-            </View>
+            </SettingsSection>
+            <SettingsSection style={styles.subGroup}>
+              <NavRow label="Custom Themes…" onPress={() => router.push('/themes')} />
+            </SettingsSection>
           </>
         )}
 
         {match(SECTIONS.contacts) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              CONTACTS
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <Pressable
-                onPress={() => void onSyncContacts()}
-                disabled={syncing}
-                style={styles.row}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
-                  {syncing ? 'Syncing…' : 'Sync Contacts'}
-                </Text>
-              </Pressable>
-            </View>
-          </>
+          <SettingsSection label="CONTACTS" style={styles.gap}>
+            <NavRow
+              label={syncing ? 'Syncing…' : 'Sync Contacts'}
+              onPress={() => void onSyncContacts()}
+              disabled={syncing}
+              chevron={false}
+            />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.general) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              GENERAL
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Suggested Replies</Text>
-                <Switch
-                  value={smartReplies}
-                  onValueChange={(v) => void setSmartReplies(v)}
-                  accessibilityLabel="Toggle suggested replies"
-                />
-              </View>
-              <View
-                style={[
-                  styles.row,
-                  {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>App Lock</Text>
-                <Switch
-                  value={appLock}
-                  onValueChange={(v) => void onToggleAppLock(v)}
-                  accessibilityLabel="Require biometric unlock to open the app"
-                />
-              </View>
-              <Pressable
-                onPress={() => router.push('/reminders')}
-                style={[
-                  styles.row,
-                  {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Reminders</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push('/backup')}
-                style={[
-                  styles.row,
-                  {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Backup</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push('/findmy')}
-                style={[
-                  styles.row,
-                  {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Find My</Text>
-              </Pressable>
-            </View>
-          </>
+          <SettingsSection label="GENERAL" style={styles.gap}>
+            <SwitchRow
+              label="Suggested Replies"
+              value={smartReplies}
+              onValueChange={(v) => void setSmartReplies(v)}
+              accessibilityLabel="Toggle suggested replies"
+            />
+            <SwitchRow
+              label="App Lock"
+              value={appLock}
+              onValueChange={(v) => void onToggleAppLock(v)}
+              accessibilityLabel="Require biometric unlock to open the app"
+            />
+            <NavRow
+              label="Reminders"
+              color="label"
+              chevron={false}
+              onPress={() => router.push('/reminders')}
+            />
+            <NavRow
+              label="Backup"
+              color="label"
+              chevron={false}
+              onPress={() => router.push('/backup')}
+            />
+            <NavRow
+              label="Find My"
+              color="label"
+              chevron={false}
+              onPress={() => router.push('/findmy')}
+            />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.messaging) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              MESSAGING
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Enable Private API Features
-                </Text>
-                <Switch
-                  value={privateApiEnabled}
-                  onValueChange={(v) => void setFlag('privateApiEnabled', v)}
-                  accessibilityLabel="Enable typing indicators, read receipts, and other Private API features"
-                />
-              </View>
-              <View
-                style={[
-                  styles.row,
-                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.rowLabel,
-                    { color: privateApiEnabled ? theme.color.label : theme.color.tertiaryLabel },
-                  ]}
-                >
-                  Send Typing Indicators
-                </Text>
-                <Switch
-                  value={sendTypingIndicators}
-                  disabled={!privateApiEnabled}
-                  onValueChange={(v) => void setFlag('sendTypingIndicators', v)}
-                  accessibilityLabel="Let others see when you are typing"
-                />
-              </View>
-              <View
-                style={[
-                  styles.row,
-                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.rowLabel,
-                    { color: privateApiEnabled ? theme.color.label : theme.color.tertiaryLabel },
-                  ]}
-                >
-                  Send Read Receipts
-                </Text>
-                <Switch
-                  value={sendReadReceipts}
-                  disabled={!privateApiEnabled}
-                  onValueChange={(v) => void setFlag('sendReadReceipts', v)}
-                  accessibilityLabel="Let others see when you have read their messages"
-                />
-              </View>
-            </View>
-          </>
+          <SettingsSection label="MESSAGING" style={styles.gap}>
+            <SwitchRow
+              label="Enable Private API Features"
+              value={privateApiEnabled}
+              onValueChange={(v) => void setFlag('privateApiEnabled', v)}
+              accessibilityLabel="Enable typing indicators, read receipts, and other Private API features"
+            />
+            <SwitchRow
+              label="Send Typing Indicators"
+              value={sendTypingIndicators}
+              disabled={!privateApiEnabled}
+              onValueChange={(v) => void setFlag('sendTypingIndicators', v)}
+              accessibilityLabel="Let others see when you are typing"
+            />
+            <SwitchRow
+              label="Send Read Receipts"
+              value={sendReadReceipts}
+              disabled={!privateApiEnabled}
+              onValueChange={(v) => void setFlag('sendReadReceipts', v)}
+              accessibilityLabel="Let others see when you have read their messages"
+            />
+            <SwitchRow
+              label="Send Subject Lines"
+              value={sendSubjectLines}
+              disabled={!privateApiEnabled}
+              onValueChange={(v) => void setFlag('sendSubjectLines', v)}
+              accessibilityLabel="Show a subject-line field above the message composer"
+            />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.conversation) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              CONVERSATION
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Send with Return Key
-                </Text>
-                <Switch
-                  value={sendWithReturn}
-                  onValueChange={(v) => void setFlag('sendWithReturn', v)}
-                  accessibilityLabel="Pressing return sends the message instead of adding a new line"
-                />
-              </View>
-              <View
-                style={[
-                  styles.row,
-                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Show Delivery Timestamps
-                </Text>
-                <Switch
-                  value={showDeliveryTimestamps}
-                  onValueChange={(v) => void setFlag('showDeliveryTimestamps', v)}
-                  accessibilityLabel="Show Sent / Delivered / Read status under messages"
-                />
-              </View>
-            </View>
-          </>
+          <SettingsSection label="CONVERSATION" style={styles.gap}>
+            <SwitchRow
+              label="Send with Return Key"
+              value={sendWithReturn}
+              onValueChange={(v) => void setFlag('sendWithReturn', v)}
+              accessibilityLabel="Pressing return sends the message instead of adding a new line"
+            />
+            <SwitchRow
+              label="Show Delivery Timestamps"
+              value={showDeliveryTimestamps}
+              onValueChange={(v) => void setFlag('showDeliveryTimestamps', v)}
+              accessibilityLabel="Show Sent / Delivered / Read status under messages"
+            />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.chatlist) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              CHAT LIST
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Compact Conversation List
-                </Text>
-                <Switch
-                  value={compactChatList}
-                  onValueChange={(v) => void setFlag('compactChatList', v)}
-                  accessibilityLabel="Use denser conversation tiles"
-                />
-              </View>
-            </View>
-          </>
+          <SettingsSection label="CHAT LIST" style={styles.gap}>
+            <SwitchRow
+              label="Compact Conversation List"
+              value={compactChatList}
+              onValueChange={(v) => void setFlag('compactChatList', v)}
+              accessibilityLabel="Use denser conversation tiles"
+            />
+            <SwitchRow
+              label="Filter Unknown Senders"
+              value={filterUnknownSenders}
+              onValueChange={(v) => void setFlag('filterUnknownSenders', v)}
+              accessibilityLabel="Move chats from non-contacts to a separate list and silence their notifications"
+            />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.notifications) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              NOTIFICATIONS
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Message Notifications
-                </Text>
-                <Switch
-                  value={messageNotifications}
-                  onValueChange={(v) => void setFlag('messageNotifications', v)}
-                  accessibilityLabel="Show notifications for new messages"
-                />
-              </View>
-            </View>
-          </>
+          <SettingsSection label="NOTIFICATIONS" style={styles.gap}>
+            <SwitchRow
+              label="Message Notifications"
+              value={messageNotifications}
+              onValueChange={(v) => void setFlag('messageNotifications', v)}
+              accessibilityLabel="Show notifications for new messages"
+            />
+            {/* Android reliability: exempting the app from battery optimization (Doze) keeps
+                background FCM/notification delivery from being killed. Opens the OS dialog. */}
+            {Platform.OS === 'android' ? (
+              <NavRow
+                label="Disable Battery Optimization…"
+                onPress={() => void requestDisableBatteryOptimization()}
+                accessibilityLabel="Disable battery optimization for reliable notifications"
+              />
+            ) : null}
+          </SettingsSection>
         )}
 
         {match(SECTIONS.downloads) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              DOWNLOADS
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Auto-download Attachments
-                </Text>
-                <Switch
-                  value={autoDownload}
-                  onValueChange={(v) => void setFlag('autoDownloadAttachments', v)}
-                  accessibilityLabel="Automatically download incoming attachments"
-                />
-              </View>
-              <View
-                style={[
-                  styles.row,
-                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.rowLabel,
-                    { color: autoDownload ? theme.color.label : theme.color.tertiaryLabel },
-                  ]}
-                >
-                  Only on Wi-Fi
-                </Text>
-                <Switch
-                  value={autoDownloadWifiOnly}
-                  disabled={!autoDownload}
-                  onValueChange={(v) => void setFlag('autoDownloadOnWifiOnly', v)}
-                  accessibilityLabel="Only auto-download attachments on Wi-Fi"
-                />
-              </View>
-              <View
-                style={[
-                  styles.row,
-                  { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Parallel Downloads
-                </Text>
-                <View style={styles.stepper}>
-                  <Pressable
-                    onPress={() => void setMaxDownloads(maxDownloads - 1)}
-                    disabled={maxDownloads <= 1}
-                    hitSlop={8}
-                    accessibilityLabel="Fewer parallel downloads"
-                  >
-                    <Text
-                      style={[
-                        styles.stepBtn,
-                        {
-                          color:
-                            maxDownloads <= 1 ? theme.color.tertiaryLabel : theme.color.tint,
-                        },
-                      ]}
-                    >
-                      −
-                    </Text>
-                  </Pressable>
-                  <Text style={[styles.stepValue, { color: theme.color.label }]}>
-                    {maxDownloads}
-                  </Text>
-                  <Pressable
-                    onPress={() => void setMaxDownloads(maxDownloads + 1)}
-                    disabled={maxDownloads >= MAX_CONCURRENT_DOWNLOADS_LIMIT}
-                    hitSlop={8}
-                    accessibilityLabel="More parallel downloads"
-                  >
-                    <Text
-                      style={[
-                        styles.stepBtn,
-                        {
-                          color:
-                            maxDownloads >= MAX_CONCURRENT_DOWNLOADS_LIMIT
-                              ? theme.color.tertiaryLabel
-                              : theme.color.tint,
-                        },
-                      ]}
-                    >
-                      +
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          </>
+          <SettingsSection label="DOWNLOADS" style={styles.gap}>
+            <SwitchRow
+              label="Auto-download Attachments"
+              value={autoDownload}
+              onValueChange={(v) => void setFlag('autoDownloadAttachments', v)}
+              accessibilityLabel="Automatically download incoming attachments"
+            />
+            <SwitchRow
+              label="Only on Wi-Fi"
+              value={autoDownloadWifiOnly}
+              disabled={!autoDownload}
+              onValueChange={(v) => void setFlag('autoDownloadOnWifiOnly', v)}
+              accessibilityLabel="Only auto-download attachments on Wi-Fi"
+            />
+            <StepperRow
+              label="Parallel Downloads"
+              value={maxDownloads}
+              onDecrement={() => void setMaxDownloads(maxDownloads - 1)}
+              onIncrement={() => void setMaxDownloads(maxDownloads + 1)}
+              canDecrement={maxDownloads > 1}
+              canIncrement={maxDownloads < MAX_CONCURRENT_DOWNLOADS_LIMIT}
+              decrementLabel="Fewer parallel downloads"
+              incrementLabel="More parallel downloads"
+            />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.sync) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              SYNC
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>
-                  Messages per Chat
-                </Text>
-                <View style={styles.stepper}>
-                  <Pressable
-                    onPress={() => void setMessagesPerChat(mpcOptions[mpcIndex - 1] ?? 0)}
-                    disabled={mpcIndex <= 0}
-                    hitSlop={8}
-                    accessibilityLabel="Fewer messages per chat"
-                  >
-                    <Text
-                      style={[
-                        styles.stepBtn,
-                        { color: mpcIndex <= 0 ? theme.color.tertiaryLabel : theme.color.tint },
-                      ]}
-                    >
-                      −
-                    </Text>
-                  </Pressable>
-                  <Text style={[styles.stepValue, { color: theme.color.label }]}>
-                    {messagesPerChat === 0 ? 'All' : messagesPerChat}
-                  </Text>
-                  <Pressable
-                    onPress={() =>
-                      void setMessagesPerChat(mpcOptions[mpcIndex + 1] ?? messagesPerChat)
-                    }
-                    disabled={mpcIndex >= mpcOptions.length - 1}
-                    hitSlop={8}
-                    accessibilityLabel="More messages per chat"
-                  >
-                    <Text
-                      style={[
-                        styles.stepBtn,
-                        {
-                          color:
-                            mpcIndex >= mpcOptions.length - 1
-                              ? theme.color.tertiaryLabel
-                              : theme.color.tint,
-                        },
-                      ]}
-                    >
-                      +
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-              <View style={[styles.row, { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth }]}>
-                <Text style={{ color: theme.color.tertiaryLabel, fontSize: 13, flex: 1 }}>
-                  Caps the initial sync per chat (full history still loads when you open a chat).
-                </Text>
-              </View>
-            </View>
-          </>
+          <SettingsSection label="SYNC" style={styles.gap}>
+            <StepperRow
+              label="Messages per Chat"
+              value={messagesPerChat === 0 ? 'All' : messagesPerChat}
+              onDecrement={() => void setMessagesPerChat(mpcOptions[mpcIndex - 1] ?? 0)}
+              onIncrement={() =>
+                void setMessagesPerChat(mpcOptions[mpcIndex + 1] ?? messagesPerChat)
+              }
+              canDecrement={mpcIndex > 0}
+              canIncrement={mpcIndex < mpcOptions.length - 1}
+              decrementLabel="Fewer messages per chat"
+              incrementLabel="More messages per chat"
+            />
+            <NoteRow text="Caps the initial sync per chat (full history still loads when you open a chat)." />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.privacy) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              PRIVACY
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <View style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Redacted Mode</Text>
-                <Switch
-                  value={redacted}
-                  onValueChange={(v) => {
-                    void setRedacted(v);
-                  }}
-                  accessibilityLabel="Hide message previews, names, and notification contents"
-                />
-              </View>
-              <Pressable
-                onPress={onRotateKey}
-                style={[
-                  styles.row,
-                  {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
-                  Rotate encryption key…
-                </Text>
-              </Pressable>
-            </View>
-          </>
+          <SettingsSection label="PRIVACY" style={styles.gap}>
+            <SwitchRow
+              label="Redacted Mode"
+              value={redacted}
+              onValueChange={(v) => void setRedacted(v)}
+              accessibilityLabel="Hide message previews, names, and notification contents"
+            />
+            <NavRow label="Rotate encryption key…" chevron={false} onPress={onRotateKey} />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.server) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              SERVER
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <Pressable onPress={() => router.push('/server-management')} style={styles.row}>
-                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>
-                  Server Management…
-                </Text>
-                <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push('/server-health')}
-                style={[styles.row, { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth }]}
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.tint }]}>Server Health…</Text>
-                <Text style={[styles.check, { color: theme.color.tertiaryLabel }]}>›</Text>
-              </Pressable>
-            </View>
-          </>
+          <SettingsSection label="SERVER" style={styles.gap}>
+            <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
+            <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
+            <NavRow label="Server Health…" onPress={() => router.push('/server-health')} />
+          </SettingsSection>
         )}
 
         {match(SECTIONS.about) && (
-          <>
-            <Text
-              style={[styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }]}
-            >
-              ABOUT
-            </Text>
-            <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-              <InfoRow label="Server" value={origin ?? '—'} theme={theme} />
-              <InfoRow label="Version" value={serverInfo?.server_version ?? '—'} theme={theme} top />
-              <InfoRow label="macOS" value={serverInfo?.os_version ?? '—'} theme={theme} top />
-              <InfoRow
-                label="Private API"
-                value={serverInfo?.private_api ? 'Enabled' : 'Disabled'}
-                theme={theme}
-                top
-              />
-              <Pressable
-                onPress={onDisconnect}
-                style={[
-                  styles.row,
-                  {
-                    borderTopColor: theme.color.separator,
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Disconnect from server"
-              >
-                <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>Disconnect</Text>
-              </Pressable>
-            </View>
-          </>
+          <SettingsSection label="ABOUT" style={styles.gap}>
+            <InfoRow label="Server" value={origin ?? '—'} />
+            <InfoRow label="Version" value={serverInfo?.server_version ?? '—'} />
+            <InfoRow label="macOS" value={serverInfo?.os_version ?? '—'} />
+            <InfoRow label="Private API" value={serverInfo?.private_api ? 'Enabled' : 'Disabled'} />
+            <NavRow
+              label="App Logs…"
+              onPress={() => router.push('/logs')}
+              accessibilityLabel="View app logs"
+            />
+            <NavRow
+              label="Disconnect"
+              color="destructive"
+              chevron={false}
+              onPress={onDisconnect}
+              accessibilityLabel="Disconnect from server"
+            />
+          </SettingsSection>
         )}
 
         {q.length > 0 && !anyMatch && (
@@ -700,45 +409,7 @@ export default function SettingsScreen(): React.JSX.Element {
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  theme,
-  top,
-}: {
-  label: string;
-  value: string;
-  theme: ReturnType<typeof useTheme>;
-  top?: boolean;
-}): React.JSX.Element {
-  return (
-    <View
-      style={[
-        styles.row,
-        top
-          ? { borderTopColor: theme.color.separator, borderTopWidth: StyleSheet.hairlineWidth }
-          : null,
-      ]}
-    >
-      <Text style={[styles.rowLabel, { color: theme.color.label }]}>{label}</Text>
-      <Text numberOfLines={1} style={[styles.infoValue, { color: theme.color.secondaryLabel }]}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontSize: 17, width: 70 },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
-  spacer: { width: 70 },
   content: { padding: 16 },
   search: {
     borderRadius: 10,
@@ -748,19 +419,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noResults: { fontSize: 15, textAlign: 'center', marginTop: 32 },
-  sectionLabel: { fontSize: 13, marginBottom: 6, marginLeft: 12 },
-  group: { borderRadius: 12, overflow: 'hidden' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  rowLabel: { fontSize: 16 },
-  infoValue: { fontSize: 15, flexShrink: 1, marginLeft: 16, textAlign: 'right' },
-  check: { fontSize: 16, fontWeight: '700' },
-  stepper: { flexDirection: 'row', alignItems: 'center' },
-  stepBtn: { fontSize: 24, fontWeight: '500', width: 32, textAlign: 'center' },
-  stepValue: { fontSize: 16, fontWeight: '600', minWidth: 24, textAlign: 'center' },
+  gap: { marginTop: 24 },
+  subGroup: { marginTop: 8 },
 });
