@@ -45,6 +45,7 @@ export async function listReactionsByMessageGuids(
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.associated_message_guid IN (${inList})
       AND m.associated_message_type IS NOT NULL
+      AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, m.id ASC
   `);
 

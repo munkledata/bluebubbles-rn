@@ -310,6 +310,17 @@ describe('ImageAttachment — Genmoji inline rendering + alt text', () => {
     expect(screen.getByLabelText('a smiling cat wearing a top hat')).toBeTruthy();
   });
 
+  it('a Genmoji INSIDE a gallery grid fills the cell (cellSize wins over the emoji size)', async () => {
+    // A Genmoji that lands in a multi-attachment grid must size to its square cell, not shrink to
+    // inline emoji size — otherwise it breaks the grid layout.
+    await renderWithTheme(
+      <ImageAttachment att={genmoji()} isFromMe={false} showTail={false} cellSize={100} />,
+    );
+    const wrap = wrapStyle();
+    expect(wrap.width).toBe(100);
+    expect(wrap.height).toBe(100); // the full cell, NOT the small genmojiSize square
+  });
+
   it('an ordinary image gets NO Genmoji alt label and keeps the file-box tint (not transparent)', async () => {
     useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
     await renderWithTheme(

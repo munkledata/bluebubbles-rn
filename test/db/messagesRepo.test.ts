@@ -336,41 +336,62 @@ describe('conversation-view repositories', () => {
     expect(tier('q1').n).toBe(0); // explicit false IS applied
   });
 
-  // Apple "Send Later": the server emits isScheduled=true only while a row is PENDING and omits it
-  // once it sends. Persist it (so a synced pending row can be badged), and — unlike the delivery
-  // tiers — PLAIN-overwrite on conflict so the flagless "sent" re-upsert clears the badge.
-  it('persists isScheduled and clears it (plain overwrite) when a later event omits it (sent)', async () => {
+  // Apple "Send Later": the server emits isScheduled=true for ANY schedule_type=2 row — pending AND
+  // after it sends (it's gated on schedule_type, NOT is_sent) — so isScheduled does NOT clear on
+  // send. What flips is is_sent (0 → 1). Persist both; plain-overwrite on conflict so the send
+  // propagates. The "Scheduled" badge is gated on `isScheduled && is_sent != 1` (see MessageBubble),
+  // so a delivered Send-Later message stops badging because is_sent became 1 — not because
+  // isScheduled cleared.
+  it('persists isScheduled + isSent and flips isSent 0→1 on send (plain overwrite)', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);
-    const sched = (guid: string): number | null =>
-      (
-        raw.prepare('SELECT is_scheduled FROM messages WHERE guid = ?').get(guid) as {
-          is_scheduled: number | null;
-        }
-      ).is_scheduled;
+    const flags = (guid: string): { s: number | null; sent: number | null } =>
+      raw.prepare('SELECT is_scheduled s, is_sent sent FROM messages WHERE guid = ?').get(guid) as {
+        s: number | null;
+        sent: number | null;
+      };
 
-    // A pending Send-Later row (server sends isScheduled: true) → stored as 1 and read back.
+    // A PENDING Send-Later row: the server sends isScheduled:true + isSent:false.
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'sch1', text: 'later', isFromMe: true, dateCreated: 4_000, isScheduled: true })],
+      [
+        Message.parse({
+          guid: 'sch1',
+          text: 'later',
+          isFromMe: true,
+          dateCreated: 4_000,
+          isScheduled: true,
+          isSent: false,
+        }),
+      ],
       () => chatId,
       new Map(),
     );
-    expect(sched('sch1')).toBe(1);
-    const row = (await listMessagesWithSenders(db, chatId)).find((r) => r.guid === 'sch1')!;
-    expect(row.isScheduled).toBe(1);
+    expect(flags('sch1')).toEqual({ s: 1, sent: 0 });
+    const pending = (await listMessagesWithSenders(db, chatId)).find((r) => r.guid === 'sch1')!;
+    expect(pending.isScheduled).toBe(1);
+    expect(pending.isSent).toBe(0); // pending → the bubble badges it
 
-    // The message SENDS: the server stops emitting isScheduled (presence-driven), so the flagless
-    // re-upsert plain-overwrites is_scheduled to NULL — clearing the "Scheduled" badge.
+    // The message SENDS: the server STILL emits isScheduled:true (schedule_type unchanged) but now
+    // isSent:true. Plain-overwrite flips is_sent 0→1; is_scheduled stays 1. The badge hides on isSent.
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'sch1', text: 'later', isFromMe: true, dateCreated: 4_000 })],
+      [
+        Message.parse({
+          guid: 'sch1',
+          text: 'later',
+          isFromMe: true,
+          dateCreated: 4_000,
+          isScheduled: true,
+          isSent: true,
+        }),
+      ],
       () => chatId,
       new Map(),
     );
-    expect(sched('sch1')).toBeNull();
+    expect(flags('sch1')).toEqual({ s: 1, sent: 1 });
 
-    // A never-scheduled message stores NULL (never badged).
+    // A never-scheduled message stores is_scheduled NULL (never badged).
     await upsertMessages(
       db,
       [
@@ -384,7 +405,7 @@ describe('conversation-view repositories', () => {
       () => chatId,
       new Map(),
     );
-    expect(sched('sch2')).toBeNull();
+    expect(flags('sch2').s).toBeNull();
   });
 });
 

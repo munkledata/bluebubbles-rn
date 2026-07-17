@@ -98,11 +98,14 @@ export const MessageBubble = React.memo(function MessageBubble({
   const hasText = bodyText.trim().length > 0;
   const isRetracted = !!msg.dateRetracted;
   const isEdited = !isRetracted && !!msg.dateEdited;
-  // Apple "Send Later": a small "Scheduled" badge under the bubble while the row is pending-unsent.
-  // Presence of the flag is the whole gate — the server clears it (and the upsert clears the column)
-  // the instant the message sends. The retracted tombstone returns early below, so a retracted row
-  // never reaches the badge; scheduled rows are always from-me, so no defer/avatar interaction.
-  const isScheduled = !!msg.isScheduled;
+  // Apple "Send Later": a small "Scheduled" badge under the bubble ONLY while the row is pending
+  // (not yet sent). The server keeps emitting isScheduled:true even AFTER the message sends (it's
+  // gated on schedule_type, not is_sent), so isScheduled alone would badge a delivered Send-Later
+  // message forever — gate on isSent to drop it once sent. A null/undefined isSent (a row synced
+  // before the is_sent column existed) counts as not-sent and re-syncs its value on the next upsert.
+  // The retracted tombstone returns early below, so a retracted row never reaches the badge;
+  // scheduled rows are always from-me, so no defer/avatar interaction.
+  const isScheduled = !!msg.isScheduled && msg.isSent !== 1;
   // Redacted mode also suppresses the link preview (it would leak the URL/title).
   const previewUrl = useMemo(
     () => (!redacted && hasText && !isRetracted ? firstUrl(bodyText) : null),

@@ -53,6 +53,13 @@ export const Message = z.object({
   handleId: z.number().nullish(),
   handle: Handle.nullish(),
   isFromMe: z.boolean().nullish(),
+  /**
+   * Whether the message has actually been sent (Apple `is_sent`). The wire ALWAYS carries it (like
+   * `isFromMe`). Modeled `.nullish()` (matching `isFromMe`) so an old server that never emits it
+   * degrades to undefined. Paired with `isScheduled` to gate the "Scheduled" badge — a pending
+   * Send-Later row is `isScheduled && !isSent` (see MessageBubble).
+   */
+  isSent: z.boolean().nullish(),
   hasDdResults: z.boolean().nullish(),
 
   dateCreated: epochMillis,
@@ -80,11 +87,14 @@ export const Message = z.object({
   didNotifyRecipient: z.boolean().nullish(),
 
   /**
-   * Apple "Send Later" (macOS 15+/iOS 18+): true ONLY while the message is a PENDING scheduled
-   * row. Presence-driven — the server emits it as `true` for pending rows and omits it entirely
-   * once the message actually sends. Arrives on live events AND query/sync paths. Persisted so a
-   * synced pending row can render a "Scheduled" badge; clears automatically on send (the server
-   * stops emitting it, and the upsert plain-overwrites the stored flag).
+   * Apple "Send Later" (macOS 15+/iOS 18+): the server emits `true` for ANY scheduled
+   * (`schedule_type === 2`) row — while it is PENDING *and* after it actually sends (the flag is
+   * gated on `schedule_type`, NOT `is_sent`). So on its own it can't distinguish pending from sent,
+   * and a delivered Send-Later message keeps emitting `isScheduled: true` forever. Presence-driven —
+   * omitted on ordinary rows and older macOS. Arrives on live events AND query/sync paths. Persisted
+   * so a synced row can render a "Scheduled" badge, but the badge is GATED on `isScheduled && !isSent`
+   * (see {@link isSent} + MessageBubble): the pending row shows it; the sent row hides it once
+   * `is_sent` flips to 1.
    */
   isScheduled: z.boolean().nullish(),
 

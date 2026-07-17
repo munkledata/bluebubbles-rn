@@ -180,6 +180,31 @@ describe('read-state reconciliation from lastReadMessageTimestamp', () => {
     expect(marker(raw, 'c1')).toBe('r1');
   });
 
+  it('reconciles MULTIPLE chats in one batch independently (pre-filter skips one, advances another)', async () => {
+    // Guards the batched reconcile: one upsertChats call carrying watermarks for several chats must
+    // resolve each marker independently — the cheap pre-filter skips a chat already read further,
+    // while another advances — with no cross-talk between chats.
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
+    const map = await upsertChats(db, [chat('c1'), chat('c2')], handles);
+    await upsertMessages(db, [received('a1', 1000), received('a2', 2000)], () => map.get('c1')!, handles);
+    await upsertMessages(db, [received('b1', 1500), received('b2', 3000)], () => map.get('c2')!, handles);
+    await setLastReadMessageGuid(db, 'c1', 'a2'); // c1 already read to 2000; c2 never read
+
+    // Batch: c1's watermark (1500) is <= its marker date (2000) → pre-filter SKIP; c2's (2000) advances.
+    await upsertChats(
+      db,
+      [
+        chat('c1', { lastReadMessageTimestamp: 1500 }),
+        chat('c2', { lastReadMessageTimestamp: 2000 }),
+      ],
+      handles,
+    );
+
+    expect(marker(raw, 'c1')).toBe('a2'); // untouched — the pre-filter skipped it
+    expect(marker(raw, 'c2')).toBe('b1'); // advanced to the newest received <= 2000 (b2@3000 excluded)
+  });
+
   it('is idempotent: re-ingesting the same watermark leaves the marker unchanged', async () => {
     const { db, raw } = await createTestDb();
     await seedThree(db);

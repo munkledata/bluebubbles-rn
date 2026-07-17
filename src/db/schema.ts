@@ -154,10 +154,15 @@ export const messages = sqliteTable(
         vs explicitly notified the recipient. Both arrive in the server payload. */
     wasDeliveredQuietly: integer('was_delivered_quietly', { mode: 'boolean' }).default(false),
     didNotifyRecipient: integer('did_notify_recipient', { mode: 'boolean' }).default(false),
-    /** Apple "Send Later" pending flag (presence-driven from the server): 1 while the message is a
-        pending scheduled row, cleared once it actually sends. Drives the "Scheduled" badge.
-        Nullable (NULL = not scheduled) — no default, matching the presence-driven wire semantics. */
+    /** Apple "Send Later" flag (presence-driven from the server): 1 for a scheduled (schedule_type=2)
+        row. The server keeps emitting it AFTER the message sends (it's gated on schedule_type, not
+        is_sent), so on its own it can't tell pending from sent — the "Scheduled" badge is gated on
+        `isScheduled && isSent !== 1` (see MessageBubble). Nullable (NULL = not scheduled). */
     isScheduled: integer('is_scheduled', { mode: 'boolean' }),
+    /** Whether the message has actually been sent (Apple is_sent). Always on the wire (like
+        is_from_me). Paired with isScheduled to hide the "Scheduled" badge once a Send-Later message
+        delivers. Nullable (NULL = unknown, e.g. rows synced before this column existed → re-synced). */
+    isSent: integer('is_sent', { mode: 'boolean' }),
     /** Apple `message_summary_info` (macOS 13+): per-part edit history + unsent parts, stored as a
         JSON TEXT blob (the parsed `{ editedParts?, retractedParts? }` shape). Presence-driven — the
         server emits it only on edited/retracted messages, so NULL on everything else. Powers the

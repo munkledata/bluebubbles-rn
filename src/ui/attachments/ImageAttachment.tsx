@@ -61,10 +61,17 @@ export function ImageAttachment({
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
   const aspect = att.width && att.height ? att.width / att.height : 0.78;
-  const width = isGenmoji ? genmojiSize : (cellSize ?? Math.max(120, Math.min(att.width ?? maxW, maxW)));
-  const height = isGenmoji
-    ? genmojiSize
-    : (cellSize ?? Math.max(80, Math.min(width / aspect, win.height * 0.55)));
+  // A gallery grid cell (cellSize set) wins over the inline-Genmoji size — a Genmoji inside a
+  // multi-attachment grid must fill its square cell, not shrink to emoji size and break the grid.
+  // Genmoji size applies only to a standalone Genmoji (no cellSize).
+  const width =
+    isGenmoji && !cellSize
+      ? genmojiSize
+      : (cellSize ?? Math.max(120, Math.min(att.width ?? maxW, maxW)));
+  const height =
+    isGenmoji && !cellSize
+      ? genmojiSize
+      : (cellSize ?? Math.max(80, Math.min(width / aspect, win.height * 0.55)));
 
   const tail = showTail ? theme.radius.tail : theme.radius.bubble;
   // Grid-cell mode: the parent grid owns margins, alignment, and corner rounding — so DON'T emit a

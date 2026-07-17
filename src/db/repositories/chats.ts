@@ -78,27 +78,28 @@ export async function upsertChats(
 
   // Reconcile Mac-side read state (schema gap 7): a full `Chat` (chat query / sync path) may carry
   // `lastReadMessageTimestamp` (Unix ms) from the macOS `chat.last_read_message_timestamp` column.
-  // Map it into our guid-based read marker — monotonically (see reconcileReadMarkerFromTimestamp).
+  // Map it into our guid-based read marker — monotonically (see reconcileReadMarkersFromTimestamps).
   // Presence-driven: absent on `ChatSummary` (live message events + incremental-sync embedded
   // chats never model it) and on old-macOS rows, so guard with `in` (mirrors the
   // backgroundChannelGuid access above). This is the single chokepoint for chat ingestion, so
-  // every full-Chat path is reconciled here without per-caller wiring.
+  // every full-Chat path is reconciled here without per-caller wiring. Collected across the batch
+  // and reconciled in as few queries as possible (not a couple of SELECTs per chat) — see the fn.
+  const readMarkerPairs: { chatId: number; timestampMs: number }[] = [];
   for (const c of deduped) {
     const ts = 'lastReadMessageTimestamp' in c ? c.lastReadMessageTimestamp : null;
     const chatId = map.get(c.guid);
-    if (ts != null && chatId != null) {
-      await reconcileReadMarkerFromTimestamp(db, chatId, ts);
-    }
+    if (ts != null && chatId != null) readMarkerPairs.push({ chatId, timestampMs: ts });
   }
+  await reconcileReadMarkersFromTimestamps(db, readMarkerPairs);
   return map;
 }
 
 /**
- * Reconcile a Mac-side read watermark into the local guid-based read marker.
+ * Reconcile Mac-side read watermarks into the local guid-based read marker for a BATCH of chats.
  *
  * macOS syncs `chat.last_read_message_timestamp` (Unix ms) on the chat query/sync paths. Our read
  * model is guid-based (`lastReadMessageGuid`; the unread count is received messages newer than that
- * marker's `date_created`), so map the timestamp to the newest LOCAL received message at/before that
+ * marker's `date_created`), so map each timestamp to the newest LOCAL received message at/before that
  * instant and advance the marker to it. Marker semantics mirror `getNewestReceivedGuid` (the target
  * the existing `chat-read-status-changed` reconcile uses): received (`is_from_me = 0`), non-deleted;
  * a retracted or reaction row CAN be the marker — only its `date_created` matters as the unread
@@ -106,33 +107,58 @@ export async function upsertChats(
  * marker's message date, so a marker the user has read FURTHER on this device is never regressed. A
  * null timestamp, empty chat, unresolvable timestamp (nothing received at/before it), or a target no
  * newer than the current marker → no-op. Idempotent: re-running with the same timestamp is a no-op.
+ *
+ * Batched to avoid the old ~2-SELECTs-PER-CHAT cost (≈2N reads on every N-chat sync page — ~800 for a
+ * 400-chat account, on EVERY sync): ONE query loads every chat's current marker date; a cheap
+ * pre-filter drops chats whose watermark cannot advance the marker (`ts <= markerDate` ⇒ the
+ * candidate, itself `<= ts`, can never be strictly newer — the common steady-state case, so most
+ * chats do zero work); and each surviving chat takes ONE combined UPDATE that finds the candidate and
+ * re-applies the monotonic guard atomically. Behavior is byte-identical to the per-chat version (same
+ * strictly-greater advance, same `date_created DESC, id DESC` tie-break, same received/non-deleted
+ * eligibility) — the readReconcile suite pins every branch.
  */
-async function reconcileReadMarkerFromTimestamp(
+async function reconcileReadMarkersFromTimestamps(
   db: AppDatabase,
-  chatId: number,
-  timestampMs: number,
+  pairs: { chatId: number; timestampMs: number }[],
 ): Promise<void> {
-  // Newest received, non-deleted message at/before the Mac's read instant (getNewestReceivedGuid
-  // bounded by the watermark). `date_created <= ts` also drops NULL-dated rows. None → no-op.
-  const candidate = await db.all<{ guid: string; dateCreated: number }>(sql`
-    SELECT guid, date_created AS dateCreated FROM messages
-     WHERE chat_id = ${chatId} AND is_from_me = 0 AND date_deleted IS NULL
-       AND date_created <= ${timestampMs}
-     ORDER BY date_created DESC, id DESC LIMIT 1
-  `);
-  const target = candidate[0];
-  if (!target) return;
+  if (pairs.length === 0) return;
 
-  // The current marker's message date — 0 when never read or the marker row isn't local (mirrors
-  // the inbox unread query's COALESCE(..., 0)). Advance only when the target is strictly newer.
-  const current = await db.all<{ dateCreated: number | null }>(sql`
-    SELECT lm.date_created AS dateCreated FROM chats c
-      LEFT JOIN messages lm ON lm.guid = c.last_read_message_guid
-     WHERE c.id = ${chatId} LIMIT 1
+  // One query for every chat's current marker message date — 0 when never read or the marker row
+  // isn't local (mirrors the inbox unread query's COALESCE(..., 0)).
+  const inList = sql.join(
+    pairs.map((p) => sql`${p.chatId}`),
+    sql`, `,
+  );
+  // Annotate the variable (not the db.all generic) — the loose AppDatabase types db.all's result as
+  // `any`, so `.map` below would otherwise trip noImplicitAny (mirrors upsertMessages' `existing`).
+  const markerRows: Array<{ chatId: number; markerDate: number }> = await db.all(sql`
+    SELECT c.id AS chatId, COALESCE(lm.date_created, 0) AS markerDate
+      FROM chats c LEFT JOIN messages lm ON lm.guid = c.last_read_message_guid
+     WHERE c.id IN (${inList})
   `);
-  const currentDate = current[0]?.dateCreated ?? 0;
-  if (target.dateCreated > currentDate) {
-    await db.update(chats).set({ lastReadMessageGuid: target.guid }).where(eq(chats.id, chatId));
+  const markerDate = new Map(markerRows.map((r) => [r.chatId, r.markerDate]));
+
+  for (const { chatId, timestampMs } of pairs) {
+    const current = markerDate.get(chatId) ?? 0;
+    // Pre-filter: the candidate (newest received at/before ts) has date_created <= ts, so if ts is
+    // already <= the current marker date it can never be strictly newer — skip the per-chat write.
+    if (timestampMs <= current) continue;
+    // One combined statement (db.run — a non-returning UPDATE): point the marker at the newest
+    // received, non-deleted message at/before the watermark, but only when that candidate is strictly
+    // newer than the current marker (the monotonic guard). `date_created <= ts` also drops NULL-dated
+    // rows; a chat with no such candidate yields NULL from MAX(...) → the guard is false → no-op.
+    await db.run(sql`
+      UPDATE chats SET last_read_message_guid = (
+        SELECT m.guid FROM messages m
+         WHERE m.chat_id = ${chatId} AND m.is_from_me = 0 AND m.date_deleted IS NULL
+           AND m.date_created <= ${timestampMs}
+         ORDER BY m.date_created DESC, m.id DESC LIMIT 1
+      )
+      WHERE id = ${chatId}
+        AND (SELECT MAX(m.date_created) FROM messages m
+              WHERE m.chat_id = ${chatId} AND m.is_from_me = 0 AND m.date_deleted IS NULL
+                AND m.date_created <= ${timestampMs}) > ${current}
+    `);
   }
 }
 

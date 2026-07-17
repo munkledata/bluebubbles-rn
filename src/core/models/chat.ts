@@ -28,7 +28,7 @@ export const Chat = z.object({
    * macOS-side read watermark: `chat.last_read_message_timestamp` (Unix ms; null = never read on
    * the Mac). Presence-driven — omitted on older macOS rows without the column. NOT stored as a
    * column; it is reconciled at ingestion into the guid-based `lastReadMessageGuid` marker (see
-   * `reconcileReadMarkerFromTimestamp` in the chats repo), so a read done on the Mac clears the
+   * `reconcileReadMarkersFromTimestamps` in the chats repo), so a read done on the Mac clears the
    * app's unread badge. Tolerant `nullish()` — a shape drift here must never fail the chat parse.
    */
   lastReadMessageTimestamp: z.number().nullish(),

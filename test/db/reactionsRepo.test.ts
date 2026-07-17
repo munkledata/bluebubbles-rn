@@ -3,6 +3,7 @@ import {
   getMessagePreviewByGuid,
   listMessagesWithSenders,
   listReactionsByMessageGuids,
+  markMessageDeleted,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -95,6 +96,18 @@ describe('listReactionsByMessageGuids', () => {
   it('returns an empty map for no guids', async () => {
     const { db } = await createTestDb();
     expect((await listReactionsByMessageGuids(db, [])).size).toBe(0);
+  });
+
+  it('drops a tombstoned (deleted) reaction row from the badge', async () => {
+    const { db } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    await react(db, chatId, hm, { guid: 'r1', type: 'love', from: 'a@x.com', date: 110 });
+    // The reaction badges the target first…
+    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(1);
+    // …then the reaction message lands in "Recently Deleted" (tombstoned via date_deleted) — the
+    // badge must vanish, like every other render/count query that filters date_deleted IS NULL.
+    await markMessageDeleted(db, 'r1', 5000);
+    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(0);
   });
 
   it('excludes reaction rows from the bubble list', async () => {

@@ -265,11 +265,31 @@ describe('MessageBubble tombstone (unsent)', () => {
 });
 
 describe('MessageBubble Scheduled badge (Apple Send Later)', () => {
-  it('shows "Scheduled" for a pending scheduled (from-me) message', async () => {
-    await renderWithTheme(<MessageBubble msg={makeMsg({ isFromMe: 1, isScheduled: 1 })} showTail />);
+  it('shows "Scheduled" for a pending scheduled (from-me, not-yet-sent) message', async () => {
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ isFromMe: 1, isScheduled: 1, isSent: 0 })} showTail />,
+    );
     expect(screen.getByText('Scheduled')).toBeTruthy();
     // The bubble text still renders alongside the badge (a pending row keeps its typed body).
     expect(screen.getByText('Hello there')).toBeTruthy();
+  });
+
+  it('does NOT show "Scheduled" once a scheduled message has SENT (isSent=1)', async () => {
+    // The bug fix: the server keeps emitting isScheduled:true after a Send-Later message sends, so
+    // the badge MUST gate on isSent — a delivered scheduled message shows no "Scheduled" caption.
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ isFromMe: 1, isScheduled: 1, isSent: 1 })} showTail />,
+    );
+    expect(screen.queryByText('Scheduled')).toBeNull();
+  });
+
+  it('treats a null/undefined isSent (pre-migration row) as not-yet-sent → still badges', async () => {
+    // Old rows synced before the is_sent column carry NULL; they must still badge a pending
+    // scheduled row (the value self-heals to the real is_sent on the next upsert).
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ isFromMe: 1, isScheduled: 1, isSent: null })} showTail />,
+    );
+    expect(screen.getByText('Scheduled')).toBeTruthy();
   });
 
   it('does not show "Scheduled" for an ordinary message', async () => {

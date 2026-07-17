@@ -393,4 +393,13 @@ export const MIGRATIONS: Migration[] = [
     name: '0022_message_date_deleted',
     statements: [`ALTER TABLE messages ADD COLUMN date_deleted INTEGER`],
   },
+  {
+    // Apple "Send Later" sent-state (is_sent). The server emits `isScheduled: true` for ANY
+    // scheduled (schedule_type=2) row — pending AND after it sends — so isScheduled alone can't
+    // hide the badge on a delivered Send-Later message. Persist is_sent (which flips 0→1 on send)
+    // so the "Scheduled" badge can gate on `isScheduled && is_sent != 1`. Nullable (NULL = unknown
+    // on pre-migration rows; re-synced on the next upsert). Additive; applied transactionally + by name.
+    name: '0023_message_is_sent',
+    statements: [`ALTER TABLE messages ADD COLUMN is_sent INTEGER`],
+  },
 ];

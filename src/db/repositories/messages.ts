@@ -75,10 +75,13 @@ export async function upsertMessages(
           // would mask the real value. Consumers treat NULL as falsy, same as false.
           wasDeliveredQuietly: m.wasDeliveredQuietly ?? null,
           didNotifyRecipient: m.didNotifyRecipient ?? null,
-          // Apple "Send Later" pending flag. NULL when the event omits it (not scheduled, or the
-          // row already sent) — unlike the delivery tiers this is PLAIN-overwritten on conflict
-          // (see below), because the server emits it only while pending and drops it on send.
+          // Apple "Send Later" flag. NULL when the event omits it (not scheduled). PLAIN-overwritten
+          // on conflict (see below) so it always mirrors the server's latest value.
           isScheduled: m.isScheduled ?? null,
+          // Apple is_sent. NULL only when the server omits it (old server); a modern server always
+          // emits it. PLAIN-overwritten on conflict so the 0→1 flip on send propagates and hides the
+          // "Scheduled" badge (isScheduled && is_sent != 1).
+          isSent: m.isSent ?? null,
           // Apple edit history / unsent parts, stored as a JSON TEXT blob (parsed shape). NULL when
           // the message isn't edited/retracted (the server omits the key), so the COALESCE-preserve
           // on conflict (below) can't wipe a previously-stored history.
@@ -102,11 +105,15 @@ export async function upsertMessages(
         dateDelivered: sql`excluded.date_delivered`,
         dateEdited: sql`excluded.date_edited`,
         dateRetracted: sql`excluded.date_retracted`,
-        // A state transition like date_retracted — reflect the LATEST event, do NOT COALESCE-preserve
-        // like the delivery tiers. The server emits is_scheduled=true only while the row is pending
-        // and OMITS it once the message sends, so plain-overwriting to NULL on that flagless "sent"
-        // re-upsert is exactly what clears the "Scheduled" badge (the app has no isSent to gate on).
+        // Reflect the LATEST server value (plain overwrite, not COALESCE-preserve like the delivery
+        // tiers). The server emits is_scheduled=true for a schedule_type=2 row both while pending AND
+        // after it sends, so this flag does NOT clear on send — the "Scheduled" badge is instead
+        // gated on is_sent below (isScheduled && is_sent != 1).
         isScheduled: sql`excluded.is_scheduled`,
+        // Plain-overwrite is_sent so the 0→1 send transition propagates on the re-upsert — that flip
+        // is exactly what hides the badge. The wire always carries is_sent, so overwriting never
+        // nulls a good value; never COALESCE-preserve here (we WANT the send to win).
+        isSent: sql`excluded.is_sent`,
         error: sql`excluded.error`,
         // Delivery tiers flip on a later updated-message event (Apple may report the
         // quiet delivery after the initial echo), so refresh them on conflict too — but
@@ -383,9 +390,13 @@ export interface MessageRow {
   dateEdited: number | null;
   dateRetracted: number | null;
   hasAttachments: number;
-  // Apple "Send Later" pending flag (1 while scheduled-but-unsent; NULL/absent otherwise). Optional
-  // so hand-built test literals need not set it; the SELECT above always provides it at runtime.
+  // Apple "Send Later" flag (1 for a scheduled row — pending OR sent; NULL/absent otherwise).
+  // Optional so hand-built test literals need not set it; the SELECT above always provides it.
   isScheduled?: number | null;
+  // Apple is_sent (1 = sent, 0 = not yet, NULL/undefined = unknown on a pre-migration row). Gates the
+  // "Scheduled" badge with isScheduled. Optional so hand-built test literals need not set it; the
+  // SELECT above always provides it at runtime.
+  isSent?: number | null;
   // Apple edit history / unsent parts as the RAW JSON TEXT blob (or null). Kept as a string here —
   // like `attributedBody` — and parsed lazily by the consumer via parseMessageSummaryInfo (only the
   // long-press "View Edit History" path needs the structured form). Optional so hand-built test
@@ -428,6 +439,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
     m.date_retracted AS dateRetracted,
     m.is_scheduled AS isScheduled,
+    m.is_sent AS isSent,
     m.message_summary_info AS messageSummaryInfo,
     m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
