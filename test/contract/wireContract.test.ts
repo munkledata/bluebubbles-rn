@@ -34,6 +34,8 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       expect(res.data.private_api).toBe(true);
       expect(res.data.proxy_service).toBe('zrok');
       expect(res.data.supports_header_auth).toBe(true);
+      // Schema gap 6: the deletion-detection capability is additive and parsed as a plain boolean.
+      expect(res.data.supports_message_deleted).toBe(true);
     }
   });
 

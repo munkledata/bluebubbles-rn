@@ -380,4 +380,17 @@ export const MIGRATIONS: Migration[] = [
     name: '0021_message_summary_info',
     statements: [`ALTER TABLE messages ADD COLUMN message_summary_info TEXT`],
   },
+  {
+    // Message deletion tombstone (macOS 13+ "Recently Deleted"). The server's `message-deleted`
+    // live event carries the deleted message's guid + delete date; we set this column (Unix ms)
+    // instead of HARD-deleting the row. A deleted message REMAINS in the Mac's chat.db for ~30 days
+    // (Recently Deleted) and the server's QUERY/SYNC paths still return it — only the live event
+    // signals the deletion — so a hard delete would be UNDONE by the very next sync re-inserting the
+    // row (the re-sync hazard). Instead the row is TOMBSTONED and every render/count query filters
+    // `date_deleted IS NULL`, so a deleted message VANISHES from the UI (unlike an unsend's
+    // `date_retracted`, which keeps a visible tombstone bubble) while the row survives the re-sync.
+    // NULL on all non-deleted (and pre-migration) rows. Additive; applied transactionally + by name.
+    name: '0022_message_date_deleted',
+    statements: [`ALTER TABLE messages ADD COLUMN date_deleted INTEGER`],
+  },
 ];

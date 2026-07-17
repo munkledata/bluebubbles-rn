@@ -3,6 +3,7 @@ import { logger } from '@core/secure';
 import {
   FaceTimeStatusPayload,
   GroupChangePayload,
+  MessageDeletedPayload,
   ReadStatusPayload,
   RcsAlertPayload,
   RcsBridgeDownPayload,
@@ -95,6 +96,10 @@ export class EventRouter {
       case 'updated-message': {
         const m = Message.safeParse(data);
         return m.success ? { type: 'updated-message', message: m.data } : null;
+      }
+      case 'message-deleted': {
+        const p = MessageDeletedPayload.safeParse(data);
+        return p.success ? { type: 'message-deleted', payload: p.data } : null;
       }
       case 'typing-indicator': {
         const p = TypingIndicatorPayload.safeParse(data);

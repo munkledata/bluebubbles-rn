@@ -135,6 +135,16 @@ export async function upsertMessages(
         // delivery/read receipt, or a live event whose leaner projection omits the blob) then can't
         // wipe the stored timeline. Same reasoning as the group-event metadata above.
         messageSummaryInfo: sql`COALESCE(excluded.message_summary_info, ${messages.messageSummaryInfo})`,
+        // NOTE — `date_deleted` is DELIBERATELY absent from both the insert values (above) and this
+        // conflict set, a documented deviation from the message-column checklist. It is NOT a
+        // wire-carried field: a MessageV1 never carries the deletion — only the `message-deleted`
+        // EVENT does — so there is no `m.dateDeleted` to write here, and no zod model field. The
+        // column is written ONLY by markMessageDeleted. Its ABSENCE from this set IS the
+        // COALESCE-PRESERVE the design needs: a still-in-Recently-Deleted row that the server keeps
+        // returning gets re-upserted on every sync, and because we never touch date_deleted here the
+        // existing tombstone survives untouched (deletion is monotonic in v1; recovery is not
+        // resurrected, matching the server emitting no event on a 30-day recovery). Were it in the
+        // set, a re-sync would clear the tombstone and the deletion would undo itself.
       },
     })
     .returning({ id: messages.id, guid: messages.guid });
@@ -190,13 +200,17 @@ export async function upsertMessages(
   }
   await upsertAttachments(db, attRows);
 
-  // Refresh denormalized latest_message_date for touched chats.
+  // Refresh denormalized latest_message_date for touched chats. Exclude DELETED (tombstoned) rows
+  // from the MAX so a re-sync of a still-in-Recently-Deleted row can't re-inflate the chat's inbox
+  // position back to the deleted message's date — that must stay consistent with markMessageDeleted,
+  // which recomputes the same way. (Retracted rows are intentionally NOT excluded: they still render
+  // as tombstone bubbles in the thread, so they legitimately hold the chat's latest position.)
   const touched = [...new Set(withChat.map((x) => x.chatId))];
   if (touched.length > 0) {
     await db
       .update(chats)
       .set({
-        latestMessageDate: sql`(SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id)`,
+        latestMessageDate: sql`(SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL)`,
       })
       .where(inArray(chats.id, touched));
   }
@@ -222,7 +236,9 @@ export async function searchMessages(
   const match = toFtsQuery(queryText);
   if (!match) return [];
   const rows = await db.all<Record<string, unknown>>(
-    sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ${match} ORDER BY rank LIMIT ${limit}`,
+    // The FTS index still holds a tombstoned message's text (setting date_deleted only re-indexes
+    // the unchanged text), so a deleted message must be excluded at QUERY time — it VANISHES.
+    sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ${match} AND m.date_deleted IS NULL ORDER BY rank LIMIT ${limit}`,
   );
   return rows;
 }
@@ -279,6 +295,7 @@ export async function searchMessagesEnriched(
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE messages_fts MATCH ${match}
       AND m.associated_message_type IS NULL
+      AND m.date_deleted IS NULL
     ORDER BY m.date_created DESC
     LIMIT ${limit}
   `);
@@ -296,6 +313,7 @@ export async function listThreadMessages(
     ${MESSAGE_ROW_SELECT}
     WHERE (m.guid = ${originatorGuid} OR m.thread_originator_guid = ${originatorGuid})
       AND m.associated_message_type IS NULL
+      AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, m.id ASC
   `);
 }
@@ -325,10 +343,12 @@ export async function getFirstUnreadInChat(
     SELECT guid, date_created AS dateCreated,
       (SELECT COUNT(*) FROM messages mm
         WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 0 AND mm.date_created > ${readDate}
-          AND mm.associated_message_type IS NULL AND mm.date_retracted IS NULL) AS count
+          AND mm.associated_message_type IS NULL AND mm.date_retracted IS NULL
+          AND mm.date_deleted IS NULL) AS count
     FROM messages
     WHERE chat_id = ${chatId} AND is_from_me = 0 AND date_created > ${readDate}
       AND associated_message_type IS NULL AND date_retracted IS NULL
+      AND date_deleted IS NULL
     ORDER BY date_created ASC, id ASC LIMIT 1
   `);
   return rows[0] ?? null;
@@ -341,7 +361,7 @@ export async function getNewestReceivedGuid(
 ): Promise<string | null> {
   const rows = await db.all<{ guid: string }>(sql`
     SELECT guid FROM messages
-    WHERE chat_id = ${chatId} AND is_from_me = 0
+    WHERE chat_id = ${chatId} AND is_from_me = 0 AND date_deleted IS NULL
     ORDER BY date_created DESC, id DESC LIMIT 1
   `);
   return rows[0]?.guid ?? null;
@@ -445,6 +465,7 @@ function queryMessageRows(
     ${MESSAGE_ROW_SELECT}
     WHERE m.chat_id = ${chatId} ${where}
       AND m.associated_message_type IS NULL
+      AND m.date_deleted IS NULL
     ${order}
     LIMIT ${limit}
   `);
@@ -525,6 +546,7 @@ export async function searchChatGuidsByMessage(
     JOIN chats c ON c.id = m.chat_id
     WHERE messages_fts MATCH ${match}
       AND m.associated_message_type IS NULL
+      AND m.date_deleted IS NULL
     LIMIT ${limit}
   `);
   return rows.map((r: { guid: string }) => r.guid);
@@ -554,7 +576,7 @@ export async function getMessagePreviewByGuid(
               WHERE a.message_id = m.id AND a.emoji_image_short_description IS NOT NULL
               ORDER BY a.id ASC LIMIT 1) AS attachmentDescription
     FROM messages m LEFT JOIN handles h ON h.id = m.handle_id
-    WHERE m.guid = ${guid} LIMIT 1
+    WHERE m.guid = ${guid} AND m.date_deleted IS NULL LIMIT 1
   `);
   return rows[0] ?? null;
 }
@@ -598,6 +620,50 @@ export async function applyLocalUnsend(db: AppDatabase, guid: string, now: numbe
 /** Clear a retraction (revert an optimistic unsend on POST failure). */
 export async function clearLocalUnsend(db: AppDatabase, guid: string): Promise<void> {
   await db.update(messages).set({ dateRetracted: null }).where(eq(messages.guid, guid));
+}
+
+/**
+ * Apply a server `message-deleted` event (macOS "Recently Deleted"): TOMBSTONE the message by
+ * setting `date_deleted` (Unix ms), then recompute the owning chat's denormalized
+ * `latest_message_date` so deleting the NEWEST message drops the chat to its previous message's
+ * inbox position (the preview CTE + the sort key would otherwise disagree).
+ *
+ * TOMBSTONE, not hard delete: the message stays in the Mac's chat.db (~30 days) and the server's
+ * query/sync paths keep returning it, so a hard delete would be UNDONE by the next sync re-inserting
+ * the row (the re-sync hazard). The tombstone is filtered out of every render/count query (the
+ * message VANISHES from the UI) but survives the re-sync. Deletion is monotonic in v1: a still-
+ * deleted row re-synced later can't clear the tombstone (upsertMessages never writes this column),
+ * and the server emits NOTHING on a 30-day recovery, so v1 does not resurrect a recovered message.
+ *
+ * The recompute counts RETRACTED (unsent) rows — they still render as tombstone bubbles in the
+ * thread, so they legitimately hold the chat's latest position — and excludes only DELETED rows,
+ * matching upsertMessages' own MAX(date_created) recompute so the two never drift.
+ *
+ * Returns true if a local row matched the guid (tombstone applied), false for an unknown guid — a
+ * safe no-op (e.g. a deletion for a message this device never synced, or already hard-deleted).
+ */
+export async function markMessageDeleted(
+  db: AppDatabase,
+  guid: string,
+  dateDeleted: number,
+): Promise<boolean> {
+  // Tombstone the row AND recover its chat id in one statement. An unknown guid updates 0 rows, so
+  // RETURNING yields nothing → false (no-op). db.all(sql`… RETURNING`) per the op-sqlite rules: we
+  // need the chat id back, which a non-returning db.run wouldn't give.
+  const rows = await db.all<{ chatId: number }>(
+    sql`UPDATE messages SET date_deleted = ${dateDeleted} WHERE guid = ${guid} RETURNING chat_id AS chatId`,
+  );
+  const chatId = rows[0]?.chatId;
+  if (chatId == null) return false;
+  // Recompute the inbox sort key over the surviving (non-deleted) rows. db.run — a non-returning
+  // UPDATE (db.all would throw "use run()" under better-sqlite3).
+  await db.run(
+    sql`UPDATE chats
+        SET latest_message_date =
+          (SELECT MAX(date_created) FROM messages WHERE chat_id = ${chatId} AND date_deleted IS NULL)
+        WHERE id = ${chatId}`,
+  );
+  return true;
 }
 
 /** Read a message's current text + edit marker (to revert an optimistic edit on failure). */

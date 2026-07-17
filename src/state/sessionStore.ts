@@ -61,7 +61,18 @@ export const sessionAccessors = {
   privateApiEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.private_api,
   /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
   rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,
+  /**
+   * Whether the connected server can emit `message-deleted` (macOS "Recently Deleted"; schema gap
+   * 6). Absent/false on older servers. Informational for now — the DbEventSink tombstones deletions
+   * unconditionally (an old server never sends the event); this is for future deletion affordances.
+   */
+  messageDeletedSupported: (): boolean =>
+    !!useSessionStore.getState().serverInfo?.supports_message_deleted,
 };
 
 /** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
 export const useRcsEnabled = (): boolean => useSessionStore((s) => !!s.serverInfo?.rcs);
+
+/** React hook: can the server emit `message-deleted`? (For future deletion affordances.) */
+export const useMessageDeletedSupported = (): boolean =>
+  useSessionStore((s) => !!s.serverInfo?.supports_message_deleted);

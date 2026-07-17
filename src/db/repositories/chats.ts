@@ -303,6 +303,7 @@ export async function listChatsForInbox(
         SELECT m2.id FROM messages m2
         WHERE m2.chat_id = m.chat_id AND m2.associated_message_type IS NULL
           AND m2.date_retracted IS NULL
+          AND m2.date_deleted IS NULL
         ORDER BY m2.date_created DESC, m2.id DESC LIMIT 1
       )
     )
@@ -330,6 +331,7 @@ export async function listChatsForInbox(
       (SELECT COUNT(*) FROM messages um
          WHERE um.chat_id = c.id AND um.is_from_me = 0 AND um.associated_message_type IS NULL
            AND um.date_retracted IS NULL
+           AND um.date_deleted IS NULL
            AND um.date_created > COALESCE(
              (SELECT lm.date_created FROM messages lm WHERE lm.guid = c.last_read_message_guid), 0)
       ) AS unreadCount,

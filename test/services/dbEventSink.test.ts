@@ -1,6 +1,14 @@
 import { Chat, Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
-import { listChats, listMessages, upsertChats, upsertHandles } from '@db/repositories';
+import {
+  getChatIdByGuid,
+  listChats,
+  listMessages,
+  listMessagesWithSenders,
+  upsertChats,
+  upsertHandles,
+} from '@db/repositories';
+import type { AppDatabase } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { createTestDb } from '../support/testDb';
@@ -122,5 +130,69 @@ describe('DbEventSink (live path)', () => {
     for (const c of chats) {
       expect(await listMessages(db, c.id)).toHaveLength(0);
     }
+  });
+});
+
+describe('DbEventSink — message-deleted (tombstone)', () => {
+  // Seed a received message via the live new-message path (creates the chat + row), returning the
+  // router so the follow-up message-deleted rides the SAME sink/db.
+  async function seedInbound(db: AppDatabase, guid: string, chatGuid: string): Promise<EventRouter> {
+    const router = new EventRouter(new DbEventSink(db));
+    await router.handle(
+      'new-message',
+      JSON.stringify(
+        Message.parse({
+          guid,
+          text: 'delete me',
+          dateCreated: 1700000000000,
+          handle: { address: 'bob@x.com' },
+          chats: [{ guid: chatGuid, displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+        }),
+      ),
+      'socket',
+    );
+    return router;
+  }
+
+  it('tombstones the local row (not a hard delete) and hides it from the rendered thread', async () => {
+    const { db, raw } = await createTestDb();
+    const router = await seedInbound(db, 'del-live', 'cDel');
+    const chatId = (await getChatIdByGuid(db, 'cDel'))!;
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toContain('del-live');
+
+    await router.handle(
+      'message-deleted',
+      JSON.stringify({ guid: 'del-live', chatGuid: 'cDel', dateDeleted: 1700000009000 }),
+      'socket',
+    );
+
+    // The row STILL EXISTS (tombstone, so the next sync re-returning it can't resurrect it) …
+    const row = raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get('del-live') as {
+      d: number | null;
+    };
+    expect(row.d).toBe(1700000009000);
+    // … but VANISHES from the rendered thread (deleted messages don't render, unlike unsends).
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).not.toContain('del-live');
+  });
+
+  it('applies a delete carrying ONLY a guid (chat resolved from the row; date falls back to now)', async () => {
+    const { db, raw } = await createTestDb();
+    const router = await seedInbound(db, 'del-bare', 'cBare');
+    const before = Date.now();
+    // No chatGuid, no dateDeleted — markMessageDeleted still resolves the chat from the message row.
+    await router.handle('message-deleted', { guid: 'del-bare' }, 'socket');
+    const row = raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get('del-bare') as {
+      d: number | null;
+    };
+    expect(typeof row.d).toBe('number');
+    expect(row.d as number).toBeGreaterThanOrEqual(before); // now() fallback for an absent date
+  });
+
+  it('is a safe no-op for an unknown guid (no throw, no rows touched)', async () => {
+    const { db } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    await expect(
+      router.handle('message-deleted', { guid: 'never-synced', dateDeleted: 1 }, 'socket'),
+    ).resolves.toBeDefined();
   });
 });

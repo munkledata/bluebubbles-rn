@@ -20,6 +20,14 @@ export const ServerInfo = z
     /** Whether the server accepts header-based auth (rebuild requirement). */
     supports_header_auth: z.boolean().nullish(),
     /**
+     * Whether the server can detect message deletions (macOS "Recently Deleted") and emit the
+     * `message-deleted` event. Additive; absent/false on older servers, which simply never emit the
+     * event. Reflects a LIVE capability (the table+column must exist on the Mac), so it can flip
+     * across reconnects. No UI gates on it today — DbEventSink applies deletions unconditionally (an
+     * old server just never sends one); the accessor/hook exist for future affordances.
+     */
+    supports_message_deleted: z.boolean().nullish(),
+    /**
      * Gator RCS bridge enabled (additive; absent/false on older servers). When true the server
      * serves RCS chats through the same v1 endpoints (`RCS;-;` guids, `service:"RCS"`). The app
      * needs no gate to RECEIVE them (they just appear in the list) — this flag lets RCS-specific

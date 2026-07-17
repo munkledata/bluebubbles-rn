@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { Message } from '@core/models';
+import { Message, epochMillis } from '@core/models';
 import type { ServerEventName } from '@core/config/constants';
 
 /**
@@ -39,6 +39,21 @@ export const RcsBridgeDownPayload = z
   })
   .loose();
 
+/**
+ * The server's `message-deleted` event (macOS "Recently Deleted"; fanned out over socket + webhook +
+ * FCM). `guid` is the only load-bearing field — the sink resolves the owning chat from the local
+ * message row, and falls back to now() for an absent delete date — so `chatGuid`/`dateDeleted` are
+ * best-effort. `.loose()` + `epochMillis` coercion keep it tolerant across server/transport shapes
+ * (e.g. a stringified `dateDeleted`). A guid-less payload fails this parse and is dropped at the router.
+ */
+export const MessageDeletedPayload = z
+  .object({
+    guid: z.string(),
+    chatGuid: z.string().nullish(),
+    dateDeleted: epochMillis, // Unix ms; number | null after coercion
+  })
+  .loose();
+
 export const FaceTimeStatusPayload = z
   .object({
     uuid: z.string().nullish(),
@@ -54,6 +69,10 @@ export const FaceTimeStatusPayload = z
 export type NormalizedEvent =
   | { type: 'new-message'; message: Message }
   | { type: 'updated-message'; message: Message }
+  // A message entered macOS "Recently Deleted". The sink TOMBSTONES the local row (never a hard
+  // delete — the message stays in the Mac's chat.db and the sync path keeps returning it), so the
+  // deletion survives the next sync. See DbEventSink → markMessageDeleted.
+  | { type: 'message-deleted'; payload: z.infer<typeof MessageDeletedPayload> }
   | { type: 'typing-indicator'; payload: z.infer<typeof TypingIndicatorPayload> }
   | { type: 'chat-read-status-changed'; payload: z.infer<typeof ReadStatusPayload> }
   | { type: 'group-name-change'; payload: z.infer<typeof GroupChangePayload> }

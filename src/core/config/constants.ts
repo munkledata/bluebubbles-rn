@@ -33,6 +33,11 @@ export const TUNNEL_SKIP_HEADERS: Readonly<Record<string, string>> = {
 export const SERVER_EVENTS = [
   'new-message',
   'updated-message',
+  // A message entered macOS "Recently Deleted" — the server's deletion detector fires this (socket +
+  // webhook + FCM). The app TOMBSTONES the local row (DbEventSink → markMessageDeleted) rather than
+  // hard-deleting it, so the deletion survives the next sync (which still returns the row). Old
+  // servers simply never emit it (see the `supports_message_deleted` capability).
+  'message-deleted',
   'typing-indicator',
   'chat-read-status-changed',
   'group-name-change',

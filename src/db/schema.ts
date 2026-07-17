@@ -118,6 +118,18 @@ export const messages = sqliteTable(
     dateEdited: integer('date_edited'),
     /** Set when the message is unsent/retracted; renders a tombstone. */
     dateRetracted: integer('date_retracted'),
+    /**
+     * Set (Unix ms) when the message enters macOS "Recently Deleted" — the server's `message-deleted`
+     * event. A TOMBSTONE, not a hard delete: the message stays in the Mac's chat.db (~30 days) and
+     * the server's query/sync paths keep returning it, so hard-deleting the local row would let the
+     * next sync RE-INSERT it. Every render/count query instead filters `date_deleted IS NULL`, so a
+     * deleted message VANISHES from the UI (contrast `dateRetracted`, which keeps a tombstone bubble)
+     * while the row survives the re-sync. There is deliberately NO wire model field for this — a
+     * `MessageV1` never carries it (only the event does), so it is written ONLY by `markMessageDeleted`,
+     * never by `upsertMessages` (which is why it is absent from upsertMessages' insert + conflict set).
+     * NULL on non-deleted rows.
+     */
+    dateDeleted: integer('date_deleted'),
     hasAttachments: integer('has_attachments', { mode: 'boolean' }).default(false),
     associatedMessageGuid: text('associated_message_guid'),
     associatedMessageType: text('associated_message_type'),

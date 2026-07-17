@@ -2,6 +2,7 @@ import { Chat, Message } from '@core/models';
 import {
   applyLocalUnsend,
   listChatsForInbox,
+  markMessageDeleted,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -165,6 +166,52 @@ describe('listChatsForInbox', () => {
     await applyLocalUnsend(t.db, 'u2', 9000);
     const after = await listChatsForInbox(t.db);
     expect(after[0]!.unreadCount).toBe(1);
+  });
+
+  it('deleting the NEWEST message falls the preview back AND drops the chat in the sort order', async () => {
+    const t = await createTestDb();
+    // `top` leads (newest @300); `other` is second (@200).
+    await seedChat(t, 'top', {
+      participants: ['a@x.com'],
+      messages: [
+        { guid: 'a1', text: 'older top', date: 100 },
+        { guid: 'a2', text: 'newest top', date: 300 },
+      ],
+    });
+    await seedChat(t, 'other', {
+      participants: ['b@x.com'],
+      messages: [{ guid: 'b1', text: 'middle', date: 200 }],
+    });
+    const before = await listChatsForInbox(t.db);
+    expect(before.map((r) => r.guid)).toEqual(['top', 'other']);
+    expect(before[0]!.lastText).toBe('newest top');
+
+    // The server signals a2 (top's newest) was deleted.
+    await markMessageDeleted(t.db, 'a2', 9000);
+
+    const after = await listChatsForInbox(t.db);
+    // Preview falls back to the previous surviving message …
+    const top = after.find((r) => r.guid === 'top')!;
+    expect(top.lastText).toBe('older top');
+    expect(top.lastGuid).toBe('a1');
+    // … and the chat drops below `other` (its latest is now a1 @100 < b1 @200).
+    expect(after.map((r) => r.guid)).toEqual(['other', 'top']);
+  });
+
+  it('excludes a deleted inbound message from the unread count', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'c', {
+      participants: ['a@x.com'],
+      readGuid: null,
+      messages: [
+        { guid: 'd1', text: 'a', date: 100 },
+        { guid: 'd2', text: 'b', date: 200 },
+      ],
+    });
+    expect((await listChatsForInbox(t.db))[0]!.unreadCount).toBe(2);
+
+    await markMessageDeleted(t.db, 'd2', 9000);
+    expect((await listChatsForInbox(t.db))[0]!.unreadCount).toBe(1);
   });
 
   it('reports participant count/names and toggles archived', async () => {

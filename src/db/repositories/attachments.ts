@@ -196,6 +196,7 @@ export async function listChatImageAttachmentsByAttachmentGuid(
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
       AND m.date_retracted IS NULL
+      AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, a.id ASC
   `);
   return { items: rows, index: rows.findIndex((r: AttachmentRow) => r.guid === guid) };
@@ -251,6 +252,7 @@ export async function listChatAttachmentsByKind(
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
       AND m.date_retracted IS NULL
+      AND m.date_deleted IS NULL
     ORDER BY m.date_created DESC, a.id DESC
     LIMIT ${limit * 4}
   `);
@@ -281,6 +283,7 @@ export async function listChatAttachmentsByKind(
     WHERE c.guid = ${chatGuid}
       AND m.text LIKE '%http%'
       AND m.date_retracted IS NULL
+      AND m.date_deleted IS NULL
       AND m.associated_message_type IS NULL
     ORDER BY m.date_created DESC, m.id DESC
     LIMIT ${limit * 4}

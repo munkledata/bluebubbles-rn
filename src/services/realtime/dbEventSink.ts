@@ -4,6 +4,7 @@ import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
   getNewestReceivedGuid,
+  markMessageDeleted,
   markMessageSendError,
   reconcileEchoByContent,
   setLastReadMessageGuid,
@@ -71,6 +72,37 @@ export class DbEventSink implements EventSink {
         // could otherwise strand a queue-less unpromoted temp row (a permanent duplicate).
         await reconcileEchoByContent(this.db, message, chatId);
         await upsertMessages(this.db, [message], () => chatId, handleMap);
+        break;
+      }
+      case 'message-deleted': {
+        // The server saw a message enter macOS "Recently Deleted". TOMBSTONE the local row (never a
+        // hard delete): the message REMAINS in the Mac's chat.db (~30 days) and the server's
+        // query/sync paths keep returning it, so a hard delete would be UNDONE by the next sync
+        // re-inserting the row. markMessageDeleted resolves the owning chat from the message row
+        // itself (the payload's chatGuid, when present, is not needed) and recomputes the chat's
+        // inbox position. An absent dateDeleted (some transports omit it) falls back to now() — fine
+        // for a tombstone whose only job is to hide the row. An unknown guid is a safe no-op.
+        //
+        // RESIDUAL (accepted, v1): a delete event missed while the app was DEAD or APP-LOCKED
+        // (deliverRespectingLock does not touch the DB while locked) leaves the message lingering
+        // locally — and NOTHING else reconciles it, because the server's query/sync path does NOT
+        // expose Recently-Deleted state (a re-sync returns the row with no deleted marker). So
+        // deletions apply ONLY via this live event; a missed event = the message persists locally.
+        // We deliberately do NOT add a reconciliation sweep — there is no server signal to sweep on.
+        const p = event.payload;
+        if (!p.guid) break;
+        const dateDeleted = p.dateDeleted ?? Date.now();
+        try {
+          const found = await markMessageDeleted(this.db, p.guid, dateDeleted);
+          if (!found) {
+            logger.debug('[dbEventSink] message-deleted for unknown guid — no-op', {
+              guid: p.guid,
+            });
+          }
+        } catch (e) {
+          // Never throw into the router; a failed tombstone is logged and the message simply stays.
+          logger.warn('[dbEventSink] failed to apply message-deleted', { guid: p.guid, error: e });
+        }
         break;
       }
       case 'chat-read-status-changed': {

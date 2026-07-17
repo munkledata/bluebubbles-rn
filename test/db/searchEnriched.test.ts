@@ -1,5 +1,6 @@
 import { Chat, Message } from '@core/models';
 import {
+  markMessageDeleted,
   searchMessagesEnriched,
   upsertChats,
   upsertHandles,
@@ -75,5 +76,15 @@ describe('searchMessagesEnriched', () => {
     await seed(db);
     // "love" is the reaction type, never indexed text → no result.
     expect(await searchMessagesEnriched(db, 'love')).toEqual([]);
+  });
+
+  it('excludes a deleted message even though its text is still in the FTS index', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    expect(await searchMessagesEnriched(db, 'keynote')).toHaveLength(1);
+    // Tombstoning only re-indexes the unchanged text, so the FTS row survives — the query-time
+    // `date_deleted IS NULL` filter is what makes the deleted message VANISH from search.
+    await markMessageDeleted(db, 'm1', 5000);
+    expect(await searchMessagesEnriched(db, 'keynote')).toEqual([]);
   });
 });

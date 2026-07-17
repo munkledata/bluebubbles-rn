@@ -1,5 +1,6 @@
 import { Chat, Message } from '@core/models';
 import {
+  applyLocalUnsend,
   getChatHeader,
   listThreadMessages,
   getChatIdByGuid,
@@ -8,6 +9,7 @@ import {
   listChatsForInbox,
   listMessagesAround,
   listMessagesWithSenders,
+  markMessageDeleted,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
@@ -383,5 +385,94 @@ describe('conversation-view repositories', () => {
       new Map(),
     );
     expect(sched('sch2')).toBeNull();
+  });
+});
+
+describe('markMessageDeleted (deletion tombstone)', () => {
+  it('tombstones the newest message, recomputes latest_message_date to the survivor, and hides it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m1 recv@100, m2 mine@200, m3 recv@300 (newest)
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+    expect(latestDate()).toBe(300); // m3 is the newest
+
+    const found = await markMessageDeleted(db, 'm3', 5000);
+    expect(found).toBe(true);
+
+    // The tombstone is written (Unix ms) — the row still exists (NOT hard-deleted) …
+    const del = (
+      raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get('m3') as {
+        d: number | null;
+      }
+    ).d;
+    expect(del).toBe(5000);
+    // … but VANISHES from the rendered thread (the deleted-newest falls back to m2) …
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toEqual(['m2', 'm1']);
+    // … and the denormalized inbox sort key falls to the previous surviving message (m2 @200).
+    expect(latestDate()).toBe(200);
+  });
+
+  it('excludes the deleted originator/reply from listThreadMessages too', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'r1',
+          text: 'a reply',
+          dateCreated: 400,
+          threadOriginatorGuid: 'm1',
+          handle: { address: 'a@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    expect((await listThreadMessages(db, 'm1')).map((m) => m.guid)).toEqual(['m1', 'r1']);
+    await markMessageDeleted(db, 'r1', 5000);
+    expect((await listThreadMessages(db, 'm1')).map((m) => m.guid)).toEqual(['m1']); // reply gone
+  });
+
+  it('recompute COUNTS retracted rows (they still render as tombstones) but excludes deleted ones', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m1@100, m2@200, m3@300
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+    // Unsend the NEWEST (m3): a retracted row still renders as a tombstone bubble, so it must keep
+    // holding the chat's latest position.
+    await applyLocalUnsend(db, 'm3', 4000);
+    // Now delete a MIDDLE message (m2). Survivors: m1@100 and the retracted m3@300 → MAX must be 300.
+    const found = await markMessageDeleted(db, 'm2', 5000);
+    expect(found).toBe(true);
+    expect(latestDate()).toBe(300); // retracted m3 counts; only the deleted m2 is excluded
+  });
+
+  it('is a safe no-op for an unknown guid (returns false, changes nothing)', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+    const before = latestDate();
+    expect(await markMessageDeleted(db, 'does-not-exist', 5000)).toBe(false);
+    expect(latestDate()).toBe(before); // untouched
+    // No stray tombstone landed on any real row.
+    const anyDeleted = raw
+      .prepare('SELECT COUNT(*) c FROM messages WHERE date_deleted IS NOT NULL')
+      .get() as { c: number };
+    expect(anyDeleted.c).toBe(0);
   });
 });

@@ -79,4 +79,42 @@ describe('EventRouter', () => {
     if (out?.type === 'rcs-alert') expect(out.payload.alertType).toBe('GAIA_LOGGED_OUT');
     expect(events).toHaveLength(1);
   });
+
+  it('normalizes a message-deleted event and forwards its guid + chatGuid + dateDeleted', async () => {
+    const { events, sink } = collector();
+    const router = new EventRouter(sink);
+    const out = await router.handle(
+      'message-deleted',
+      { guid: 'del-1', chatGuid: 'iMessage;-;+1555', dateDeleted: 1700000000000 },
+      'socket',
+    );
+    expect(out?.type).toBe('message-deleted');
+    if (out?.type === 'message-deleted') {
+      expect(out.payload.guid).toBe('del-1');
+      expect(out.payload.chatGuid).toBe('iMessage;-;+1555');
+      expect(out.payload.dateDeleted).toBe(1700000000000);
+    }
+    expect(events).toHaveLength(1);
+  });
+
+  it('tolerates a message-deleted with only a guid (chatGuid/dateDeleted absent → null)', async () => {
+    const { sink } = collector();
+    const router = new EventRouter(sink);
+    const out = await router.handle('message-deleted', { guid: 'del-2' }, 'fcm');
+    expect(out?.type).toBe('message-deleted');
+    if (out?.type === 'message-deleted') {
+      expect(out.payload.guid).toBe('del-2');
+      // An absent `.nullish()` key stays undefined; epochMillis coerces an absent date to null (not
+      // NaN). The sink handles both (chatGuid is unused; dateDeleted ?? now()).
+      expect(out.payload.chatGuid).toBeUndefined();
+      expect(out.payload.dateDeleted).toBeNull();
+    }
+  });
+
+  it('drops a guid-less message-deleted (nothing to tombstone)', async () => {
+    const { events, sink } = collector();
+    const router = new EventRouter(sink);
+    expect(await router.handle('message-deleted', { dateDeleted: 1 }, 'socket')).toBeNull();
+    expect(events).toHaveLength(0);
+  });
 });
