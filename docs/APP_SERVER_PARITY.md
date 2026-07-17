@@ -16,6 +16,35 @@ The top gaps have since been wired (app-side; the server already emitted these e
 - **`new-server`** (tunnel-URL rotation) — the app now subscribes and, via `ServerUrlEventSink` → `applyNewServerUrl`, scheme-validates the new URL, persists it to the vault, re-points the session origin (HTTP re-points automatically via the session accessors), and reconnects the socket — instead of silently hitting the stale URL until a manual reconnect.
 - **Server Health screen** (Settings › SERVER › "Server Health…", and from Server Management) — surfaces the previously-untapped **remote-readable diagnostics** the server already exposed: Private-API helper connectivity (Messages + FaceTime), Find My key-import status (`get-findmy-keys-status` + `get-env` `findmyNeedsKeys`, explaining empty Find My tabs), push/FCM config (`get-fcm-status`), environment/uptime (`get-env` + `/admin/status`), tunnel + public IP + TLS (`get-zrok-status`/`get-public-ip`/`get-tls-status`), and the server alert log (`get-alerts` + Clear). No server change needed — all channels were already password-accessible.
 
+## ✅ Closed (2026-07-17) — chat.db schema-gap features
+
+The server's SCHEMA_GAPS_PLAN.md features (shipped server-side 2026-07-16, additive v1 wire
+fields + one new event) are now fully consumed app-side. All seven, each unit-tested and
+adversarially reviewed (per-chat/message details in the wave commits `75cfb25..d70958a`):
+
+- **Unsend (`dateRetracted`)** — was already rendered as a tombstone; the last gap (withdrawing
+  the delivered notification on unsend) is now wired via an `updated-message` cancel intent.
+  v1 constraint: notifications are keyed per-chat, so the whole chat's notification is withdrawn.
+- **`isScheduled` (Apple Send Later)** — persisted + badged. Per the server contract the badge is
+  gated `isScheduled && !isSent` (the server emits `isScheduled` on `schedule_type=2` regardless
+  of sent state); `isSent` is now modeled/persisted for this.
+- **Genmoji (`emojiImage*`)** — persisted through the attachment chain; description used as
+  accessibility alt text + notification/preview fallback (never under redaction); renders
+  inline emoji-sized (gallery `cellSize` still wins in multi-attachment grids).
+- **Edit history (`messageSummaryInfo`)** — persisted (JSON column, COALESCE-preserved) and
+  surfaced via a long-press "View Edit History" sheet (revisions + removed parts; redaction-safe).
+- **Group events** — `itemType 6` relabeled SharePlay (was mislabeled FaceTime), background
+  changed/removed (`gAT 4/6`) render properly, and a bg-change ingestion side-effect sink
+  refetches the chat wallpaper (`ensureSyncedBackground`) without requiring a chat re-open.
+- **Deletions (`message-deleted` + `supports_message_deleted`)** — new event wired through
+  SERVER_EVENTS → EventRouter → DbEventSink; tombstone column (`date_deleted`) rather than hard
+  delete (the server's sync paths keep returning Recently-Deleted rows for ~30 days, so a hard
+  delete would resurrect); filtered out of every render/count/search query; the chat's
+  denormalized inbox sort key is recomputed on delete. Residual (documented): a delete arriving
+  while the app is dead/locked only reconciles via the live event — there is no sync-side signal.
+- **Read-state (`lastReadMessageTimestamp`)** — Mac-side read markers reconcile into the app's
+  guid-based marker at chat ingestion (monotonic, idempotent, batched); unread counts self-correct.
+
 ## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
 
 The Gator server's RCS bridge (a `libgm` sidecar) serves RCS chats through the **same frozen v1
