@@ -59,7 +59,7 @@ honest tests.
 ## Shared context (paste into EVERY agent prompt)
 
 > ### Project context — Gator RN
-> - Repo: /Users/munkle/github/bluebubbles-rn. React Native (Expo SDK 56, RN 0.85, React 19)
+> - Repo: /Users/munkle/github/bluebubbles-rn. React Native (Expo SDK 57, RN 0.86, React 19)
 >   + TypeScript. Read AGENTS.md FIRST — including its "Component tests (jest-expo + RNTL)"
 >   subsection, which records the environment gotchas as hard rules.
 > - Two jest projects (jest.config.js): 'node' (ts-jest, `.test.ts`) and 'components'

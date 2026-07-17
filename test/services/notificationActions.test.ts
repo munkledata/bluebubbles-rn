@@ -34,7 +34,7 @@ import {
   PRESS_OPEN,
   PRESS_REMINDER,
 } from '@/services/notifications/notifeeService';
-import { handleNotificationAction } from '@/services/notifications/actions';
+import { handleNotificationAction, handleNotificationPress } from '@/services/notifications/actions';
 
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
 jest.mock('react-native-notify-kit', () => ({
@@ -189,26 +189,42 @@ describe('handleNotificationAction — love (tapback)', () => {
   });
 });
 
-describe('handleNotificationAction — reminder press', () => {
+describe('handleNotificationPress — reminder body tap (EventType.PRESS)', () => {
+  // A reminder's main pressAction fires EventType.PRESS (a body tap), not ACTION_PRESS — so the
+  // cleanup lives in handleNotificationPress, invoked from the foreground/background PRESS paths
+  // + the cold-start getInitialNotification. handleNotificationAction (ACTION_PRESS only) does NOT.
   it('deletes the reminder row by notification id, opening the DB via ensureDatabase()', async () => {
-    await handleNotificationAction(
+    await handleNotificationPress(
       chatDetail(PRESS_REMINDER, { chatGuid: 'c3' }, { id: 'reminder-m3-5000' }),
     );
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
     expect(mockGetDatabase).not.toHaveBeenCalled();
     expect(mockDeleteReminder).toHaveBeenCalledWith(mockDb, 'reminder-m3-5000');
-    // A reminder tap doesn't cancel a chat notification (deep-link handled by launchActivity).
+    // A reminder tap doesn't cancel a chat notification (navigation is done separately).
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
   });
 
   it('does nothing when the reminder notification has no id', async () => {
-    await handleNotificationAction(chatDetail(PRESS_REMINDER, { chatGuid: 'c3' }));
+    await handleNotificationPress(chatDetail(PRESS_REMINDER, { chatGuid: 'c3' }));
+    expect(mockDeleteReminder).not.toHaveBeenCalled();
+  });
+
+  it('ignores a non-reminder press (open-chat body tap) — no reminder delete', async () => {
+    await handleNotificationPress(chatDetail(PRESS_OPEN, { chatGuid: 'c3' }, { id: 'c3' }));
+    expect(mockDeleteReminder).not.toHaveBeenCalled();
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+  });
+
+  it('handleNotificationAction (ACTION_PRESS path) does NOT handle a reminder press', async () => {
+    await handleNotificationAction(
+      chatDetail(PRESS_REMINDER, { chatGuid: 'c3' }, { id: 'reminder-m3-5000' }),
+    );
     expect(mockDeleteReminder).not.toHaveBeenCalled();
   });
 });
 
 describe('handleNotificationAction — ignored / no-op cases', () => {
-  it('does nothing for an open-chat body press (deep-link handled by launchActivity)', async () => {
+  it('does nothing for an open-chat body press (navigation is handled by the PRESS path)', async () => {
     await handleNotificationAction(chatDetail(PRESS_OPEN, { chatGuid: 'c4' }));
     expect(mockMarkRead).not.toHaveBeenCalled();
     expect(mockSendText).not.toHaveBeenCalled();

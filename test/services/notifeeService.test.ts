@@ -151,7 +151,13 @@ describe('postNotification — message (default, not redacted)', () => {
     expect(n.id).toBe('chat-1');
     expect(n.title).toBe('Alice');
     expect(n.body).toBe('secret plans');
-    expect(n.data).toEqual({ chatGuid: 'chat-1', messageGuid: 'msg-1' });
+    // messageDate (stringified timestamp) is carried so a notification tap can deep-link with
+    // ?focusDate and scroll the chat to the message.
+    expect(n.data).toEqual({
+      chatGuid: 'chat-1',
+      messageGuid: 'msg-1',
+      messageDate: '1700000000000',
+    });
     expect(n.android?.channelId).toBe(CHANNEL_NEW_MESSAGE);
     expect(n.android?.pressAction).toEqual({ id: PRESS_OPEN, launchActivity: 'default' });
   });
@@ -330,6 +336,16 @@ describe('scheduleReminderNotification', () => {
     expect(trigger.type).toBe(0); // TriggerType.TIMESTAMP
     expect(trigger.timestamp).toBe(5000);
     expect(trigger.alarmManager).toEqual({ type: ALARM_IDLE }); // SET_AND_ALLOW_WHILE_IDLE — no exact-alarm perm
+  });
+
+  it('carries the message date (stringified) in data so a tap deep-links with ?focusDate', async () => {
+    await scheduleReminderNotification({ ...args, messageDate: 1700000000000 });
+    expect(mockCreateTrigger.mock.calls.at(-1)![0].data).toEqual({
+      chatGuid: 'c1',
+      messageGuid: 'm1',
+      reminder: '1',
+      messageDate: '1700000000000',
+    });
   });
 
   it('REDACTS the reminder body to "Reminder" under hidePreview (privacy pin)', async () => {

@@ -5,7 +5,8 @@
 > failures are now DONE**, and `master` is already pushed and in sync with origin (the "push master"
 > item is stale). Still open: scheduled recurrence, server-update install, QR display, and the socket
 > `refreshUrl` failover (needs `@react-native-firebase/database` + a `ServerUrlResolver` wire-up);
-> credential/native-gated: Sentry, Find My embedded map, Tasker receiver.
+> credential/native-gated: Sentry, Tasker receiver. (The Find My embedded map is now built — a
+> Leaflet/OSM WebView, no Google Maps key needed — so it's no longer blocked.)
 
 _Living checklist of what's NOT yet done, as of 2026-06-21 (after merging the parity Phases 1–3
 to master). See [ROADMAP.md](./ROADMAP.md) for the full feature plan and [COMPARISON.md](./COMPARISON.md)
@@ -25,10 +26,10 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
 
 ## 2. Not yet built — ROADMAP Phase 4 (Settings & polish)
 - [ ] Settings search (indexed `SearchableSettingItem`)
-- [ ] Scheduled **recurrence UI** (the F-8 `ScheduleSpec` plumbing already exists)
+- [ ] Scheduled **recurrence UI** — one-shot plumbing exists (`ScheduleArgs` / `ScheduledRow`); recurrence is NOT modeled yet (no recurrence field on the REST surface), so model it first
 - [ ] Configurable max-concurrent-downloads + image-preview-quality
 - [ ] DiceBear-style fake avatars in redacted mode (local/deterministic, not the network service)
-- [ ] Server update **install** (we have *check*; add `POST /server/update/install` + a button)
+- [ ] Server update **check + install** — both unimplemented on the Gator fork (`checkUpdate` rejects with `UnimplementedEndpointError`); add `GET /server/update/check` + `POST /server/update/install` + a button
 - [ ] QR pairing display in server management
 
 ## 3. Known code follow-ups
@@ -36,16 +37,18 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
       not wired to a real `ServerUrlResolver` (none is instantiated in `src/`; no `fetchFromFirebase`
       impl yet). Escalation currently just reconnects to the same origin with backoff.
       (See project memory `socketio-reconnect-attempts-infinity`.)
-- [ ] Errored-send "client error" titles (`errorTitleForCode` 10001–10008) aren't mapped from real
-      JS/network errors yet (server codes work; client codes are aspirational).
+- [x] ✅ Errored-send "client error" codes ARE now mapped from real failures — `sendErrorCode()`
+      (`src/utils/messageStatus.ts`) maps HTTP 502→10002 / 504→10003 / 404→10005 and a non-HTTP throw→10004,
+      wired into the send-failure path (`sendOutcome.ts`).
 
 ## 4. Blocked on credentials / server-side setup (can't be done from the app side)
 - [ ] 🔴 **Server-side Firebase** (service account + Realtime DB) so the server can SEND pushes — the
       FCM **client** is built, but killed-app push won't work until this is configured. **Biggest
       functional gap.**
 - [ ] **Sentry** — needs a DSN.
-- [ ] **Find My embedded map** — needs a Google Maps Android API key + `react-native-maps` + a rebuild
-      (the `geo:` URL fallback ships today).
+- [x] ✅ **Find My embedded map** — DONE via an interactive Leaflet/OpenStreetMap WebView
+      (`src/ui/findmy/FindMyMap.tsx`, wired into `app/(app)/findmy.tsx`); needs NO Google Maps key or
+      `react-native-maps`. (Real-server Find My *data* is still a device-smoke item in §1.)
 - [ ] Exported native **Tasker / automation receiver** (the hardened JS intent-gate is done; the
       native receiver isn't built).
 

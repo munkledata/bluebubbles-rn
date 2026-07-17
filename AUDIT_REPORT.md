@@ -8,6 +8,8 @@
 > sticker-render / video-fullscreen / Android share-intent (F-14), and `allowBackup`/legacy-query
 > hygiene (SEC-5/6). Test/file counts below are historical (current: **104 suites / 532 tests**).
 > Everything below is the ORIGINAL 2026-06-20 snapshot.
+>
+> **Superseded for current feature/parity status by** [`docs/OLD_APP_PARITY_AUDIT_2026-07-15.md`](./docs/OLD_APP_PARITY_AUDIT_2026-07-15.md) **and** [`docs/GITHUB_ISSUES_FEATURE_AUDIT_2026-07-15.md`](./docs/GITHUB_ISSUES_FEATURE_AUDIT_2026-07-15.md) **(2026-07-15).** This file is retained as the 2026-06-20 baseline; where it disagrees with those, trust the newer audits and the code. (Note: SEC-1's `requireAuthentication: true` recommendation was later explicitly decided *against* by design — see `src/native/secureVault.ts` — so it is closed, not open.)
 
 _Generated 2026-06-20 from a 7-agent audit (635k tokens) of the React Native rebuild
 (`bluebubbles-rn`, 176 source files / 19 screens / **77 test files, 345 passing**) against the

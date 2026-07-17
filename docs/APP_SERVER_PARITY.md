@@ -29,6 +29,8 @@ Prompt 8.
 | Server → App | RCS `MessageV1` (`service:"RCS"`, `originalROWID:null`, ms dates, status on `isSent`/`isDelivered`/`isRead`) via `get-chat/:guid/message` + realtime `new-message`/`updated-message` | ✅ Flows through the existing chat-open backfill + `EventRouter` unchanged (no service filter drops it). |
 | Server → App | RCS attachment bytes on the **separate** route `GET /api/v1/rcs/attachment/{mediaID}/download` | ✅ App branches on the owning chat's service — `attachmentDownloadUrl(http, guid, service)` builds `/rcs/attachment/…` when `service === 'RCS'`. Service is derived (chat-guid `LIKE 'RCS;-;%'` JOIN) onto `AttachmentRow`. |
 | Server → App | `ServerInfoV1.rcs?: boolean` capability flag | ✅ Added to the `ServerInfo` zod model (nullish → older servers omit it, no throw); `sessionAccessors.rcsEnabled()` / `useRcsEnabled()` gate RCS-specific UI. |
+| Server → App | `rcs-alert` realtime event (bridge health: `alertType` + message) | ✅ Subscribed (`SERVER_EVENTS`) + zod-normalized in `EventRouter`; `RcsAlertEventSink` maps it to a Server Health RCS row (`rcsHealth.ts`). |
+| Server → App | `rcs-bridge-down` high-priority push (`{title, body, reason}`) | ✅ Subscribed + normalized; posts a content-less status notification (`intents.ts` → `notifeeService`), honoring the hide-preview toggle. |
 | App UI | RCS bubble colour + badge | ✅ New `rcsBackground` teal token (distinct from iMessage blue + SMS green) across all presets; `MessageBubble` mirrors the SMS-green branch for `senderService === 'RCS'`; a subtle "RCS" `ServiceBadge` pill shows in `ConversationHeader` + `ConversationTile` (keyed off the `RCS;-;` guid). |
 
 **Intentional non-alignments (RCS):**
@@ -101,8 +103,7 @@ These are genuine divergences, each for a concrete reason — not oversights:
 ## Bottom line
 
 - **App → Server: clean.** The app never calls anything the server can't handle — nothing would 404 a user. The only drift is the app being wired for the `imessage-aliases-removed` realtime event that this server never emits (dead listener; the *server* is what's missing the emission), plus an already-stubbed `checkUpdate`.
-- **Server → App: large untapped surface.** The app uses the core data/action APIs fully but ignores most of the server's admin/config/diagnostics + several realtime events. The highest-value gaps to wire into the app:
-  1. **`message-send-error`** socket event — the server pushes outgoing-send failures the app currently ignores (a failed send only surfaces via the app's own retry queue).
-  2. **Realtime `group-icon-changed` / `group-icon-removed` / `new-server` / `scheduled-message-update`** — the app misses live group-avatar changes, tunnel-URL rotation, and externally-changed scheduled messages until a resync.
-  3. **Diagnostics reads** (`get-private-api-status`, `get-env`→`findmyNeedsKeys`, `get-findmy-keys-status`, `get-fcm-status`, `get-alerts`, `get-config`) — would power an in-app Server Health / Settings screen and explain empty Find My tabs / disabled effects.
+- **Server → App: mostly wired now.** The app uses the core data/action APIs fully, and the previously-untapped realtime + diagnostics surface has largely been closed (see the *✅ Closed (2026-07-01)* section above): `message-send-error`, `new-server` (tunnel-URL rotation), and the admin/diagnostics reads (`get-private-api-status`, `get-env`→`findmyNeedsKeys`, `get-findmy-keys-status`, `get-fcm-status`, `get-alerts`, `get-config`) are now handled — the diagnostics reads are surfaced by the in-app **Server Health** screen. The only realtime events still unwired are the **intentional non-alignments** below, not gaps:
+  1. **`group-icon-changed` / `group-icon-removed`** — the app renders participant-collage group avatars, so there's no server group photo to refresh (deferred with the group-photo feature).
+  2. **`scheduled-message-update`** — the app schedules sends **locally**, so the server-side scheduled-message signal doesn't map to its model.
 - **Not worth wiring** (low mobile value / local-console-only): webhooks, zrok/TLS/VAPID/Cloudflare management, `set-config` writes (all admin-only, 403 to remote clients).

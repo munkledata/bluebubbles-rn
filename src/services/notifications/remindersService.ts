@@ -1,6 +1,7 @@
 import {
   createReminder,
   deleteReminder,
+  getMessageDateByGuid,
   getReminderByMessageGuid,
   updateReminderTime,
 } from '@db/repositories';
@@ -17,6 +18,7 @@ export interface ReminderScheduler {
     title: string;
     body: string;
     scheduledFor: number;
+    messageDate?: number;
   }): Promise<void>;
   cancel(notificationId: string): Promise<void>;
 }
@@ -56,6 +58,9 @@ export async function scheduleReminder(
     await deleteReminder(db, existing.id);
   }
   const notificationId = newNotificationId(args.messageGuid, args.scheduledFor);
+  // Look up the reminded message's date so the notification tap can center the chat on it
+  // (?focusDate deep-link). null when the message is gone — the tap still opens the chat.
+  const messageDate = (await getMessageDateByGuid(db, args.messageGuid)) ?? undefined;
   await scheduler.schedule({
     notificationId,
     chatGuid: args.chatGuid,
@@ -63,6 +68,7 @@ export async function scheduleReminder(
     title: args.chatTitle,
     body: args.messagePreview ?? 'Reminder',
     scheduledFor: args.scheduledFor,
+    messageDate,
   });
   return createReminder(db, {
     messageGuid: args.messageGuid,
@@ -93,6 +99,7 @@ export async function rescheduleReminder(
   scheduler: ReminderScheduler = notifeeScheduler,
 ): Promise<string> {
   const notificationId = newNotificationId(reminder.messageGuid, scheduledFor);
+  const messageDate = (await getMessageDateByGuid(db, reminder.messageGuid)) ?? undefined;
   // Schedule the new trigger FIRST so a failure leaves the old reminder intact
   // (no orphaned DB row pointing at a cancelled trigger).
   await scheduler.schedule({
@@ -102,6 +109,7 @@ export async function rescheduleReminder(
     title: reminder.senderName ?? 'Reminder',
     body: reminder.messagePreview ?? 'Reminder',
     scheduledFor,
+    messageDate,
   });
   await scheduler.cancel(reminder.notificationId);
   await updateReminderTime(db, reminder.id, scheduledFor, notificationId);

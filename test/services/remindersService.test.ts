@@ -1,4 +1,12 @@
-import { getReminderByMessageGuid, listReminders } from '@db/repositories';
+import { Chat, Message } from '@core/models';
+import {
+  getReminderByMessageGuid,
+  listReminders,
+  upsertChats,
+  upsertHandles,
+  upsertMessages,
+} from '@db/repositories';
+import type { AppDatabase } from '@db/types';
 import {
   cancelReminder,
   rescheduleReminder,
@@ -7,18 +15,38 @@ import {
 } from '@/services/notifications/remindersService';
 import { createTestDb } from '../support/testDb';
 
+type ScheduleArgs = Parameters<ReminderScheduler['schedule']>[0];
+
 function fakeScheduler() {
   const scheduled: string[] = [];
   const cancelled: string[] = [];
+  const args: ScheduleArgs[] = [];
   const scheduler: ReminderScheduler = {
     schedule: async (a) => {
       scheduled.push(a.notificationId);
+      args.push(a);
     },
     cancel: async (id) => {
       cancelled.push(id);
     },
   };
-  return { scheduler, scheduled, cancelled };
+  return { scheduler, scheduled, cancelled, args };
+}
+
+/** Seed a chat with a single message ('m1') at a known date so getMessageDateByGuid resolves. */
+async function seedMessage(db: AppDatabase, guid: string, dateCreated: number): Promise<void> {
+  const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
+  const chatMap = await upsertChats(
+    db,
+    [Chat.parse({ guid: 'c1', displayName: 'Alice', participants: [{ address: 'alice@me.com' }] })],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [Message.parse({ guid, text: 'hi', dateCreated })],
+    () => chatMap.get('c1')!,
+    handles,
+  );
 }
 
 const base = {
@@ -105,6 +133,34 @@ describe('rescheduleReminder', () => {
     expect(after?.scheduledFor).toBe(5000);
     expect(after?.notificationId).toBe('reminder-m1-5000');
     expect(cancelled).toEqual([]);
+  });
+});
+
+describe('reminder message-date plumbing (focusDate deep-link)', () => {
+  it('passes the reminded message’s dateCreated to the scheduler when the message is known', async () => {
+    const { db } = await createTestDb();
+    await seedMessage(db, 'm1', 1700000000000);
+    const { scheduler, args } = fakeScheduler();
+    await scheduleReminder(db, { ...base, scheduledFor: 5000 }, scheduler);
+    expect(args[0]?.messageDate).toBe(1700000000000);
+  });
+
+  it('omits messageDate (undefined) when the message is not in the DB', async () => {
+    const { db } = await createTestDb();
+    const { scheduler, args } = fakeScheduler();
+    await scheduleReminder(db, { ...base, scheduledFor: 5000 }, scheduler);
+    expect(args[0]?.messageDate).toBeUndefined();
+  });
+
+  it('carries messageDate through a reschedule too', async () => {
+    const { db } = await createTestDb();
+    await seedMessage(db, 'm1', 1700000000000);
+    const { scheduler, args } = fakeScheduler();
+    await scheduleReminder(db, { ...base, scheduledFor: 5000 }, scheduler);
+    const r = (await getReminderByMessageGuid(db, 'm1'))!;
+    await rescheduleReminder(db, r, 12000, scheduler);
+    // args[0] = initial schedule, args[1] = reschedule
+    expect(args[1]?.messageDate).toBe(1700000000000);
   });
 });
 

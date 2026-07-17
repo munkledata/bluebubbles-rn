@@ -139,7 +139,13 @@ export async function postNotification(intent: NotificationIntent): Promise<void
     id: intent.chatGuid,
     title,
     body,
-    data: { chatGuid: intent.chatGuid, messageGuid: intent.messageGuid },
+    // messageDate lets a notification tap deep-link with ?focusDate so the chat loads a
+    // window CENTERED on the message (older messages resolve reliably, not just recent ones).
+    data: {
+      chatGuid: intent.chatGuid,
+      messageGuid: intent.messageGuid,
+      messageDate: String(intent.timestamp),
+    },
     android: {
       channelId,
       smallIcon: 'ic_launcher',
@@ -271,6 +277,9 @@ export async function scheduleReminderNotification(args: {
   title: string;
   body: string;
   scheduledFor: number;
+  /** The reminded message's timestamp (ms) — carried so a tap deep-links with ?focusDate and
+   *  scrolls to the message. Omitted when the message's date is unknown. */
+  messageDate?: number;
 }): Promise<void> {
   await ensureReminderChannel();
   // SET_AND_ALLOW_WHILE_IDLE = inexact alarm that still fires in Doze — needs NO
@@ -287,7 +296,13 @@ export async function scheduleReminderNotification(args: {
         id: args.notificationId,
         title: args.title,
         body: hidePreview ? 'Reminder' : args.body,
-        data: { chatGuid: args.chatGuid, messageGuid: args.messageGuid, reminder: '1' },
+        data: {
+          chatGuid: args.chatGuid,
+          messageGuid: args.messageGuid,
+          reminder: '1',
+          // Only include when known — notificationOpenTarget ignores a non-numeric/missing value.
+          ...(args.messageDate != null ? { messageDate: String(args.messageDate) } : {}),
+        },
         android: {
           channelId: CHANNEL_REMINDERS,
           smallIcon: 'ic_launcher',

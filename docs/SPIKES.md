@@ -8,7 +8,7 @@ foundation pass (which is Node-only). Each has a binary pass/fail gate.
 ## 1. Encrypted DB + reactive list at scale
 **Goal:** prove op-sqlite + SQLCipher with a reactive query feeds a smooth list at volume.
 - Seed 100k synthetic messages into an encrypted DB.
-- Render an inverted FlashList bound to a reactive query.
+- Render a FlashList v2 bound to a reactive query (v2 has no `inverted` prop — use `maintainVisibleContentPosition={{ startRenderingFromBottom: true }}`).
 - **Pass:** scroll stays ~60fps; jump-to-message works; DB file is unreadable without the key.
 - If variable-height jank appears, evaluate Legend List.
 
@@ -16,7 +16,7 @@ foundation pass (which is Node-only). Each has a binary pass/fail gate.
 **Goal:** prove a background data message can update the DB with no React tree, then notify.
 - Send an FCM data message with the app force-killed.
 - `setBackgroundMessageHandler` opens SQLCipher, runs `EventRouter`, writes the message,
-  posts a Notifee notification — all from `core/` + `native/` only.
+  posts a notify-kit (`react-native-notify-kit`) notification — all from `core/` + `native/` only.
 - **Pass:** message persists and the notification appears within the OS time budget; the
   same row is visible when the app is reopened.
 

@@ -15,7 +15,7 @@ they only add independent test files.
 ## Shared context (paste into EVERY agent prompt)
 
 > ### Project context — Gator RN
-> - Repo: `/Users/munkle/github/bluebubbles-rn`. A React Native (Expo SDK 56, RN 0.85,
+> - Repo: `/Users/munkle/github/bluebubbles-rn`. A React Native (Expo SDK 57, RN 0.86,
 >   React 19) + TypeScript iMessage client, Android-only, iOS-styled. Read `AGENTS.md` at the
 >   repo root FIRST — it is the authoritative gotcha list and its instructions override defaults.
 > - Existing tests: 122 suites / ~700 tests, ALL Node-only via ts-jest (`jest.config.js`,
@@ -36,7 +36,7 @@ they only add independent test files.
 >
 > ### Hard constraints for component tests
 > 1. **Never import real native modules in a test path.** `@op-engineering/op-sqlite`,
->    `@notifee/react-native` (a stub exists at `test/__mocks__/notifee.ts`), Firebase,
+>    `react-native-notify-kit` (a stub exists at `test/__mocks__/notifee.ts`, mapped in `jest.config.js`; the mock file name is intentionally kept), Firebase,
 >    `react-native-libsodium`, `jail-monkey`, `react-native-ssl-public-key-pinning` have no
 >    native half in jest. jest-expo auto-mocks most `expo-*` packages; for the rest add
 >    `moduleNameMapper` entries or `jest.mock()` in the test file.
@@ -76,10 +76,10 @@ passes; all ~700 existing tests still pass; typecheck passes.
   `testMatch: ['<rootDir>/test/components/**/*.test.tsx']`, the same path-alias
   moduleNameMapper, plus the notifee mapping.
 - Root-level options that don't belong in a project (e.g. coverage settings) stay top-level.
-- Install with `npx expo install jest-expo` so the version matches SDK 56, and
+- Install with `npx expo install jest-expo` so the version matches SDK 57, and
   `npm i -D @testing-library/react-native` (plus `react-test-renderer` at the EXACT installed
   React version if RNTL requires it — check the RNTL v13+ docs for React 19 first; do not
-  guess versions, and consult https://docs.expo.dev/versions/v56.0.0/ for the SDK's
+  guess versions, and consult https://docs.expo.dev/versions/v57.0.0/ for the SDK's
   testing guidance).
 - jest-expo's preset includes `transformIgnorePatterns` for RN/Expo packages — keep its
   defaults; extend (don't replace) if a package fails to transform.
@@ -267,9 +267,9 @@ allow adding a tiny render-count probe helper to `test/components/support/`.
 
 ## Known risks (tell every agent)
 
-- **Version alignment is the #1 setup risk:** jest-expo must match Expo SDK 56 and RNTL must
+- **Version alignment is the #1 setup risk:** jest-expo must match Expo SDK 57 and RNTL must
   support React 19. Resolve from the installed packages' own peerDependency declarations and
-  the SDK 56 docs, not from memory.
+  the SDK 57 docs, not from memory.
 - jest-expo may pull its own `jest` peer expectations; if the existing jest@29 conflicts,
   STOP and report options rather than force-resolving.
 - Some components may turn out to import a native module at module top-level; the fix is a

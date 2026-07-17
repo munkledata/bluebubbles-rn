@@ -126,11 +126,13 @@ app/        expo-router screens (added Phase 1+)
 src/
   core/     REACT-FREE pure TS SDK — api, realtime, sync, crypto, secure, config, models
   db/       Drizzle schema + migrations (op-sqlite + SQLCipher)
+  services/ composition root — HTTP/socket/FCM clients, send, download, backup, notifications, bootstrap
   state/    Zustand stores + TanStack Query (added with screens)
+  features/ feature modules wiring core + ui together
   ui/       iOS design system: tokens, ThemeProvider, primitives
   native/   thin wrappers over native modules (crypto, secure store, fcm, biometrics)
   utils/    pure helpers (bytes/base64, version compare)
-test/       Jest unit tests for the core layer
+test/       Jest tests — `node` project (core/db/services, `.test.ts`) + `components` project (jest-expo RN tests under `test/components`, `.test.tsx`)
 ```
 
 `core/` imports no React/React Native, so it runs in Node (tests) and the headless FCM
@@ -144,7 +146,7 @@ handler, and could be extracted into a standalone `@gator/sdk`.
 | Local DB | op-sqlite + SQLCipher + Drizzle ORM |
 | REST | ky + zod validation |
 | Realtime | socket.io-client + FCM (one `EventRouter`) |
-| Push | @react-native-firebase/messaging + Notifee |
+| Push | @react-native-firebase/messaging + react-native-notify-kit |
 | Crypto | react-native-libsodium (XChaCha20-Poly1305 + Argon2id) |
 | Secure storage | expo-secure-store (Android Keystore) |
 
@@ -153,7 +155,7 @@ handler, and could be extracted into a standalone `@gator/sdk`.
 ```bash
 npm install
 npm run typecheck   # tsc --noEmit
-npm test            # jest (core layer)
+npm test            # jest (node + component test projects)
 ```
 
 The `core/` layer and its tests run in plain Node — **no Android SDK, Java, or device

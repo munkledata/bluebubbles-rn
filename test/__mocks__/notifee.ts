@@ -17,5 +17,6 @@ const notifee = {
   cancelTriggerNotification: async () => undefined,
   onForegroundEvent: () => () => undefined,
   onBackgroundEvent: () => undefined,
+  getInitialNotification: async () => null,
 };
 export default notifee;

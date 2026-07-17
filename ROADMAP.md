@@ -170,10 +170,10 @@ has a first-class JS port, so we get Flutter's exact algorithm without Material-
 | Item | Effort | Notes |
 |---|---|---|
 | **Settings search** | M | Wrap settings rows in a `SearchableSettingItem` registry (title + tags); a search field filters. Useful as settings grow with the above. |
-| **Scheduled-recurrence UI** | S/M | Plumbing exists (F-8 `ScheduleSpec`); add a "Repeat" picker to the schedule sheet → `schedule: {type:'recurring', interval, intervalType}`. |
+| **Scheduled-recurrence UI** | S/M | One-shot plumbing exists (`ScheduleArgs` / `ScheduledRow`; the local `runDueScheduled` pipeline). Recurrence is NOT modeled yet — the REST surface has no recurrence field. Model it, then add a "Repeat" picker to the schedule sheet. |
 | **Configurable max-concurrent-downloads + image-preview-quality** | S | Settings → wire to the download semaphore limit + the preview resize quality. |
 | **DiceBear fake avatars in redacted mode** | S | Generate a deterministic local avatar per handle when redacted (a seeded SVG/emoji — avoid the network DiceBear call for privacy). |
-| **Server update *install*** | S | Add `POST /server/update/install` to `server.ts` + a button in the server-management panel (we already have *check*). |
+| **Server update *check* + *install*** | S | Both unimplemented on the Gator fork — `checkUpdate` currently rejects with `UnimplementedEndpointError('/server/update/check')` and isn't surfaced. Implement `GET /server/update/check` + `POST /server/update/install` in `server.ts` + a button in the server-management panel. |
 | **QR pairing display** | S/M | Render a connection QR in server-management (we deferred this). |
 
 ---

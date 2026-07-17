@@ -513,6 +513,19 @@ export async function getMessagePreviewByGuid(
   return rows[0] ?? null;
 }
 
+/**
+ * The message's dateCreated (epoch ms) by guid, or null when the message is absent or has no
+ * date. Used to center the chat on a reminded message when its notification is tapped (the
+ * `?focusDate` deep-link loads a window around the message so scroll-to-message works even for
+ * an old message not in the recent window).
+ */
+export async function getMessageDateByGuid(db: AppDatabase, guid: string): Promise<number | null> {
+  const rows = await db.all<{ dateCreated: number | null }>(
+    sql`SELECT date_created AS dateCreated FROM messages WHERE guid = ${guid} LIMIT 1`,
+  );
+  return rows[0]?.dateCreated ?? null;
+}
+
 /** Delete a message by guid (used to clear an errored temp row before retry). */
 export async function deleteMessageByGuid(db: AppDatabase, guid: string): Promise<void> {
   await db.delete(messages).where(eq(messages.guid, guid));

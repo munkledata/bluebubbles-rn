@@ -53,19 +53,30 @@ export async function handleNotificationAction(detail: EventDetail): Promise<voi
       await notifee.cancelNotification(chatGuid);
       break;
     }
-    case PRESS_REMINDER: {
-      // Reminder fired + tapped → it's done; remove the DB row. Deep-link to the
-      // chat is handled by launchActivity.
-      const notifId = detail.notification?.id;
-      // ensureDatabase (not getDatabase) so this works in the headless killed-app wake,
-      // where boot() never ran and the DB was never opened.
-      if (notifId) await deleteReminderByNotificationId(await ensureDatabase(), notifId);
-      break;
-    }
     default:
-      // open-chat / body press: deep-link handled by launchActivity; nothing here.
+      // Only inline action buttons reach here. A body/main press (open-chat, reminder) is
+      // EventType.PRESS, not ACTION_PRESS — handled by handleNotificationPress (side-effects)
+      // + openFromNotification (deep-link + scroll-to-message).
       break;
   }
+}
+
+/**
+ * Handle a MAIN notification press — the body tap, not an action button (EventType.PRESS).
+ * Runs only the DB side-effects that must happen whether the app is foreground or headless.
+ * Today that's: a fired reminder that's been tapped is done, so drop its DB row.
+ *
+ * NAVIGATION to the chat is done separately (openFromNotification) because it needs a React
+ * tree — a killed-app tap navigates on next mount via `getInitialNotification()`. This is
+ * idempotent (getInitialNotification and onBackgroundEvent can BOTH deliver the same launching
+ * press, and deleteReminderByNotificationId is a no-op on an already-removed row).
+ */
+export async function handleNotificationPress(detail: EventDetail): Promise<void> {
+  if (detail.pressAction?.id !== PRESS_REMINDER) return;
+  const notifId = detail.notification?.id;
+  // ensureDatabase (not getDatabase) so this works in the headless killed-app wake, where
+  // boot() never ran and the DB was never opened.
+  if (notifId) await deleteReminderByNotificationId(await ensureDatabase(), notifId);
 }
 
 /**

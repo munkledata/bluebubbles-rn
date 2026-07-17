@@ -339,6 +339,13 @@ clear; boot-recovery tries both keys) + a settings trigger. Built on the now-pro
 - [ ] Build a preview APK: `eas build --profile preview --platform android`
 - [ ] (later) Production AAB + submit: `eas build --profile production --platform android` → `eas submit`
 
+**One-command release path (preferred):** `npm run release:android` bumps the patch version
+(`npm version patch --no-git-tag-version`), builds a production AAB on EAS Cloud, and
+auto-submits it to the Play internal track (`eas build … --auto-submit`). Use
+`npm run release:android:local` to build the AAB locally (`--local --output ./gator-release.aab`)
+and then `eas submit --path ./gator-release.aab`. Submit credentials come from
+`submit.production.serviceAccountKeyPath: ./play-service-account.json` in [eas.json](./eas.json).
+
 **Already done:** [eas.json](./eas.json) has `development` / `preview` / `production` profiles
 (internal APK / store AAB) + a `submit.production` track. CI ([.github/workflows/ci.yml](./.github/workflows/ci.yml))
 runs typecheck + prettier + jest on every push/PR.

@@ -99,11 +99,12 @@ FTS5 search index.
   (FTS5 must be compiled in, or it fails on device only.)
 
 ### 7. Attachment binary file cache (filesystem)
-`src/ui/attachments/*`
+`src/services/download/*` (downloader — `downloadService`, `expoFetcher`/`devFetcher`, `pathSafety`), `src/db/repositories/attachments.ts` (`updateAttachmentLocalPath`), `src/ui/attachments/*` (UI trigger/render layer only)
 
 - Only `local_path` is cached in the DB row. The bytes are downloaded **on demand** (images
   < 5 MB auto, everything else tap-to-download) to `Paths.document/attachments/{guid}/`,
-  concurrency-capped at 2, with per-guid dedup of concurrent calls.
+  concurrency-capped at a configurable limit (default `DEFAULT_MAX_CONCURRENT_DOWNLOADS = 2`,
+  adjustable up to `MAX_CONCURRENT_DOWNLOADS_LIMIT = 6`), with per-guid dedup of concurrent calls.
 - On success, `updateAttachmentLocalPath` writes `local_path` → adapter flush → `useMessages`
   re-queries → the image swaps from placeholder to media (driven by the **DB write**, never
   the store).
@@ -120,8 +121,9 @@ FTS5 search index.
   value TEXT)`.
 
 ### 9. In-memory zustand stores
-- *kv-mirroring*: `themeStore`, `smartReplyStore`, `redactedModeStore` — hydrate from `kv`,
-  set memory first then best-effort `kvSet`.
+- *kv-mirroring*: `themeStore`, `smartReplyStore`, `redactedModeStore`, `featureSettingsStore`
+  (feature flags + attachment auto-download / wifi-only settings), `syncSettingsStore`
+  (messages-per-chat) — hydrate from `kv`, set memory first then best-effort `kvSet`.
 - *vault-mirroring*: `sessionStore` (credentials), `lockStore` (`appLockEnabled`) — never
   persisted by zustand.
 - *purely ephemeral* (reset every reload): `downloadStore`, `syncStore`, `typingStore`,
@@ -169,8 +171,8 @@ FTS5 search index.
 
 - **No TTL / eviction / pruning anywhere.** Nothing deletes old messages, chats, handles, or
   downloaded media. The DB and on-disk media cache grow **unbounded** with history. Only
-  per-entity user/server-driven deletes exist (deleteChat cascade, deleteMessage,
-  clearContacts). No size cap, age cap, LRU, or cleanup job; expo-image's bitmap cache is
+  per-entity user/server-driven deletes exist (`deleteChatLocal` cascade, `deleteMessageByGuid`,
+  and the full contacts wipe in `upsertContacts` via `db.delete(contacts)`). No size cap, age cap, LRU, or cleanup job; expo-image's bitmap cache is
   never cleared. *(This is the place to add a cache-size cap if ever wanted.)*
 - **Logout does not wipe the cache.** `forget()` removes only `serverAddress` +
   `serverPassword` and resets the session store — it leaves the DB key in the vault and the
@@ -206,4 +208,5 @@ FTS5 search index.
 | `src/core/realtime/eventRouter.ts` | socket + FCM normalization |
 | `src/services/realtime/dbEventSink.ts` | realtime → DB upserts |
 | `src/db/repositories/*` | upserts, reads, kv, sync marker |
-| `src/ui/attachments/*` | media download + on-disk file cache |
+| `src/services/download/*` | on-demand media download, concurrency cap, per-guid dedup, on-disk file cache |
+| `src/ui/attachments/*` | UI trigger/render layer (fires the download, swaps on the DB `local_path` write) |

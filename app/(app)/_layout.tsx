@@ -1,9 +1,10 @@
 import notifee, { EventType } from 'react-native-notify-kit';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
-import { handleNotificationAction } from '@/services/notifications/actions';
+import { handleNotificationAction, handleNotificationPress } from '@/services/notifications/actions';
+import { openFromNotification } from '@/services/notifications/notificationOpen';
 import { pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
@@ -15,6 +16,8 @@ import { ShareIntentHandler } from '@ui/ShareIntentHandler';
  * actions (reply / mark-read).
  */
 export default function AppLayout(): React.JSX.Element {
+  const router = useRouter();
+
   // App-lock: record background time; lock on foreground once the timeout passes.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
@@ -44,14 +47,37 @@ export default function AppLayout(): React.JSX.Element {
     return () => sub.remove();
   }, []);
 
-  // Foreground notification actions (reply / mark-read from the tray while open).
+  // Foreground notification handling. Action buttons (reply / mark-read / love) run their
+  // side-effects; a body tap (PRESS) runs its side-effects AND deep-links to the chat,
+  // scrolling to the message. On Android `launchActivity: 'default'` only foregrounds the
+  // app — it does NOT navigate — so we route the tap here.
   useEffect(
     () =>
       notifee.onForegroundEvent(({ type, detail }) => {
-        if (type === EventType.ACTION_PRESS) void handleNotificationAction(detail);
+        if (type === EventType.ACTION_PRESS) {
+          void handleNotificationAction(detail);
+        } else if (type === EventType.PRESS) {
+          void handleNotificationPress(detail);
+          openFromNotification(detail.notification?.data, (path) => router.push(path));
+        }
       }),
-    [],
+    [router],
   );
+
+  // Cold start: a tap that LAUNCHED the app from killed isn't replayed as a foreground event.
+  // getInitialNotification() reports that launching press exactly once (it's cleared after the
+  // first read), so run its side-effects + deep-link to the chat here on mount.
+  useEffect(() => {
+    let cancelled = false;
+    void notifee.getInitialNotification().then((initial) => {
+      if (cancelled || !initial) return;
+      void handleNotificationPress(initial);
+      openFromNotification(initial.notification?.data, (path) => router.push(path));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   return (
     <>
