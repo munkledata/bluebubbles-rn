@@ -96,6 +96,58 @@ export function sendText(http: HttpClient, params: SendTextParams): Promise<Send
   });
 }
 
+/** One phone number on a contact card being sent. `label` (e.g. "cell", "home") is optional. */
+export interface ContactPhone {
+  number: string;
+  label?: string;
+}
+/** One email on a contact card being sent. `label` (e.g. "home", "work") is optional. */
+export interface ContactEmail {
+  address: string;
+  label?: string;
+}
+
+export interface SendContactParams {
+  chatGuid: string;
+  /** Client-generated temp GUID for optimistic send + reconciliation. */
+  tempGuid: string;
+  firstName?: string;
+  lastName?: string;
+  organization?: string;
+  phones?: ContactPhone[];
+  emails?: ContactEmail[];
+  subject?: string;
+  effectId?: string;
+  /** Reply target. */
+  selectedMessageGuid?: string;
+}
+
+/**
+ * POST /api/v1/message/contact — send a contact card. The client sends STRUCTURED fields; the
+ * server assembles a vCard 3.0 and ships it through the same attachment pipeline as
+ * send-attachment (so the ack is the same `{ guid? }` SendAck, and the live `new-message` echo
+ * carries the real `.vcf` attachment). Gate on `serverInfo.supports_send_contact` before calling.
+ *
+ * Empty phone/email arrays are omitted so the server's "a contact needs at least a name, org,
+ * phone, or email" refinement isn't tripped by an all-empty body.
+ */
+export function sendContact(http: HttpClient, params: SendContactParams): Promise<SendAck> {
+  return http.post('/message/contact', SendAck, {
+    json: {
+      chatGuid: params.chatGuid,
+      tempGuid: params.tempGuid,
+      firstName: params.firstName,
+      lastName: params.lastName,
+      organization: params.organization,
+      phones: params.phones?.length ? params.phones : undefined,
+      emails: params.emails?.length ? params.emails : undefined,
+      subject: params.subject,
+      effectId: params.effectId,
+      selectedMessageGuid: params.selectedMessageGuid,
+    },
+  });
+}
+
 export interface MessageQuery {
   limit?: number;
   /** ROWID cursor (server >= 1.6.0). */

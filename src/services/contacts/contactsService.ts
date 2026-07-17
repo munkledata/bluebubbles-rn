@@ -7,11 +7,35 @@ import { matchContactsToHandles, upsertContacts, type DeviceContact } from '@db/
 // The session-bound HTTP client (used only at runtime inside syncContacts).
 import { http } from '../clients';
 import { backfillServerAvatars } from './serverAvatars';
+import type { ContactCard } from '../send/sendContactService';
 
 /** Request READ_CONTACTS. Returns true if granted. */
 export async function requestContactsPermission(): Promise<boolean> {
   const { status } = await Contacts.requestPermissionsAsync();
   return status === 'granted';
+}
+
+/**
+ * Present the native contact picker and map the chosen contact to the structured fields the
+ * `send-contact` endpoint wants. Returns null when the user cancels or denies access — the caller
+ * simply sends nothing. Only name/org/phones/emails are carried (the server builds the vCard);
+ * the device photo is intentionally left off (the server-side vCard builder omits PHOTO too).
+ */
+export async function pickContact(): Promise<ContactCard | null> {
+  if (!(await requestContactsPermission())) return null;
+  const c = await Contacts.presentContactPickerAsync();
+  if (!c) return null;
+  return {
+    firstName: c.firstName ?? undefined,
+    lastName: c.lastName ?? undefined,
+    organization: c.company ?? undefined,
+    phones: (c.phoneNumbers ?? [])
+      .map((p) => ({ number: (p.number ?? '').trim(), label: p.label ?? undefined }))
+      .filter((p) => p.number),
+    emails: (c.emails ?? [])
+      .map((e) => ({ address: (e.email ?? '').trim(), label: e.label ?? undefined }))
+      .filter((e) => e.address),
+  };
 }
 
 /**

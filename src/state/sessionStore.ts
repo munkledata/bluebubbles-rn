@@ -68,6 +68,9 @@ export const sessionAccessors = {
    */
   messageDeletedSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_message_deleted,
+  /** Whether the connected server can build + send a contact card (`send-contact`). */
+  sendContactSupported: (): boolean =>
+    !!useSessionStore.getState().serverInfo?.supports_send_contact,
 };
 
 /** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
@@ -76,3 +79,7 @@ export const useRcsEnabled = (): boolean => useSessionStore((s) => !!s.serverInf
 /** React hook: can the server emit `message-deleted`? (For future deletion affordances.) */
 export const useMessageDeletedSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_message_deleted);
+
+/** React hook: can the server send a contact card? (Gate the composer's "Contact" affordance.) */
+export const useSendContactSupported = (): boolean =>
+  useSessionStore((s) => !!s.serverInfo?.supports_send_contact);

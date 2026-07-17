@@ -28,6 +28,13 @@ export const ServerInfo = z
      */
     supports_message_deleted: z.boolean().nullish(),
     /**
+     * Whether the server can build + send a contact card from structured fields — the
+     * `send-contact` action (`POST /api/v1/message/contact`) that assembles a vCard 3.0 server-side
+     * and ships it as an attachment. Additive; absent/false on older servers. The app gates the
+     * composer's "Contact" affordance on this so it never offers a send the server can't fulfil.
+     */
+    supports_send_contact: z.boolean().nullish(),
+    /**
      * Gator RCS bridge enabled (additive; absent/false on older servers). When true the server
      * serves RCS chats through the same v1 endpoints (`RCS;-;` guids, `service:"RCS"`). The app
      * needs no gate to RECEIVE them (they just appear in the list) — this flag lets RCS-specific

@@ -168,6 +168,26 @@ describe('AttachmentTray — media library', () => {
   });
 });
 
+describe('AttachmentTray — contact button (capability-gated)', () => {
+  it('does NOT render the Contact button when no onPickContact is provided', async () => {
+    grantWith([]);
+    await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+    // Wait for the tray to settle, then assert the button is absent.
+    expect(await screen.findByLabelText('Attach a file')).toBeTruthy();
+    expect(screen.queryByLabelText('Send a contact')).toBeNull();
+  });
+
+  it('renders the Contact button and fires onPickContact when the handler is supplied', async () => {
+    grantWith([]);
+    const onPickContact = jest.fn();
+    await renderWithTheme(
+      <AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} onPickContact={onPickContact} />,
+    );
+    fireEvent.press(await screen.findByLabelText('Send a contact'));
+    expect(onPickContact).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AttachmentTray — camera capture', () => {
   it('stages a captured photo via onPick', async () => {
     grantWith([]);
