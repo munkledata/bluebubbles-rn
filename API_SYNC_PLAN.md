@@ -6,6 +6,15 @@
 > (client-only wire fields P2#10, error/metadata envelope P2#11; `hideAttachment` P1#9 is now DONE — present in `src/core/models/attachment.ts`) plus the
 > server-repo / device-verifiable half. NOTE: `repositories.ts` was split into a
 > **`src/db/repositories/` directory** — file paths below may point at the moved location.
+>
+> **STATUS UPDATE (2026-07-17):** The server's schema-gap features (SCHEMA_GAPS_PLAN.md, shipped
+> 2026-07-16) are wired app-side end-to-end — `dateRetracted` notification withdrawal,
+> `isScheduled` (badged as `isScheduled && !isSent`), Genmoji `emojiImage*`, `messageSummaryInfo`
+> (partially resolves P1#8 — the server now emits it in a *parsed* `{editedParts, retractedParts}`
+> shape, not upstream's raw plist), group-event constants (itemType 6 = SharePlay), the new
+> `message-deleted` event + `supports_message_deleted`, and `lastReadMessageTimestamp`
+> reconciliation. App suite 1727 tests. Full record: `docs/APP_SERVER_PARITY.md`
+> "✅ Closed (2026-07-17)".
 
 _2026-06-21. How to align the RN app's zod models (`bluebubbles-rn/src/core/models`,
 `src/core/api/endpoints`) with the Gator server's wire contracts
@@ -104,7 +113,7 @@ frozen contract → fix server). Where Gator **intentionally** changed/renamed, 
 | 5   | **Chat mutations** (`POST /chat/new`, participant add/remove, `PUT /chat/{guid}` rename) — app calls them; server may not implement. → new-chat + group management fail.                                                          | **Server** implements these operations returning the updated `Chat` (the app already persists the returned chat). |
 | 6   | **Message attachments not nested**: app requests `with=attachments`; `messageSerializer` omits the array.                                                                                                                         | **Server** nests `attachments[]` on `MessageResponse` when requested (else app must N+1 fetch).                   |
 | 7   | **Delivered tiers**: app just shipped `wasDeliveredQuietly` + `didNotifyRecipient` (Phase 2, migration 0010); server has the DB columns but the serializer **doesn't emit them**. → the "Delivered Quietly" tier never lights up. | **Server** emits both in `messageSerializer`.                                                                     |
-| 8   | **Rich message fields**: server omits `attributedBody`, `messageSummaryInfo`, `payloadData` (rich text / tapback summary / digital-touch). App models them.                                                                       | **Server** emits them (or documents that Gator drops rich text → app degrades to plaintext).                      |
+| 8   | **Rich message fields**: server omits `attributedBody`, `messageSummaryInfo`, `payloadData` (rich text / tapback summary / digital-touch). App models them. _2026-07-17: `messageSummaryInfo` is now emitted (parsed `{editedParts, retractedParts}` shape, not the raw plist) and consumed by the app's edit-history sheet._ | **Server** emits them (or documents that Gator drops rich text → app degrades to plaintext).                      |
 | 9   | **Attachment dimensions**: `height`/`width`/`webUrl` app-only (server never sends); `hideAttachment` server-only (app drops).                                                                                                     | **Server** adds `height`/`width`; app adds `hideAttachment` to its zod (additive).                                |
 
 ### 🟡 P2 — model hygiene (no breakage, but tighten the contract)
