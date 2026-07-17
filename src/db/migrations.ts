@@ -359,4 +359,16 @@ export const MIGRATIONS: Migration[] = [
     name: '0019_message_is_scheduled',
     statements: [`ALTER TABLE messages ADD COLUMN is_scheduled INTEGER`],
   },
+  {
+    // Genmoji attachments (macOS 15.1+ AI-generated emoji images): the server sends
+    // `emojiImageContentIdentifier` (presence marks a Genmoji → render inline emoji-sized) and
+    // `emojiImageShortDescription` (natural-language alt text; also the notification/preview
+    // fallback text). Both presence-driven — NULL on ordinary attachments (and pre-migration rows).
+    // Additive; applied transactionally + idempotently by name.
+    name: '0020_attachment_genmoji',
+    statements: [
+      `ALTER TABLE attachments ADD COLUMN emoji_image_content_identifier TEXT`,
+      `ALTER TABLE attachments ADD COLUMN emoji_image_short_description TEXT`,
+    ],
+  },
 ];

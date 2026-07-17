@@ -89,7 +89,11 @@ export function ThreadSheet({
                     </Text>
                   </View>
                   <Text numberOfLines={3} style={[styles.body, { color: theme.color.label }]}>
-                    {redacted ? redactMessageText(m.text, true) : (m.text ?? '📎 Attachment')}
+                    {redacted
+                      ? redactMessageText(m.text, true)
+                      : // Non-redacted only: prefer a Genmoji's description over the generic label.
+                        // The redacted branch above keeps masking message content.
+                        (m.text ?? m.attachmentDescription ?? '📎 Attachment')}
                   </Text>
                 </Pressable>
               );

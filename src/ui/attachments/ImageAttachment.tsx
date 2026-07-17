@@ -52,25 +52,36 @@ export function ImageAttachment({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [att.guid, att.localPath, autoDownload, wifiOnly, netType, status]);
 
+  // Genmoji (macOS 15.1+ AI-generated emoji) render INLINE at ~big-emoji size (mirrors the bubble's
+  // bigEmoji precedent) — a small transparent square, never a full-width file box. Detected purely
+  // from the presence of the server's `emojiImageContentIdentifier`; ordinary images are unchanged.
+  const isGenmoji = !!att.emojiImageContentIdentifier;
+  const genmojiSize = theme.font.size.body * 3;
+
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
   const aspect = att.width && att.height ? att.width / att.height : 0.78;
-  const width = cellSize ?? Math.max(120, Math.min(att.width ?? maxW, maxW));
-  const height = cellSize ?? Math.max(80, Math.min(width / aspect, win.height * 0.55));
+  const width = isGenmoji ? genmojiSize : (cellSize ?? Math.max(120, Math.min(att.width ?? maxW, maxW)));
+  const height = isGenmoji
+    ? genmojiSize
+    : (cellSize ?? Math.max(80, Math.min(width / aspect, win.height * 0.55)));
 
   const tail = showTail ? theme.radius.tail : theme.radius.bubble;
   // Grid-cell mode: the parent grid owns margins, alignment, and corner rounding — so DON'T emit a
   // tail corner. A per-corner radius overrides the `borderRadius: 0` shorthand on the native side
   // regardless of merge order, so leaving `corners` in would keep one rounded corner per cell,
   // notching the grid at the joins.
-  const corners = cellSize
-    ? null
-    : isFromMe
-      ? { borderBottomRightRadius: tail }
-      : { borderBottomLeftRadius: tail };
+  const corners =
+    isGenmoji || cellSize
+      ? null
+      : isFromMe
+        ? { borderBottomRightRadius: tail }
+        : { borderBottomLeftRadius: tail };
   const cellOverrides = cellSize
     ? { marginVertical: 0, marginHorizontal: 0, borderRadius: 0 }
     : null;
+  // A Genmoji is a transparent inline emoji — drop the file-box tint and rounded bubble corner.
+  const genmojiOverrides = isGenmoji ? { backgroundColor: 'transparent', borderRadius: 0 } : null;
 
   const onPress = (): void => {
     if (att.localPath) router.push(`/media/${encodeURIComponent(att.guid)}`);
@@ -80,6 +91,10 @@ export function ImageAttachment({
   return (
     <Pressable
       onPress={onPress}
+      // Genmoji carry a natural-language description ("a smiling cat wearing a top hat") — surface it
+      // as the accessibility label (alt text). Ordinary images have none set, so this stays
+      // undefined for them (unchanged behavior).
+      accessibilityLabel={att.emojiImageShortDescription ?? undefined}
       style={[
         styles.wrap,
         {
@@ -91,12 +106,13 @@ export function ImageAttachment({
           ...corners,
         },
         cellOverrides,
+        genmojiOverrides,
       ]}
     >
       <Image
         source={att.localPath ? { uri: att.localPath } : null}
         placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
-        contentFit="cover"
+        contentFit={isGenmoji ? 'contain' : 'cover'}
         transition={150}
         style={styles.img}
       />

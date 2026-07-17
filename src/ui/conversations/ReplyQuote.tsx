@@ -22,7 +22,11 @@ export function ReplyQuote({ preview, isFromMe, onPress }: ReplyQuoteProps): Rea
     preview.isFromMe === 1 ? 'You' : redactTitle(preview.senderName ?? 'Unknown', redacted);
   const text =
     redactMessageText(preview.text, redacted) ||
-    (preview.hasAttachments === 1 ? '📎 Attachment' : '');
+    (preview.hasAttachments === 1
+      ? // A Genmoji's description is MESSAGE CONTENT — surface it ONLY when NOT redacted; the redacted
+        // path keeps the generic placeholder (matching the masked text/tombstone above).
+        (!redacted && preview.attachmentDescription?.trim()) || '📎 Attachment'
+      : '');
 
   return (
     <Pressable

@@ -7,6 +7,9 @@ export interface PreviewInput {
   lastIsFromMe: number | null;
   lastHasAttachments: number | null;
   lastAssociatedType: string | null;
+  /** Genmoji description of the latest message's Genmoji attachment (or null/absent) — used as the
+   *  attachment fallback text in place of the generic "📎 Attachment". */
+  lastAttachmentDescription?: string | null;
 }
 
 /**
@@ -46,7 +49,12 @@ export function buildPreview(row: PreviewInput): string {
   }
 
   let body = stripAttachmentPlaceholder(row.lastText ?? row.lastSubject);
-  if (!body && row.lastHasAttachments) body = '📎 Attachment';
+  if (!body && row.lastHasAttachments) {
+    // Genmoji: prefer the natural-language description ("a smiling cat wearing a top hat") over the
+    // generic label. The whole preview is redacted by the caller (redactPreview → "Message"), so
+    // this raw description never leaks under redacted mode.
+    body = row.lastAttachmentDescription?.trim() || '📎 Attachment';
+  }
   if (!body) return '';
 
   return row.lastIsFromMe ? `You: ${body}` : body;

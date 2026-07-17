@@ -374,6 +374,10 @@ export interface MessageRow {
   groupTitle?: string | null;
   otherHandle?: number | null;
   otherHandleName?: string | null;
+  // Genmoji (macOS 15.1+) natural-language description of this message's first Genmoji attachment,
+  // or null. Used as the thread-row fallback text in place of the generic "📎 Attachment". Optional
+  // so hand-built test literals need not set it; the SELECT below always provides it at runtime.
+  attachmentDescription?: string | null;
 }
 
 // Shared SELECT (columns + sender join) for message-row reads. Kept in ONE place so the
@@ -400,6 +404,9 @@ const MESSAGE_ROW_SELECT = sql`
     m.other_handle AS otherHandle,
     (SELECT COALESCE(h2.display_name, h2.address) FROM handles h2
        WHERE h2.original_row_id = m.other_handle LIMIT 1) AS otherHandleName,
+    (SELECT a.emoji_image_short_description FROM attachments a
+       WHERE a.message_id = m.id AND a.emoji_image_short_description IS NOT NULL
+       ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
     h.address AS senderAddress,
     COALESCE(h.display_name, h.address) AS senderName,
     h.avatar AS senderAvatar,
@@ -510,6 +517,10 @@ export interface MessagePreview {
   senderName: string | null;
   isFromMe: number;
   hasAttachments: number;
+  // Genmoji description of the message's first Genmoji attachment (or null) — the reply-quote /
+  // reply-composer fallback text in place of the generic "📎 Attachment". Optional so hand-built
+  // test literals need not set it; the SELECT below always provides it at runtime.
+  attachmentDescription?: string | null;
 }
 
 /** A compact preview of a message by guid (for the reply quote). */
@@ -519,7 +530,10 @@ export async function getMessagePreviewByGuid(
 ): Promise<MessagePreview | null> {
   const rows = await db.all<MessagePreview>(sql`
     SELECT m.guid, m.text, m.is_from_me AS isFromMe, m.has_attachments AS hasAttachments,
-           COALESCE(h.display_name, h.address) AS senderName
+           COALESCE(h.display_name, h.address) AS senderName,
+           (SELECT a.emoji_image_short_description FROM attachments a
+              WHERE a.message_id = m.id AND a.emoji_image_short_description IS NOT NULL
+              ORDER BY a.id ASC LIMIT 1) AS attachmentDescription
     FROM messages m LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.guid = ${guid} LIMIT 1
   `);

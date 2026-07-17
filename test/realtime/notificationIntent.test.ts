@@ -58,7 +58,64 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     );
     const i = intents[0]!;
     expect(i.kind).toBe('message');
+    // No Genmoji description present → the generic label is the deliberate fallback (a Genmoji
+    // attachment WOULD supply a description; see the Genmoji cases below).
     if (i.kind === 'message') expect(i.body).toBe('📎 Attachment');
+  });
+
+  it('uses the Genmoji description as the body for an attachment-only Genmoji message', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'gm1',
+        text: '\uFFFC', // attachment placeholder only — no real caption
+        dateCreated: 1700000000010,
+        handle: { address: 'bob@x.com', displayName: 'Bob' },
+        chats: [{ guid: 'cGen', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+        attachments: [
+          {
+            guid: 'gm-att',
+            mimeType: 'image/png',
+            emojiImageContentIdentifier: 'gm-xyz',
+            emojiImageShortDescription: 'a smiling cat wearing a top hat',
+          },
+        ],
+      },
+      'socket',
+    );
+    const i = intents[0]!;
+    expect(i.kind).toBe('message');
+    // A far better lock-screen body than "📎 Attachment". It's RAW here; the Notifee layer masks it
+    // to "New message" under hidePreview (asserted in notifeeService.test), so it never leaks.
+    if (i.kind === 'message') expect(i.body).toBe('a smiling cat wearing a top hat');
+  });
+
+  it('prefers a real caption over the Genmoji description (description is only the fallback)', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'gm2',
+        text: '\uFFFClook at this',
+        dateCreated: 1700000000011,
+        handle: { address: 'bob@x.com', displayName: 'Bob' },
+        chats: [{ guid: 'cGen2', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+        attachments: [
+          {
+            guid: 'gm-att2',
+            mimeType: 'image/png',
+            emojiImageContentIdentifier: 'gm-xyz',
+            emojiImageShortDescription: 'a smiling cat wearing a top hat',
+          },
+        ],
+      },
+      'socket',
+    );
+    const i = intents[0]!;
+    if (i.kind === 'message') expect(i.body).toBe('look at this');
   });
 
   it('strips a U+FFFC placeholder but keeps a real caption', async () => {

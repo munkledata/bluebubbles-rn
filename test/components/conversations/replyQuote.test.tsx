@@ -10,6 +10,7 @@ import React from 'react';
 import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 import { ReplyQuote } from '@ui/conversations/ReplyQuote';
 import type { MessagePreview } from '@db/repositories';
+import { useRedactedModeStore } from '@state/redactedModeStore';
 
 function preview(over: Partial<MessagePreview> = {}): MessagePreview {
   return {
@@ -21,6 +22,12 @@ function preview(over: Partial<MessagePreview> = {}): MessagePreview {
     ...over,
   };
 }
+
+// Redacted mode is module-global (zustand) — reset OFF before each test so the redaction case can't
+// leak into the others (AGENTS.md: reset stores in beforeEach, never afterEach).
+beforeEach(() => {
+  useRedactedModeStore.setState({ enabled: false, hydrated: false });
+});
 
 describe('ReplyQuote who/text rendering', () => {
   it('shows the sender name and the quoted text for a received original', async () => {
@@ -50,6 +57,37 @@ describe('ReplyQuote who/text rendering', () => {
     await renderWithTheme(
       <ReplyQuote preview={preview({ text: null, hasAttachments: 1 })} isFromMe={false} />,
     );
+    expect(screen.getByText('📎 Attachment')).toBeTruthy();
+  });
+
+  it('shows a Genmoji description in place of the generic label when NOT redacted', async () => {
+    await renderWithTheme(
+      <ReplyQuote
+        preview={preview({
+          text: null,
+          hasAttachments: 1,
+          attachmentDescription: 'a smiling cat wearing a top hat',
+        })}
+        isFromMe={false}
+      />,
+    );
+    expect(screen.getByText('a smiling cat wearing a top hat')).toBeTruthy();
+  });
+
+  it('masks the Genmoji description under redacted mode (keeps the generic placeholder)', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(
+      <ReplyQuote
+        preview={preview({
+          text: null,
+          hasAttachments: 1,
+          attachmentDescription: 'a smiling cat wearing a top hat',
+        })}
+        isFromMe={false}
+      />,
+    );
+    // The description is MESSAGE CONTENT — under redaction the quote falls back to the generic label.
+    expect(screen.queryByText('a smiling cat wearing a top hat')).toBeNull();
     expect(screen.getByText('📎 Attachment')).toBeTruthy();
   });
 });

@@ -37,6 +37,14 @@ export async function buildMessageIntents(
       const isGroup = (header?.participantCount ?? 0) > 1;
       const chatTitle =
         header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
+      // Genmoji (macOS 15.1+): a Genmoji attachment carries a natural-language description ("a
+      // smiling cat wearing a top hat") — a far better notification body than "📎 Attachment".
+      // Presence-driven, so plain images/other attachments have none. This body is RAW; the Notifee
+      // service redacts it downstream (postNotification masks it to "New message" under hidePreview),
+      // so the description never leaks on a locked/redacted screen.
+      const genmojiDescription = m.attachments
+        ?.find((a) => a.emojiImageShortDescription)
+        ?.emojiImageShortDescription?.trim();
       return [
         {
           kind: 'message',
@@ -49,8 +57,9 @@ export async function buildMessageIntents(
           // layer drops it again under redacted mode.
           avatarUri: profile?.avatar ?? undefined,
           // Attachment messages carry U+FFFC placeholder text (renders as an empty box); strip it
-          // and fall back to a generic label so the notification never shows a bare box.
-          body: stripAttachmentPlaceholder(m.text) || '📎 Attachment',
+          // and fall back to the Genmoji description (if any), else a generic label — so the
+          // notification never shows a bare box.
+          body: stripAttachmentPlaceholder(m.text) || genmojiDescription || '📎 Attachment',
           messageGuid: m.guid,
           timestamp: m.dateCreated ?? Date.now(),
           isGroup,

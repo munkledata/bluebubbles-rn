@@ -274,6 +274,52 @@ describe('ImageAttachment — gallery cell corner rounding', () => {
   });
 });
 
+describe('ImageAttachment — Genmoji inline rendering + alt text', () => {
+  const wrapStyle = (): Record<string, unknown> =>
+    StyleSheet.flatten(screen.getByTestId('expo-image').parent!.props.style) as Record<
+      string,
+      unknown
+    >;
+
+  function genmoji(over: Partial<AttachmentRow> = {}): AttachmentRow {
+    return makeImg({
+      guid: 'gm-1',
+      mimeType: 'image/png',
+      localPath: '/data/genmoji.png', // local → no auto-download races
+      width: 600,
+      height: 800,
+      emojiImageContentIdentifier: 'gm-xyz',
+      emojiImageShortDescription: 'a smiling cat wearing a top hat',
+      ...over,
+    });
+  }
+
+  it('renders a Genmoji at emoji size: a small transparent square (never the full-width image)', async () => {
+    await renderWithTheme(<ImageAttachment att={genmoji()} isFromMe={false} showTail />);
+    const wrap = wrapStyle();
+    // Square + emoji-sized: well below the 120px MIN width an ordinary image would use for width=600.
+    expect(wrap.width).toBe(wrap.height);
+    expect(wrap.width as number).toBeLessThan(120);
+    // Transparent — no file-box tint or rounded bubble corner (an inline emoji, not a photo box).
+    expect(wrap.backgroundColor).toBe('transparent');
+    expect(wrap.borderRadius).toBe(0);
+  });
+
+  it('exposes the Genmoji description as the accessibility label (alt text)', async () => {
+    await renderWithTheme(<ImageAttachment att={genmoji()} isFromMe={false} showTail />);
+    expect(screen.getByLabelText('a smiling cat wearing a top hat')).toBeTruthy();
+  });
+
+  it('an ordinary image gets NO Genmoji alt label and keeps the file-box tint (not transparent)', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: '/data/photo.jpg' })} isFromMe={false} showTail />,
+    );
+    expect(screen.queryByLabelText('a smiling cat wearing a top hat')).toBeNull();
+    expect(wrapStyle().backgroundColor).not.toBe('transparent');
+  });
+});
+
 describe('ImageAttachment — auto-download effect', () => {
   it('auto-downloads a small, undownloaded image on mount with default settings', async () => {
     await renderWithTheme(

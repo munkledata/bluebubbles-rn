@@ -272,6 +272,10 @@ export interface InboxRow {
   lastGuid: string | null;
   lastAssociatedType: string | null;
   lastError: number | null;
+  // Genmoji description of the latest message's first Genmoji attachment (or null) — the inbox
+  // preview fallback in place of "📎 Attachment". Optional so hand-built InboxRow test literals need
+  // not set it; the query below always provides it at runtime.
+  lastAttachmentDescription?: string | null;
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
@@ -310,6 +314,9 @@ export async function listChatsForInbox(
       l.text AS lastText, l.subject AS lastSubject, l.is_from_me AS lastIsFromMe,
       l.has_attachments AS lastHasAttachments, l.date_created AS lastDate, l.guid AS lastGuid,
       l.associated_message_type AS lastAssociatedType, l.error AS lastError,
+      (SELECT a.emoji_image_short_description FROM attachments a
+         WHERE a.message_id = l.id AND a.emoji_image_short_description IS NOT NULL
+         ORDER BY a.id ASC LIMIT 1) AS lastAttachmentDescription,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
       (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id

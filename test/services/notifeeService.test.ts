@@ -209,6 +209,16 @@ describe('postNotification — message (REDACTED / hidePreview ON) — privacy p
     // The style message text is also the redacted body.
     expect(n.android?.style.messages[0].text).toBe('New message');
   });
+
+  it('masks a Genmoji-description body to "New message" too — the description is message content', async () => {
+    // buildMessageIntents may put a Genmoji's natural-language description in the body (see
+    // notificationIntent.test); under hidePreview it must STILL be redacted, never leaked.
+    setHideNotificationPreview(true);
+    await postNotification(messageIntent({ body: 'a smiling cat wearing a top hat' }));
+    const n = lastNotif();
+    expect(n.body).toBe('New message');
+    expect(n.android?.style.messages[0].text).toBe('New message');
+  });
 });
 
 describe('postNotification — cancel / facetime-cancel', () => {

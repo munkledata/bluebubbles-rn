@@ -120,4 +120,53 @@ describe('attachment repositories', () => {
     const rcsByMsg = await listAttachmentsByMessageIds(db, [rcsMsgId]);
     expect(rcsByMsg.get(rcsMsgId)!.every((a) => a.service === 'RCS')).toBe(true);
   });
+
+  it('round-trips Genmoji fields (identifier + description) via list + getByGuid; ordinary → null', async () => {
+    const { db } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'g@x.com' }]);
+    const map = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cG', participants: [{ address: 'g@x.com' }] })],
+      handles,
+    );
+    const chatId = map.get('cG')!;
+    const ids = await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm-gen',
+          dateCreated: 500,
+          hasAttachments: true,
+          handle: { address: 'g@x.com' },
+          attachments: [
+            Attachment.parse({
+              guid: 'att-genmoji',
+              mimeType: 'image/png',
+              transferName: 'Genmoji.png',
+              emojiImageContentIdentifier: 'genmoji-ABCDEF',
+              emojiImageShortDescription: 'a smiling cat wearing a top hat',
+            }),
+            Attachment.parse({ guid: 'att-plain', mimeType: 'image/jpeg', transferName: 'p.jpg' }),
+          ],
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    const msgId = ids.get('m-gen')!;
+
+    // listAttachmentsByMessageIds carries the fields on the Genmoji; the plain image has neither.
+    const byMsg = (await listAttachmentsByMessageIds(db, [msgId])).get(msgId)!;
+    const gen = byMsg.find((a) => a.guid === 'att-genmoji')!;
+    const plain = byMsg.find((a) => a.guid === 'att-plain')!;
+    expect(gen.emojiImageContentIdentifier).toBe('genmoji-ABCDEF');
+    expect(gen.emojiImageShortDescription).toBe('a smiling cat wearing a top hat');
+    expect(plain.emojiImageContentIdentifier).toBeNull();
+    expect(plain.emojiImageShortDescription).toBeNull();
+
+    // getAttachmentByGuid round-trips the same fields.
+    const one = await getAttachmentByGuid(db, 'att-genmoji');
+    expect(one?.emojiImageContentIdentifier).toBe('genmoji-ABCDEF');
+    expect(one?.emojiImageShortDescription).toBe('a smiling cat wearing a top hat');
+  });
 });

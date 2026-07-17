@@ -170,6 +170,11 @@ export const attachments = sqliteTable(
     isSticker: integer('is_sticker', { mode: 'boolean' }).default(false),
     /** iMessage's hidden rich-link/plugin-payload attachments — skipped when rendering. */
     hideAttachment: integer('hide_attachment', { mode: 'boolean' }).default(false),
+    /** Genmoji (macOS 15.1+ AI-generated emoji image): the image's content identifier. Presence
+     *  marks a Genmoji so the UI renders it inline emoji-sized, not full-width. NULL otherwise. */
+    emojiImageContentIdentifier: text('emoji_image_content_identifier'),
+    /** Genmoji natural-language description (alt text + notification/preview fallback). NULL otherwise. */
+    emojiImageShortDescription: text('emoji_image_short_description'),
     /** Local filesystem path once downloaded. */
     localPath: text('local_path'),
   },

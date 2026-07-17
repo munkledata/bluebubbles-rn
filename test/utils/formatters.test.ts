@@ -64,6 +64,30 @@ describe('buildPreview', () => {
     expect(buildPreview({ ...base, lastText: null, lastHasAttachments: 1 })).toBe('📎 Attachment');
   });
 
+  it('prefers a Genmoji description over the generic attachment label', () => {
+    // (The inbox redacts the WHOLE preview via redactPreview at the call site, so this raw
+    // description never leaks under redacted mode — see ConversationTile.)
+    expect(
+      buildPreview({
+        ...base,
+        lastText: null,
+        lastHasAttachments: 1,
+        lastAttachmentDescription: 'a smiling cat wearing a top hat',
+      }),
+    ).toBe('a smiling cat wearing a top hat');
+  });
+
+  it('falls back to the generic label when an attachment has no Genmoji description', () => {
+    expect(
+      buildPreview({
+        ...base,
+        lastText: null,
+        lastHasAttachments: 1,
+        lastAttachmentDescription: null,
+      }),
+    ).toBe('📎 Attachment');
+  });
+
   it('relabels reactions', () => {
     expect(buildPreview({ ...base, lastText: null, lastAssociatedType: 'love' })).toBe(
       'Loved a message',

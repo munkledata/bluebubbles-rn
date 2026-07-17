@@ -36,6 +36,14 @@ jest.mock('@ui/attachments', () => {
 import { MessageBubble } from '@ui/conversations/MessageBubble';
 // eslint-disable-next-line import/first
 import { darkTheme } from '@ui/theme/tokens';
+// eslint-disable-next-line import/first
+import { useRedactedModeStore } from '@state/redactedModeStore';
+
+// Redacted mode is module-global (zustand) — reset OFF before each test so the redaction test below
+// can't leak into the others (AGENTS.md: reset stores in beforeEach, never afterEach).
+beforeEach(() => {
+  useRedactedModeStore.setState({ enabled: false, hydrated: false });
+});
 
 type BubbleMsg = MessageRow & {
   attachments?: never[];
@@ -180,6 +188,40 @@ describe('MessageBubble text rendering', () => {
     };
     await renderWithTheme(<MessageBubble msg={msg} showTail />);
     expect(screen.getByText(reactionMeta('love').emoji)).toBeTruthy();
+  });
+});
+
+describe('MessageBubble Genmoji attachment', () => {
+  const genmojiMsg = () => ({
+    ...makeMsg({ text: '' }),
+    attachments: [
+      {
+        guid: 'gm-1',
+        mimeType: 'image/png',
+        localPath: '/data/gm.png',
+        emojiImageContentIdentifier: 'gm-xyz',
+        emojiImageShortDescription: 'a smiling cat wearing a top hat',
+      } as AttachmentRow,
+    ],
+  });
+
+  it('renders a single Genmoji via the attachment view (not the gallery grid), never as bubble text', async () => {
+    await renderWithTheme(<MessageBubble msg={genmojiMsg()} showTail />);
+    // Delegates to AttachmentView (→ ImageAttachment, which sizes it inline emoji-sized). The
+    // description is alt text INSIDE that view — never a bubble Text node here.
+    expect(screen.getByText('ATT')).toBeTruthy();
+    expect(screen.queryByText('GRID')).toBeNull();
+    expect(screen.queryByText('a smiling cat wearing a top hat')).toBeNull();
+  });
+
+  it('redacted mode masks the Genmoji to the generic placeholder and leaks no description', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(<MessageBubble msg={genmojiMsg()} showTail />);
+    // The redacted placeholder replaces the attachment entirely (AttachmentView never mounts), so the
+    // Genmoji image AND its description stay off-screen.
+    expect(screen.getByText('Attachment')).toBeTruthy();
+    expect(screen.queryByText('ATT')).toBeNull();
+    expect(screen.queryByText('a smiling cat wearing a top hat')).toBeNull();
   });
 });
 

@@ -73,6 +73,19 @@ describe('AttachmentView — MIME dispatch (attachmentKind)', () => {
     expect(screen.getByText('CHILD:image')).toBeTruthy();
   });
 
+  it('routes a Genmoji (image/png carrying the emoji-image keys) to ImageAttachment', async () => {
+    // A Genmoji is still an image MIME, so it dispatches to ImageAttachment — which self-detects the
+    // emojiImageContentIdentifier and renders it inline emoji-sized (proven in imageAttachment.test).
+    const att: AttachmentRow = {
+      ...makeAtt('image/png'),
+      emojiImageContentIdentifier: 'gm-xyz',
+      emojiImageShortDescription: 'a smiling cat wearing a top hat',
+    };
+    await renderWithTheme(<AttachmentView att={att} isFromMe={false} showTail />);
+    expect(screen.getByText('CHILD:image')).toBeTruthy();
+    expect(screen.queryByText('CHILD:file')).toBeNull();
+  });
+
   it('renders VideoPlayer for a video/* type', async () => {
     await renderKind('video/mp4');
     expect(screen.getByText('CHILD:video')).toBeTruthy();

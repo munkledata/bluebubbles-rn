@@ -101,6 +101,22 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
     if (res.success) {
       expect(res.data.guid).toBe('at-AABBCCDD-1122-3344');
       expect(res.data.mimeType).toBe('image/jpeg');
+      // The Genmoji keys are presence-driven — an ordinary attachment omits them entirely
+      // (mirrors the Wave-A isScheduled absence assertion above).
+      expect(res.data.emojiImageContentIdentifier).toBeUndefined();
+      expect(res.data.emojiImageShortDescription).toBeUndefined();
+    }
+  });
+
+  it('Attachment accepts a Genmoji (macOS 15.1+) carrying both emoji-image keys', () => {
+    const res = Attachment.safeParse(fixture('attachmentGenmoji.gator.json'));
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.guid).toBe('at-GENMOJI-9911');
+      // The identifier marks it a Genmoji (→ inline emoji-size render); the description is the
+      // natural-language alt text (→ accessibility label + notification/preview fallback).
+      expect(res.data.emojiImageContentIdentifier).toBe('genmoji-ABCDEF-1234');
+      expect(res.data.emojiImageShortDescription).toBe('a smiling cat wearing a top hat');
     }
   });
 

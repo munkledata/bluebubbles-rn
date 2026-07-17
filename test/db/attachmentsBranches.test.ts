@@ -12,6 +12,7 @@ import {
   insertOutgoingAttachment,
   listAttachmentsByMessageIds,
   listChatAttachmentsByKind,
+  listChatImageAttachmentsByAttachmentGuid,
   promoteAttachmentGuid,
   updateAttachmentLocalPath,
   upsertAttachments,
@@ -208,6 +209,37 @@ describe('promoteAttachmentGuid — dup vs update branches', () => {
     await promoteAttachmentGuid(db, 'temp-d-att', 'server-d', 'file:///b.jpg');
     expect(await getAttachmentByGuid(db, 'temp-d-att')).toBeNull(); // temp dropped, no dup
     expect(await getAttachmentByGuid(db, 'server-d')).not.toBeNull();
+  });
+});
+
+describe('Genmoji fields round-trip via the chat-scoped reads', () => {
+  it('listChatImageAttachmentsByAttachmentGuid + listChatAttachmentsByKind carry the identifier + description', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db, 'cGen');
+    await putMsg(db, chatId, {
+      guid: 'm-gen',
+      dateCreated: 10,
+      chats: [{ guid: 'cGen' }],
+      attachments: [
+        {
+          guid: 'gen-1',
+          mimeType: 'image/png',
+          emojiImageContentIdentifier: 'gm-xyz',
+          emojiImageShortDescription: 'a dancing robot',
+        },
+      ],
+    });
+
+    // The fullscreen image-carousel query keeps the fields on each image row.
+    const carousel = await listChatImageAttachmentsByAttachmentGuid(db, 'gen-1');
+    const hit = carousel.items[carousel.index]!;
+    expect(hit.emojiImageContentIdentifier).toBe('gm-xyz');
+    expect(hit.emojiImageShortDescription).toBe('a dancing robot');
+
+    // The conversation-details "shared media" query buckets it under photos with the fields intact.
+    const media = await listChatAttachmentsByKind(db, 'cGen', 10);
+    expect(media.photos[0]!.emojiImageContentIdentifier).toBe('gm-xyz');
+    expect(media.photos[0]!.emojiImageShortDescription).toBe('a dancing robot');
   });
 });
 

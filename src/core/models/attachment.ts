@@ -21,6 +21,16 @@ export const Attachment = z.object({
    */
   hideAttachment: z.boolean().nullish(),
   blurhash: z.string().nullish(),
+  /**
+   * Genmoji (macOS 15.1+ AI-generated emoji images). Both keys are presence-driven — the server
+   * emits them ONLY on Genmoji attachments and omits them otherwise. `emojiImageContentIdentifier`
+   * is the image's identity (its presence marks the attachment as a Genmoji → render inline
+   * emoji-sized, not full-width); `emojiImageShortDescription` is natural-language alt text
+   * (e.g. "a smiling cat wearing a top hat"), used as the accessibility label and as the
+   * notification/preview fallback in place of the generic "📎 Attachment".
+   */
+  emojiImageContentIdentifier: z.string().nullish(),
+  emojiImageShortDescription: z.string().nullish(),
   metadata: z.record(z.string(), z.unknown()).nullish(),
 });
 export type Attachment = z.infer<typeof Attachment>;

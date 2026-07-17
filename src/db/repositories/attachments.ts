@@ -59,6 +59,8 @@ export async function upsertAttachments(
         hasLivePhoto: att.hasLivePhoto ?? false,
         isSticker: att.isSticker ?? false,
         hideAttachment: att.hideAttachment ?? false,
+        emojiImageContentIdentifier: att.emojiImageContentIdentifier ?? null,
+        emojiImageShortDescription: att.emojiImageShortDescription ?? null,
       })),
     )
     .onConflictDoUpdate({
@@ -67,6 +69,8 @@ export async function upsertAttachments(
         mimeType: sql`excluded.mime_type`,
         totalBytes: sql`excluded.total_bytes`,
         blurhash: sql`excluded.blurhash`,
+        emojiImageContentIdentifier: sql`excluded.emoji_image_content_identifier`,
+        emojiImageShortDescription: sql`excluded.emoji_image_short_description`,
       },
     });
 }
@@ -86,6 +90,14 @@ export interface AttachmentRow {
   hasLivePhoto: number;
   isSticker: number;
   hideAttachment: number;
+  /**
+   * Genmoji (macOS 15.1+): the image content identifier (presence → render inline emoji-sized) and
+   * the natural-language description (alt text / notification + preview fallback). Both NULL on
+   * ordinary attachments. Optional so hand-built test literals need not set them; the SELECT lists
+   * below always project them at runtime (NULL when absent).
+   */
+  emojiImageContentIdentifier?: string | null;
+  emojiImageShortDescription?: string | null;
   localPath: string | null;
   /**
    * Owning chat's service — 'RCS' when the attachment belongs to an `RCS;-;` chat, else null.
@@ -114,7 +126,10 @@ export async function listAttachmentsByMessageIds(
       a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
       a.transfer_name AS transferName, a.total_bytes AS totalBytes,
       a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
-      a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment, a.local_path AS localPath,
+      a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment,
+      a.emoji_image_content_identifier AS emojiImageContentIdentifier,
+      a.emoji_image_short_description AS emojiImageShortDescription,
+      a.local_path AS localPath,
       ${RCS_SERVICE_CASE} AS service
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
@@ -138,7 +153,10 @@ export async function getAttachmentByGuid(
     SELECT a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
       a.transfer_name AS transferName, a.total_bytes AS totalBytes, a.height, a.width, a.blurhash,
       a.has_live_photo AS hasLivePhoto, a.is_sticker AS isSticker,
-      a.hide_attachment AS hideAttachment, a.local_path AS localPath,
+      a.hide_attachment AS hideAttachment,
+      a.emoji_image_content_identifier AS emojiImageContentIdentifier,
+      a.emoji_image_short_description AS emojiImageShortDescription,
+      a.local_path AS localPath,
       ${RCS_SERVICE_CASE} AS service
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
@@ -162,7 +180,10 @@ export async function listChatImageAttachmentsByAttachmentGuid(
     SELECT a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
       a.transfer_name AS transferName, a.total_bytes AS totalBytes, a.height, a.width, a.blurhash,
       a.has_live_photo AS hasLivePhoto, a.is_sticker AS isSticker,
-      a.hide_attachment AS hideAttachment, a.local_path AS localPath,
+      a.hide_attachment AS hideAttachment,
+      a.emoji_image_content_identifier AS emojiImageContentIdentifier,
+      a.emoji_image_short_description AS emojiImageShortDescription,
+      a.local_path AS localPath,
       ${RCS_SERVICE_CASE} AS service
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
@@ -220,6 +241,8 @@ export async function listChatAttachmentsByKind(
       a.transfer_name AS transferName, a.total_bytes AS totalBytes,
       a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
       a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment,
+      a.emoji_image_content_identifier AS emojiImageContentIdentifier,
+      a.emoji_image_short_description AS emojiImageShortDescription,
       a.local_path AS localPath, ${RCS_SERVICE_CASE} AS service, m.date_created AS dateCreated
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
