@@ -66,3 +66,36 @@ export function openFromNotification(
   const target = notificationOpenTarget(data);
   if (target) navigate(chatDeepLink(target));
 }
+
+/** Minimal structural shape of a notify-kit InitialNotification / EventDetail read here. */
+export interface TappedNotification {
+  notification?: { data?: Record<string, unknown> };
+}
+
+/**
+ * Drain a pending notification tap at foreground time and open its chat EXACTLY ONCE.
+ *
+ * A resume-time tap can arrive through two independent channels, so this reads BOTH:
+ *  - notify-kit's `getInitialNotification()` — the sticky launch event, posted for a killed-app
+ *    cold-start AND for a background-alive press; and
+ *  - the `pendingNav` stash set by `onBackgroundEvent` (the deterministic same-JS-context backstop
+ *    for a background-alive press, in case the sticky event isn't delivered).
+ *
+ * Both sources are CLEARED (getInitial is read-once; takePending empties the slot) so a stale tap
+ * can't re-fire on a later resume, then a SINGLE `openFromNotification` runs — the two channels
+ * describe the same press, so navigating once (preferring the initial's data) avoids pushing the
+ * chat twice onto the stack. `runPressSideEffects` runs the DB side-effects (reminder cleanup) for
+ * a real launch press. Every dependency is injected, so this is unit-testable without notifee or
+ * expo-router.
+ */
+export async function drainNotificationTap<T extends TappedNotification>(
+  getInitial: () => Promise<T | null>,
+  takePending: () => Record<string, unknown> | null,
+  runPressSideEffects: (detail: T) => void | Promise<void>,
+  navigate: (path: string) => void,
+): Promise<void> {
+  const initial = await getInitial();
+  const pending = takePending();
+  if (initial) await runPressSideEffects(initial);
+  openFromNotification(initial?.notification?.data ?? pending ?? undefined, navigate);
+}

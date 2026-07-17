@@ -1,10 +1,14 @@
 import notifee, { EventType } from 'react-native-notify-kit';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
 import { handleNotificationAction, handleNotificationPress } from '@/services/notifications/actions';
-import { openFromNotification } from '@/services/notifications/notificationOpen';
+import {
+  drainNotificationTap,
+  openFromNotification,
+} from '@/services/notifications/notificationOpen';
+import { takePendingNotification } from '@/services/notifications/pendingNav';
 import { pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
@@ -47,10 +51,21 @@ export default function AppLayout(): React.JSX.Element {
     return () => sub.remove();
   }, []);
 
+  // Drain a pending notification tap and open its chat. Reads BOTH the notify-kit launch event
+  // (getInitialNotification) and the pendingNav stash a background-alive tap leaves behind, once.
+  const consumeNotificationTap = useCallback(() => {
+    void drainNotificationTap(
+      () => notifee.getInitialNotification(),
+      takePendingNotification,
+      handleNotificationPress,
+      (path) => router.push(path),
+    );
+  }, [router]);
+
   // Foreground notification handling. Action buttons (reply / mark-read / love) run their
-  // side-effects; a body tap (PRESS) runs its side-effects AND deep-links to the chat,
-  // scrolling to the message. On Android `launchActivity: 'default'` only foregrounds the
-  // app — it does NOT navigate — so we route the tap here.
+  // side-effects; a body tap (PRESS) while the app is VISIBLE runs its side-effects AND deep-links
+  // to the chat, scrolling to the message. On Android `launchActivity: 'default'` only foregrounds
+  // the app — it does NOT navigate — so we route the tap here.
   useEffect(
     () =>
       notifee.onForegroundEvent(({ type, detail }) => {
@@ -64,20 +79,23 @@ export default function AppLayout(): React.JSX.Element {
     [router],
   );
 
-  // Cold start: a tap that LAUNCHED the app from killed isn't replayed as a foreground event.
-  // getInitialNotification() reports that launching press exactly once (it's cleared after the
-  // first read), so run its side-effects + deep-link to the chat here on mount.
+  // Cold start: a tap that LAUNCHED the app from killed isn't replayed as a foreground event —
+  // getInitialNotification() reports it once, drained here on mount.
   useEffect(() => {
-    let cancelled = false;
-    void notifee.getInitialNotification().then((initial) => {
-      if (cancelled || !initial) return;
-      void handleNotificationPress(initial);
-      openFromNotification(initial.notification?.data, (path) => router.push(path));
+    consumeNotificationTap();
+  }, [consumeNotificationTap]);
+
+  // Resume: a tap while the app was ALIVE-BUT-BACKGROUNDED is delivered to the headless
+  // onBackgroundEvent (which can't navigate), NOT to onForegroundEvent above — this is the common
+  // case and the reason taps used to just foreground the app on its last screen. Drain the pending
+  // tap when we come active so the chat actually opens. (Kept separate from the app-lock / realtime
+  // AppState listeners; drainNotificationTap is a no-op when there's nothing pending.)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') consumeNotificationTap();
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    return () => sub.remove();
+  }, [consumeNotificationTap]);
 
   return (
     <>
