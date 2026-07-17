@@ -98,6 +98,11 @@ export const MessageBubble = React.memo(function MessageBubble({
   const hasText = bodyText.trim().length > 0;
   const isRetracted = !!msg.dateRetracted;
   const isEdited = !isRetracted && !!msg.dateEdited;
+  // Apple "Send Later": a small "Scheduled" badge under the bubble while the row is pending-unsent.
+  // Presence of the flag is the whole gate — the server clears it (and the upsert clears the column)
+  // the instant the message sends. The retracted tombstone returns early below, so a retracted row
+  // never reaches the badge; scheduled rows are always from-me, so no defer/avatar interaction.
+  const isScheduled = !!msg.isScheduled;
   // Redacted mode also suppresses the link preview (it would leak the URL/title).
   const previewUrl = useMemo(
     () => (!redacted && hasText && !isRetracted ? firstUrl(bodyText) : null),
@@ -263,6 +268,19 @@ export const MessageBubble = React.memo(function MessageBubble({
           Edited
         </Text>
       ) : null}
+      {isScheduled ? (
+        // Same frosted-pill overlay treatment as "Edited" so it stays legible over a wallpaper.
+        <Text
+          style={[
+            styles.scheduled,
+            overlay,
+            { alignSelf: isFromMe ? 'flex-end' : 'flex-start' },
+            pill,
+          ]}
+        >
+          Scheduled
+        </Text>
+      ) : null}
       {previewUrl ? (
         <UrlPreviewCard url={previewUrl} preview={preview} isFromMe={isFromMe} />
       ) : null}
@@ -364,6 +382,8 @@ const styles = StyleSheet.create({
   bigEmoji: { marginHorizontal: 6, marginVertical: 2 },
   tombstone: { fontStyle: 'italic', fontSize: 13, marginHorizontal: 14, marginVertical: 4 },
   edited: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },
+  // Same footprint as the "Edited" label — a small caption under the bubble.
+  scheduled: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },
   errorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   errorTitle: { fontSize: 11, textAlign: 'right', marginRight: 14, marginTop: 2 },
   errorBadge: {

@@ -222,6 +222,33 @@ describe('MessageBubble tombstone (unsent)', () => {
   });
 });
 
+describe('MessageBubble Scheduled badge (Apple Send Later)', () => {
+  it('shows "Scheduled" for a pending scheduled (from-me) message', async () => {
+    await renderWithTheme(<MessageBubble msg={makeMsg({ isFromMe: 1, isScheduled: 1 })} showTail />);
+    expect(screen.getByText('Scheduled')).toBeTruthy();
+    // The bubble text still renders alongside the badge (a pending row keeps its typed body).
+    expect(screen.getByText('Hello there')).toBeTruthy();
+  });
+
+  it('does not show "Scheduled" for an ordinary message', async () => {
+    await renderWithTheme(<MessageBubble msg={makeMsg({ isScheduled: 0 })} showTail />);
+    expect(screen.queryByText('Scheduled')).toBeNull();
+  });
+
+  it('shows the tombstone, not "Scheduled", once a scheduled message is unsent', async () => {
+    // The retracted tombstone replaces the whole bubble (the badge lives inside it), so even if the
+    // flag lingered a retracted row shows no badge.
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({ isFromMe: 1, isScheduled: 1, dateRetracted: 6_000 })}
+        showTail
+      />,
+    );
+    expect(screen.queryByText('Scheduled')).toBeNull();
+    expect(screen.getByText('You unsent a message')).toBeTruthy();
+  });
+});
+
 describe('MessageBubble send-error state', () => {
   it('renders the error badge + title and fires onRetry when the badge is pressed', async () => {
     const onRetry = jest.fn();

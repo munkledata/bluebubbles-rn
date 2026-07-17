@@ -351,4 +351,12 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE messages ADD COLUMN other_handle INTEGER`,
     ],
   },
+  {
+    // Apple "Send Later" (macOS 15+/iOS 18+): the server emits `isScheduled: true` ONLY while a
+    // message is a PENDING scheduled row (presence-driven; omitted once it sends). Persist it so a
+    // synced pending row can render a "Scheduled" badge that survives restarts. Nullable (NULL =
+    // not scheduled / pre-migration rows). Additive; applied transactionally + idempotently by name.
+    name: '0019_message_is_scheduled',
+    statements: [`ALTER TABLE messages ADD COLUMN is_scheduled INTEGER`],
+  },
 ];

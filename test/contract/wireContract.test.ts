@@ -45,6 +45,19 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       expect(res.data.isFromMe).toBe(false);
       expect(res.data.didNotifyRecipient).toBe(true);
       expect(res.data.wasDeliveredQuietly).toBe(false);
+      // isScheduled is presence-driven — an ordinary (non-scheduled) message omits it entirely.
+      expect(res.data.isScheduled).toBeUndefined();
+    }
+  });
+
+  it('Message accepts a pending Apple "Send Later" row and preserves isScheduled', () => {
+    const res = Message.safeParse(fixture('messageScheduled.gator.json'));
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.guid).toBe('p:0/SCHED-1234-5678-9ABC');
+      // The whole point: the pending-scheduled flag survives parsing so the app can badge it.
+      expect(res.data.isScheduled).toBe(true);
+      expect(res.data.isFromMe).toBe(true);
     }
   });
 

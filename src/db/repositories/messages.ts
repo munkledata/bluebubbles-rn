@@ -75,6 +75,10 @@ export async function upsertMessages(
           // would mask the real value. Consumers treat NULL as falsy, same as false.
           wasDeliveredQuietly: m.wasDeliveredQuietly ?? null,
           didNotifyRecipient: m.didNotifyRecipient ?? null,
+          // Apple "Send Later" pending flag. NULL when the event omits it (not scheduled, or the
+          // row already sent) — unlike the delivery tiers this is PLAIN-overwritten on conflict
+          // (see below), because the server emits it only while pending and drops it on send.
+          isScheduled: m.isScheduled ?? null,
         };
       }),
     )
@@ -94,6 +98,11 @@ export async function upsertMessages(
         dateDelivered: sql`excluded.date_delivered`,
         dateEdited: sql`excluded.date_edited`,
         dateRetracted: sql`excluded.date_retracted`,
+        // A state transition like date_retracted — reflect the LATEST event, do NOT COALESCE-preserve
+        // like the delivery tiers. The server emits is_scheduled=true only while the row is pending
+        // and OMITS it once the message sends, so plain-overwriting to NULL on that flagless "sent"
+        // re-upsert is exactly what clears the "Scheduled" badge (the app has no isSent to gate on).
+        isScheduled: sql`excluded.is_scheduled`,
         error: sql`excluded.error`,
         // Delivery tiers flip on a later updated-message event (Apple may report the
         // quiet delivery after the initial echo), so refresh them on conflict too — but
@@ -341,6 +350,9 @@ export interface MessageRow {
   dateEdited: number | null;
   dateRetracted: number | null;
   hasAttachments: number;
+  // Apple "Send Later" pending flag (1 while scheduled-but-unsent; NULL/absent otherwise). Optional
+  // so hand-built test literals need not set it; the SELECT above always provides it at runtime.
+  isScheduled?: number | null;
   error: number;
   sendState: string;
   wasDeliveredQuietly: number;
@@ -373,6 +385,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.subject, m.is_from_me AS isFromMe, m.date_created AS dateCreated,
     m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
     m.date_retracted AS dateRetracted,
+    m.is_scheduled AS isScheduled,
     m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
     m.did_notify_recipient AS didNotifyRecipient,

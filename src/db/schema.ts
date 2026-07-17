@@ -141,6 +141,10 @@ export const messages = sqliteTable(
         vs explicitly notified the recipient. Both arrive in the server payload. */
     wasDeliveredQuietly: integer('was_delivered_quietly', { mode: 'boolean' }).default(false),
     didNotifyRecipient: integer('did_notify_recipient', { mode: 'boolean' }).default(false),
+    /** Apple "Send Later" pending flag (presence-driven from the server): 1 while the message is a
+        pending scheduled row, cleared once it actually sends. Drives the "Scheduled" badge.
+        Nullable (NULL = not scheduled) — no default, matching the presence-driven wire semantics. */
+    isScheduled: integer('is_scheduled', { mode: 'boolean' }),
   },
   (t) => ({
     guidIdx: uniqueIndex('messages_guid_idx').on(t.guid),

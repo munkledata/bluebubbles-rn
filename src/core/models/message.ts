@@ -35,6 +35,15 @@ export const Message = z.object({
   wasDeliveredQuietly: z.boolean().nullish(),
   didNotifyRecipient: z.boolean().nullish(),
 
+  /**
+   * Apple "Send Later" (macOS 15+/iOS 18+): true ONLY while the message is a PENDING scheduled
+   * row. Presence-driven — the server emits it as `true` for pending rows and omits it entirely
+   * once the message actually sends. Arrives on live events AND query/sync paths. Persisted so a
+   * synced pending row can render a "Scheduled" badge; clears automatically on send (the server
+   * stops emitting it, and the upsert plain-overwrites the stored flag).
+   */
+  isScheduled: z.boolean().nullish(),
+
   /** Chats this message belongs to (message/query `with: ['chats']`). */
   chats: z.array(ChatSummary).nullish(),
 

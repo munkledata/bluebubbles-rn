@@ -60,6 +60,22 @@ export async function buildMessageIntents(
     case 'chat-read-status-changed':
       // Read elsewhere → clear any pending notification for this chat.
       return [{ kind: 'cancel', chatGuid: event.payload.chatGuid }];
+    case 'updated-message': {
+      // A message was UNSENT (retracted) → withdraw its delivered notification. The server fires
+      // `updated-message` for an unsend, carrying `dateRetracted` (Unix ms; non-null = unsent).
+      const m = event.message;
+      // Guard: any OTHER update (an edit, a delivery/read receipt) must produce NO intent — it
+      // neither raises a new notification nor cancels one. Only a retraction acts here.
+      if (m.dateRetracted == null) return [];
+      const chatGuid = resolveMessageChatGuid(m);
+      if (!chatGuid) return [];
+      // KNOWN CONSTRAINT (accepted for v1): notifications are keyed per CHAT — the Notifee id is the
+      // chatGuid (see notifeeService.displayNotification / cancelForChat → notifee.cancelNotification
+      // (chatGuid)). So withdrawing cancels the WHOLE chat's notification, including any newer unread
+      // messages folded into it. Per-message removal would require rebuilding the Android MESSAGING
+      // messages[] array minus this guid — out of scope. Mirrors the read-status cancel above.
+      return [{ kind: 'cancel', chatGuid }];
+    }
     case 'incoming-facetime': {
       // Legacy incoming event (carries `caller`).
       const { uuid, caller, address } = event.payload;

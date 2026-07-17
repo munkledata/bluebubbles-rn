@@ -195,6 +195,71 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cC' }]);
   });
 
+  it('withdraws the chat notification when a message is unsent (updated-message with dateRetracted)', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    // Seed the chat with an inbound message (creates the chat + its notify intent).
+    await router.handle(
+      'new-message',
+      {
+        guid: 'u1',
+        text: 'oops',
+        dateCreated: 1,
+        handle: { address: 'a@b.com' },
+        chats: [{ guid: 'cU', participants: [{ address: 'a@b.com' }] }],
+      },
+      'socket',
+    );
+    intents.length = 0;
+    // The sender unsends it → the server fires updated-message carrying dateRetracted (Unix ms).
+    // The (per-chat) notification is withdrawn via a cancel intent.
+    await router.handle(
+      'updated-message',
+      {
+        guid: 'u1',
+        text: null,
+        dateRetracted: 1700000000000,
+        dateCreated: 1,
+        handle: { address: 'a@b.com' },
+        chats: [{ guid: 'cU', participants: [{ address: 'a@b.com' }] }],
+      },
+      'socket',
+    );
+    expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cU' }]);
+  });
+
+  it('does NOT touch notifications for an ordinary updated-message (edit / receipt, no dateRetracted)', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'u2',
+        text: 'hi',
+        dateCreated: 1,
+        handle: { address: 'a@b.com' },
+        chats: [{ guid: 'cU2', participants: [{ address: 'a@b.com' }] }],
+      },
+      'socket',
+    );
+    intents.length = 0;
+    // An edit / delivery update (no dateRetracted) must produce NO intent — neither a new
+    // notification nor a cancel.
+    await router.handle(
+      'updated-message',
+      {
+        guid: 'u2',
+        text: 'hi (edited)',
+        dateEdited: 1700000000000,
+        dateCreated: 1,
+        handle: { address: 'a@b.com' },
+        chats: [{ guid: 'cU2', participants: [{ address: 'a@b.com' }] }],
+      },
+      'socket',
+    );
+    expect(intents).toHaveLength(0);
+  });
+
   it('emits an alias-removed intent when iMessage aliases are deregistered (F-6)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
