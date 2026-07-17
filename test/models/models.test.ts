@@ -81,4 +81,19 @@ describe('Chat model', () => {
     ).toBe(true);
     expect(isGroup(Chat.parse({ guid: 'c', participants: [{ address: 'a' }] }))).toBe(false);
   });
+
+  it('accepts and preserves the macOS read watermark (lastReadMessageTimestamp, Unix ms)', () => {
+    const m = Chat.parse({ guid: 'c', lastReadMessageTimestamp: 1718900002000 });
+    expect(m.lastReadMessageTimestamp).toBe(1718900002000);
+  });
+
+  it('tolerates a null lastReadMessageTimestamp ("never read on the Mac")', () => {
+    const m = Chat.parse({ guid: 'c', lastReadMessageTimestamp: null });
+    expect(m.lastReadMessageTimestamp).toBeNull();
+  });
+
+  it('omits lastReadMessageTimestamp when absent (presence-driven → undefined)', () => {
+    const m = Chat.parse({ guid: 'c' });
+    expect(m.lastReadMessageTimestamp).toBeUndefined();
+  });
 });

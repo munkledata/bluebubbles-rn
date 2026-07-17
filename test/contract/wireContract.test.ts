@@ -147,7 +147,18 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       expect(res.data.participants).toHaveLength(1);
       expect(res.data.participants?.[0]?.address).toBe('+15551234567');
       expect(res.data.lastMessage?.guid).toBe('p:0/LASTMSG-1122-3344');
+      // Schema gap 7: the macOS read watermark (Unix ms) is additive + presence-driven; it survives
+      // parsing so upsertChats can reconcile it into the local read marker.
+      expect(res.data.lastReadMessageTimestamp).toBe(1718900002000);
     }
+  });
+
+  it('Chat omits lastReadMessageTimestamp entirely on an old-macOS chat that lacks the column', () => {
+    // Presence-driven (mirrors isScheduled / the Genmoji keys): a chat list from a server whose
+    // macOS lacks last_read_message_timestamp carries no such key, and the app must see undefined.
+    const res = Chat.safeParse((fixture('chatList.gator.json') as { chats: unknown[] }).chats[0]);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.lastReadMessageTimestamp).toBeUndefined();
   });
 
   it('ScheduledItem accepts the Gator flat scheduled-message shape (string id)', () => {

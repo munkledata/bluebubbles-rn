@@ -24,6 +24,14 @@ export const Chat = z.object({
   lastMessage: Message.nullish(),
   /** GUID of the last message the local user has read, for unread tracking. */
   lastReadMessageGuid: z.string().nullish(),
+  /**
+   * macOS-side read watermark: `chat.last_read_message_timestamp` (Unix ms; null = never read on
+   * the Mac). Presence-driven — omitted on older macOS rows without the column. NOT stored as a
+   * column; it is reconciled at ingestion into the guid-based `lastReadMessageGuid` marker (see
+   * `reconcileReadMarkerFromTimestamp` in the chats repo), so a read done on the Mac clears the
+   * app's unread badge. Tolerant `nullish()` — a shape drift here must never fail the chat parse.
+   */
+  lastReadMessageTimestamp: z.number().nullish(),
   /** macOS 26 synced "transcript background": present (a channel GUID) only when the chat has a
    *  background set. Doubles as the version key — re-download the image when it changes. */
   backgroundChannelGuid: z.string().nullish(),
