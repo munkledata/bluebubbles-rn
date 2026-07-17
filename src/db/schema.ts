@@ -126,8 +126,9 @@ export const messages = sqliteTable(
     threadOriginatorGuid: text('thread_originator_guid'),
     expressiveSendStyleId: text('expressive_send_style_id'),
     /** iMessage group/chat-event metadata. item_type 0 = a normal message; >0 = a system event
-        (1 add/remove participant, 2 rename, 3 leave/photo change, 4 location, 5 kept audio,
-        6 FaceTime). group_action_type disambiguates within a type (e.g. add vs remove).
+        (1 add/remove participant, 2 rename, 3 leave/photo/chat-background change, 4 location,
+        5 kept audio, 6 SharePlay). group_action_type disambiguates within a type (e.g. add vs
+        remove; under item_type 3: 0 left, 1 photo set, 2 photo removed, 4 bg changed, 6 bg removed).
         group_title carries the new name on a rename; other_handle is the affected participant's
         server ROWID (resolved to a name at read time). See utils/groupEvent.ts. */
     itemType: integer('item_type').default(0),

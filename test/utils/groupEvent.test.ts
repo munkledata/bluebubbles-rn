@@ -1,4 +1,4 @@
-import { buildGroupEventText, isGroupEvent } from '@utils';
+import { buildGroupEventText, isChatBackgroundChangeEvent, isGroupEvent } from '@utils';
 
 describe('isGroupEvent', () => {
   it('is false for a normal message (itemType 0, no title)', () => {
@@ -42,7 +42,7 @@ describe('buildGroupEventText', () => {
     );
   });
 
-  it('leave / photo change / photo remove (itemType 3)', () => {
+  it('leave / photo change / photo remove / background change / background remove (itemType 3)', () => {
     expect(buildGroupEventText({ itemType: 3, groupActionType: 0, senderName: 'Alice' })).toBe(
       'Alice left the conversation.',
     );
@@ -52,18 +52,31 @@ describe('buildGroupEventText', () => {
     expect(buildGroupEventText({ itemType: 3, groupActionType: 2, senderName: 'Alice' })).toBe(
       'Alice removed the group photo.',
     );
+    expect(buildGroupEventText({ itemType: 3, groupActionType: 4, senderName: 'Alice' })).toBe(
+      'Alice changed the chat background.',
+    );
+    expect(buildGroupEventText({ itemType: 3, groupActionType: 6, senderName: 'Alice' })).toBe(
+      'Alice removed the chat background.',
+    );
   });
 
-  it('location, kept audio, FaceTime (itemType 4/5/6)', () => {
+  it('itemType 3 with an unconfirmed groupActionType (3 or 5) falls back to unknown', () => {
+    expect(buildGroupEventText({ itemType: 3, groupActionType: 3, senderName: 'Alice' })).toBe(
+      'Unknown group event',
+    );
+    expect(buildGroupEventText({ itemType: 3, groupActionType: 5, senderName: 'Alice' })).toBe(
+      'Unknown group event',
+    );
+  });
+
+  it('location, kept audio, SharePlay (itemType 4/5/6)', () => {
     expect(buildGroupEventText({ itemType: 4, groupActionType: 0, senderName: 'Alice' })).toBe(
       'Alice shared their location.',
     );
     expect(buildGroupEventText({ itemType: 5, senderName: 'Alice' })).toBe(
       'Alice kept an audio message.',
     );
-    expect(buildGroupEventText({ itemType: 6, senderName: 'Alice' })).toBe(
-      'Alice started a FaceTime call.',
-    );
+    expect(buildGroupEventText({ itemType: 6, senderName: 'Alice' })).toBe('Alice started SharePlay.');
   });
 
   it('uses "You" for own events and "your" in the location phrasing', () => {
@@ -79,5 +92,22 @@ describe('buildGroupEventText', () => {
     expect(buildGroupEventText({ itemType: 1, groupActionType: 0 })).toBe(
       'Someone added someone to the conversation.',
     );
+  });
+});
+
+describe('isChatBackgroundChangeEvent', () => {
+  it('is true only for itemType 3 with groupActionType 4 (changed) or 6 (removed)', () => {
+    expect(isChatBackgroundChangeEvent({ itemType: 3, groupActionType: 4 })).toBe(true);
+    expect(isChatBackgroundChangeEvent({ itemType: 3, groupActionType: 6 })).toBe(true);
+  });
+
+  it('is false for other itemType 3 actions, other itemTypes, and normal messages', () => {
+    expect(isChatBackgroundChangeEvent({ itemType: 3, groupActionType: 0 })).toBe(false);
+    expect(isChatBackgroundChangeEvent({ itemType: 3, groupActionType: 1 })).toBe(false);
+    expect(isChatBackgroundChangeEvent({ itemType: 3, groupActionType: 3 })).toBe(false);
+    expect(isChatBackgroundChangeEvent({ itemType: 3, groupActionType: 5 })).toBe(false);
+    expect(isChatBackgroundChangeEvent({ itemType: 1, groupActionType: 4 })).toBe(false);
+    expect(isChatBackgroundChangeEvent({ itemType: 0, groupActionType: 0 })).toBe(false);
+    expect(isChatBackgroundChangeEvent({})).toBe(false);
   });
 });

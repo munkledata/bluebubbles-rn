@@ -2,7 +2,8 @@
  * Group / chat-event system messages (ported from the Flutter `buildGroupEventText`).
  *
  * iMessage emits in-thread events — someone added/removed, the group renamed, the photo changed,
- * someone left, a location shared, an audio kept, a FaceTime started — as messages carrying an
+ * someone left, a location shared, an audio kept, SharePlay started, the chat background changed —
+ * as messages carrying an
  * `itemType` (+ `groupActionType`, `groupTitle`, and `otherHandle` → the affected participant).
  * These render as a centered event line rather than a bubble. Pure/structural so it stays in the
  * React-free utils layer and is unit-testable.
@@ -48,13 +49,31 @@ export function buildGroupEventText(m: GroupEventFields): string {
     if (groupActionType == null || groupActionType === 0) return `${name} left the conversation.`;
     if (groupActionType === 1) return `${name} changed the group photo.`;
     if (groupActionType === 2) return `${name} removed the group photo.`;
+    // macOS 26 synced "transcript background" (chat wallpaper): 4 = changed, 6 = removed. The
+    // wallpaper asset itself is refetched on ingestion by GroupEventSideEffectSink (the event does
+    // not carry the new channel). groupActionType 3 and 5 also occur in the wild, but the server
+    // left their semantics unconfirmed, so they intentionally fall through to the unknown line.
+    if (groupActionType === 4) return `${name} changed the chat background.`;
+    if (groupActionType === 6) return `${name} removed the chat background.`;
   } else if (itemType === 4 && groupActionType === 0) {
     return `${name} shared ${name === 'You' ? 'your' : 'their'} location.`;
   } else if (itemType === 5) {
     return `${name} kept an audio message.`;
   } else if (itemType === 6) {
-    return `${name} started a FaceTime call.`;
+    return `${name} started SharePlay.`;
   }
 
   return 'Unknown group event';
+}
+
+/**
+ * True when this message is a chat-background change/removal group event: itemType 3 with
+ * groupActionType 4 (background changed) or 6 (background removed). The message itself does NOT
+ * carry the new background channel, so the app must refetch the wallpaper via the background
+ * endpoint (see GroupEventSideEffectSink). Pure predicate → reused by the sink and unit-testable.
+ */
+export function isChatBackgroundChangeEvent(
+  m: Pick<GroupEventFields, 'itemType' | 'groupActionType'>,
+): boolean {
+  return (m.itemType ?? 0) === 3 && (m.groupActionType === 4 || m.groupActionType === 6);
 }

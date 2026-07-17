@@ -10,6 +10,7 @@ import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
 import { useTypingStore } from '@state/typingStore';
 import { http, vault } from './clients';
+import { ensureSyncedBackground } from './backgrounds/syncedBackground';
 import { ensureDatabase } from './databaseControl';
 import { maybeResumeSync } from './syncControl';
 import { startReachabilityWatch } from './reachability';
@@ -20,6 +21,7 @@ import {
   setHideNotificationPreview,
 } from './notifications/notifeeService';
 import { DbEventSink } from './realtime/dbEventSink';
+import { GroupEventSideEffectSink } from './realtime/groupEventSideEffectSink';
 import { NotifyingEventSink } from './realtime/notifyingEventSink';
 import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
@@ -51,30 +53,36 @@ function realtimeSink(db: AppDatabase): EventSink {
     new RcsAlertEventSink(
       new FaceTimeEventSink(
         new TypingEventSink(
-          new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, (intent) => {
-            // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
-            // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
-            // pull the kv-backed store — and the DB is still written regardless.
-            if (
-              intent.kind === 'message' &&
-              !useFeatureSettingsStore.getState().messageNotifications
-            ) {
-              return;
-            }
-            // "Filter Unknown Senders": a chat with no contact-matched participant notifies
-            // silently (DB/badge only) when the filter is on — parity with the old app's muted
-            // unknown-sender notifications. Same gating layer as the toggle above.
-            if (
-              intent.kind === 'message' &&
-              useFeatureSettingsStore.getState().filterUnknownSenders
-            ) {
-              void chatHasKnownSender(db, intent.chatGuid).then((known) => {
-                if (known) void postNotification(intent);
-              });
-              return;
-            }
-            void postNotification(intent);
-          }),
+          new GroupEventSideEffectSink(
+            new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, (intent) => {
+              // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
+              // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
+              // pull the kv-backed store — and the DB is still written regardless.
+              if (
+                intent.kind === 'message' &&
+                !useFeatureSettingsStore.getState().messageNotifications
+              ) {
+                return;
+              }
+              // "Filter Unknown Senders": a chat with no contact-matched participant notifies
+              // silently (DB/badge only) when the filter is on — parity with the old app's muted
+              // unknown-sender notifications. Same gating layer as the toggle above.
+              if (
+                intent.kind === 'message' &&
+                useFeatureSettingsStore.getState().filterUnknownSenders
+              ) {
+                void chatHasKnownSender(db, intent.chatGuid).then((known) => {
+                  if (known) void postNotification(intent);
+                });
+                return;
+              }
+              void postNotification(intent);
+            }),
+            // Chat-background changed/removed group event → refetch the synced wallpaper. Injected
+            // (not run inside DbEventSink) because it's a network + DB side effect. Change-detects
+            // internally, so calling it on ingestion — before the channel visibly syncs — is safe.
+            (guid) => ensureSyncedBackground(http, db, guid),
+          ),
           (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
         ),
         (c) => useFaceTimeStore.getState().ring(c),

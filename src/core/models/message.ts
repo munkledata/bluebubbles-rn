@@ -112,7 +112,7 @@ export const Message = z.object({
 
   /**
    * Group/chat-event metadata. `itemType` > 0 marks a system event (participant add/remove,
-   * rename, leave, photo change, location, kept audio, FaceTime); `groupActionType`
+   * rename, leave, photo change, chat-background change, location, kept audio, SharePlay); `groupActionType`
    * disambiguates within a type; `groupTitle` is the new name on a rename; `otherHandle` is the
    * affected participant's server ROWID. Rendered as a centered event line (utils/groupEvent.ts).
    */
