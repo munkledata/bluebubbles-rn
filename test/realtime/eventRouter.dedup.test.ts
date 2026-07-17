@@ -48,4 +48,49 @@ describe('EventRouter dedup-by-GUID', () => {
       0, 1234,
     ]);
   });
+
+  it('releases the guid when the sink throws, so a redelivery is reprocessed (not lost)', async () => {
+    let attempts = 0;
+    const events: NormalizedEvent[] = [];
+    // First delivery of guid "boom" throws inside the sink (a transient DB hiccup); the second
+    // succeeds. The old mark-seen-before-sink logic burned the guid on the first (failed) try and
+    // silently deduped the retry away, so the notification was lost forever.
+    const sink: EventSink = {
+      onEvent: (e) => {
+        if (e.type === 'new-message' && e.message.guid === 'boom' && attempts++ === 0) {
+          throw new Error('transient sink failure');
+        }
+        events.push(e);
+      },
+    };
+    const router = new EventRouter(sink);
+    const msg = { guid: 'boom', dateCreated: 1 };
+    await expect(router.handle('new-message', msg, 'fcm')).rejects.toThrow('transient sink failure');
+    expect(events).toHaveLength(0); // first attempt failed
+    // A redelivery of the SAME guid must now be reprocessed, not deduped away.
+    const retry = await router.handle('new-message', msg, 'socket');
+    expect(retry?.type).toBe('new-message');
+    expect(events).toHaveLength(1);
+  });
+
+  it('still dedups a concurrent redelivery of the same guid (claim before the sink resolves)', async () => {
+    const events: NormalizedEvent[] = [];
+    // A slow sink: both deliveries are in flight before either resolves. The guid must be claimed
+    // synchronously (before the await) so the second copy is deduped even mid-flight.
+    const sink: EventSink = {
+      onEvent: async (e) => {
+        await Promise.resolve();
+        events.push(e);
+      },
+    };
+    const router = new EventRouter(sink);
+    const msg = { guid: 'race', dateCreated: 1 };
+    const [a, b] = await Promise.all([
+      router.handle('new-message', msg, 'socket'),
+      router.handle('new-message', msg, 'fcm'),
+    ]);
+    // Exactly one of the two concurrent copies is processed.
+    expect([a?.type, b?.type].filter(Boolean)).toEqual(['new-message']);
+    expect(events).toHaveLength(1);
+  });
 });

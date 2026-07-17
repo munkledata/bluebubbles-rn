@@ -8,10 +8,18 @@ import { vault } from './clients';
 
 /** Open the encrypted DB (once), generating the SQLCipher key on first run. */
 export async function ensureDatabase(): Promise<AppDatabase> {
-  // resolveDbKey (not getOrCreateDbKey) so a key rotation interrupted by a crash is
-  // finished here before the DB is opened.
-  const key = await resolveDbKey(vault);
-  return initDatabase(key);
+  // Fast path: if the DB is already open, return the cached handle without touching the vault.
+  // getDatabase() throws when the DB isn't open yet, so the catch is the genuine first-open path.
+  // This matters because ensureDatabase runs on EVERY FCM event, and resolveDbKey below does two
+  // native Keystore reads that are pure waste once the connection exists.
+  try {
+    return getDatabase();
+  } catch {
+    // resolveDbKey (not getOrCreateDbKey) so a key rotation interrupted by a crash is finished
+    // here before the DB is opened. Only runs on the true first open.
+    const key = await resolveDbKey(vault);
+    return initDatabase(key);
+  }
 }
 
 /** Rotate the SQLCipher database key (crash-safe). The open connection keeps working. */

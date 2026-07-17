@@ -58,13 +58,25 @@ export class EventRouter {
       });
       return null;
     }
-    if (this.isDuplicate(normalized)) return null;
-    await this.sink.onEvent(normalized, source);
+    if (this.hasSeen(normalized)) return null;
+    // Claim the guid BEFORE awaiting the sink so a concurrent redelivery (socket + FCM racing)
+    // is still deduped — but RELEASE it if the sink throws, so a delivery that failed on a
+    // transient error (e.g. a DB write hiccup) stays retry-eligible instead of being swallowed
+    // forever. Recording only AFTER success would let two concurrent copies both notify;
+    // recording only BEFORE (the old behaviour) dropped the notification permanently on any sink
+    // error, and every later redelivery of that guid was then silently deduped away.
+    this.recordSeen(normalized);
+    try {
+      await this.sink.onEvent(normalized, source);
+    } catch (e) {
+      this.unrecordSeen(normalized);
+      throw e;
+    }
     return normalized;
   }
 
   /**
-   * True (and records the guid) if this message event was already processed.
+   * The dedup key for an event, or null for event types that are never deduped.
    *
    * Dedup is restricted to `new-message` only: a redelivered new-message (socket + FCM, or a
    * retried push) must post its notification exactly once. `updated-message` is NOT deduped —
@@ -73,18 +85,33 @@ export class EventRouter {
    * idempotent, so re-applying one is harmless). Deduping by guid here would drop every
    * update after the first for a given message.
    */
-  private isDuplicate(event: NormalizedEvent): boolean {
-    if (event.type !== 'new-message') return false;
+  private seenKey(event: NormalizedEvent): string | null {
+    if (event.type !== 'new-message') return null;
     const guid = event.message.guid;
-    if (!guid) return false;
-    const key = `${event.type}:${guid}`;
-    if (this.seen.has(key)) return true;
+    return guid ? `${event.type}:${guid}` : null;
+  }
+
+  /** True if this message event was already processed. Read-only — does not record anything. */
+  private hasSeen(event: NormalizedEvent): boolean {
+    const key = this.seenKey(event);
+    return key !== null && this.seen.has(key);
+  }
+
+  /** Record the event as seen, evicting the oldest key past the cap. No-op for un-deduped types. */
+  private recordSeen(event: NormalizedEvent): void {
+    const key = this.seenKey(event);
+    if (key === null) return;
     this.seen.add(key);
     if (this.seen.size > EventRouter.SEEN_MAX) {
       const oldest = this.seen.values().next().value;
       if (oldest !== undefined) this.seen.delete(oldest);
     }
-    return false;
+  }
+
+  /** Release a previously-recorded key so a delivery that failed can be retried. */
+  private unrecordSeen(event: NormalizedEvent): void {
+    const key = this.seenKey(event);
+    if (key !== null) this.seen.delete(key);
   }
 
   private normalize(eventName: ServerEventName, data: unknown): NormalizedEvent | null {

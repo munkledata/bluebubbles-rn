@@ -120,9 +120,11 @@ export async function startFcm(): Promise<void> {
 const DEVICE_NAME = `Gator (Android ${Platform.Version})`;
 
 /**
- * Register this device's FCM token with the connected server so it can push to us. The
- * server keys on the token, so a generic device name is fine. No-op when offline — it's
- * re-run from `startRealtime()` once a server connection is established. Best-effort.
+ * Register this device's FCM token with the connected server so it can push to us. The server
+ * keys on the token (de-duping duplicate rows), so a generic device name is fine and re-registering
+ * is idempotent. Called on EVERY (re)connect from `startRealtime()` — that per-connect retry is
+ * what recovers a registration that failed at first boot or that targeted a previous server.
+ * No-op when there's no session origin yet. Best-effort (a failure is logged, not thrown).
  */
 export async function registerFcmToken(): Promise<void> {
   if (!useSessionStore.getState().origin) return;
