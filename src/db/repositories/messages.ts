@@ -79,6 +79,10 @@ export async function upsertMessages(
           // row already sent) — unlike the delivery tiers this is PLAIN-overwritten on conflict
           // (see below), because the server emits it only while pending and drops it on send.
           isScheduled: m.isScheduled ?? null,
+          // Apple edit history / unsent parts, stored as a JSON TEXT blob (parsed shape). NULL when
+          // the message isn't edited/retracted (the server omits the key), so the COALESCE-preserve
+          // on conflict (below) can't wipe a previously-stored history.
+          messageSummaryInfo: m.messageSummaryInfo ? JSON.stringify(m.messageSummaryInfo) : null,
         };
       }),
     )
@@ -122,6 +126,15 @@ export async function upsertMessages(
         groupActionType: sql`COALESCE(excluded.group_action_type, ${messages.groupActionType})`,
         groupTitle: sql`COALESCE(excluded.group_title, ${messages.groupTitle})`,
         otherHandle: sql`COALESCE(excluded.other_handle, ${messages.otherHandle})`,
+        // Edit history: COALESCE-PRESERVE, NOT plain-overwrite like isScheduled. The two differ on
+        // whether ABSENCE is meaningful. isScheduled's absence means "no longer pending" → it must
+        // clear (plain-overwrite to NULL). messageSummaryInfo's absence never means "history was
+        // removed" — the history is monotonic (an edit only ADDS revisions, an unsend only ADDS a
+        // retracted part) and permanent. A genuine new edit re-emits the FULL, fuller history, so
+        // overwrite-WHEN-PRESENT (COALESCE) captures it; and a later flagless re-upsert (a
+        // delivery/read receipt, or a live event whose leaner projection omits the blob) then can't
+        // wipe the stored timeline. Same reasoning as the group-event metadata above.
+        messageSummaryInfo: sql`COALESCE(excluded.message_summary_info, ${messages.messageSummaryInfo})`,
       },
     })
     .returning({ id: messages.id, guid: messages.guid });
@@ -353,6 +366,11 @@ export interface MessageRow {
   // Apple "Send Later" pending flag (1 while scheduled-but-unsent; NULL/absent otherwise). Optional
   // so hand-built test literals need not set it; the SELECT above always provides it at runtime.
   isScheduled?: number | null;
+  // Apple edit history / unsent parts as the RAW JSON TEXT blob (or null). Kept as a string here —
+  // like `attributedBody` — and parsed lazily by the consumer via parseMessageSummaryInfo (only the
+  // long-press "View Edit History" path needs the structured form). Optional so hand-built test
+  // literals need not set it; the SELECT below always provides it at runtime.
+  messageSummaryInfo?: string | null;
   error: number;
   sendState: string;
   wasDeliveredQuietly: number;
@@ -390,6 +408,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
     m.date_retracted AS dateRetracted,
     m.is_scheduled AS isScheduled,
+    m.message_summary_info AS messageSummaryInfo,
     m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
     m.did_notify_recipient AS didNotifyRecipient,

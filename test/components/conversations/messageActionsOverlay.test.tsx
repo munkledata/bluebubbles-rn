@@ -51,6 +51,7 @@ function handlers() {
     onShare: jest.fn(),
     onDelete: jest.fn(),
     onViewThread: jest.fn(),
+    onViewEditHistory: jest.fn(),
     onSelect: jest.fn(),
   };
 }
@@ -65,6 +66,7 @@ function makeSelected(overrides: Partial<SelectedMessage> = {}): SelectedMessage
     mine: [],
     dateCreated: Date.now(),
     isRetracted: false,
+    isEdited: false,
     isTemp: false,
     sendState: 'sent',
     attachments: [],
@@ -209,6 +211,26 @@ describe('MessageActionsOverlay — View Thread + Select', () => {
   it('hides View Thread for a message with no thread', async () => {
     await renderOverlay(makeSelected({ inThread: false }));
     expect(screen.queryByText('View Thread')).toBeNull();
+  });
+
+  it('shows View Edit History only for an edited message, and fires onViewEditHistory + onClose', async () => {
+    const h = await renderOverlay(makeSelected({ isEdited: true }));
+    await pressAndFlush(screen.getByText('View Edit History'), () => {
+      expect(h.onViewEditHistory).toHaveBeenCalledTimes(1);
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('hides View Edit History for a message that was never edited', async () => {
+    await renderOverlay(makeSelected({ isEdited: false }));
+    expect(screen.queryByText('View Edit History')).toBeNull();
+  });
+
+  it('shows View Edit History for ANY edited message, including one from someone else', async () => {
+    // Distinct from Edit/Unsend (own-recent only) — you can view the history of a message the
+    // other person edited.
+    await renderOverlay(makeSelected({ isFromMe: false, isEdited: true }));
+    expect(screen.getByText('View Edit History')).toBeTruthy();
   });
 
   it('Select fires onSelect + onClose (multi-select entry)', async () => {

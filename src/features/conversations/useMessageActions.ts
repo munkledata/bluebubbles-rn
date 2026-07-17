@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Share } from 'react-native';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
+import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
 import { getDatabase } from '@db/database';
 import { deleteMessageByGuid, type MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
@@ -72,6 +73,12 @@ export function useMessageActions({
       myEmojis,
       dateCreated: msg.dateCreated,
       isRetracted: !!msg.dateRetracted,
+      // Any edited message offers "View Edit History" (independent of the own-recent Edit gate).
+      isEdited: !!msg.dateEdited,
+      // Parse the persisted JSON blob (raw string on the row) into the history shape, tolerantly —
+      // a garbage/legacy value degrades to null (empty sheet), never throws. Threaded onto the
+      // selection so the sheet needs no extra DB fetch (the row is already loaded).
+      messageSummaryInfo: parseMessageSummaryInfo(msg.messageSummaryInfo),
       isTemp: msg.guid.startsWith('temp-'),
       sendState: msg.sendState,
       attachments: (msg.attachments ?? []).map((a) => ({
@@ -92,6 +99,16 @@ export function useMessageActions({
   const onViewThreadSelected = (): void => {
     if (!selected) return;
     setThreadFor(selected.threadOriginatorGuid ?? selected.guid);
+  };
+
+  // "View Edit History": the edit-history sheet. Wrapped so the wrapper's presence is the open
+  // signal (null = closed) even when there's no synced summary info (an optimistic local edit) —
+  // the sheet then shows an empty state. The value is already on the selection (parsed from the
+  // reactive row), so no fetch is needed.
+  const [editHistory, setEditHistory] = useState<{ info: MessageSummaryInfo | null } | null>(null);
+  const onViewEditHistorySelected = (): void => {
+    if (!selected) return;
+    setEditHistory({ info: selected.messageSummaryInfo ?? null });
   };
 
   // Multi-select mode: null = off; a Set of selected guids while active. Entered from the
@@ -318,6 +335,9 @@ export function useMessageActions({
     setSelectedGuids,
     threadFor,
     setThreadFor,
+    editHistory,
+    setEditHistory,
+    onViewEditHistorySelected,
     onLongPressMessage,
     onSwipeReply,
     onToggleSelect,

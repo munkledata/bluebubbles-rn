@@ -1,4 +1,4 @@
-import { Chat, Message } from '@core/models';
+import { Chat, Message, parseMessageSummaryInfo } from '@core/models';
 import {
   applyLocalEdit,
   applyLocalUnsend,
@@ -69,5 +69,101 @@ describe('edit/unsend repo fns', () => {
     );
     const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
     expect(row.dateRetracted).toBe(9000);
+  });
+});
+
+describe('messageSummaryInfo persistence (edit history)', () => {
+  const INFO = {
+    editedParts: {
+      '0': [
+        { date: 100, text: 'first draft' },
+        { date: 200, text: 'final text' },
+      ],
+    },
+    retractedParts: [2],
+  };
+
+  it('round-trips the JSON blob through write → read (JSON survives)', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'me1',
+          text: 'final text',
+          dateCreated: 100,
+          dateEdited: 200,
+          messageSummaryInfo: INFO,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+    const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'me1')!;
+    // Stored as raw JSON TEXT (like attributedBody); the tolerant helper reconstructs the shape.
+    expect(typeof row.messageSummaryInfo).toBe('string');
+    expect(parseMessageSummaryInfo(row.messageSummaryInfo)).toEqual(INFO);
+  });
+
+  it('parseMessageSummaryInfo returns null for garbage in the column (never throws)', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // seeds m1 with no summary info
+    raw
+      .prepare('UPDATE messages SET message_summary_info = ? WHERE guid = ?')
+      .run('{not valid json', 'm1');
+    const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
+    expect(row.messageSummaryInfo).toBe('{not valid json');
+    expect(parseMessageSummaryInfo(row.messageSummaryInfo)).toBeNull();
+  });
+
+  it('COALESCE-preserves the stored history when a later flagless re-upsert omits it', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mc1', dateCreated: 100, dateEdited: 200, messageSummaryInfo: INFO })],
+      () => chatId,
+      new Map(),
+    );
+    // A delivery/read-receipt re-upsert carries no messageSummaryInfo — it must NOT wipe the history
+    // (unlike isScheduled, whose absence is meaningful; edit history is monotonic + permanent).
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mc1', dateCreated: 100, dateRead: 5000 })],
+      () => chatId,
+      new Map(),
+    );
+    const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'mc1')!;
+    expect(parseMessageSummaryInfo(row.messageSummaryInfo)).toEqual(INFO);
+  });
+
+  it('overwrites with the fuller history when a new edit re-supplies it', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    const v1 = { editedParts: { '0': [{ date: 100, text: 'a' }, { date: 200, text: 'b' }] } };
+    const v2 = {
+      editedParts: {
+        '0': [
+          { date: 100, text: 'a' },
+          { date: 200, text: 'b' },
+          { date: 300, text: 'c' },
+        ],
+      },
+    };
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mo1', dateCreated: 100, dateEdited: 200, messageSummaryInfo: v1 })],
+      () => chatId,
+      new Map(),
+    );
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'mo1', dateCreated: 100, dateEdited: 300, messageSummaryInfo: v2 })],
+      () => chatId,
+      new Map(),
+    );
+    const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'mo1')!;
+    expect(parseMessageSummaryInfo(row.messageSummaryInfo)?.editedParts?.['0']).toHaveLength(3);
   });
 });

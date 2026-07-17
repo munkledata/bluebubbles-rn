@@ -105,6 +105,7 @@ function makeSelected(overrides: Partial<SelectedMessage> = {}): SelectedMessage
     myEmojis: [],
     dateCreated: Date.now(),
     isRetracted: false,
+    isEdited: false,
     isTemp: false,
     sendState: 'sent',
     attachments: [],

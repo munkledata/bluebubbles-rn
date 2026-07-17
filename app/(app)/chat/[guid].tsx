@@ -48,6 +48,7 @@ import {
   Composer,
   ConversationHeader,
   EdgeFade,
+  EditHistorySheet,
   MessageActionsOverlay,
   MessageList,
   Screen,
@@ -261,6 +262,9 @@ function ChatScreenInner({
     setSelectedGuids,
     threadFor,
     setThreadFor,
+    editHistory,
+    setEditHistory,
+    onViewEditHistorySelected,
     onLongPressMessage,
     onSwipeReply,
     onToggleSelect,
@@ -562,6 +566,7 @@ function ChatScreenInner({
         onShare={onShareSelected}
         onDelete={onDeleteSelected}
         onViewThread={onViewThreadSelected}
+        onViewEditHistory={onViewEditHistorySelected}
         onSelect={onEnterSelect}
       />
       <ThreadSheet
@@ -569,6 +574,7 @@ function ChatScreenInner({
         onClose={() => setThreadFor(null)}
         onJump={(m) => setJump({ guid: m.guid, dateCreated: m.dateCreated })}
       />
+      <EditHistorySheet data={editHistory} onClose={() => setEditHistory(null)} />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />
       ) : null}

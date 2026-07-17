@@ -7,6 +7,7 @@ import {
   removalType,
   type ReactionBaseType,
 } from '@core/reactions/reactionType';
+import type { MessageSummaryInfo } from '@core/models';
 import { useTheme } from '../theme';
 
 export interface SelectedMessage {
@@ -20,6 +21,12 @@ export interface SelectedMessage {
   myEmojis?: string[];
   dateCreated: number | null; // for the "recent" edit/unsend gate
   isRetracted: boolean;
+  /** The message carries an edit marker (dateEdited) → offers "View Edit History". Distinct from
+   *  the own-recent Edit/Unsend gate: you can view the history of ANY edited message. */
+  isEdited: boolean;
+  /** Parsed edit history / unsent parts for this message (or null). Threaded through from the
+   *  reactive row so the history sheet needs no extra fetch. Present only when isEdited. */
+  messageSummaryInfo?: MessageSummaryInfo | null;
   isTemp: boolean; // not yet on the server → can't edit/unsend
   /** Local send lifecycle of an optimistic message ('sending' | 'error' | 'sent'). */
   sendState: string;
@@ -54,6 +61,8 @@ interface MessageActionsOverlayProps {
   onDelete: () => void;
   /** Open the reply-thread sheet (shown only when the message is in a thread). */
   onViewThread?: () => void;
+  /** Open the edit-history sheet (shown only when the message was edited). */
+  onViewEditHistory?: () => void;
   /** Enter multi-select mode seeded with this message. */
   onSelect?: () => void;
 }
@@ -80,6 +89,7 @@ export function MessageActionsOverlay({
   onShare,
   onDelete,
   onViewThread,
+  onViewEditHistory,
   onSelect,
 }: MessageActionsOverlayProps): React.JSX.Element {
   const theme = useTheme();
@@ -261,6 +271,17 @@ export function MessageActionsOverlay({
               }}
             >
               <Text style={[styles.actionText, { color: theme.color.tint }]}>View Thread</Text>
+            </Pressable>
+          ) : null}
+          {onViewEditHistory && selected?.isEdited ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onViewEditHistory();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>View Edit History</Text>
             </Pressable>
           ) : null}
           {onSelect ? (

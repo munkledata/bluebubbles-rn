@@ -371,4 +371,13 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE attachments ADD COLUMN emoji_image_short_description TEXT`,
     ],
   },
+  {
+    // Apple `message_summary_info` (macOS 13+): per-part EDIT HISTORY + unsent ("retracted") parts.
+    // The server emits `messageSummaryInfo` (parsed `{ editedParts?, retractedParts? }`) only on
+    // edited/retracted messages; persist it as a JSON TEXT blob so the long-press "View Edit
+    // History" sheet can show the revision timeline offline. NULL on ordinary (and pre-migration)
+    // rows. Additive; applied transactionally + idempotently by name.
+    name: '0021_message_summary_info',
+    statements: [`ALTER TABLE messages ADD COLUMN message_summary_info TEXT`],
+  },
 ];

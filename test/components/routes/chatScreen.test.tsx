@@ -81,6 +81,7 @@ jest.mock('@ui', () => {
     Composer: capture('composer'),
     SmartReplyChips: capture('smartReply'),
     ThreadSheet: () => null,
+    EditHistorySheet: () => null,
   };
 });
 
@@ -283,6 +284,27 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
     );
     expect(mockCaptured.overlay!.selected.isTemp).toBe(true);
     expect(mockCaptured.overlay!.selected.isFromMe).toBe(true);
+  });
+
+  it('flags an edited message and parses its messageSummaryInfo JSON onto the selection', async () => {
+    await renderWithTheme(<ChatScreen />);
+    const info = { editedParts: { '0': [{ date: 1, text: 'a' }, { date: 2, text: 'b' }] } };
+    await run(() =>
+      mockCaptured.list!.onLongPressMessage(
+        makeMsg({ guid: 'm9', dateEdited: 2, messageSummaryInfo: JSON.stringify(info) }),
+      ),
+    );
+    const sel = mockCaptured.overlay!.selected;
+    expect(sel.isEdited).toBe(true);
+    // The raw JSON column is parsed into the structured history (original → current).
+    expect(sel.messageSummaryInfo.editedParts['0']).toHaveLength(2);
+  });
+
+  it('leaves isEdited false and messageSummaryInfo null for an un-edited message', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    expect(mockCaptured.overlay!.selected.isEdited).toBe(false);
+    expect(mockCaptured.overlay!.selected.messageSummaryInfo).toBeNull();
   });
 });
 

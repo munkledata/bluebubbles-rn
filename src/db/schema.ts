@@ -145,6 +145,11 @@ export const messages = sqliteTable(
         pending scheduled row, cleared once it actually sends. Drives the "Scheduled" badge.
         Nullable (NULL = not scheduled) — no default, matching the presence-driven wire semantics. */
     isScheduled: integer('is_scheduled', { mode: 'boolean' }),
+    /** Apple `message_summary_info` (macOS 13+): per-part edit history + unsent parts, stored as a
+        JSON TEXT blob (the parsed `{ editedParts?, retractedParts? }` shape). Presence-driven — the
+        server emits it only on edited/retracted messages, so NULL on everything else. Powers the
+        long-press "View Edit History" sheet; read back tolerantly via parseMessageSummaryInfo. */
+    messageSummaryInfo: text('message_summary_info'),
   },
   (t) => ({
     guidIdx: uniqueIndex('messages_guid_idx').on(t.guid),

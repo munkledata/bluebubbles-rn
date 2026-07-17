@@ -1,4 +1,4 @@
-import { Chat, isGroup, isReaction, Message } from '@core/models';
+import { Chat, isGroup, isReaction, Message, parseMessageSummaryInfo } from '@core/models';
 
 describe('Message model', () => {
   it('parses a minimal message and coerces string timestamps', () => {
@@ -17,6 +17,57 @@ describe('Message model', () => {
     expect(isReaction({ associatedMessageType: 'love' })).toBe(true);
     expect(isReaction({ associatedMessageType: '-love' })).toBe(false);
     expect(isReaction({ associatedMessageType: null })).toBe(false);
+  });
+
+  it('accepts and preserves a well-formed messageSummaryInfo (edit history + retracted parts)', () => {
+    const m = Message.parse({
+      guid: 'g',
+      messageSummaryInfo: {
+        editedParts: {
+          '0': [
+            { date: 100, text: 'v1' },
+            { date: 200, text: 'v2' },
+          ],
+        },
+        retractedParts: [1],
+      },
+    });
+    expect(m.messageSummaryInfo?.editedParts?.['0']).toHaveLength(2);
+    expect(m.messageSummaryInfo?.editedParts?.['0']?.[1]?.text).toBe('v2');
+    expect(m.messageSummaryInfo?.retractedParts).toEqual([1]);
+  });
+
+  it('omits messageSummaryInfo when absent (presence-driven, like isScheduled)', () => {
+    const m = Message.parse({ guid: 'g', text: 'hi' });
+    expect(m.messageSummaryInfo).toBeUndefined();
+  });
+
+  it('tolerates a MALFORMED messageSummaryInfo without rejecting the whole message', () => {
+    // A sync page is ONE hard array parse — a bad nested value must degrade to "absent", never fail
+    // the whole message (which would stall the page). `.catch(undefined)` is the guard.
+    const m = Message.parse({
+      guid: 'g',
+      text: 'hi',
+      messageSummaryInfo: { editedParts: 'not-an-object' },
+    });
+    expect(m.guid).toBe('g');
+    expect(m.text).toBe('hi');
+    expect(m.messageSummaryInfo).toBeUndefined();
+  });
+
+  it('keeps the whole message even when messageSummaryInfo is wholesale garbage', () => {
+    const m = Message.parse({ guid: 'g', messageSummaryInfo: 42 });
+    expect(m.guid).toBe('g');
+    expect(m.messageSummaryInfo).toBeUndefined();
+  });
+
+  it('parseMessageSummaryInfo round-trips valid JSON and returns null on garbage', () => {
+    const info = { editedParts: { '0': [{ date: 1, text: 'a' }] }, retractedParts: [3] };
+    expect(parseMessageSummaryInfo(JSON.stringify(info))).toEqual(info);
+    expect(parseMessageSummaryInfo('{not json')).toBeNull();
+    expect(parseMessageSummaryInfo(null)).toBeNull();
+    expect(parseMessageSummaryInfo(undefined)).toBeNull();
+    expect(parseMessageSummaryInfo('')).toBeNull();
   });
 });
 

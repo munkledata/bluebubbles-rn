@@ -47,6 +47,23 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       expect(res.data.wasDeliveredQuietly).toBe(false);
       // isScheduled is presence-driven — an ordinary (non-scheduled) message omits it entirely.
       expect(res.data.isScheduled).toBeUndefined();
+      // messageSummaryInfo is likewise presence-driven — an un-edited message omits it entirely.
+      expect(res.data.messageSummaryInfo).toBeUndefined();
+    }
+  });
+
+  it('Message accepts an edited message carrying messageSummaryInfo (edit history + retracted parts)', () => {
+    const res = Message.safeParse(fixture('messageEditHistory.gator.json'));
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.guid).toBe('p:0/EDIT-1234-5678-9ABC');
+      // editedParts is keyed by part index (JSON string keys); ordered original → current.
+      const parts = res.data.messageSummaryInfo?.editedParts?.['0'];
+      expect(parts).toHaveLength(2);
+      expect(parts?.[0]?.text).toBe('first version'); // index 0 = the ORIGINAL text
+      expect(parts?.[1]?.text).toBe('final version'); // last = the CURRENT text
+      expect(parts?.[1]?.date).toBe(1718900500000);
+      expect(res.data.messageSummaryInfo?.retractedParts).toEqual([1]);
     }
   });
 

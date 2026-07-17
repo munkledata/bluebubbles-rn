@@ -5,6 +5,40 @@ import { Attachment } from './attachment';
 import { ChatSummary } from './chatSummary';
 
 /**
+ * One revision of an edited message part: the part's text at that revision plus the edit date
+ * (Unix ms, nullable). The wire carries an ordered array per part — index 0 = the ORIGINAL text,
+ * the last entry = the CURRENT text. `.loose()` + nullish inner keys so a shape drift on any one
+ * revision degrades gracefully rather than rejecting the whole message.
+ */
+export const EditRevision = z
+  .object({
+    date: epochMillis, // number | null after coercion
+    text: z.string().nullish(),
+  })
+  .loose();
+export type EditRevision = z.infer<typeof EditRevision>;
+
+/**
+ * Apple `message_summary_info` (macOS 13+): per-part edit history + unsent ("retracted") parts.
+ * Present ONLY on edited/retracted messages — the server omits the key entirely otherwise. Powers
+ * the long-press "View Edit History" sheet.
+ *   - `editedParts`: keyed by part index (JSON object keys are strings) → that part's ordered
+ *     revision list (original → current).
+ *   - `retractedParts`: the part indexes the sender unsent.
+ * Deliberately tolerant — `.loose()` (keeps unknown keys like Apple's `otr`) + optional/nullish
+ * inner keys — so a malformed value degrades to "no history" instead of a hard parse failure. A
+ * sync page is ONE array parse, so one bad field must never stall the whole page (invariant:
+ * readers degrade, never throw).
+ */
+export const MessageSummaryInfo = z
+  .object({
+    editedParts: z.record(z.string(), z.array(EditRevision)).nullish(),
+    retractedParts: z.array(z.number()).nullish(),
+  })
+  .loose();
+export type MessageSummaryInfo = z.infer<typeof MessageSummaryInfo>;
+
+/**
  * A single message (Flutter: Message). Reactions are modelled server-side as
  * "associated messages" carrying an `associatedMessageType` (e.g. "love",
  * "like", "emphasize"); threading uses `threadOriginatorGuid`.
@@ -26,6 +60,16 @@ export const Message = z.object({
   dateDelivered: epochMillis,
   dateEdited: epochMillis,
   dateRetracted: epochMillis,
+
+  /**
+   * Apple edit history / unsent parts (macOS 13+). Presence-driven — arrives ONLY on edited or
+   * retracted messages. `messageSummaryInfo` is already in SYNC_WITH_QUERY, so existing sync/query
+   * flows deliver it once this field exists (older code silently stripped it for lack of a model
+   * field). `.catch(undefined)` is the final guard: a malformed value coerces to "absent" rather
+   * than failing the whole message parse (which would stall the sync page it rides in). Persisted
+   * as JSON TEXT on the messages table; read back tolerantly via {@link parseMessageSummaryInfo}.
+   */
+  messageSummaryInfo: MessageSummaryInfo.nullish().catch(undefined),
 
   hasAttachments: z.boolean().nullish(),
   attachments: z.array(Attachment).nullish(),
@@ -95,4 +139,25 @@ export function isReaction(m: Pick<Message, 'associatedMessageType'>): boolean {
  */
 export function resolveMessageChatGuid(m: Pick<Message, 'chats' | 'chatGuid'>): string | undefined {
   return m.chats?.[0]?.guid ?? m.chatGuid ?? undefined;
+}
+
+/**
+ * Tolerant read-back parse for the DB's `message_summary_info` JSON TEXT column: `JSON.parse`
+ * then validate against {@link MessageSummaryInfo}. Returns null on ANY failure (absent, empty,
+ * non-JSON, or shape mismatch) and NEVER throws — a corrupt/legacy value degrades to "no history"
+ * instead of crashing the long-press menu. Mirror of the write side (`JSON.stringify` in
+ * `upsertMessages`).
+ */
+export function parseMessageSummaryInfo(
+  raw: string | null | undefined,
+): MessageSummaryInfo | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const res = MessageSummaryInfo.safeParse(parsed);
+  return res.success ? res.data : null;
 }
