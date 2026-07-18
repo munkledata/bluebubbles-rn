@@ -35,6 +35,14 @@ export const ServerInfo = z
      */
     supports_send_contact: z.boolean().nullish(),
     /**
+     * Whether the server can read/modify the signed-in iMessage account — the `icloud/account`
+     * endpoints (Apple ID, display name, and the send-from alias picker) that require the Private-API
+     * helper. Additive; absent/false on older servers (the route 404s → the screen shows "unsupported").
+     * The app gates the Settings "iMessage Account" row on this. Reflects a LIVE capability (true iff
+     * Private API is on), so it can flip across reconnects — the account screen keeps a 404 fallback.
+     */
+    supports_icloud_account: z.boolean().nullish(),
+    /**
      * Gator RCS bridge enabled (additive; absent/false on older servers). When true the server
      * serves RCS chats through the same v1 endpoints (`RCS;-;` guids, `service:"RCS"`). The app
      * needs no gate to RECEIVE them (they just appear in the list) — this flag lets RCS-specific

@@ -33,3 +33,34 @@ describe('sessionAccessors.messageDeletedSupported', () => {
     expect(sessionAccessors.messageDeletedSupported()).toBe(true);
   });
 });
+
+/**
+ * The `supports_icloud_account` capability (iMessage-account F#8). The Settings "iMessage Account"
+ * row gates on this accessor; false in every shape except a server that explicitly advertises it.
+ */
+describe('sessionAccessors.icloudAccountSupported', () => {
+  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
+
+  it('is false when there is no server info', () => {
+    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
+  });
+
+  it('is false when the server omits the flag', () => {
+    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
+    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
+  });
+
+  it('is false when the server reports it false', () => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_icloud_account: false }),
+    });
+    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
+  });
+
+  it('is true only when the server advertises the capability', () => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_icloud_account: true }),
+    });
+    expect(sessionAccessors.icloudAccountSupported()).toBe(true);
+  });
+});

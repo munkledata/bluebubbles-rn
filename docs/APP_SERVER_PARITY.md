@@ -62,6 +62,29 @@ The server's `send-contact` action (`POST /api/v1/message/contact`, advertised v
   in the rendered card; a failure flips it to the retryable error state (mirrors `sendTextMessage`).
   See `sendContactService.ts` + `sendContact` (`endpoints/messages.ts`).
 
+## ✅ Closed (2026-07-18) — iMessage account (`icloud/account`)
+
+Was an **App → Server** gap: the app called `GET /api/v1/icloud/account` (+ the alias POST), which
+the Gator daemon never implemented → 404 → the screen always errored. Now wired on BOTH sides
+(server-TS only — the injected helper already had the actions; no dylib rebuild):
+
+- **Server** (`packages/bbd`): `MessageSender.getAccountInfo()`/`setActiveAlias()` dispatch the
+  helper actions `get-account-info`/`modify-active-alias`; a new `buildIcloudOperations({ sender })`
+  group exposes `GET /api/v1/icloud/account` + `POST /api/v1/icloud/account/alias` (both auth). The
+  GET **normalizes the helper's snake_case dict → the app's camelCase `AccountInfo`** (apple_id→appleId,
+  account_name→displayName, active_alias→activeAlias, `vetted_aliases:[{Alias}]`→`vettedAliases: string[]`)
+  — a raw passthrough would parse as 200-but-all-null. The POST validates the alias is Apple-vetted
+  before switching. Registered in `backend.ts`; unit-tested (`icloudOperations.test.ts`, FakeTransport).
+- **Capability**: `supports_icloud_account` added to `ServerInfoV1` / `/server/info`, emitted as
+  `enablePrivateApi` (the endpoints require the helper). Static `true` would lie on Private-API-off
+  servers, where the route would 500.
+- **App**: `serverInfo.supports_icloud_account` + `useIcloudAccountSupported()` gate the Settings
+  "iMessage Account" row; `account.tsx` keeps its 404→`UnimplementedEndpointError` fallback for a deep
+  link / stale serverInfo. Unit-tested (accessor + hook).
+- **Divergence from the earlier plan doc:** `MessageSender` lives at `packages/bbd/src/messaging/`
+  (not `api/services/`), and bbd's transport nests the payload ONE level (`res.data`), not the legacy
+  server's `res.data.data`. See `docs/IMESSAGE_ACCOUNT_PLAN.md` (status: implemented).
+
 ## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
 
 The Gator server's RCS bridge (a `libgm` sidecar) serves RCS chats through the **same frozen v1

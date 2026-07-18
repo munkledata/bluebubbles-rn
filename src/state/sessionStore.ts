@@ -71,6 +71,9 @@ export const sessionAccessors = {
   /** Whether the connected server can build + send a contact card (`send-contact`). */
   sendContactSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_send_contact,
+  /** Whether the connected server exposes the iMessage-account endpoints (`icloud/account`). */
+  icloudAccountSupported: (): boolean =>
+    !!useSessionStore.getState().serverInfo?.supports_icloud_account,
 };
 
 /** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
@@ -83,3 +86,7 @@ export const useMessageDeletedSupported = (): boolean =>
 /** React hook: can the server send a contact card? (Gate the composer's "Contact" affordance.) */
 export const useSendContactSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_send_contact);
+
+/** React hook: does the server expose the iMessage-account endpoints? (Gate the Settings row.) */
+export const useIcloudAccountSupported = (): boolean =>
+  useSessionStore((s) => !!s.serverInfo?.supports_icloud_account);

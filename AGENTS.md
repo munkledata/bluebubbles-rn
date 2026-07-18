@@ -274,11 +274,19 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   forever after (looks broken on repeat presses; there's no exemption-state query without a native module).
   `src/services/battery.ts` fires `IGNORE_BATTERY_OPTIMIZATION_SETTINGS` (fallback `APPLICATION_DETAILS_SETTINGS`)
   so it always opens something.
-- **A Gator-server route the client doesn't back → `UnimplementedEndpointError`, not a scary error.** The
-  iMessage Account screen calls `/icloud/account`, which the server never implemented (404). `getAccountInfo`
-  remaps a 404 to `UnimplementedEndpointError` so `account.tsx` shows a neutral "not supported on this server
-  yet" state instead of blaming the Private API (same pattern as `/server/update/check`). Private-API being
-  on/off is irrelevant.
+- **A Gator-server route the client doesn't back → `UnimplementedEndpointError`, not a scary error.** Pattern:
+  `getAccountInfo` remaps a **404** to `UnimplementedEndpointError` so `account.tsx` shows a neutral "not
+  supported on this server yet" state instead of blaming the Private API (same as `/server/update/check`).
+- **iMessage Account (`icloud/account`) IS implemented server-side now** (2026-07-18, `packages/bbd`
+  `icloudOperations.ts`) — the Settings row is gated on `serverInfo.supports_icloud_account`
+  (`useIcloudAccountSupported`), emitted by the server as `enablePrivateApi` (the endpoints need the helper).
+  Two things to know: (1) the **snake→camel normalization is done SERVER-side** (helper returns
+  `apple_id`/`account_name`/`active_alias`/`vetted_aliases:[{Alias}]`; the bbd route maps to the app's
+  camelCase `AccountInfo` — a raw passthrough parses as 200-but-all-null since the app schema is loose +
+  nullish). (2) Keep the 404 fallback in `account.tsx` as defense-in-depth: the flag hides the *entrance*,
+  but the screen is still reachable via deep link or a stale/null `serverInfo`, and Private-API-off servers
+   404. Helper-off (flag on, helper crashed) surfaces as a generic 500, not 404 — acceptable. See
+  `docs/IMESSAGE_ACCOUNT_PLAN.md` + `docs/APP_SERVER_PARITY.md`.
 
 ## FCM gotchas (verified against the Flutter/Kotlin reference)
 - **Envelope shape:** the server's FCM *data* message is `{ type: '<event>', data: '<JSON body>',

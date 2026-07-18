@@ -397,7 +397,11 @@ export default function SettingsScreen(): React.JSX.Element {
 
         {match(SECTIONS.server) && (
           <SettingsSection label="SERVER" style={styles.gap}>
-            <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
+            {/* Only when the server advertises the icloud/account endpoints (Private API on). The
+                account screen keeps its own 404 fallback for a deep link / stale serverInfo. */}
+            {serverInfo?.supports_icloud_account && (
+              <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
+            )}
             <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
             <NavRow label="Server Health…" onPress={() => router.push('/server-health')} />
           </SettingsSection>
