@@ -28,6 +28,22 @@ export function setHideNotificationPreview(value: boolean): void {
   hidePreview = value;
 }
 
+// Fallback avatar for a sender with no contact photo: the Gator mark, so the notification shows
+// our icon instead of Android's generic gray silhouette. Resolved once at module load — headless-
+// safe (the require + RN asset registry are available even in the FCM wake context). Guarded:
+// resolveAssetSource can return undefined, and notify-kit throws on `icon: undefined`.
+let gatorAvatarUri: string | undefined;
+try {
+  // Lazy require (literal strings, so Metro still bundles both) — the React-free node/jest import
+  // graph never evaluates react-native, and any failure here just leaves the fallback undefined.
+  const { Image } = require('react-native') as typeof import('react-native');
+  gatorAvatarUri = Image.resolveAssetSource(
+    require('../../../assets/notification-avatar.png') as number,
+  )?.uri;
+} catch {
+  gatorAvatarUri = undefined;
+}
+
 let channelReady: Promise<string> | null = null;
 function ensureChannel(): Promise<string> {
   channelReady ??= notifee.createChannel({
@@ -161,9 +177,12 @@ export async function postNotification(intent: NotificationIntent): Promise<void
             person: {
               name: senderName,
               id: intent.senderHandle,
-              // `icon` must be a string when present — omit entirely when no avatar, and
-              // never attach the avatar in redacted mode (it would reveal the contact).
-              ...(intent.avatarUri && !hidePreview ? { icon: intent.avatarUri } : {}),
+              // Contact photo when we have one; otherwise the Gator mark instead of Android's
+              // gray silhouette. Never in redacted mode (matches dropping the real avatar), and
+              // only when the value is a string — notify-kit throws on `icon: undefined`.
+              ...(!hidePreview && (intent.avatarUri ?? gatorAvatarUri)
+                ? { icon: (intent.avatarUri ?? gatorAvatarUri) as string }
+                : {}),
             },
           },
         ],
