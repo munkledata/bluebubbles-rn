@@ -5,8 +5,10 @@ import { useTheme } from '../theme';
 interface ServiceBadgeProps {
   /** Badge label, e.g. "RCS". */
   label: string;
-  /** Fill color; defaults to the theme's RCS teal. */
+  /** Fill color; defaults to the theme's RCS green. */
   color?: string;
+  /** Label color; defaults to white (RCS passes a pale gator-green for its deep-green pill). */
+  textColor?: string;
 }
 
 /**
@@ -14,7 +16,7 @@ interface ServiceBadgeProps {
  * Kept subtle + iOS-styled: uppercase caption on a tinted rounded chip. Non-focusable — the
  * adjacent title already announces the chat, so the badge is decorative-by-default under TalkBack.
  */
-export function ServiceBadge({ label, color }: ServiceBadgeProps): React.JSX.Element {
+export function ServiceBadge({ label, color, textColor }: ServiceBadgeProps): React.JSX.Element {
   const theme = useTheme();
   const bg = color ?? theme.color.bubble.rcsBackground ?? theme.color.bubble.smsBackground;
   return (
@@ -23,7 +25,7 @@ export function ServiceBadge({ label, color }: ServiceBadgeProps): React.JSX.Ele
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Text style={styles.text}>{label}</Text>
+      <Text style={[styles.text, textColor ? { color: textColor } : null]}>{label}</Text>
     </View>
   );
 }

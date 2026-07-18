@@ -6,10 +6,9 @@ import {
   deleteChatLocal,
   setChatArchive,
   setChatMute,
-  setChatUnreadLocal,
   type InboxRow,
 } from '@db/repositories';
-import { markRead } from '@/services';
+import { markRead, markUnread } from '@/services';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
@@ -93,8 +92,7 @@ export const ConversationTile = React.memo(function ConversationTile({
       label: unread ? 'Read' : 'Unread',
       icon: unread ? 'mail-open-outline' : 'mail-unread-outline',
       color: '#34C759',
-      onPress: () =>
-        unread ? void markRead(row.guid) : void setChatUnreadLocal(getDatabase(), row.guid),
+      onPress: () => (unread ? void markRead(row.guid) : void markUnread(row.guid)),
     },
   ];
   const rightActions: SwipeAction[] = [
@@ -134,15 +132,13 @@ export const ConversationTile = React.memo(function ConversationTile({
           pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
         ]}
         accessibilityRole="button"
-        accessibilityLabel={`${title}. ${unread ? 'Unread. ' : ''}${preview}`}
+        accessibilityLabel={`${title}. ${unread ? `${row.unreadCount} unread. ` : ''}${preview}`}
         accessibilityHint="Double tap to open, or long press for actions"
       >
         <View style={styles.leading}>
-          {unread ? (
-            <View style={[styles.dot, { backgroundColor: theme.color.tint }]} />
-          ) : (
-            <View style={styles.dotSpacer} />
-          )}
+          {/* Unread is now signalled by the count badge on the right, so the leading gutter is
+              always the spacer (keeps avatars aligned across read/unread rows). */}
+          <View style={styles.dotSpacer} />
           {group ? (
             <GroupAvatar
               // Redacted mode masks the monogram + photo with deterministic seeded tiles
@@ -171,7 +167,14 @@ export const ConversationTile = React.memo(function ConversationTile({
             >
               {title}
             </Text>
-            {badge ? <ServiceBadge label={badge.label} color={badge.color} /> : null}
+            {badge ? (
+              <ServiceBadge
+                label={badge.label}
+                color={badge.color}
+                // Pale gator-green label on the deep-green RCS pill; other services keep white.
+                textColor={service === 'RCS' ? '#EAF7EC' : undefined}
+              />
+            ) : null}
           </View>
           <Text
             numberOfLines={compact ? 1 : 2}
@@ -186,6 +189,13 @@ export const ConversationTile = React.memo(function ConversationTile({
             {formatChatDate(row.lastDate)}
           </Text>
           <View style={styles.trailingRow}>
+            {unread ? (
+              <View style={[styles.countBadge, { backgroundColor: theme.color.tint }]}>
+                <Text style={styles.countText} numberOfLines={1}>
+                  {row.unreadCount > 99 ? '99+' : row.unreadCount}
+                </Text>
+              </View>
+            ) : null}
             {muted ? (
               <Icon name="notifications-off-outline" size={14} color={theme.color.tertiaryLabel} />
             ) : null}
@@ -200,8 +210,9 @@ export const ConversationTile = React.memo(function ConversationTile({
 const styles = StyleSheet.create({
   tile: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingRight: 12 },
   tileCompact: { paddingVertical: 6 },
-  leading: { flexDirection: 'row', alignItems: 'center', width: 64, paddingLeft: 6 },
-  dot: { width: 10, height: 10, borderRadius: 5, marginRight: 6 },
+  // width sizes the avatar column; the avatar is left-anchored, so the extra width past the
+  // avatar (≈62px of content) becomes breathing room between the photo and the name/preview.
+  leading: { flexDirection: 'row', alignItems: 'center', width: 74, paddingLeft: 6 },
   dotSpacer: { width: 10, marginRight: 6 },
   center: { flex: 1, paddingRight: 8 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
@@ -209,6 +220,16 @@ const styles = StyleSheet.create({
   preview: { fontSize: 15, lineHeight: 20 },
   trailing: { alignItems: 'flex-end', minWidth: 52 },
   time: { fontSize: 13, marginBottom: 4 },
-  trailingRow: { flexDirection: 'row', alignItems: 'center' },
+  trailingRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   chevron: { fontSize: 18, fontWeight: '600' },
+  // Unread count pill (accent-colored — gator-green under the Gator theme, blue under OLED Dark).
+  countBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
 });

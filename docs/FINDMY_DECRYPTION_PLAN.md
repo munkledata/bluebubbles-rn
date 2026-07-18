@@ -1,8 +1,15 @@
 # Find My on macOS 14.4+ (incl. 26) — Implementation Plan
 
-*Plan only — no code yet. Generated 2026-06-24. Porting the approach from upstream PR
+*Generated 2026-06-24. Porting the approach from upstream PR
 [BlueBubblesApp/bluebubbles-server#810](https://github.com/BlueBubblesApp/bluebubbles-server/pull/810)
 to **our** Gator bbd server + RN app, with two chosen extensions.*
+
+**Status (updated 2026-07-17):** RN-side devices/friends are DONE — `normalizeDevice`/`normalizeFriend`
+(both Gator + upstream shapes), the `[lat, lng]` coordinate-order pin test (Phase 4 item 15), and the
+`findmyStore` / `findmyApi` / `FindMyMap` UI are all implemented in this repo. Still UNBUILT: Phase 4
+item 16 (the items/AirTags split in this repo — `FindMyItem` type, `normalizeItem`, a `findmyItems`
+endpoint + AirTags section/store slice), and ALL server-side phases 1–3 (the bbd decryption core,
+items/devices endpoints, and the Gator key-import UI — they live in the `bluebubbles-server` repo).
 
 ## Why this is needed now
 

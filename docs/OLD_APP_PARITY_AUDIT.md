@@ -1,6 +1,6 @@
 # Old App → RN Parity Audit
 
-> ⚠️ **SUPERSEDED (2026-07-15).** This 2026-07-01 snapshot is stale — many gaps listed below were closed in Waves 1–3 and Phases 7d/8/9. See [`OLD_APP_PARITY_AUDIT_2026-07-15.md`](./OLD_APP_PARITY_AUDIT_2026-07-15.md) for the current audit. Retained only for the detailed per-screen tables the refresh summarizes.
+> ⚠️ **SUPERSEDED (2026-07-15).** This 2026-07-01 snapshot is stale — many gaps listed below were closed in Waves 1–3 and Phases 7d/8/9. See [`OLD_APP_PARITY_AUDIT_2026-07-15.md`](./OLD_APP_PARITY_AUDIT_2026-07-15.md) for the current audit. Retained only for the detailed per-screen tables the refresh summarizes. The per-screen gap tables below are a **frozen 2026-07-01 snapshot** — code-verified 2026-07-17: many 🔴 rows (copy/forward/save message actions, recipient chips, auto-download toggles, scheduled sent/error history, composer camera capture, redacted-mode leak fixes) have since shipped; the 2026-07-15 audit is authoritative on current state.
 
 _Generated 2026-07-01. Screen-by-screen comparison of the old Flutter app (`~/github/bluebubbles-app`) against the React Native rebuild (`~/github/bluebubbles-rn`)._
 

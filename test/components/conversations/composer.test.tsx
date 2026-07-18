@@ -515,8 +515,8 @@ describe('Composer — send-effect long-press', () => {
   });
 });
 
-describe('Composer — schedule (two-step native picker)', () => {
-  it('shows the schedule button only after typing and drives date→time→onSchedule', async () => {
+describe('Composer — schedule (two-step native picker + recurrence sheet)', () => {
+  it('shows the schedule button only after typing and drives date→time→repeat→onSchedule', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
     expect(screen.queryByLabelText('Schedule message')).toBeNull();
@@ -534,11 +534,45 @@ describe('Composer — schedule (two-step native picker)', () => {
     expect(timeCfg.mode).toBe('time');
     act(() => timeCfg.onChange({ type: 'set' }, future));
 
-    expect(onSchedule).toHaveBeenCalledTimes(1);
-    const [text, when] = onSchedule.mock.calls[0]!;
+    // Step 3: the recurrence sheet opens; nothing is scheduled until a choice is made.
+    expect(onSchedule).not.toHaveBeenCalled();
+    fireEvent.press(await screen.findByText('Send once'));
+
+    await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
+    const [text, when, recurrence] = onSchedule.mock.calls[0]!;
     expect(text).toBe('later');
     expect(when).toBeGreaterThan(Date.now());
+    expect(recurrence).toBeNull(); // "Send once" = one-shot
     await waitFor(() => expect(input().props.value).toBe(''));
+  });
+
+  it('picking a repeat cadence passes it to onSchedule', async () => {
+    const onSchedule = jest.fn();
+    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
+    fireEvent.changeText(input(), 'daily later');
+    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    const future = new Date(Date.now() + 2 * 86_400_000);
+    act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
+    act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
+    fireEvent.press(await screen.findByText('Repeat daily'));
+    await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
+    expect(onSchedule.mock.calls[0]![0]).toBe('daily later');
+    expect(onSchedule.mock.calls[0]![2]).toBe('daily');
+    await waitFor(() => expect(input().props.value).toBe(''));
+  });
+
+  it('cancelling the recurrence sheet aborts scheduling and keeps the typed text', async () => {
+    const onSchedule = jest.fn();
+    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
+    fireEvent.changeText(input(), 'keep me');
+    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    const future = new Date(Date.now() + 2 * 86_400_000);
+    act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
+    act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
+    fireEvent.press(await screen.findByText('Cancel'));
+    await waitFor(() => expect(screen.queryByText('Send once')).toBeNull());
+    expect(onSchedule).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('keep me'); // draft not lost on cancel
   });
 
   it('cancelling the date step aborts scheduling (no time picker, no callback)', async () => {

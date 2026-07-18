@@ -11,3 +11,5 @@ export * from './ScreenHeader';
 export * from './ActionListRow';
 export * from './SettingsSection';
 export * from './SettingsRow';
+export * from './QrCode';
+export * from './PairingQr';

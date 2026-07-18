@@ -13,6 +13,7 @@ import { http, vault } from './clients';
 import { ensureSyncedBackground } from './backgrounds/syncedBackground';
 import { ensureDatabase } from './databaseControl';
 import { maybeResumeSync } from './syncControl';
+import { autoDownloadMessageAttachments } from './download/autoDownloadAttachments';
 import { startReachabilityWatch } from './reachability';
 import { buildMessageIntents } from './notifications/intents';
 import {
@@ -27,6 +28,7 @@ import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
 import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
 import { RcsAlertEventSink } from './realtime/rcsAlertEventSink';
+import { createServerUrlResolver } from './realtime/serverUrlResolver';
 import { SocketService } from './realtime/socketService';
 
 let socket: SocketService | null = null;
@@ -54,30 +56,47 @@ function realtimeSink(db: AppDatabase): EventSink {
       new FaceTimeEventSink(
         new TypingEventSink(
           new GroupEventSideEffectSink(
-            new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, (intent) => {
-              // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
-              // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
-              // pull the kv-backed store — and the DB is still written regardless.
-              if (
-                intent.kind === 'message' &&
-                !useFeatureSettingsStore.getState().messageNotifications
-              ) {
-                return;
-              }
-              // "Filter Unknown Senders": a chat with no contact-matched participant notifies
-              // silently (DB/badge only) when the filter is on — parity with the old app's muted
-              // unknown-sender notifications. Same gating layer as the toggle above.
-              if (
-                intent.kind === 'message' &&
-                useFeatureSettingsStore.getState().filterUnknownSenders
-              ) {
-                void chatHasKnownSender(db, intent.chatGuid).then((known) => {
-                  if (known) void postNotification(intent);
-                });
-                return;
-              }
-              void postNotification(intent);
-            }),
+            new NotifyingEventSink(
+              new DbEventSink(
+                db,
+                (messageId) => void autoDownloadMessageAttachments(db, messageId),
+              ),
+              db,
+              buildMessageIntents,
+              (intent) => {
+                // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
+                // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
+                // pull the kv-backed store — and the DB is still written regardless.
+                if (
+                  intent.kind === 'message' &&
+                  !useFeatureSettingsStore.getState().messageNotifications
+                ) {
+                  return;
+                }
+                // "Filter Unknown Senders": a chat with no contact-matched participant notifies
+                // silently (DB/badge only) when the filter is on — parity with the old app's muted
+                // unknown-sender notifications. Same gating layer as the toggle above.
+                if (
+                  intent.kind === 'message' &&
+                  useFeatureSettingsStore.getState().filterUnknownSenders
+                ) {
+                  // Fail OPEN: if the known-sender lookup rejects (a DB read hiccup), still post the
+                  // notification rather than silently swallowing it as an unhandled rejection — a
+                  // dropped alert is worse than an occasional unfiltered one. The DB row is already
+                  // written regardless (this gate only decides whether to raise the notification).
+                  void chatHasKnownSender(db, intent.chatGuid)
+                    .then((known) => {
+                      if (known) void postNotification(intent);
+                    })
+                    .catch((e) => {
+                      logger.warn('[notify] known-sender check failed — notifying anyway', e);
+                      void postNotification(intent);
+                    });
+                  return;
+                }
+                void postNotification(intent);
+              },
+            ),
             // Chat-background changed/removed group event → refetch the synced wallpaper. Injected
             // (not run inside DbEventSink) because it's a network + DB side effect. Change-detects
             // internally, so calling it on ingestion — before the channel visibly syncs — is safe.
@@ -108,20 +127,33 @@ function sharedRouter(db: AppDatabase): EventRouter {
 /** Dispatch a raw realtime event through the shared pipeline (dev injection / FCM). */
 export async function dispatchRealtimeEvent(eventName: string, rawData: unknown): Promise<void> {
   const db = await ensureDatabase();
-  // A killed-app FCM wake does NOT run the UI boot effect that seeds the notification
-  // hide-preview flag, so sync it from the persisted setting before we notify —
-  // otherwise a headless push would leak message content despite redacted mode being ON.
-  await useRedactedModeStore.getState().hydrate();
+  // A killed-app FCM wake does NOT run the UI boot effect that seeds the notification hide-preview
+  // flag / feature flags, so hydrate them from the persisted settings before we notify — otherwise
+  // a headless push would leak content despite redacted mode being ON, or ignore the "Message
+  // Notifications" toggle. Gate on each store's `hydrated` flag so this hits the DB only ONCE per
+  // JS context (the first event of a wake), not on every event: the in-memory store is already
+  // authoritative after the first hydrate, and its setters keep it current, so re-reading kv on
+  // every push (including the frequent silent updated-message receipts) was pure redundant work.
+  const redacted = useRedactedModeStore.getState();
+  if (!redacted.hydrated) await redacted.hydrate();
   setHideNotificationPreview(useRedactedModeStore.getState().enabled);
-  // Same reason: a headless wake hasn't hydrated the feature flags, so load them before notifying
-  // so the "Message Notifications" toggle (and typing/read-receipt gates) are honored killed-app.
-  await useFeatureSettingsStore.getState().hydrate();
+  const features = useFeatureSettingsStore.getState();
+  if (!features.hydrated) await features.hydrate();
   await sharedRouter(db).handle(eventName, rawData, 'fcm');
 }
 
 /** Dev push transport, pre-bound to dispatch — drives the "Inject message" button. */
 export const devPush = new DevPushTransport();
 devPush.start(dispatchRealtimeEvent);
+
+// Reconnect-escalation URL rediscovery: when the socket's capped retries are exhausted, ask
+// whether the server URL rotated while the socket was down. Today the one source is the session
+// store — `applyNewServerUrl` (a `new-server` event, possibly delivered over FCM while the socket
+// was dead) has already persisted the rotated origin there; a future Firebase-RTDB lookup can be
+// appended as another source without touching the socket.
+const refreshServerUrl = createServerUrlResolver([
+  { name: 'session', get: () => useSessionStore.getState().origin },
+]);
 
 /** Connect the live socket and route its events into the DB. */
 export async function startRealtime(): Promise<void> {
@@ -136,26 +168,31 @@ export async function startRealtime(): Promise<void> {
   socket.connect(origin, password, {
     headers: http.buildHeaders(),
     legacyQueryAuth: !http.usesHeaderAuth(),
+    refreshUrl: refreshServerUrl,
   });
   // Auto-resume HTTP sync when the server becomes reachable again after a drop. The socket's own
   // reconnect covers the happy path, but for users who lose connectivity often (and whose websocket
   // frequently can't re-establish) this lightweight ping-on-a-timer is what actually brings sync
   // back without a manual pull. `ping` is non-retrying, so it detects "down" fast.
   startReachabilityWatch(() => serverApi.ping(http), maybeResumeSync);
-  // ONE-TIME setup only. Requesting notification permission (notifee + FCM) launches the system
-  // permission dialog, and that dialog itself fires an AppState change → the foreground
-  // `resumeRealtime()` listener → `startRealtime()` again. Doing it on EVERY (re)connect created
-  // an INFINITE permission-request loop the first time the app foregrounded (the UI froze; logcat
-  // showed GrantPermissionsActivity launched tens of thousands of times). Request it once; a
-  // foreground reconnect just re-opens the socket.
+  // ONE-TIME: requesting notification permission (notifee + FCM) launches the system permission
+  // dialog, and that dialog itself fires an AppState change → the foreground `resumeRealtime()`
+  // listener → `startRealtime()` again. Doing it on EVERY (re)connect created an INFINITE
+  // permission-request loop the first time the app foregrounded (the UI froze; logcat showed
+  // GrantPermissionsActivity launched tens of thousands of times). Request it once.
   if (!realtimeOneTimeSetupDone) {
     realtimeOneTimeSetupDone = true;
     void requestNotificationPermission();
-    // Register this device's FCM token with the server so it can push to us. Firebase is
-    // dynamically imported to keep it out of the test/static graph (a no-op until FCM is enabled).
-    if (FCM_ENABLED) {
-      void import('./notifications/fcmMessaging').then((m) => m.registerFcmToken());
-    }
+  }
+  // Register this device's FCM token on EVERY (re)connect — NOT once. The server de-dupes by token
+  // (register-device collapses duplicate rows), so this is idempotent and cheap, and it is the only
+  // thing that keeps push alive across the cases a one-shot registration silently broke: a transient
+  // failure at first boot (server briefly unreachable → no token → zero pushes all session), a
+  // reconnect to a DIFFERENT server after `forget()` (new server never learned the token), and an
+  // FCM token rotation that landed while disconnected. Firebase is dynamically imported to keep it
+  // out of the test/static graph (a no-op until FCM is enabled).
+  if (FCM_ENABLED) {
+    void import('./notifications/fcmMessaging').then((m) => m.registerFcmToken());
   }
 }
 

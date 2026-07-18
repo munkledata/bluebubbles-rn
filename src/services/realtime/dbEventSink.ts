@@ -21,7 +21,15 @@ import type { AppDatabase } from '@db/types';
  * is unit-tested in Node against better-sqlite3.
  */
 export class DbEventSink implements EventSink {
-  constructor(private readonly db: AppDatabase) {}
+  /**
+   * @param onMessageStored optional hook fired with a persisted message's row id (new/updated
+   *   message). Injected by the app to trigger attachment auto-download; left undefined in unit
+   *   tests so the Node import graph never pulls the native download/media modules.
+   */
+  constructor(
+    private readonly db: AppDatabase,
+    private readonly onMessageStored?: (messageId: number) => void,
+  ) {}
 
   async onEvent(event: NormalizedEvent, _source: EventSource): Promise<void> {
     switch (event.type) {
@@ -71,7 +79,10 @@ export class DbEventSink implements EventSink {
         // queue-delete and the guid-promote commit atomically — a hard crash in the sub-ms gap
         // could otherwise strand a queue-less unpromoted temp row (a permanent duplicate).
         await reconcileEchoByContent(this.db, message, chatId);
-        await upsertMessages(this.db, [message], () => chatId, handleMap);
+        const idMap = await upsertMessages(this.db, [message], () => chatId, handleMap);
+        // Notify the app (attachment auto-download) that this message + its rows are persisted.
+        const storedId = idMap.get(message.guid);
+        if (storedId != null) this.onMessageStored?.(storedId);
         break;
       }
       case 'message-deleted': {

@@ -47,3 +47,13 @@ export function showDateSeparator(msg: MessageRow, older: MessageRow | null): bo
   if (a - b <= GROUP_BREAK_MS) return false;
   return new Date(a).toDateString() !== new Date(b).toDateString();
 }
+
+/**
+ * Show a small time label above `msg` when it falls in a DIFFERENT clock-minute than the message
+ * immediately before it (`older`) — so a burst of messages within one minute shares a single time,
+ * but the next minute re-stamps. The first message in the list always stamps (no `older`).
+ */
+export function showTimestampAbove(msg: MessageRow, older: MessageRow | null): boolean {
+  if (!older) return true;
+  return Math.floor((msg.dateCreated ?? 0) / 60_000) !== Math.floor((older.dateCreated ?? 0) / 60_000);
+}

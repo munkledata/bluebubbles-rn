@@ -15,6 +15,8 @@ import { sendReactionMessage, type SendReactionArgs } from './sendReactionServic
 import { sendEdit, sendUnsend } from './sendEditService';
 import { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 import { sendImageMessage, type PickedImage } from './sendAttachmentService';
+import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
+import { pickContact } from '../contacts/contactsService';
 import { expoAttachmentUploader } from './attachmentUpload';
 import { runOutgoingQueue } from './outgoingQueueService';
 
@@ -22,6 +24,12 @@ export { runOutgoingQueue } from './outgoingQueueService';
 
 export { generateTempGuid, sendTextMessage, type SendTextArgs } from './sendService';
 export { sendImageMessage, type PickedImage } from './sendAttachmentService';
+export {
+  sendContactMessage,
+  contactDisplayName,
+  hasContactContent,
+  type ContactCard,
+} from './sendContactService';
 export { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
 export { sendEdit, sendUnsend, type SendEditArgs } from './sendEditService';
 export { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
@@ -54,6 +62,33 @@ export function sendImages(args: {
 /** UI-facing send: bound to the composition-root DB + HttpClient. */
 export function send(args: SendTextArgs): Promise<{ tempGuid: string }> {
   return sendTextMessage(getDatabase(), http, args);
+}
+
+/** UI-facing contact-card send: bound to the composition-root DB + HttpClient. */
+export function sendContactCard(args: {
+  chatGuid: string;
+  contact: ContactCard;
+  replyToGuid?: string;
+}): Promise<{ tempGuid: string }> {
+  return sendContactMessage(getDatabase(), http, {
+    chatGuid: args.chatGuid,
+    contact: args.contact,
+    selectedMessageGuid: args.replyToGuid,
+  });
+}
+
+/**
+ * UI-facing "share a contact" flow: open the native picker, then send the chosen contact as a
+ * card. Returns null when the user cancels/denies the picker or the contact has no usable field.
+ * Kept here (not in the chat screen) so the screen depends only on the send barrel — and so the
+ * expo-contacts native import stays out of the screen's module graph.
+ */
+export async function pickAndSendContact(
+  chatGuid: string,
+): Promise<{ tempGuid: string } | null> {
+  const contact = await pickContact();
+  if (!contact || !hasContactContent(contact)) return null;
+  return sendContactCard({ chatGuid, contact });
 }
 
 /** UI-facing tapback send (toggle: pass '-love' to remove). */
@@ -112,16 +147,24 @@ export async function cancelScheduled(row: { id: number; serverId: string | null
  * row we re-create it: DELETE the old scheduled message, POST a fresh one, then point the local
  * row at the new uuid. The server call goes FIRST — any failure rethrows so the edit screen can
  * surface it instead of silently diverging from the server. Local-only rows just update locally.
+ * Adding a RECURRENCE to a server-backed row converts it to LOCAL-ONLY (delete server-side, no
+ * re-create) — the server can't repeat, so the on-device ticker must own the row to re-arm it.
  */
 export async function editScheduled(
   id: number,
-  patch: { text: string; scheduledFor?: number },
+  patch: { text: string; scheduledFor?: number; recurrence?: string | null },
 ): Promise<void> {
   const db = getDatabase();
   const row = await getScheduledById(db, id);
   if (row?.serverId != null) {
     // No PUT on Gator: delete the old server-side message, then create a replacement.
     await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
+    if (patch.recurrence) {
+      // Now recurring → keep it local-only so the ticker (which skips server-backed rows)
+      // fires and re-arms it. The server row is already gone; just drop the serverId.
+      await updateScheduled(db, id, { ...patch, serverId: null });
+      return;
+    }
     let newServerId: string | null;
     try {
       const created = await scheduledApi.createScheduled(http, {

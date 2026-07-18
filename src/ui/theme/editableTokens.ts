@@ -117,7 +117,7 @@ export const EDITABLE_COLORS: EditableColorField[] = [
   },
   {
     key: 'rcsBackground',
-    label: 'RCS bubble (teal)',
+    label: 'RCS bubble (green)',
     read: (t) => t.color.bubble.rcsBackground,
     write: (t, v) => {
       t.color.bubble.rcsBackground = v;

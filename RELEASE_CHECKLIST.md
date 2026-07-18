@@ -1,5 +1,15 @@
 # Release Checklist
 
+> **STATUS UPDATE (2026-07-17):** This doc is largely SUPERSEDED. The app is now on **Expo SDK 57 /
+> RN 0.86** (notifee → react-native-notify-kit, zod 4, RNFB 25 — see
+> `docs/REACT_PATTERNS_AUDIT_2026-07-16.md`), and many boxes below were completed after they were
+> written: the FCM glue file exists (`src/services/notifications/fcmMessaging.ts`), the firebase
+> packages are installed, §3.2 swipe actions, §4.4 group add/remove/rename UI, §5.2 audio playback /
+> voice recording / document send / share-intent receive, and §9.3's Find My map (shipped keylessly
+> via WebView/Leaflet — no Maps key needed) are all DONE — each is ticked/annotated in place below.
+> What genuinely remains: on-device verification (`docs/DEVICE_VERIFICATION_CHECKLIST.md`) and the
+> credential-gated items (Sentry DSN, cert-pin SPKI hash, EAS/Play signup).
+
 > **STATUS UPDATE (2026-06-30):** Code foundations are complete; several checkboxes below are STALE.
 > **FCM is fully wired** (firebase app+messaging, `google-services.json`, `FCM_ENABLED=true`,
 > background handler at module top, **AES-256-GCM encrypted-payload decrypt**) — the §0.2 "blocked"
@@ -14,8 +24,8 @@ Two tiers of remaining work:
 - **Phase 0 — critical path to a *working* app** (below): FCM push, the crypto backend, and live-server
   connectivity. These gate "the app actually delivers messages and is secure." See
   [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) for the full rationale.
-- **Phase 9 — release infra** (further down): EAS build, Sentry, the Find My map — each blocked on one
-  external credential.
+- **Phase 9 — release infra** (further down): EAS build and Sentry — each blocked on one external
+  credential. (The Find My map is no longer blocked — see §9.3, shipped keylessly.)
 
 Where an item is "done in code," the wiring is committed and tested; only a credential, a native
 rebuild, or your server is left. Don't stub a fake secret — surface the blocker.
@@ -59,33 +69,23 @@ The transport ([FcmPushTransport](./src/core/realtime/pushTransport.ts)) and the
 deferred until you have it.
 
 **Left to do (you), in order:**
-- [ ] Create a Firebase project, add an Android app with the Gator package id, download
-      **`google-services.json`** into the repo root.
-- [ ] `npx expo install @react-native-firebase/app @react-native-firebase/messaging`
-- [ ] In [app.config.ts](./app.config.ts): add `'@react-native-firebase/app'` to `plugins`, and set
-      `android.googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json'`.
-- [ ] Create `src/native/fcmMessaging.ts` (the firebase-importing glue — kept out of the repo until the
-      package exists so the build stays green):
-      ```ts
-      import messaging from '@react-native-firebase/messaging';
-      import { FcmPushTransport } from '@core/realtime';
-      import { dispatchRealtimeEvent } from '@/services';
-
-      // MUST be module top-level (import this file for side effect in app/_layout.tsx)
-      // or killed-app delivery drops. Mirrors the AGENTS.md Notifee-handler gotcha.
-      messaging().setBackgroundMessageHandler(async (msg) => {
-        await dispatchRealtimeEvent(String(msg.data?.type ?? ''), msg.data?.payload);
-      });
-
-      export async function startFcm(): Promise<void> {
-        await new FcmPushTransport(() => messaging()).start(dispatchRealtimeEvent);
-      }
-      ```
-- [ ] Flip `FCM_ENABLED = true` in [pushTransport.ts](./src/core/realtime/pushTransport.ts) and, in
-      [src/services/index.ts](./src/services/index.ts), call `startFcm()` (dynamic-import it, like
-      `getSecretBox` does) when `FCM_ENABLED`, else keep `devPush`.
+- [x] Create a Firebase project, add an Android app with the Gator package id, download
+      **`google-services.json`** into the repo root. _(done 2026-06 — project
+      `bluegreengatorapps-35710`; file present in the repo root.)_
+- [x] `npx expo install @react-native-firebase/app @react-native-firebase/messaging` _(done — now on
+      RNFB **25.1.0** after the SDK 57 pass.)_
+- [x] In [app.config.ts](./app.config.ts): add `'@react-native-firebase/app'` to `plugins`, and set
+      `android.googleServicesFile`. _(done — see app.config.ts.)_
+- [x] ~~Create `src/native/fcmMessaging.ts` (the firebase-importing glue)~~ **OBSOLETE — the file
+      exists at [src/services/notifications/fcmMessaging.ts](./src/services/notifications/fcmMessaging.ts)**
+      (modular RNFB 25 API, `setBackgroundMessageHandler` at module top level, wrapped in try/catch
+      so a misconfigured Firebase project degrades to socket-only). The inline code sample this box
+      carried is superseded by that file.
+- [x] Flip `FCM_ENABLED = true` in [pushTransport.ts](./src/core/realtime/pushTransport.ts) and call
+      `startFcm()`. _(done — FCM enabled and wired per the 2026-06-30 banner.)_
 - [ ] **Native rebuild**, then the Phase 0 spike: with the app **killed**, send a push and confirm it
-      writes to the encrypted DB and posts a Notifee notification.
+      writes to the encrypted DB and posts a notification. _(Still pending on-device — see
+      `docs/DEVICE_VERIFICATION_CHECKLIST.md` §(e).)_
 
 > Until this lands, killed-app delivery falls back to the ~15-min `backgroundSync` catch-up
 > ([src/services/background](./src/services/background)) — fine for a spike, not for production.
@@ -163,7 +163,7 @@ references outside the known `__DEV__`-gated entry points.
   (`isJailBroken` / `canMockLocation` → redacted `logger.warn`), called fire-and-forget at boot, lazy +
   try/caught so it's a silent no-op until linked. Covered by
   [test/native/deviceIntegrity.test.ts](./test/native/deviceIntegrity.test.ts).
-- **Left to do (you):** native rebuild, and **verify `jail-monkey` v3 links on RN 0.85 / new-arch** (it's
+- **Left to do (you):** native rebuild, and **verify `jail-monkey` v3 links on RN 0.86 / new-arch** (it's
   an older bridge module — if it fails to build, remove it; the wiring degrades to a no-op).
 
 > Reminder: items 0.1 (crypto), 1.4 (pinning) and 1.5 (root) all install native modules. Before the next
@@ -201,9 +201,9 @@ conflict set, like mute/custom). Pinned chats render in an iOS-style grid above 
 Verified on-device: long-press → Pin moves a chat into the grid reactively.
 
 ## 3.2 Remaining Phase-3 polish — **follow-ups**
-- [ ] **Swipe-to-reveal actions** on tiles (the iOS swipe gesture). Deferred: clean swipe-in-a-list needs
-      `react-native-gesture-handler` (a native module → rebuild) or careful `PanResponder` work that can
-      fight FlashList scroll. The long-press sheet covers the same actions today.
+- [x] **Swipe-to-reveal actions** on tiles (the iOS swipe gesture). _(done 2026-07 —
+      [SwipeableRow.tsx](./src/ui/conversations/SwipeableRow.tsx), PanResponder-based, wired into
+      `ConversationTile`.)_
 - [ ] **Collapsing large-title header** (the header is currently static). Pure JS (scroll-driven
       `Animated`), lower priority.
 - [ ] _(If you want pin/archive to sync across devices, they'd need server endpoints — currently local.)_
@@ -227,14 +227,14 @@ The Composer debounces a `started/stopped-typing` emit ([Composer.tsx](./src/ui/
 `onTyping`) → `sendTyping` → `SocketService.emit` (`{chatGuid}`). Covered by a socket-emit test. **Needs the
 Gator private API** on the server to relay it — can't be verified without a live server.
 
-## 4.4 Group management — **endpoints + leave/roster done; add/remove/rename UI is a follow-up**
+## 4.4 Group management — **DONE (endpoints + full UI)**
 - Endpoints added ([chats.ts](./src/core/api/endpoints/chats.ts)): `updateParticipant` (add/remove),
   `renameChat` (PUT), `leaveChat`. **Private-API / server-gated.**
 - chat-settings now shows a **GROUP** section (participant roster + **Leave Group** → `leaveChat` + local
   delete) for group chats.
-- [ ] **Add/remove participant + rename UI** — needs a contact/participant picker (add/remove require the
-      member's *address*, not just the display name) and an Android-friendly rename input (`Alert.prompt`
-      is iOS-only). Endpoints are ready; wire the UI when building against a private-API server.
+- [x] **Add/remove participant + rename UI** — _(done 2026-07 —
+      [chat-settings/[guid].tsx](<./app/(app)/chat-settings/[guid].tsx>) wires `renameChat` (~L228),
+      `updateParticipant 'add'` (~L241) and `'remove'` (~L259).)_
 
 ## 4.5 Per-message delivery/read — **optional**
 `statusFor` exists and last-message status is iMessage-correct; revisit only if you want per-message read
@@ -256,14 +256,15 @@ receipts like the Flutter app.
 - **Live-photo badge.** `ImageAttachment` shows a "◉ LIVE" badge when `hasLivePhoto` (column already exists
   — no migration).
 
-## 5.2 Remaining attachment work — **follow-ups**
-- [ ] **Audio playback** — needs `expo-audio` (native module → rebuild). Audio currently falls to the file
-      chip; build an AudioAttachment (waveform + play/scrub) once linked. **Native-gated.**
-- [ ] **Voice-memo recording** — `expo-audio` recorder + `RECORD_AUDIO` permission + a mic UI. **Native-gated.**
-- [ ] **Document send** — JS-completable WITHOUT a new module: `expo-file-system` `File.pickFileAsync({ multipleFiles })`
-      → the (MIME-agnostic) `sendImageMessage` path. A focused follow-up (needs a device to test the picker).
-- [ ] **Android share-intent / content-URI** receive (share a photo *into* Gator) — needs an
-      `ACTION_SEND` intent filter + a content-URI→file bridge. **Native-gated.**
+## 5.2 Remaining attachment work — **mostly DONE (2026-07); one polish item left**
+- [x] **Audio playback** — _(done — `expo-audio ~57.0.2` installed;
+      [AudioAttachment.tsx](./src/ui/attachments/AudioAttachment.tsx) shipped.)_
+- [x] **Voice-memo recording** — _(done —
+      [VoiceRecorder.tsx](./src/ui/conversations/VoiceRecorder.tsx) shipped.)_
+- [x] **Document send** — _(done — `expo-document-picker` wired in
+      [chat/[guid].tsx](<./app/(app)/chat/[guid].tsx>) (~L331).)_
+- [x] **Android share-intent / content-URI** receive — _(done — `expo-share-intent ^8.0.1`
+      installed and wired; on-device check in `docs/DEVICE_VERIFICATION_CHECKLIST.md` §(h).)_
 - [ ] **LocationCard static-map thumbnail** + **live-photo video sidecar playback** — need a Maps key /
       `expo-video` sidecar respectively (see the Find My + native-rebuild notes).
 
@@ -326,7 +327,10 @@ pass. **Left to do:** the crash-safe rotation state machine (stage new key → r
 clear; boot-recovery tries both keys) + a settings trigger. Built on the now-proven primitive.
 
 ## Still blocked (separate credential / rebuild)
-- **Find My embedded map** — Google **Maps** Android API key (distinct from Firebase) + `react-native-maps` (rebuild).
+- ~~**Find My embedded map** — Google **Maps** Android API key + `react-native-maps`~~ **DONE
+  DIFFERENTLY (2026-07):** shipped keylessly via
+  [FindMyMap.tsx](./src/ui/findmy/FindMyMap.tsx) (WebView + Leaflet/OSM) — no Maps key or
+  react-native-maps needed. See §9.3.
 - **Sentry** redacted breadcrumbs — a Sentry **DSN** + `@sentry/react-native` (rebuild).
 - **Launcher shortcuts** + the **exported Tasker receiver** — native config (rebuild).
 
@@ -361,20 +365,20 @@ runs typecheck + prettier + jest on every push/PR.
 **Already done:** [src/ui/ErrorBoundary.tsx](./src/ui/ErrorBoundary.tsx) `componentDidCatch` has the
 `// Hook for redacted crash reporting (Sentry) later` placeholder ready to forward the error.
 
-## 9.3 Embedded Find My map — needs a **Google Maps Android API key**
+## 9.3 Embedded Find My map — **DONE DIFFERENTLY (2026-07, no Maps key needed)**
 
-- [ ] Get a Google Maps **Android** API key (Google Cloud console)
-- [ ] `npx expo install react-native-maps` + add the key to `app.config.ts`
-      (`android.config.googleMaps.apiKey`)
-- [ ] Replace the `geo:`-URL "Open in Maps" fallback in [app/(app)/findmy.tsx](<./app/(app)/findmy.tsx>)
-      with an in-screen `<MapView>` of device/friend locations
-- [ ] **Requires a native rebuild** (new native module) — not an OTA/JS-only change
+The embedded map shipped without Google Maps: [FindMyMap.tsx](./src/ui/findmy/FindMyMap.tsx)
+renders device/friend locations in a **WebView + Leaflet (OpenStreetMap)** — no API key, no
+`react-native-maps`, no extra native module. The boxes below are OBSOLETE and kept only for history:
 
-**Already done:** the Find My screen ships today with an "Open in Maps" `geo:` URL per device/person;
-only the *embedded* map is deferred.
+- ~~[ ] Get a Google Maps **Android** API key~~ — not needed (Leaflet/OSM).
+- ~~[ ] `npx expo install react-native-maps` + key in `app.config.ts`~~ — not needed.
+- ~~[ ] Replace the `geo:`-URL fallback with an in-screen `<MapView>`~~ — done via `FindMyMap.tsx`
+      (the "Open in Maps" `geo:` URL remains as a per-item action).
+- ~~[ ] Requires a native rebuild~~ — WebView was already linked.
 
 ---
 
-_Last updated: 2026-06-20. Phase 0.1 (crypto) and 0.3 (socket auth) are now done in code; 0.2 (FCM) and
-the live-server spike need your `google-services.json` and server. Phase 9 items are external-service
-signups — once you have a secret, ask the agent to wire that one piece._
+_Last updated: 2026-07-17 (checkbox-truth pass; original body 2026-06-20). See the top banner for
+what changed — the remaining open items are device verification, the cert-pin SPKI hash, EAS/Play
+signup, and Sentry. Once you have a secret, ask the agent to wire that one piece._

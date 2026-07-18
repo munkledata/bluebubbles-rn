@@ -112,7 +112,14 @@ export function ConversationHeader({
           >
             {title}
           </Text>
-          {badge ? <ServiceBadge label={badge.label} color={badge.color} /> : null}
+          {badge ? (
+            <ServiceBadge
+              label={badge.label}
+              color={badge.color}
+              // Pale gator-green label on the deep-green RCS pill; other services keep white.
+              textColor={service === 'RCS' ? '#EAF7EC' : undefined}
+            />
+          ) : null}
         </View>
       </Pressable>
       <View style={styles.rightGroup}>

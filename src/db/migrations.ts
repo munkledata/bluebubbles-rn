@@ -402,4 +402,14 @@ export const MIGRATIONS: Migration[] = [
     name: '0023_message_is_sent',
     statements: [`ALTER TABLE messages ADD COLUMN is_sent INTEGER`],
   },
+  {
+    // Scheduled-message recurrence: NULL = one-shot (all pre-migration rows), else
+    // 'daily' | 'weekly' | 'monthly'. A recurring row is LOCAL-ONLY (the server has no
+    // repeat concept, so scheduleTextMessage skips the server create when recurrence is
+    // set) and, on a successful send, is RE-ARMED to its next occurrence instead of being
+    // marked sent (see runDueScheduled + rearmScheduled). Additive; applied
+    // transactionally + idempotently by name.
+    name: '0024_scheduled_recurrence',
+    statements: [`ALTER TABLE scheduled_messages ADD COLUMN recurrence TEXT`],
+  },
 ];

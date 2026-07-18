@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -8,7 +9,9 @@ import { findChatByParticipantAddresses } from '@db/repositories';
 import { createNewChat, http } from '@/services';
 import { sendImages } from '@/services/send';
 import { checkIMessageAvailability } from '@core/api/endpoints/handles';
+import { parseForwardAttachments } from '@features/conversations/forwardParams';
 import { useContactSearch } from '@features/contacts/useContactSearch';
+import { useRcsEnabled } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
 import { Icon, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
@@ -23,24 +26,41 @@ interface Recipient {
 export default function NewChatScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  // A forwarded message pre-fills the composer (from the chat's "Forward" action).
-  const { forwardText } = useLocalSearchParams<{ forwardText?: string }>();
+  // A forwarded message pre-fills the composer (from the chat's "Forward" action); its
+  // downloaded attachments ride as a JSON param, validated + staged in the mount effect below.
+  const { forwardText, forwardAttachments } = useLocalSearchParams<{
+    forwardText?: string;
+    forwardAttachments?: string;
+  }>();
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [query, setQuery] = useState('');
   const [message, setMessage] = useState(forwardText ?? '');
-  const [service, setService] = useState<'iMessage' | 'SMS'>('iMessage');
+  const [service, setService] = useState<'iMessage' | 'SMS' | 'RCS'>('iMessage');
+  // RCS is server-gated: the chip only renders when the connected server's RCS bridge is on.
+  const rcsEnabled = useRcsEnabled();
   const [existingGuid, setExistingGuid] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Files shared INTO the app (Android share sheet) — staged to send after the chat is created.
   const [staged, setStaged] = useState<SharedAttachment[]>([]);
 
-  // Consume any content shared into the app (via the share sheet) once on mount: prefill the
-  // message with shared text/URL and stage shared files, then clear the store.
+  // Stage incoming content once on mount: forwarded attachments (validated — only `file://`
+  // paths that actually exist on disk are staged) plus any content shared INTO the app via the
+  // share sheet (prefills the message with shared text/URL, then clears the store).
   useEffect(() => {
+    const forwarded = parseForwardAttachments(forwardAttachments, (uri) => {
+      const f = new File(uri);
+      return { exists: f.exists, size: f.size };
+    });
     const { text, files, clear } = useShareIntentStore.getState();
     if (text) setMessage((m) => m || text);
-    if (files.length > 0) setStaged(files);
+    // Merge (dedupe by uri) — the staged tray keys rows by uri.
+    const seen = new Set<string>();
+    const all = [...forwarded, ...files].filter((f) =>
+      seen.has(f.uri) ? false : (seen.add(f.uri), true),
+    );
+    if (all.length > 0) setStaged(all);
     if (text || files.length > 0) clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Per-recipient iMessage availability (advisory): true → blue chip, false → green (SMS),
@@ -67,13 +87,19 @@ export default function NewChatScreen(): React.JSX.Element {
   // Auto-pick the service from availability UNTIL the user manually taps the toggle. Deriving both
   // directions (SMS when any recipient is confirmed SMS-only, else iMessage) means removing the
   // SMS-only recipient reverts to iMessage instead of getting stuck on SMS; the `touched` guard
-  // stops a later probe from clobbering the user's explicit choice.
+  // stops a later probe from clobbering the user's explicit choice. RCS is NEVER auto-picked —
+  // it's a manual choice only, and (being manual) is itself protected by the same guard.
   const serviceTouchedRef = useRef(false);
   useEffect(() => {
     if (serviceTouchedRef.current) return;
     const anySmsOnly = recipients.some((r) => availability[r.address] === false);
     setService(anySmsOnly ? 'SMS' : 'iMessage');
   }, [recipients, availability]);
+  // If the capability disappears mid-compose (reconnect to a non-RCS server) while RCS is
+  // selected, fall back so we never send service='RCS' to a server that can't route it.
+  useEffect(() => {
+    if (!rcsEnabled && service === 'RCS') setService('iMessage');
+  }, [rcsEnabled, service]);
 
   const chosen = new Set(recipients.map((r) => r.address.toLowerCase()));
 
@@ -130,9 +156,16 @@ export default function NewChatScreen(): React.JSX.Element {
     addRecipient({ address: raw, name: raw });
   };
 
+  // RCS chats are 1:1 (the server's RCS branch routes to the FIRST address only) — block a
+  // multi-recipient create instead of silently dropping the extra people.
+  const rcsTooMany = service === 'RCS' && recipients.length > 1;
+
   // A staged shared file can be sent even with no typed message.
   const canStart =
-    !busy && recipients.length > 0 && (message.trim().length > 0 || staged.length > 0);
+    !busy &&
+    !rcsTooMany &&
+    recipients.length > 0 &&
+    (message.trim().length > 0 || staged.length > 0);
 
   const onStart = async (): Promise<void> => {
     if (!canStart) return;
@@ -231,7 +264,10 @@ export default function NewChatScreen(): React.JSX.Element {
         ) : null}
 
         <View style={styles.serviceRow}>
-          {(['iMessage', 'SMS'] as const).map((s) => (
+          {(rcsEnabled
+            ? (['iMessage', 'SMS', 'RCS'] as const)
+            : (['iMessage', 'SMS'] as const)
+          ).map((s) => (
             <Pressable
               key={s}
               onPress={() => {
@@ -252,6 +288,12 @@ export default function NewChatScreen(): React.JSX.Element {
             </Pressable>
           ))}
         </View>
+
+        {rcsTooMany ? (
+          <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+            RCS conversations are one-to-one — remove extra recipients to start.
+          </Text>
+        ) : null}
 
         {staged.length > 0 ? (
           <ScrollView
@@ -334,6 +376,7 @@ const styles = StyleSheet.create({
   existingText: { fontSize: 14, fontWeight: '500' },
   serviceRow: { flexDirection: 'row', gap: 8 },
   serviceChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 },
+  rcsNote: { fontSize: 13 },
   message: { minHeight: 90, borderRadius: 12, padding: 14, fontSize: 16, textAlignVertical: 'top' },
   stagedRow: { gap: 10, paddingVertical: 2 },
   stagedItem: { width: 64, height: 64 },

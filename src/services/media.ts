@@ -1,6 +1,13 @@
-import * as MediaLibrary from 'expo-media-library';
+// SDK 57 moved expo-media-library to a class-based API and turned the ROOT imperative functions
+// (saveToLibraryAsync/createAssetAsync/…) into THROWING deprecation stubs — so importing the root
+// silently broke Save-to-Photos on device. Import the legacy imperative API instead (same pattern
+// AttachmentTray uses). See the expo-contacts/legacy note in AGENTS.md.
+import * as MediaLibrary from 'expo-media-library/legacy';
 import { logger } from '@core/secure';
 import { isLocalFileUri } from '@utils';
+
+/** Photos album auto-downloaded images are filed into (when the destination setting is 'album'). */
+export const GATOR_ALBUM = 'Gator';
 
 /**
  * Share/save helpers for downloaded attachment files, shared by the chat screen's
@@ -58,5 +65,39 @@ export async function saveAttachmentsToPhotos(
   } catch (e) {
     logger.warn('[media] save to Photos failed', e);
     return { status: 'error' };
+  }
+}
+
+export type SaveImageResult = 'saved' | 'skipped' | 'denied' | 'error';
+
+/**
+ * Save ONE already-downloaded image file to the device library, for the auto-download flow.
+ * `album: true` files it into the {@link GATOR_ALBUM} album (created on first use); otherwise it
+ * lands in the regular gallery. A non-local path (undownloaded / remote dev URL) is 'skipped'.
+ * Never throws — maps failures to a result the caller can count.
+ */
+export async function saveImageToLibrary(
+  uri: string | null | undefined,
+  opts: { album?: boolean } = {},
+): Promise<SaveImageResult> {
+  if (!isLocalFileUri(uri)) return 'skipped';
+  try {
+    const perm = await MediaLibrary.requestPermissionsAsync();
+    if (perm.status !== 'granted') return 'denied';
+    if (!opts.album) {
+      await MediaLibrary.saveToLibraryAsync(uri);
+      return 'saved';
+    }
+    // Album path: create the asset (also adds it to the gallery), then MOVE it into the named album
+    // (copy=false avoids a duplicate lingering in the camera roll). Android can't create an empty
+    // album, so the first save seeds it via createAlbumAsync.
+    const asset = await MediaLibrary.createAssetAsync(uri);
+    const existing = await MediaLibrary.getAlbumAsync(GATOR_ALBUM);
+    if (existing) await MediaLibrary.addAssetsToAlbumAsync([asset], existing, false);
+    else await MediaLibrary.createAlbumAsync(GATOR_ALBUM, asset, false);
+    return 'saved';
+  } catch (e) {
+    logger.warn('[media] save image to library failed', e);
+    return 'error';
   }
 }

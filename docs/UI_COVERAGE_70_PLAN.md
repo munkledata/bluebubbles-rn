@@ -3,7 +3,8 @@
 **Goal:** raise statement coverage of `src/ui/**` from the measured baseline **23.3%
 (547/2347)** to **≥ 70%**, using the existing two-project jest setup (node + jest-expo
 components). Successor to `docs/COMPONENT_TESTING_PLAN.md` (all 4 phases of which are merged:
-harness, primitives, behavior components, regression guards — 141 suites / 807 tests green).
+harness, primitives, behavior components, regression guards — 141 suites / 807 tests green;
+that count is a plan-time snapshot — the suite has grown well past it since).
 
 ## The metric contract (the ONLY number that counts)
 
@@ -133,7 +134,7 @@ the image swap is driven by the DB `localPath` (prop), while the progress ring i
 image. FileChip: name/size/extension rendering (bytes formatting per src/utils/bytes.ts).
 ProgressRing: progress→arc/label mapping.
 
-### 1d — Data cards (`test/components/attachments/contactCard.test.tsx`, `locationCard.test.tsx`, `test/components/conversations/searchResultsView.test.tsx`)
+### 1d — Data cards (`test/components/cards/contactCard.test.tsx`, `test/components/cards/locationCard.test.tsx`, `test/components/conversations/searchResultsView.test.tsx`) <!-- card tests landed under cards/, not the originally-planned attachments/ -->
 ContactCard: name/phone rendering from vCard data (src/utils/vcard.ts has node tests — reuse
 its fixtures' shapes), tap-to-add callback. LocationCard: place text from vlocation parsing,
 open-map callback (mock expo-linking usage in-file if imported). SearchResultsView: result

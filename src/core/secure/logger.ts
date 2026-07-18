@@ -55,16 +55,32 @@ export class MemorySink implements LogSink {
     return [...this.buf].reverse();
   }
 
+  /**
+   * Seed the buffer with older (oldest-first) entries restored from disk at boot, so the in-app
+   * viewer shows prior sessions. Prepended (they precede this session's lines), then capped to the
+   * newest {@link MEMORY_LOG_CAPACITY}.
+   */
+  hydrate(entries: LogEntry[]): void {
+    if (entries.length === 0) return;
+    this.buf = [...entries, ...this.buf];
+    if (this.buf.length > MEMORY_LOG_CAPACITY)
+      this.buf.splice(0, this.buf.length - MEMORY_LOG_CAPACITY);
+  }
+
   clear(): void {
     this.buf = [];
   }
 }
 
-/** Fan a log line out to several sinks (console + the in-memory viewer buffer). */
+/** Fan a log line out to several sinks (console + the in-memory viewer buffer + a disk sink). */
 export class TeeSink implements LogSink {
   private readonly sinks: LogSink[];
   constructor(...sinks: LogSink[]) {
     this.sinks = sinks;
+  }
+  /** Attach a sink after construction (e.g. the persistent file sink, wired up at boot). */
+  add(sink: LogSink): void {
+    this.sinks.push(sink);
   }
   write(level: LogLevel, message: string, meta?: unknown): void {
     for (const s of this.sinks) s.write(level, message, meta);
@@ -83,4 +99,5 @@ export const memoryLogSink = new MemorySink();
  * To add Sentry later: wrap this sink (or add a second one) that forwards the
  * already-redacted message as a breadcrumb — see RELEASE_CHECKLIST §9.2.
  */
-export const logger = new RedactingLogger(new TeeSink(new ConsoleSink(), memoryLogSink));
+export const logSinks = new TeeSink(new ConsoleSink(), memoryLogSink);
+export const logger = new RedactingLogger(logSinks);

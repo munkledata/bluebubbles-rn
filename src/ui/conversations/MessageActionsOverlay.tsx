@@ -20,6 +20,12 @@ export interface SelectedMessage {
   /** Arbitrary-emoji tapback glyphs the current user has already applied. */
   myEmojis?: string[];
   dateCreated: number | null; // for the "recent" edit/unsend gate
+  /** Delivery/read/edit timestamps + per-message service — surfaced by the "Details" sheet.
+   *  Optional so existing SelectedMessage literals (tests) stay valid. */
+  dateDelivered?: number | null;
+  dateRead?: number | null;
+  dateEdited?: number | null;
+  senderService?: string | null;
   isRetracted: boolean;
   /** The message carries an edit marker (dateEdited) → offers "View Edit History". Distinct from
    *  the own-recent Edit/Unsend gate: you can view the history of ANY edited message. */
@@ -51,7 +57,7 @@ interface MessageActionsOverlayProps {
   onCancelSend: () => void;
   /** Copy the message text to the clipboard. */
   onCopy: () => void;
-  /** Forward the message text to another conversation (opens the new-message composer). */
+  /** Forward the message text and/or downloaded attachments (opens the new-message composer). */
   onForward: () => void;
   /** Save the message's attachment(s) to the device gallery. */
   onSave: () => void;
@@ -63,6 +69,8 @@ interface MessageActionsOverlayProps {
   onViewThread?: () => void;
   /** Open the edit-history sheet (shown only when the message was edited). */
   onViewEditHistory?: () => void;
+  /** Open the message-details sheet (sent/delivered/read times, sender, service). */
+  onDetails?: () => void;
   /** Enter multi-select mode seeded with this message. */
   onSelect?: () => void;
 }
@@ -90,6 +98,7 @@ export function MessageActionsOverlay({
   onDelete,
   onViewThread,
   onViewEditHistory,
+  onDetails,
   onSelect,
 }: MessageActionsOverlayProps): React.JSX.Element {
   const theme = useTheme();
@@ -229,7 +238,7 @@ export function MessageActionsOverlay({
               <Text style={[styles.actionText, { color: theme.color.tint }]}>Copy</Text>
             </Pressable>
           ) : null}
-          {hasText ? (
+          {hasText || hasAttachments ? (
             <Pressable
               style={[styles.action, { borderTopColor: theme.color.separator }]}
               onPress={() => {
@@ -282,6 +291,17 @@ export function MessageActionsOverlay({
               }}
             >
               <Text style={[styles.actionText, { color: theme.color.tint }]}>View Edit History</Text>
+            </Pressable>
+          ) : null}
+          {onDetails ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onDetails();
+                onClose();
+              }}
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Details</Text>
             </Pressable>
           ) : null}
           {onSelect ? (

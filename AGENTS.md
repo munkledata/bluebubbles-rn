@@ -97,6 +97,23 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   from some docs — always compare against the `EventType.ACTION_PRESS` constant, never a literal.
 - **notify-kit background handler (`onBackgroundEvent`) + TaskManager.defineTask must be module top-level**,
   imported for side effect at the top of `app/_layout.tsx` — not inside a component — or killed-app delivery drops.
+- **A notification tap only reaches `onForegroundEvent` when the Activity is RESUMED.** notify-kit routes a
+  PRESS to the foreground emitter ONLY if the app is truly on-screen; a tap while the app is
+  alive-but-backgrounded (the COMMON case) is delivered to the headless `onBackgroundEvent`, which has no
+  router and cannot deep-link. So navigating to the chat must happen at foreground time, not in the press
+  handler: `onBackgroundEvent` stashes the tapped chat via `stashPendingNotification` (`pendingNav.ts`), and
+  `app/(app)/_layout.tsx` DRAINS it on every AppState `active` (plus `getInitialNotification()` for the
+  killed-app cold-start) through `drainNotificationTap`, which reads both sources and opens the chat exactly
+  once. Reading `getInitialNotification()` only once on mount is NOT enough — it never re-fires for a
+  background-alive resume, so the thread never opens. Keep `drainNotificationTap` idempotent (no-op when
+  nothing is pending; single navigation when both sources describe the same press).
+- **Send-contact posts STRUCTURED fields; the SERVER builds the vCard.** The `send-contact` endpoint
+  (`POST /api/v1/message/contact`) takes `{ firstName, lastName, organization, phones[], emails[] }` and
+  the server assembles the vCard 3.0 + sends it as an attachment (client builds no file). Gate the UI on
+  `serverInfo.supports_send_contact` (`useSendContactSupported`) — the tray's "Contact" button is only
+  passed a handler when true. The optimistic bubble is a TEXT placeholder (the contact's display name)
+  until the live `new-message` echo swaps in the rendered `.vcf` card; that brief text-then-card is
+  expected. See `sendContactService.ts` + `pickContact` (`contactsService.ts`).
 - **Additive migrations are appended to `MIGRATIONS` by name** (`src/db/migrations.ts`); `runMigrations`
   skips already-applied names and wraps each in BEGIN/COMMIT. Use `ALTER TABLE ADD COLUMN` (no
   `IF NOT EXISTS` — SQLite lacks it; the name-guard is the idempotency). Never edit an applied migration.
@@ -210,13 +227,58 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   and flip only STYLES + zIndex. Branching element types (View vs Fragment) on the flag remounts
   the whole subtree, wiping the composer draft/staged attachments/scroll position. GOTCHA 2:
   macOS's case-insensitive FS makes tsc reject sibling files differing only in case
-  (`EdgeFade.tsx` + `edgeFade.ts` → TS1261).
+  (`EdgeFade.tsx` + `edgeFadeStops.ts` → TS1261).
 - **Native security modules are dependency-deferred + advisory, so the build stays green pre-rebuild.**
   `react-native-libsodium` (crypto), `jail-monkey` (`deviceIntegrity`), `react-native-ssl-public-key-pinning`
   (`certPinning`) are all installed but only touched via a lazy `import()` inside a `try/catch` (root check)
   or behind a "no config → no-op" guard (pinning skips the native call when no pins are stored). So a JS
   bundle on a build that hasn't linked them doesn't crash — they activate after the next native rebuild. When
   adding such a module, never top-level `import` it from a startup path.
+- **`expo-media-library` SDK 57: the ROOT imperative API THROWS.** Like `expo-contacts`, SDK 57 moved
+  media-library to a class-based API and turned the root `saveToLibraryAsync`/`createAssetAsync`/… into
+  throwing deprecation stubs — so importing `expo-media-library` (root) silently broke Save-to-Photos on
+  device (caught → `{status:'error'}`, invisible in jest since the module is mocked). Import from
+  `expo-media-library/legacy` (as `AttachmentTray` does). `src/services/media.ts` uses it for both the
+  gallery save AND the "Gator" album path (`createAssetAsync` → `getAlbumAsync`/`createAlbumAsync`/
+  `addAssetsToAlbumAsync` with `copy=false` to MOVE, not duplicate; Android can't create an empty album, so
+  the first save seeds it).
+- **In-app toast: `AppToast` is a non-Modal host mounted once at the app root.** `showToast(msg)` (zero-React,
+  callable from services) enqueues into `useToastStore` (FIFO, mirrors `dialogStore`); `AppToast`
+  (`src/ui/toast/`) is an absolutely-positioned, `pointerEvents="none"`, auto-dismiss pill — NOT a `Modal`
+  (a Modal would capture touches). Mount it after `<AppDialog/>` in `app/_layout.tsx` (inside
+  ThemeProvider+SafeAreaProvider). Headless FCM has no React host, so `showToast` just enqueues and nothing
+  renders — harmless.
+- **Auto-download attachments runs on the INGESTION path via an injected callback.** `DbEventSink` takes an
+  optional `onMessageStored?(messageId)` (2nd ctor arg) — undefined in unit tests so their Node import graph
+  never pulls natives; the app wires it from `realtimeControl.ts` to `autoDownloadMessageAttachments`
+  (`src/services/download/autoDownloadAttachments.ts`). That fn LAZILY `import()`s the fetcher / `expo-network`
+  (Wi-Fi gate) / `expo-media-library` only AFTER its early returns, so importing it stays Node-safe. Gated by
+  `shouldAutoDownload` (image/* ≤5MB) + the `autoDownloadAttachments`/`autoDownloadOnWifiOnly` flags; the
+  `autoDownloadDestination` enum ('app'|'gallery'|'album', default 'album') decides the extra saved copy; a
+  single toast is BATCHED per burst (module-level debounce), never one-per-image. Hydrates the feature store
+  once if headless (defaults otherwise ignore the user's Wi-Fi-only/destination choice).
+- **In-app App Logs persist across restarts via an INJECTED file sink.** `MemorySink` (heap-only) is wiped on
+  app close; `FileLogSink` (`src/services/logging/fileLogSink.ts`, OUTSIDE `core` so it can use
+  expo-file-system — lazily) is attached to the logger's `TeeSink` at `boot()` via `logSinks.add(...)`, after
+  `memoryLogSink.hydrate(...)` seeds the viewer from `Paths.document/app-logs.json`. `write()` stays sync
+  (buffers + debounced flush); capped at 500 lines; the viewer's Clear wipes the file too. Lines are
+  already-redacted before any sink, so the file holds no secrets. `core/` must never import expo-file-system.
+- **Chat opens at the newest message via a one-shot, keyboard-follow is near-bottom-gated** (`MessageList`).
+  A normal open can't rely on `startRenderingFromBottom` alone (the list first mounts EMPTY on the async DB
+  read), so a guarded `scrollToEnd` fires on the first `[]→populated` transition — but ONLY when `!focusReady`,
+  so a notification/search open keeps its `initialScrollIndex` jump. A `keyboardDidShow` listener re-pins to
+  the newest message only when the user was within `KEYBOARD_FOLLOW_THRESHOLD` of the bottom (else a reader is
+  left alone). Both are device-only to verify (jest fakes keyboard + FlashList layout).
+- **"Disable Battery Optimization" opens the settings SCREEN, not the one-shot request.**
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` only shows its dialog when NOT already exempt and silently no-ops
+  forever after (looks broken on repeat presses; there's no exemption-state query without a native module).
+  `src/services/battery.ts` fires `IGNORE_BATTERY_OPTIMIZATION_SETTINGS` (fallback `APPLICATION_DETAILS_SETTINGS`)
+  so it always opens something.
+- **A Gator-server route the client doesn't back → `UnimplementedEndpointError`, not a scary error.** The
+  iMessage Account screen calls `/icloud/account`, which the server never implemented (404). `getAccountInfo`
+  remaps a 404 to `UnimplementedEndpointError` so `account.tsx` shows a neutral "not supported on this server
+  yet" state instead of blaming the Private API (same pattern as `/server/update/check`). Private-API being
+  on/off is irrelevant.
 
 ## FCM gotchas (verified against the Flutter/Kotlin reference)
 - **Envelope shape:** the server's FCM *data* message is `{ type: '<event>', data: '<JSON body>',
@@ -246,6 +308,24 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   "accessible only when unlocked" attribute here), so it is NOT an at-rest key-custody guarantee on
   Android. `requireAuthentication` is intentionally OFF so the headless-while-locked decrypt works
   (see `src/native/secureVault.ts`).
+- **Register the FCM token on EVERY (re)connect, not once.** `registerFcmToken` runs from every
+  `startRealtime()` (NOT gated by `realtimeOneTimeSetupDone` — only the permission prompt is, to avoid
+  the GrantPermissionsActivity loop). The server de-dupes by token, so re-registering is idempotent, and
+  it is the only thing that recovers push when a one-shot registration silently broke: a transient failure
+  at first boot (server briefly unreachable → server has NO token → zero pushes all session), a reconnect
+  to a DIFFERENT server after `forget()`, or an FCM token rotation that landed while disconnected.
+- **EventRouter dedup: CLAIM the guid before the sink, RELEASE it if the sink throws.** `new-message` is
+  deduped by guid (socket + FCM deliver the same message). The claim is recorded synchronously BEFORE
+  `await sink.onEvent` (so a concurrent redelivery is still deduped mid-flight) but removed in a `catch`
+  if the sink throws — otherwise a delivery that failed on a transient DB error burned the guid forever
+  and every redelivery was silently deduped away, so the notification was never posted (the DB-write path
+  from a later full sync does NOT run through the notify layer). See `hasSeen`/`recordSeen`/`unrecordSeen`.
+- **Hydrate the redacted/feature stores at most ONCE per JS context on the push path.**
+  `dispatchRealtimeEvent` gates `hydrate()` on each store's `hydrated` flag (`if (!store.getState().hydrated)
+  …`) — a killed-app wake must hydrate once (no UI boot effect ran), but re-reading kv on every event
+  (incl. the frequent silent `updated-message` receipts) was pure redundant work; the in-memory store is
+  authoritative after the first hydrate and its setters keep it current. Likewise `ensureDatabase()`
+  returns the cached handle via `getDatabase()` before ever calling `resolveDbKey` (two Keystore reads).
 
 ## Crypto gotchas (react-native-libsodium, verified on-device)
 - **AAD must be a `string`.** The NATIVE binding throws `crypto_aead_xchacha20poly1305_ietf_encrypt:

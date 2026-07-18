@@ -1,20 +1,30 @@
 # RCS via Google Messages web-pairing — orchestration plan
 
-**Status: COMPLETE (Prompts 1–10 built, verified, committed 2026-07-04). On-device end-to-end
-run against a live deploy still pending.**
+**Status: COMPLETE except one small UI gap (re-verified against code 2026-07-17). Send to an
+EXISTING RCS chat works end-to-end: the server routes every action by the `RCS;-;` chat guid
+(`routesToRcs` in `actionOperations.ts`), the app's ack reconcile handles the RCS tempGuid-echo
+contract (`sendOutcome.ts`), and OUTGOING bubbles render teal (`MessageBubble` threads the chat's
+service via `chatService`). The one remaining app-side gap: the new-chat screen's service toggle
+offers only iMessage | SMS (`app/(app)/new-chat.tsx`) — it never passes `service:'RCS'`, though
+both the app endpoint (`createChat`) and the server (`new-chat` RCS branch → sidecar
+get-or-create) already support it. On-device end-to-end run against a live deploy still pending.**
 Format: a Context section, then numbered prompts. Each prompt = concrete task (with file
 paths) + one rationale sentence (so the implementing agent can adapt when reality differs)
 + a verification step (run X, confirm Y) so failure is caught immediately.
 
-**Progress — ALL PROMPTS DONE:**
+**Progress — all prompts done; one app-side UI gap (new-chat RCS toggle):**
 - ✅ **Prompt 1** — spike LIVE-VALIDATED against the real account (pair via Gaia cookies +
   emoji, session resume, live event stream, RCS send all confirmed).
 - ✅ **Prompts 2–6 (server bridge)** — sidecar (`packages/rcs-sidecar/`), supervision, pairing
   UI, read path (cache + fanout), v1 serve. Committed. Prompt 2–4 also live-validated
   (paired, `connected:true`, real conversations/messages/events through the HTTP API).
-- ✅ **Prompts 7–9 (app + rich features)** — RCS renders (teal bubbles, badge), text send,
-  then media/reactions/typing/read-receipts at iMessage parity (app needed no changes for
-  the rich features — server maps to iMessage shapes).
+- ✅ **Prompt 7 (app accept/render)** — RCS renders (teal bubbles, badge), capability gate,
+  `rcs-alert`/`rcs-bridge-down` handling.
+- ✅ **Prompts 8–9 (send + rich features)** — the server routes send/read/typing by the `RCS;-;`
+  guid prefix, so the app's normal send path works unchanged against an existing RCS chat
+  (re-verified 2026-07-17: ack reconcile handles the RCS tempGuid echo, outgoing bubbles teal).
+  **Remaining sliver:** the new-chat toggle doesn't offer RCS (`service:'RCS'` is supported by
+  both `createChat` and the server's `new-chat` sidecar branch — the UI just never sends it).
 - ✅ **Prompt 10 (ops hardening)** — cookie re-auth (no re-pair), bridge alerts + `get-rcs-status`,
   `rcs-bridge-down` push, `docs/RCS_RUNBOOK.md` (server repo).
 - Test totals at completion: server bbd **375**, app **563**, sidecar `go build`/`vet` clean.

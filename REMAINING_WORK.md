@@ -25,10 +25,13 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
 - [ ] Native batches (audio/voice/file from P1) on-device.
 
 ## 2. Not yet built — ROADMAP Phase 4 (Settings & polish)
-- [ ] Settings search (indexed `SearchableSettingItem`)
+- [x] ✅ Settings search — done (2026-06-30); implemented as a keyword-bag section filter in
+      `app/(app)/settings.tsx` (not the `SearchableSettingItem` registry design, but the feature ships)
 - [ ] Scheduled **recurrence UI** — one-shot plumbing exists (`ScheduleArgs` / `ScheduledRow`); recurrence is NOT modeled yet (no recurrence field on the REST surface), so model it first
-- [ ] Configurable max-concurrent-downloads + image-preview-quality
-- [ ] DiceBear-style fake avatars in redacted mode (local/deterministic, not the network service)
+- [x] ✅ Configurable max-concurrent-downloads — done (2026-06-30); `maxConcurrentDownloads` in
+      `src/state/featureSettingsStore.ts`, applied by the semaphore in `src/services/download/downloadService.ts`
+- [x] ✅ DiceBear-style fake avatars in redacted mode — done (2026-06-30); local deterministic
+      seeded tiles via `seededRedacted()` in `src/ui/primitives/Avatar.tsx` (no network service)
 - [ ] Server update **check + install** — both unimplemented on the Gator fork (`checkUpdate` rejects with `UnimplementedEndpointError`); add `GET /server/update/check` + `POST /server/update/install` + a button
 - [ ] QR pairing display in server management
 
@@ -53,9 +56,12 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
       native receiver isn't built).
 
 ## 5. In-flight / process
-- [ ] **API-model sync with the server** — keep the app's zod models (`src/core/models/*`) aligned with
-      `~/github/BB/bluebubbles-server` (which carries our server-side changes). Plan in progress.
-- [ ] Decide whether to push `master` / open a PR (currently local only).
+- [x] ✅ **API-model sync with the server** — substantially done as of 2026-07-17: Phase A, the
+      endpoint-shape reconciliation, contract fixtures/tests, and all 7 server schema-gap features
+      are wired app-side. Residuals (device verification, Phase B/C fixtures, chat mutations, rich
+      fields) are tracked in [API_SYNC_PLAN.md](./API_SYNC_PLAN.md) "Still open".
+- ~~Decide whether to push `master` / open a PR (currently local only).~~ **Stale** — `master` is
+      pushed and in sync with `origin` (see the 2026-06-30 status header).
 
 ## 6. Post-audit open items (2026-06-21 security/functional audit)
 _Most findings from [SECURITY_FUNCTIONAL_AUDIT_2026-06-21.md](./SECURITY_FUNCTIONAL_AUDIT_2026-06-21.md)

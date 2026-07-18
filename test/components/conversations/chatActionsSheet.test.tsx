@@ -6,7 +6,8 @@
  *     Archive↔Unarchive, Mark as Read↔Mark as Unread);
  *   - pressing a row calls the RIGHT device-local mutation with the row guid + toggled value,
  *     then closes the sheet (run() → fn().finally(onClose));
- *   - Mark as Read routes to the service `markRead(guid)`; Mark as Unread to the local repo;
+ *   - Mark as Read routes to the service `markRead(guid)`; Mark as Unread to `markUnread(guid)`
+ *     (local flip + best-effort server sync — the service owns the RCS/Private-API gating);
  *   - Delete does NOT mutate directly — it closes the sheet and opens a confirm dialog whose
  *     message names the chat;
  *   - a null target renders no rows.
@@ -14,7 +15,8 @@
  * In-file mocks:
  *   - `@db/repositories`: the sheet imports the five chat mutations; the real barrel pulls
  *     op-sqlite/drizzle native at import. Stub each as a jest.fn resolving void.
- *   - `@/services`: only `markRead` is referenced; its barrel loads native modules at import.
+ *   - `@/services`: only `markRead`/`markUnread` are referenced; its barrel loads native modules
+ *     at import.
  *   - `@ui/dialog/dialogStore`: spy `showDialog` so the Delete-confirm can be asserted without
  *     driving the real dialog store/Modal.
  *   `@db/database` (getDatabase) is already stubbed by the shared setup to a jest.fn() → undefined,
@@ -26,8 +28,8 @@
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { ChatActionsSheet, type ChatActionTarget } from '@ui/conversations/ChatActionsSheet';
-import { setChatPin, setChatMute, setChatArchive, setChatUnreadLocal } from '@db/repositories';
-import { markRead } from '@/services';
+import { setChatPin, setChatMute, setChatArchive } from '@db/repositories';
+import { markRead, markUnread } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 
 // Zero insets so useSafeAreaInsets() resolves without a SafeAreaProvider.
@@ -39,18 +41,20 @@ jest.mock('@db/repositories', () => ({
   setChatPin: jest.fn(() => Promise.resolve()),
   setChatMute: jest.fn(() => Promise.resolve()),
   setChatArchive: jest.fn(() => Promise.resolve()),
-  setChatUnreadLocal: jest.fn(() => Promise.resolve()),
   deleteChatLocal: jest.fn(() => Promise.resolve()),
 }));
 
-jest.mock('@/services', () => ({ markRead: jest.fn(() => Promise.resolve()) }));
+jest.mock('@/services', () => ({
+  markRead: jest.fn(() => Promise.resolve()),
+  markUnread: jest.fn(() => Promise.resolve()),
+}));
 
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 
 const mockSetChatPin = setChatPin as jest.Mock;
 const mockSetChatMute = setChatMute as jest.Mock;
 const mockSetChatArchive = setChatArchive as jest.Mock;
-const mockSetChatUnreadLocal = setChatUnreadLocal as jest.Mock;
+const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
 
@@ -70,7 +74,7 @@ beforeEach(() => {
   mockSetChatPin.mockClear();
   mockSetChatMute.mockClear();
   mockSetChatArchive.mockClear();
-  mockSetChatUnreadLocal.mockClear();
+  mockMarkUnread.mockClear();
   mockMarkRead.mockClear();
   mockShowDialog.mockClear();
 });
@@ -155,15 +159,15 @@ describe('ChatActionsSheet — Mark read / unread', () => {
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Mark as Read'));
     expect(mockMarkRead).toHaveBeenCalledWith(t.guid);
-    expect(mockSetChatUnreadLocal).not.toHaveBeenCalled();
+    expect(mockMarkUnread).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it('a READ chat shows "Mark as Unread" and routes to the local repo', async () => {
+  it('a READ chat shows "Mark as Unread" and routes to the markUnread service', async () => {
     const t = makeTarget({ unread: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Mark as Unread'));
-    expect(mockSetChatUnreadLocal).toHaveBeenCalledWith(undefined, t.guid);
+    expect(mockMarkUnread).toHaveBeenCalledWith(t.guid);
     expect(mockMarkRead).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });

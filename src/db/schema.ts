@@ -228,6 +228,8 @@ export const scheduledMessages = sqliteTable('scheduled_messages', {
   payload: text('payload').notNull(),
   scheduledFor: integer('scheduled_for').notNull(),
   schedule: text('schedule'),
+  /** NULL = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send (local-only). */
+  recurrence: text('recurrence'),
   // pending → (claimed) sending → sent | error. attempts caps prod retries.
   status: text('status').default('pending'),
   attempts: integer('attempts').notNull().default(0),

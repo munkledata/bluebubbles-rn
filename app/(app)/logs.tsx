@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { memoryLogSink, type LogEntry } from '@core/secure';
+import { fileLogSink } from '@/services/logging/fileLogSink';
 import { formatTime } from '@utils';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 
@@ -50,6 +51,7 @@ export default function LogsScreen(): React.JSX.Element {
 
   const onClear = (): void => {
     memoryLogSink.clear();
+    void fileLogSink.clear(); // also purge the on-disk history, not just this session's buffer
     refresh();
   };
 

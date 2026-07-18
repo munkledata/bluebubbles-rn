@@ -16,11 +16,13 @@ security weaknesses of the original addressed from day one.
 > open-chat) so the memos actually hold (rows no longer re-render on every composer/reply/selection state
 > change — only on a real message change); and **resilience** (chat screen distinguishes a load *error*
 > from *empty*, home catch-up + scheduled-delete failures no longer crash/silently fail). **260 unit
-> tests** + typecheck + prettier all green. On-device (dev fixtures): boots through the error boundary,
+> tests** at the time of this snapshot (the suite has since grown — ~251 test files as of 2026-07-17)
+> + typecheck + prettier all green. On-device (dev fixtures): boots through the error boundary,
 > inbox + chat render, long-press → react → the tapback persists, send → optimistic bubble → the
 > memoized list updates → a failed send surfaces "Not Delivered" + retry. Infra-blocked (need user
-> credentials): EAS build/submit (Expo account), Sentry (DSN), the embedded Find My map (Maps API key).
-> See `AGENTS.md` for gotchas.
+> credentials): EAS build/submit (Expo account), Sentry (DSN). (The embedded Find My map has since
+> shipped keylessly — a Leaflet/OpenStreetMap WebView, `src/ui/findmy/FindMyMap.tsx` — so it is no
+> longer Maps-API-key-blocked.) See `AGENTS.md` for gotchas.
 >
 > Status (prior): **Phase 8 — advanced features (message effects, FaceTime, Find My) complete & verified
 > on-device.** Builds on Phases 0–7. Adds: **message effects** —
@@ -46,7 +48,8 @@ security weaknesses of the original addressed from day one.
 > better-sqlite3; typecheck + expo-doctor (21/21) pass. On-device: a slam/invisible-ink bubble + a
 > confetti/balloons shower play in a chat; an incoming-FaceTime notification answers; Find My lists
 > devices + people. Server-only (not emulator-verifiable): a real FaceTime link + live Find My data.
-> Tracked follow-ups: an embedded Find My map (needs `react-native-maps` + a Google Maps API key + a
+> Tracked follow-ups: an embedded Find My map (since DONE — shipped as a Leaflet/OpenStreetMap
+> WebView in `src/ui/findmy/FindMyMap.tsx`; needed NO `react-native-maps`, Google Maps API key, or
 > rebuild). See `AGENTS.md` for gotchas.
 >
 > Status (prior): **Phase 7d — the remaining Phase-7 features (per-chat customization, backup/restore,

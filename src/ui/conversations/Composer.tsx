@@ -13,8 +13,10 @@ import {
 } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme, withAlpha } from '../theme';
+import type { Recurrence } from '@core/schedule';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
 import { EffectPicker } from './effects';
+import { RecurrenceSheet } from './RecurrenceSheet';
 
 interface ComposerProps {
   /** effectId set when sending with an iMessage send-effect (long-press send); subject is the
@@ -24,13 +26,17 @@ interface ComposerProps {
   onSendAttachments?: (items: PendingAttachment[]) => void;
   /** Open the document picker (the tray's "Files" button); returns picked items to stage. */
   onPickFiles?: () => Promise<PendingAttachment[]>;
+  /** Pick a device contact and send it as a card (tray's "Contact" button). Provided only when the
+   *  server can build vCards (`supports_send_contact`), so the button is capability-gated. */
+  onPickContact?: () => void;
   replyTo?: MessagePreview | null;
   onCancelReply?: () => void;
   /** When set, the composer edits this text instead of sending a new message. */
   editingText?: string | null;
   onCancelEdit?: () => void;
-  /** When set, a 📅 button offers to schedule the typed text for a future time. */
-  onSchedule?: (text: string, scheduledFor: number) => void;
+  /** When set, a 📅 button offers to schedule the typed text for a future time
+   *  (recurrence: null/undefined = send once, else repeat daily/weekly/monthly). */
+  onSchedule?: (text: string, scheduledFor: number, recurrence?: Recurrence | null) => void;
   /** Emit typing state to the server (debounced). */
   onTyping?: (isTyping: boolean) => void;
   /** Start a voice-memo recording (mic button shown when the input is empty). */
@@ -59,6 +65,7 @@ export const Composer = React.memo(function Composer({
   onSend,
   onSendAttachments,
   onPickFiles,
+  onPickContact,
   replyTo,
   onCancelReply,
   editingText,
@@ -83,6 +90,10 @@ export const Composer = React.memo(function Composer({
   const [subject, setSubject] = useState('');
   const [effectOpen, setEffectOpen] = useState(false);
   const [trayOpen, setTrayOpen] = useState(false);
+  // Set once the date+time pickers resolve; the RecurrenceSheet (step 3) commits or cancels it.
+  const [pendingSchedule, setPendingSchedule] = useState<{ text: string; when: number } | null>(
+    null,
+  );
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   // Picked @mentions (resolved to text spans at send time) + the current cursor for @-detection.
   const [mentions, setMentions] = useState<MentionPick[]>([]);
@@ -263,8 +274,8 @@ export const Composer = React.memo(function Composer({
             // passed (so picking the current minute is allowed — it fires next tick).
             const currentMinute = Math.floor(Date.now() / 60_000) * 60_000;
             if (when < currentMinute) return;
-            setText('');
-            onSchedule(captured, when);
+            // Step 3: pick a recurrence (or Send once) before committing the schedule.
+            setPendingSchedule({ text: captured, when });
           },
         });
       },
@@ -484,11 +495,35 @@ export const Composer = React.memo(function Composer({
           </Pressable>
         ) : null}
       </View>
-      {trayOpen ? <AttachmentTray onPick={addPending} onPickFiles={handlePickFiles} /> : null}
+      {trayOpen ? (
+        <AttachmentTray
+          onPick={addPending}
+          onPickFiles={handlePickFiles}
+          onPickContact={
+            onPickContact
+              ? () => {
+                  setTrayOpen(false);
+                  onPickContact();
+                }
+              : undefined
+          }
+        />
+      ) : null}
       <EffectPicker
         visible={effectOpen}
         onClose={() => setEffectOpen(false)}
         onPick={(effectId) => submit(effectId)}
+      />
+      <RecurrenceSheet
+        visible={pendingSchedule != null}
+        onClose={() => setPendingSchedule(null)} /* cancel keeps the typed text */
+        onPick={(recurrence) => {
+          const sched = pendingSchedule;
+          setPendingSchedule(null);
+          if (!sched || !onSchedule) return;
+          setText('');
+          onSchedule(sched.text, sched.when, recurrence);
+        }}
       />
     </View>
   );

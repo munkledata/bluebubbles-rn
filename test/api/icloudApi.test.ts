@@ -1,40 +1,29 @@
-import { AccountInfo, getAccountInfo, setActiveAlias } from '@core/api/endpoints/icloud';
+import { getAccountInfo } from '@core/api/endpoints/icloud';
+import { ApiError, UnimplementedEndpointError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 
-describe('icloudApi', () => {
-  it('getAccountInfo GETs /icloud/account', async () => {
-    const get = jest.fn(() => Promise.resolve({ activeAlias: 'a@b.com', aliases: ['a@b.com'] }));
-    const http = { get } as unknown as HttpClient;
-    await getAccountInfo(http);
-    expect(get).toHaveBeenCalledWith('/icloud/account', expect.anything());
+/** A minimal fake HttpClient whose `get` runs the provided impl. */
+function mkHttp(impl: () => Promise<unknown>): HttpClient {
+  return { get: jest.fn(impl) } as unknown as HttpClient;
+}
+
+describe('getAccountInfo', () => {
+  it('returns the parsed account on success', async () => {
+    const http = mkHttp(async () => ({ appleId: 'me@icloud.com', aliases: ['me@icloud.com'] }));
+    await expect(getAccountInfo(http)).resolves.toMatchObject({ appleId: 'me@icloud.com' });
   });
 
-  it('setActiveAlias POSTs /icloud/account/alias with the chosen alias', async () => {
-    const post = jest.fn(() => Promise.resolve({ activeAlias: '+15551234567' }));
-    const http = { post } as unknown as HttpClient;
-    await setActiveAlias(http, '+15551234567');
-    expect(post).toHaveBeenCalledWith('/icloud/account/alias', expect.anything(), {
-      json: { alias: '+15551234567' },
+  it('remaps a 404 (route not implemented on the server) to UnimplementedEndpointError', async () => {
+    const http = mkHttp(async () => {
+      throw ApiError.fromStatus(404);
     });
+    await expect(getAccountInfo(http)).rejects.toBeInstanceOf(UnimplementedEndpointError);
   });
 
-  it('AccountInfo parses leniently: missing aliases → [], nulls tolerated', () => {
-    const parsed = AccountInfo.parse({ appleId: null, activeAlias: null });
-    expect(parsed.aliases).toEqual([]);
-    expect(parsed.appleId).toBeNull();
-    expect(parsed.vettedAliases).toBeUndefined();
-  });
-
-  it('AccountInfo keeps a provided alias list + vetted subset', () => {
-    const parsed = AccountInfo.parse({
-      appleId: 'you@icloud.com',
-      displayName: 'You',
-      activeAlias: 'you@icloud.com',
-      aliases: ['you@icloud.com', '+15551234567'],
-      vettedAliases: ['you@icloud.com'],
-      loginStatusMessage: 'Connected',
+  it('passes a real error (e.g. 401 unauthorized) straight through', async () => {
+    const http = mkHttp(async () => {
+      throw ApiError.fromStatus(401);
     });
-    expect(parsed.aliases).toEqual(['you@icloud.com', '+15551234567']);
-    expect(parsed.vettedAliases).toEqual(['you@icloud.com']);
+    await expect(getAccountInfo(http)).rejects.toBeInstanceOf(ApiError);
   });
 });

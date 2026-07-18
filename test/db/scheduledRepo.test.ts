@@ -11,13 +11,16 @@ import {
   listScheduledHistory,
   markScheduledFailed,
   markScheduledSent,
+  rearmScheduled,
   reconcileServerScheduled,
   resetStuckScheduled,
   SCHED_MAX_ATTEMPTS,
   updateScheduled,
 } from '@db/repositories';
+import { nextOccurrence } from '@core/schedule';
+import * as scheduledApi from '@core/api/endpoints/scheduled';
 import { ScheduledItem } from '@core/api/endpoints/scheduled';
-import { runDueScheduled } from '@/services/send/scheduleService';
+import { runDueScheduled, scheduleTextMessage } from '@/services/send/scheduleService';
 import { createTestDb } from '../support/testDb';
 
 const noHttp = {} as unknown as HttpClient;
@@ -195,6 +198,123 @@ describe('scheduled messages repo', () => {
       // After the cap it is 'error' — no longer pending/due, so it stops retrying.
       expect(await listAllScheduled(db)).toHaveLength(0);
       expect(await listDueScheduled(db, 9999)).toHaveLength(0);
+    });
+  });
+
+  describe('recurrence (re-arm instead of mark-sent)', () => {
+    const attemptsOf = (raw: import('better-sqlite3').Database, id: number): number =>
+      (raw.prepare('SELECT attempts FROM scheduled_messages WHERE id = ?').get(id) as {
+        attempts: number;
+      }).attempts;
+
+    it('round-trips the recurrence column through insert + read', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'every day',
+        scheduledFor: 1000,
+        recurrence: 'daily',
+      });
+      expect((await getScheduledById(db, id))?.recurrence).toBe('daily');
+      // One-shot rows stay null.
+      const one = await insertScheduled(db, { chatGuid: 'c1', text: 'once', scheduledFor: 1000 });
+      expect((await getScheduledById(db, one))?.recurrence).toBeNull();
+    });
+
+    it('updateScheduled sets and clears recurrence', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1000 });
+      await updateScheduled(db, id, { recurrence: 'weekly' });
+      expect((await getScheduledById(db, id))?.recurrence).toBe('weekly');
+      await updateScheduled(db, id, { recurrence: null }); // back to one-shot
+      expect((await getScheduledById(db, id))?.recurrence).toBeNull();
+    });
+
+    it('a recurring row that sends is RE-ARMED: pending at the next occurrence, attempts reset', async () => {
+      const { db, raw } = await createTestDb();
+      const now = 1_750_000_000_000;
+      const at = now - 60_000;
+      const id = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'daily hi',
+        scheduledFor: at,
+        recurrence: 'daily',
+      });
+      // Prior failures left attempts > 0; a successful send must clear them.
+      await claimScheduled(db, id);
+      await markScheduledFailed(db, id);
+      await claimScheduled(db, id);
+      await markScheduledFailed(db, id);
+      expect(attemptsOf(raw, id)).toBe(2);
+
+      const fired = await runDueScheduled(db, noHttp, now, async () => {});
+      expect(fired).toBe(1);
+      const row = await getScheduledById(db, id);
+      expect(row?.status).toBe('pending'); // NOT 'sent'
+      expect(row?.scheduledFor).toBe(nextOccurrence(at, 'daily', now));
+      expect(row?.scheduledFor).toBeGreaterThan(now); // no immediate re-fire
+      expect(row?.recurrence).toBe('daily'); // cadence survives the re-arm
+      expect(attemptsOf(raw, id)).toBe(0);
+      // The re-armed row is no longer due this tick.
+      expect(await listDueScheduled(db, now)).toHaveLength(0);
+    });
+
+    it('a one-shot row still marks sent (unchanged path)', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'once', scheduledFor: 1 });
+      expect(await runDueScheduled(db, noHttp, 1000, async () => {})).toBe(1);
+      expect((await getScheduledById(db, id))?.status).toBe('sent');
+    });
+
+    it('a permanently-failing RECURRING row still retires to error at the attempt cap', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, {
+        chatGuid: 'gone',
+        text: 'poison',
+        scheduledFor: 1,
+        recurrence: 'weekly',
+      });
+      const thrower = async (): Promise<void> => {
+        throw new ApiError('no_connection', 'unknown chat', 404);
+      };
+      for (let i = 0; i < SCHED_MAX_ATTEMPTS; i += 1) {
+        await runDueScheduled(db, noHttp, 1000, thrower);
+      }
+      expect((await getScheduledById(db, id))?.status).toBe('error');
+      expect(await listDueScheduled(db, 9_999_999)).toHaveLength(0); // stopped retrying
+    });
+
+    it('scheduleTextMessage keeps a recurring message LOCAL-ONLY (no server create)', async () => {
+      const { db } = await createTestDb();
+      const spy = jest
+        .spyOn(scheduledApi, 'createScheduled')
+        .mockResolvedValue({ id: 'srv-uuid' } as never);
+      try {
+        const { serverId } = await scheduleTextMessage(db, noHttp, {
+          chatGuid: 'c1',
+          text: 'every week',
+          scheduledFor: 1000,
+          recurrence: 'weekly',
+        });
+        expect(spy).not.toHaveBeenCalled(); // server can't repeat — local ticker owns it
+        expect(serverId).toBeNull();
+        const row = (await listAllScheduled(db))[0];
+        expect(row?.recurrence).toBe('weekly');
+        expect(row?.serverId).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('rearmScheduled only re-arms a CLAIMED row (preserves the claim contract)', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
+      expect(await rearmScheduled(db, id, 5000)).toBe(false); // pending, unclaimed → no-op
+      expect((await getScheduledById(db, id))?.scheduledFor).toBe(1);
+      await claimScheduled(db, id); // pending → sending
+      expect(await rearmScheduled(db, id, 5000)).toBe(true);
+      const row = await getScheduledById(db, id);
+      expect(row).toMatchObject({ status: 'pending', scheduledFor: 5000 });
     });
   });
 

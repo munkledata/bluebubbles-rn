@@ -13,6 +13,7 @@ import {
   showDateSeparator,
   showSenderHeader,
   showTail,
+  showTimestampAbove,
   statusFor,
 } from '@utils';
 import { Avatar } from '../primitives';
@@ -84,6 +85,11 @@ export const MessageRow = React.memo(function MessageRow({
   const tail = showTail(msg, newerMsg);
   const header = showSenderHeader(msg, olderMsg, isGroup);
   const separator = showDateSeparator(msg, older);
+  // A small centered time above the bubble whenever this message is in a new clock-minute vs the
+  // one before it. Suppressed when the fuller date separator already renders (it carries the time),
+  // and empty for a dateless/optimistic row (formatTime returns '' for null/0).
+  const timeLabel =
+    !separator && showTimestampAbove(msg, older) ? formatTime(msg.dateCreated ?? 0) : '';
   const status = isLastOutgoing && showTimestamps ? statusFor(msg) : null;
   const breaksGroup = !olderMsg || !sameSender(msg, olderMsg);
   // Reaction badges overflow the bubble top; reserve room so they don't clip.
@@ -175,6 +181,11 @@ export const MessageRow = React.memo(function MessageRow({
           {formatSeparatorDate(msg.dateCreated)}
         </Text>
       ) : null}
+      {timeLabel ? (
+        <Text style={[styles.timestamp, overlay, pill ? [styles.timestampPill, pill] : null]}>
+          {timeLabel}
+        </Text>
+      ) : null}
       {/* Horizontal swipe on the bubble content: drag left peeks this message's sent time; drag
           right past the threshold sets it as the reply target. The separator + status stay put. */}
       <MessageSwipeWrapper
@@ -249,6 +260,9 @@ export const MessageRow = React.memo(function MessageRow({
 
 const styles = StyleSheet.create({
   separator: { textAlign: 'center', fontSize: 12, marginVertical: 10 },
+  // Per-message time stamp (new clock-minute) — smaller/tighter than the full date separator.
+  timestamp: { textAlign: 'center', fontSize: 11, marginTop: 6, marginBottom: 2 },
+  timestampPill: { alignSelf: 'center' },
   // Centered group/chat-event line (e.g. "Alice added Bob to the conversation.").
   groupEvent: { textAlign: 'center', fontSize: 12, marginVertical: 4, paddingHorizontal: 24 },
   groupEventPill: { alignSelf: 'center' },

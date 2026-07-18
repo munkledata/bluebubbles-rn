@@ -6,6 +6,7 @@ import {
   showDateSeparator,
   showSenderHeader,
   showTail,
+  showTimestampAbove,
   TAIL_GAP_MS,
 } from '@utils';
 
@@ -101,5 +102,19 @@ describe('showDateSeparator', () => {
     expect(showDateSeparator(m({ dateCreated: day2 }), m({ dateCreated: day1 }))).toBe(true);
     const close = m({ dateCreated: day1 + 60_000 });
     expect(showDateSeparator(close, m({ dateCreated: day1 }))).toBe(false); // <30min
+  });
+});
+
+describe('showTimestampAbove', () => {
+  it('stamps the first message and any message in a new clock-minute', () => {
+    const base = new Date(2024, 0, 1, 14, 30, 10).getTime(); // 2:30:10 PM
+    expect(showTimestampAbove(m({ dateCreated: base }), null)).toBe(true); // first message
+    // Same minute (2:30) → no stamp, even 40s later.
+    expect(showTimestampAbove(m({ dateCreated: base + 40_000 }), m({ dateCreated: base }))).toBe(
+      false,
+    );
+    // Next minute (2:31) → stamp, regardless of sender.
+    const nextMin = new Date(2024, 0, 1, 14, 31, 5).getTime();
+    expect(showTimestampAbove(m({ dateCreated: nextMin }), m({ dateCreated: base }))).toBe(true);
   });
 });

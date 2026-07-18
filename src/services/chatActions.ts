@@ -1,8 +1,10 @@
 import { chatsApi } from '@core/api';
+import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import {
   getChatIdByGuid,
   getNewestReceivedGuid,
+  setChatUnreadLocal,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
@@ -61,5 +63,24 @@ export async function markRead(chatGuid: string): Promise<void> {
     await chatsApi.markChatRead(http, chatGuid);
   } catch {
     // Offline / not connected — the local marker still clears the badge.
+  }
+}
+
+/**
+ * Mark a chat UNREAD: always clear the local read marker first (the inbox badge returns
+ * immediately), then best-effort sync it to the Mac via POST /chat/:guid/unread. A server
+ * failure never reverts or blocks the local flip — it's logged and dropped. The endpoint is
+ * Private-API + iMessage-only, so the call is skipped for `RCS;-;` chats (the RCS sidecar has
+ * no unread endpoint) and when the master Private API toggle is off.
+ */
+export async function markUnread(chatGuid: string): Promise<void> {
+  const db = getDatabase();
+  await setChatUnreadLocal(db, chatGuid);
+  if (chatGuid.startsWith('RCS;-;')) return;
+  if (!useFeatureSettingsStore.getState().privateApiEnabled) return;
+  try {
+    await chatsApi.markChatUnread(http, chatGuid);
+  } catch (e) {
+    logger.debug('[chats] mark-unread server sync failed; local flip kept', { error: String(e) });
   }
 }

@@ -190,6 +190,22 @@ describe('dedupeParticipants', () => {
     expect(names).toEqual(['Alice', 'Alice']);
   });
 
+  it('collapses one person whose two handles share a photo but show different address labels', () => {
+    // The reported bug: an unsaved family member reachable via phone + email — each handle keeps
+    // its own raw address as the name, but both carry the same downloaded contact photo.
+    const { names, uris } = dedupeParticipants(
+      ['+15551234567', 'mom@example.com', 'Bob'],
+      ['file:///mom.png', 'file:///mom.png', 'file:///bob.png'],
+    );
+    expect(names).toEqual(['+15551234567', 'Bob']);
+    expect(uris).toEqual(['file:///mom.png', 'file:///bob.png']);
+  });
+
+  it('never merges distinct people who both have no photo', () => {
+    const { names } = dedupeParticipants(['Alice', 'Bob'], [null, null]);
+    expect(names).toEqual(['Alice', 'Bob']);
+  });
+
   it('treats a missing uri slot as null when the arrays are ragged', () => {
     const { names, uris } = dedupeParticipants(['Alice', 'Alice'], ['file:///a.png']);
     expect(names).toEqual(['Alice', 'Alice']);

@@ -1,5 +1,18 @@
 # Gator RN — Audit Report (rebuild vs. Flutter original)
 
+> **STATUS UPDATE (2026-07-17):** The tables below are a FROZEN 2026-06-20 snapshot — do not read
+> them as current status. Since then: **F-2 (group add/remove/rename UI, `chat-settings/[guid].tsx`),
+> F-3 (audio playback — `AudioAttachment.tsx` + expo-audio), F-4 (voice recording —
+> `VoiceRecorder.tsx`), F-5 (document picker — expo-document-picker), and the Android share-intent
+> part of F-14 (expo-share-intent 8) are DONE in code**; **SEC-2's SSRF guard shipped**
+> (`src/services/urlPreview.ts` `isPrivateHost` rejects loopback/link-local/private/metadata hosts).
+> One table claim no longer holds: **S-4** — the app now deliberately sets
+> `usesCleartextTraffic: true` (app.config.ts:147) so a direct-LAN `http://` server is reachable,
+> gated by an app-layer default-deny "Allow insecure connection" toggle in `connect()`; the
+> "false in the release manifest" statement is obsolete (the protection moved from the manifest to
+> the connect gate). **SEC-6 (`allowBackup="true"`) remains genuinely open.** The app is now on
+> Expo SDK 57 / RN 0.86.
+
 > **STATUS UPDATE (2026-06-30):** Re-verified against the current code — most findings are now
 > RESOLVED. The one CRITICAL item (F-1, no compose/new-chat) is fully built (`app/(app)/new-chat.tsx`
 > + FAB + `POST /chat/new`); group management (F-2), Find My refresh calls (F-13), the server
@@ -57,7 +70,7 @@ guard around the now-top-level Firebase import; bind the headless-push DB-open t
 | S-1 | Credentials in plaintext SharedPreferences | **Fixed** — `ExpoSecureVault` over Keystore-backed expo-secure-store; non-secret prefs in the encrypted SQLCipher `kv` table; no plaintext store exists (`src/native/secureVault.ts`, `src/core/secure/vault.ts`). |
 | S-2 | Auth token in the URL query (~20 sites + socket) | **Fixed** — `Authorization: Bearer <pw>` (single injection point) + socket `auth` payload; tests assert `searchParams.has('guid') === false` (`src/core/api/http.ts`, `socketService.ts`). |
 | S-3 | `badCertificateCallback` accepted any cert on the host | **Fixed** — no TLS bypass anywhere; standard validation + optional SPKI pinning (`src/native/certPinning.ts`). |
-| S-4 | `usesCleartextTraffic="true"` app-wide | **Fixed** — `false` in the release manifest via expo-build-properties; `sanitizeServerAddress` prepends https. |
+| S-4 | `usesCleartextTraffic="true"` app-wide | **Fixed** — `false` in the release manifest via expo-build-properties; `sanitizeServerAddress` prepends https. _(2026-07-17: OBSOLETE — now deliberately `true` for direct-LAN servers, gated by an app-layer default-deny "Allow insecure" toggle; see top banner.)_ |
 | S-5 | Exported receiver gated by a plaintext-password `==` compare | **Hardened** — rotating Keystore token + constant-time compare + default-deny allowlist (`src/core/secure/intents.ts`). |
 | S-6 | AES-256-CBC + unsalted single-iteration MD5 KDF | **Fixed** — XChaCha20-Poly1305 AEAD + Argon2id, versioned envelope, device-verified (`src/native/crypto.ts`, `src/core/crypto/`). |
 

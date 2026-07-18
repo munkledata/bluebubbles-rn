@@ -1,6 +1,6 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Keyboard, type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet, Text, View } from 'react-native';
 import { discardMessage, retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { chatServiceFromGuid, isGroupEvent } from '@utils';
@@ -43,6 +43,10 @@ interface MessageListProps {
   selectedGuids?: Set<string> | null;
   onToggleSelect?: (msg: EnrichedMessage) => void;
 }
+
+// Within this many px of the bottom, a keyboard-open re-pins to the newest message; scrolled
+// further up (reading history) it's left alone. ~2 message-rows of slack.
+const KEYBOARD_FOLLOW_THRESHOLD = 160;
 
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
 // from the bottom so the newest message is visible and the list stays pinned.
@@ -117,6 +121,9 @@ export function MessageList({
   const listRef = useRef<FlashListRef<EnrichedMessage>>(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
+  // One-shot "land at newest on first open" bookkeeping (see the firstPopulate effect below).
+  const didInitialScrollRef = useRef(false);
+  const initRaf = useRef<number | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [highlightGuid, setHighlightGuid] = useState<string | null>(null);
   const jumpToReply = useCallback((originatorGuid: string): void => {
@@ -157,32 +164,70 @@ export function MessageList({
     }, 450);
   }, [focusReady, focusGuid, focusIndex]);
 
-  // Unmount: clear both delayed one-shots so a late fire can't setState/scroll a dead list.
+  // Unmount: clear all delayed one-shots so a late fire can't setState/scroll a dead list.
   useEffect(
     () => () => {
       if (highlightTimer.current) clearTimeout(highlightTimer.current);
       if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
+      if (initRaf.current != null) cancelAnimationFrame(initRaf.current);
     },
     [],
   );
+
+  // Distance (px) from the bottom, updated on scroll — drives "am I near the newest message?" for
+  // the keyboard-follow below. Starts at 0 (a fresh chat opens pinned to the bottom).
+  const distFromBottomRef = useRef(0);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentSize, contentOffset, layoutMeasurement } = e.nativeEvent;
+    distFromBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height;
+  }, []);
+
+  // When the keyboard opens, the KeyboardAvoidingView (chat screen) shrinks this list from the
+  // bottom, but FlashList keeps its scroll offset — so the newest messages slide behind the
+  // composer/keyboard. If the user was already near the bottom, re-pin to the newest message.
+  // Deferred a frame so the scroll runs AFTER the frame has shrunk (else it uses stale metrics).
+  const kbRaf = useRef<number | null>(null);
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (distFromBottomRef.current > KEYBOARD_FOLLOW_THRESHOLD) return; // reading history — leave it
+      if (kbRaf.current != null) cancelAnimationFrame(kbRaf.current);
+      kbRaf.current = requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    });
+    return () => {
+      sub.remove();
+      if (kbRaf.current != null) cancelAnimationFrame(kbRaf.current);
+    };
+  }, []);
 
   // Reveal the user's OWN just-sent message even if they'd scrolled up: when a NEW message from me
   // lands as the chronological tail, jump to the end. (Incoming-while-near-bottom is handled natively
   // by autoscrollToBottomThreshold on the list below; this covers the scrolled-up sender, where that
   // threshold won't fire.) Ref-diff because `rows` is a fresh array on every reactive tick — gate on
   // a genuine append (length grew AND a new tail guid) so in-place updates (sending→sent, localPath
-  // writes, reaction joins) and a temp→real guid swap don't re-fire, and the first population just
-  // sets the baseline (startRenderingFromBottom already positions the cold render at the bottom).
+  // writes, reaction joins) and a temp→real guid swap don't re-fire.
   const lastTailRef = useRef<{ guid: string | null; len: number }>({ guid: null, len: 0 });
+  // firstPopulate lands at the newest message the FIRST time rows arrive on a NORMAL open. The list
+  // mounts EMPTY (messages load async), so startRenderingFromBottom anchors an empty cold render and
+  // the rows that arrive after render from the top — hence chats "often" opened mid-history. A
+  // notification/search open (focusReady) keeps its initialScrollIndex jump and is left alone.
   useEffect(() => {
     const prev = lastTailRef.current;
     const last = rows[rows.length - 1] ?? null;
     const appended = prev.len > 0 && rows.length > prev.len && !!last && last.guid !== prev.guid;
+    const firstPopulate = prev.len === 0 && rows.length > 0;
     lastTailRef.current = { guid: last?.guid ?? null, len: rows.length };
+    if (firstPopulate && !focusReady && !didInitialScrollRef.current) {
+      didInitialScrollRef.current = true;
+      if (initRaf.current != null) cancelAnimationFrame(initRaf.current);
+      initRaf.current = requestAnimationFrame(() =>
+        listRef.current?.scrollToEnd({ animated: false }),
+      );
+      return;
+    }
     if (appended && last?.isFromMe === 1) {
       listRef.current?.scrollToEnd({ animated: true });
     }
-  }, [rows]);
+  }, [rows, focusReady]);
 
   return (
     <View style={styles.flex}>
@@ -203,6 +248,8 @@ export function MessageList({
             : { startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }
         }
         refreshControl={onRefresh ? refreshControl : undefined}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         // Reaching the START of the (chronological) data = scrolled to the oldest loaded message →
         // load older history. maintainVisibleContentPosition keeps the viewport pinned as the
         // newly-prepended older rows come in, so the scroll doesn't jump.

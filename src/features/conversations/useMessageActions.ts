@@ -15,6 +15,7 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
 import { isLocalFileUri } from '@utils';
 import { devSendFakeReaction, devUnsendFake } from './devSeed';
+import { buildForwardParams } from './forwardParams';
 import type { EnrichedMessage } from './useMessages';
 
 export interface MessageActionsArgs {
@@ -72,6 +73,11 @@ export function useMessageActions({
       mine,
       myEmojis,
       dateCreated: msg.dateCreated,
+      // For the "Details" sheet: delivery/read/edit timestamps + this message's own service.
+      dateDelivered: msg.dateDelivered,
+      dateRead: msg.dateRead,
+      dateEdited: msg.dateEdited,
+      senderService: msg.senderService,
       isRetracted: !!msg.dateRetracted,
       // Any edited message offers "View Edit History" (independent of the own-recent Edit gate).
       isEdited: !!msg.dateEdited,
@@ -109,6 +115,13 @@ export function useMessageActions({
   const onViewEditHistorySelected = (): void => {
     if (!selected) return;
     setEditHistory({ info: selected.messageSummaryInfo ?? null });
+  };
+
+  // "Details": the read-only message-info sheet. Presence of `details` is the open signal (null =
+  // closed); the value is the current selection, so no fetch is needed.
+  const [details, setDetails] = useState<SelectedMessage | null>(null);
+  const onDetailsSelected = (): void => {
+    if (selected) setDetails(selected);
   };
 
   // Multi-select mode: null = off; a Set of selected guids while active. Entered from the
@@ -276,11 +289,15 @@ export function useMessageActions({
     ]);
   };
 
-  // Forward: open the new-message composer pre-filled with this message's text (parity with the
-  // old app's "Forward" → chat creator). Attachment forwarding is not yet supported.
+  // Forward: open the new-message composer pre-filled with this message's text and/or its
+  // DOWNLOADED attachments (passed as a JSON param; new-chat validates + stages them). An
+  // attachment-only message with nothing downloaded gets the existing-style "download first"
+  // notice — forwarding never triggers a download.
   const onForwardSelected = (): void => {
-    if (!selected?.text) return;
-    router.push({ pathname: '/new-chat', params: { forwardText: selected.text } });
+    if (!selected) return;
+    const plan = buildForwardParams({ text: selected.text, attachments: selected.attachments });
+    if (plan.kind === 'notice') showDialog('Forward', plan.message);
+    else if (plan.kind === 'navigate') router.push({ pathname: '/new-chat', params: plan.params });
   };
 
   // Save the message's attachment(s) to the device gallery. Saves any already-downloaded local
@@ -338,6 +355,9 @@ export function useMessageActions({
     editHistory,
     setEditHistory,
     onViewEditHistorySelected,
+    details,
+    setDetails,
+    onDetailsSelected,
     onLongPressMessage,
     onSwipeReply,
     onToggleSelect,

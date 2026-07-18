@@ -97,6 +97,10 @@ frozen contract → fix server). Where Gator **intentionally** changed/renamed, 
 
 ## Divergence decision table (prioritized)
 
+> **Note (2026-07-17):** the table cells below are the ORIGINAL 2026-06-21 divergence snapshot and
+> predate the status headers at the top — several rows (e.g. P0 #1/#3, P1 #7, P1 #9) are now
+> resolved. The status headers are authoritative for current state.
+
 ### 🔴 P0 — the app cannot work against Gator until these are fixed
 
 | #   | Divergence                                                                                                                                                                                                                                                                                                                                                                    | Decision                                                                                                                                                                                                                                                                                                                       |

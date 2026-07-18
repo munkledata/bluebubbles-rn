@@ -164,21 +164,25 @@ describe('MessageActionsOverlay — text-gated actions (Copy / Forward)', () => 
     expect(h.onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('hides Copy + Forward when the message has no trimmed text', async () => {
+  it('hides Copy + Forward when the message has no trimmed text (and no attachments)', async () => {
     await renderOverlay(makeSelected({ text: '   ' }));
     expect(screen.queryByText('Copy')).toBeNull();
     expect(screen.queryByText('Forward')).toBeNull();
   });
 
-  it('hides Copy + Forward when text is null (attachment-only message)', async () => {
-    await renderOverlay(
+  it('hides Copy but keeps Forward for an attachment-only message', async () => {
+    // Forward now covers attachments too (the action itself decides between navigating with
+    // the downloaded files and the "download it first" notice) — only Copy is text-gated.
+    const h = await renderOverlay(
       makeSelected({
         text: null,
         attachments: [{ guid: 'a1', localPath: null, mimeType: 'image/jpeg' }],
       }),
     );
     expect(screen.queryByText('Copy')).toBeNull();
-    expect(screen.queryByText('Forward')).toBeNull();
+    await pressAndFlush(screen.getByText('Forward'), () =>
+      expect(h.onForward).toHaveBeenCalledTimes(1),
+    );
   });
 });
 

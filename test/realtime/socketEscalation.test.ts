@@ -39,6 +39,7 @@ const mockIo = jest.fn((..._args: unknown[]): FakeSocket => {
 jest.mock('socket.io-client', () => ({ io: mockIo }));
 
 import type { EventSink } from '@core/realtime';
+import { createServerUrlResolver } from '@/services/realtime/serverUrlResolver';
 import { SocketService } from '@/services/realtime/socketService';
 
 const sink: EventSink = { onEvent: jest.fn() };
@@ -106,8 +107,59 @@ describe('SocketService reconnect escalation', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(refreshUrl).toHaveBeenCalled();
+    // The hook receives the origin the socket is currently trying (so a resolver can
+    // compare against the stored URL) and its answer becomes the new connect target.
+    expect(refreshUrl).toHaveBeenCalledWith('https://srv');
     expect(mockIo).toHaveBeenCalledTimes(2);
     expect(mockIo.mock.calls[1]![0]).toBe('https://moved');
+  });
+
+  it('retries the SAME origin when refreshUrl reports nothing new (null)', async () => {
+    const refreshUrl = jest.fn(async () => null);
+    new SocketService(sink).connect('https://srv', 'pw', { refreshUrl });
+
+    fireReconnectFailed();
+    jest.advanceTimersByTime(1_200);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(refreshUrl).toHaveBeenCalledWith('https://srv');
+    expect(mockIo).toHaveBeenCalledTimes(2);
+    expect(mockIo.mock.calls[1]![0]).toBe('https://srv');
+  });
+
+  it('a second escalation asks about the UPDATED origin (not the original one)', async () => {
+    const refreshUrl = jest.fn(async () => 'https://moved');
+    new SocketService(sink).connect('https://srv', 'pw', { refreshUrl });
+
+    fireReconnectFailed();
+    jest.advanceTimersByTime(1_200);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockIo.mock.calls[1]![0]).toBe('https://moved');
+
+    // The moved origin fails too → the next escalation must pass 'https://moved'.
+    fireReconnectFailed();
+    jest.advanceTimersByTime(2_500); // attempt 1 backoff ≈ 2s + jitter
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(refreshUrl).toHaveBeenLastCalledWith('https://moved');
+  });
+
+  it('escalation + createServerUrlResolver picks up a store-side URL rotation', async () => {
+    // Simulates the real wiring (realtimeControl): a `new-server` event arrived over FCM
+    // while the socket was down and updated the store; the escalation re-reads it.
+    let storedOrigin = 'https://srv';
+    const refreshUrl = createServerUrlResolver([{ name: 'session', get: () => storedOrigin }]);
+    new SocketService(sink).connect('https://srv', 'pw', { refreshUrl });
+
+    storedOrigin = 'https://rotated'; // tunnel rotated while the socket was down
+    fireReconnectFailed();
+    jest.advanceTimersByTime(1_200);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockIo).toHaveBeenCalledTimes(2);
+    expect(mockIo.mock.calls[1]![0]).toBe('https://rotated');
   });
 });

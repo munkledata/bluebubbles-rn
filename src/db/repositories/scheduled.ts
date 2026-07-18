@@ -12,6 +12,8 @@ export interface ScheduledRow {
   selectedMessageGuid?: string;
   scheduledFor: number;
   status: string; // 'pending' | 'sending' | 'sent' | 'error'
+  /** null/undefined = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send. */
+  recurrence?: string | null;
 }
 
 interface ScheduledPayload {
@@ -19,7 +21,7 @@ interface ScheduledPayload {
   selectedMessageGuid?: string;
 }
 
-const SCHED_COLS = sql`id, server_id AS serverId, chat_guid AS chatGuid, payload, scheduled_for AS scheduledFor, status`;
+const SCHED_COLS = sql`id, server_id AS serverId, chat_guid AS chatGuid, payload, scheduled_for AS scheduledFor, status, recurrence`;
 
 function mapScheduled(r: {
   id: number;
@@ -28,6 +30,7 @@ function mapScheduled(r: {
   payload: string;
   scheduledFor: number;
   status: string;
+  recurrence: string | null;
 }): ScheduledRow {
   const p: ScheduledPayload = JSON.parse(r.payload);
   return {
@@ -38,6 +41,7 @@ function mapScheduled(r: {
     selectedMessageGuid: p.selectedMessageGuid,
     scheduledFor: r.scheduledFor,
     status: r.status,
+    recurrence: r.recurrence,
   };
 }
 
@@ -50,6 +54,8 @@ export async function insertScheduled(
     selectedMessageGuid?: string;
     /** Set when the server is also tracking this row (server fires it; the local ticker skips it). */
     serverId?: string | null;
+    /** null/undefined = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send. */
+    recurrence?: string | null;
   },
 ): Promise<number> {
   const payload: ScheduledPayload = {
@@ -64,6 +70,7 @@ export async function insertScheduled(
       payload: JSON.stringify(payload),
       scheduledFor: args.scheduledFor,
       status: 'pending',
+      recurrence: args.recurrence ?? null,
     })
     .returning({ id: scheduledMessages.id });
   return rows[0]!.id;
@@ -136,9 +143,20 @@ export async function reconcileServerScheduled(
 export async function updateScheduled(
   db: AppDatabase,
   id: number,
-  patch: { text?: string; scheduledFor?: number; serverId?: string | null },
+  patch: {
+    text?: string;
+    scheduledFor?: number;
+    serverId?: string | null;
+    /** Pass null to clear back to one-shot; undefined leaves it untouched. */
+    recurrence?: string | null;
+  },
 ): Promise<void> {
-  const set: { payload?: string; scheduledFor?: number; serverId?: string | null } = {};
+  const set: {
+    payload?: string;
+    scheduledFor?: number;
+    serverId?: string | null;
+    recurrence?: string | null;
+  } = {};
   if (patch.text !== undefined) {
     const cur = await db.all<{ payload: string }>(
       sql`SELECT payload FROM scheduled_messages WHERE id = ${id} LIMIT 1`,
@@ -149,6 +167,7 @@ export async function updateScheduled(
   }
   if (patch.scheduledFor !== undefined) set.scheduledFor = patch.scheduledFor;
   if (patch.serverId !== undefined) set.serverId = patch.serverId;
+  if (patch.recurrence !== undefined) set.recurrence = patch.recurrence;
   if (Object.keys(set).length === 0) return;
   await db
     .update(scheduledMessages)
@@ -236,6 +255,25 @@ export async function markScheduledSent(
     .update(scheduledMessages)
     .set({ status: 'sent', serverId })
     .where(eq(scheduledMessages.id, id));
+}
+
+/**
+ * Re-arm a RECURRING row after a successful send: back to 'pending' at its next
+ * occurrence with the attempt counter cleared, in ONE UPDATE. The `status = 'sending'`
+ * guard mirrors `claimScheduled` — only the runner that holds the claim can re-arm, so
+ * the claim contract (exactly one owner between claim and terminal write) is preserved.
+ */
+export async function rearmScheduled(
+  db: AppDatabase,
+  id: number,
+  nextScheduledFor: number,
+): Promise<boolean> {
+  const rows = await db
+    .update(scheduledMessages)
+    .set({ status: 'pending', scheduledFor: nextScheduledFor, attempts: 0 })
+    .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'sending')))
+    .returning({ id: scheduledMessages.id });
+  return rows.length > 0;
 }
 
 /**

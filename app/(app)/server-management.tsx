@@ -5,10 +5,11 @@ import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'rea
 import { showDialog } from '@ui/dialog/dialogStore';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
+import { buildSetupQr } from '@features/setup/qr';
 import { http, startSync } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
-import { InfoRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
@@ -17,6 +18,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const setServerInfo = useSessionStore((s) => s.setServerInfo);
   const origin = useSessionStore((s) => s.origin);
+  const password = useSessionStore((s) => s.password);
   const syncStatus = useSyncStore((s) => s.status);
   // Select each primitive separately — an object-returning selector `(s) => ({...})` allocates a
   // fresh object every render, which useSyncExternalStore reads as a changed snapshot → infinite
@@ -26,6 +28,18 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
   const [logs, setLogs] = useState<string | null>(null);
+  const [qrOpen, setQrOpen] = useState(false);
+
+  // The pairing payload embeds the PASSWORD — build it in memory only, never log it,
+  // and only hand it to the reveal-gated PairingQr inside the modal.
+  let pairingPayload: string | null = null;
+  if (origin && password) {
+    try {
+      pairingPayload = buildSetupQr(origin, password);
+    } catch {
+      pairingPayload = null; // malformed origin — the modal shows the "connect first" copy
+    }
+  }
 
   // Round-trip latency probe. `retry: false` mirrors the endpoint's fail-fast intent — a
   // reachability check must not mask a down server by silently retrying, and
@@ -175,6 +189,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         <SettingsSection label="ACTIONS" style={styles.gap}>
           <ActionRow label="Sync Now" disabled={syncStatus === 'syncing'} onPress={onSyncNow} />
           <ActionRow label="Server Health" onPress={() => router.push('/server-health')} />
+          <ActionRow label="Show Pairing QR" onPress={() => setQrOpen(true)} />
           <ActionRow
             label="Restart iMessage"
             disabled={!!busy}
@@ -247,6 +262,29 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
         </SettingsSection>
       </ScrollView>
+
+      {/* Conditionally rendered (not just visible=false) so PairingQr fully unmounts on close,
+          dropping any revealed QR state along with it. */}
+      {qrOpen ? (
+        <Modal visible animationType="slide" onRequestClose={() => setQrOpen(false)}>
+          <Screen>
+            <ScreenHeader
+              title="Pairing QR"
+              right={
+                <Pressable
+                  onPress={() => setQrOpen(false)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close pairing QR"
+                >
+                  <Text style={[styles.done, { color: theme.color.tint }]}>Done</Text>
+                </Pressable>
+              }
+            />
+            <PairingQr payload={pairingPayload} />
+          </Screen>
+        </Modal>
+      ) : null}
 
       <Modal visible={logs != null} animationType="slide" onRequestClose={() => setLogs(null)}>
         <Screen>

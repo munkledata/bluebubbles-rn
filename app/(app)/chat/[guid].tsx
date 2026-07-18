@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
+import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
@@ -26,6 +27,7 @@ import { clearChatNotification } from '@/services/notifications/notifeeService';
 import {
   editText,
   fireDueScheduled,
+  pickAndSendContact,
   reply,
   runDueScheduled,
   schedule,
@@ -33,6 +35,8 @@ import {
   sendImage,
   sendImages,
 } from '@/services/send';
+import { logger } from '@core/secure';
+import { useSendContactSupported } from '@state/sessionStore';
 import {
   devEditFake,
   devInjectEffect,
@@ -50,6 +54,7 @@ import {
   EdgeFade,
   EditHistorySheet,
   MessageActionsOverlay,
+  MessageDetailsSheet,
   MessageList,
   Screen,
   ThreadSheet,
@@ -216,9 +221,15 @@ function ChatScreenInner({
   // useCallback-stable: these feed the memoized Composer (and SmartReplyChips), so a reactive
   // tick re-rendering the screen doesn't re-render the composer through fresh closures.
   const onSchedule = useCallback(
-    (text: string, scheduledFor: number): void => {
+    (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
       // Capture the active reply target so a scheduled reply still threads.
-      void schedule({ chatGuid: guid, text, scheduledFor, selectedMessageGuid: replyTo?.guid });
+      void schedule({
+        chatGuid: guid,
+        text,
+        scheduledFor,
+        selectedMessageGuid: replyTo?.guid,
+        recurrence,
+      });
       setReplyTo(null);
     },
     [guid, replyTo],
@@ -265,6 +276,9 @@ function ChatScreenInner({
     editHistory,
     setEditHistory,
     onViewEditHistorySelected,
+    details,
+    setDetails,
+    onDetailsSelected,
     onLongPressMessage,
     onSwipeReply,
     onToggleSelect,
@@ -356,6 +370,13 @@ function ChatScreenInner({
   const onTyping = useCallback((active: boolean): void => void sendTyping(guid, active), [guid]);
   const onStartVoice = useCallback((): void => setRecording(true), []);
 
+  // Contact card: only offered when the server can build vCards (supports_send_contact). Opens the
+  // native picker and sends the chosen contact (optimistic bubble + reconcile inside the service).
+  const supportsSendContact = useSendContactSupported();
+  const onPickContact = useCallback((): void => {
+    pickAndSendContact(guid).catch((e) => logger.warn('[chat] contact pick/send failed', e));
+  }, [guid]);
+
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
   const kbVisible = useKeyboardVisible();
@@ -418,7 +439,14 @@ function ChatScreenInner({
   // persists any in-progress draft to kv AND to `draft` state (via onDraftChange), so exiting
   // select mode remounts the Composer with a fresh `initialText` and restores the draft.
   const selectionBar = selectedGuids ? (
-    <View style={[styles.selectBar, { borderTopColor: theme.color.separator }]}>
+    // Add the bottom safe-area inset (like the Composer this bar replaces) so Copy/Delete/Done
+    // clear the Android system nav bar under edge-to-edge instead of hiding behind it.
+    <View
+      style={[
+        styles.selectBar,
+        { borderTopColor: theme.color.separator, paddingBottom: insets.bottom + 14 },
+      ]}
+    >
       <Text style={[styles.selectCount, { color: theme.color.label }]}>
         {selectedGuids.size} selected
       </Text>
@@ -453,6 +481,7 @@ function ChatScreenInner({
         onSend={onSend}
         onSendAttachments={onSendAttachments}
         onPickFiles={pickFiles}
+        onPickContact={supportsSendContact ? onPickContact : undefined}
         replyTo={replyTo}
         onCancelReply={onCancelReply}
         editingText={editing?.text ?? null}
@@ -484,9 +513,17 @@ function ChatScreenInner({
           accessibilityIgnoresInvertColors
         />
       ) : null}
-      {/* `padding` consumes the keyboard inset under Android edge-to-edge
-          (RN 0.85 / Expo SDK 56 default), keeping the composer above the keyboard. */}
-      <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
+      {/* `padding` consumes the keyboard inset under Android edge-to-edge (RN 0.86 / Expo SDK 57
+          default), keeping the composer above the keyboard. `keyboardVerticalOffset={-insets.bottom}`
+          cancels the nav-bar-sized padding KAV would otherwise leave (the Composer already reserves
+          `insets.bottom` itself) — without it the composer floats a nav-bar's height above the
+          keyboard. Same fix the inbox uses (ConversationListScreen). */}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior="padding"
+        enabled={kbVisible}
+        keyboardVerticalOffset={-insets.bottom}
+      >
         {/* ONE structural tree for both modes — the wallpaper flag only switches STYLES (bars go
             absolute, veils appear, the list gains insets). The flag arrives ASYNC (reactive DB
             read, null on first render; a participant-set background can also land mid-chat), so
@@ -567,6 +604,7 @@ function ChatScreenInner({
         onDelete={onDeleteSelected}
         onViewThread={onViewThreadSelected}
         onViewEditHistory={onViewEditHistorySelected}
+        onDetails={onDetailsSelected}
         onSelect={onEnterSelect}
       />
       <ThreadSheet
@@ -575,6 +613,11 @@ function ChatScreenInner({
         onJump={(m) => setJump({ guid: m.guid, dateCreated: m.dateCreated })}
       />
       <EditHistorySheet data={editHistory} onClose={() => setEditHistory(null)} />
+      <MessageDetailsSheet
+        data={details}
+        onClose={() => setDetails(null)}
+        chatService={chatService}
+      />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />
       ) : null}

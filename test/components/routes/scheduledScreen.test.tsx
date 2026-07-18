@@ -167,6 +167,17 @@ describe('ScheduledScreen', () => {
     expect(mockBack).toHaveBeenCalled();
   });
 
+  it('shows a compact recurrence label on recurring rows', async () => {
+    setRows([
+      makeRow({ id: 11, text: 'standup ping', recurrence: 'daily' }),
+      makeRow({ id: 12, text: 'one-off', recurrence: null }),
+    ]);
+    await renderWithTheme(<ScheduledScreen />);
+    expect(screen.getByText(/Repeats daily/)).toBeTruthy();
+    // The one-shot row's subtitle carries no recurrence tag.
+    expect(screen.queryAllByText(/Repeats/)).toHaveLength(1);
+  });
+
   it('surfaces sent + failed messages under a COMPLETED section (no longer vanishing silently)', async () => {
     setRows(
       [makeRow({ id: 1, text: 'still pending' })],

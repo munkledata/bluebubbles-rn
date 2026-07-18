@@ -38,4 +38,45 @@ describe('MemorySink (in-app log viewer buffer)', () => {
     expect(a).toEqual(['hello']);
     expect(b).toEqual(['hello']);
   });
+
+  it('TeeSink.add() attaches a sink after construction (for the boot-time file sink)', () => {
+    const seen: string[] = [];
+    const late: LogSink = { write: (_l, m) => void seen.push(m) };
+    const tee = new TeeSink({ write: () => undefined });
+    tee.write('info', 'before'); // late sink not attached yet
+    tee.add(late);
+    tee.write('info', 'after');
+    expect(seen).toEqual(['after']);
+  });
+
+  it('hydrate() prepends restored (older) entries before this session and keeps newest-first order', () => {
+    const sink = new MemorySink();
+    sink.write('info', 'session-1');
+    sink.write('info', 'session-2');
+    // Restored disk history is oldest-first; it should appear BEFORE the session lines.
+    sink.hydrate([
+      { level: 'info', message: 'disk-old', timestamp: 1 },
+      { level: 'info', message: 'disk-new', timestamp: 2 },
+    ]);
+    expect(sink.entries().map((e) => e.message)).toEqual([
+      'session-2',
+      'session-1',
+      'disk-new',
+      'disk-old',
+    ]);
+  });
+
+  it('hydrate() still caps the buffer to 500 after prepending history', () => {
+    const sink = new MemorySink();
+    for (let i = 0; i < 400; i++) sink.write('info', `s${i}`);
+    const history = Array.from({ length: 300 }, (_v, i) => ({
+      level: 'info' as const,
+      message: `h${i}`,
+      timestamp: i,
+    }));
+    sink.hydrate(history);
+    expect(sink.entries()).toHaveLength(500);
+    // Newest kept = the latest session line; oldest history rows fall off the front.
+    expect(sink.entries()[0]!.message).toBe('s399');
+  });
 });

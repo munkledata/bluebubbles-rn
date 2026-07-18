@@ -10,6 +10,7 @@ import { syncContacts } from '@/services/contacts/contactsService';
 import {
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
   useFeatureSettingsStore,
+  type AutoDownloadDestination,
 } from '@state/featureSettingsStore';
 import { MESSAGES_PER_CHAT_OPTIONS, useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useLockStore } from '@state/lockStore';
@@ -31,6 +32,13 @@ import {
 } from '@ui';
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
 
+/** Where auto-downloaded images are additionally saved (the picker in the DOWNLOADS section). */
+const AUTO_DOWNLOAD_DEST_OPTIONS: { value: AutoDownloadDestination; label: string }[] = [
+  { value: 'app', label: 'App only' },
+  { value: 'gallery', label: 'Photos gallery' },
+  { value: 'album', label: 'Gator album' },
+];
+
 /** Settings: theme presets + contacts sync (more sections land in later phases). */
 export default function SettingsScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -51,6 +59,8 @@ export default function SettingsScreen(): React.JSX.Element {
   const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
+  const autoDownloadDestination = useFeatureSettingsStore((s) => s.autoDownloadDestination);
+  const setAutoDownloadDestination = useFeatureSettingsStore((s) => s.setAutoDownloadDestination);
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
   const showDeliveryTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
@@ -77,7 +87,7 @@ export default function SettingsScreen(): React.JSX.Element {
     notifications:
       'notifications alerts message notifications sound battery optimization background doze delivery reliable',
     downloads:
-      'downloads parallel concurrent attachments images media bandwidth auto-download wifi',
+      'downloads parallel concurrent attachments images media bandwidth auto-download wifi gallery album photos save destination location',
     sync: 'sync messages per chat initial history',
     privacy: 'privacy redacted mode hide previews encryption key rotate security',
     server:
@@ -313,31 +323,46 @@ export default function SettingsScreen(): React.JSX.Element {
         )}
 
         {match(SECTIONS.downloads) && (
-          <SettingsSection label="DOWNLOADS" style={styles.gap}>
-            <SwitchRow
-              label="Auto-download Attachments"
-              value={autoDownload}
-              onValueChange={(v) => void setFlag('autoDownloadAttachments', v)}
-              accessibilityLabel="Automatically download incoming attachments"
-            />
-            <SwitchRow
-              label="Only on Wi-Fi"
-              value={autoDownloadWifiOnly}
-              disabled={!autoDownload}
-              onValueChange={(v) => void setFlag('autoDownloadOnWifiOnly', v)}
-              accessibilityLabel="Only auto-download attachments on Wi-Fi"
-            />
-            <StepperRow
-              label="Parallel Downloads"
-              value={maxDownloads}
-              onDecrement={() => void setMaxDownloads(maxDownloads - 1)}
-              onIncrement={() => void setMaxDownloads(maxDownloads + 1)}
-              canDecrement={maxDownloads > 1}
-              canIncrement={maxDownloads < MAX_CONCURRENT_DOWNLOADS_LIMIT}
-              decrementLabel="Fewer parallel downloads"
-              incrementLabel="More parallel downloads"
-            />
-          </SettingsSection>
+          <>
+            <SettingsSection label="DOWNLOADS" style={styles.gap}>
+              <SwitchRow
+                label="Auto-download Attachments"
+                value={autoDownload}
+                onValueChange={(v) => void setFlag('autoDownloadAttachments', v)}
+                accessibilityLabel="Automatically download incoming attachments"
+              />
+              <SwitchRow
+                label="Only on Wi-Fi"
+                value={autoDownloadWifiOnly}
+                disabled={!autoDownload}
+                onValueChange={(v) => void setFlag('autoDownloadOnWifiOnly', v)}
+                accessibilityLabel="Only auto-download attachments on Wi-Fi"
+              />
+              <StepperRow
+                label="Parallel Downloads"
+                value={maxDownloads}
+                onDecrement={() => void setMaxDownloads(maxDownloads - 1)}
+                onIncrement={() => void setMaxDownloads(maxDownloads + 1)}
+                canDecrement={maxDownloads > 1}
+                canIncrement={maxDownloads < MAX_CONCURRENT_DOWNLOADS_LIMIT}
+                decrementLabel="Fewer parallel downloads"
+                incrementLabel="More parallel downloads"
+              />
+            </SettingsSection>
+            <SettingsSection label="SAVE AUTO-DOWNLOADED IMAGES TO" style={styles.subGroup}>
+              {AUTO_DOWNLOAD_DEST_OPTIONS.map((opt) => (
+                <CheckRow
+                  key={opt.value}
+                  label={opt.label}
+                  checked={autoDownloadDestination === opt.value}
+                  onPress={() => void setAutoDownloadDestination(opt.value)}
+                  disabled={!autoDownload}
+                  dimmed={!autoDownload}
+                />
+              ))}
+              <NoteRow text="A copy is saved outside the app. Photos permission is requested the first time. Images always appear in chats regardless." />
+            </SettingsSection>
+          </>
         )}
 
         {match(SECTIONS.sync) && (

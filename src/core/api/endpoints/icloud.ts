@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { ApiError, UnimplementedEndpointError } from '../errors';
 import type { HttpClient } from '../http';
 
 /**
@@ -27,8 +28,18 @@ export const AccountInfo = z
 export type AccountInfo = z.infer<typeof AccountInfo>;
 
 /** GET /api/v1/icloud/account — the signed-in account + its aliases. */
-export function getAccountInfo(http: HttpClient): Promise<AccountInfo> {
-  return http.get('/icloud/account', AccountInfo);
+export async function getAccountInfo(http: HttpClient): Promise<AccountInfo> {
+  try {
+    return await http.get('/icloud/account', AccountInfo);
+  } catch (e) {
+    // Not every Gator server implements this route (it 404s). Surface that as "unsupported" so the
+    // screen can show an honest message rather than blaming the Private API. A real auth/network
+    // failure (any non-404) propagates unchanged.
+    if (e instanceof ApiError && e.status === 404) {
+      throw new UnimplementedEndpointError('/icloud/account');
+    }
+    throw e;
+  }
 }
 
 const SetAliasResult = z.object({ activeAlias: z.string().nullish() }).loose();

@@ -8,10 +8,9 @@ import {
   setChatArchive,
   setChatMute,
   setChatPin,
-  setChatUnreadLocal,
   type InboxRow,
 } from '@db/repositories';
-import { markRead } from '@/services';
+import { markRead, markUnread } from '@/services';
 import { resolveTitle } from '@utils';
 import { useTheme } from '../theme';
 
@@ -94,11 +93,7 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() =>
-                    target.unread
-                      ? markRead(target.guid)
-                      : setChatUnreadLocal(getDatabase(), target.guid),
-                  )
+                  run(() => (target.unread ? markRead(target.guid) : markUnread(target.guid)))
                 }
               />
               <Row

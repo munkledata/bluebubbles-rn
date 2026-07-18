@@ -39,3 +39,22 @@ export function parseSetupQr(raw: string | null | undefined): ParsedSetupQr {
 
   return { password, origin };
 }
+
+/**
+ * Build the setup QR payload for DISPLAY on this device, so another device can
+ * scan it and pair. Emits the exact shape `parseSetupQr` (and the Flutter app)
+ * accept: a JSON array `[password, serverURL]`.
+ *
+ * SECURITY: the returned string contains the server password. Never log it and
+ * only render it behind an explicit user reveal (see PairingQr).
+ *
+ * Throws when either credential is missing/blank — callers should treat that as
+ * "no QR available", not render an empty code.
+ */
+export function buildSetupQr(origin: string, password: string): string {
+  const cleanOrigin = sanitizeServerAddress(origin);
+  if (!cleanOrigin || !password) {
+    throw new Error('Server URL and password are required to build a pairing QR.');
+  }
+  return JSON.stringify([password, cleanOrigin]);
+}

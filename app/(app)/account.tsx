@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as icloudApi from '@core/api/endpoints/icloud';
 import type { AccountInfo } from '@core/api/endpoints/icloud';
+import { isUnimplementedEndpoint } from '@core/api/errors';
 import { http } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { CheckRow, InfoRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
@@ -24,12 +25,16 @@ export default function AccountScreen(): React.JSX.Element {
     queryFn: () => icloudApi.getAccountInfo(http),
   });
   const info = accountQuery.data ?? null;
+  // 'unsupported' = the server doesn't implement /icloud/account (a 404, remapped to
+  // UnimplementedEndpointError) — a distinct, non-alarming state vs a real load 'error'.
   // 'loading' covers both the first fetch and the "Try again" refetch after an error.
-  const status: 'loading' | 'ready' | 'error' =
+  const status: 'loading' | 'ready' | 'error' | 'unsupported' =
     accountQuery.isPending || (accountQuery.isError && accountQuery.isFetching)
       ? 'loading'
       : accountQuery.isError
-        ? 'error'
+        ? isUnimplementedEndpoint(accountQuery.error)
+          ? 'unsupported'
+          : 'error'
         : 'ready';
 
   // vettedAliases gates which aliases can be selected (Apple must have enabled them for iMessage);
@@ -65,10 +70,17 @@ export default function AccountScreen(): React.JSX.Element {
         <View style={styles.center}>
           <ActivityIndicator color={theme.color.tint} />
         </View>
+      ) : status === 'unsupported' ? (
+        <View style={styles.center}>
+          <Text style={[styles.note, { color: theme.color.secondaryLabel, textAlign: 'center' }]}>
+            This Gator server doesn’t provide iMessage account details yet. Nothing’s wrong with your
+            setup — the feature just isn’t available on this server.
+          </Text>
+        </View>
       ) : status === 'error' ? (
         <View style={styles.center}>
           <Text style={[styles.note, { color: theme.color.secondaryLabel, textAlign: 'center' }]}>
-            Couldn’t load your account. This needs the Private API helper connected on your server.
+            Couldn’t load your account. Check your server connection and try again.
           </Text>
           <Pressable onPress={() => void accountQuery.refetch()} style={styles.retry}>
             <Text style={{ color: theme.color.tint, fontSize: 16 }}>Try again</Text>

@@ -551,8 +551,9 @@ export async function setLastReadMessageGuid(
 
 /**
  * Mark a chat UNREAD locally: clear the read marker so `unreadCount` (messages newer than the
- * marker) counts all received messages again and the inbox badge/bold-title returns. Local-only —
- * there is no server "mark unread". Opening the chat re-marks it read.
+ * marker) counts all received messages again and the inbox badge/bold-title returns. This is the
+ * LOCAL half only — the service `markUnread` (chatActions.ts) calls it, then best-effort syncs the
+ * Mac via POST /chat/:guid/unread. Opening the chat re-marks it read.
  */
 export async function setChatUnreadLocal(db: AppDatabase, chatGuid: string): Promise<void> {
   await db.update(chats).set({ lastReadMessageGuid: null }).where(eq(chats.guid, chatGuid));

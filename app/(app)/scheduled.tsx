@@ -2,6 +2,7 @@ import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { StyleSheet, Text } from 'react-native';
+import { asRecurrence, recurrenceLabel } from '@core/schedule';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import {
@@ -78,10 +79,12 @@ export default function ScheduledScreen(): React.JSX.Element {
           const row = item.row;
           const status = statusLine(row);
           const pendingRow = isPendingRow(row);
+          // Compact recurrence tag, e.g. "· Repeats daily" (null for one-shot rows).
+          const rec = asRecurrence(row.recurrence);
           return (
             <ActionListRow
               title={row.text}
-              subtitle={`${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}`}
+              subtitle={`${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec ? ` · ${recurrenceLabel(rec)}` : ''}`}
               subtitleColor={status.color}
               disabled={!pendingRow}
               onPress={() => router.push(`/scheduled-edit/${row.id}`)}

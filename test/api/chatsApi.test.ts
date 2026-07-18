@@ -1,4 +1,4 @@
-import { createChat } from '@core/api/endpoints/chats';
+import { createChat, markChatUnread } from '@core/api/endpoints/chats';
 import type { HttpClient } from '@core/api/http';
 
 describe('chatsApi.createChat', () => {
@@ -20,5 +20,19 @@ describe('chatsApi.createChat', () => {
       expect.anything(),
       expect.objectContaining({ json: expect.objectContaining({ service: 'SMS' }) }),
     );
+  });
+});
+
+describe('chatsApi.markChatUnread', () => {
+  it('POSTs /chat/{guid}/unread with the guid encoded into the PATH, never the query', async () => {
+    const post = jest.fn((..._a: unknown[]) => Promise.resolve({}));
+    const http = { post } as unknown as HttpClient;
+    const guid = 'iMessage;-;+15551234567';
+    await markChatUnread(http, guid);
+    expect(post).toHaveBeenCalledTimes(1);
+    const [path, , opts] = post.mock.calls[0]!;
+    expect(path).toBe(`/chat/${encodeURIComponent(guid)}/unread`);
+    expect(path).not.toContain('?'); // no query string at all
+    expect(opts).toBeUndefined(); // and no options object smuggling a { query: { guid } }
   });
 });

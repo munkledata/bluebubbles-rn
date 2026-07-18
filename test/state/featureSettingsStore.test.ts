@@ -1,6 +1,10 @@
 import { getDatabase } from '@db/database';
 import { kvGet, kvSet } from '@db/repositories';
-import { MAX_CONCURRENT_DOWNLOADS_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
+import {
+  AUTO_DOWNLOAD_DEST_KEY,
+  MAX_CONCURRENT_DOWNLOADS_KEY,
+  useFeatureSettingsStore,
+} from '@state/featureSettingsStore';
 import {
   DEFAULT_MAX_CONCURRENT_DOWNLOADS,
   setMaxConcurrentDownloads,
@@ -40,6 +44,7 @@ beforeEach(() => {
   useFeatureSettingsStore.setState({
     ...DEFAULTS,
     maxConcurrentDownloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+    autoDownloadDestination: 'album',
     hydrated: false,
   });
 });
@@ -158,5 +163,29 @@ describe('featureSettingsStore — maxConcurrentDownloads value setting', () => 
     });
     await useFeatureSettingsStore.getState().hydrate();
     expect(useFeatureSettingsStore.getState().hydrated).toBe(false);
+  });
+});
+
+describe('featureSettingsStore — autoDownloadDestination', () => {
+  it('hydrates the default (album) when nothing was persisted', async () => {
+    await openTestDb();
+    await useFeatureSettingsStore.getState().hydrate();
+    expect(useFeatureSettingsStore.getState().autoDownloadDestination).toBe('album');
+  });
+
+  it('round-trips a persisted destination', async () => {
+    const db = await openTestDb();
+    await useFeatureSettingsStore.getState().setAutoDownloadDestination('gallery');
+    expect(await kvGet(db, AUTO_DOWNLOAD_DEST_KEY)).toBe('gallery');
+    useFeatureSettingsStore.setState({ autoDownloadDestination: 'album', hydrated: false });
+    await useFeatureSettingsStore.getState().hydrate();
+    expect(useFeatureSettingsStore.getState().autoDownloadDestination).toBe('gallery');
+  });
+
+  it('falls back to the default for a corrupt persisted value', async () => {
+    const db = await openTestDb();
+    await kvSet(db, AUTO_DOWNLOAD_DEST_KEY, 'nonsense');
+    await useFeatureSettingsStore.getState().hydrate();
+    expect(useFeatureSettingsStore.getState().autoDownloadDestination).toBe('album');
   });
 });

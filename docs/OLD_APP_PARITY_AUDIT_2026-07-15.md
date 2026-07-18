@@ -197,7 +197,7 @@ tapbacks._
 - **[H] Group / chat-event system messages** — see shortlist #1.
 - **[H] Scroll-back pagination** — see shortlist #2.
 - **[M] Reply-thread view** — old app's "N replies" property opens a popup of all replies. RN
-  shows a single quote + jump, no thread view or count.
+  shows a single quote + jump, no thread view or count. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Swipe-to-reply gesture** — old app swipes a bubble to set it as reply target. RN's
   `SwipeableRow` is wired only to inbox tiles, not message rows.
 - **[M] Swipe-to-reveal per-message timestamps** — old app drags the list left to reveal each
@@ -206,19 +206,21 @@ tapbacks._
   stores `lastReadMessageGuid` but never surfaces it.
 - **[M] Image-gallery grid collapse** — old app collapses consecutive photos into one grid
   bubble. RN stacks them vertically.
-- **[M] Delete a confirmed message locally** — see shortlist #3.
+- **[M] Delete a confirmed message locally** — see shortlist #3. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Per-message Info / details popup** — no per-message metadata view (compounds the missing
   timestamp reveal).
-- **[M] Multi-select mode** — no bulk-select of messages.
+- **[M] Multi-select mode** — no bulk-select of messages. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Recipient Focus/DND "notifications silenced" banner** — RN never fetches focus state.
 - **[L]** View edit history · send-effect replay label · sender actions (open DM/create contact) ·
   reaction details (who reacted) · bookmark · extended attachment actions · interactive-app
   balloon fallback · send/insert animation.
 - **Partials:** receipt line is hidden when "Show Delivery Timestamps" is off (old app keeps the
   label, toggle only adds the time); intra-day time separators missing (RN needs a *different
-  day* AND >30min, old app shows a separator on any >30min gap); **reactions don't show on
-  attachment-only messages** (nested in the text branch — react to a photo and no badge appears —
-  arguably a bug); forward is text-only; no reply-thread connector lines.
+  day* AND >30min, old app shows a separator on any >30min gap); ~~reactions don't show on
+  attachment-only messages~~ _(✅ fixed in `b217bea` 2026-07-16 — `attsReactionAnchor` in
+  `MessageBubble`; gallery-path regression test added 2026-07-17)_; ~~forward is text-only~~
+  _(✅ attachment forwarding shipped 2026-07-17 — downloaded attachments stage into new-chat via
+  `forwardParams.ts`)_; no reply-thread connector lines.
 
 ### Composer, attachment tray, camera, audio
 _Already at parity: multiline field, dynamic send/mic, send-with-return, effect picker on
@@ -226,9 +228,9 @@ long-press-send, reply/edit compose, staged-attachment strip, camera photo, rece
 document picker, local schedule, typing debounce, voice-memo send._
 
 - **[M] Per-chat drafts not persisted** — text + staged attachments live in local `useState`,
-  thrown away on unmount. Back out of a half-typed message and it's gone.
-- **[M] @mention autocomplete + compose** — see cross-cutting themes.
-- **[M] Subject-line compose field** — see cross-cutting themes.
+  thrown away on unmount. Back out of a half-typed message and it's gone. _(✅ closed 2026-07-16 — see Completed section.)_
+- **[M] @mention autocomplete + compose** — see cross-cutting themes. _(✅ closed 2026-07-16 — see Completed section.)_
+- **[M] Subject-line compose field** — see cross-cutting themes. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Record NEW video with the camera** — the Camera button captures stills only
   (`launchCameraAsync` with no `mediaTypes`).
 - **[M] Keyboard content-insertion (Gboard GIF/sticker)** — RN's plain `TextInput` doesn't forward
@@ -245,10 +247,10 @@ document picker, local schedule, typing debounce, voice-memo send._
 _Already at parity: React (classic + arbitrary emoji), Reply, Copy, Forward, Save, Remind Me
 Later, Edit, Unsend, Cancel Sending._
 
-- **[H] Delete message (local)** — see shortlist #3.
-- **[M] Select multiple** — no bulk message selection.
+- **[H] Delete message (local)** — see shortlist #3. _(✅ closed 2026-07-16 — see Completed section.)_
+- **[M] Select multiple** — no bulk message selection. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Share via system share sheet** — Copy/Forward/Save exist but no Share from a message.
-- **[M] View thread** — thread data exists (`threadOriginatorGuid`) but no thread-chain viewer.
+- **[M] View thread** — thread data exists (`threadOriginatorGuid`) but no thread-chain viewer. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[L]** Bookmark · Message Info · Open DM (group member) · Start Conversation (group member) ·
   Create Contact · Save Original · Save Live Photo · Re-download attachment.
 - **Partials:** Forward is text-only (can't carry attachments; button hidden unless `hasText`);
@@ -264,7 +266,7 @@ background the old app lacks._
   channel (custom sound/importance/vibration). RN has only an in-app mute switch + 3 global
   channels.
 - **[M] Set/change chat avatar (group photo + local custom avatar)** — no avatar block at all; no
-  `setIcon`/`removeIcon`.
+  `setIcon`/`removeIcon`. _(✅ group-photo set/remove closed 2026-07-16 — see Completed section; local custom avatar still open.)_
 - **[M] Contact card — view/add contact + DM contact info** — no view-contact or add-to-contacts.
 - **[L]** Multi-select shared media + bulk save · per-chat private-API overrides · per-chat sync
   range · locations section · voice-call/mail quick-actions · view bookmarks · clear/download
@@ -279,7 +281,7 @@ _Already at parity (stale-audit HIGHs closed): removable recipient chips that ap
 existing-chat detection + "Open it" banner, forward-text-into-new-chat._
 
 - **[M] Per-recipient iMessage availability (chip color + auto SMS switch)** — RN never queries
-  availability; all chips one color, user must guess iMessage vs SMS.
+  availability; all chips one color, user must guess iMessage vs SMS. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Address validation (isEmail/isPhoneNumber)** — RN accepts any string as a recipient chip
   ("asdf" becomes a recipient); failure surfaces later as a generic error.
 - **[M] E.164 phone normalization** — RN passes typed text verbatim into `createChat`, creating
@@ -332,7 +334,7 @@ auto full-sync with per-chat cap + backfill, insecure-http acknowledgement (an i
 
 - **[M] Permissions request page (Contacts + Notifications)** — RN requests these implicitly/
   lazily with no status UI, re-grant, or "open Settings" recovery.
-- **[M] Battery-optimization exemption page** — see shortlist #9.
+- **[M] Battery-optimization exemption page** — see shortlist #9. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[L]** Sync-time filter · skip-empty-chats · save-sync-log + live log · sync % + progress bar ·
   confetti on complete · restore-during-setup · server-setup help page · custom headers · password
   show/hide.
@@ -345,7 +347,7 @@ _Already at parity: show delivery timestamps, send-with-return, suggested replie
 working settings search (section-level)._
 
 - **[M] Message status indicators on chat tiles** — no last-outgoing delivery/read state on tiles.
-- **[M] Filter Unknown Senders (separate list + notification suppression)** — absent.
+- **[M] Filter Unknown Senders (separate list + notification suppression)** — absent. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Unarchive chats on new message** — the realtime sink never clears `is_archived` on an
   inbound message.
 - **[M] Store Last Read / scroll back to last unread** — tracked for badge count only; chat always
@@ -379,7 +381,7 @@ edit/unsend/reactions/effects/replies; redacted mode masks across the whole app 
 notifications. Firebase/UnifiedPush/Tasker/keep-alive all correctly na-fork (Gator ships its own
 FCM)._
 
-- **[M] Send Subject Lines (toggle + field)** — see cross-cutting themes.
+- **[M] Send Subject Lines (toggle + field)** — see cross-cutting themes. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[M] Manual Mark Read mode** — RN always auto-marks read on open; no way to read without
   sending a receipt.
 - **[M] Granular redacted sub-toggles** — old app has 4 independent toggles (hide content /
@@ -476,9 +478,9 @@ old `ActionHandler` switch does, plus Gator-only events (message-send-error, new
 rcs-alert, rcs-bridge-down). Send/edit/unsend/react solid (incl. custom-emoji tapbacks);
 optimistic queue with atomic claim + backoff; sync (full + incremental + backfill) complete._
 
-- **[M] Send @mentions in groups** — see cross-cutting themes.
-- **[M] Set/remove custom group chat photo** — no `setIcon`/`removeIcon` endpoints.
-- **[M] Auto-detect iMessage vs SMS availability** — no availability query; manual toggle only.
+- **[M] Send @mentions in groups** — see cross-cutting themes. _(✅ closed 2026-07-16 — see Completed section.)_
+- **[M] Set/remove custom group chat photo** — no `setIcon`/`removeIcon` endpoints. _(✅ closed 2026-07-16 — see Completed section.)_
+- **[M] Auto-detect iMessage vs SMS availability** — no availability query; manual toggle only. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[L]** Recipient Focus/DND indicator · "Notify Anyway" for quiet messages · Live Photo motion ·
   embedded interactive media · compose subject · create contact on server · lock-the-Mac admin.
 - **Partials:** **mark-unread doesn't sync to the Mac** (read does); **text + attachment sent as
@@ -494,7 +496,7 @@ optimistic queue with atomic claim + backoff; sync (full + incremental + backfil
   expo-location).
 - **[M] Android SEND / SEND_MULTIPLE share-target** — the app never appears in Android's share
   sheet (no `intentFilters`; needs expo-share-intent + prebuild).
-- **[M] @mention autocomplete in composer** — same theme as above.
+- **[M] @mention autocomplete in composer** — same theme as above. _(✅ closed 2026-07-16 — see Completed section.)_
 - **[L]** Subject line · Focus/DND banner + Notify Anyway · emoji-picker button.
 - **Partials:** stickers render as inline images but no peel-and-place overlay on the target
   bubble; notification quick-reply is **present** (checked, not a gap).

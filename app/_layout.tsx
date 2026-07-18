@@ -18,7 +18,7 @@ import { hydrateAllStores } from '@state/hydrateStores';
 import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { AppDialog, ErrorBoundary, ThemeProvider } from '@ui';
+import { AppDialog, AppToast, ErrorBoundary, ThemeProvider } from '@ui';
 
 /**
  * Root layout: app-wide providers + the navigation stack. On mount it boots —
@@ -52,6 +52,9 @@ export default function RootLayout(): React.JSX.Element {
             {/* App-wide themed dialog host (replaces native Alert.alert). Mounted here inside
                 ThemeProvider so it's themed and covers every screen, above the nav stack. */}
             <AppDialog />
+            {/* Ephemeral, non-blocking status pill (e.g. auto-download confirmations). After the
+                dialog so it paints above it if both are up. */}
+            <AppToast />
             {locked ? (
               <View style={StyleSheet.absoluteFill}>
                 <LockScreen onUnlock={completeUnlock} />

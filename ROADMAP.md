@@ -37,8 +37,9 @@ We do **not** blindly port Flutter. We take what fits our architecture and targe
 ## Phase 1 — Robustness & reactivity (highest ROI, ~no native deps)
 
 ### 1.1 Socket backoff + reconnect escalation — **M**
-- **Why:** our `src/services/realtime/socketService.ts` (65 lines) delegates everything to socket.io
-  defaults; flaky ngrok/zrok tunnels drop us with no escalation.
+- **Why:** our `src/services/realtime/socketService.ts` (65 lines at the time; now ~302 lines with
+  the backoff/escalation DONE) delegated everything to socket.io
+  defaults; flaky ngrok/zrok tunnels dropped us with no escalation.
 - **Do:** add tiered reconnection — socket.io quick retries → on exhaust, a capped exponential backoff
   that also triggers a **server-URL refresh** (we already have Firebase URL discovery in
   `core/config`). Mirror Flutter `socket_service.dart`'s ladder.
@@ -95,7 +96,7 @@ We do **not** blindly port Flutter. We take what fits our architecture and targe
 - **Do:** map the stored numeric send-error code to a friendly title (port Flutter's `ClientMessageError`
   table) in `messageStatus.ts`; show it in the error bubble + retry sheet.
 
-### 2.5 Like/love a message from the notification — **M** _(native: Notifee actions already linked)_
+### 2.5 Like/love a message from the notification — **M** _(native: Notifee actions already linked; Notifee has since become `react-native-notify-kit` — same API)_
 - **Do:** add reaction actions to the Notifee message notification (`notifeeService.ts`) + handle them in
   `actions.ts` → `sendReaction`. No new native module (Notifee is already built).
 

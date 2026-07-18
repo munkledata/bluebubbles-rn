@@ -145,6 +145,10 @@ const config: ExpoConfig = {
           // "Allow insecure connection" toggle (services/index.ts + the manual-setup screen).
           // HTTPS / a tunnel remains the recommended path, especially for remote access.
           usesCleartextTraffic: true,
+          // No adb/device-transfer backups (SEC-6): the SQLCipher key lives in the Android
+          // Keystore and never leaves the device, so a backed-up DB is undecryptable anyway —
+          // but message metadata and the kv table shouldn't ride along in a backup either.
+          allowBackup: false,
           minSdkVersion: 24,
           // react-native-notify-kit needs no extraMavenRepos: since 9.2.0 the native
           // core compiles from source (autolinked), so the old notifee local-AAR maven

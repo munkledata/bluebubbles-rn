@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { asRecurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
@@ -8,6 +9,7 @@ import { getScheduledById } from '@db/repositories';
 import { editScheduled } from '@/services/send';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
+import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
 import { formatChatDate, formatTime } from '@utils';
 
 /** Edit a still-pending scheduled message: change the text and/or the fire time. */
@@ -18,6 +20,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   const schedId = Number(id);
   const [text, setText] = useState('');
   const [when, setWhen] = useState<number | null>(null);
+  const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -28,6 +31,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
         if (row) {
           setText(row.text);
           setWhen(row.scheduledFor);
+          setRecurrence(asRecurrence(row.recurrence));
         }
       } catch (e) {
         // A failed read must not leave the screen permanently blank (loaded stuck false).
@@ -49,7 +53,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
     if (!trimmed) return;
     // editScheduled mirrors the change to the server first (for server-backed rows); a failed
     // server update rethrows so we surface it instead of silently diverging.
-    void editScheduled(schedId, { text: trimmed, scheduledFor: when ?? undefined })
+    void editScheduled(schedId, { text: trimmed, scheduledFor: when ?? undefined, recurrence })
       .then(() => router.back())
       .catch(() => showDialog('Scheduled', 'Couldn’t update — the server is unreachable.'));
   };
@@ -100,6 +104,8 @@ export default function ScheduledEditScreen(): React.JSX.Element {
               {when != null ? `${formatChatDate(when)} ${formatTime(when)}` : 'Pick a time'}
             </Text>
           </Pressable>
+          <Text style={[styles.repeatLabel, { color: theme.color.secondaryLabel }]}>Repeat</Text>
+          <RecurrencePicker value={recurrence} onChange={setRecurrence} />
         </View>
       ) : null}
     </Screen>
@@ -121,4 +127,5 @@ const styles = StyleSheet.create({
   },
   timeLabel: { fontSize: 16 },
   timeValue: { fontSize: 16 },
+  repeatLabel: { fontSize: 13, marginTop: 4, marginLeft: 4 },
 });

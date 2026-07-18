@@ -5,6 +5,14 @@ real Android device/emulator (Android SDK + JDK) or an EAS Dev Client build, so 
 **deferred** until that toolchain is available — they could not be run in the
 foundation pass (which is Node-only). Each has a binary pass/fail gate.
 
+**Partial on-device validation since (2026-07-17 note):** per AGENTS.md, some of what these
+spikes cover has since been proven on real hardware — the libsodium crypto self-test
+(`runCryptoSelfTest`, round-trip + tamper-reject) and the string-only AAD behavior are verified
+on device (covers Spike 4's core), and SQLCipher `PRAGMA rekey` (proven 2026-06-20) + FTS5
+compile-in are verified on device (overlaps Spike 1's encryption gate). The formal spike gates
+remain unrun: 60 fps scroll at 100k messages (Spike 1), killed-app FCM write within the OS time
+budget (Spike 2), and the header-auth end-to-end packet capture (Spike 3).
+
 ## 1. Encrypted DB + reactive list at scale
 **Goal:** prove op-sqlite + SQLCipher with a reactive query feeds a smooth list at volume.
 - Seed 100k synthetic messages into an encrypted DB.

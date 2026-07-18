@@ -16,15 +16,16 @@ export interface SocketAuthOptions {
   legacyQueryAuth?: boolean;
   /**
    * Optional URL-refresh hook for the reconnect escalation ladder. After socket.io's
-   * built-in retries are exhausted we call this to (re)discover the server origin and
-   * reconnect to the result (the Flutter app does this via `fdb.fetchNewUrl()`).
+   * built-in retries are exhausted we call this with the origin the socket is currently
+   * trying; return a DIFFERENT valid origin to reconnect there, or null to retry the
+   * same one (the Flutter app does this via `fdb.fetchNewUrl()`).
    *
-   * NOTE: this is an OPTIONAL hook only. Nothing in `src/` wires it yet — the Firebase
-   * `ServerUrlResolver.refresh()` that would supply a fresh origin is not built at the
-   * composition root, so today the escalation just reconnects to the SAME origin (a
-   * clean no-op when the hook is omitted). Pass a resolver here to enable rediscovery.
+   * Wired at the composition root (`startRealtime` in `src/services/realtimeControl.ts`)
+   * to `createServerUrlResolver` over the session store — so a tunnel rotation delivered
+   * via FCM (`new-server` → `applyNewServerUrl`) is picked up even though the socket was
+   * down when it arrived. Omitting the hook is a clean no-op (same-origin retry).
    */
-  refreshUrl?: () => Promise<string | null>;
+  refreshUrl?: (currentUrl: string) => Promise<string | null>;
 }
 
 // ── Reconnect escalation (Phase 1.1) ──────────────────────────────────────────
@@ -251,9 +252,7 @@ export class SocketService {
     this.escalationInProgress = true;
     try {
       if (this.opts.refreshUrl) {
-        // TODO(phase1): wire `refreshUrl` to the Firebase ServerUrlResolver.refresh() at the
-        // composition root (src/services/index.ts) so a moved server is rediscovered here.
-        const fresh = await this.opts.refreshUrl();
+        const fresh = await this.opts.refreshUrl(this.origin);
         if (fresh && fresh !== this.origin) {
           logger.info('[socket] server URL changed — reconnecting to the new origin');
           this.origin = fresh;

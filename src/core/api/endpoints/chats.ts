@@ -76,6 +76,14 @@ export function markChatRead(http: HttpClient, guid: string): Promise<unknown> {
   return http.post(`/chat/${encodeURIComponent(guid)}/read`, z.unknown());
 }
 
+/**
+ * POST /api/v1/chat/{guid}/unread — mark a chat as unread on the Mac (Private API,
+ * iMessage-only; the RCS sidecar has no unread endpoint, so callers skip `RCS;-;` guids).
+ */
+export function markChatUnread(http: HttpClient, guid: string): Promise<unknown> {
+  return http.post(`/chat/${encodeURIComponent(guid)}/unread`, z.unknown());
+}
+
 // ── Group management ─────────────────────────────────────────────────────────
 // Implemented on the Gator server via the injected Private-API helper: add/remove
 // participant, rename (PUT), and leave. Each mutation except leave returns the updated

@@ -82,6 +82,7 @@ jest.mock('@ui', () => {
     SmartReplyChips: capture('smartReply'),
     ThreadSheet: () => null,
     EditHistorySheet: () => null,
+    MessageDetailsSheet: () => null,
   };
 });
 
@@ -131,6 +132,7 @@ jest.mock('@/services/send', () => ({
   cancelOutgoing: jest.fn(),
   editText: jest.fn(),
   fireDueScheduled: jest.fn(),
+  pickAndSendContact: jest.fn(),
   react: jest.fn(),
   reply: jest.fn(),
   runDueScheduled: jest.fn(),

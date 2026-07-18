@@ -189,6 +189,29 @@ describe('MessageBubble text rendering', () => {
     await renderWithTheme(<MessageBubble msg={msg} showTail />);
     expect(screen.getByText(reactionMeta('love').emoji)).toBeTruthy();
   });
+
+  it('renders a tapback on an image-only GALLERY message (anchored to the grid)', async () => {
+    // Same regression as above but through the multi-image gallery path — the cluster must
+    // anchor to the gallery grid container, not just the single-attachment stack.
+    const reaction: ReactionRow = {
+      targetGuid: 'msg-1',
+      baseType: 'like',
+      emoji: null,
+      isFromMe: 1,
+      senderName: null,
+      dateCreated: 1000,
+    };
+    const msg = {
+      ...makeMsg({ text: '', reactions: [reaction] }),
+      attachments: [
+        { guid: 'g1', mimeType: 'image/jpeg' } as AttachmentRow,
+        { guid: 'g2', mimeType: 'image/png' } as AttachmentRow,
+      ],
+    };
+    await renderWithTheme(<MessageBubble msg={msg} showTail />);
+    expect(screen.getByText('GRID')).toBeTruthy(); // gallery path taken
+    expect(screen.getByText(reactionMeta('like').emoji)).toBeTruthy(); // cluster still renders
+  });
 });
 
 describe('MessageBubble Genmoji attachment', () => {

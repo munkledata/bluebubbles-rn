@@ -53,6 +53,18 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
 export const MAX_CONCURRENT_DOWNLOADS_KEY = 'downloads.maxConcurrent';
 export { MAX_CONCURRENT_DOWNLOADS_LIMIT };
 
+/**
+ * Where auto-downloaded images are ADDITIONALLY saved (the app always keeps its own copy to render
+ * the bubble). 'app' = in-app only; 'gallery' = also the device gallery; 'album' = the "Gator"
+ * Photos album. An enum, so it can't reuse the boolean-only {@link FLAGS} machinery.
+ */
+export type AutoDownloadDestination = 'app' | 'gallery' | 'album';
+export const AUTO_DOWNLOAD_DEST_KEY = 'attachments.autoDownloadDestination';
+const AUTO_DOWNLOAD_DEST_DEFAULT: AutoDownloadDestination = 'album';
+function parseAutoDownloadDestination(raw: string | null): AutoDownloadDestination {
+  return raw === 'app' || raw === 'gallery' || raw === 'album' ? raw : AUTO_DOWNLOAD_DEST_DEFAULT;
+}
+
 function clampDownloads(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_MAX_CONCURRENT_DOWNLOADS;
   return Math.max(1, Math.min(MAX_CONCURRENT_DOWNLOADS_LIMIT, Math.floor(n)));
@@ -98,10 +110,12 @@ interface FeatureSettingsState {
   sendSubjectLines: boolean;
   filterUnknownSenders: boolean;
   maxConcurrentDownloads: number;
+  autoDownloadDestination: AutoDownloadDestination;
   hydrated: boolean;
   hydrate: () => Promise<void>;
   setFlag: (flag: FeatureFlag, value: boolean) => Promise<void>;
   setMaxConcurrentDownloads: (n: number) => Promise<void>;
+  setAutoDownloadDestination: (dest: AutoDownloadDestination) => Promise<void>;
 }
 
 export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
@@ -117,6 +131,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
   sendSubjectLines: FLAGS.sendSubjectLines.def,
   filterUnknownSenders: FLAGS.filterUnknownSenders.def,
   maxConcurrentDownloads: VALUE_SETTINGS.maxConcurrentDownloads.def,
+  autoDownloadDestination: AUTO_DOWNLOAD_DEST_DEFAULT,
   hydrated: false,
   hydrate: async () => {
     try {
@@ -135,9 +150,13 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
           return [k, value] as const;
         }),
       );
+      const autoDownloadDestination = parseAutoDownloadDestination(
+        await kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
+      );
       set({
         ...Object.fromEntries(flagEntries),
         ...Object.fromEntries(valueEntries),
+        autoDownloadDestination,
         hydrated: true,
       } as Partial<FeatureSettingsState>);
     } catch {
@@ -161,6 +180,14 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
       await kvSet(getDatabase(), setting.key, setting.serialize(val));
     } catch {
       // best-effort persist; the in-memory cap still applies this session
+    }
+  },
+  setAutoDownloadDestination: async (dest) => {
+    set({ autoDownloadDestination: dest }); // optimistic
+    try {
+      await kvSet(getDatabase(), AUTO_DOWNLOAD_DEST_KEY, dest);
+    } catch {
+      // best-effort persist; the in-memory choice still applies this session
     }
   },
 }));

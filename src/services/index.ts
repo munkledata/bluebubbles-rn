@@ -13,7 +13,7 @@ export { computeBackgroundIsLight } from './backgrounds/luminance';
 export { vault, http, getSecretBox, runCryptoSelfTest } from './clients';
 export { getCertPins, setCertPins, applyStoredCertPins } from './certPins';
 export { ensureDatabase, rotateDatabaseKey } from './databaseControl';
-export { createNewChat, sendTyping, markRead } from './chatActions';
+export { createNewChat, sendTyping, markRead, markUnread } from './chatActions';
 export { hydrateLock, setAppLockEnabled, completeUnlock } from './lock';
 export { startSync, refreshInbox, maybeResumeSync, ensureChatSynced } from './syncControl';
 export {

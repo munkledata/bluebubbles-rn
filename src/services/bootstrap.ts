@@ -6,6 +6,7 @@ import { checkDeviceIntegrity } from '@native/deviceIntegrity';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { candidateClient, http, runCryptoSelfTest, vault } from './clients';
+import { initPersistentLogs } from './logging/fileLogSink';
 import { applyStoredCertPins } from './certPins';
 import { connectToServer } from './connection';
 import { ensureDatabase, runSearchTextBackfillOnce } from './databaseControl';
@@ -51,6 +52,9 @@ export async function hydrateSession(): Promise<void> {
  * never released on disk until the user authenticates (see {@link completeUnlock}).
  */
 export async function boot(): Promise<void> {
+  // Restore last session's app logs into the viewer + start persisting new lines to disk (so the
+  // in-app App Logs survive a close/reopen). File-backed, so it's independent of DB/lock state.
+  void initPersistentLogs();
   // Pinning must be active BEFORE any network call; the root/jailbreak check is advisory.
   await applyStoredCertPins();
   void checkDeviceIntegrity();

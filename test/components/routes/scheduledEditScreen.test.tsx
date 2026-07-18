@@ -7,7 +7,7 @@
  *     a row that never loaded).
  */
 import React from 'react';
-import { renderWithTheme, screen } from '../support/renderWithTheme';
+import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
 import type { ScheduledRow } from '@db/repositories';
 
 const mockBack = jest.fn();
@@ -37,8 +37,11 @@ jest.mock('@core/secure', () => ({
 import ScheduledEditScreen from '../../../app/(app)/scheduled-edit/[id]';
 // eslint-disable-next-line import/first
 import { getScheduledById } from '@db/repositories';
+// eslint-disable-next-line import/first
+import { editScheduled } from '@/services/send';
 
 const mockGetScheduledById = getScheduledById as jest.Mock;
+const mockEditScheduled = editScheduled as jest.Mock;
 
 function makeRow(overrides: Partial<ScheduledRow> = {}): ScheduledRow {
   return {
@@ -70,5 +73,54 @@ describe('ScheduledEditScreen', () => {
     // The screen must not stay blank: loaded still flips, surfacing the error text.
     expect(await screen.findByText('Couldn’t load this scheduled message.')).toBeTruthy();
     expect(screen.queryByPlaceholderText('Message')).toBeNull();
+  });
+
+  it('renders the recurrence chips with the loaded cadence selected', async () => {
+    mockGetScheduledById.mockResolvedValue(makeRow({ recurrence: 'weekly' }));
+    await renderWithTheme(<ScheduledEditScreen />);
+    await screen.findByDisplayValue('Happy birthday!');
+    const weekly = screen.getByLabelText('Repeat weekly');
+    expect(weekly.props.accessibilityState?.selected).toBe(true);
+    expect(screen.getByLabelText('Repeat none').props.accessibilityState?.selected).toBe(false);
+  });
+
+  it('saving passes the picked recurrence to editScheduled', async () => {
+    mockGetScheduledById.mockResolvedValue(makeRow());
+    mockEditScheduled.mockResolvedValue(undefined);
+    await renderWithTheme(<ScheduledEditScreen />);
+    await screen.findByDisplayValue('Happy birthday!');
+    // Flush the chip press before Save so Save's closure sees the updated selection.
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Repeat daily'));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Save'));
+    });
+    await waitFor(() =>
+      expect(mockEditScheduled).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ text: 'Happy birthday!', recurrence: 'daily' }),
+      ),
+    );
+    await waitFor(() => expect(mockBack).toHaveBeenCalled());
+  });
+
+  it('saving with None sends recurrence null (clears a previous cadence)', async () => {
+    mockGetScheduledById.mockResolvedValue(makeRow({ recurrence: 'monthly' }));
+    mockEditScheduled.mockResolvedValue(undefined);
+    await renderWithTheme(<ScheduledEditScreen />);
+    await screen.findByDisplayValue('Happy birthday!');
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Repeat none'));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Save'));
+    });
+    await waitFor(() =>
+      expect(mockEditScheduled).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ recurrence: null }),
+      ),
+    );
   });
 });

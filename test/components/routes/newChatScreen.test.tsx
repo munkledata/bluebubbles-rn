@@ -24,7 +24,11 @@ import type { ContactPick } from '@db/repositories';
 const mockPush = jest.fn();
 const mockBack = jest.fn();
 const mockReplace = jest.fn();
-let mockSearchParams: { forwardText?: string } = {};
+let mockSearchParams: { forwardText?: string; forwardAttachments?: string } = {};
+// Per-uri fake filesystem for the forwarded-attachment validation (File.exists/.size).
+// Referenced LAZILY from the mock class's getters (safe under factory hoisting, like
+// mockSearchParams), and reset in beforeEach.
+const mockFiles: Record<string, { exists: boolean; size: number | null }> = {};
 
 // The full `@ui` barrel drags in native/ESM modules (expo-video/expo-image/ky). The screen only
 // needs `Screen` + `useTheme`, so swap the barrel for its two lightweight submodules.
@@ -35,6 +39,20 @@ jest.mock('@ui', () => ({
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace }),
   useLocalSearchParams: () => mockSearchParams,
+}));
+jest.mock('expo-file-system', () => ({
+  File: class {
+    private readonly mockUri: string;
+    constructor(uri: string) {
+      this.mockUri = uri;
+    }
+    get exists(): boolean {
+      return mockFiles[this.mockUri]?.exists ?? false;
+    }
+    get size(): number | null {
+      return mockFiles[this.mockUri]?.size ?? null;
+    }
+  },
 }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -53,25 +71,36 @@ import NewChatScreen from '../../../app/(app)/new-chat';
 // eslint-disable-next-line import/first
 import { createNewChat } from '@/services';
 // eslint-disable-next-line import/first
+import { sendImages } from '@/services/send';
+// eslint-disable-next-line import/first
 import { searchContactAddresses, findChatByParticipantAddresses } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { checkIMessageAvailability } from '@core/api/endpoints/handles';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
+// eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
+// eslint-disable-next-line import/first
+import { ServerInfo } from '@core/models';
 
 const mockCreateNewChat = createNewChat as jest.Mock;
+const mockSendImages = sendImages as jest.Mock;
 const mockSearchContacts = searchContactAddresses as jest.Mock;
 const mockFindChat = findChatByParticipantAddresses as jest.Mock;
 const mockCheckAvailability = checkIMessageAvailability as jest.Mock;
 
 beforeEach(() => {
   mockSearchParams = {};
+  for (const k of Object.keys(mockFiles)) delete mockFiles[k];
+  mockSendImages.mockResolvedValue([]);
   mockSearchContacts.mockResolvedValue([] as ContactPick[]);
   mockFindChat.mockResolvedValue(null);
   mockCreateNewChat.mockResolvedValue('iMessage;-;+15551234567');
   // Default: no probe resolves (helper down) → chips stay neutral, service stays iMessage.
   mockCheckAvailability.mockRejectedValue(new Error('no helper'));
   useDialogStore.setState({ current: null, queue: [] });
+  // Default: no server capabilities → the RCS chip is hidden.
+  useSessionStore.setState({ serverInfo: null });
 });
 
 /** Commit a typed address as a recipient chip. */
@@ -155,11 +184,107 @@ describe('NewChatScreen — iMessage availability + auto-SMS', () => {
   });
 });
 
+describe('NewChatScreen — RCS service option (server-gated)', () => {
+  const rcsServerInfo = ServerInfo.parse({ version: '1.9.0', rcs: true });
+
+  it('hides the RCS chip when the server lacks the capability', async () => {
+    await renderWithTheme(<NewChatScreen />);
+    expect(screen.getByText('SMS')).toBeTruthy(); // the service row rendered…
+    expect(screen.queryByText('RCS')).toBeNull(); // …without an RCS chip
+  });
+
+  it('shows the RCS chip when the server advertises RCS and sends with service=RCS', async () => {
+    useSessionStore.setState({ serverInfo: rcsServerInfo });
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.press(screen.getByText('RCS'));
+    });
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551230000'], 'hi', 'RCS'),
+    );
+  });
+
+  it('blocks Start for a multi-recipient RCS chat (1:1 only) and unblocks on removal', async () => {
+    useSessionStore.setState({ serverInfo: rcsServerInfo });
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await addRecipient('+15559990000');
+    await act(async () => {
+      fireEvent.press(screen.getByText('RCS'));
+    });
+    // The inline 1:1 note appears and Start is inert.
+    await screen.findByText(/one-to-one/);
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    await waitFor(() => expect(mockCreateNewChat).not.toHaveBeenCalled());
+    // Dropping back to one recipient clears the note and lets the create through.
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Remove +15559990000'));
+    });
+    await waitFor(() => expect(screen.queryByText(/one-to-one/)).toBeNull());
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551230000'], 'hi', 'RCS'),
+    );
+  });
+});
+
 describe('NewChatScreen — forward prefill', () => {
   it('pre-fills the composer from the forwardText param', async () => {
     mockSearchParams = { forwardText: 'Forwarded body' };
     await renderWithTheme(<NewChatScreen />);
     expect(screen.getByPlaceholderText('Message').props.value).toBe('Forwarded body');
+  });
+
+  it('stages a forwarded attachment (existing file) and sends it after the chat is created', async () => {
+    const uri = 'file:///data/att/IMG_0001.jpeg';
+    mockFiles[uri] = { exists: true, size: 1234 };
+    mockSearchParams = {
+      forwardAttachments: JSON.stringify([{ uri, name: 'IMG_0001.jpeg', mimeType: 'image/jpeg' }]),
+    };
+    await renderWithTheme(<NewChatScreen />);
+
+    // The attachment tray renders the staged file (its remove affordance is the stable handle),
+    // and the message placeholder flips to optional.
+    expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Add a message (optional)')).toBeTruthy();
+
+    // Attachment-only forward: Start is enabled with no typed message.
+    await addRecipient('+15551234567');
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    await waitFor(() =>
+      expect(mockSendImages).toHaveBeenCalledWith({
+        chatGuid: 'iMessage;-;+15551234567',
+        images: [{ uri, name: 'IMG_0001.jpeg', mimeType: 'image/jpeg', size: 1234 }],
+      }),
+    );
+  });
+
+  it('does not stage a forwarded attachment whose file is missing on disk', async () => {
+    mockSearchParams = {
+      forwardText: 'still forwards the text',
+      forwardAttachments: JSON.stringify([
+        { uri: 'file:///data/att/gone.jpeg', name: 'gone.jpeg', mimeType: 'image/jpeg' },
+      ]),
+    };
+    await renderWithTheme(<NewChatScreen />);
+    expect(screen.queryByLabelText('Remove attachment')).toBeNull();
+    expect(screen.getByPlaceholderText('Message').props.value).toBe('still forwards the text');
   });
 });
 

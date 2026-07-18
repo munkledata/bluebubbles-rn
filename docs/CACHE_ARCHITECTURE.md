@@ -51,10 +51,12 @@ FTS5 search index.
   (not an at-rest custody guarantee).
 
 ### 3. Sync write path + persisted cursor
-`src/services/sync/engine.ts`, `src/core/sync/cursor.ts`, `src/db/repositories/sync.ts`,
-`src/services/background/backgroundSync.ts`, `src/services/index.ts`
+`src/services/sync/engine.ts`, `src/services/syncControl.ts`, `src/core/sync/cursor.ts`,
+`src/db/repositories/sync.ts`, `src/services/background/backgroundSync.ts`, `src/services/index.ts`
 
-- `runSync` reads the cursor (single-row `sync_markers id=1`: `last_synced_row_id` /
+- `runSync` (a module-local orchestrator in `src/services/syncControl.ts` — the engine's actual
+  exports are `fullSync` / `incrementalSync` / `syncAllChats` / `syncChatMessages` in
+  `src/services/sync/engine.ts`) reads the cursor (single-row `sync_markers id=1`: `last_synced_row_id` /
   `last_synced_timestamp`):
   - both NULL → **fullSync** (all chats + participants first, then ~100 recent msgs/chat,
     concurrency 2 + pacing).

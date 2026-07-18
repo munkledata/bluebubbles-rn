@@ -131,12 +131,20 @@ describe('ConversationTile — unread state', () => {
     expect(titleWeight('Alice')).toBe('500');
   });
 
-  it('unread row: inserts "Unread." into the a11y label and bolds (600) the title', async () => {
+  it('unread row: shows the count badge, speaks the count in the a11y label, bolds (600) the title', async () => {
     await renderWithTheme(
       <ConversationTile row={makeRow({ unreadCount: 3 })} onPress={() => {}} />,
     );
-    expect(screen.getByLabelText('Alice. Unread. hey there')).toBeTruthy();
+    expect(screen.getByLabelText('Alice. 3 unread. hey there')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy(); // the numeric count badge
     expect(titleWeight('Alice')).toBe('600');
+  });
+
+  it('caps the unread badge at 99+', async () => {
+    await renderWithTheme(
+      <ConversationTile row={makeRow({ unreadCount: 250 })} onPress={() => {}} />,
+    );
+    expect(screen.getByText('99+')).toBeTruthy();
   });
 });
 
