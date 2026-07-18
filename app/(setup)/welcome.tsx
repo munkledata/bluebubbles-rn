@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ensureDatabase } from '@/services';
 import { seedFixtures } from '@features/conversations/devSeed';
@@ -28,10 +28,10 @@ export default function Welcome(): React.JSX.Element {
         ]}
       >
         <View style={styles.hero}>
-          <Text style={styles.emoji}>🫧</Text>
+          <Image source={require('../../assets/icon.png')} style={styles.logo} />
           <Text style={[styles.title, { color: theme.color.label }]}>Gator</Text>
           <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-            iMessage on Android, reimagined.
+            Your Mac’s messages, on Android.
           </Text>
         </View>
         <Button title="Get Started" onPress={() => router.push('/connect')} />
@@ -51,7 +51,7 @@ export default function Welcome(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'space-between', paddingHorizontal: 24 },
   hero: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emoji: { fontSize: 72, marginBottom: 16 },
+  logo: { width: 128, height: 128, borderRadius: 28, marginBottom: 20 },
   title: { fontSize: 36, fontWeight: '700' },
   subtitle: { fontSize: 17, marginTop: 8, textAlign: 'center' },
   devBtn: { marginTop: 8 },
