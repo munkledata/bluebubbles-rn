@@ -1,6 +1,6 @@
 {
   "name": "gator-rn",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
@@ -51,6 +51,7 @@
     "expo-secure-store": "~57.0.1",
     "expo-share-intent": "^8.0.1",
     "expo-sharing": "~57.0.6",
+    "expo-splash-screen": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.1",
     "expo-task-manager": "~57.0.5",
