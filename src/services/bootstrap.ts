@@ -6,6 +6,7 @@ import { checkDeviceIntegrity } from '@native/deviceIntegrity';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { candidateClient, http, runCryptoSelfTest, vault } from './clients';
+import { initErrorReporting } from './errors';
 import { initPersistentLogs } from './logging/fileLogSink';
 import { applyStoredCertPins } from './certPins';
 import { connectToServer } from './connection';
@@ -55,6 +56,10 @@ export async function boot(): Promise<void> {
   // Restore last session's app logs into the viewer + start persisting new lines to disk (so the
   // in-app App Logs survive a close/reopen). File-backed, so it's independent of DB/lock state.
   void initPersistentLogs();
+  // Capture app errors (uncaught JS + unhandled rejections + every `error`-level log) into the
+  // durable upload queue, and install the global handlers. Independent of DB/lock state — the
+  // capture sink buffers in memory until the DB opens. Uploads happen later, once connected.
+  initErrorReporting();
   // Pinning must be active BEFORE any network call; the root/jailbreak check is advisory.
   await applyStoredCertPins();
   void checkDeviceIntegrity();

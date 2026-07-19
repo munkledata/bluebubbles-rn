@@ -9,7 +9,7 @@ import {
   openFromNotification,
 } from '@/services/notifications/notificationOpen';
 import { takePendingNotification } from '@/services/notifications/pendingNav';
-import { pauseRealtime, resumeRealtime } from '@/services';
+import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
@@ -44,11 +44,20 @@ export default function AppLayout(): React.JSX.Element {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
         void resumeRealtime();
+        void flushErrorReports();
       } else if (state === 'background') {
         pauseRealtime();
+        void flushErrorReports();
       }
     });
     return () => sub.remove();
+  }, []);
+
+  // Upload any buffered error reports once the connected app has mounted ("on start"). No-op unless
+  // the server advertises support + the feature is enabled; the AppState listener above catches up
+  // if serverInfo hasn't loaded yet at mount.
+  useEffect(() => {
+    void flushErrorReports();
   }, []);
 
   // Drain a pending notification tap and open its chat. Reads BOTH the notify-kit launch event

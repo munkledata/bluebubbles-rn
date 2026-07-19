@@ -74,6 +74,9 @@ export const sessionAccessors = {
   /** Whether the connected server exposes the iMessage-account endpoints (`icloud/account`). */
   icloudAccountSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_icloud_account,
+  /** Whether the connected server accepts client error-report uploads. */
+  errorLogUploadSupported: (): boolean =>
+    !!useSessionStore.getState().serverInfo?.supports_error_log_upload,
 };
 
 /** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
@@ -90,3 +93,7 @@ export const useSendContactSupported = (): boolean =>
 /** React hook: does the server expose the iMessage-account endpoints? (Gate the Settings row.) */
 export const useIcloudAccountSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_icloud_account);
+
+/** React hook: does the server accept error-report uploads? (Gate the Settings toggle's effect.) */
+export const useErrorLogUploadSupported = (): boolean =>
+  useSessionStore((s) => !!s.serverInfo?.supports_error_log_upload);

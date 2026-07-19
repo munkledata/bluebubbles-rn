@@ -47,6 +47,22 @@ export function redact(value: unknown, seen = new WeakSet<object>()): unknown {
   if (seen.has(value)) return '[circular]';
   seen.add(value);
 
+  // Error objects keep name/message/stack as NON-enumerable props, so the `Object.entries` walk
+  // below would drop them (an Error meta would serialize to `{}` — losing the stack). Flatten to a
+  // plain object explicitly, redacting the (attacker-influenceable) message/stack strings. A chained
+  // `cause` and any own-enumerable custom fields (e.g. an ApiError's `kind`) are carried through too.
+  if (value instanceof Error) {
+    const out: Record<string, unknown> = { name: value.name, message: redactUrls(value.message) };
+    if (value.stack) out.stack = redactUrls(value.stack);
+    const cause = (value as { cause?: unknown }).cause;
+    if (cause !== undefined) out.cause = redact(cause, seen);
+    for (const [k, v] of Object.entries(value)) {
+      if (k in out) continue;
+      out[k] = SENSITIVE_KEYS.test(k) ? PLACEHOLDER : redact(v, seen);
+    }
+    return out;
+  }
+
   if (Array.isArray(value)) return value.map((v) => redact(v, seen));
 
   const out: Record<string, unknown> = {};

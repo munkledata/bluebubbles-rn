@@ -295,6 +295,23 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   `memoryLogSink.hydrate(...)` seeds the viewer from `Paths.document/app-logs.json`. `write()` stays sync
   (buffers + debounced flush); capped at 500 lines; the viewer's Clear wipes the file too. Lines are
   already-redacted before any sink, so the file holds no secrets. `core/` must never import expo-file-system.
+- **App-wide error reporting = a capture sink + a durable upload queue (a self-hosted crash reporter).**
+  `ErrorReportSink` (`src/services/errors/`, OUTSIDE `core`) is `logSinks.add(...)`-attached at `boot()`
+  (via `initErrorReporting`) and captures ONLY `error`-level lines (already redacted). Global uncaught-JS
+  (`ErrorUtils.setGlobalHandler`, chained) + unhandled-rejection (`HermesInternal.enablePromiseRejectionTracker`,
+  which RN only enables in `__DEV__`) handlers funnel through one `captureError(err, origin)`. Reports buffer
+  in memory (sync `write`) then debounced-drain to the `error_reports` table (migration `0025`), which is a
+  lease/backoff/attempt-cap retry queue CLONED from `outgoing_queue` — `runErrorReportQueue` (node-testable,
+  no RN) batches → `POST /api/v1/error-reports` (`retry:false`; the queue owns retries) → deletes on success.
+  `flushErrorReports` gates on creds + `serverInfo.supports_error_log_upload` + the `errorReportingEnabled`
+  flag (default ON), and runs on AppState active/background, connected mount, and the bg task. FEEDBACK-LOOP
+  SAFETY: the sink captures only `error`, hard-skips `[errorReport]`-tagged messages, and a `busy` flag drops
+  any error logged during its own enqueue/drain — and the upload path logs failures at `warn` (never `error`).
+  STACK PRESERVATION: `redact()` is now `Error`-aware (flattens `Error`→`{name,message,stack}`) — before this,
+  Object.entries dropped the non-enumerable stack and an Error meta serialized to `{}`. Server side
+  (`packages/bbd`): `errorLogIngestionEnabled` config (default OFF) gates ingestion + drives the capability
+  flag; `ErrorReportStore` fingerprints (deterministic sha1 over normalized message + top stack frame + tag +
+  level, `errors/fingerprint.ts`) and appends `error-reports/categories/<fp>.jsonl` + an atomic `index.json`.
 - **Chat opens at the newest message via a one-shot, keyboard-follow is near-bottom-gated** (`MessageList`).
   A normal open can't rely on `startRenderingFromBottom` alone (the list first mounts EMPTY on the async DB
   read), so a guarded `scrollToEnd` fires on the first `[]→populated` transition — but ONLY when `!focusReady`,

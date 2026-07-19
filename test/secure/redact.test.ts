@@ -45,6 +45,37 @@ describe('redaction', () => {
     expect(() => redact(a)).not.toThrow();
   });
 
+  it('flattens an Error to {name,message,stack} instead of dropping its non-enumerable fields', () => {
+    // Object.entries can't see an Error's message/stack, so before the Error branch these serialized
+    // to `{}` — losing the stack we most want in an uploaded crash report.
+    const err = new TypeError('bad https://x?token=abc123 thing');
+    const out = redact(err) as Record<string, unknown>;
+    expect(out.name).toBe('TypeError');
+    expect(out.message).toBe('bad https://x?token=[redacted] thing');
+    expect(typeof out.stack).toBe('string');
+    expect(out.stack as string).toContain('TypeError');
+  });
+
+  it('redacts a nested Error carried as meta (ErrorBoundary { error, componentStack } shape)', () => {
+    const err = new Error('boom Bearer sk-secret');
+    const out = redact({ error: err, componentStack: 'at Foo' }) as Record<string, unknown>;
+    const nested = out.error as Record<string, unknown>;
+    expect(nested.message).toBe('boom Bearer [redacted]');
+    expect(typeof nested.stack).toBe('string');
+    expect(out.componentStack).toBe('at Foo');
+  });
+
+  it('carries an Error cause + custom own fields, redacting the sensitive ones', () => {
+    const err = new Error('outer') as Error & { kind?: string; token?: string; cause?: unknown };
+    err.kind = 'no_connection';
+    err.token = 'sekret';
+    err.cause = new Error('inner');
+    const out = redact(err) as Record<string, unknown>;
+    expect(out.kind).toBe('no_connection');
+    expect(out.token).toBe('[redacted]');
+    expect((out.cause as Record<string, unknown>).message).toBe('inner');
+  });
+
   it('RedactingLogger redacts both message and meta before writing', () => {
     const writes: { level: string; message: string; meta?: unknown }[] = [];
     const sink: LogSink = {

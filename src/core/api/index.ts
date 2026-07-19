@@ -9,3 +9,4 @@ export * as faceTimeApi from './endpoints/facetime';
 export * as findMyApi from './endpoints/findmy';
 export * as fcmApi from './endpoints/fcm';
 export * as contactsApi from './endpoints/contacts';
+export * as errorReportsApi from './endpoints/errorReports';

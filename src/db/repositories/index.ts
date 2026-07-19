@@ -13,6 +13,7 @@ export * from './attachments';
 export * from './messages';
 export * from './reactions';
 export * from './outgoing';
+export * from './errorReports';
 export * from './kv';
 export * from './themes';
 export * from './backup';

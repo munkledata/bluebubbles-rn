@@ -412,4 +412,25 @@ export const MIGRATIONS: Migration[] = [
     name: '0024_scheduled_recurrence',
     statements: [`ALTER TABLE scheduled_messages ADD COLUMN recurrence TEXT`],
   },
+  {
+    // Error-report capture queue: a durable buffer of already-redacted `error`-level log lines that
+    // the app batch-uploads to the server (which fingerprints + writes them to disk). Leased +
+    // uploaded + deleted like outgoing_queue (attempts cap + next_retry_at backoff/lease). A NEW
+    // table (not an ALTER), created transactionally + idempotently by name.
+    name: '0025_error_reports',
+    statements: [
+      `CREATE TABLE error_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level TEXT NOT NULL,
+        message TEXT NOT NULL,
+        stack TEXT,
+        tag TEXT,
+        meta TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_retry_at INTEGER NOT NULL DEFAULT 0
+      )`,
+      `CREATE INDEX error_reports_retry_idx ON error_reports (next_retry_at)`,
+    ],
+  },
 ];

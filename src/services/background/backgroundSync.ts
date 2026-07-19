@@ -4,6 +4,7 @@ import { logger } from '@core/secure';
 import { useSessionStore } from '@state/sessionStore';
 import { http } from '../clients';
 import { ensureDatabase } from '../databaseControl';
+import { flushErrorReports } from '@/services/errors';
 import { runOutgoingQueue } from '@/services/send';
 import { httpSyncApi, incrementalSync } from '@/services/sync';
 
@@ -26,6 +27,8 @@ TaskManager.defineTask(BG_SYNC_TASK, async () => {
     await incrementalSync(db, api, { serverVersion: version });
     // Retry stranded/failed sends while we're awake (the ~15-min recovery cadence).
     await runOutgoingQueue(db, http);
+    // Upload any buffered error reports too (no-op unless connected + server supports it + enabled).
+    await flushErrorReports();
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (e) {
     // Don't swallow silently: a recurring catch-up failure (auth expiry, schema/migration

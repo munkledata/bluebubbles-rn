@@ -49,6 +49,14 @@ export const ServerInfo = z
      * UI (e.g. an RCS option in new-chat, Prompt 8) show only when the bridge is live.
      */
     rcs: z.boolean().nullish(),
+    /**
+     * Whether the server accepts client error-report uploads (`POST /api/v1/error-reports`) and
+     * writes categorized logs to disk. Reflects a LIVE capability — the server sets it to its
+     * `errorLogIngestionEnabled` config, so it flips when the operator toggles ingestion. Additive;
+     * absent/false on older servers. The app gates uploads on this so it never POSTs to a server
+     * that would just drop them.
+     */
+    supports_error_log_upload: z.boolean().nullish(),
   })
   .transform((s) => ({ ...s, server_version: s.server_version ?? s.version ?? undefined }));
 export type ServerInfo = z.infer<typeof ServerInfo>;

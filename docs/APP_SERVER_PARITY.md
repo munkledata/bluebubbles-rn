@@ -85,6 +85,33 @@ the Gator daemon never implemented → 404 → the screen always errored. Now wi
   (not `api/services/`), and bbd's transport nests the payload ONE level (`res.data`), not the legacy
   server's `res.data.data`. See `docs/IMESSAGE_ACCOUNT_PLAN.md` (status: implemented).
 
+## ✅ Closed (2026-07-19) — client error-report upload (`error-reports`)
+
+A NEW capability on BOTH sides (a lightweight self-hosted crash reporter): the app captures every
+error, batch-uploads them, and the server fingerprints (categorizes) + writes them to disk.
+
+- **App** (`bluebubbles-rn`): `ErrorReportSink` captures `error`-level lines (uncaught JS via a chained
+  `ErrorUtils.setGlobalHandler`, unhandled rejections via `HermesInternal.enablePromiseRejectionTracker`,
+  the React `ErrorBoundary`, and every `logger.error`) into the `error_reports` table (migration `0025`) —
+  a lease/backoff/attempt-cap queue cloned from `outgoing_queue`. `runErrorReportQueue` batch-`POST`s to
+  `/api/v1/error-reports` (`retry:false`), deletes on success, retries on failure. `flushErrorReports` runs
+  on AppState active/background, connected mount, and the bg task. `redact()` was made `Error`-aware so
+  stack traces survive redaction (previously dropped as non-enumerable → `{}`). Client toggle
+  `errorReportingEnabled` (default ON); everything is redacted before it leaves the device.
+- **Server** (`packages/bbd`): `buildErrorReportOperations` exposes `POST /api/v1/error-reports` (auth);
+  `ErrorReportStore` computes a deterministic fingerprint (sha1 over normalized message + top stack frame +
+  tag + level, `errors/fingerprint.ts`) and appends `<userData>/error-reports/categories/<fp>.jsonl` + an
+  atomic `index.json` rollup. No LLM/AI — pure rule-based grouping.
+- **Capability**: `supports_error_log_upload` added to `ServerInfoV1` / `/server/info`, emitted as the
+  `errorLogIngestionEnabled` config (default OFF — opt-in on the RECEIVING side, like `persistLogs`). The
+  app only uploads once the operator turns ingestion on; the handler also re-checks the flag and answers
+  `{ ingested:0, disabled:true }` (defense-in-depth against a stale capability).
+- Unit-tested both sides: redaction Error-branch, the `error_reports` repo (atomic claim/backoff/cap), the
+  upload orchestration (batch/delete/retry/no-double-upload/disabled), the sink (level filter, `[errorReport]`
+  loop-guard, buffer→drain), migration `0025`; server fingerprint determinism, `ErrorReportStore` disk layout,
+  the operation (401/enabled/disabled/400), and the server-info capability. Device-only: the global handlers
+  firing + the real upload/disk write.
+
 ## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
 
 The Gator server's RCS bridge (a `libgm` sidecar) serves RCS chats through the **same frozen v1

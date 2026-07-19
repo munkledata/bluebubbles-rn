@@ -33,7 +33,8 @@ export type FeatureFlag =
   | 'compactChatList'
   | 'messageNotifications'
   | 'sendSubjectLines'
-  | 'filterUnknownSenders';
+  | 'filterUnknownSenders'
+  | 'errorReportingEnabled';
 
 const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   privateApiEnabled: { key: 'privateApi.enabled', def: true },
@@ -47,6 +48,9 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   messageNotifications: { key: 'notifications.messages', def: true },
   sendSubjectLines: { key: 'privateApi.sendSubjectLines', def: false },
   filterUnknownSenders: { key: 'chatList.filterUnknownSenders', def: false },
+  // Capture app errors + upload them to the server (default ON: capture is cheap and is the point;
+  // uploads are additionally gated on the server advertising `supports_error_log_upload`).
+  errorReportingEnabled: { key: 'diagnostics.errorReporting', def: true },
 };
 
 /** kv key for the parallel-download cap — byte-identical to the pre-merge store (no migration). */
@@ -109,6 +113,7 @@ interface FeatureSettingsState {
   messageNotifications: boolean;
   sendSubjectLines: boolean;
   filterUnknownSenders: boolean;
+  errorReportingEnabled: boolean;
   maxConcurrentDownloads: number;
   autoDownloadDestination: AutoDownloadDestination;
   hydrated: boolean;
@@ -130,6 +135,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
   messageNotifications: FLAGS.messageNotifications.def,
   sendSubjectLines: FLAGS.sendSubjectLines.def,
   filterUnknownSenders: FLAGS.filterUnknownSenders.def,
+  errorReportingEnabled: FLAGS.errorReportingEnabled.def,
   maxConcurrentDownloads: VALUE_SETTINGS.maxConcurrentDownloads.def,
   autoDownloadDestination: AUTO_DOWNLOAD_DEST_DEFAULT,
   hydrated: false,

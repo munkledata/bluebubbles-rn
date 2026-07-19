@@ -249,6 +249,37 @@ export const outgoingQueue = sqliteTable('outgoing_queue', {
   nextRetryAt: integer('next_retry_at').notNull().default(0),
 });
 
+/**
+ * Durable buffer of captured error reports awaiting upload to the server (a lightweight
+ * self-hosted crash reporter). The capture sink inserts already-redacted `error`-level lines; the
+ * upload queue leases + uploads + deletes them (backoff + attempt cap), mirroring outgoing_queue.
+ */
+export const errorReports = sqliteTable(
+  'error_reports',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    level: text('level').notNull(),
+    /** Already-redacted log message, e.g. `[uncaught] TypeError: …`. */
+    message: text('message').notNull(),
+    /** Redacted stack trace, extracted from the log meta (null when none). */
+    stack: text('stack'),
+    /** The `[tag]` category parsed from the message (server fingerprints on it). */
+    tag: text('tag'),
+    /** Redacted, stringified log meta (extra context). */
+    meta: text('meta'),
+    /** Capture time (epoch ms). */
+    createdAt: integer('created_at')
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    attempts: integer('attempts').notNull().default(0),
+    /** When the next upload attempt is due (ms epoch; 0 = now). Doubles as an in-flight lease. */
+    nextRetryAt: integer('next_retry_at').notNull().default(0),
+  },
+  (t) => ({
+    retryIdx: index('error_reports_retry_idx').on(t.nextRetryAt),
+  }),
+);
+
 /** Incremental-sync markers (one row, id=1). */
 export const syncMarkers = sqliteTable('sync_markers', {
   id: integer('id').primaryKey(),
@@ -311,6 +342,7 @@ export const schema = {
   contacts,
   scheduledMessages,
   outgoingQueue,
+  errorReports,
   syncMarkers,
   themes,
   kv,

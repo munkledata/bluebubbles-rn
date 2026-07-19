@@ -25,3 +25,4 @@ export {
   applyNewServerUrl,
 } from './realtimeControl';
 export { hydrateSession, boot, connect, forget } from './bootstrap';
+export { initErrorReporting, flushErrorReports, runErrorReportQueue } from './errors';
