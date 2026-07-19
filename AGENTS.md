@@ -114,6 +114,38 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   passed a handler when true. The optimistic bubble is a TEXT placeholder (the contact's display name)
   until the live `new-message` echo swaps in the rendered `.vcf` card; that brief text-then-card is
   expected. See `sendContactService.ts` + `pickContact` (`contactsService.ts`).
+- **Share-INTO-Gator capture must live at the ROOT, above the lock/auth gate — split from navigation.**
+  A picture shared from another app arrives as an Android `SEND` intent (`expo-share-intent`, autolinked;
+  the plugin adds the `SEND`/`SEND_MULTIPLE` filters — confirm a shipped build has them by grepping the
+  `.aab` manifest, not by trusting `app.config.ts`, since `android/` is gitignored and EAS re-prebuilds).
+  The killer bug: capturing via a single `useShareIntent()` mounted DEEP inside `(app)` drops the intent
+  when the share KILLED-or-LOCKED-launches the app — `(app)` (hence the handler) hasn't mounted yet, and
+  pushing a route from there races the not-yet-ready navigator. Fix = the library's canonical pattern:
+  `<ShareIntentProvider>` at the app root (`app/_layout.tsx`) with a `ShareIntentCapture`
+  (`useShareIntentContext`) that ONLY stashes into `shareIntentStore`; a separate `ShareIntentNavigator`
+  in `(app)/_layout.tsx` drains the store → `/new-chat` once the connected app is mounted. Pass
+  `resetOnBackground:false` (we clear the native intent ourselves after capture) so the app-switch flicker
+  doesn't wipe the pending share. Don't wrap the capture in a silent `fallback={null}` boundary — log via
+  `onError`. `ShareIntentFile.path` is a REAL cached file path (`toUri` → `file://`), which the disk-
+  streaming uploader (`attachmentUpload.ts`) reads fine — so an empty composer means capture never fired,
+  not a URI problem. Device-only: jest has no native half (mock `useShareIntentContext`). See
+  `src/ui/ShareIntentHandler.tsx`.
+- **Share-sheet PROMINENCE (top "Direct Share" row) = declaration + runtime shortcuts, split across two layers.**
+  Declaring `SEND` intent filters only puts the app in the sheet's lower all-apps list. Two pieces get it into
+  the priority row: (1) `plugins/withShareTargets.js` writes the `<share-target>` (`res/xml/shortcuts.xml`) +
+  `android.app.shortcuts` meta-data on MainActivity — the DECLARATION; (2) the LOCAL native module
+  `modules/gator-share-shortcuts` (autolinked, Android-only) PUBLISHES long-lived dynamic `ShortcutInfoCompat`s
+  (one per recent chat, tagged with the SAME `…category.SHARE_TARGET` category + a `Person`) via
+  `ShortcutManagerCompat`. Both category strings MUST match or Android surfaces nothing. `ConversationListScreen`
+  calls `publishShareShortcuts(rows)` (keyed on the top-4 guids so it doesn't re-publish every reactive tick);
+  `forget()` clears them. Delivery: a Direct Share tap delivers the SEND intent to MainActivity with
+  `EXTRA_SHORTCUT_ID` (the chat guid) — expo-share-intent does NOT surface it, so the module captures it
+  (OnNewIntent for the running app; a `ReactActivityLifecycleListener` for cold start, mirroring
+  expo-share-intent's singleton) and exposes `getLaunchShortcutId()`. `ShareIntentNavigator` reads it → routes
+  to `/chat/<guid>?share=1` (the chat consumes the staged share into the Composer via `initialAttachments`)
+  instead of `/new-chat`. All JS→native calls go through `requireOptionalNativeModule` + try/catch, so a
+  pre-rebuild bundle / Jest just no-ops. Native (Kotlin) is device-only — jest can't compile it; verify
+  autolinking with `npx expo-modules-autolinking search` and the manifest via `expo prebuild`.
 - **Additive migrations are appended to `MIGRATIONS` by name** (`src/db/migrations.ts`); `runMigrations`
   skips already-applied names and wraps each in BEGIN/COMMIT. Use `ALTER TABLE ADD COLUMN` (no
   `IF NOT EXISTS` — SQLite lacks it; the name-guard is the idempotency). Never edit an applied migration.

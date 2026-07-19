@@ -5,6 +5,7 @@ import {
   DarkTheme as NavDarkTheme,
   DefaultTheme as NavDefaultTheme,
 } from 'expo-router';
+import { ShareIntentProvider } from 'expo-share-intent';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -24,6 +25,11 @@ import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { AppDialog, AppToast, ErrorBoundary, ThemeProvider, useTheme } from '@ui';
+import { ShareIntentCapture } from '@ui/ShareIntentHandler';
+
+// Verbose expo-share-intent logs in dev only (visible in `adb logcat`). `__DEV__` is a RN runtime
+// global that is UNDEFINED under Jest — guard it so this module never throws when imported in tests.
+const SHARE_DEBUG = typeof __DEV__ !== 'undefined' && __DEV__;
 
 /**
  * The navigation stack, themed. Expo Router (React Navigation) paints each screen's
@@ -74,25 +80,35 @@ export default function RootLayout(): React.JSX.Element {
 
   return (
     <ErrorBoundary>
-      <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <ThemeProvider>
-            <StatusBar style="auto" />
-            <ThemedStack />
-            {/* App-wide themed dialog host (replaces native Alert.alert). Mounted here inside
-                ThemeProvider so it's themed and covers every screen, above the nav stack. */}
-            <AppDialog />
-            {/* Ephemeral, non-blocking status pill (e.g. auto-download confirmations). After the
-                dialog so it paints above it if both are up. */}
-            <AppToast />
-            {locked ? (
-              <View style={StyleSheet.absoluteFill}>
-                <LockScreen onUnlock={completeUnlock} />
-              </View>
-            ) : null}
-          </ThemeProvider>
-        </QueryClientProvider>
-      </SafeAreaProvider>
+      {/* Share-target capture lives at the ROOT — above the lock/auth gate — so a picture shared
+          into Gator while the app was killed or locked is stashed the instant it arrives, not lost
+          because the connected-app layout hadn't mounted yet. resetOnBackground:false stops the
+          library from clearing the pending share during the app-switch flicker before we consume
+          it (we clear the native intent ourselves right after capturing). */}
+      <ShareIntentProvider options={{ resetOnBackground: false, debug: SHARE_DEBUG }}>
+        <SafeAreaProvider>
+          <QueryClientProvider client={queryClient}>
+            <ThemeProvider>
+              <StatusBar style="auto" />
+              <ThemedStack />
+              {/* App-wide themed dialog host (replaces native Alert.alert). Mounted here inside
+                  ThemeProvider so it's themed and covers every screen, above the nav stack. */}
+              <AppDialog />
+              {/* Ephemeral, non-blocking status pill (e.g. auto-download confirmations). After the
+                  dialog so it paints above it if both are up. */}
+              <AppToast />
+              {/* Stashes an incoming share into the store; ShareIntentNavigator (in the (app)
+                  layout) opens new-chat once the connected app is mounted. Renders nothing. */}
+              <ShareIntentCapture />
+              {locked ? (
+                <View style={StyleSheet.absoluteFill}>
+                  <LockScreen onUnlock={completeUnlock} />
+                </View>
+              ) : null}
+            </ThemeProvider>
+          </QueryClientProvider>
+        </SafeAreaProvider>
+      </ShareIntentProvider>
     </ErrorBoundary>
   );
 }

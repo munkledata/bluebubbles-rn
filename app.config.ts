@@ -76,6 +76,12 @@ const config: ExpoConfig = {
     // Injects the dedicated Android notification status-bar icon (ic_stat_gator) into the
     // regenerated native res/ folders at prebuild. See plugins/withNotificationIcon.js.
     './plugins/withNotificationIcon',
+    // Declares an Android Direct Share target (res/xml/shortcuts.xml + the android.app.shortcuts
+    // meta-data) so Gator can appear in the share sheet's PRIORITIZED row. Declaration only — the
+    // priority row also needs runtime-published dynamic shortcuts (a native follow-up); the generic
+    // app-list share entry from the SEND intent filters below is independent. See
+    // plugins/withShareTargets.js.
+    './plugins/withShareTargets',
     // FCM push: the firebase plugin wires google-services.json + the messaging SDK
     // into the native build (the receive pipeline is already in JS).
     '@react-native-firebase/app',

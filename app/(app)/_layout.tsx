@@ -12,7 +12,7 @@ import { takePendingNotification } from '@/services/notifications/pendingNav';
 import { pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
-import { ShareIntentHandler } from '@ui/ShareIntentHandler';
+import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
 
 /**
  * Layout for the connected app. Drives the resume re-lock (the gate itself is
@@ -100,8 +100,9 @@ export default function AppLayout(): React.JSX.Element {
   return (
     <>
       <Stack screenOptions={{ headerShown: false }} />
-      {/* Captures content shared INTO Gator from the Android share sheet → new-chat creator. */}
-      <ShareIntentHandler />
+      {/* Opens the new-chat creator for a share captured at the root (ShareIntentCapture) once the
+          connected app is mounted and the navigator is ready. */}
+      <ShareIntentNavigator />
       {/* App-wide so an incoming call rings on any screen; the in-call WebView overlay
           takes over once answered (and is also opened by outgoing calls from the chat). */}
       <IncomingFaceTimeOverlay />

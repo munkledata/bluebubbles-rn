@@ -444,6 +444,21 @@ describe('Composer — staged attachments', () => {
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
   });
 
+  it('seeds initialAttachments into the tray on mount (Direct Share INTO this chat)', async () => {
+    const onSendAttachments = jest.fn();
+    await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        onSendAttachments={onSendAttachments}
+        initialAttachments={[ITEM_A]}
+      />,
+    );
+    // The shared photo shows as a staged chip with NO tray interaction, and send is enabled.
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
+    fireEvent.press(screen.getByLabelText('Send message'));
+    expect(onSendAttachments).toHaveBeenCalledWith([ITEM_A]);
+  });
+
   it('does not stage the same uri twice (dedupe by uri)', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
     fireEvent.press(screen.getByLabelText('Attach photo or file'));

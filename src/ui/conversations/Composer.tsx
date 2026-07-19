@@ -53,6 +53,9 @@ interface ComposerProps {
   initialText?: string;
   /** Persist the draft (debounced while typing; '' immediately on send). */
   onDraftChange?: (text: string) => void;
+  /** Pre-stage attachments into the tray on mount (e.g. a photo shared INTO this chat via the
+   *  Android Direct Share row). Seeded once; the user reviews + taps send. */
+  initialAttachments?: PendingAttachment[];
 }
 
 /**
@@ -79,6 +82,7 @@ export const Composer = React.memo(function Composer({
   mentionParticipants = [],
   initialText,
   onDraftChange,
+  initialAttachments,
 }: ComposerProps): React.JSX.Element {
   const theme = useTheme();
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
@@ -183,6 +187,16 @@ export const Composer = React.memo(function Composer({
     setText((cur) => cur || initialText);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialText]);
+
+  // Seed shared attachments (Direct Share INTO this chat) into the tray once, on mount, without
+  // clobbering anything the user may already have staged. Also opens the tray so they're visible.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || !initialAttachments || initialAttachments.length === 0) return;
+    seededRef.current = true;
+    setPending((cur) => (cur.length > 0 ? cur : initialAttachments));
+    setTrayOpen(true);
+  }, [initialAttachments]);
 
   // Draft persistence: debounced while typing; flushed on unmount so the last keystrokes aren't
   // lost when backing out of the chat. Editing an existing message never persists as a draft.

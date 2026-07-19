@@ -19,9 +19,10 @@ interface ShareIntentState {
 
 /**
  * Holds content shared INTO Gator from another app (via `expo-share-intent`) between the capture
- * point (the share-intent handler in the app layout) and its consumer (the new-chat creator, which
- * stages it and clears the store). Files can't ride expo-router URL params, so they pass through
- * here instead. See `ShareIntentHandler`.
+ * point (`ShareIntentCapture`, mounted at the root above the lock/auth gate) and its consumer (the
+ * new-chat creator, which stages it and clears the store). `ShareIntentNavigator` (in the connected
+ * (app) layout) opens new-chat once a share is pending here. Files can't ride expo-router URL
+ * params, so they pass through this store instead. See `src/ui/ShareIntentHandler.tsx`.
  */
 export const useShareIntentStore = create<ShareIntentState>((set) => ({
   text: null,

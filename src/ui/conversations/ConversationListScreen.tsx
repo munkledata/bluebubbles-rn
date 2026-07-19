@@ -13,6 +13,7 @@ import {
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { refreshInbox } from '@/services';
+import { publishShareShortcuts } from '@/services/shortcuts/shareShortcuts';
 import { useChats } from '@features/conversations/useChats';
 import { getDatabase } from '@db/database';
 import { markAllChatsReadLocal, type InboxRow } from '@db/repositories';
@@ -39,6 +40,18 @@ export function ConversationListScreen(): React.JSX.Element {
   const rows = useMemo(() => data ?? [], [data]);
   // Pull-to-refresh: incremental sync. The list sits below the fixed title → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
+
+  // Publish the most-recent conversations as Android Direct Share targets (share sheet's priority
+  // row). Keyed on the top rows' identity so it only re-publishes when the leading chats actually
+  // change — not on every reactive tick. No-op on iOS / a build without the native module.
+  const topKey = rows
+    .slice(0, 4)
+    .map((r) => r.guid)
+    .join('|');
+  useEffect(() => {
+    if (rows.length > 0) publishShareShortcuts(rows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topKey]);
 
   // Only let the KeyboardAvoidingView add padding WHILE the keyboard is up. When it's down the KAV
   // is disabled (contributes 0), so it can't leave the nav-bar-sized residual gap under the bar that

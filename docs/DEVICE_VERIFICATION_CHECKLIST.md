@@ -125,8 +125,31 @@ If either logs `ok: false`, stop and investigate — the native crypto backend i
 
 ## (h) Share intent (share INTO the app)
 
+Capture lives at the ROOT (`ShareIntentCapture`, above the lock/auth gate) and stashes into
+`shareIntentStore`; `ShareIntentNavigator` (in the `(app)` layout) opens the target once the app is
+ready. So the share must survive all three app states below. See `src/ui/ShareIntentHandler.tsx`.
+
 - [ ] From another app, **share some text** to Gator — it lands in the app ready to send.
-- [ ] From the gallery, **share an image** to Gator — it lands staged as an attachment.
+- [ ] From the gallery, **share an image** to Gator — it lands **staged as an attachment** in the
+      new-message composer (the original "picture not populated" bug).
+- [ ] Repeat the image share with the app in each state, all must populate the photo:
+      **(1) killed/force-stopped**, **(2) backgrounded-but-alive**, **(3) already open/foreground**.
+- [ ] Share **multiple images** at once (`SEND_MULTIPLE`) and a **non-image file** (e.g. a PDF from
+      Downloads) — all stage correctly.
+
+### Direct Share (priority "share to a person" row)
+
+Requires `plugins/withShareTargets.js` (the `<share-target>` declaration) + the native module
+`modules/gator-share-shortcuts` (publishes dynamic shortcuts). Emulators without recent chats show
+nothing — use a build where you have a few conversations. See AGENTS.md "Share-sheet PROMINENCE".
+
+- [ ] Open Gator (so `ConversationListScreen` publishes shortcuts), then from the gallery tap
+      **Share** — your **recent conversations appear in the top row** of the share sheet (they may
+      take a moment / a second share to surface as Android learns the targets).
+- [ ] Tap a conversation in that top row — Gator **opens THAT chat** (not the new-message picker)
+      with the shared **photo staged in the composer**; review and tap send.
+- [ ] Tap-behavior sanity: the chat opens with the photo staged (NOT auto-sent) — you press send.
+- [ ] Disconnect/log out (`forget()`) — the Direct Share targets are **removed** from the share sheet.
 
 ---
 

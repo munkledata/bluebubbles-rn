@@ -123,6 +123,14 @@ export async function forget(): Promise<void> {
   stopReachabilityWatch();
   getSocket()?.disconnect();
   setSocket(null);
+  // Drop the Direct Share targets — they point at this account's chats. Lazy import keeps this
+  // module's (React-free, node-tested) graph from pulling the native bridge at load.
+  try {
+    const { clearShareShortcuts } = await import('./shortcuts/shareShortcuts');
+    clearShareShortcuts();
+  } catch {
+    // best-effort — logout must not fail on a shortcut cleanup
+  }
   await Promise.all([vault.delete('serverAddress'), vault.delete('serverPassword')]);
   useSessionStore.getState().reset();
 }

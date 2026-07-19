@@ -69,6 +69,7 @@ import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useTypingStore } from '@state/typingStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useShareIntentStore } from '@state/shareIntentStore';
 import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
 
 // Lazy: expo-audio (native) is only pulled in when the user actually records a voice memo,
@@ -84,14 +85,20 @@ const VoiceRecorder = lazy(() =>
  */
 export default function ChatScreen(): React.JSX.Element {
   // `focus`/`focusDate` arrive when opened from a search hit — scroll to + highlight that message.
-  const { guid, focus, focusDate } = useLocalSearchParams<{
+  const { guid, focus, focusDate, share } = useLocalSearchParams<{
     guid: string;
     focus?: string;
     focusDate?: string;
+    share?: string;
   }>();
   return (
     <ChatThemeProvider guid={guid}>
-      <ChatScreenInner guid={guid} focusGuid={focus} focusDate={focusDate} />
+      <ChatScreenInner
+        guid={guid}
+        focusGuid={focus}
+        focusDate={focusDate}
+        fromShare={share === '1'}
+      />
     </ChatThemeProvider>
   );
 }
@@ -100,10 +107,12 @@ function ChatScreenInner({
   guid,
   focusGuid,
   focusDate,
+  fromShare = false,
 }: {
   guid: string;
   focusGuid?: string;
   focusDate?: string;
+  fromShare?: boolean;
 }): React.JSX.Element {
   const header = useChatHeader(guid);
   const backgroundUri = useChatBackgroundUri(guid);
@@ -152,6 +161,24 @@ function ChatScreenInner({
   const [replyTo, setReplyTo] = useState<MessagePreview | null>(null);
   const [editing, setEditing] = useState<{ guid: string; text: string } | null>(null);
   const [recording, setRecording] = useState(false);
+
+  // Direct Share INTO this chat: consume the share the root captured (ShareIntentCapture) and stage
+  // it in the composer so the user reviews + taps send. Captured ONCE in lazy initializers (only
+  // when we arrived via a Direct Share tap, `?share=1`); the effect then clears the store so a
+  // normal chat open never picks it up.
+  const [sharedAttachments] = useState<PendingAttachment[]>(() =>
+    fromShare
+      ? useShareIntentStore
+          .getState()
+          .files.map((f) => ({ uri: f.uri, name: f.name, mimeType: f.mimeType, size: f.size }))
+      : [],
+  );
+  const [sharedText] = useState<string | null>(() =>
+    fromShare ? useShareIntentStore.getState().text : null,
+  );
+  useEffect(() => {
+    if (fromShare) useShareIntentStore.getState().clear();
+  }, [fromShare]);
   const screenEffect = useNewScreenEffect(guid, messages);
   // "Jump to oldest unread": captured BEFORE markRead moves the read marker. The chip shows only
   // when the backlog is deep enough that the oldest unread sits off-screen above the opening view.
@@ -494,8 +521,9 @@ function ChatScreenInner({
         mentionParticipants={
           isGroup && chatService === 'iMessage' ? (participants ?? NO_PARTICIPANTS) : undefined
         }
-        initialText={draft ?? undefined}
+        initialText={draft ?? sharedText ?? undefined}
         onDraftChange={onDraftChange}
+        initialAttachments={sharedAttachments.length > 0 ? sharedAttachments : undefined}
       />
     </>
   );
