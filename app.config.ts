@@ -63,12 +63,17 @@ const config: ExpoConfig = {
     // screen) with the gator icon, so launching a closed app no longer flashes white. Same
     // color in OS light + dark. The config plugin is the SDK 57 way (legacy `splash` keys are
     // deprecated); backgroundColor controls res/values/colors.xml `splashscreen_background`.
+    // Android 12+ masks windowSplashScreenAnimatedIcon into a circle (inner ~2/3 safe zone),
+    // so `splash-icon.png` is a safe-zone-padded CIRCULAR gator badge (the gator sits within
+    // ~64% of the canvas with transparent margins) — a full-bleed icon gets clipped on all four
+    // sides. imageWidth = 288 (the full A12 icon canvas dp) renders the already-padded source
+    // 1:1 so the baked padding is preserved on a clean rebuild.
     [
       'expo-splash-screen',
       {
         backgroundColor: '#000000',
         image: './assets/splash-icon.png',
-        imageWidth: 180,
+        imageWidth: 288,
         resizeMode: 'contain',
         dark: { backgroundColor: '#000000', image: './assets/splash-icon.png' },
       },
