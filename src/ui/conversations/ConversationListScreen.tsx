@@ -21,6 +21,7 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
+import { useChatNavigator } from '../useChatNavigator';
 import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
@@ -58,12 +59,14 @@ export function ConversationListScreen(): React.JSX.Element {
   // Android edge-to-edge otherwise produces after a show/hide cycle.
   const kbVisible = useKeyboardVisible();
 
-  // Stable so the memoized ConversationTile doesn't re-render every list update.
+  // Stable so the memoized ConversationTile doesn't re-render every list update. Routes through
+  // useChatNavigator so a thread never stacks on a thread (Back from a chat always → Messages).
+  const openChatNav = useChatNavigator();
   const openChat = useCallback(
     (guid: string): void => {
-      router.push(`/chat/${encodeURIComponent(guid)}`);
+      openChatNav(`/chat/${encodeURIComponent(guid)}`);
     },
-    [router],
+    [openChatNav],
   );
 
   // Long-press a tile → pin/mute/archive/delete sheet. Stable so the memoized tiles hold.

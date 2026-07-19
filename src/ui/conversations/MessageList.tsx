@@ -121,9 +121,6 @@ export function MessageList({
   const listRef = useRef<FlashListRef<EnrichedMessage>>(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
-  // One-shot "land at newest on first open" bookkeeping (see the firstPopulate effect below).
-  const didInitialScrollRef = useRef(false);
-  const initRaf = useRef<number | null>(null);
   // Deferred scroll for a just-sent (appended) message — see the appended branch below.
   const appendRaf = useRef<number | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,11 +168,22 @@ export function MessageList({
     () => () => {
       if (highlightTimer.current) clearTimeout(highlightTimer.current);
       if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
-      if (initRaf.current != null) cancelAnimationFrame(initRaf.current);
       if (appendRaf.current != null) cancelAnimationFrame(appendRaf.current);
     },
     [],
   );
+
+  // Land at the newest message once FlashList has MEASURED itself. `onLoad` fires after the
+  // first-render layout is committed, so scrollToEnd here computes against real row heights —
+  // a bare rAF/effect ran too early and, on a tall window, landed SHORT (dropping the user into
+  // mid-history, showing old texts). Paired with `startRenderingFromBottom` (which anchors the
+  // cold render) this makes a normal open reliably start at the bottom. Skipped for a
+  // search/notification open (focusReady), which keeps its `initialScrollIndex` jump. Fires once
+  // per mount; the list is keyed by chat guid, so switching threads re-mounts and re-anchors.
+  const onListLoad = useCallback((): void => {
+    if (focusReady) return;
+    listRef.current?.scrollToEnd({ animated: false });
+  }, [focusReady]);
 
   // Distance (px) from the bottom, updated on scroll — drives "am I near the newest message?" for
   // the keyboard-follow below. Starts at 0 (a fresh chat opens pinned to the bottom).
@@ -209,45 +217,39 @@ export function MessageList({
   // a genuine append (length grew AND a new tail guid) so in-place updates (sending→sent, localPath
   // writes, reaction joins) and a temp→real guid swap don't re-fire.
   const lastTailRef = useRef<{ guid: string | null; len: number }>({ guid: null, len: 0 });
-  // firstPopulate lands at the newest message the FIRST time rows arrive on a NORMAL open. The list
-  // mounts EMPTY (messages load async), so startRenderingFromBottom anchors an empty cold render and
-  // the rows that arrive after render from the top — hence chats "often" opened mid-history. A
-  // notification/search open (focusReady) keeps its initialScrollIndex jump and is left alone.
+  // The initial "land at newest" is handled by onListLoad (post-measure) + startRenderingFromBottom.
+  // This effect only reveals the user's OWN just-sent message when it's appended as the chronological
+  // tail — even if they'd scrolled up. (Incoming-while-near-bottom is handled natively by
+  // autoscrollToBottomThreshold; this covers the scrolled-up sender, where that threshold won't fire.)
   useEffect(() => {
     const prev = lastTailRef.current;
     const last = rows[rows.length - 1] ?? null;
     const appended = prev.len > 0 && rows.length > prev.len && !!last && last.guid !== prev.guid;
-    const firstPopulate = prev.len === 0 && rows.length > 0;
     lastTailRef.current = { guid: last?.guid ?? null, len: rows.length };
-    if (firstPopulate && !focusReady && !didInitialScrollRef.current) {
-      didInitialScrollRef.current = true;
-      if (initRaf.current != null) cancelAnimationFrame(initRaf.current);
-      initRaf.current = requestAnimationFrame(() =>
-        listRef.current?.scrollToEnd({ animated: false }),
-      );
-      return;
-    }
     if (appended && last?.isFromMe === 1) {
       // Defer a frame so FlashList has laid out/measured the newly-appended tail row before we
       // scroll — otherwise scrollToEnd computes against the pre-append content height and lands
-      // short, leaving the just-sent bubble hidden below the fold (this is the ONE scroll site
-      // that used to skip the rAF the firstPopulate/keyboardDidShow paths already use).
+      // short, leaving the just-sent bubble hidden below the fold.
       if (appendRaf.current != null) cancelAnimationFrame(appendRaf.current);
       appendRaf.current = requestAnimationFrame(() =>
         listRef.current?.scrollToEnd({ animated: true }),
       );
     }
-  }, [rows, focusReady]);
+  }, [rows]);
 
   return (
     <View style={styles.flex}>
       <FlashList
-        // Remount keyed to the focus target so initialScrollIndex (mount-time) lands on it.
-        key={focusReady ? `focus-${focusGuid}` : 'list'}
+        // Remount keyed to the focus target so initialScrollIndex (mount-time) lands on it; else
+        // keyed by chat guid so a REUSED screen instance (a chat opened via replace over another
+        // chat) re-mounts the list and re-runs onLoad → lands the new thread at its newest message.
+        key={focusReady ? `focus-${focusGuid}` : `list-${chatGuid}`}
         ref={listRef}
         data={rows}
         keyExtractor={(m: EnrichedMessage) => m.guid}
         initialScrollIndex={focusReady ? focusIndex : undefined}
+        // Land at the newest message after first-render measurement (normal open). See onListLoad.
+        onLoad={onListLoad}
         // startRenderingFromBottom positions the COLD render at the newest message; the threshold is
         // what makes the list auto-follow appended messages (unset → -1 → FlashList never auto-scrolls).
         // 0.2 = auto-scroll to a new bottom row only when the user is within ~20% of a screen of the

@@ -20,7 +20,7 @@ jest.mock('@shopify/flash-list', () => {
   const ReactLib = require('react');
   const { View } = require('react-native');
   const FlashList = ReactLib.forwardRef(function FlashList(
-    props: { data?: unknown[]; renderItem?: (a: { item: unknown; index: number }) => unknown; keyExtractor?: (i: unknown) => string },
+    props: { data?: unknown[]; renderItem?: (a: { item: unknown; index: number }) => unknown; keyExtractor?: (i: unknown) => string; onLoad?: (info: { elapsedTimeInMs: number }) => void },
     ref: unknown,
   ) {
     ReactLib.useImperativeHandle(ref, () => ({
@@ -28,7 +28,12 @@ jest.mock('@shopify/flash-list', () => {
       scrollToIndex: jest.fn(),
       scrollToOffset: jest.fn(),
     }));
-    const { data = [], renderItem, keyExtractor } = props;
+    const { data = [], renderItem, keyExtractor, onLoad } = props;
+    // Real FlashList raises onLoad once it has drawn/measured its first render; the initial
+    // "scroll to newest" now hangs off that, so fire it once on mount to mirror the device.
+    ReactLib.useEffect(() => {
+      onLoad?.({ elapsedTimeInMs: 0 });
+    }, []);
     return ReactLib.createElement(
       View,
       null,

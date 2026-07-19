@@ -24,7 +24,10 @@ import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 import type { SearchResultRow, InboxRow } from '@db/repositories';
 
 const mockPush = jest.fn();
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: mockPush }),
+  usePathname: () => '/home',
+}));
 
 // The reactive-DB hooks: mocked so tests feed controlled result/chat rows.
 jest.mock('@features/search/useSearch', () => ({ useSearch: jest.fn() }));

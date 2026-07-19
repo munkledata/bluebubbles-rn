@@ -6,6 +6,7 @@ import { useChats } from '@features/conversations/useChats';
 import type { InboxRow } from '@db/repositories';
 import { Screen, ScreenHeader } from '../primitives';
 import { useTheme } from '../theme';
+import { useChatNavigator } from '../useChatNavigator';
 import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
 
@@ -37,12 +38,13 @@ export function FilteredChatListScreen({
 }: FilteredChatListScreenProps): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
+  const openChatNav = useChatNavigator();
   const { data } = useChats(includeArchived);
   const rows = useMemo(() => (data ?? []).filter(filter), [data, filter]);
 
   const openChat = useCallback(
-    (guid: string): void => router.push(`/chat/${encodeURIComponent(guid)}`),
-    [router],
+    (guid: string): void => openChatNav(`/chat/${encodeURIComponent(guid)}`),
+    [openChatNav],
   );
   const [actionTarget, setActionTarget] = useState<ChatActionTarget | null>(null);
   const onLongPress = useCallback((row: InboxRow): void => {

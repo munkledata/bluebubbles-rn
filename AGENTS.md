@@ -312,12 +312,27 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   (`packages/bbd`): `errorLogIngestionEnabled` config (default OFF) gates ingestion + drives the capability
   flag; `ErrorReportStore` fingerprints (deterministic sha1 over normalized message + top stack frame + tag +
   level, `errors/fingerprint.ts`) and appends `error-reports/categories/<fp>.jsonl` + an atomic `index.json`.
-- **Chat opens at the newest message via a one-shot, keyboard-follow is near-bottom-gated** (`MessageList`).
-  A normal open can't rely on `startRenderingFromBottom` alone (the list first mounts EMPTY on the async DB
-  read), so a guarded `scrollToEnd` fires on the first `[]→populated` transition — but ONLY when `!focusReady`,
-  so a notification/search open keeps its `initialScrollIndex` jump. A `keyboardDidShow` listener re-pins to
-  the newest message only when the user was within `KEYBOARD_FOLLOW_THRESHOLD` of the bottom (else a reader is
-  left alone). Both are device-only to verify (jest fakes keyboard + FlashList layout).
+- **Chat opens at the newest message; keyboard-follow is near-bottom-gated** (`MessageList` + `chat/[guid].tsx`).
+  FlashList v2's `startRenderingFromBottom` anchors the newest message ONLY on the INITIAL render (confirmed in
+  flash-list 2.0.2 types) — so the list must mount WITH data. The chat screen gates the `MessageList` behind
+  `messagesLoading` (a spinner until the first `useMessages` read resolves, i.e. `messagesData != null`), so
+  FlashList's first render is already populated. The corrective "land at newest" then fires from FlashList's
+  `onLoad` (raised AFTER first-render measurement) as a single `scrollToEnd`, NOT a bare rAF on the
+  `[]→populated` transition — the old rAF ran before row heights were measured and, on a tall (250-msg) window,
+  landed SHORT, dropping the user into mid-history (the "opens in the middle showing old texts" bug). Skipped
+  when `focusReady` (a search/notification open keeps its `initialScrollIndex` jump). The list is keyed
+  `list-${chatGuid}`, so a REUSED screen instance (a chat opened via `router.replace` over another chat)
+  re-mounts the list → `onLoad` re-fires → the new thread lands at its newest message. A `keyboardDidShow`
+  listener re-pins to the newest message only when the user was within `KEYBOARD_FOLLOW_THRESHOLD` of the
+  bottom (else a reader is left alone). All device-only to verify (jest fakes keyboard + FlashList layout).
+- **Open a chat ONLY via `useChatNavigator` (`src/ui/useChatNavigator.ts`) — never a raw `router.push` to
+  `/chat/…`.** The app keeps ONE stack with the Messages list at its base; pushing a thread on top of an
+  already-open thread (notification taps did this) left Back returning to the PREVIOUS thread, not the inbox
+  (the "threads stacking" bug). `useChatNavigator` REPLACES when the current route is already a `/chat/…`
+  (so Back → Messages) and PUSHES otherwise, keeping the stack at `[Messages, thread]`. Every entry point
+  (inbox, search, archived/unknown lists, notification foreground-press + resume-drain, Direct Share) routes
+  through it. It reads `usePathname()`, so a component test mocking `expo-router` must provide `usePathname`
+  (a non-`/chat/` path → `push`) alongside `useRouter`.
 - **"Disable Battery Optimization" opens the settings SCREEN, not the one-shot request.**
   `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` only shows its dialog when NOT already exempt and silently no-ops
   forever after (looks broken on repeat presses; there's no exemption-state query without a native module).

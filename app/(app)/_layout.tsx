@@ -1,5 +1,5 @@
 import notifee, { EventType } from 'react-native-notify-kit';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useCallback, useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
@@ -13,6 +13,7 @@ import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
+import { useChatNavigator } from '@ui/useChatNavigator';
 
 /**
  * Layout for the connected app. Drives the resume re-lock (the gate itself is
@@ -20,7 +21,9 @@ import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
  * actions (reply / mark-read).
  */
 export default function AppLayout(): React.JSX.Element {
-  const router = useRouter();
+  // Opens a chat WITHOUT stacking one thread on another: a notification tapped while a thread is
+  // already open swaps it (replace) instead of pushing, so Back from any thread → Messages.
+  const openChat = useChatNavigator();
 
   // App-lock: record background time; lock on foreground once the timeout passes.
   useEffect(() => {
@@ -67,9 +70,9 @@ export default function AppLayout(): React.JSX.Element {
       () => notifee.getInitialNotification(),
       takePendingNotification,
       handleNotificationPress,
-      (path) => router.push(path),
+      openChat,
     );
-  }, [router]);
+  }, [openChat]);
 
   // Foreground notification handling. Action buttons (reply / mark-read / love) run their
   // side-effects; a body tap (PRESS) while the app is VISIBLE runs its side-effects AND deep-links
@@ -82,10 +85,10 @@ export default function AppLayout(): React.JSX.Element {
           void handleNotificationAction(detail);
         } else if (type === EventType.PRESS) {
           void handleNotificationPress(detail);
-          openFromNotification(detail.notification?.data, (path) => router.push(path));
+          openFromNotification(detail.notification?.data, openChat);
         }
       }),
-    [router],
+    [openChat],
   );
 
   // Cold start: a tap that LAUNCHED the app from killed isn't replayed as a foreground event —

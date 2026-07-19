@@ -5,6 +5,7 @@ import { logger } from '@core/secure';
 import { getLaunchShortcutId } from '@/services/shortcuts/shareShortcuts';
 import { useShareIntentStore } from '@state/shareIntentStore';
 import { LoadErrorBoundary } from './LoadErrorBoundary';
+import { useChatNavigator } from './useChatNavigator';
 
 /** A bare local file path → a usable file:// uri (expo-share-intent may return either form). */
 function toUri(path: string): string {
@@ -75,6 +76,7 @@ export function ShareIntentCapture(): React.JSX.Element {
  */
 function ShareIntentNavigatorInner(): null {
   const router = useRouter();
+  const openChat = useChatNavigator();
   const pending = useShareIntentStore((s) => s.files.length > 0 || s.text !== null);
   const navigatedRef = useRef(false);
 
@@ -89,13 +91,14 @@ function ShareIntentNavigatorInner(): null {
     const chatGuid = getLaunchShortcutId();
     if (chatGuid) {
       // Direct Share tap → open that exact chat; `share=1` tells it to consume the staged share.
+      // Via useChatNavigator so it never stacks on an already-open thread.
       logger.debug('[share] direct-share → open chat');
-      router.push(`/chat/${encodeURIComponent(chatGuid)}?share=1`);
+      openChat(`/chat/${encodeURIComponent(chatGuid)}?share=1`);
     } else {
       logger.debug('[share] opening new-chat for pending share');
       router.push('/new-chat');
     }
-  }, [pending, router]);
+  }, [pending, router, openChat]);
 
   return null;
 }

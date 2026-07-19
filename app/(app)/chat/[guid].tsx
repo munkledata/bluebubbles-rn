@@ -2,7 +2,14 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams } from 'expo-router';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -136,6 +143,11 @@ function ChatScreenInner({
   const [limit, setLimit] = useState(250);
   const { data: messagesData, error: messagesError } = useMessages(guid, limit, anchorDate);
   const messages = messagesData ?? [];
+  // Hold the list back until the FIRST DB read resolves, so FlashList mounts WITH data. Its
+  // `startRenderingFromBottom` only anchors the newest message on the INITIAL render (verified
+  // against flash-list 2.0.2) — mounting empty and populating later left chats opening mid-history.
+  // An error still "resolves" the load (the banner explains it); only a genuine null is loading.
+  const messagesLoading = messagesData == null && messagesError == null;
   // Load older history when the list reaches the top. Guarded so repeated onStartReached fires (and
   // the async reactive re-query) can't stack several page-grows at once: the ref is set on grow and
   // cleared when the message count actually changes (new page arrived). Growth stops once a load
@@ -443,7 +455,11 @@ function ChatScreenInner({
         <Text style={styles.unreadChipText}>↑ {firstUnread.count} unread — jump to first</Text>
       </Pressable>
     ) : null;
-  const listNode = (
+  const listNode = messagesLoading ? (
+    <View style={[styles.flex, styles.listLoading]}>
+      <ActivityIndicator color={theme.color.tint} />
+    </View>
+  ) : (
     <MessageList
       chatGuid={guid}
       isGroup={isGroup}
@@ -681,6 +697,9 @@ const JUMP_UNREAD_MIN = 6;
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  // Placeholder while the first message page loads, so the list mounts already-populated
+  // (see messagesLoading) — occupies the list's slot so the layout doesn't jump on arrival.
+  listLoading: { alignItems: 'center', justifyContent: 'center' },
   // Wallpaper mode: bars float over the full-height list instead of framing it. zIndex 2 keeps
   // the bar chrome above the EdgeFade veils (zIndex 1), which sit above the in-flow list (0) —
   // the bars precede the list in flow order, so sibling order alone would z-bury them.

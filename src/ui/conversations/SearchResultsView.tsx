@@ -1,5 +1,4 @@
 import { FlashList } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SearchResultRow } from '@db/repositories';
@@ -7,6 +6,7 @@ import { useChatMatches } from '@features/search/useChatMatches';
 import { useSearch } from '@features/search/useSearch';
 import { formatChatDate, resolveTitle } from '@utils';
 import { useTheme } from '../theme';
+import { useChatNavigator } from '../useChatNavigator';
 import { ConversationTile } from './ConversationTile';
 
 // Cap the chat list so the (non-virtualized) header stays light; the matching set is identical to the
@@ -35,7 +35,7 @@ function chatTitle(r: SearchResultRow): string {
  */
 export function SearchResultsView({ query }: { query: string }): React.JSX.Element {
   const theme = useTheme();
-  const router = useRouter();
+  const openChatNav = useChatNavigator();
   const { results, loading } = useSearch(query);
   // Chats section = NAME/people matches only; message-content matches show in the Messages section
   // below with the snippet, so the Chats list never looks irrelevant.
@@ -46,19 +46,19 @@ export function SearchResultsView({ query }: { query: string }): React.JSX.Eleme
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(
     (guid: string): void => {
-      router.push(`/chat/${encodeURIComponent(guid)}`);
+      openChatNav(`/chat/${encodeURIComponent(guid)}`);
     },
-    [router],
+    [openChatNav],
   );
   // Open the chat focused on the matched message (the chat screen scrolls to + highlights it).
   const openMessage = useCallback(
     (r: SearchResultRow): void => {
       const date = r.dateCreated != null ? `&focusDate=${r.dateCreated}` : '';
-      router.push(
+      openChatNav(
         `/chat/${encodeURIComponent(r.chatGuid)}?focus=${encodeURIComponent(r.guid)}${date}`,
       );
     },
-    [router],
+    [openChatNav],
   );
 
   const sectionLabel = (label: string): React.JSX.Element => (

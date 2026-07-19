@@ -30,13 +30,17 @@ interface MockShareState {
 }
 
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
 const mockShare: { current: MockShareState } = {
   current: { hasShareIntent: false, shareIntent: {}, resetShareIntent: jest.fn() },
 };
 // The Direct Share target the user tapped (guid) or null for a plain share.
 const mockShortcutId: { current: string | null } = { current: null };
 
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  usePathname: () => '/home',
+}));
 jest.mock('expo-share-intent', () => ({ useShareIntentContext: () => mockShare.current }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   getLaunchShortcutId: () => mockShortcutId.current,
