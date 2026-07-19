@@ -59,6 +59,9 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     'expo-secure-store',
+    // Injects the dedicated Android notification status-bar icon (ic_stat_gator) into the
+    // regenerated native res/ folders at prebuild. See plugins/withNotificationIcon.js.
+    './plugins/withNotificationIcon',
     // FCM push: the firebase plugin wires google-services.json + the messaging SDK
     // into the native build (the receive pipeline is already in JS).
     '@react-native-firebase/app',

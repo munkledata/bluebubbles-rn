@@ -111,7 +111,7 @@ export async function postNotification(intent: NotificationIntent): Promise<void
       body: intent.body,
       android: {
         channelId: CHANNEL_NEW_MESSAGE,
-        smallIcon: 'ic_launcher',
+        smallIcon: 'ic_stat_gator',
         pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
       },
     });
@@ -131,7 +131,7 @@ export async function postNotification(intent: NotificationIntent): Promise<void
       body,
       android: {
         channelId: CHANNEL_NEW_MESSAGE,
-        smallIcon: 'ic_launcher',
+        smallIcon: 'ic_stat_gator',
         pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
       },
     });
@@ -164,7 +164,7 @@ export async function postNotification(intent: NotificationIntent): Promise<void
     },
     android: {
       channelId,
-      smallIcon: 'ic_launcher',
+      smallIcon: 'ic_stat_gator',
       pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,
@@ -219,7 +219,7 @@ export async function postLockedNotification(): Promise<void> {
     body: 'You have new messages',
     android: {
       channelId: CHANNEL_NEW_MESSAGE,
-      smallIcon: 'ic_launcher',
+      smallIcon: 'ic_stat_gator',
       pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
     },
   });
@@ -256,7 +256,7 @@ async function postFaceTimeNotification(intent: {
     data: { faceTimeUuid: intent.uuid },
     android: {
       channelId: CHANNEL_FACETIME,
-      smallIcon: 'ic_launcher',
+      smallIcon: 'ic_stat_gator',
       importance: AndroidImportance.HIGH,
       category: AndroidCategory.CALL,
       ongoing: true,
@@ -324,7 +324,7 @@ export async function scheduleReminderNotification(args: {
         },
         android: {
           channelId: CHANNEL_REMINDERS,
-          smallIcon: 'ic_launcher',
+          smallIcon: 'ic_stat_gator',
           pressAction: { id: PRESS_REMINDER, launchActivity: 'default' },
         },
       },
