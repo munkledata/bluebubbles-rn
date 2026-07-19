@@ -1,6 +1,6 @@
 {
   "name": "gator-rn",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
