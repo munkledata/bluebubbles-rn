@@ -1,7 +1,12 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Stack } from 'expo-router';
+import {
+  Stack,
+  ThemeProvider as NavThemeProvider,
+  DarkTheme as NavDarkTheme,
+  DefaultTheme as NavDefaultTheme,
+} from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { boot, completeUnlock } from '@/services';
@@ -18,7 +23,32 @@ import { hydrateAllStores } from '@state/hydrateStores';
 import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { AppDialog, AppToast, ErrorBoundary, ThemeProvider } from '@ui';
+import { AppDialog, AppToast, ErrorBoundary, ThemeProvider, useTheme } from '@ui';
+
+/**
+ * The navigation stack, themed. Expo Router (React Navigation) paints each screen's
+ * scene container — and the native container behind the stack — with the navigation
+ * theme's `background`/`card` colors. Without this it defaults to a near-white light
+ * theme, so every push/pop briefly flashes light-gray before the screen's own view
+ * paints (jarring on the app's dark presets). Feeding the app theme's background in
+ * makes the transition background match the screens. Rendered under `<ThemeProvider>`
+ * so `useTheme()` resolves; the nested (app) stack inherits this via context.
+ */
+function ThemedStack(): React.JSX.Element {
+  const theme = useTheme();
+  const navTheme = useMemo(() => {
+    const base = theme.mode === 'dark' ? NavDarkTheme : NavDefaultTheme;
+    return {
+      ...base,
+      colors: { ...base.colors, background: theme.color.background, card: theme.color.background },
+    };
+  }, [theme.mode, theme.color.background]);
+  return (
+    <NavThemeProvider value={navTheme}>
+      <Stack screenOptions={{ headerShown: false }} />
+    </NavThemeProvider>
+  );
+}
 
 /**
  * Root layout: app-wide providers + the navigation stack. On mount it boots —
@@ -48,7 +78,7 @@ export default function RootLayout(): React.JSX.Element {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <StatusBar style="auto" />
-            <Stack screenOptions={{ headerShown: false }} />
+            <ThemedStack />
             {/* App-wide themed dialog host (replaces native Alert.alert). Mounted here inside
                 ThemeProvider so it's themed and covers every screen, above the nav stack. */}
             <AppDialog />

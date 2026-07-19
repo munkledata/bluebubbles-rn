@@ -124,6 +124,8 @@ export function MessageList({
   // One-shot "land at newest on first open" bookkeeping (see the firstPopulate effect below).
   const didInitialScrollRef = useRef(false);
   const initRaf = useRef<number | null>(null);
+  // Deferred scroll for a just-sent (appended) message — see the appended branch below.
+  const appendRaf = useRef<number | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [highlightGuid, setHighlightGuid] = useState<string | null>(null);
   const jumpToReply = useCallback((originatorGuid: string): void => {
@@ -170,6 +172,7 @@ export function MessageList({
       if (highlightTimer.current) clearTimeout(highlightTimer.current);
       if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
       if (initRaf.current != null) cancelAnimationFrame(initRaf.current);
+      if (appendRaf.current != null) cancelAnimationFrame(appendRaf.current);
     },
     [],
   );
@@ -225,7 +228,14 @@ export function MessageList({
       return;
     }
     if (appended && last?.isFromMe === 1) {
-      listRef.current?.scrollToEnd({ animated: true });
+      // Defer a frame so FlashList has laid out/measured the newly-appended tail row before we
+      // scroll — otherwise scrollToEnd computes against the pre-append content height and lands
+      // short, leaving the just-sent bubble hidden below the fold (this is the ONE scroll site
+      // that used to skip the rAF the firstPopulate/keyboardDidShow paths already use).
+      if (appendRaf.current != null) cancelAnimationFrame(appendRaf.current);
+      appendRaf.current = requestAnimationFrame(() =>
+        listRef.current?.scrollToEnd({ animated: true }),
+      );
     }
   }, [rows, focusReady]);
 
