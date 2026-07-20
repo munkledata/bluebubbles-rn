@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { stripAssociatedGuidPrefix } from '../reactions/reactionType';
 import { epochMillis } from './common';
 import { Handle } from './handle';
 import { Attachment } from './attachment';
@@ -110,8 +111,17 @@ export const Message = z.object({
    */
   chatGuid: z.string().nullish(),
 
-  /** Reaction/threading linkage. */
-  associatedMessageGuid: z.string().nullish(),
+  /**
+   * Reaction/threading linkage. Normalized on parse to the BARE target guid: the wire carries a
+   * part prefix (`p:0/<guid>` / `bp:0/<guid>`) that the target message's own `guid` does not, so
+   * without this strip an incoming reaction never matches its target and stays invisible. Applied
+   * here at the schema boundary so EVERY ingestion path (live socket/FCM event + sync/query) is
+   * covered at once. See {@link stripAssociatedGuidPrefix}.
+   */
+  associatedMessageGuid: z
+    .string()
+    .transform(stripAssociatedGuidPrefix)
+    .nullish(),
   associatedMessageType: z.string().nullish(),
   /** Glyph of an arbitrary-emoji tapback (associatedMessageType 'emoji'/'-emoji'). */
   associatedMessageEmoji: z.string().nullish(),

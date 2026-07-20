@@ -59,6 +59,22 @@ export function reactionMeta(base: ReactionBaseType): ReactionMeta {
   return META[base];
 }
 
+/**
+ * Normalize an `associatedMessageGuid` to the BARE target-message guid.
+ *
+ * Apple/BlueBubbles stores a reaction's linkage with a part prefix — `p:0/<guid>` (text part) or
+ * `bp:0/<guid>` (attachment part) — while the target message's OWN `guid` has no prefix. Left raw,
+ * the reaction never matches its target (`WHERE associated_message_guid IN (<bare guids>)`), so
+ * OTHER people's reactions store fine but attach to nothing and never render. Strip the prefix on
+ * the way in — everything after the last `/`; a guid with no `/` is returned unchanged. Mirrors the
+ * Flutter reference (`message.dart`: `.replaceAll("bp:", "").split("/").last`). Reaction guids carry
+ * exactly one `/` and message guids never contain one, so "after the last `/`" is safe.
+ */
+export function stripAssociatedGuidPrefix(guid: string): string {
+  const slash = guid.lastIndexOf('/');
+  return slash >= 0 ? guid.slice(slash + 1) : guid;
+}
+
 /** The wire string sent to remove an existing reaction of this type/kind. */
 export function removalType(base: ReactionKind): string {
   return `-${base}`;

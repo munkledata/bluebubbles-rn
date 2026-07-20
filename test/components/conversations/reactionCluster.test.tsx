@@ -9,7 +9,7 @@
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { renderWithTheme, screen } from '../support/renderWithTheme';
+import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { ReactionCluster } from '@ui/conversations/ReactionCluster';
 import { darkTheme } from '@ui/theme/tokens';
 import { reactionMeta } from '@core/reactions/reactionType';
@@ -86,5 +86,23 @@ describe('ReactionCluster', () => {
     // No badge emojis present for any reaction type.
     expect(screen.queryByText(reactionMeta('love').emoji)).toBeNull();
     expect(screen.queryByText(reactionMeta('like').emoji)).toBeNull();
+  });
+
+  it('fires onPress when the cluster (a button) is tapped', async () => {
+    const onPress = jest.fn();
+    await renderWithTheme(
+      <ReactionCluster
+        reactions={[reaction({ baseType: 'love' })]}
+        isFromMe={false}
+        onPress={onPress}
+      />,
+    );
+    fireEvent.press(screen.getByRole('button', { name: 'View who reacted' }));
+    await waitFor(() => expect(onPress).toHaveBeenCalledTimes(1));
+  });
+
+  it('stays inert (no button) when no handler is given', async () => {
+    await renderWithTheme(<ReactionCluster reactions={[reaction({ baseType: 'love' })]} isFromMe={false} />);
+    expect(screen.queryByRole('button', { name: 'View who reacted' })).toBeNull();
   });
 });

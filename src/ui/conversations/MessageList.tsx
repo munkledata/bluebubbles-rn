@@ -8,6 +8,7 @@ import { usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
 import { MessageRow } from './MessageRow';
 import { FailedMessageSheet } from './FailedMessageSheet';
+import { ReactionDetailsSheet } from './ReactionDetailsSheet';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
 interface MessageListProps {
@@ -103,6 +104,9 @@ export function MessageList({
   // image (from its retained on-disk path), not just the (empty) text.
   const [failed, setFailed] = useState<EnrichedMessage | null>(null);
   const handleRetry = useCallback((m: EnrichedMessage) => setFailed(m), []);
+  // Tap a message's reaction badges → open the "who reacted" sheet (owned here, like FailedMessageSheet).
+  const [reactionsFor, setReactionsFor] = useState<EnrichedMessage | null>(null);
+  const handleShowReactions = useCallback((m: EnrichedMessage) => setReactionsFor(m), []);
   const failedImage = useMemo(() => {
     const att = failed?.attachments.find((a) => a.localPath);
     return att?.localPath
@@ -284,6 +288,7 @@ export function MessageList({
             isSelected={selectedGuids?.has(item.guid) ?? false}
             onToggleSelect={onToggleSelect}
             onJumpToReply={jumpToReply}
+            onShowReactions={handleShowReactions}
             isHighlighted={item.guid === highlightGuid}
           />
         )}
@@ -313,6 +318,10 @@ export function MessageList({
         onDelete={() => {
           if (failed) void discardMessage(failed.guid);
         }}
+      />
+      <ReactionDetailsSheet
+        data={reactionsFor ? { reactions: reactionsFor.reactions } : null}
+        onClose={() => setReactionsFor(null)}
       />
     </View>
   );

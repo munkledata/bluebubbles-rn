@@ -3,6 +3,7 @@ import {
   parseReactionType,
   reactionMeta,
   removalType,
+  stripAssociatedGuidPrefix,
 } from '@core/reactions/reactionType';
 
 describe('reactionType', () => {
@@ -28,5 +29,17 @@ describe('reactionType', () => {
     expect(reactionMeta('love').emoji).toBe('❤️');
     expect(reactionMeta('laugh').label).toBe('Laugh');
     expect(removalType('like')).toBe('-like');
+  });
+
+  describe('stripAssociatedGuidPrefix', () => {
+    it('strips the p:0/ text-part prefix', () => {
+      expect(stripAssociatedGuidPrefix('p:0/ABC-123')).toBe('ABC-123');
+    });
+    it('strips the bp:0/ attachment-part prefix', () => {
+      expect(stripAssociatedGuidPrefix('bp:0/ABC-123')).toBe('ABC-123');
+    });
+    it('leaves a bare guid (no prefix) untouched', () => {
+      expect(stripAssociatedGuidPrefix('ABC-123')).toBe('ABC-123');
+    });
   });
 });

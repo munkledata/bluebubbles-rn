@@ -34,6 +34,8 @@ interface MessageBubbleProps {
   onLongPress?: () => void;
   /** Tap the reply quote → jump to the original message. */
   onJumpToReply?: () => void;
+  /** Tap the reaction badges → open the "who reacted" detail. Omit → badges stay inert. */
+  onShowReactions?: () => void;
   /**
    * Don't render the "Edited" label here — the caller will, below the bubble. The group-avatar row
    * aligns the sender avatar to the bubble's bottom, so an inline "Edited" would drag the avatar
@@ -57,6 +59,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetry,
   onLongPress,
   onJumpToReply,
+  onShowReactions,
   deferEdited,
   hasBackground,
 }: MessageBubbleProps): React.JSX.Element {
@@ -211,7 +214,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         // positioned) reaction cluster pins to the attachment's top corner.
         <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
           {attachmentsNode}
-          <ReactionCluster reactions={reactions} isFromMe={isFromMe} />
+          <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
         </View>
       ) : (
         attachmentsNode
@@ -232,7 +235,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             {bodyText}
           </Text>
           {reactions.length > 0 ? (
-            <ReactionCluster reactions={reactions} isFromMe={isFromMe} />
+            <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
           ) : null}
         </View>
       ) : showText || hasSubject ? (
@@ -255,7 +258,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             ) : null}
           </View>
           {reactions.length > 0 ? (
-            <ReactionCluster reactions={reactions} isFromMe={isFromMe} />
+            <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
           ) : null}
         </View>
       ) : null}

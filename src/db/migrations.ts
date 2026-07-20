@@ -433,4 +433,20 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX error_reports_retry_idx ON error_reports (next_retry_at)`,
     ],
   },
+  {
+    // Retroactively strip the part-prefix from reaction linkage guids already stored raw.
+    // Incoming reactions arrive as `p:0/<guid>` / `bp:0/<guid>`; the target message's own guid has
+    // no prefix, so these rows were saved but never matched their target and stayed invisible. The
+    // ingestion path now strips on parse (Message model), but rows written BEFORE this fix keep the
+    // prefix — this one-time pass fixes the backlog so historical reactions surface. Reaction guids
+    // carry exactly one `/`; a bare guid has none, so the `LIKE '%/%'` guard touches only prefixed
+    // rows and `substr(..., instr(...,'/')+1)` keeps the segment after it. Additive; applied
+    // transactionally + idempotently by name.
+    name: '0026_strip_associated_guid_prefix',
+    statements: [
+      `UPDATE messages
+         SET associated_message_guid = substr(associated_message_guid, instr(associated_message_guid, '/') + 1)
+       WHERE associated_message_guid LIKE '%/%'`,
+    ],
+  },
 ];

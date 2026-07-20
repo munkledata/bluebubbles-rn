@@ -56,6 +56,8 @@ jest.mock('@ui/conversations/MessageBubble', () => {
   return { MessageBubble: (p: { msg?: { text?: string } }) => ReactLib.createElement(Text, null, p.msg?.text ?? '') };
 });
 jest.mock('@ui/conversations/FailedMessageSheet', () => ({ FailedMessageSheet: () => null }));
+// Also list-owned + uses safe-area insets (no SafeAreaProvider here) — stub like FailedMessageSheet.
+jest.mock('@ui/conversations/ReactionDetailsSheet', () => ({ ReactionDetailsSheet: () => null }));
 jest.mock('@/services/send', () => ({ retry: jest.fn(), discardMessage: jest.fn() }));
 
 // eslint-disable-next-line import/first
