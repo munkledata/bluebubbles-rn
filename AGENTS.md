@@ -173,6 +173,20 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   uncovered text. Track a cursor and emit `[cursor, run.start)` + the trailing remainder as plain runs
   (see `parseAttributedRuns`). The upstream format carries NO bold/italic/underline attributes (grep the
   Flutter `lib/` for `kIMText*` → zero hits), so rich text is mentions + links only.
+- **A reaction's `associatedMessageGuid` arrives PART-PREFIXED — strip it or incoming reactions never
+  link.** The wire carries the linkage as `p:0/<guid>` (text part) or `bp:0/<guid>` (attachment part),
+  while the target message's OWN `guid` is bare. Left raw, the reaction row stores fine but its
+  `WHERE associated_message_guid IN (<bare guids>)` join never matches, so OTHER people's reactions
+  attach to nothing and stay invisible (your own show because the optimistic insert + guid-keyed
+  echo-reconcile use the bare target guid). Normalized ONCE at the schema boundary — the `Message`
+  zod field runs `stripAssociatedGuidPrefix` (`@core/reactions/reactionType`, everything after the last
+  `/`) so EVERY ingestion path (live socket/FCM `Message.safeParse` + sync `MessageList`) + the
+  echo-match in `reconcileEchoByContent` get the bare guid for free. Mirrors the Flutter reference
+  (`message.dart`: `.replaceAll("bp:", "").split("/").last`); `threadOriginatorGuid` (replies) is NOT
+  prefixed, so this is reaction-specific. Migration `0026_strip_associated_guid_prefix` backfills rows
+  stored raw before the fix. Tapping a bubble's reaction badges opens `ReactionDetailsSheet` (who
+  reacted, honoring redacted mode); the sheet is list-owned like `FailedMessageSheet`, so a test
+  rendering `MessageList` without a `SafeAreaProvider` must mock it out (it calls `useSafeAreaInsets`).
 - **Backups must filter secret-looking kv keys + delete the cache export file.** The export reads only
   `kv`/`themes`/whitelisted `chats` columns (never SecureVault/messages/handles) and drops any key
   matching `/password|token|secret|credential|auth|key/i`; the plaintext file written to `Paths.cache`

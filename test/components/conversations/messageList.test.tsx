@@ -122,6 +122,8 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
 });
 
 jest.mock('@/services/send', () => ({ retry: jest.fn(), discardMessage: jest.fn() }));
+// Also list-owned + uses safe-area insets (no SafeAreaProvider here) — stub like FailedMessageSheet.
+jest.mock('@ui/conversations/ReactionDetailsSheet', () => ({ ReactionDetailsSheet: () => null }));
 
 // eslint-disable-next-line import/first
 import { MessageList } from '@ui/conversations/MessageList';

@@ -39,7 +39,7 @@ async function react(
   db: AppDatabase,
   chatId: number,
   hm: Map<string, number>,
-  args: { guid: string; type: string; from?: string; date: number },
+  args: { guid: string; type: string; from?: string; date: number; target?: string },
 ) {
   await upsertMessages(
     db,
@@ -48,7 +48,9 @@ async function react(
         guid: args.guid,
         isFromMe: !args.from,
         dateCreated: args.date,
-        associatedMessageGuid: 'mt',
+        // The wire carries a part prefix (`p:0/<guid>`); the Message schema strips it on parse so
+        // the reaction matches the target's bare guid. Default to the bare form for existing cases.
+        associatedMessageGuid: args.target ?? 'mt',
         associatedMessageType: args.type,
         handle: args.from ? { address: args.from } : null,
       }),
@@ -70,6 +72,38 @@ describe('listReactionsByMessageGuids', () => {
     expect(list).toHaveLength(2);
     expect(list.every((r: ReactionRow) => r.baseType === 'love')).toBe(true);
     expect(list.some((r) => r.isFromMe === 1)).toBe(true);
+  });
+
+  it('attaches an incoming reaction whose linkage carries the p:0/ wire prefix (regression)', async () => {
+    // The bug: OTHER people's reactions arrive as `associatedMessageGuid: 'p:0/<targetGuid>'`, but
+    // the target message's own guid is bare ('mt'), so left raw the reaction never matched and
+    // stayed invisible. The Message schema now strips the prefix on parse.
+    const { db } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'love',
+      from: 'a@x.com',
+      date: 110,
+      target: 'p:0/mt',
+    });
+    const list = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0]?.baseType).toBe('love');
+    expect(list[0]?.isFromMe).toBe(0); // from someone else
+  });
+
+  it('also strips the bp:0/ (attachment-part) prefix', async () => {
+    const { db } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    await react(db, chatId, hm, {
+      guid: 'r1',
+      type: 'like',
+      from: 'a@x.com',
+      date: 110,
+      target: 'bp:0/mt',
+    });
+    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(1);
   });
 
   it('collapses add→remove (latest wins) to no badge', async () => {

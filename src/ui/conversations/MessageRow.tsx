@@ -40,6 +40,8 @@ interface MessageRowProps {
   onLongPress?: (msg: EnrichedMessage) => void;
   /** Jump to a replied-to message by its guid (tap the reply quote). */
   onJumpToReply?: (originatorGuid: string) => void;
+  /** Tap the reaction badges → show who reacted (the list owns the detail sheet). */
+  onShowReactions?: (msg: EnrichedMessage) => void;
   /** Swipe the bubble right past the threshold → set this message as the reply target. */
   onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Briefly flashed when this row is the jump target. */
@@ -67,6 +69,7 @@ export const MessageRow = React.memo(function MessageRow({
   onRetry,
   onLongPress,
   onJumpToReply,
+  onShowReactions,
   onSwipeReply,
   isHighlighted,
   selecting,
@@ -111,6 +114,7 @@ export const MessageRow = React.memo(function MessageRow({
     if (originator) onJumpToReply?.(originator);
   }, [onJumpToReply, originator]);
   const handleSwipeReply = useCallback(() => onSwipeReply?.(msg), [onSwipeReply, msg]);
+  const handleShowReactions = useCallback(() => onShowReactions?.(msg), [onShowReactions, msg]);
 
   // Group / chat-event system message → a centered event line instead of a bubble. Every name in
   // the line (the actor, the affected participant, and a renamed-to title) can leak identity, so
@@ -162,6 +166,9 @@ export const MessageRow = React.memo(function MessageRow({
       onRetry={onRetry ? handleRetry : undefined}
       onLongPress={onLongPress ? handleLongPress : undefined}
       onJumpToReply={onJumpToReply && originator ? handleJumpToReply : undefined}
+      // Only wire the tap when a handler is provided AND there's something to show, so an
+      // un-reacted bubble's cluster stays inert (and the memo prop-compare sees `undefined`).
+      onShowReactions={onShowReactions && hasReactions ? handleShowReactions : undefined}
       // In the avatar row the avatar aligns to the bubble's bottom; defer "Edited" to below the row
       // (rendered by MessageRow) so the avatar doesn't drop to the label's level.
       deferEdited={showAvatar}
