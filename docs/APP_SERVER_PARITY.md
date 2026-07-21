@@ -112,6 +112,28 @@ error, batch-uploads them, and the server fingerprints (categorizes) + writes th
   the operation (401/enabled/disabled/400), and the server-info capability. Device-only: the global handlers
   firing + the real upload/disk write.
 
+## ✅ Closed (2026-07-20) — rich-link previews (`payloadData`)
+
+Received links previously rendered blank cards: the app re-fetched every URL itself with a
+bot-looking User-Agent (blocked by X/Instagram/Amazon/news CDNs), while Apple's OWN pre-fetched
+preview (the LPLinkMetadata the sender's device embedded in `payload_data`) was read from chat.db
+by the server but never emitted, and never stored by the app.
+
+- **Server** (`packages/bbd`): `parsePayloadData` (`data/imessage/payloadData.ts`) decodes the
+  NSKeyedArchiver blob (bplist → UID-walk, modeled on the Flutter client's `extractUIDs`) into a
+  flat `{urlData: [{url, originalUrl, title, summary, siteName, itemType, imageUrl, iconUrl,
+  videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL balloon bundle id +
+  decodable data; placeholder RichLinks → omitted). Additive `MessageV1.payloadData` on the
+  protocol; REST + socket + FCM all carry it (single serializer). NO capability flag — additive,
+  use-if-present (precedent: `messageSummaryInfo`/`isScheduled`). Validated against 578 real
+  chat.db blobs (512 decode, 66 are placeholders).
+- **App** (`bluebubbles-rn`): `payload_data` JSON TEXT column (migration `0027`, COALESCE-preserved
+  like `messageSummaryInfo`); zod `PayloadData` with `.catch(undefined)`; `MessageBubble` renders
+  the card straight from it (image/icon URLs re-checked with `isSafePreviewUrl`) and passes
+  `useUrlPreview(null)` so payload-backed messages NEVER fetch. Fallback (no payload: old rows,
+  placeholders, old servers) = the client OG fetch, hardened 2026-07-20: real Safari UA, 512KB
+  pre-reject → 5MB DoS guard only, transient failures (403/429/timeout) no longer negative-cached.
+
 ## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
 
 The Gator server's RCS bridge (a `libgm` sidecar) serves RCS chats through the **same frozen v1

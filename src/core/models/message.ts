@@ -40,6 +40,39 @@ export const MessageSummaryInfo = z
 export type MessageSummaryInfo = z.infer<typeof MessageSummaryInfo>;
 
 /**
+ * One decoded rich-link preview from a URL balloon's `payload_data` — the LPLinkMetadata the
+ * SENDER's device already fetched (title/summary/site + image/icon/video URLs). Every field
+ * nullish + `.loose()`: the server owns the decode and this must tolerate shape drift.
+ */
+export const UrlPreviewItem = z
+  .object({
+    url: z.string().nullish(),
+    originalUrl: z.string().nullish(),
+    title: z.string().nullish(),
+    summary: z.string().nullish(),
+    siteName: z.string().nullish(),
+    itemType: z.string().nullish(),
+    imageUrl: z.string().nullish(),
+    iconUrl: z.string().nullish(),
+    videoUrl: z.string().nullish(),
+  })
+  .loose();
+export type UrlPreviewItem = z.infer<typeof UrlPreviewItem>;
+
+/**
+ * Apple rich-link metadata for a URL balloon (`payloadData` on the wire). Presence-driven:
+ * the server emits it only when the blob decoded to real data — placeholder RichLinks (link
+ * sent before its metadata resolved), app balloons, and old servers simply omit it, and the
+ * client falls back to its own OG fetch (useUrlPreview).
+ */
+export const PayloadData = z
+  .object({
+    urlData: z.array(UrlPreviewItem).nullish(),
+  })
+  .loose();
+export type PayloadData = z.infer<typeof PayloadData>;
+
+/**
  * A single message (Flutter: Message). Reactions are modelled server-side as
  * "associated messages" carrying an `associatedMessageType` (e.g. "love",
  * "like", "emphasize"); threading uses `threadOriginatorGuid`.
@@ -78,6 +111,16 @@ export const Message = z.object({
    * as JSON TEXT on the messages table; read back tolerantly via {@link parseMessageSummaryInfo}.
    */
   messageSummaryInfo: MessageSummaryInfo.nullish().catch(undefined),
+
+  /**
+   * Apple rich-link preview (URL balloons): the sender-fetched LPLinkMetadata, decoded
+   * server-side. Presence-driven — arrives ONLY on URL balloons with real metadata; already in
+   * SYNC_WITH_QUERY, so sync + live socket/FCM deliver it once this field exists. Same
+   * `.catch(undefined)` guard as `messageSummaryInfo`: a malformed value degrades to "absent"
+   * (→ the client's own OG fetch) instead of stalling the sync page. Persisted as JSON TEXT;
+   * read back tolerantly via {@link parsePayloadData}.
+   */
+  payloadData: PayloadData.nullish().catch(undefined),
 
   hasAttachments: z.boolean().nullish(),
   attachments: z.array(Attachment).nullish(),
@@ -180,4 +223,24 @@ export function parseMessageSummaryInfo(
   }
   const res = MessageSummaryInfo.safeParse(parsed);
   return res.success ? res.data : null;
+}
+
+/**
+ * Tolerant read-back parse for the DB's `payload_data` JSON TEXT column: `JSON.parse` then
+ * validate against {@link PayloadData}. Returns null on ANY failure (absent, empty, non-JSON,
+ * shape mismatch, or no urlData entries) and NEVER throws — a corrupt value degrades to "no
+ * server preview" and the OG-fetch fallback takes over. Mirror of the write side
+ * (`JSON.stringify` in `upsertMessages`).
+ */
+export function parsePayloadData(raw: string | null | undefined): PayloadData | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const res = PayloadData.safeParse(parsed);
+  if (!res.success || !res.data.urlData?.length) return null;
+  return res.data;
 }

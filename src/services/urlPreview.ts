@@ -67,9 +67,23 @@ export function parseOgMetadata(html: string, url: string): OgMetadata {
   return out;
 }
 
-const MAX_BYTES = 512 * 1024;
+const MAX_BYTES = 512 * 1024; // parse-window: OG tags live in <head>, well inside this
+const HARD_CAP_BYTES = 5 * 1024 * 1024; // DoS guard only — header may be absent or compressed size
 const TIMEOUT_MS = 8000;
 const MAX_REDIRECTS = 3;
+
+/**
+ * Outcome of a preview fetch. The split matters for caching:
+ * - `ok`        → cache the metadata (success TTL)
+ * - `empty`     → definitive "this URL will never preview" (unsafe target, non-HTML,
+ *                 oversized) → negative-cache briefly
+ * - `transient` → network error, timeout, or an HTTP error status (403/429 are usually
+ *                 bot-blocks that clear on retry) → cache NOTHING so the next mount retries
+ */
+export type OgFetchResult =
+  | { kind: 'ok'; meta: OgMetadata }
+  | { kind: 'empty' }
+  | { kind: 'transient' };
 
 /**
  * SSRF guard: true if `hostname` is a private/loopback/link-local/internal address. The
@@ -119,52 +133,60 @@ export function isSafePreviewUrl(raw: string): boolean {
 /**
  * IMPURE: securely fetch a URL and parse its OG metadata. http(s) only, HTML only,
  * size/time-capped, with an SSRF guard validating the host on EVERY redirect hop (manual
- * redirects). Returns null on any failure (→ negative cache). Does NOT use the Gator
- * HttpClient, so the server auth header never leaks to third-party sites.
+ * redirects). Returns an {@link OgFetchResult} so the caller can cache definitive failures
+ * but retry transient ones. Does NOT use the Gator HttpClient, so the server auth header
+ * never leaks to third-party sites.
  */
-export async function fetchOgMetadata(url: string): Promise<OgMetadata | null> {
+export async function fetchOgMetadata(url: string): Promise<OgFetchResult> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
   try {
     let current = url;
     let res: Response | null = null;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (!isSafePreviewUrl(current)) return null; // SSRF: reject private/odd-port/non-http(s)
+      if (!isSafePreviewUrl(current)) return { kind: 'empty' }; // SSRF: private/odd-port/non-http(s)
       const r = await fetch(current, {
         signal: ac.signal,
         redirect: 'manual', // follow manually so each hop is re-validated
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Gator/1.0)',
+          // A real mobile-browser UA: sites serve bot-looking UAs a login wall/empty shell,
+          // which is what made previews blank. This client IS a phone, so the UA is honest.
+          'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
           Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
         },
       });
       if (r.status >= 300 && r.status < 400) {
         const loc = r.headers.get('location');
-        if (!loc) return null;
+        if (!loc) return { kind: 'empty' }; // malformed redirect — retrying won't help
         try {
           current = new URL(loc, current).toString();
         } catch {
-          return null;
+          return { kind: 'empty' };
         }
         continue;
       }
       res = r;
       break;
     }
-    if (!res || !res.ok) return null; // includes "too many redirects"
+    if (!res) return { kind: 'transient' }; // too many redirects (loops sometimes resolve later)
+    if (!res.ok) return { kind: 'transient' }; // 403/429/5xx: often a bot-block or hiccup — retry later
     // On device RN auto-follows redirects (it ignores `redirect: 'manual'`), so the per-hop
     // re-validation above may not run — re-check the FINAL URL's host here so a redirect can't
     // land the fetch on a private/internal address.
-    if (res.url && !isSafePreviewUrl(res.url)) return null;
+    if (res.url && !isSafePreviewUrl(res.url)) return { kind: 'empty' };
     const ctype = res.headers.get('content-type') ?? '';
     // Only parse HTML(-ish) documents. xhtml+xml is HTML-shaped and safe to regex; other
     // content types (json/images/pdf) are rejected so we never mis-parse binary as HTML.
-    if (!ctype.includes('text/html') && !ctype.includes('application/xhtml+xml')) return null;
-    if (Number(res.headers.get('content-length') ?? '0') > MAX_BYTES) return null; // reject oversized
+    if (!ctype.includes('text/html') && !ctype.includes('application/xhtml+xml'))
+      return { kind: 'empty' };
+    if (Number(res.headers.get('content-length') ?? '0') > HARD_CAP_BYTES)
+      return { kind: 'empty' }; // absurdly large — the parse slice below is the real cap
     const html = (await res.text()).slice(0, MAX_BYTES);
-    return parseOgMetadata(html, current);
+    return { kind: 'ok', meta: parseOgMetadata(html, current) };
   } catch {
-    return null;
+    return { kind: 'transient' }; // network error / timeout
   } finally {
     clearTimeout(timer);
   }

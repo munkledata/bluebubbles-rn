@@ -1,4 +1,11 @@
-import { Chat, isGroup, isReaction, Message, parseMessageSummaryInfo } from '@core/models';
+import {
+  Chat,
+  isGroup,
+  isReaction,
+  Message,
+  parseMessageSummaryInfo,
+  parsePayloadData,
+} from '@core/models';
 
 describe('Message model', () => {
   it('parses a minimal message and coerces string timestamps', () => {
@@ -68,6 +75,44 @@ describe('Message model', () => {
     expect(parseMessageSummaryInfo(null)).toBeNull();
     expect(parseMessageSummaryInfo(undefined)).toBeNull();
     expect(parseMessageSummaryInfo('')).toBeNull();
+  });
+
+  it('accepts and preserves a well-formed payloadData (Apple rich-link metadata)', () => {
+    const m = Message.parse({
+      guid: 'g',
+      text: 'https://example.com',
+      payloadData: {
+        urlData: [
+          {
+            url: 'https://example.com/page',
+            title: 'A Title',
+            summary: 'A summary.',
+            imageUrl: 'https://cdn.example.com/img.jpg',
+          },
+        ],
+      },
+    });
+    expect(m.payloadData?.urlData?.[0]?.title).toBe('A Title');
+    expect(m.payloadData?.urlData?.[0]?.imageUrl).toBe('https://cdn.example.com/img.jpg');
+  });
+
+  it('tolerates a MALFORMED payloadData without rejecting the whole message', () => {
+    // Same rationale as messageSummaryInfo: one bad nested value must never stall the sync page.
+    const m = Message.parse({ guid: 'g', text: 'hi', payloadData: { urlData: 'not-an-array' } });
+    expect(m.guid).toBe('g');
+    expect(m.payloadData).toBeUndefined();
+    expect(Message.parse({ guid: 'g', payloadData: 42 }).payloadData).toBeUndefined();
+    expect(Message.parse({ guid: 'g' }).payloadData).toBeUndefined();
+  });
+
+  it('parsePayloadData round-trips valid JSON; null on garbage/empty urlData', () => {
+    const data = { urlData: [{ url: 'https://x.com/a', title: 'T' }] };
+    expect(parsePayloadData(JSON.stringify(data))).toEqual(data);
+    expect(parsePayloadData(JSON.stringify({ urlData: [] }))).toBeNull(); // nothing renderable
+    expect(parsePayloadData('{not json')).toBeNull();
+    expect(parsePayloadData(null)).toBeNull();
+    expect(parsePayloadData(undefined)).toBeNull();
+    expect(parsePayloadData('')).toBeNull();
   });
 });
 

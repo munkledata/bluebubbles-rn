@@ -168,6 +168,11 @@ export const messages = sqliteTable(
         server emits it only on edited/retracted messages, so NULL on everything else. Powers the
         long-press "View Edit History" sheet; read back tolerantly via parseMessageSummaryInfo. */
     messageSummaryInfo: text('message_summary_info'),
+    /** Apple rich-link preview of a URL balloon: server-decoded LPLinkMetadata (title/summary/
+        site + image/icon/video URLs the SENDER's device fetched), stored as JSON TEXT. Presence-
+        driven — NULL for non-URL messages, placeholders, and rows from older servers; the chat
+        falls back to its own OG fetch then. Read back tolerantly via parsePayloadData. */
+    payloadData: text('payload_data'),
   },
   (t) => ({
     guidIdx: uniqueIndex('messages_guid_idx').on(t.guid),

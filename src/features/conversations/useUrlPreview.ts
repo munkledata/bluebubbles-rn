@@ -5,11 +5,11 @@ import { fetchOgMetadata } from '@/services/urlPreview';
 
 const TABLES = ['url_previews'];
 
-// A successful preview is cached for a week; a failed/empty one for only a few hours so a
-// TRANSIENT failure (a moment offline, a flaky server, a timeout) doesn't blank that link
-// forever — the old code cached negatives permanently, which is why previews stayed blank.
+// A successful preview is cached for a week; a definitive failure (non-HTML target, unsafe
+// URL) for an hour. TRANSIENT failures (offline, timeout, a 403 bot-block) are not cached at
+// all — the fetch reports them separately and the next mount simply retries.
 const SUCCESS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const ERROR_TTL_MS = 6 * 60 * 60 * 1000;
+const ERROR_TTL_MS = 60 * 60 * 1000;
 
 /** A cached row is still usable if it hasn't aged past its TTL (shorter for failures). */
 function isFresh(row: UrlPreviewRow, now: number): boolean {
@@ -30,7 +30,11 @@ export function useUrlPreview(url: string | null): UrlPreviewRow | null {
       const db = getDatabase();
       const cached = await getUrlPreview(db, url);
       if (cached && isFresh(cached, Date.now())) return cached;
-      const meta = await fetchOgMetadata(url);
+      const result = await fetchOgMetadata(url);
+      // Transient failure → write nothing (a write would negative-cache a bot-block or a
+      // moment offline). Keep showing the stale cached row if there is one; retry next mount.
+      if (result.kind === 'transient') return cached;
+      const meta = result.kind === 'ok' ? result.meta : null;
       await setUrlPreview(
         db,
         url,

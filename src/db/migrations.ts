@@ -449,4 +449,13 @@ export const MIGRATIONS: Migration[] = [
        WHERE associated_message_guid LIKE '%/%'`,
     ],
   },
+  {
+    // Apple rich-link preview metadata for URL balloons (server-decoded LPLinkMetadata as JSON
+    // TEXT — the title/summary/image the SENDER's device already fetched). Lets the chat render
+    // link cards without re-fetching the URL, which bot-hostile sites (X, Instagram, …) serve a
+    // blank shell to. NULL for all existing rows; no backfill — the OG-fetch path stays the
+    // fallback for history and metadata-less links.
+    name: '0027_message_payload_data',
+    statements: [`ALTER TABLE messages ADD COLUMN payload_data TEXT`],
+  },
 ];

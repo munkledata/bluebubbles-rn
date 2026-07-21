@@ -1,8 +1,16 @@
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
+import { parsePayloadData } from '@core/models';
 import { parseAttributedRuns, type TextRun } from '@core/richtext';
-import type { AttachmentRow, MessagePreview, MessageRow, ReactionRow } from '@db/repositories';
+import type {
+  AttachmentRow,
+  MessagePreview,
+  MessageRow,
+  ReactionRow,
+  UrlPreviewRow,
+} from '@db/repositories';
+import { isSafePreviewUrl } from '@/services/urlPreview';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useUrlPreview } from '@features/conversations/useUrlPreview';
 import { errorTitleForCode, firstUrl, isBigEmoji, resolveBubbleColor, safeOpenUrl } from '@utils';
@@ -114,11 +122,42 @@ export const MessageBubble = React.memo(function MessageBubble({
     () => (!redacted && hasText && !isRetracted ? firstUrl(bodyText) : null),
     [redacted, hasText, isRetracted, bodyText],
   );
+  // Apple's rich-link metadata (server-decoded payload_data): the title/summary/image the
+  // SENDER's device already fetched. When it carries something renderable, synthesize the card
+  // row directly — no network fetch, no url_previews cache — which is what makes bot-hostile
+  // sites (X, Instagram, …) preview reliably. Image/icon URLs pass the same SSRF guard as the
+  // fetch path (they come from the wire, so treat them like any server-supplied URL).
+  const payloadPreview = useMemo<UrlPreviewRow | null>(() => {
+    if (redacted || isRetracted || !msg.payloadData) return null;
+    const item = parsePayloadData(msg.payloadData)?.urlData?.[0];
+    if (!item) return null;
+    const img =
+      item.imageUrl && isSafePreviewUrl(item.imageUrl)
+        ? item.imageUrl
+        : item.iconUrl && isSafePreviewUrl(item.iconUrl)
+          ? item.iconUrl
+          : null;
+    if (!item.title && !img) return null; // nothing the card could render — fall back to fetch
+    return {
+      url: item.url ?? item.originalUrl ?? '',
+      title: item.title ?? null,
+      description: item.summary ?? null,
+      imageUrl: img,
+      siteName: item.siteName ?? null,
+      fetchedAt: null,
+      error: 0,
+    };
+  }, [redacted, isRetracted, msg.payloadData]);
   // Own the preview lookup here (not inside the card) so we can also decide whether to draw the
   // raw link text. When the WHOLE message is just a URL and its card loaded, hide the text so we
   // don't show a blue link AND a card (matching iMessage). If the preview failed, keep the link
-  // so it's still tappable. Hook is called unconditionally (null url → null) to keep hook order.
-  const preview = useUrlPreview(previewUrl);
+  // so it's still tappable. Hook is called unconditionally (null url → null) to keep hook order —
+  // and a payload-backed message passes null so it NEVER fetches or touches the cache table.
+  const fetched = useUrlPreview(payloadPreview ? null : previewUrl);
+  const preview = payloadPreview ?? fetched;
+  // The card's tap target/domain line. Prefer the text URL; a URL balloon whose text somehow
+  // lacks a regex-matchable URL (bare-domain text) still gets its card via the payload URL.
+  const cardUrl = previewUrl ?? (payloadPreview?.url ? payloadPreview.url : null);
   const previewLoaded = !!preview && preview.error !== 1 && (!!preview.title || !!preview.imageUrl);
   const urlOnly = useMemo(
     () =>
@@ -287,9 +326,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           Scheduled
         </Text>
       ) : null}
-      {previewUrl ? (
-        <UrlPreviewCard url={previewUrl} preview={preview} isFromMe={isFromMe} />
-      ) : null}
+      {cardUrl ? <UrlPreviewCard url={cardUrl} preview={preview} isFromMe={isFromMe} /> : null}
     </Pressable>
   );
 

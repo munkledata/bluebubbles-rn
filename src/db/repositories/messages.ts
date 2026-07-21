@@ -86,6 +86,10 @@ export async function upsertMessages(
           // the message isn't edited/retracted (the server omits the key), so the COALESCE-preserve
           // on conflict (below) can't wipe a previously-stored history.
           messageSummaryInfo: m.messageSummaryInfo ? JSON.stringify(m.messageSummaryInfo) : null,
+          // Apple rich-link preview (URL balloons), stored as JSON TEXT. NULL when the server
+          // omits it (non-URL message, placeholder, old server) so the COALESCE-preserve on
+          // conflict (below) can't wipe previously-stored metadata.
+          payloadData: m.payloadData ? JSON.stringify(m.payloadData) : null,
         };
       }),
     )
@@ -142,6 +146,10 @@ export async function upsertMessages(
         // delivery/read receipt, or a live event whose leaner projection omits the blob) then can't
         // wipe the stored timeline. Same reasoning as the group-event metadata above.
         messageSummaryInfo: sql`COALESCE(excluded.message_summary_info, ${messages.messageSummaryInfo})`,
+        // Rich-link metadata: COALESCE-preserve for the same reason as messageSummaryInfo —
+        // absence never means "the preview was removed" (a delivery/read-receipt re-upsert or a
+        // leaner live projection just omits the blob), so overwrite-when-present only.
+        payloadData: sql`COALESCE(excluded.payload_data, ${messages.payloadData})`,
         // NOTE — `date_deleted` is DELIBERATELY absent from both the insert values (above) and this
         // conflict set, a documented deviation from the message-column checklist. It is NOT a
         // wire-carried field: a MessageV1 never carries the deletion — only the `message-deleted`
@@ -402,6 +410,11 @@ export interface MessageRow {
   // long-press "View Edit History" path needs the structured form). Optional so hand-built test
   // literals need not set it; the SELECT below always provides it at runtime.
   messageSummaryInfo?: string | null;
+  // Apple rich-link preview metadata as the RAW JSON TEXT blob (or null) — like
+  // messageSummaryInfo, parsed lazily by the consumer via parsePayloadData (only MessageBubble's
+  // preview card needs the structured form). Optional so hand-built test literals need not set
+  // it; the SELECT below always provides it at runtime.
+  payloadData?: string | null;
   error: number;
   sendState: string;
   wasDeliveredQuietly: number;
@@ -441,6 +454,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.is_scheduled AS isScheduled,
     m.is_sent AS isSent,
     m.message_summary_info AS messageSummaryInfo,
+    m.payload_data AS payloadData,
     m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
     m.did_notify_recipient AS didNotifyRecipient,
