@@ -167,6 +167,30 @@ describe('MessageList — pinned-to-bottom convergence', () => {
     expect(mockScrollToEnd).toHaveBeenCalledWith({ animated: false });
   });
 
+  it('re-lands at the bottom when the viewport resizes while pinned (keyboard open/close, typing bubble)', async () => {
+    const { getByTestId } = await mountAtBottom(initial());
+    const wrapper = getByTestId('message-list-wrapper');
+    const layout = (height: number) => ({
+      nativeEvent: { layout: { x: 0, y: 0, width: 400, height } },
+    });
+    await act(async () => {
+      fireEvent(wrapper, 'layout', layout(800)); // first measure — primes the baseline, no scroll
+    });
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent(wrapper, 'layout', layout(500)); // keyboard shrank the list → re-land at bottom
+    });
+    expect(mockScrollToEnd).toHaveBeenCalledWith({ animated: false });
+
+    // A reader scrolled up (unpinned) is left alone by the same resize.
+    mockScrollToEnd.mockClear();
+    await dragAwayFromBottom();
+    await act(async () => {
+      fireEvent(wrapper, 'layout', layout(800)); // keyboard closed
+    });
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+  });
+
   it('scroll events WITHOUT a drag never unpin (programmatic scrolls cannot self-unpin)', async () => {
     const { queryByLabelText } = await mountAtBottom(initial());
     // A short-landing programmatic scroll reports a big distance — but no drag started it.
