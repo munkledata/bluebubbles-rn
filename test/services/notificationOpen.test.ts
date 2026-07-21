@@ -1,10 +1,13 @@
 /**
  * Unit tests for notification deep-link routing (`src/services/notifications/notificationOpen.ts`).
  *
- * This is the code that turns a TAPPED notification into an open-the-chat-and-scroll-to-the-message
- * navigation. On Android `launchActivity: 'default'` only foregrounds the app; it does NOT deep-link,
- * so tapping a message notification used to land the user on whatever screen was already open. These
- * tests pin the extraction + path-building (the navigate call itself is injected, so no expo-router).
+ * This is the code that turns a TAPPED notification into open-the-chat navigation. On Android
+ * `launchActivity: 'default'` only foregrounds the app; it does NOT deep-link, so tapping a message
+ * notification used to land the user on whatever screen was already open. A MESSAGE tap opens the
+ * chat PLAIN (live at the newest message, bottom-pinned); only a REMINDER tap (`reminder: '1'`)
+ * anchors on its old message with the search-hit `?focus=…` route — anchored mode freezes the
+ * bottom-follow behavior, which is wrong for normal conversation. These tests pin the extraction +
+ * path-building (the navigate call itself is injected, so no expo-router).
  */
 import {
   chatDeepLink,
@@ -35,8 +38,15 @@ describe('notificationOpenTarget', () => {
     });
   });
 
-  it('omits messageGuid/messageDate when absent (a reminder-style notice with only a chat)', () => {
+  it('omits messageGuid/messageDate when absent (a notice with only a chat)', () => {
     expect(notificationOpenTarget({ chatGuid: 'c1' })).toEqual({ chatGuid: 'c1' });
+  });
+
+  it('extracts the reminder flag (only the exact "1" the reminder path posts)', () => {
+    expect(
+      notificationOpenTarget({ chatGuid: 'c1', messageGuid: 'm1', reminder: '1' }),
+    ).toEqual({ chatGuid: 'c1', messageGuid: 'm1', reminder: true });
+    expect(notificationOpenTarget({ chatGuid: 'c1', reminder: true })).toEqual({ chatGuid: 'c1' });
   });
 
   it('drops a non-numeric messageDate rather than passing NaN downstream', () => {
@@ -55,32 +65,61 @@ describe('notificationOpenTarget', () => {
 });
 
 describe('chatDeepLink', () => {
-  it('builds the focus + focusDate query the chat screen reads (mirrors search)', () => {
+  it('opens a MESSAGE tap plainly — live at the newest message, never anchored', () => {
+    // Anchored (?focus) mode freezes bottom-follow (no keyboard follow / no re-pin on send),
+    // which broke normal conversation when every notification tap used it.
     expect(chatDeepLink({ chatGuid: 'c1', messageGuid: 'm1', messageDate: 1700000000000 })).toBe(
-      '/chat/c1?focus=m1&focusDate=1700000000000',
+      '/chat/c1',
     );
+  });
+
+  it('anchors a REMINDER tap on its (old) message with the search-hit focus route', () => {
+    expect(
+      chatDeepLink({
+        chatGuid: 'c1',
+        messageGuid: 'm1',
+        messageDate: 1700000000000,
+        reminder: true,
+      }),
+    ).toBe('/chat/c1?focus=m1&focusDate=1700000000000');
   });
 
   it('URL-encodes the guid + messageGuid (real guids contain ; and +)', () => {
     expect(
-      chatDeepLink({ chatGuid: 'iMessage;-;+1555', messageGuid: 'p:0/abc', messageDate: 10 }),
+      chatDeepLink({
+        chatGuid: 'iMessage;-;+1555',
+        messageGuid: 'p:0/abc',
+        messageDate: 10,
+        reminder: true,
+      }),
     ).toBe('/chat/iMessage%3B-%3B%2B1555?focus=p%3A0%2Fabc&focusDate=10');
   });
 
   it('omits ?focus entirely when there is no message to scroll to', () => {
-    expect(chatDeepLink({ chatGuid: 'c1' })).toBe('/chat/c1');
+    expect(chatDeepLink({ chatGuid: 'c1', reminder: true })).toBe('/chat/c1');
   });
 
-  it('omits focusDate when the message has no timestamp', () => {
-    expect(chatDeepLink({ chatGuid: 'c1', messageGuid: 'm1' })).toBe('/chat/c1?focus=m1');
+  it('omits focusDate when the reminder message has no timestamp', () => {
+    expect(chatDeepLink({ chatGuid: 'c1', messageGuid: 'm1', reminder: true })).toBe(
+      '/chat/c1?focus=m1',
+    );
   });
 });
 
 describe('openFromNotification', () => {
-  it('navigates to the focused chat deep-link for a message notification', () => {
+  it('navigates to the plain chat route for a message notification', () => {
     const navigate = jest.fn();
     openFromNotification({ chatGuid: 'c1', messageGuid: 'm1', messageDate: '5' }, navigate);
     expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+  });
+
+  it('navigates to the anchored deep-link for a reminder notification', () => {
+    const navigate = jest.fn();
+    openFromNotification(
+      { chatGuid: 'c1', messageGuid: 'm1', messageDate: '5', reminder: '1' },
+      navigate,
+    );
     expect(navigate).toHaveBeenCalledWith('/chat/c1?focus=m1&focusDate=5');
   });
 
@@ -109,7 +148,7 @@ describe('drainNotificationTap', () => {
     await drainNotificationTap(async () => messageInitial, () => null, press, navigate);
     expect(press).toHaveBeenCalledWith(messageInitial);
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1?focus=m1');
+    expect(navigate).toHaveBeenCalledWith('/chat/c1');
   });
 
   it('navigates from the pending stash when there is no launch event (background-alive backstop)', async () => {
@@ -124,7 +163,7 @@ describe('drainNotificationTap', () => {
     // No launch event → no press side-effects, but the stash still opens the chat.
     expect(press).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c2?focus=m2&focusDate=9');
+    expect(navigate).toHaveBeenCalledWith('/chat/c2');
   });
 
   it('drains BOTH sources but navigates only once (same press, no double-push)', async () => {
@@ -135,7 +174,7 @@ describe('drainNotificationTap', () => {
     // Both the launch event and the stash describe the same tap — clear both, open once.
     expect(takePending).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1?focus=m1');
+    expect(navigate).toHaveBeenCalledWith('/chat/c1');
   });
 
   it('runs press side-effects but does NOT navigate for a launch that is not about a chat', async () => {

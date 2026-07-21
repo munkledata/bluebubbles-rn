@@ -364,11 +364,18 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   message taller than ~20% of the viewport defeats its near-bottom check even parked at the bottom). Only a
   user DRAG can unpin (`onScrollBeginDrag` — the one signal programmatic scrolls never emit; Android fires
   momentum for animated programmatic scrolls, so momentum may re-pin but never unpins); reaching the bottom
-  re-pins; sending re-pins from anywhere; `keyboardDidShow` re-pins only while pinned. Unpinned shows the
+  re-pins; sending re-pins from anywhere. VIEWPORT resizes (keyboard open/close via the KAV, typing bubble /
+  smart-reply chips / selection bar appearing) re-land via the wrapper View's `onLayout` while pinned —
+  onLayout fires AFTER the resize is committed, so metrics are fresh; the old `keyboardDidShow` + one-frame
+  rAF raced the KAV layout and left the newest text behind the keyboard with no recovery. Unpinned shows the
   "jump to newest" FAB (badge = incoming missed while unpinned); in an anchored (search-hit/unread-jump)
   session the pin machine is FROZEN (the window bottom ≠ newest) and the FAB becomes `onExitAnchor` — the
-  screen clears jump + focus params, and the remount/convergence loop lands the live window. Decisions are
-  jest-tested (`messageListPinned.test.tsx`, `scrollPin.test.ts`); layout timing is device-only.
+  screen clears jump + focus params, and the remount/convergence loop lands the live window. GOTCHA: anchored
+  mode deliberately has NO keyboard-follow/re-pin, so only genuinely-old targets may enter it — a MESSAGE
+  notification tap opens the chat PLAIN (`chatDeepLink`, notificationOpen.ts); ONLY a reminder
+  (`reminder:'1'` in the data bag) deep-links with `?focus=…` (taps used to anchor on every notification,
+  which froze bottom-follow in normal conversation). Decisions are jest-tested
+  (`messageListPinned.test.tsx`, `scrollPin.test.ts`, `notificationOpen.test.ts`); layout timing is device-only.
 - **Open a chat ONLY via `useChatNavigator` (`src/ui/useChatNavigator.ts`) — never a raw `router.push` to
   `/chat/…`.** The app keeps ONE stack with the Messages list at its base; pushing a thread on top of an
   already-open thread (notification taps did this) left Back returning to the PREVIOUS thread, not the inbox

@@ -1,7 +1,7 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Keyboard,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -248,13 +248,9 @@ export function MessageList({
     listRef.current?.scrollToEnd({ animated: false });
   }, [focusReady]);
 
-  // Distance (px) from the bottom, updated on scroll. Starts at 0 (a fresh chat opens pinned).
-  const distFromBottomRef = useRef(0);
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const dist = distFromBottomOf(e);
-      distFromBottomRef.current = dist;
-      if (!focusReadyRef.current) applyPin(pinOnScroll(pinRef.current, dist));
+      if (!focusReadyRef.current) applyPin(pinOnScroll(pinRef.current, distFromBottomOf(e)));
     },
     [applyPin],
   );
@@ -267,9 +263,7 @@ export function MessageList({
   // scrolls too, so this transition may re-pin but never unpins (see scrollPin).
   const onMomentumScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const dist = distFromBottomOf(e);
-      distFromBottomRef.current = dist;
-      if (!focusReadyRef.current) applyPin(pinOnMomentumEnd(pinRef.current, dist));
+      if (!focusReadyRef.current) applyPin(pinOnMomentumEnd(pinRef.current, distFromBottomOf(e)));
     },
     [applyPin],
   );
@@ -280,21 +274,21 @@ export function MessageList({
     if (pinRef.current.pinned) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
-  // When the keyboard opens, the KeyboardAvoidingView (chat screen) shrinks this list from the
-  // bottom, but FlashList keeps its scroll offset — so the newest messages slide behind the
-  // composer/keyboard. If the list is pinned (at/near the newest), re-pin to the newest message.
-  // Deferred a frame so the scroll runs AFTER the frame has shrunk (else it uses stale metrics).
-  const kbRaf = useRef<number | null>(null);
-  useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
-      if (!pinRef.current.pinned) return; // reading history — leave it
-      if (kbRaf.current != null) cancelAnimationFrame(kbRaf.current);
-      kbRaf.current = requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-    });
-    return () => {
-      sub.remove();
-      if (kbRaf.current != null) cancelAnimationFrame(kbRaf.current);
-    };
+  // The list's viewport RESIZES from the bottom — keyboard open/close (the chat screen's
+  // KeyboardAvoidingView), the typing bubble / smart-reply chips appearing, the selection bar —
+  // and FlashList keeps its scroll offset, so the newest messages slide behind the composer.
+  // While pinned, re-land at the bottom on ANY height change. This hangs off the wrapper's
+  // onLayout, which fires AFTER the resize is committed, so the metrics are fresh — the old
+  // keyboardDidShow + one-frame-rAF version raced the KAV layout and could land the newest text
+  // behind the keyboard with no recovery. A reader scrolled up (unpinned) is left alone.
+  const listHeightRef = useRef(0);
+  const onWrapperLayout = useCallback((e: LayoutChangeEvent): void => {
+    const h = e.nativeEvent.layout.height;
+    const prev = listHeightRef.current;
+    listHeightRef.current = h;
+    if (prev > 0 && h !== prev && pinRef.current.pinned) {
+      listRef.current?.scrollToEnd({ animated: false });
+    }
   }, []);
 
   // Tail-append watcher. Ref-diff because `rows` is a fresh array on every reactive tick — gate on
@@ -340,7 +334,7 @@ export function MessageList({
   const showFab = onExitAnchor != null || (fabVisible && rows.length > 0);
 
   return (
-    <View style={styles.flex}>
+    <View style={styles.flex} onLayout={onWrapperLayout} testID="message-list-wrapper">
       <FlashList
         // Remount keyed to the focus target so initialScrollIndex (mount-time) lands on it; else
         // keyed by chat guid so a REUSED screen instance (a chat opened via replace over another

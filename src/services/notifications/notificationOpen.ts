@@ -1,13 +1,17 @@
 /**
  * Turn a tapped notification's `data` into a chat deep-link, and navigate there.
  *
- * Message/reminder notifications carry `{ chatGuid, messageGuid?, messageDate? }`
- * (see notifeeService). Tapping one must open the chat AND scroll to + highlight that
- * message — the very same `/chat/[guid]?focus=…&focusDate=…` route the in-app search
- * hits already use (see SearchResultsView.openMessage). On Android a notification's
- * `pressAction: { launchActivity: 'default' }` only FOREGROUNDS the app; it does NOT
- * deep-link, so we do the routing ourselves — from the foreground PRESS event (app
- * alive) and from `getInitialNotification()` (app cold-started by the tap).
+ * Message notifications carry `{ chatGuid, messageGuid?, messageDate? }`; reminders add
+ * `reminder: '1'` (see notifeeService). A MESSAGE tap opens the chat PLAIN (`/chat/[guid]`)
+ * — live at the newest message, bottom-pinned. Only a REMINDER tap deep-links with
+ * `?focus=…&focusDate=…` (the anchored mode search hits use): a reminder points at an OLD
+ * message worth jumping to, whereas a message notification is about the newest message —
+ * and the anchored mode deliberately freezes the bottom-follow behavior (no keyboard
+ * follow, no re-pin on send, the jump-to-newest button always shown), which is wrong for
+ * normal conversation. On Android a notification's `pressAction: { launchActivity:
+ * 'default' }` only FOREGROUNDS the app; it does NOT deep-link, so we do the routing
+ * ourselves — from the foreground PRESS event (app alive) and from
+ * `getInitialNotification()` (app cold-started by the tap).
  *
  * `navigate` is injected so this stays a pure, unit-testable function with no
  * expo-router dependency.
@@ -19,6 +23,8 @@ export interface NotificationOpenTarget {
   messageGuid?: string;
   /** Message timestamp (ms) — lets the chat load a window CENTERED on an old message. */
   messageDate?: number;
+  /** A "remind me later" notification — the only kind that anchors on its (old) message. */
+  reminder?: boolean;
 }
 
 /**
@@ -40,16 +46,18 @@ export function notificationOpenTarget(
     chatGuid,
     ...(messageGuid ? { messageGuid } : {}),
     ...(messageDate != null ? { messageDate } : {}),
+    ...(data?.reminder === '1' ? { reminder: true } : {}),
   };
 }
 
 /**
- * Build the `/chat/…` deep-link path for a target. Mirrors SearchResultsView's format:
- * `?focus=<messageGuid>&focusDate=<ms>` (both encoded); message focus is optional.
+ * Build the `/chat/…` deep-link path for a target. A message tap opens the chat PLAIN (live
+ * at the newest, bottom-pinned). Only a reminder anchors on its old message with the
+ * search-hit format `?focus=<messageGuid>&focusDate=<ms>` (both encoded).
  */
 export function chatDeepLink(target: NotificationOpenTarget): string {
   const base = `/chat/${encodeURIComponent(target.chatGuid)}`;
-  if (!target.messageGuid) return base;
+  if (!target.reminder || !target.messageGuid) return base;
   const date = target.messageDate != null ? `&focusDate=${target.messageDate}` : '';
   return `${base}?focus=${encodeURIComponent(target.messageGuid)}${date}`;
 }
