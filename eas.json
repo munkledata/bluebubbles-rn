@@ -20,7 +20,8 @@
       "autoIncrement": true,
       "channel": "production",
       "env": { "NODE_ENV": "production" },
-      "android": { "buildType": "app-bundle" }
+      "android": { "buildType": "app-bundle" },
+      "node": "24.5.0"
     }
   },
   "submit": {
