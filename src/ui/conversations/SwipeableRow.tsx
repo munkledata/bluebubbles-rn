@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { isHorizontalSwipe } from '@utils';
 import { Icon } from '../primitives';
 
 export interface SwipeAction {
@@ -63,9 +64,10 @@ export function SwipeableRow({
     PanResponder.create({
       // Never claim on touch-start, so taps/long-press reach the child.
       onStartShouldSetPanResponder: () => false,
-      // Claim only a mostly-horizontal drag (so vertical list scrolling still works).
-      onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      // Claim only a mostly-horizontal drag (so vertical list scrolling still works) — in BOTH the
+      // bubble and capture phases so the swipe is recognised before the FlashList scroll engages.
+      onMoveShouldSetPanResponder: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
+      onMoveShouldSetPanResponderCapture: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
       onPanResponderMove: (_e, g) => {
         let next = offset.current + g.dx;
         // Clamp to the available action width per side (no overscroll past the panel).
@@ -79,6 +81,10 @@ export function SwipeableRow({
         else if (next >= OPEN_THRESHOLD && lw > 0) snap(lw);
         else snap(0);
       },
+      // Once we own the drag, refuse to hand it back to the scroll view (same OEM scroll-steal fix
+      // as the message-row swipe); on Android, block the native scroll once the gesture is granted.
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
       onPanResponderTerminate: () => snap(0),
     }),
   ).current;

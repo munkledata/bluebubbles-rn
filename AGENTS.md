@@ -236,6 +236,20 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   `noImplicitOverride`), else tsc errors TS4114. Mount it ABOVE the providers (it must catch a `ThemeProvider`
   throw too), so its fallback uses literal colors, not theme tokens. See `src/ui/ErrorBoundary.tsx`.
 - **FlashList v2 auto-sizes — do NOT add `estimatedItemSize`** (removed/ignored in v2; it was a v1 prop).
+- **A per-row horizontal swipe inside a FlashList MUST harden its `PanResponder` or the scroll STEALS the
+  gesture on some OEMs.** A `PanResponder` that only sets a mostly-horizontal `onMoveShouldSetPanResponder`
+  works on a Pixel but drops **~50% of swipes on a Galaxy S25 Ultra** (One UI): the vertical scroll wins the
+  touch-arbitration race about half the time and the swipe silently does nothing ("it just scrolls a bit").
+  Whether the scroll wins is timing-sensitive, so it looks like "works on one phone, flaky on another." Three
+  guards fix it: (1) **`onPanResponderTerminationRequest: () => false`** — once claimed, never surrender the
+  gesture back to the scroll mid-drag (THE key one — its default is `true`); (2)
+  **`onMoveShouldSetPanResponderCapture`** mirroring the move predicate — claim in the capture phase, a beat
+  before the scroll engages; (3) **`onShouldBlockNativeResponder: () => true`** (Android — block the native
+  scroll once granted; RN default, set explicitly). Shared claim predicate = `isHorizontalSwipe(dx, dy)`
+  (`@utils`/`swipeGesture.ts`, node-tested). Applied to BOTH `MessageSwipeWrapper` (swipe-to-reply) and
+  `SwipeableRow` (conversation-list actions) — both had the identical gap. Device-only to verify (jest can't
+  drive native touches); a config-level regression guard lives in
+  `test/components/conversations/messageSwipeWrapper.test.tsx` (spies `PanResponder.create`, asserts the guards).
 - **Mark avatars `accessible={false}`** — they sit next to a label that already announces the name (tile title,
   chat header), so a labeled avatar double-announces under TalkBack. Decorative-by-default is correct here.
 - **Never call `console.*` directly — use `logger` from `@core/secure`** (the redacting logger over a

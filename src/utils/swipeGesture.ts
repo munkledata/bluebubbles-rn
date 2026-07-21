@@ -24,3 +24,14 @@ export function swipeTranslate(dx: number, replyEnabled: boolean): number {
 export function isReplyTrigger(dx: number, replyEnabled: boolean): boolean {
   return replyEnabled && swipeTranslate(dx, true) >= REPLY_TRIGGER_PX;
 }
+
+/**
+ * True for a mostly-horizontal drag that a row should CLAIM as a swipe (a `dy`-dominant vertical
+ * drag falls through to the list scroll). Kept low + shared so both message rows and conversation
+ * rows recognise a swipe early — before the scroll engages — which, paired with refusing to
+ * surrender the gesture once claimed, is what stops Samsung One UI's scroll from stealing the swipe
+ * ~half the time (works fine on Pixel, flaky on the S25 Ultra without it).
+ */
+export function isHorizontalSwipe(dx: number, dy: number): boolean {
+  return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5;
+}

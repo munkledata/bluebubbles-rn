@@ -1,6 +1,12 @@
 import React, { useRef } from 'react';
 import { Animated, PanResponder, StyleSheet, View } from 'react-native';
-import { isReplyTrigger, REPLY_TRIGGER_PX, swipeTranslate, TIMESTAMP_REVEAL_MAX } from '@utils';
+import {
+  isHorizontalSwipe,
+  isReplyTrigger,
+  REPLY_TRIGGER_PX,
+  swipeTranslate,
+  TIMESTAMP_REVEAL_MAX,
+} from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
@@ -41,15 +47,22 @@ export function MessageSwipeWrapper({
 
   const responder = useRef(
     PanResponder.create({
+      // Never claim on touch-start, so taps/long-press reach the bubble.
       onStartShouldSetPanResponder: () => false,
-      // Claim only a mostly-horizontal drag so vertical list scrolling is untouched.
-      onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      // Claim only a mostly-horizontal drag so vertical list scrolling is untouched — in BOTH the
+      // bubble and capture phases so the swipe is recognised before the FlashList scroll engages.
+      onMoveShouldSetPanResponder: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
+      onMoveShouldSetPanResponderCapture: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
       onPanResponderMove: (_e, g) => tx.setValue(swipeTranslate(g.dx, !!onReplyRef.current)),
       onPanResponderRelease: (_e, g) => {
         if (isReplyTrigger(g.dx, !!onReplyRef.current)) onReplyRef.current?.();
         settle();
       },
+      // Once we own the drag, refuse to hand it back to the scroll view — the key fix for the
+      // ~50% swipe loss on Samsung One UI (the scroll would otherwise reclaim the gesture mid-drag).
+      onPanResponderTerminationRequest: () => false,
+      // Android: block the native scroll once the JS gesture is granted (RN default; explicit here).
+      onShouldBlockNativeResponder: () => true,
       onPanResponderTerminate: settle,
     }),
   ).current;

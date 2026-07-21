@@ -1,4 +1,10 @@
-import { isReplyTrigger, REPLY_TRIGGER_PX, swipeTranslate, TIMESTAMP_REVEAL_MAX } from '@utils';
+import {
+  isHorizontalSwipe,
+  isReplyTrigger,
+  REPLY_TRIGGER_PX,
+  swipeTranslate,
+  TIMESTAMP_REVEAL_MAX,
+} from '@utils';
 
 describe('swipeTranslate', () => {
   it('follows a leftward drag, clamped at the timestamp reveal max', () => {
@@ -27,5 +33,18 @@ describe('isReplyTrigger', () => {
 
   it('never fires when reply is unavailable', () => {
     expect(isReplyTrigger(10_000, false)).toBe(false);
+  });
+});
+
+describe('isHorizontalSwipe', () => {
+  it('claims a mostly-horizontal drag (either direction)', () => {
+    expect(isHorizontalSwipe(40, 5)).toBe(true); // right (reply)
+    expect(isHorizontalSwipe(-40, 5)).toBe(true); // left (timestamp peek)
+  });
+
+  it('ignores a tiny or vertical-dominant drag so the list can scroll', () => {
+    expect(isHorizontalSwipe(6, 0)).toBe(false); // below the 10px activation
+    expect(isHorizontalSwipe(20, 20)).toBe(false); // diagonal — not clearly horizontal
+    expect(isHorizontalSwipe(5, 60)).toBe(false); // a vertical scroll
   });
 });
