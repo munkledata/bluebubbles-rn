@@ -9,6 +9,7 @@
  * loading / negative-cache / no-metadata "render nothing" branches and the domain fallback.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
 import type { UrlPreviewRow } from '@db/repositories';
@@ -159,6 +160,27 @@ describe('UrlPreviewCard', () => {
     await waitFor(() => expect(screen.queryByTestId('url-preview-image')).toBeNull());
     // Title still shows → the card degrades to text-only rather than a blank box.
     expect(screen.getByText('A Title')).toBeTruthy();
+  });
+
+  it('sizes the card with a DETERMINED width — never maxWidth-only (the width-0 image bug)', async () => {
+    // Regression lock for the invisible-image bug (fixed 2026-07-21, see AGENTS.md): the card
+    // was alignSelf + maxWidth-only, so its width came from its children — and the image's
+    // width:'100%' referenced that same parent. Yoga resolves the cycle to width 0: the image
+    // "loads" (onLoad fires) but renders zero pixels, with no error, on every image library.
+    // Jest's mock layout can't reproduce Yoga's resolution, so this asserts the style contract
+    // instead: the card must carry an explicit width, not only a maxWidth.
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row({ title: 'A Title', imageUrl: 'https://img/x.png' })}
+        isFromMe={false}
+      />,
+    );
+    const img = screen.getByTestId('url-preview-image');
+    const card = img.parent;
+    const style = StyleSheet.flatten(card?.props.style);
+    expect(style.width).toBeDefined();
+    expect(style.width).not.toBe('auto');
   });
 
   it('renders nothing when an image-only card (no title) has a failing image', async () => {

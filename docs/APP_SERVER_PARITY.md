@@ -133,6 +133,10 @@ by the server but never emitted, and never stored by the app.
   `useUrlPreview(null)` so payload-backed messages NEVER fetch. Fallback (no payload: old rows,
   placeholders, old servers) = the client OG fetch, hardened 2026-07-20: real Safari UA, 512KB
   pre-reject → 5MB DoS guard only, transient failures (403/429/timeout) no longer negative-cached.
+- **Postscript (0.1.28, 2026-07-21)**: preview IMAGES had never rendered on-device regardless of the
+  metadata source — a card-layout circularity resolved the image to width 0 (looked like a
+  network/library bug for a whole evening; see the AGENTS.md UI gotcha). `UrlPreviewCard` now uses a
+  fixed `width:'78%'`, verified rendering on-device. Preview cards are feature-complete end to end.
 
 ## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
 
