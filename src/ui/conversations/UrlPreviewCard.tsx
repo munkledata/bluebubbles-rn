@@ -1,6 +1,5 @@
-import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
@@ -55,15 +54,20 @@ export function UrlPreviewCard({
       ]}
     >
       {showImage && imageUrl ? (
+        // RN's built-in Image (Fresco), NOT expo-image — deliberate. On-device (S25U/Android 16,
+        // release build) expo-image mounts the view for a remote https source but never starts a
+        // Glide load: no network request, no onError, just a permanent blank box (verified via
+        // Glide verbose logging; local file:// attachments are unaffected, so expo-image stays
+        // everywhere else). RN Image is what avatars use and provably renders on this device.
+        // Keyed by the URL so a recycled row remounts and loads the NEW image instead of briefly
+        // showing the previous message's.
         <Image
           testID="url-preview-image"
+          key={imageUrl}
           source={{ uri: imageUrl }}
-          // Keyed by the URL so a recycled row loads the NEW image instead of showing the
-          // previous message's (or a blank) native view.
-          recyclingKey={imageUrl}
           onError={() => setImgFailed(true)}
-          contentFit="cover"
-          transition={150}
+          resizeMode="cover"
+          fadeDuration={150}
           style={[styles.image, { backgroundColor: theme.color.separator }]}
         />
       ) : null}
