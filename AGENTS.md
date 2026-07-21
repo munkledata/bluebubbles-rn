@@ -236,13 +236,16 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   `noImplicitOverride`), else tsc errors TS4114. Mount it ABOVE the providers (it must catch a `ThemeProvider`
   throw too), so its fallback uses literal colors, not theme tokens. See `src/ui/ErrorBoundary.tsx`.
 - **FlashList v2 auto-sizes — do NOT add `estimatedItemSize`** (removed/ignored in v2; it was a v1 prop).
-- **expo-image NEVER loads remote https sources on-device (S25U/Android 16, release build) — use RN's
-  built-in `Image` for remote URLs.** The expo-image view mounts (blank box, style bg visible) but no
-  Glide load ever starts: zero network activity under Glide verbose logging (`setprop log.tag.Engine
-  VERBOSE` etc.) and `onError` never fires, so the imgFailed-collapse can't save you. Local `file://`
-  attachment rendering via expo-image works fine — keep expo-image there. `UrlPreviewCard` renders its
-  OG/payload image with RN `Image` (Fresco) for exactly this reason (keyed by URL for FlashList
-  recycling); don't "modernize" it back to expo-image without proving a remote URL renders on-device.
+- **NETWORK images must render with NO fade-in (`fadeDuration={0}` / no `transition`) — a fade leaves
+  the image PERMANENTLY INVISIBLE on-device (S25U, RN 0.86 Fabric, release build).** The bug that made
+  URL-preview images a blank box for months: the image downloads and decodes fine (`onLoad` fires — proven
+  via on-device `[preview]` lifecycle logs), but the fade animation never runs, so alpha stays 0 forever
+  and `onError` never fires either (nothing failed), defeating the imgFailed-collapse. It bit BOTH image
+  libraries identically (expo-image `transition={150}` and RN `Image` `fadeDuration` — whose Android
+  DEFAULT is 300, so it must be EXPLICITLY zeroed). Local `file://`/`content://` sources skip Fresco's
+  fade, which is why avatars and attachments always rendered and made the image libs look innocent.
+  `UrlPreviewCard` uses RN `Image` + `fadeDuration={0}` + `key={imageUrl}` (recycling) + a browser
+  User-Agent header; if you add any new remote-image surface, no fades.
 - **A per-row horizontal swipe inside a FlashList MUST harden its `PanResponder` or the scroll STEALS the
   gesture on some OEMs.** A `PanResponder` that only sets a mostly-horizontal `onMoveShouldSetPanResponder`
   works on a Pixel but drops **~50% of swipes on a Galaxy S25 Ultra** (One UI): the vertical scroll wins the

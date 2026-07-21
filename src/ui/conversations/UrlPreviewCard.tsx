@@ -62,24 +62,16 @@ export function UrlPreviewCard({
       ]}
     >
       {showImage && imageUrl ? (
-        // RN's built-in Image (Fresco), NOT expo-image — deliberate. On-device (S25U/Android 16,
-        // release build) expo-image mounts the view for a remote https source but never starts a
-        // Glide load: no network request, no onError, just a permanent blank box (verified via
-        // Glide verbose logging; local file:// attachments are unaffected, so expo-image stays
-        // everywhere else). RN Image is what avatars use and provably renders on this device.
-        // Keyed by the URL so a recycled row remounts and loads the NEW image instead of briefly
-        // showing the previous message's.
+        // RN's built-in Image (Fresco). The load-bearing part is fadeDuration={0} below — with
+        // ANY fade (expo-image `transition` or Fresco's default 300ms), a network image decodes
+        // but never becomes visible on-device (see the fadeDuration comment). Keyed by the URL
+        // so a recycled row remounts and loads the NEW image instead of briefly showing the
+        // previous message's.
         <Image
           testID="url-preview-image"
           key={imageUrl}
           source={{ uri: imageUrl, headers: { 'User-Agent': IMG_UA } }}
-          // TEMP diagnostics ([preview] tag, App Logs viewer): preview images render as a
-          // permanent blank box on-device with no error across BOTH expo-image and RN Image,
-          // while Chrome loads the same URL fine — these lifecycle logs (esp. Fresco's real
-          // onError message) pin down where the load dies. Remove once root-caused.
-          onLoadStart={() => logger.warn('[preview] img loadStart', { uri: imageUrl })}
           onLoad={() => logger.warn('[preview] img loaded', { uri: imageUrl })}
-          onLoadEnd={() => logger.warn('[preview] img loadEnd', { uri: imageUrl })}
           onError={(e) => {
             logger.warn('[preview] img ERROR', {
               uri: imageUrl,
@@ -88,7 +80,14 @@ export function UrlPreviewCard({
             setImgFailed(true);
           }}
           resizeMode="cover"
-          fadeDuration={150}
+          // NO fade-in — THE root cause of the years-of-blank-preview-images bug (S25U,
+          // RN 0.86 Fabric): the network-image fade animation never runs, so the image
+          // DECODES (onLoad fires) but stays at 0 alpha forever. Applies identically to
+          // expo-image's `transition` and RN Image's `fadeDuration` (default 300 — must be
+          // EXPLICITLY 0). Local images skip Fresco's fade, which is why avatars/attachments
+          // always rendered. Confirmed on-device via the [preview] lifecycle logs: "loaded"
+          // fired while the box stayed blank at 150ms fade; 0 renders instantly.
+          fadeDuration={0}
           style={[styles.image, { backgroundColor: theme.color.separator }]}
         />
       ) : null}
