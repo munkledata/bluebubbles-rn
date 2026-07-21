@@ -5,10 +5,6 @@ import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
 
-// Some CDNs gate image requests on a browser-looking UA (same reason the OG fetch uses one).
-const IMG_UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
-
 interface UrlPreviewCardProps {
   url: string;
   /** The already-fetched preview row (the parent bubble owns the hook so it runs once). */
@@ -32,9 +28,6 @@ export function UrlPreviewCard({
   const imageUrl = preview?.imageUrl ?? null;
   useEffect(() => {
     setImgFailed(false);
-    // TEMP diagnostics: pairs with the <Image> lifecycle logs below — if this fires but
-    // loadStart never does, the native pipeline never even began the request.
-    if (imageUrl) logger.warn('[preview] card has image', { uri: imageUrl });
   }, [imageUrl]);
   const showImage = !!imageUrl && !imgFailed;
 
@@ -62,32 +55,20 @@ export function UrlPreviewCard({
       ]}
     >
       {showImage && imageUrl ? (
-        // RN's built-in Image (Fresco). The load-bearing part is fadeDuration={0} below — with
-        // ANY fade (expo-image `transition` or Fresco's default 300ms), a network image decodes
-        // but never becomes visible on-device (see the fadeDuration comment). Keyed by the URL
-        // so a recycled row remounts and loads the NEW image instead of briefly showing the
-        // previous message's.
+        // Keyed by the URL so a recycled row remounts and loads the NEW image instead of
+        // briefly showing the previous message's.
         <Image
           testID="url-preview-image"
           key={imageUrl}
-          source={{ uri: imageUrl, headers: { 'User-Agent': IMG_UA } }}
-          onLoad={() => logger.warn('[preview] img loaded', { uri: imageUrl })}
+          source={{ uri: imageUrl }}
           onError={(e) => {
-            logger.warn('[preview] img ERROR', {
+            logger.warn('[preview] img failed', {
               uri: imageUrl,
               error: e.nativeEvent?.error != null ? String(e.nativeEvent.error) : 'unknown',
             });
             setImgFailed(true);
           }}
           resizeMode="cover"
-          // NO fade-in — THE root cause of the years-of-blank-preview-images bug (S25U,
-          // RN 0.86 Fabric): the network-image fade animation never runs, so the image
-          // DECODES (onLoad fires) but stays at 0 alpha forever. Applies identically to
-          // expo-image's `transition` and RN Image's `fadeDuration` (default 300 — must be
-          // EXPLICITLY 0). Local images skip Fresco's fade, which is why avatars/attachments
-          // always rendered. Confirmed on-device via the [preview] lifecycle logs: "loaded"
-          // fired while the box stayed blank at 150ms fade; 0 renders instantly.
-          fadeDuration={0}
           style={[styles.image, { backgroundColor: theme.color.separator }]}
         />
       ) : null}
@@ -110,7 +91,13 @@ export function UrlPreviewCard({
 
 const styles = StyleSheet.create({
   card: {
-    maxWidth: '78%',
+    // width — NOT maxWidth — is load-bearing. With maxWidth only, the alignSelf'd card
+    // sizes itself from its CHILDREN, and the image's width:'100%' then references a
+    // parent whose width depends on the image: Yoga resolves that cycle to width 0. The
+    // image "loads" (onLoad fires at 0×140) but is invisible — the origin of the eternal
+    // blank-image-box bug, identical under expo-image and RN Image, debug and release.
+    // A fixed 78% makes the card constant-width (matches iMessage) and the cycle gone.
+    width: '78%',
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,

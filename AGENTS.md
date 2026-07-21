@@ -236,16 +236,18 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   `noImplicitOverride`), else tsc errors TS4114. Mount it ABOVE the providers (it must catch a `ThemeProvider`
   throw too), so its fallback uses literal colors, not theme tokens. See `src/ui/ErrorBoundary.tsx`.
 - **FlashList v2 auto-sizes — do NOT add `estimatedItemSize`** (removed/ignored in v2; it was a v1 prop).
-- **NETWORK images must render with NO fade-in (`fadeDuration={0}` / no `transition`) — a fade leaves
-  the image PERMANENTLY INVISIBLE on-device (S25U, RN 0.86 Fabric, release build).** The bug that made
-  URL-preview images a blank box for months: the image downloads and decodes fine (`onLoad` fires — proven
-  via on-device `[preview]` lifecycle logs), but the fade animation never runs, so alpha stays 0 forever
-  and `onError` never fires either (nothing failed), defeating the imgFailed-collapse. It bit BOTH image
-  libraries identically (expo-image `transition={150}` and RN `Image` `fadeDuration` — whose Android
-  DEFAULT is 300, so it must be EXPLICITLY zeroed). Local `file://`/`content://` sources skip Fresco's
-  fade, which is why avatars and attachments always rendered and made the image libs look innocent.
-  `UrlPreviewCard` uses RN `Image` + `fadeDuration={0}` + `key={imageUrl}` (recycling) + a browser
-  User-Agent header; if you add any new remote-image surface, no fades.
+- **A `width:'100%'` image inside a content-sized card resolves to WIDTH 0 — the image "loads"
+  (`onLoad` fires) but is invisible, with no error, forever.** The origin of the long-lived
+  blank-preview-image bug: `UrlPreviewCard` was `alignSelf` + `maxWidth:'78%'` only, so the card's width
+  came from its CHILDREN — and the image's `width:'100%'` referenced that same parent. Yoga resolves the
+  cycle to 0×140: every layer looks healthy (network 200, decode OK, onLoad fires, `onError` never —
+  nothing failed), so it perfectly impersonates a network/image-library bug. It reproduced identically
+  under expo-image AND RN Image, debug AND release — the tell that it was neither library. Root-caused
+  with a standalone probe app (sideloaded, live Metro) after on-device `[preview]` lifecycle logs proved
+  decode-success-yet-blank. FIX: the card uses `width:'78%'` (constant-width, iMessage-like). RULE: a
+  percentage-sized child must have an ancestor with DETERMINED width — never `%`-size a child of an
+  `alignSelf`'d/auto-width container. (Two earlier wrong diagnoses shipped along the way — "expo-image
+  broken", "fade leaves alpha 0" — both reverted; RN `Image` + `key={imageUrl}` remains, which is fine.)
 - **A per-row horizontal swipe inside a FlashList MUST harden its `PanResponder` or the scroll STEALS the
   gesture on some OEMs.** A `PanResponder` that only sets a mostly-horizontal `onMoveShouldSetPanResponder`
   works on a Pixel but drops **~50% of swipes on a Galaxy S25 Ultra** (One UI): the vertical scroll wins the
