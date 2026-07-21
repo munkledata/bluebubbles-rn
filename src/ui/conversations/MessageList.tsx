@@ -1,11 +1,29 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet, Text, View } from 'react-native';
+import {
+  Keyboard,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { discardMessage, retry } from '@/services/send';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
-import { chatServiceFromGuid, isGroupEvent } from '@utils';
+import {
+  chatServiceFromGuid,
+  initialPinState,
+  isGroupEvent,
+  pinExplicitly,
+  pinOnDragStart,
+  pinOnMomentumEnd,
+  pinOnScroll,
+  unpinExplicitly,
+  type ScrollPinState,
+} from '@utils';
 import { usePullToRefresh } from '../primitives';
-import { useTheme } from '../theme';
+import { useTheme, withAlpha } from '../theme';
 import { MessageRow } from './MessageRow';
 import { FailedMessageSheet } from './FailedMessageSheet';
 import { ReactionDetailsSheet } from './ReactionDetailsSheet';
@@ -43,14 +61,21 @@ interface MessageListProps {
   /** Multi-select mode: the selected guids (null/undefined = off) + the toggle callback. */
   selectedGuids?: Set<string> | null;
   onToggleSelect?: (msg: EnrichedMessage) => void;
+  /** Present while the list shows an ANCHORED window (search hit / unread jump): the scroll-to-
+   *  bottom button becomes an exit hatch — the screen clears the anchor and the chat returns to
+   *  the live newest window. The window's own bottom is NOT the newest message, so a plain
+   *  scrollToEnd would lie. */
+  onExitAnchor?: () => void;
 }
 
-// Within this many px of the bottom, a keyboard-open re-pins to the newest message; scrolled
-// further up (reading history) it's left alone. ~2 message-rows of slack.
-const KEYBOARD_FOLLOW_THRESHOLD = 160;
+function distFromBottomOf(e: NativeSyntheticEvent<NativeScrollEvent>): number {
+  const { contentSize, contentOffset, layoutMeasurement } = e.nativeEvent;
+  return contentSize.height - contentOffset.y - layoutMeasurement.height;
+}
 
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
-// from the bottom so the newest message is visible and the list stays pinned.
+// from the bottom so the newest message is visible and the list stays pinned
+// (the scrollPin convergence loop below is what "pinned" means).
 export function MessageList({
   chatGuid,
   isGroup,
@@ -67,6 +92,7 @@ export function MessageList({
   focusGuid,
   selectedGuids,
   onToggleSelect,
+  onExitAnchor,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
@@ -121,23 +147,6 @@ export function MessageList({
       : undefined;
   }, [failed]);
 
-  // Tap a reply quote → scroll to the original message + briefly highlight it.
-  const listRef = useRef<FlashListRef<EnrichedMessage>>(null);
-  const rowsRef = useRef(rows);
-  rowsRef.current = rows;
-  // Deferred scroll for a just-sent (appended) message — see the appended branch below.
-  const appendRaf = useRef<number | null>(null);
-  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [highlightGuid, setHighlightGuid] = useState<string | null>(null);
-  const jumpToReply = useCallback((originatorGuid: string): void => {
-    const index = rowsRef.current.findIndex((m) => m.guid === originatorGuid);
-    if (index < 0) return; // the original isn't in the loaded window
-    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
-    setHighlightGuid(originatorGuid);
-    if (highlightTimer.current) clearTimeout(highlightTimer.current);
-    highlightTimer.current = setTimeout(() => setHighlightGuid(null), 1600);
-  }, []);
-
   // Opened from a search hit → land on that message. The list is bottom-anchored, so an old target
   // is far above the first render and `scrollToIndex` to it silently no-ops (the row isn't measured
   // yet). Instead we REMOUNT the list keyed to the target with `initialScrollIndex` — a reliable
@@ -148,6 +157,56 @@ export function MessageList({
     [focusGuid, rows],
   );
   const focusReady = focusGuid != null && focusIndex >= 0;
+
+  // ---- pinned-to-bottom follow model (pure decisions in @utils scrollPin, node-tested) --------
+  // `pinned` = follow the newest message: while pinned, EVERY content-size change re-scrolls to
+  // the end (onContentSizeChange below) — a convergence loop that self-heals late row-height
+  // changes (URL-preview cards popping in, image boxes) which made one-shot corrective scrolls
+  // land short. Only a user DRAG can unpin; reaching the bottom again re-pins. A ref carries the
+  // state on the hot scroll path (no re-render per event); `fabVisible` mirrors it for the button.
+  const listRef = useRef<FlashListRef<EnrichedMessage>>(null);
+  const pinRef = useRef<ScrollPinState>(initialPinState(!focusReady));
+  const [fabVisible, setFabVisible] = useState(focusReady);
+  // Incoming messages appended while unpinned — the FAB badge. Reset on every re-pin.
+  const [missed, setMissed] = useState(0);
+  // Anchored (search-hit / unread-jump) sessions freeze the pin machine: the window's bottom is
+  // NOT the newest message, so nothing may pin/unpin there — the FAB exit hatch is the way back.
+  const focusReadyRef = useRef(focusReady);
+  focusReadyRef.current = focusReady;
+  const applyPin = useCallback((next: ScrollPinState): void => {
+    const flipped = next.pinned !== pinRef.current.pinned;
+    pinRef.current = next;
+    if (flipped) {
+      setFabVisible(!next.pinned);
+      if (next.pinned) setMissed(0);
+    }
+  }, []);
+  // Entering an anchored session unpins; leaving one (jump cleared → focusReady drops) re-pins —
+  // the anchored→normal data swap then converges to the newest row via onContentSizeChange.
+  useEffect(() => {
+    applyPin(focusReady ? unpinExplicitly(pinRef.current) : pinExplicitly(pinRef.current));
+  }, [focusReady, applyPin]);
+
+  // Tap a reply quote → scroll to the original message + briefly highlight it. Unpins first: the
+  // user asked to READ something above, so content growth must not yank them back down.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  // Deferred scroll for a just-sent (appended) message — see the appended branch below.
+  const appendRaf = useRef<number | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [highlightGuid, setHighlightGuid] = useState<string | null>(null);
+  const jumpToReply = useCallback(
+    (originatorGuid: string): void => {
+      const index = rowsRef.current.findIndex((m) => m.guid === originatorGuid);
+      if (index < 0) return; // the original isn't in the loaded window
+      applyPin(unpinExplicitly(pinRef.current));
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+      setHighlightGuid(originatorGuid);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlightGuid(null), 1600);
+    },
+    [applyPin],
+  );
   // Highlight the target once it's mounted in view (once per target); nudge it toward center.
   const focusedRef = useRef<string | null>(null);
   const focusScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -189,22 +248,46 @@ export function MessageList({
     listRef.current?.scrollToEnd({ animated: false });
   }, [focusReady]);
 
-  // Distance (px) from the bottom, updated on scroll — drives "am I near the newest message?" for
-  // the keyboard-follow below. Starts at 0 (a fresh chat opens pinned to the bottom).
+  // Distance (px) from the bottom, updated on scroll. Starts at 0 (a fresh chat opens pinned).
   const distFromBottomRef = useRef(0);
-  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentSize, contentOffset, layoutMeasurement } = e.nativeEvent;
-    distFromBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height;
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const dist = distFromBottomOf(e);
+      distFromBottomRef.current = dist;
+      if (!focusReadyRef.current) applyPin(pinOnScroll(pinRef.current, dist));
+    },
+    [applyPin],
+  );
+  // A finger-down drag is the only signal that can lead to an unpin — programmatic scrolls and
+  // FlashList's own autoscroll never emit it, so a short-landing scrollToEnd can't self-unpin.
+  const onScrollBeginDrag = useCallback((): void => {
+    if (!focusReadyRef.current) applyPin(pinOnDragStart(pinRef.current));
+  }, [applyPin]);
+  // Momentum end closes the drag session. Android fires momentum for ANIMATED programmatic
+  // scrolls too, so this transition may re-pin but never unpins (see scrollPin).
+  const onMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const dist = distFromBottomOf(e);
+      distFromBottomRef.current = dist;
+      if (!focusReadyRef.current) applyPin(pinOnMomentumEnd(pinRef.current, dist));
+    },
+    [applyPin],
+  );
+  // THE convergence loop: while pinned, any content growth (appended rows, a URL-preview card
+  // popping in, an image box) re-lands the list at the bottom. Native scrollToEnd recomputes
+  // from the CURRENT content height, so repeated calls converge where one-shots landed short.
+  const onContentSizeChange = useCallback((): void => {
+    if (pinRef.current.pinned) listRef.current?.scrollToEnd({ animated: false });
   }, []);
 
   // When the keyboard opens, the KeyboardAvoidingView (chat screen) shrinks this list from the
   // bottom, but FlashList keeps its scroll offset — so the newest messages slide behind the
-  // composer/keyboard. If the user was already near the bottom, re-pin to the newest message.
+  // composer/keyboard. If the list is pinned (at/near the newest), re-pin to the newest message.
   // Deferred a frame so the scroll runs AFTER the frame has shrunk (else it uses stale metrics).
   const kbRaf = useRef<number | null>(null);
   useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => {
-      if (distFromBottomRef.current > KEYBOARD_FOLLOW_THRESHOLD) return; // reading history — leave it
+      if (!pinRef.current.pinned) return; // reading history — leave it
       if (kbRaf.current != null) cancelAnimationFrame(kbRaf.current);
       kbRaf.current = requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     });
@@ -214,23 +297,23 @@ export function MessageList({
     };
   }, []);
 
-  // Reveal the user's OWN just-sent message even if they'd scrolled up: when a NEW message from me
-  // lands as the chronological tail, jump to the end. (Incoming-while-near-bottom is handled natively
-  // by autoscrollToBottomThreshold on the list below; this covers the scrolled-up sender, where that
-  // threshold won't fire.) Ref-diff because `rows` is a fresh array on every reactive tick — gate on
+  // Tail-append watcher. Ref-diff because `rows` is a fresh array on every reactive tick — gate on
   // a genuine append (length grew AND a new tail guid) so in-place updates (sending→sent, localPath
   // writes, reaction joins) and a temp→real guid swap don't re-fire.
+  //  - Own message appended → RE-PIN (even from deep in history; pinExplicitly survives the
+  //    animated scroll's own events) + reveal it. The pinned convergence loop can't cover this:
+  //    a scrolled-up sender is unpinned by definition.
+  //  - Incoming appended while unpinned → count it on the FAB badge instead of yanking the reader.
+  //    (Incoming while PINNED is landed by onContentSizeChange + FlashList's autoscroll.)
   const lastTailRef = useRef<{ guid: string | null; len: number }>({ guid: null, len: 0 });
-  // The initial "land at newest" is handled by onListLoad (post-measure) + startRenderingFromBottom.
-  // This effect only reveals the user's OWN just-sent message when it's appended as the chronological
-  // tail — even if they'd scrolled up. (Incoming-while-near-bottom is handled natively by
-  // autoscrollToBottomThreshold; this covers the scrolled-up sender, where that threshold won't fire.)
   useEffect(() => {
     const prev = lastTailRef.current;
     const last = rows[rows.length - 1] ?? null;
     const appended = prev.len > 0 && rows.length > prev.len && !!last && last.guid !== prev.guid;
     lastTailRef.current = { guid: last?.guid ?? null, len: rows.length };
-    if (appended && last?.isFromMe === 1) {
+    if (!appended || !last) return;
+    if (last.isFromMe === 1) {
+      if (!focusReadyRef.current) applyPin(pinExplicitly(pinRef.current));
       // Defer a frame so FlashList has laid out/measured the newly-appended tail row before we
       // scroll — otherwise scrollToEnd computes against the pre-append content height and lands
       // short, leaving the just-sent bubble hidden below the fold.
@@ -238,8 +321,23 @@ export function MessageList({
       appendRaf.current = requestAnimationFrame(() =>
         listRef.current?.scrollToEnd({ animated: true }),
       );
+    } else if (!pinRef.current.pinned) {
+      setMissed((n) => n + 1);
     }
-  }, [rows]);
+  }, [rows, applyPin]);
+
+  // The floating "jump to newest" button: shows whenever the list isn't following the newest
+  // message. In an anchored session it EXITS the anchor (the screen clears it and the chat
+  // returns to the live window); otherwise it re-pins and scrolls.
+  const onFabPress = useCallback((): void => {
+    if (onExitAnchor) {
+      onExitAnchor();
+      return;
+    }
+    applyPin(pinExplicitly(pinRef.current));
+    listRef.current?.scrollToEnd({ animated: true });
+  }, [onExitAnchor, applyPin]);
+  const showFab = onExitAnchor != null || (fabVisible && rows.length > 0);
 
   return (
     <View style={styles.flex}>
@@ -265,6 +363,9 @@ export function MessageList({
         }
         refreshControl={onRefresh ? refreshControl : undefined}
         onScroll={onScroll}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        onContentSizeChange={onContentSizeChange}
         scrollEventThrottle={16}
         // Reaching the START of the (chronological) data = scrolled to the oldest loaded message →
         // load older history. maintainVisibleContentPosition keeps the viewport pinned as the
@@ -307,6 +408,32 @@ export function MessageList({
           </Text>
         </View>
       ) : null}
+      {showFab ? (
+        <Pressable
+          onPress={onFabPress}
+          style={[
+            styles.fab,
+            {
+              bottom: 16 + bottomInset,
+              // Frosted over a wallpaper (the overlay-chip language); an elevated surface otherwise.
+              backgroundColor: hasBackground
+                ? withAlpha(theme.color.background, 0.62)
+                : theme.color.secondaryBackground,
+              borderColor: theme.color.separator,
+            },
+          ]}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Scroll to newest message"
+        >
+          <Text style={[styles.fabGlyph, { color: theme.color.tint }]}>↓</Text>
+          {missed > 0 ? (
+            <View style={[styles.fabBadge, { backgroundColor: theme.color.tint }]}>
+              <Text style={styles.fabBadgeText}>{missed > 99 ? '99+' : missed}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
       <FailedMessageSheet
         visible={failed !== null}
         isAttachment={failedImage !== undefined}
@@ -339,4 +466,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyText: { fontSize: 15 },
+  // Floating "jump to newest" button (above the composer; badge = messages missed while unpinned).
+  fab: {
+    position: 'absolute',
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+  },
+  fabGlyph: { fontSize: 20, fontWeight: '600', lineHeight: 24 },
+  fabBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 });

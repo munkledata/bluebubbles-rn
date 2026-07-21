@@ -326,19 +326,28 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   (`packages/bbd`): `errorLogIngestionEnabled` config (default OFF) gates ingestion + drives the capability
   flag; `ErrorReportStore` fingerprints (deterministic sha1 over normalized message + top stack frame + tag +
   level, `errors/fingerprint.ts`) and appends `error-reports/categories/<fp>.jsonl` + an atomic `index.json`.
-- **Chat opens at the newest message; keyboard-follow is near-bottom-gated** (`MessageList` + `chat/[guid].tsx`).
-  FlashList v2's `startRenderingFromBottom` anchors the newest message ONLY on the INITIAL render (confirmed in
-  flash-list 2.0.2 types) — so the list must mount WITH data. The chat screen gates the `MessageList` behind
-  `messagesLoading` (a spinner until the first `useMessages` read resolves, i.e. `messagesData != null`), so
-  FlashList's first render is already populated. The corrective "land at newest" then fires from FlashList's
-  `onLoad` (raised AFTER first-render measurement) as a single `scrollToEnd`, NOT a bare rAF on the
-  `[]→populated` transition — the old rAF ran before row heights were measured and, on a tall (250-msg) window,
-  landed SHORT, dropping the user into mid-history (the "opens in the middle showing old texts" bug). Skipped
-  when `focusReady` (a search/notification open keeps its `initialScrollIndex` jump). The list is keyed
-  `list-${chatGuid}`, so a REUSED screen instance (a chat opened via `router.replace` over another chat)
-  re-mounts the list → `onLoad` re-fires → the new thread lands at its newest message. A `keyboardDidShow`
-  listener re-pins to the newest message only when the user was within `KEYBOARD_FOLLOW_THRESHOLD` of the
-  bottom (else a reader is left alone). All device-only to verify (jest fakes keyboard + FlashList layout).
+- **Chat lands/stays at the newest message via TWO mechanisms: a keyed per-chat remount + a pinned-follow
+  convergence loop** (`chat/[guid].tsx` + `MessageList` + `@utils` `scrollPin`). (1) THE REMOUNT: the chat
+  screen is reused on a `router.replace` thread switch (every notification tap while a chat is open) and
+  `useReactiveQuery` KEEPS the previous deps' data until the new query resolves — so without a remount the
+  `messagesLoading` spinner-gate never engaged and the list mounted with the WRONG chat's rows, one-shot
+  scrolled against them, and stranded the new thread mid-history (the original "opens in the wrong spot" bug).
+  `ChatScreen` keys the subtree with `screenKey` (guid|focus|focusDate|share), which also resets per-chat
+  leaks (pagination `limit`, `jump` anchor, reply/edit targets) and re-runs the share-intent initializers.
+  The gate matters because FlashList v2's `startRenderingFromBottom` anchors ONLY on the INITIAL render —
+  the list must mount WITH data; `onLoad` (post-measure, once per instance) then does the first `scrollToEnd`.
+  (2) THE PIN LOOP: `pinned` state (pure transitions in `src/utils/scrollPin.ts`, node-tested) makes landing
+  CONVERGENT instead of one-shot — while pinned, every `onContentSizeChange` re-issues `scrollToEnd` (native
+  recomputes from the CURRENT height), which self-heals late row-height changes (async URL-preview cards,
+  image boxes) AND FlashList's own `autoscrollToBottomThreshold` miss (verified in 2.0.2 source: an incoming
+  message taller than ~20% of the viewport defeats its near-bottom check even parked at the bottom). Only a
+  user DRAG can unpin (`onScrollBeginDrag` — the one signal programmatic scrolls never emit; Android fires
+  momentum for animated programmatic scrolls, so momentum may re-pin but never unpins); reaching the bottom
+  re-pins; sending re-pins from anywhere; `keyboardDidShow` re-pins only while pinned. Unpinned shows the
+  "jump to newest" FAB (badge = incoming missed while unpinned); in an anchored (search-hit/unread-jump)
+  session the pin machine is FROZEN (the window bottom ≠ newest) and the FAB becomes `onExitAnchor` — the
+  screen clears jump + focus params, and the remount/convergence loop lands the live window. Decisions are
+  jest-tested (`messageListPinned.test.tsx`, `scrollPin.test.ts`); layout timing is device-only.
 - **Open a chat ONLY via `useChatNavigator` (`src/ui/useChatNavigator.ts`) — never a raw `router.push` to
   `/chat/…`.** The app keeps ONE stack with the Messages list at its base; pushing a thread on top of an
   already-open thread (notification taps did this) left Back returning to the PREVIOUS thread, not the inbox
