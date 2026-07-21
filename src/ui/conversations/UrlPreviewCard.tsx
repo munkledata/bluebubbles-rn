@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { logger } from '@core/secure';
 import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
+
+// Some CDNs gate image requests on a browser-looking UA (same reason the OG fetch uses one).
+const IMG_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
 
 interface UrlPreviewCardProps {
   url: string;
@@ -27,6 +32,9 @@ export function UrlPreviewCard({
   const imageUrl = preview?.imageUrl ?? null;
   useEffect(() => {
     setImgFailed(false);
+    // TEMP diagnostics: pairs with the <Image> lifecycle logs below — if this fires but
+    // loadStart never does, the native pipeline never even began the request.
+    if (imageUrl) logger.warn('[preview] card has image', { uri: imageUrl });
   }, [imageUrl]);
   const showImage = !!imageUrl && !imgFailed;
 
@@ -64,8 +72,21 @@ export function UrlPreviewCard({
         <Image
           testID="url-preview-image"
           key={imageUrl}
-          source={{ uri: imageUrl }}
-          onError={() => setImgFailed(true)}
+          source={{ uri: imageUrl, headers: { 'User-Agent': IMG_UA } }}
+          // TEMP diagnostics ([preview] tag, App Logs viewer): preview images render as a
+          // permanent blank box on-device with no error across BOTH expo-image and RN Image,
+          // while Chrome loads the same URL fine — these lifecycle logs (esp. Fresco's real
+          // onError message) pin down where the load dies. Remove once root-caused.
+          onLoadStart={() => logger.warn('[preview] img loadStart', { uri: imageUrl })}
+          onLoad={() => logger.warn('[preview] img loaded', { uri: imageUrl })}
+          onLoadEnd={() => logger.warn('[preview] img loadEnd', { uri: imageUrl })}
+          onError={(e) => {
+            logger.warn('[preview] img ERROR', {
+              uri: imageUrl,
+              error: e.nativeEvent?.error != null ? String(e.nativeEvent.error) : 'unknown',
+            });
+            setImgFailed(true);
+          }}
           resizeMode="cover"
           fadeDuration={150}
           style={[styles.image, { backgroundColor: theme.color.separator }]}
