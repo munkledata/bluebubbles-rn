@@ -23,7 +23,11 @@ const DEBOUNCE_MS = 24;
  * drizzle adapter in db/database.ts does that automatically after each write.
  *
  * Pass `deps` for inputs that should re-create the subscription/query. `run` is
- * read from a ref, so it need not be memoized.
+ * read from a ref, so it need not be memoized. GOTCHA: on a deps change, `data`
+ * KEEPS the previous deps' result until the new query resolves (deliberate — a
+ * reset here would flash a loading state on every pagination limit grow). Key
+ * the consuming component if it must never render stale data (the chat screen
+ * does this — see `screenKey` in app/(app)/chat/[guid].tsx).
  *
  * `options.enabled` (default true) gates the whole thing: when false, neither the
  * initial exec nor the reactive subscription runs (data null, isLoading false) —

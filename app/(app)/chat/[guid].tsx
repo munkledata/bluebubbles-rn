@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -98,8 +98,17 @@ export default function ChatScreen(): React.JSX.Element {
     focusDate?: string;
     share?: string;
   }>();
+  // Remount the whole per-chat subtree when the chat (or its open mode) changes. The screen
+  // instance is REUSED on a `router.replace` thread switch (notification tap while a chat is open),
+  // and `useReactiveQuery` keeps the PREVIOUS deps' data until the new query resolves — without the
+  // key, `messagesLoading` never gates, so the list mounted with the previous chat's rows, did its
+  // one-shot bottom landing against the wrong content, and stranded the new thread mid-history.
+  // The key also resets per-chat state that must not leak across a switch (pagination limit, jump
+  // anchor, reply/edit targets, selection) and re-runs the share-intent lazy initializers so a
+  // Direct Share into an already-open different chat still stages its files.
+  const screenKey = `${guid}|${focus ?? ''}|${focusDate ?? ''}|${share ?? ''}`;
   return (
-    <ChatThemeProvider guid={guid}>
+    <ChatThemeProvider key={screenKey} guid={guid}>
       <ChatScreenInner
         guid={guid}
         focusGuid={focus}
@@ -162,6 +171,17 @@ function ChatScreenInner({
     loadingOlderRef.current = true;
     setLimit((n) => n + 200);
   }, [anchorDate, messages.length, limit]);
+  // The list's scroll-to-bottom button in an ANCHORED session (search hit / unread jump): exit the
+  // anchor and return to the live newest window. Clearing the route params changes `screenKey`
+  // (clean remount → normal bottom-anchored open); clearing only `jump` keeps the instance, and
+  // the anchored→normal data swap converges to the newest row via the list's pinned follow loop.
+  // '' (not undefined) is the strict-TS-safe way to drop a param — the existing guards treat ''
+  // as absent (`focusDate ? … : NaN`, findIndex('') === -1).
+  const router = useRouter();
+  const exitAnchor = useCallback((): void => {
+    setJump(null);
+    router.setParams({ focus: '', focusDate: '' });
+  }, [router]);
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
   // Group participants for @mention autocomplete (reactive so contact-sync name updates flow in).
@@ -476,6 +496,7 @@ function ChatScreenInner({
       focusGuid={effFocusGuid}
       selectedGuids={selectedGuids}
       onToggleSelect={onToggleSelect}
+      onExitAnchor={anchorDate != null || effFocusGuid ? exitAnchor : undefined}
     />
   );
   // Multi-select replaces the composer with a selection action bar. The Composer's unmount flush
