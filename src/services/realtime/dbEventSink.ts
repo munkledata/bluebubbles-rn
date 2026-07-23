@@ -2,10 +2,10 @@ import { Chat, resolveMessageChatGuid } from '@core/models';
 import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 import { logger } from '@core/secure';
 import {
+  applyServerSendError,
   getChatIdByGuid,
   getNewestReceivedGuid,
   markMessageDeleted,
-  markMessageSendError,
   reconcileEchoByContent,
   setLastReadMessageGuid,
   upsertChats,
@@ -127,9 +127,11 @@ export class DbEventSink implements EventSink {
         break;
       }
       case 'message-send-error': {
-        // The server (helper) reports an outgoing send failed in Messages.app. Match the message
-        // by any guid the payload carries and flip it to the error state so the bubble shows the
-        // error + retry (complements the app's own optimistic-send retry queue).
+        // The server (helper / RCS bridge) reports an outgoing send failed. Match the message by
+        // any guid the payload carries and flip it to the error state so the bubble shows the
+        // error + retry. Queue-aware: if the guid still owns an outgoing_queue row (a fast RCS
+        // bridge failure around the immediate ack), this also bumps attempts + reschedules the
+        // backoff so the automatic retry ladder stays honest (see applyServerSendError).
         const p = event.payload;
         const embedded = (p.message ?? {}) as Record<string, unknown>;
         const guid = [p.guid, p.tempGuid, p.messageGuid, embedded.guid].find(
@@ -137,7 +139,11 @@ export class DbEventSink implements EventSink {
         );
         if (!guid) break;
         const code = Number(p.error ?? embedded.error ?? 1) || 1;
-        await markMessageSendError(this.db, guid, code);
+        // `retryable: true` = a SEND-PHASE bridge failure (nothing reached Google) — safe to
+        // re-arm the automatic retry ladder even though the immediate ack already consumed the
+        // queue row. Absent/false (older servers, delivery-phase failures) → bubble-only.
+        const retryable = p.retryable === true || embedded.retryable === true;
+        await applyServerSendError(this.db, guid, code, Date.now(), retryable);
         break;
       }
       case 'group-name-change':

@@ -1,9 +1,17 @@
 import type { HttpClient } from '@core/api/http';
 import { sendReaction, sendText, type MessageMention } from '@core/api/endpoints/messages';
 import { logger } from '@core/secure';
-import { claimOutgoing, listRetryableOutgoing, type RetryableOutgoing } from '@db/repositories';
+import {
+  claimOutgoing,
+  getAttachmentByGuid,
+  listRetryableOutgoing,
+  markOutgoingSending,
+  retireOutgoing,
+  type RetryableOutgoing,
+} from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
+import type { AttachmentUploader } from './sendAttachmentService';
 
 interface TextPayload {
   message: string;
@@ -18,15 +26,35 @@ interface ReactionPayload {
   emoji?: string;
   selectedMessageText?: string;
 }
+interface AttachmentPayload {
+  attachmentGuid: string;
+  localPath?: string;
+}
+
+/**
+ * The native I/O an attachment re-upload needs, INJECTED so this module stays free of RN
+ * imports (it runs in Node tests against better-sqlite3). Production wires the expo
+ * implementations (`expoAttachmentUploader` / `expoFileExists`); tests inject fakes.
+ */
+export interface OutgoingQueueIO {
+  upload: AttachmentUploader;
+  fileExists: (uri: string) => Promise<boolean>;
+}
 
 /** Re-POST a single queued send (temp row + queue row already exist) and reconcile. */
 async function resend(
   db: AppDatabase,
   http: HttpClient,
+  io: OutgoingQueueIO,
   row: RetryableOutgoing,
   now: number,
 ): Promise<boolean> {
   try {
+    // A retried row is 'error' from its last failure — flip it back to 'sending' FIRST, or the
+    // guid-less ack paths (RCS tempGuid echo / AppleScript) hit markOutgoingSentNoGuid's
+    // sticky-error guard and the retry's SUCCESS is swallowed: bubble stays errored, queue row
+    // survives un-bumped, and the same message re-sends on every later drain (duplicates).
+    await markOutgoingSending(db, row.tempGuid);
     let server;
     if (row.kind === 'text') {
       const p = JSON.parse(row.payload) as TextPayload;
@@ -47,10 +75,33 @@ async function resend(
         reaction: p.reaction,
         emoji: p.emoji,
       });
+    } else if (row.kind === 'attachment') {
+      const p = JSON.parse(row.payload) as AttachmentPayload;
+      // name/mimeType live on the attachments row (the payload only pins guid + path); the
+      // row also holds the freshest localPath should anything have rewritten it.
+      const att = await getAttachmentByGuid(db, p.attachmentGuid);
+      const uri = att?.localPath ?? p.localPath;
+      if (!att || !uri || !(await io.fileExists(uri))) {
+        // The on-disk file is gone (OS cache eviction / rows deleted) — no retry can ever
+        // succeed. Retire now instead of burning attempts; the bubble keeps its error badge
+        // and the sheet's Delete still works.
+        logger.warn(`[queue] attachment retry has no local file — retiring`);
+        await retireOutgoing(db, row.tempGuid);
+        return false;
+      }
+      server = await io.upload({
+        http,
+        chatGuid: row.chatGuid,
+        tempGuid: row.tempGuid,
+        name: att.transferName ?? 'attachment',
+        uri,
+        mimeType: att.mimeType ?? 'application/octet-stream',
+      });
     } else {
-      // Attachment re-upload from the queue isn't supported yet (needs the file at
-      // localPath, which may be gone). The error bubble's manual retry still works.
-      logger.debug(`[queue] skipping retry of unsupported kind: ${row.kind}`);
+      // Unknown kind: retire rather than skip, or the row is claimed-and-skipped on every
+      // drain forever (the old zombie behavior attachments used to have).
+      logger.warn(`[queue] unknown outgoing kind '${row.kind}' — retiring`);
+      await retireOutgoing(db, row.tempGuid);
       return false;
     }
     await reconcileSendOutcome(db, row.tempGuid, server, now);
@@ -62,23 +113,26 @@ async function resend(
 }
 
 /**
- * Process the outgoing queue: retry every eligible stranded/failed text + reaction send
- * with exponential backoff, retiring a row to the 'error' bubble after the attempt cap.
- * Each row is leased (claimOutgoing) so two concurrent runners never double-send. This is
- * the recovery missing from the original optimistic-send path — run it at boot and from
- * the background task (and the FCM wake, once provisioned). Pure orchestration (no RN
- * imports) → runs in Node tests against better-sqlite3.
+ * Process the outgoing queue: retry every eligible stranded/failed text, reaction, and
+ * attachment send with exponential backoff, retiring a row to the 'error' bubble after the
+ * attempt cap (or immediately when its local file is gone). Each row is leased
+ * (claimOutgoing) so two concurrent runners never double-send; retries reuse the original
+ * tempGuid so the server's idempotency cache can absorb an ack-lost duplicate. This is the
+ * recovery missing from the original optimistic-send path — run it at boot, from the
+ * background task, and from the in-session drains (chat ticker / AppState active). Pure
+ * orchestration (no RN imports — attachment I/O is injected) → runs in Node tests.
  */
 export async function runOutgoingQueue(
   db: AppDatabase,
   http: HttpClient,
+  io: OutgoingQueueIO,
   now: number = Date.now(),
 ): Promise<{ eligible: number; sent: number }> {
   const rows = await listRetryableOutgoing(db, now);
   let sent = 0;
   for (const row of rows) {
     if (!(await claimOutgoing(db, row.id, now))) continue; // another runner took it
-    if (await resend(db, http, row, now)) sent += 1;
+    if (await resend(db, http, io, row, now)) sent += 1;
   }
   return { eligible: rows.length, sent };
 }

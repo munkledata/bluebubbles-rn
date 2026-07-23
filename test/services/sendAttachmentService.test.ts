@@ -227,6 +227,43 @@ describe('sendImageMessage', () => {
     expect(att.lp).toBe('file:///photo.jpg');
   });
 
+  it('RCS sync-first also promotes an ERRORED optimistic picture (client saw 5xx but the upload landed)', async () => {
+    // Same as the sync-first case, but the client-side send FAILED (e.g. Caddy 502 mid-response)
+    // while the server actually delivered. The sync materialization must promote the errored temp
+    // row in place — keeping the on-disk image and clearing the queue row (no duplicate upload).
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const up = fakeUploader(async () => {
+      throw new ApiError('server_error', 'bad gateway', 502);
+    });
+    await sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload, 1000);
+    const tempGuid = up.captured!.tempGuid;
+    expect(one(raw, 'SELECT send_state s FROM messages').s).toBe('error');
+
+    const chatId = (raw.prepare('SELECT id FROM chats WHERE guid=?').get('c1') as { id: number })
+      .id;
+    const echo = Message.parse({
+      guid: 'rcs-77',
+      isFromMe: true,
+      dateCreated: 1000,
+      hasAttachments: true,
+      attachments: [{ guid: 'rcs-media-7', mimeType: 'image/jpeg' }],
+    });
+    await reconcileOutgoingAttachmentByContent(db, echo, chatId);
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertMessages(db, [echo], () => chatId, handles);
+
+    expect(tempGuid).not.toBe('rcs-77');
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(1);
+    const msg = one(raw, 'SELECT guid, send_state s FROM messages');
+    expect(msg.guid).toBe('rcs-77');
+    expect(msg.s).toBe('sent');
+    const att = one(raw, 'SELECT guid, local_path lp FROM attachments');
+    expect(att.guid).toBe('rcs-media-7');
+    expect(att.lp).toBe('file:///photo.jpg');
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
   it('sync reconcile does NOT hijack a fresh optimistic send with an OLD identical re-synced picture', async () => {
     // Sync-safety: a history backfill surfacing an OLD identical picture (same null text) must not
     // claim the fresh pending optimistic row — the ±5min window rejects it. This is exactly why the

@@ -10,6 +10,8 @@ import {
 } from '@/services/notifications/notificationOpen';
 import { takePendingNotification } from '@/services/notifications/pendingNav';
 import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
+import { recoverOutgoing } from '@/services/send';
+import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
@@ -48,6 +50,10 @@ export default function AppLayout(): React.JSX.Element {
       if (state === 'active') {
         void resumeRealtime();
         void flushErrorReports();
+        // Drain the outgoing retry queue on resume — a send that failed mid-session otherwise
+        // waits for the next home mount / 15-min background tick. Backoff + claims gate the
+        // actual re-sends, so this is one cheap SELECT when nothing is pending.
+        if (!isDevServer()) void recoverOutgoing();
       } else if (state === 'background') {
         pauseRealtime();
         void flushErrorReports();

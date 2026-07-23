@@ -17,10 +17,17 @@ import { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './sched
 import { sendImageMessage, type PickedImage } from './sendAttachmentService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
 import { pickContact } from '../contacts/contactsService';
-import { expoAttachmentUploader } from './attachmentUpload';
-import { runOutgoingQueue } from './outgoingQueueService';
+import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
+import { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
+import { showToast } from '@ui/toast/toastStore';
 
-export { runOutgoingQueue } from './outgoingQueueService';
+export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
+
+/** The production attachment I/O for the outgoing queue (expo uploader + on-disk check). */
+export const outgoingQueueIO: OutgoingQueueIO = {
+  upload: expoAttachmentUploader,
+  fileExists: expoFileExists,
+};
 
 export { generateTempGuid, sendTextMessage, type SendTextArgs } from './sendService';
 export { sendImageMessage, type PickedImage } from './sendAttachmentService';
@@ -238,7 +245,7 @@ export function recoverStuckScheduled(): Promise<number> {
  * message; it retries automatically until it sends or retires to the error bubble.
  */
 export function recoverOutgoing(now = Date.now()): Promise<{ eligible: number; sent: number }> {
-  return runOutgoingQueue(getDatabase(), http, now);
+  return runOutgoingQueue(getDatabase(), http, outgoingQueueIO, now);
 }
 
 /** Retry a failed send: drop the errored temp row, then re-send. */
@@ -246,6 +253,13 @@ export async function retry(
   oldTempGuid: string,
   args: SendTextArgs & { image?: PickedImage },
 ): Promise<{ tempGuid: string }> {
+  // Nothing re-sendable: the failed attachment's local file is gone (no image could be rebuilt
+  // from the row) and there's no text either. Keep the failed bubble untouched — deleting it
+  // and POSTing an empty text (the old fallthrough) silently destroyed the user's message.
+  if (!args.image && !args.text.trim()) {
+    showToast('Original file is no longer available');
+    return { tempGuid: oldTempGuid };
+  }
   // Drop the old errored row, then re-send. A failed ATTACHMENT must be re-uploaded as an
   // attachment (re-streaming its on-disk file) — the old code only re-sent text, so retrying a
   // failed picture just deleted it and sent nothing. When an image is supplied, re-send that.

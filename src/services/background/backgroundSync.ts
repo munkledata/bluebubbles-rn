@@ -5,7 +5,7 @@ import { useSessionStore } from '@state/sessionStore';
 import { http } from '../clients';
 import { ensureDatabase } from '../databaseControl';
 import { flushErrorReports } from '@/services/errors';
-import { runOutgoingQueue } from '@/services/send';
+import { outgoingQueueIO, runOutgoingQueue } from '@/services/send';
 import { httpSyncApi, incrementalSync } from '@/services/sync';
 
 export const BG_SYNC_TASK = 'gator-bg-sync';
@@ -26,7 +26,8 @@ TaskManager.defineTask(BG_SYNC_TASK, async () => {
       useSessionStore.getState().serverInfo?.server_version ?? (await api.serverVersion());
     await incrementalSync(db, api, { serverVersion: version });
     // Retry stranded/failed sends while we're awake (the ~15-min recovery cadence).
-    await runOutgoingQueue(db, http);
+    // Attachments re-upload too (outgoingQueueIO streams from the retained localPath).
+    await runOutgoingQueue(db, http, outgoingQueueIO);
     // Upload any buffered error reports too (no-op unless connected + server supports it + enabled).
     await flushErrorReports();
     return BackgroundTask.BackgroundTaskResult.Success;

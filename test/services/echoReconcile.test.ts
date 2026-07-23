@@ -68,6 +68,46 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
     expect(msgs[0]!.sendState).toBe('sent');
   });
 
+  it('promotes an ERRORED temp row when its echo lands (client saw 502 but the send actually delivered)', async () => {
+    // The incident shape: the app's POST failed (Caddy 502 / bridge hiccup) so the bubble went
+    // 'error' + the queue row stayed armed — but the server had actually accepted the send, and
+    // its echo arrives under the real guid. The echo must promote the errored row in place AND
+    // clear the queue row (stopping the retry ladder → no duplicate send), not insert a twin.
+    const { db, raw } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    const chatId = await seedChat(db, 'cErrEcho');
+
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-err11111',
+      chatId,
+      chatGuid: 'cErrEcho',
+      text: 'made it anyway',
+      now: 1000,
+    });
+    // Simulate handleSendFailure: bubble errored, attempts bumped, backoff armed.
+    raw
+      .prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-err11111'")
+      .run();
+    raw
+      .prepare("UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-err11111'")
+      .run();
+
+    const echo = Message.parse({
+      guid: 'real-recovered',
+      text: 'made it anyway',
+      isFromMe: true,
+      dateCreated: 1000,
+      chats: [{ guid: 'cErrEcho' }],
+    });
+    await router.handle('new-message', JSON.stringify(echo), 'socket');
+
+    const msgs = (await listMessages(db, chatId)) as Array<{ guid: string; sendState: string }>;
+    expect(msgs).toHaveLength(1); // no duplicate bubble
+    expect(msgs[0]!.guid).toBe('real-recovered');
+    expect(msgs[0]!.sendState).toBe('sent');
+    expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-err11111')).toBe(0); // ladder stopped
+  });
+
   it('echo-before-ack preserves the optimistic attachment local_path (no re-download)', async () => {
     const { db } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));

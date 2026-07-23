@@ -1,17 +1,22 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
+import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
 import { Chat } from '@core/models';
 import {
+  applyServerSendError,
   getChatIdByGuid,
+  insertOutgoingAttachment,
+  insertOutgoingReaction,
   insertOutgoingText,
   listRetryableOutgoing,
   outgoingBackoffMs,
+  OUTGOING_MAX_ATTEMPTS,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
+import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
 
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
@@ -25,6 +30,40 @@ const failHttp = (): HttpClient =>
   fakeHttp(async () => {
     throw new ApiError('unauthorized', 'boom', 500);
   });
+/** RCS-shaped ack: the bridge echoes back the client's OWN tempGuid as its correlation token. */
+const rcsEchoHttp = (): HttpClient =>
+  fakeHttp(async (json) => ({
+    guid: (json as { tempGuid: string }).tempGuid,
+    dateCreated: null,
+    dateDelivered: null,
+  }));
+
+/** IO stub for text/reaction-only tests: any attachment upload is a test failure. */
+const noAttachmentIo: OutgoingQueueIO = {
+  upload: async () => {
+    throw new Error('unexpected attachment upload');
+  },
+  fileExists: async () => true,
+};
+
+type UploadArgs = Parameters<OutgoingQueueIO['upload']>[0];
+/** Attachment IO fake that captures the args the queue passed to the uploader. */
+function fakeIo(impl: {
+  upload?: (args: UploadArgs) => Promise<SendAck>;
+  fileExists?: (uri: string) => Promise<boolean>;
+}): { io: OutgoingQueueIO; captured?: UploadArgs } {
+  const holder: { io: OutgoingQueueIO; captured?: UploadArgs } = {
+    io: {
+      upload: async (args) => {
+        holder.captured = args;
+        if (!impl.upload) throw new Error('unexpected attachment upload');
+        return impl.upload(args);
+      },
+      fileExists: impl.fileExists ?? (async () => true),
+    },
+  };
+  return holder;
+}
 
 async function seedChat(db: AppDatabase, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
@@ -34,6 +73,10 @@ const queueCount = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM outgoing_queue').get() as { c: number }).c;
 const stateOf = (raw: Database.Database, guid: string): string | undefined =>
   (raw.prepare('SELECT send_state s FROM messages WHERE guid = ?').get(guid) as { s: string })?.s;
+const attemptsOf = (raw: Database.Database, tempGuid: string): number | undefined =>
+  (raw.prepare('SELECT attempts a FROM outgoing_queue WHERE temp_guid = ?').get(tempGuid) as {
+    a: number;
+  })?.a;
 
 /** Insert an outgoing text whose created_at is forced old, so it's a stranded (eligible) row. */
 async function strandedText(
@@ -48,6 +91,30 @@ async function strandedText(
   raw
     .prepare('UPDATE outgoing_queue SET created_at = ? WHERE temp_guid = ?')
     .run(createdAt, tempGuid);
+}
+
+/** Seed a FAILED optimistic picture: attachment rows + queue row forced already-failed/eligible. */
+async function seedFailedAttachment(
+  db: AppDatabase,
+  raw: Database.Database,
+  tempGuid: string,
+): Promise<void> {
+  const chatId = await getChatIdByGuid(db, 'c1');
+  await insertOutgoingAttachment(db, {
+    tempGuid,
+    attachmentGuid: `${tempGuid}-att`,
+    chatId: chatId!,
+    chatGuid: 'c1',
+    localPath: 'file:///pic.jpg',
+    mimeType: 'image/jpeg',
+    transferName: 'pic.jpg',
+    totalBytes: 1234,
+    now: 1000,
+  });
+  raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid=?").run(tempGuid);
+  raw
+    .prepare('UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid=?')
+    .run(tempGuid);
 }
 
 describe('outgoingBackoffMs', () => {
@@ -66,7 +133,7 @@ describe('runOutgoingQueue', () => {
     const now = 10_000_000;
     await strandedText(db, raw, 'c1', 'temp-a', now - 200_000);
 
-    const res = await runOutgoingQueue(db, okHttp(now), now);
+    const res = await runOutgoingQueue(db, okHttp(now), noAttachmentIo, now);
     expect(res).toEqual({ eligible: 1, sent: 1 });
     expect(queueCount(raw)).toBe(0); // reconciled + dequeued
     expect(stateOf(raw, 'real-1')).toBe('sent'); // temp promoted to the real guid
@@ -95,7 +162,7 @@ describe('runOutgoingQueue', () => {
       wire = json as Record<string, unknown>;
       return { guid: 'real-subj', dateCreated: now, dateDelivered: null };
     });
-    expect((await runOutgoingQueue(db, http, now)).sent).toBe(1);
+    expect((await runOutgoingQueue(db, http, noAttachmentIo, now)).sent).toBe(1);
     expect(wire?.subject).toBe('Important');
     expect(wire?.mentions).toEqual([{ start: 0, length: 4, address: 'a@b.com' }]);
   });
@@ -113,7 +180,7 @@ describe('runOutgoingQueue', () => {
       text: 'hi',
       now,
     });
-    const res = await runOutgoingQueue(db, okHttp(now), now);
+    const res = await runOutgoingQueue(db, okHttp(now), noAttachmentIo, now);
     expect(res.eligible).toBe(0);
     expect(queueCount(raw)).toBe(1); // left for the in-flight UI send
   });
@@ -125,7 +192,10 @@ describe('runOutgoingQueue', () => {
     await strandedText(db, raw, 'c1', 'temp-b', t - 200_000);
 
     // First attempt fails → attempts=1, next_retry_at = t + 30s, message errored.
-    expect(await runOutgoingQueue(db, failHttp(), t)).toEqual({ eligible: 1, sent: 0 });
+    expect(await runOutgoingQueue(db, failHttp(), noAttachmentIo, t)).toEqual({
+      eligible: 1,
+      sent: 0,
+    });
     expect(stateOf(raw, 'temp-b')).toBe('error');
     expect(queueCount(raw)).toBe(1);
 
@@ -133,7 +203,7 @@ describe('runOutgoingQueue', () => {
     expect((await listRetryableOutgoing(db, t + 10_000)).length).toBe(0);
 
     // After the backoff → retried, and this time it succeeds.
-    const res = await runOutgoingQueue(db, okHttp(t + 31_000), t + 31_000);
+    const res = await runOutgoingQueue(db, okHttp(t + 31_000), noAttachmentIo, t + 31_000);
     expect(res.sent).toBe(1);
     expect(queueCount(raw)).toBe(0);
   });
@@ -146,11 +216,257 @@ describe('runOutgoingQueue', () => {
 
     // Drive 5 failures, advancing past each backoff window.
     for (let i = 0; i < 5; i++) {
-      await runOutgoingQueue(db, failHttp(), t);
+      await runOutgoingQueue(db, failHttp(), noAttachmentIo, t);
       t += 3_700_000; // past the max backoff so the next attempt is eligible
     }
     // Capped: no longer eligible, message stays errored, row retired (still present).
     expect((await listRetryableOutgoing(db, t)).length).toBe(0);
     expect(stateOf(raw, 'temp-c')).toBe('error');
+  });
+
+  it('REGRESSION: a retry SUCCESS on the RCS tempGuid-echo ack flips error→sent and clears the queue (no duplicate re-sends)', async () => {
+    // The swallow bug: a retried row is 'error' from its last failure, and the RCS ack echoes
+    // our own tempGuid, which reconciles via markOutgoingSentNoGuid — whose sticky-error guard
+    // refused to touch an 'error' row AND left the queue row alive. The retry's success was
+    // invisible: bubble stayed errored, attempts never bumped, and the queue re-sent the same
+    // message on EVERY later drain (duplicate texts once the server idempotency TTL lapsed).
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-rcs', 1000);
+    raw.prepare("UPDATE messages SET send_state='error', error=500 WHERE guid='temp-rcs'").run();
+    raw
+      .prepare("UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-rcs'")
+      .run();
+
+    const res = await runOutgoingQueue(db, rcsEchoHttp(), noAttachmentIo, 2_000_000);
+    expect(res).toEqual({ eligible: 1, sent: 1 });
+    // Identity stays the tempGuid (the real rcs-<id> arrives later on the fanout), but the
+    // bubble is 'sent' and the queue row is GONE — nothing left to re-send.
+    expect(stateOf(raw, 'temp-rcs')).toBe('sent');
+    expect(queueCount(raw)).toBe(0);
+  });
+});
+
+describe('runOutgoingQueue — attachment resend', () => {
+  it('re-uploads a failed picture with the SAME tempGuid, name+mime from the attachment row, and reconciles the RCS echo ack', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-pic');
+
+    const up = fakeIo({
+      upload: async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }), // RCS echo ack
+    });
+    const res = await runOutgoingQueue(db, {} as HttpClient, up.io, 2_000_000);
+    expect(res).toEqual({ eligible: 1, sent: 1 });
+    // The re-upload streams the ORIGINAL on-disk file under the ORIGINAL tempGuid (so the
+    // server's idempotency cache can absorb an ack-lost duplicate).
+    expect(up.captured).toMatchObject({
+      chatGuid: 'c1',
+      tempGuid: 'temp-pic',
+      name: 'pic.jpg',
+      uri: 'file:///pic.jpg',
+      mimeType: 'image/jpeg',
+    });
+    // error → sent (the swallow fix), queue cleared, local image retained for rendering.
+    expect(stateOf(raw, 'temp-pic')).toBe('sent');
+    expect(queueCount(raw)).toBe(0);
+    expect(
+      (raw.prepare('SELECT local_path lp FROM attachments').get() as { lp: string }).lp,
+    ).toBe('file:///pic.jpg');
+  });
+
+  it('a failed re-upload bumps attempts + reschedules backoff (bubble stays errored)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-pic2');
+
+    const up = fakeIo({
+      upload: async () => {
+        throw new ApiError('server_error', 'bridge down', 502);
+      },
+    });
+    const res = await runOutgoingQueue(db, {} as HttpClient, up.io, 2_000_000);
+    expect(res).toEqual({ eligible: 1, sent: 0 });
+    expect(stateOf(raw, 'temp-pic2')).toBe('error');
+    expect(attemptsOf(raw, 'temp-pic2')).toBe(2);
+    expect(queueCount(raw)).toBe(1);
+  });
+
+  it('retires immediately when the local file is GONE (no attempt burn; bubble keeps its error badge)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-gone');
+
+    const up = fakeIo({ fileExists: async () => false });
+    const res = await runOutgoingQueue(db, {} as HttpClient, up.io, 2_000_000);
+    expect(res).toEqual({ eligible: 1, sent: 0 });
+    expect(up.captured).toBeUndefined(); // never attempted an upload
+    // Retired: attempts jumped to the cap, so it is never eligible again — even far in the future.
+    expect(attemptsOf(raw, 'temp-gone')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect((await listRetryableOutgoing(db, 9_999_999_999)).length).toBe(0);
+    expect(stateOf(raw, 'temp-gone')).toBe('error');
+    expect(queueCount(raw)).toBe(1); // row kept (cancellable / visible to diagnostics)
+  });
+
+  it('retires an UNKNOWN kind instead of claiming-and-skipping it forever (the old zombie)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-z', 1000);
+    raw.prepare("UPDATE outgoing_queue SET kind='wormhole', next_retry_at=0 WHERE temp_guid='temp-z'").run();
+    raw.prepare("UPDATE outgoing_queue SET attempts=1 WHERE temp_guid='temp-z'").run();
+
+    const res = await runOutgoingQueue(db, {} as HttpClient, noAttachmentIo, 2_000_000);
+    expect(res).toEqual({ eligible: 1, sent: 0 });
+    expect(attemptsOf(raw, 'temp-z')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect((await listRetryableOutgoing(db, 9_999_999_999)).length).toBe(0);
+  });
+});
+
+describe('applyServerSendError', () => {
+  it('bumps attempts + backoff when the guid still owns a queue row (fast async bridge failure)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-async', 1000);
+
+    await applyServerSendError(db, 'temp-async', 502, 5_000_000);
+    expect(stateOf(raw, 'temp-async')).toBe('error');
+    expect(attemptsOf(raw, 'temp-async')).toBe(1);
+    // Rescheduled with the ladder's backoff, not left at its insert-time value.
+    const next = (
+      raw.prepare("SELECT next_retry_at n FROM outgoing_queue WHERE temp_guid='temp-async'").get() as {
+        n: number;
+      }
+    ).n;
+    expect(next).toBe(5_000_000 + outgoingBackoffMs(1));
+  });
+
+  it('only flips the bubble when no queue row exists (post-ack / real-guid failure)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-done', 1000);
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-done'").run();
+
+    await applyServerSendError(db, 'temp-done', 22, 5_000_000);
+    expect(stateOf(raw, 'temp-done')).toBe('error');
+    expect(queueCount(raw)).toBe(0); // nothing re-created, nothing to retry automatically
+  });
+
+  it('RETRYABLE post-ack failure re-enqueues an attachment ladder, and the drain re-uploads it', async () => {
+    // The RCS immediate-ack flow: ack consumed the queue row and marked the bubble sent; the
+    // background relay then failed and the server pushed message-send-error {retryable:true}
+    // (send-phase — nothing reached Google). The ladder must re-arm automatically.
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = await getChatIdByGuid(db, 'c1');
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-async-pic',
+      attachmentGuid: 'temp-async-pic-att',
+      chatId: chatId!,
+      chatGuid: 'c1',
+      localPath: 'file:///async.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'async.jpg',
+      totalBytes: 9,
+      now: 1000,
+    });
+    // Simulate the ack: bubble 'sent', queue row consumed.
+    raw.prepare("UPDATE messages SET send_state='sent' WHERE guid='temp-async-pic'").run();
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-async-pic'").run();
+
+    await applyServerSendError(db, 'temp-async-pic', 502, 5_000_000, true);
+    expect(stateOf(raw, 'temp-async-pic')).toBe('error'); // failure surfaced on the bubble
+    const row = raw
+      .prepare("SELECT kind, attempts, payload FROM outgoing_queue WHERE temp_guid='temp-async-pic'")
+      .get() as { kind: string; attempts: number; payload: string };
+    expect(row.kind).toBe('attachment');
+    expect(row.attempts).toBe(1); // the failed relay WAS attempt one; also skips the grace window
+    expect(JSON.parse(row.payload)).toEqual({
+      attachmentGuid: 'temp-async-pic-att',
+      localPath: 'file:///async.jpg',
+    });
+
+    // The drain then re-uploads from disk and the RCS echo ack reconciles it to 'sent'.
+    const up = fakeIo({ upload: async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }) });
+    const res = await runOutgoingQueue(db, {} as HttpClient, up.io, 5_000_000 + 31_000);
+    expect(res.sent).toBe(1);
+    expect(up.captured?.uri).toBe('file:///async.jpg');
+    expect(stateOf(raw, 'temp-async-pic')).toBe('sent');
+    expect(queueCount(raw)).toBe(0);
+  });
+
+  it('RETRYABLE re-enqueue rebuilds a TEXT payload from the message row', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = await getChatIdByGuid(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-async-txt',
+      chatId: chatId!,
+      chatGuid: 'c1',
+      text: 'resend me',
+      now: 1000,
+      subject: 'Subj',
+      effectId: 'com.apple.MobileSMS.expressivesend.impact',
+    });
+    raw.prepare("UPDATE messages SET send_state='sent' WHERE guid='temp-async-txt'").run();
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-async-txt'").run();
+
+    await applyServerSendError(db, 'temp-async-txt', 503, 5_000_000, true);
+    const row = raw
+      .prepare("SELECT kind, payload FROM outgoing_queue WHERE temp_guid='temp-async-txt'")
+      .get() as { kind: string; payload: string };
+    expect(row.kind).toBe('text');
+    expect(JSON.parse(row.payload)).toMatchObject({
+      message: 'resend me',
+      subject: 'Subj',
+      effectId: 'com.apple.MobileSMS.expressivesend.impact',
+    });
+  });
+
+  it('the re-enqueue CYCLE CAP stops a permanently-failing ack/fail loop after 2 automatic ladders', async () => {
+    // ack → async-fail → re-enqueue resets everything durable, so a permanent failure would
+    // loop forever without the in-memory cycle cap: 2 automatic ladders, then manual-only.
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = await getChatIdByGuid(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-loop',
+      chatId: chatId!,
+      chatGuid: 'c1',
+      text: 'never sends',
+      now: 1000,
+    });
+    const simulateAck = (): void => {
+      raw.prepare("UPDATE messages SET send_state='sent', error=0 WHERE guid='temp-loop'").run();
+      raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-loop'").run();
+    };
+    simulateAck();
+    await applyServerSendError(db, 'temp-loop', 502, 5_000_000, true);
+    expect(queueCount(raw)).toBe(1); // cycle 1 granted
+    simulateAck();
+    await applyServerSendError(db, 'temp-loop', 502, 6_000_000, true);
+    expect(queueCount(raw)).toBe(1); // cycle 2 granted
+    simulateAck();
+    await applyServerSendError(db, 'temp-loop', 502, 7_000_000, true);
+    expect(queueCount(raw)).toBe(0); // cap spent: bubble-only, manual retry from here
+    expect(stateOf(raw, 'temp-loop')).toBe('error');
+  });
+
+  it('never re-enqueues a REACTION row (reactions are not flagged retryable by the server)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = await getChatIdByGuid(db, 'c1');
+    await insertOutgoingReaction(db, {
+      tempGuid: 'temp-react',
+      chatId: chatId!,
+      chatGuid: 'c1',
+      targetGuid: 'mt-1',
+      reaction: 'love',
+      now: 1000,
+    });
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-react'").run();
+
+    await applyServerSendError(db, 'temp-react', 502, 5_000_000, true);
+    expect(queueCount(raw)).toBe(0);
+    expect(stateOf(raw, 'temp-react')).toBe('error');
   });
 });

@@ -26,6 +26,14 @@ function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
   } as unknown as HttpClient;
 }
 
+/** Reaction-only tests: the attachment IO must never be touched. */
+const noIo = {
+  upload: async () => {
+    throw new Error('unexpected attachment upload');
+  },
+  fileExists: async () => true,
+};
+
 async function seed(db: AppDatabase): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
@@ -92,6 +100,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-emo', dateCreated: 2000 };
       }),
+      noIo,
       2_000_000,
     );
 
@@ -126,6 +135,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-unemo', dateCreated: 2000 };
       }),
+      noIo,
       2_000_000,
     );
     expect(body).toMatchObject({ reactionType: '-emoji', reactionEmoji: '🫡' });
@@ -143,6 +153,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-love', dateCreated: 2000 };
       }),
+      noIo,
       2_000_000,
     );
     expect(body).toMatchObject({ reactionType: 'love' });

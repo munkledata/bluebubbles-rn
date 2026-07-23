@@ -134,6 +134,7 @@ jest.mock('@/services/send', () => ({
   fireDueScheduled: jest.fn(),
   pickAndSendContact: jest.fn(),
   react: jest.fn(),
+  recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
   reply: jest.fn(),
   runDueScheduled: jest.fn(),
   schedule: jest.fn(),

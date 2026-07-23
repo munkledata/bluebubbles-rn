@@ -15,6 +15,19 @@ import type { AttachmentUploader } from './sendAttachmentService';
  * The form fields (chatGuid/tempGuid/name/method) ride as multipart `parameters` alongside the
  * file part (fieldName `attachment`); the server reads them the same as the JSON path did.
  */
+/**
+ * Does the file at `uri` still exist on disk? Queue-retry pre-flight: a failed attachment
+ * whose cached source file was evicted is retired instead of retried forever.
+ */
+export const expoFileExists = async (uri: string): Promise<boolean> => {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists === true;
+  } catch {
+    return false;
+  }
+};
+
 export const expoAttachmentUploader: AttachmentUploader = async ({
   http,
   chatGuid,

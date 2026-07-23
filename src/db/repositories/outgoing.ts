@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import type { MessageMention } from '@core/api/endpoints/messages';
 import { chats, messages, outgoingQueue } from '../schema';
 import type { AppDatabase } from '../types';
@@ -336,10 +336,14 @@ export async function reconcileEchoByContent(
       : sql``;
   // Prefer an actually-in-flight 'sending' row, then oldest-first (the first echo corresponds
   // to the first send) so rapid identical sends promote in order, not swapped.
+  // 'error' rows are matchable too: a send that FAILED client-side (502/timeout) may still have
+  // gone through server-side — its echo must promote the errored bubble in place (clearing the
+  // queue row, which stops the retry ladder) instead of inserting a duplicate. The ±window +
+  // exact-content + same-chat guards bound stale-row hijack.
   const rows = await db.all<{ guid: string }>(sql`
     SELECT guid FROM messages
     WHERE chat_id = ${chatId} AND is_from_me = 1 AND guid LIKE 'temp-%'
-      AND send_state IN ('sending', 'sent') AND ${match} ${window}
+      AND send_state IN ('sending', 'sent', 'error') AND ${match} ${window}
     ORDER BY (send_state = 'sending') DESC, date_created ASC, id ASC LIMIT 1`);
   const temp = rows[0];
   if (!temp) return;
@@ -398,10 +402,12 @@ export async function reconcileOutgoingAttachmentByContent(
   // pending-local-`-att` gate is what makes this sync-safe. Match text too (a caption-less picture
   // and its echo both carry NULL text) so a text send can never claim a picture row. Prefer an
   // in-flight 'sending' row, then oldest-first, so rapid identical sends promote in send order.
+  // 'error' included for the same reason as reconcileEchoByContent: a client-side-failed picture
+  // whose upload actually landed must be promoted (and its queue row cleared), not duplicated.
   const rows = await db.all<{ guid: string }>(sql`
     SELECT mm.guid FROM messages mm
     WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 1 AND mm.guid LIKE 'temp-%'
-      AND mm.send_state IN ('sending', 'sent')
+      AND mm.send_state IN ('sending', 'sent', 'error')
       AND mm.associated_message_type IS NULL AND mm.text IS ${m.text ?? null}
       AND EXISTS (
         SELECT 1 FROM attachments a
@@ -420,6 +426,48 @@ export async function reconcileOutgoingAttachmentByContent(
     .update(messages)
     .set({ guid: m.guid, sendState: 'sent', error: 0 })
     .where(eq(messages.guid, temp.guid));
+}
+
+/**
+ * Flip an errored optimistic row back to 'sending' at the start of a deliberate queue retry.
+ * Guarded to 'error' rows only, so a row already promoted to 'sent' is never regressed.
+ *
+ * Why this exists: the guid-less ack paths (RCS tempGuid echo → `reconcileOutgoingSuccess`'s
+ * backstop, and the AppleScript fallback) reconcile via `markOutgoingSentNoGuid`, whose
+ * sticky-error guard refuses to touch an 'error' row — correct for its original race (a
+ * server-pushed failure landing just before the ack of the SAME attempt), but it also
+ * swallowed the SUCCESS of a queue RETRY: the bubble stayed errored, the queue row survived
+ * with attempts un-bumped, and the queue re-sent the same message on every later drain
+ * (duplicate texts once the server's idempotency TTL lapsed). Flipping to 'sending' first
+ * scopes the sticky guard back to failures reported DURING the in-flight attempt.
+ */
+export async function markOutgoingSending(db: AppDatabase, tempGuid: string): Promise<void> {
+  await db
+    .update(messages)
+    .set({ sendState: 'sending', error: 0 })
+    .where(and(eq(messages.guid, tempGuid), eq(messages.sendState, 'error')));
+}
+
+/**
+ * Permanently retire a queue row (no further automatic retries): attempts jumps to the cap and
+ * the bubble is forced to 'error' unless it already reconciled to 'sent'. For failures no retry
+ * can ever fix — the attachment's on-disk file is gone, or the row's kind is unknown. The queue
+ * row is KEPT (matching the natural attempts-cap retirement) so `cancelOutgoing` still treats
+ * the message as a cancellable optimistic send.
+ */
+export async function retireOutgoing(
+  db: AppDatabase,
+  tempGuid: string,
+  errorCode = 1,
+): Promise<void> {
+  await db
+    .update(outgoingQueue)
+    .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+    .where(eq(outgoingQueue.tempGuid, tempGuid));
+  await db
+    .update(messages)
+    .set({ sendState: 'error', error: errorCode })
+    .where(and(eq(messages.guid, tempGuid), ne(messages.sendState, 'sent')));
 }
 
 /** Max automatic retries before a queued send retires to the 'error' bubble. */
@@ -471,6 +519,123 @@ export async function markMessageSendError(
     .update(messages)
     .set({ sendState: 'error', error: errorCode })
     .where(eq(messages.guid, guid));
+}
+
+/**
+ * Re-enqueue cycle cap. The RCS immediate-ack flow can loop forever on a permanently-failing
+ * send: ack marks the bubble 'sent' + deletes the queue row → the async failure re-enqueues →
+ * the retry is acked again → fails async again → … Nothing durable survives each cycle (the
+ * ack resets both the queue row and the message's error field), so the cap lives here: at most
+ * MAX_REQUEUE_CYCLES automatic ladders per tempGuid per app session; after that the failure
+ * stays on the bubble for a manual retry. Bounded like {@link cancelledTempGuids}.
+ */
+const requeueCycles = new Map<string, number>();
+const MAX_REQUEUE_CYCLES = 2;
+const REQUEUE_MAP_MAX = 256;
+
+/**
+ * Re-arm the automatic retry ladder for a send whose failure arrived AFTER its ack — the RCS
+ * immediate-ack contract: the server acks instantly, relays to Google in the background, and
+ * reports a send-phase failure via `message-send-error` with `retryable: true`. By then the ack
+ * already deleted the queue row, so without this the "picture failed after the ack" case was
+ * manual-retry only. Rebuilds a queue row from the message (+ attachment) rows.
+ *
+ * Returns false (caller falls back to bubble-only error) when: the guid isn't a temp- row
+ * anymore (promoted rows can't be re-sent), it's a reaction (never flagged retryable by the
+ * server), a queue row already exists, the cycle cap is spent, or an attachment's on-disk file
+ * reference is gone.
+ */
+export async function reEnqueueOutgoingFromMessage(
+  db: AppDatabase,
+  tempGuid: string,
+  now: number,
+): Promise<boolean> {
+  if (!tempGuid.startsWith('temp-')) return false;
+  if ((requeueCycles.get(tempGuid) ?? 0) >= MAX_REQUEUE_CYCLES) return false;
+  const rows = await db.all<{
+    id: number;
+    text: string | null;
+    subject: string | null;
+    threadOriginatorGuid: string | null;
+    expressiveSendStyleId: string | null;
+    chatGuid: string | null;
+  }>(sql`
+    SELECT m.id, m.text, m.subject,
+           m.thread_originator_guid AS threadOriginatorGuid,
+           m.expressive_send_style_id AS expressiveSendStyleId,
+           c.guid AS chatGuid
+    FROM messages m JOIN chats c ON c.id = m.chat_id
+    WHERE m.guid = ${tempGuid} AND m.associated_message_type IS NULL LIMIT 1`);
+  const msg = rows[0];
+  if (!msg?.chatGuid) return false;
+  const queued = await db.all<{ id: number }>(
+    sql`SELECT id FROM outgoing_queue WHERE temp_guid = ${tempGuid} LIMIT 1`,
+  );
+  if (queued[0]) return false; // a live ladder already owns it — bump, don't duplicate
+  const att = await db.all<{ guid: string; localPath: string | null }>(sql`
+    SELECT guid, local_path AS localPath FROM attachments
+    WHERE message_id = ${msg.id} AND guid LIKE '%-att' LIMIT 1`);
+  let kind: 'text' | 'attachment';
+  let payload: string;
+  const firstAtt = att[0];
+  if (firstAtt) {
+    if (!firstAtt.localPath) return false; // nothing on disk to re-upload
+    kind = 'attachment';
+    payload = JSON.stringify({ attachmentGuid: firstAtt.guid, localPath: firstAtt.localPath });
+  } else {
+    kind = 'text';
+    payload = JSON.stringify({
+      message: msg.text ?? '',
+      selectedMessageGuid: msg.threadOriginatorGuid ?? undefined,
+      effectId: msg.expressiveSendStyleId ?? undefined,
+      subject: msg.subject ?? undefined,
+    });
+  }
+  // attempts starts at 1: the failed background relay WAS attempt one, and attempts>=1 also
+  // bypasses the fresh-row grace window so the ladder re-fires on the next drain tick.
+  await db.insert(outgoingQueue).values({
+    tempGuid,
+    chatGuid: msg.chatGuid,
+    kind,
+    payload,
+    attempts: 1,
+    nextRetryAt: now + outgoingBackoffMs(1),
+  });
+  if (requeueCycles.size >= REQUEUE_MAP_MAX) {
+    const oldest = requeueCycles.keys().next().value;
+    if (oldest !== undefined) requeueCycles.delete(oldest);
+  }
+  requeueCycles.set(tempGuid, (requeueCycles.get(tempGuid) ?? 0) + 1);
+  return true;
+}
+
+/**
+ * Apply a SERVER-pushed `message-send-error` with retry-ladder awareness. If the guid still has
+ * an outgoing_queue row (an optimistic send the app owns — e.g. the RCS bridge failed FAST,
+ * before/around the immediate ack), route through {@link reconcileOutgoingError} so attempts is
+ * bumped and the backoff rescheduled — without this, a fast async failure left attempts at 0/1
+ * forever and the ladder never converged. When the queue row is already gone (the RCS
+ * immediate-ack consumed it) and the server flagged the failure `retryable` (send-phase:
+ * nothing reached Google, so a re-send cannot duplicate), re-enqueue a fresh ladder via
+ * {@link reEnqueueOutgoingFromMessage}. In every case the bubble is flipped to the error state;
+ * a re-enqueued ladder clears it again on success.
+ */
+export async function applyServerSendError(
+  db: AppDatabase,
+  guid: string,
+  errorCode = 1,
+  now: number = Date.now(),
+  retryable = false,
+): Promise<void> {
+  const queued = await db.all<{ id: number }>(
+    sql`SELECT id FROM outgoing_queue WHERE temp_guid = ${guid} LIMIT 1`,
+  );
+  if (queued[0]) {
+    await reconcileOutgoingError(db, guid, errorCode, now);
+    return;
+  }
+  if (retryable) await reEnqueueOutgoingFromMessage(db, guid, now);
+  await markMessageSendError(db, guid, errorCode);
 }
 
 export interface RetryableOutgoing {

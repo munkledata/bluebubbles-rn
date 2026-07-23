@@ -2,6 +2,7 @@ import { Chat, Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
 import {
   getChatIdByGuid,
+  insertOutgoingAttachment,
   listChats,
   listMessages,
   listMessagesWithSenders,
@@ -71,6 +72,49 @@ describe('DbEventSink (live path)', () => {
     const m = msgs.find((x) => x.guid === 'send-fail-1')!;
     expect(m.error).toBe(22);
     expect(m.sendState).toBe('error');
+  });
+
+  it('a message-send-error with retryable:true re-arms the outgoing queue for a post-ack failure', async () => {
+    // The RCS immediate-ack path: the ack consumed the queue row and marked the bubble sent;
+    // the async send-phase failure (retryable:true) must re-enqueue the ladder — the wire flag
+    // flows raw through the eventRouter payload into applyServerSendError.
+    const { db, raw } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    const handles = await upsertHandles(db, [{ address: 'rcs@x.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'RCS;-;conv-1', participants: [{ address: 'rcs@x.com' }] })],
+      handles,
+    );
+    const chatId = await getChatIdByGuid(db, 'RCS;-;conv-1');
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-sink-pic',
+      attachmentGuid: 'temp-sink-pic-att',
+      chatId: chatId!,
+      chatGuid: 'RCS;-;conv-1',
+      localPath: 'file:///sink.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'sink.jpg',
+      totalBytes: 5,
+      now: 1000,
+    });
+    raw.prepare("UPDATE messages SET send_state='sent' WHERE guid='temp-sink-pic'").run();
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-sink-pic'").run();
+
+    await router.handle(
+      'message-send-error',
+      JSON.stringify({ guid: 'temp-sink-pic', tempGuid: 'temp-sink-pic', error: 502, retryable: true }),
+      'socket',
+    );
+
+    const q = raw
+      .prepare("SELECT kind, attempts FROM outgoing_queue WHERE temp_guid='temp-sink-pic'")
+      .get() as { kind: string; attempts: number } | undefined;
+    expect(q).toEqual({ kind: 'attachment', attempts: 1 });
+    const state = raw
+      .prepare("SELECT send_state s FROM messages WHERE guid='temp-sink-pic'")
+      .get() as { s: string };
+    expect(state.s).toBe('error');
   });
 
   it('ignores events it does not handle yet (no throw)', async () => {

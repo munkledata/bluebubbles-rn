@@ -284,9 +284,26 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   (`UPDATE … WHERE id=? AND next_retry_at<=now RETURNING id` — one runner wins, like `claimScheduled`), and
   (2) `listRetryableOutgoing` only returns rows that are already-failed (`attempts>=1`) OR older than
   `OUTGOING_GRACE_MS` (a just-inserted row is assumed owned by the live UI send). Backoff via
-  `outgoingBackoffMs`; retire at `OUTGOING_MAX_ATTEMPTS`. Run it at boot (home) + the background task — NOT
-  per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim because it must read back the claimed
-  row (`db.run` works too but returns no rows; use it only for non-returning writes).
+  `outgoingBackoffMs`; retire at `OUTGOING_MAX_ATTEMPTS`. Drained from boot (home), the background task, the
+  chat screen's 20s ticker, and AppState `active` (`recoverOutgoing`) — the backoff/claims make frequent
+  drains cheap+safe; still NOT per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim because it must read
+  back the claimed row (`db.run` works too but returns no rows; use it only for non-returning writes).
+  ATTACHMENTS RESEND TOO: `runOutgoingQueue` takes an injected `OutgoingQueueIO`
+  ({expo uploader, fileExists} — `outgoingQueueIO` in prod; fakes in Node tests) and re-streams the file at
+  the attachment row's `localPath` under the SAME tempGuid (server idempotency absorbs ack-lost dups);
+  file-gone/unknown-kind rows are RETIRED via `retireOutgoing` (attempts→cap), never claimed-and-skipped
+  forever. THE SWALLOW GUARD: `resend()` flips an 'error' row to 'sending' first (`markOutgoingSending`) —
+  without it the RCS tempGuid-echo/AppleScript ack path hits `markOutgoingSentNoGuid`'s sticky-error guard,
+  the retry's SUCCESS is swallowed, and the queue re-sends the same message every drain (duplicates). The
+  content-reconcilers (`reconcileEchoByContent` + `reconcileOutgoingAttachmentByContent`) also match 'error'
+  rows so a client-side-failed-but-actually-delivered send is promoted by its echo instead of duplicated;
+  server-pushed `message-send-error` routes through `applyServerSendError` (bumps attempts when a queue row
+  still exists; when the row is gone — the RCS immediate-ack consumed it — a `retryable: true` flag on the
+  event re-enqueues a fresh ladder via `reEnqueueOutgoingFromMessage`, capped at 2 automatic cycles per
+  tempGuid per session because each ack resets all durable state; absent/false → bubble-only as before).
+  The server only flags SEND-PHASE bridge failures retryable (nothing reached Google — a re-send can't
+  duplicate); delivery-phase `failed` frames stay non-retryable. Full chain design:
+  `docs/RCS_SEND_RELIABILITY.md`.
 - **Wallpaper-chat chrome: RN 0.86 has BUILT-IN CSS gradients** (`experimental_backgroundImage`,
   new-arch) — no expo-linear-gradient/masked-view needed. Over a chat background the header/composer
   go transparent (frosted chips), the message list runs UNDER them (absolute-overlay layout in

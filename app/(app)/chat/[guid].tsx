@@ -35,6 +35,7 @@ import {
   editText,
   fireDueScheduled,
   pickAndSendContact,
+  recoverOutgoing,
   reply,
   runDueScheduled,
   schedule,
@@ -58,7 +59,6 @@ import { isDevServer } from '@utils/isDev';
 import {
   Composer,
   ConversationHeader,
-  EdgeFade,
   EditHistorySheet,
   MessageActionsOverlay,
   MessageDetailsSheet,
@@ -266,6 +266,11 @@ function ChatScreenInner({
           );
         } else {
           await fireDueScheduled();
+          // Also drain the outgoing retry queue while a chat is open, so a failed send
+          // (text or picture) recovers in ~30s instead of waiting for the next home
+          // mount / 15-min background tick. next_retry_at backoff + the DB claim gate
+          // the actual re-sends; an empty queue is a single indexed SELECT.
+          await recoverOutgoing();
         }
       } finally {
         firingRef.current = false;
@@ -440,12 +445,12 @@ function ChatScreenInner({
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
   const kbVisible = useKeyboardVisible();
 
-  // Wallpaper mode: the header/composer float transparent over the image, the list runs UNDER
-  // them, and EdgeFade veils dissolve messages into the bar zones instead of hard-clipping them
-  // at the list edge. Bar heights are measured (onLayout) since both vary (insets, reply bar,
-  // smart-reply chips) — and the wrappers are measured in BOTH modes, so real heights already
-  // exist by the time the (async, reactive) wallpaper flag flips the styles. The estimates only
-  // cover the very first frames of a cold mount.
+  // Wallpaper mode: the header/composer float transparent over the image and the list runs UNDER
+  // them, with BAR_GAP-padded content insets so resting messages clear the bars (scrolled-past
+  // messages show through behind the transparent bars). Bar heights are measured (onLayout) since
+  // both vary (insets, reply bar, smart-reply chips) — and the wrappers are measured in BOTH
+  // modes, so real heights already exist by the time the (async, reactive) wallpaper flag flips
+  // the styles. The estimates only cover the very first frames of a cold mount.
   const hasWallpaper = !!backgroundUri;
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -487,8 +492,8 @@ function ChatScreenInner({
       accentColor={header.data?.customColor}
       chatService={chatService}
       hasBackground={hasWallpaper}
-      topInset={hasWallpaper ? topBar + EDGE_FADE : 0}
-      bottomInset={hasWallpaper ? bottomBar + EDGE_FADE : 0}
+      topInset={hasWallpaper ? topBar + BAR_GAP : 0}
+      bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={onLongPressMessage}
       onSwipeReply={onSwipeReply}
       onRefresh={() => ensureChatSynced(guid)}
@@ -590,12 +595,12 @@ function ChatScreenInner({
         keyboardVerticalOffset={-insets.bottom}
       >
         {/* ONE structural tree for both modes — the wallpaper flag only switches STYLES (bars go
-            absolute, veils appear, the list gains insets). The flag arrives ASYNC (reactive DB
-            read, null on first render; a participant-set background can also land mid-chat), so
-            branching element types here would remount the whole subtree on the flip — wiping the
-            composer draft, staged attachments, and list scroll position.
-            Stacking: the bars need zIndex above the veils, which sit above the list — sibling
-            order alone would draw the veils over the header (it precedes the list in flow order).
+            absolute, the list gains insets). The flag arrives ASYNC (reactive DB read, null on
+            first render; a participant-set background can also land mid-chat), so branching element
+            types here would remount the whole subtree on the flip — wiping the composer draft,
+            staged attachments, and list scroll position.
+            Stacking: the header wrapper precedes the list in flow order, so the absolute bars need
+            zIndex 2 to sit above the in-flow list instead of being z-buried under it.
             The absolute bars hang off the unpadded stage view, so the keyboard inset (KAV
             padding) shrinks the stage and the composer rides up with it. */}
         <View style={styles.flex}>
@@ -608,22 +613,6 @@ function ChatScreenInner({
             {unreadChipNode}
           </View>
           {listNode}
-          {hasWallpaper ? (
-            <>
-              <EdgeFade
-                edge="top"
-                height={topBar + EDGE_FADE}
-                holdHeight={topBar}
-                color={theme.color.background}
-              />
-              <EdgeFade
-                edge="bottom"
-                height={bottomBar + EDGE_FADE}
-                holdHeight={bottomBar}
-                color={theme.color.background}
-              />
-            </>
-          ) : null}
           <View
             style={hasWallpaper ? styles.overlayBottom : null}
             onLayout={(e) => setBottomBarH(e.nativeEvent.layout.height)}
@@ -705,8 +694,9 @@ function ChatScreenInner({
   );
 }
 
-// Height of the dissolve band the messages fade across, past the bar zone itself.
-const EDGE_FADE = 28;
+// Extra breathing room between the newest resting message and the transparent bars floating over
+// the wallpaper (added to the measured bar height for the list's content inset).
+const BAR_GAP = 28;
 
 // Stable empty fallback for mentionParticipants — a fresh [] each render would defeat the
 // memoized Composer's shallow prop compare.
@@ -721,9 +711,8 @@ const styles = StyleSheet.create({
   // Placeholder while the first message page loads, so the list mounts already-populated
   // (see messagesLoading) — occupies the list's slot so the layout doesn't jump on arrival.
   listLoading: { alignItems: 'center', justifyContent: 'center' },
-  // Wallpaper mode: bars float over the full-height list instead of framing it. zIndex 2 keeps
-  // the bar chrome above the EdgeFade veils (zIndex 1), which sit above the in-flow list (0) —
-  // the bars precede the list in flow order, so sibling order alone would z-bury them.
+  // Wallpaper mode: bars float over the full-height list instead of framing it. The bars precede
+  // the list in flow order, so zIndex 2 keeps the bar chrome above the in-flow list (0).
   overlayTop: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2 },
   overlayBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 2 },
   errorBanner: {
