@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 import { ServerInfo } from '@core/models';
-import { UnimplementedEndpointError } from '../errors';
+import { ApiError, UnimplementedEndpointError, isUnimplementedEndpoint } from '../errors';
 import type { HttpClient } from '../http';
 
 /** GET /api/v1/ping — health check. The server returns `data: { pong: true }`. */
@@ -28,13 +28,23 @@ export function serverInfo(http: HttpClient): Promise<ServerInfo> {
  * Invoke a Gator admin-command channel over the password-authed dispatcher. The server wraps
  * the channel result in the standard envelope; `http.post` unwraps + validates it with `schema`.
  */
-export function adminCommand<T>(
+export async function adminCommand<T>(
   http: HttpClient,
   channel: string,
   schema: z.ZodType<T>,
   data?: unknown,
 ): Promise<T> {
-  return http.post('/admin/command', schema, { json: { channel, data } });
+  try {
+    return await http.post('/admin/command', schema, { json: { channel, data } });
+  } catch (e) {
+    // A 404 means the dispatcher route itself is unreachable — a server without it (stock
+    // BlueBubbles / pre-dispatcher Gator) or a reverse proxy blocking /admin/*. Surface that as
+    // "unsupported" so callers don't blame the connection. Non-404 errors propagate unchanged.
+    if (e instanceof ApiError && e.status === 404) {
+      throw new UnimplementedEndpointError('/admin/command');
+    }
+    throw e;
+  }
 }
 
 /**
@@ -104,12 +114,14 @@ export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
   // channel fails, the server isn't answering at all — throw so the caller can show "unavailable"
   // instead of a misleading all-zeros table.
   let anyOk = false;
+  let sawOtherError = false;
   const settle = async <T>(p: Promise<T>): Promise<T | null> => {
     try {
       const v = await p;
       anyOk = true;
       return v;
-    } catch {
+    } catch (e) {
+      if (!isUnimplementedEndpoint(e)) sawOtherError = true;
       return null;
     }
   };
@@ -122,6 +134,9 @@ export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
     settle(adminCommand(http, 'get-chat-video-count', MediaCount)),
     settle(adminCommand(http, 'get-chat-location-count', MediaCount)),
   ]);
+  // Every channel failed. If ALL failures were the dispatcher-404 remap, re-throw as
+  // Unimplemented so the screen can say "unsupported" instead of "check your connection".
+  if (!anyOk && !sawOtherError) throw new UnimplementedEndpointError('/admin/command');
   if (!anyOk) throw new Error('Server statistics unavailable');
   return {
     messages: asCount(messages),
@@ -273,5 +288,14 @@ const AdminStatus = z
   .loose()
   .nullish();
 export type AdminStatus = z.infer<typeof AdminStatus>;
-export const adminStatus = (http: HttpClient): Promise<AdminStatus> =>
-  http.get('/admin/status', AdminStatus);
+export async function adminStatus(http: HttpClient): Promise<AdminStatus> {
+  try {
+    return await http.get('/admin/status', AdminStatus);
+  } catch (e) {
+    // Same remap as adminCommand: a 404 = route absent or proxy-blocked, i.e. "unsupported".
+    if (e instanceof ApiError && e.status === 404) {
+      throw new UnimplementedEndpointError('/admin/status');
+    }
+    throw e;
+  }
+}

@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { serverApi } from '@core/api';
+import { isUnimplementedEndpoint } from '@core/api/errors';
 import type { RcsStatus, ServerAlert } from '@core/api/endpoints/server';
 import { deriveRcsHealth, deriveRcsHealthFromStatus, type RcsSeverity } from '@core/realtime';
 import { http } from '@/services';
@@ -107,6 +108,9 @@ export default function ServerHealthScreen(): React.JSX.Element {
   // True when EVERY read failed → the server isn't answering the health channels at all (offline
   // or too old). Shown as a banner so an empty screen reads as a server issue, not an app bug.
   const allFailed = healthQueries.every((q) => q.isError);
+  // Every failure was a dispatcher 404 (remapped to Unimplemented): the server predates the admin
+  // dispatcher, or a reverse proxy blocks /admin/* — a config problem, not connectivity.
+  const allUnsupported = allFailed && healthQueries.every((q) => isUnimplementedEndpoint(q.error));
 
   const load = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: ['server', 'health'] });
@@ -146,8 +150,9 @@ export default function ServerHealthScreen(): React.JSX.Element {
         {allFailed ? (
           <View style={[styles.banner, { backgroundColor: theme.color.secondaryBackground }]}>
             <Text style={[styles.hint, { color: theme.color.destructive }]}>
-              The server isn’t responding to health checks. It may be offline, or running an older
-              version that doesn’t report these details.
+              {allUnsupported
+                ? 'This server doesn’t expose health reporting. It may be an older version, or a proxy may be blocking its admin endpoints.'
+                : 'The server isn’t responding to health checks. It may be offline, or running an older version that doesn’t report these details.'}
             </Text>
           </View>
         ) : null}

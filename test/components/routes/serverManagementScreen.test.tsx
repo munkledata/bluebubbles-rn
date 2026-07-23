@@ -45,6 +45,8 @@ import ServerManagementScreen from '../../../app/(app)/server-management';
 // eslint-disable-next-line import/first
 import { serverApi } from '@core/api';
 // eslint-disable-next-line import/first
+import { UnimplementedEndpointError } from '@core/api/errors';
+// eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useSyncStore } from '@state/syncStore';
@@ -132,5 +134,14 @@ describe('ServerManagementScreen — statistics query', () => {
     expect(await screen.findByText('42')).toBeTruthy();
     await waitFor(() => expect(screen.queryByText(/Couldn.t load statistics/)).toBeNull());
     expect(mockStats).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the "unsupported" copy (not connection-blaming) when the dispatcher 404s', async () => {
+    // serverStatTotals re-throws Unimplemented when EVERY channel was a dispatcher 404 —
+    // an old server or a reverse proxy blocking /api/v1/admin/*.
+    mockStats.mockRejectedValueOnce(new UnimplementedEndpointError('/admin/command'));
+    await renderScreen();
+    expect(await screen.findByText(/doesn.t expose statistics/)).toBeTruthy();
+    expect(screen.queryByText(/Check your connection/)).toBeNull();
   });
 });

@@ -2,8 +2,9 @@
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
 import ky from 'ky';
+import { z } from 'zod/v4';
 import { HttpClient } from '@core/api/http';
-import { isUnimplementedEndpoint } from '@core/api/errors';
+import { ApiError, isUnimplementedEndpoint } from '@core/api/errors';
 import * as serverApi from '@core/api/endpoints/server';
 import * as findMyApi from '@core/api/endpoints/findmy';
 
@@ -104,6 +105,63 @@ describe('serverStatTotals reads stats via the admin-command dispatcher', () => 
   it('throws when EVERY channel fails, so the UI can show "unavailable" not all-zeros', async () => {
     mockKy.mockRejectedValue(new Error('server down'));
     await expect(serverApi.serverStatTotals(client())).rejects.toThrow();
+  });
+});
+
+// A 404 on the dispatcher route means the server has no admin dispatcher at all (stock
+// BlueBubbles / pre-dispatcher Gator) or a reverse proxy blocks /api/v1/admin/* (the prod Caddy
+// hardening did exactly this). That must surface as UnimplementedEndpointError — "unsupported on
+// this server" — never as a misleading "check your connection".
+describe('admin dispatcher 404 → UnimplementedEndpointError', () => {
+  const notFound = (): Response => new Response(null, { status: 404 }); // empty body, like a proxy
+
+  it('adminCommand remaps a route-level 404', async () => {
+    mockKy.mockResolvedValue(notFound());
+    const err = await serverApi.adminCommand(client(), 'get-env', z.unknown()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isUnimplementedEndpoint(err)).toBe(true);
+  });
+
+  it('adminStatus remaps a route-level 404', async () => {
+    mockKy.mockResolvedValue(notFound());
+    const err = await serverApi.adminStatus(client()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isUnimplementedEndpoint(err)).toBe(true);
+  });
+
+  it('adminCommand propagates a non-404 unchanged (401 stays unauthorized)', async () => {
+    mockKy.mockResolvedValue(new Response(null, { status: 401 }));
+    const err = await serverApi.adminCommand(client(), 'get-env', z.unknown()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isUnimplementedEndpoint(err)).toBe(false);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).kind).toBe('unauthorized');
+  });
+
+  it('serverStatTotals: ALL channels 404 → UnimplementedEndpointError', async () => {
+    mockKy.mockResolvedValue(notFound());
+    const err = await serverApi.serverStatTotals(client()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isUnimplementedEndpoint(err)).toBe(true);
+  });
+
+  it('serverStatTotals: mixed 404 + network failures → the generic error, not Unimplemented', async () => {
+    mockKy.mockResolvedValueOnce(notFound()).mockRejectedValue(new Error('net down'));
+    const err = await serverApi.serverStatTotals(client()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isUnimplementedEndpoint(err)).toBe(false);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('Server statistics unavailable');
   });
 });
 

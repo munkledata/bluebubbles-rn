@@ -66,6 +66,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
   });
   const totals = statsQuery.data ?? null;
   const statsError = statsQuery.isError;
+  // All-channels-404 (no dispatcher, or a reverse proxy blocking /admin/*) is surfaced as
+  // Unimplemented by serverStatTotals — show honest copy instead of blaming the connection.
+  const statsUnsupported = statsError && isUnimplementedEndpoint(statsQuery.error);
 
   // Refresh the cached server info (version / macOS / private-API). On a hydrated boot the
   // `connected` action never ran, so the session store still has serverInfo=null → "Unknown";
@@ -250,7 +253,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
           {statsError ? (
             <View style={styles.row}>
               <Text style={[styles.errorText, { color: theme.color.destructive }]}>
-                Couldn’t load statistics. Check your connection, then tap Refresh.
+                {statsUnsupported
+                  ? 'This server doesn’t expose statistics. It may be an older version, or a proxy may be blocking its admin endpoints.'
+                  : 'Couldn’t load statistics. Check your connection, then tap Refresh.'}
               </Text>
             </View>
           ) : null}

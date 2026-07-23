@@ -55,6 +55,8 @@ import ServerHealthScreen from '../../../app/(app)/server-health';
 // eslint-disable-next-line import/first
 import { serverApi } from '@core/api';
 // eslint-disable-next-line import/first
+import { UnimplementedEndpointError } from '@core/api/errors';
+// eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useRcsHealthStore } from '@state/rcsHealthStore';
@@ -138,6 +140,16 @@ describe('ServerHealthScreen — query-backed cards', () => {
     for (const m of Object.values(mocks)) m.mockRejectedValue(new Error('down'));
     await renderScreen();
     expect(await screen.findByText(/isn.t responding to health checks/)).toBeTruthy();
+  });
+
+  it('shows the "unsupported" banner when every channel is a dispatcher 404 (Unimplemented)', async () => {
+    // An old server without the admin dispatcher, or a reverse proxy blocking /api/v1/admin/* —
+    // the copy must point at server/proxy config, not connectivity.
+    for (const m of Object.values(mocks))
+      m.mockRejectedValue(new UnimplementedEndpointError('/admin/command'));
+    await renderScreen();
+    expect(await screen.findByText(/doesn.t expose health reporting/)).toBeTruthy();
+    expect(screen.queryByText(/isn.t responding to health checks/)).toBeNull();
   });
 
   it('Refresh invalidates the ["server","health"] prefix so every channel refetches', async () => {
