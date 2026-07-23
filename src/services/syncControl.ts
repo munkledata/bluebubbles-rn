@@ -1,12 +1,19 @@
 import { logger } from '@core/secure';
 import { getSyncMarker } from '@db/repositories';
-import { useSessionStore } from '@state/sessionStore';
+import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
 import { syncContacts } from './contacts/contactsService';
-import { fullSync, httpSyncApi, incrementalSync, syncAllChats, syncChatMessages } from './sync';
+import {
+  fullSync,
+  httpSyncApi,
+  incrementalSync,
+  syncAllChats,
+  syncChatMessages,
+  syncDeletedMessages,
+} from './sync';
 
 /** Run a full sync on first connect, otherwise an incremental catch-up sync. */
 let syncInFlight: Promise<void> | null = null;
@@ -79,6 +86,15 @@ async function runSync(): Promise<void> {
       });
       sync.done(result);
     }
+
+    // R1 deletion catch-up: apply `message-deleted` events missed while the app was dead or
+    // app-locked (the locked FCM path never touches the DB — see DbEventSink). Runs AFTER the
+    // chat/message sync so tombstones land on freshly-synced rows. Gated on the server's
+    // `supports_message_deleted` capability (older servers would 404); best-effort — a failure
+    // must never flip the sync status, which `sync.done` already reported above.
+    await syncDeletedMessages(db, api, {
+      supported: sessionAccessors.messageDeletedSupported(),
+    }).catch((e) => logger.debug('[sync] deletion catch-up failed', e));
   } catch (e) {
     sync.fail(e instanceof Error ? e.message : 'Sync failed');
   }

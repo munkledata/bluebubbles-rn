@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
 import { Message } from '@core/models';
+import { MessageDeletedPayload } from '@core/realtime/events';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
 import type { HttpClient } from '../http';
 
@@ -171,6 +172,30 @@ export async function queryMessages(http: HttpClient, q: MessageQuery): Promise<
     },
   });
   return res.messages ?? [];
+}
+
+/**
+ * Response of GET /message/deleted: each row is the SAME wire DTO (`MessageDeletedV1`) as the
+ * realtime `message-deleted` event — `{ guid, chatGuid, dateDeleted }` — so the catch-up sync
+ * applies both through the one `markMessageDeleted` path.
+ */
+export const DeletedMessageList = z.object({
+  deleted: z.array(MessageDeletedPayload).nullish(),
+});
+export type DeletedMessage = z.infer<typeof MessageDeletedPayload>;
+
+/**
+ * GET /api/v1/message/deleted — deletions whose `dateDeleted` is STRICTLY after the Unix-ms
+ * watermark, oldest-first, page capped server-side (500 rows — a full page means more remain;
+ * loop with the page's max `dateDeleted` as the next watermark). Rows sharing the watermark's
+ * exact ms may RE-EMIT (the server floors fractional ms), so applying a row must stay
+ * idempotent — re-tombstoning already is. Gate calls on `supports_message_deleted`.
+ */
+export async function deletedMessages(http: HttpClient, afterMs: number): Promise<DeletedMessage[]> {
+  const res = await http.get('/message/deleted', DeletedMessageList, {
+    query: { after: afterMs },
+  });
+  return res.deleted ?? [];
 }
 
 export interface SendReactionParams {

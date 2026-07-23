@@ -40,8 +40,10 @@ adversarially reviewed (per-chat/message details in the wave commits `75cfb25..d
   SERVER_EVENTS → EventRouter → DbEventSink; tombstone column (`date_deleted`) rather than hard
   delete (the server's sync paths keep returning Recently-Deleted rows for ~30 days, so a hard
   delete would resurrect); filtered out of every render/count/search query; the chat's
-  denormalized inbox sort key is recomputed on delete. Residual (documented): a delete arriving
-  while the app is dead/locked only reconciles via the live event — there is no sync-side signal.
+  denormalized inbox sort key is recomputed on delete. ~~Residual (documented): a delete arriving
+  while the app is dead/locked only reconciles via the live event — there is no sync-side signal.~~
+  **Residual CLOSED 2026-07-23** — the server now exposes `GET /api/v1/message/deleted` and the
+  app runs a catch-up sync against it (see *✅ Closed (2026-07-23)* below).
 - **Read-state (`lastReadMessageTimestamp`)** — Mac-side read markers reconcile into the app's
   guid-based marker at chat ingestion (monotonic, idempotent, batched); unread counts self-correct.
 
@@ -137,6 +139,32 @@ by the server but never emitted, and never stored by the app.
   metadata source — a card-layout circularity resolved the image to width 0 (looked like a
   network/library bug for a whole evening; see the AGENTS.md UI gotcha). `UrlPreviewCard` now uses a
   fixed `width:'78%'`, verified rendering on-device. Preview cards are feature-complete end to end.
+
+## ✅ Closed (2026-07-23) — missed-deletion catch-up sync (R1)
+
+The one documented residual from the schema-gap wave: a `message-deleted` event arriving while the
+app was DEAD or APP-LOCKED was LOST (the locked FCM path never touches the DB), so the deleted
+message lingered locally forever — there was no sync-side signal to reconcile against. Now closed
+on BOTH sides:
+
+- **Server** (`packages/bbd`, shipped 2026-07-23): `GET /api/v1/message/deleted?after=<unixMs>`
+  (auth, standard v1 envelope) returns `{ deleted: MessageDeletedV1[] }` — the SAME
+  `{ guid, chatGuid, dateDeleted }` DTO as the realtime `message-deleted` event — oldest-first,
+  page capped at 500 rows. `after` is a Unix-ms watermark (fractional ms floored server-side, so
+  rows sharing the watermark's exact ms may RE-EMIT — application must be idempotent). Advertised
+  via the existing `supports_message_deleted` capability.
+- **App** (`bluebubbles-rn`): `syncDeletedMessages` (`src/services/sync/engine.ts`) runs on every
+  boot/reconnect sync (`runSync` in `syncControl.ts`, after the chat/message sync), gated on
+  `sessionAccessors.messageDeletedSupported()`. It pages the endpoint from the persisted
+  `sync.deletionsSyncedAt` watermark (kv table — no new migration) and applies each row through the
+  SAME `markMessageDeleted` tombstone the live event uses (idempotent, so re-emitted rows are
+  no-ops). FIRST supported run seeds the watermark to `Date.now()` WITHOUT fetching — a fresh
+  install has no missed events, and replaying the server's whole deletion history would tombstone
+  rows the user never saw (mirrors the server's own seeding argument). Null `dateDeleted` rows are
+  tombstoned (now() fallback) but never advance the watermark; the page loop is bounded (max 5
+  pages per sync) and stops when a full page can't advance the watermark. Engine-level tests in
+  `test/services/deletionSync.test.ts` (capability gate, first-run seed / no history replay,
+  watermark advance, idempotent re-run, null dateDeleted, paging + bounded loop).
 
 ## 📱 RCS bridge (Google Messages, server Prompts 5–8; app Prompt 7)
 

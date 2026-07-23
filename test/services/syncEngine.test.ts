@@ -42,6 +42,7 @@ describe('fullSync', () => {
         return [];
       },
       fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
     };
 
     const result = await fullSync(db, api);
@@ -67,6 +68,7 @@ describe('incrementalSync', () => {
       serverVersion: async () => '1.9.0',
       fetchChats: async () => [],
       fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
       fetchMessagesAfter: async (cursor) => {
         cursors.push(cursor);
         if (cursor.mode === 'rowid' && cursor.after === 10) {
@@ -107,6 +109,7 @@ describe('incrementalSync', () => {
       serverVersion: async () => '1.9.0',
       fetchChats: async () => [],
       fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
       fetchMessagesAfter: async (cursor) => {
         if (cursor.mode === 'rowid' && cursor.after === 0) {
           return [msg('m1', 1, 'a', 'cA'), msg('m2', 2, 'b', 'cA')];
@@ -142,6 +145,7 @@ describe('incrementalSync', () => {
       serverVersion: async () => '1.5.0',
       fetchChats: async () => [],
       fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
       fetchMessagesAfter: async (cursor) => {
         seen = cursor;
         return [];

@@ -18,5 +18,6 @@ export function httpSyncApi(http: HttpClient): SyncApi {
         afterRowId: cursor.mode === 'rowid' ? cursor.after : undefined,
         afterTimestamp: cursor.mode === 'timestamp' ? cursor.after : undefined,
       }),
+    fetchDeletedAfter: (afterMs) => messagesApi.deletedMessages(http, afterMs),
   };
 }

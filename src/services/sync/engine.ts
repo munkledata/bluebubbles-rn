@@ -4,6 +4,9 @@ import { advanceMarker, buildSyncCursor, GuidDeduper, type SyncMarker } from '@c
 import {
   getChatIdByGuid,
   getSyncMarker,
+  kvGet,
+  kvSet,
+  markMessageDeleted,
   maxMessageMarker,
   reconcileOutgoingAttachmentByContent,
   setSyncMarker,
@@ -184,6 +187,84 @@ export async function syncChatMessages(
     if (total >= cap) break;
   }
   return total;
+}
+
+/** kv key holding the deletion-catch-up watermark: the max `dateDeleted` (Unix ms) already applied. */
+export const DELETIONS_SYNCED_AT_KEY = 'sync.deletionsSyncedAt';
+/** Server page cap for GET /message/deleted — a FULL page means more rows may remain. */
+export const DELETION_SYNC_PAGE_SIZE = 500;
+/** Bounded catch-up: at most this many pages per sync (any remainder catches up next sync). */
+export const DELETION_SYNC_MAX_PAGES = 5;
+
+export interface DeletionSyncOptions {
+  /** The server's `supports_message_deleted` capability (sessionAccessors.messageDeletedSupported()). */
+  supported: boolean;
+  /** Injectable clock (tests). */
+  now?: () => number;
+  /** Page cap per sync (default {@link DELETION_SYNC_MAX_PAGES}). */
+  maxPages?: number;
+  /** Full-page threshold (default {@link DELETION_SYNC_PAGE_SIZE}; overridable so tests can page small). */
+  pageSize?: number;
+}
+
+/**
+ * R1 deletion catch-up sync: apply `message-deleted` events the app MISSED while dead or
+ * app-locked (the locked FCM path never touches the DB, so a live-only deletion is lost and the
+ * deleted message lingers forever). Pages `GET /message/deleted?after=<watermark>` and re-applies
+ * each row through the SAME `markMessageDeleted` tombstone the live event uses (idempotent — rows
+ * sharing the watermark's exact ms may legitimately re-emit).
+ *
+ * Watermark (`sync.deletionsSyncedAt`, kv): the max `dateDeleted` already applied. FIRST RUN seeds
+ * it to now() WITHOUT fetching — mirroring the server's own seeding argument: a fresh install has
+ * no missed events, and replaying the server's whole deletion history would tombstone-spam rows
+ * the user never saw. A row with a null `dateDeleted` is still tombstoned (now() fallback, same as
+ * the live sink) but never advances the watermark. A full page whose max `dateDeleted` does NOT
+ * advance the watermark stops the loop (re-fetching the identical page would spin).
+ *
+ * Returns the number of deletion rows applied. Callers gate on `supported` (older servers 404).
+ */
+export async function syncDeletedMessages(
+  db: AppDatabase,
+  api: SyncApi,
+  opts: DeletionSyncOptions,
+): Promise<number> {
+  if (!opts.supported) return 0;
+  const now = opts.now ?? Date.now;
+  const maxPages = opts.maxPages ?? DELETION_SYNC_MAX_PAGES;
+  const pageSize = opts.pageSize ?? DELETION_SYNC_PAGE_SIZE;
+
+  const raw = await kvGet(db, DELETIONS_SYNCED_AT_KEY);
+  let watermark = raw == null ? Number.NaN : Number(raw);
+  if (!Number.isFinite(watermark)) {
+    // First supported run (or a corrupt value): seed to now and do NOT replay history.
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, String(now()));
+    return 0;
+  }
+
+  let applied = 0;
+  for (let page = 0; page < maxPages; page++) {
+    const rows = await api.fetchDeletedAfter(watermark);
+    if (rows.length === 0) break;
+
+    let pageMax = watermark;
+    for (const row of rows) {
+      if (!row.guid) continue;
+      // Unknown guid (never synced / already hard-gone) is a safe no-op inside markMessageDeleted.
+      await markMessageDeleted(db, row.guid, row.dateDeleted ?? now());
+      applied++;
+      if (row.dateDeleted != null && row.dateDeleted > pageMax) pageMax = row.dateDeleted;
+    }
+
+    const advanced = pageMax > watermark;
+    if (advanced) {
+      watermark = pageMax;
+      await kvSet(db, DELETIONS_SYNCED_AT_KEY, String(watermark));
+    }
+    // Loop ONLY on a full page that moved the watermark; a stuck watermark would refetch the
+    // identical page forever (e.g. a full page of null-dateDeleted rows).
+    if (rows.length < pageSize || !advanced) break;
+  }
+  return applied;
 }
 
 export interface IncrementalSyncOptions {

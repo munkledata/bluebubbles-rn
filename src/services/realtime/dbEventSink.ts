@@ -94,12 +94,13 @@ export class DbEventSink implements EventSink {
         // inbox position. An absent dateDeleted (some transports omit it) falls back to now() — fine
         // for a tombstone whose only job is to hide the row. An unknown guid is a safe no-op.
         //
-        // RESIDUAL (accepted, v1): a delete event missed while the app was DEAD or APP-LOCKED
-        // (deliverRespectingLock does not touch the DB while locked) leaves the message lingering
-        // locally — and NOTHING else reconciles it, because the server's query/sync path does NOT
-        // expose Recently-Deleted state (a re-sync returns the row with no deleted marker). So
-        // deletions apply ONLY via this live event; a missed event = the message persists locally.
-        // We deliberately do NOT add a reconciliation sweep — there is no server signal to sweep on.
+        // A delete event missed while the app was DEAD or APP-LOCKED (deliverRespectingLock does
+        // not touch the DB while locked) is reconciled by the R1 CATCH-UP SYNC (2026-07-23): every
+        // boot/reconnect sync runs syncDeletedMessages (sync/engine.ts), which pages
+        // GET /message/deleted after the persisted `sync.deletionsSyncedAt` watermark and applies
+        // each row through this same markMessageDeleted tombstone (idempotent, so a row this live
+        // event already handled re-applying is a no-op). This live event is the FAST path, no
+        // longer the only path.
         const p = event.payload;
         if (!p.guid) break;
         const dateDeleted = p.dateDeleted ?? Date.now();

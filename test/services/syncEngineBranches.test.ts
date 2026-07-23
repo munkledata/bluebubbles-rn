@@ -26,6 +26,7 @@ function api(over: Partial<SyncApi>): SyncApi {
     fetchChats: async () => [],
     fetchChatMessages: async () => [],
     fetchMessagesAfter: async () => [],
+    fetchDeletedAfter: async () => [],
     ...over,
   };
 }
