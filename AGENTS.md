@@ -384,11 +384,15 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
 - **Open a chat ONLY via `useChatNavigator` (`src/ui/useChatNavigator.ts`) — never a raw `router.push` to
   `/chat/…`.** The app keeps ONE stack with the Messages list at its base; pushing a thread on top of an
   already-open thread (notification taps did this) left Back returning to the PREVIOUS thread, not the inbox
-  (the "threads stacking" bug). `useChatNavigator` REPLACES when the current route is already a `/chat/…`
-  (so Back → Messages) and PUSHES otherwise, keeping the stack at `[Messages, thread]`. Every entry point
-  (inbox, search, archived/unknown lists, notification foreground-press + resume-drain, Direct Share) routes
-  through it. It reads `usePathname()`, so a component test mocking `expo-router` must provide `usePathname`
-  (a non-`/chat/` path → `push`) alongside `useRouter`.
+  (the "threads stacking" bug). `useChatNavigator` REPLACES when the current route is already a *different*
+  `/chat/…` (so Back → Messages), PUSHES from a non-chat screen, and does NOTHING when the target IS the
+  thread already on screen — a `replace` to the same route remounts the screen (spinner, re-scroll, lost
+  draft), so tapping a notification for the chat you're already in used to reload it. The push/replace/none
+  decision is the pure, node-tested `resolveChatNavigation` (`@utils`/`chatNavigation.ts`); a reminder anchor
+  (`?focus=`) or Direct Share (`?share=1`) target always (re)navigates even into the open chat (jump / re-stage).
+  Every entry point (inbox, search, archived/unknown lists, notification foreground-press + resume-drain,
+  Direct Share) routes through it. It reads `usePathname()`, so a component test mocking `expo-router` must
+  provide `usePathname` (a non-`/chat/` path → `push`) alongside `useRouter`.
 - **"Disable Battery Optimization" opens the settings SCREEN, not the one-shot request.**
   `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` only shows its dialog when NOT already exempt and silently no-ops
   forever after (looks broken on repeat presses; there's no exemption-state query without a native module).

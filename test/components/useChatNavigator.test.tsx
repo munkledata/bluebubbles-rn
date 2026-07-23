@@ -1,12 +1,14 @@
 /**
- * Regression guard for the "threads stacking" fix (src/ui/useChatNavigator.ts).
+ * Regression guard for the "threads stacking" + "reloads the open thread" fixes
+ * (src/ui/useChatNavigator.ts; decision logic in src/utils/chatNavigation.ts).
  *
  * The app keeps ONE navigation stack with the Messages list at its base. Opening a thread while
  * already reading one used to PUSH a second thread on top, so Back returned to the PREVIOUS thread
- * instead of the inbox. `useChatNavigator` fixes that with one rule: REPLACE when the current route
- * is already a `/chat/…`, PUSH otherwise — so the stack stays [Messages, thread] and Back from any
- * thread lands on Messages. This asserts that decision directly (the two prior test files only ever
- * exercised the push path, since their screens are never on a chat).
+ * instead of the inbox. `useChatNavigator` fixes that: REPLACE when the current route is already a
+ * `/chat/…`, PUSH otherwise — so the stack stays [Messages, thread] and Back lands on Messages.
+ * A SECOND fix rides along: tapping a notification for the thread ALREADY on screen must do
+ * NOTHING (a `replace` to the same route remounts the screen — the visible reload). This asserts
+ * all three outcomes at the hook boundary (the pure matrix is covered in test/utils).
  */
 // `mock`-prefixed so jest's hoisted factory may reference them (temporal-dead-zone rule).
 const mockPush = jest.fn();
@@ -63,6 +65,16 @@ describe('useChatNavigator — never stacks a thread on a thread', () => {
     const { result } = await renderHook(() => useChatNavigator());
     result.current('/chat/abc');
     expect(mockPush).toHaveBeenCalledWith('/chat/abc');
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('does NOTHING when the target is the thread already on screen (no reload)', async () => {
+    // A message notification tapped while already viewing that chat used to `replace` the route,
+    // which remounts the screen — spinner, re-scroll, lost draft. Now it's a no-op.
+    mockPathname = '/chat/abc';
+    const { result } = await renderHook(() => useChatNavigator());
+    result.current('/chat/abc');
+    expect(mockPush).not.toHaveBeenCalled();
     expect(mockReplace).not.toHaveBeenCalled();
   });
 });
