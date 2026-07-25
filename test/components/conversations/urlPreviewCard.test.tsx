@@ -7,12 +7,28 @@
  * URL … render as plain `<Text>`, no HTML interpretation") is asserted directly: a title/site
  * name containing markup renders as literal text, never interpreted markup. Also covers the
  * loading / negative-cache / no-metadata "render nothing" branches and the domain fallback.
+ *
+ * The TAP is the other half of that hardening: the card's `url` is fully server/attacker-controlled,
+ * and the source opens it through `safeOpenUrl` (the http(s)-scheme allowlist) rather than
+ * Linking.openURL directly. safeOpenUrl's real impl lazy-imports react-native via a dynamic
+ * `import()`, which throws under the jest-expo VM, so the contract is asserted at the `@utils`
+ * boundary — the same mock shape contactCard/locationCard use.
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
-import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
 import type { UrlPreviewRow } from '@db/repositories';
+
+jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
+
+// eslint-disable-next-line import/first
+import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
+// eslint-disable-next-line import/first
+import { safeOpenUrl } from '@utils';
+
+beforeEach(() => {
+  (safeOpenUrl as jest.Mock).mockClear();
+});
 
 /** Build a fully-populated preview row; override just the fields a test cares about. */
 function row(over: Partial<UrlPreviewRow> = {}): UrlPreviewRow {
@@ -181,6 +197,37 @@ describe('UrlPreviewCard', () => {
     const style = StyleSheet.flatten(card?.props.style);
     expect(style.width).toBeDefined();
     expect(style.width).not.toBe('auto');
+  });
+
+  it('tapping the card opens the message URL through safeOpenUrl (the scheme allowlist)', async () => {
+    // The url + every metadata field is server-controlled, so the open MUST route through
+    // safeOpenUrl — never a raw Linking.openURL, which would follow an intent:/tel: scheme.
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row({ title: 'A Title' })}
+        isFromMe={false}
+      />,
+    );
+    fireEvent.press(screen.getByText('A Title'));
+    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+    // The MESSAGE's url is opened — not the preview row's own (possibly redirected) fields.
+    expect(safeOpenUrl).toHaveBeenCalledWith('https://www.example.com/article');
+  });
+
+  it('opens the url prop, not the preview row url, when the two disagree', async () => {
+    // Defensive: a malicious server could return a preview row whose `url` differs from the URL the
+    // user actually saw in the message text. The tap must follow what was rendered/typed.
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://good.example.com/page"
+        preview={row({ url: 'https://evil.example.com/page', title: 'A Title' })}
+        isFromMe={false}
+      />,
+    );
+    fireEvent.press(screen.getByText('A Title'));
+    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+    expect(safeOpenUrl).toHaveBeenCalledWith('https://good.example.com/page');
   });
 
   it('renders nothing when an image-only card (no title) has a failing image', async () => {

@@ -6,7 +6,9 @@
  *   - pressing a button fires that button's onPress AND closes the dialog (store.current → null);
  *   - a cancel button fires its onPress (if any) and closes;
  *   - destructive vs default vs cancel buttons get their themed text color/weight;
- *   - the FIFO queue promotes the next dialog when a button handler opens another.
+ *   - the FIFO queue promotes the next dialog when a button handler opens another;
+ *   - the Android hardware-BACK handler (Modal `onRequestClose`) picks the cancel button, and its
+ *     no-cancel FALLBACK runs the LAST button (see the two `hardware back` tests below).
  *
  * All store mutations happen inside act() (they cause a mounted AppDialog to re-render); after a
  * fireEvent we assert closure via waitFor (RNTL 14 / React 19 gotcha: no getBy right after an event).
@@ -25,6 +27,20 @@ const tokens = resolvePreset(DEFAULT_PRESET);
 /** Merge a (possibly array) style prop the way RN does, so we can read the resolved color/weight. */
 function flatColor(text: ReturnType<typeof screen.getByText>): string | undefined {
   return StyleSheet.flatten(text.props.style)?.color as string | undefined;
+}
+
+/**
+ * Fire the Android hardware-back button. RN delivers it to a `<Modal>` as `onRequestClose`, and
+ * the Modal IS the rendered root here (AppDialog's outermost element), so we can dispatch straight
+ * at `screen.root`. Asserting the root's type + that the handler is wired keeps this honest: if
+ * AppDialog ever stops passing `onRequestClose`, the helper fails instead of silently no-opping.
+ */
+function pressHardwareBack(): void {
+  const root = screen.root;
+  if (!root) throw new Error('AppDialog rendered nothing — no dialog is active');
+  expect(root.type).toBe('Modal');
+  expect(typeof root.props.onRequestClose).toBe('function');
+  fireEvent(root, 'requestClose');
 }
 
 describe('AppDialog (driven through the real dialogStore)', () => {
@@ -145,6 +161,71 @@ describe('AppDialog (driven through the real dialogStore)', () => {
     expect(await screen.findByText('Step 2 done')).toBeTruthy();
     expect(screen.queryByText('Step 1')).toBeNull();
     expect(useDialogStore.getState().current?.title).toBe('Step 2 done');
+  });
+
+  it('hardware back on a confirm runs the CANCEL button, never the action', async () => {
+    const onConfirm = jest.fn();
+    const onCancel = jest.fn();
+    await renderWithTheme(<AppDialog />);
+    await act(async () => {
+      // Cancel is FIRST and the destructive action is LAST, so a fallback that just took
+      // buttons[last] would run the delete — this is what pins `buttons.find(cancel)`.
+      showConfirm({
+        title: 'Delete forever?',
+        confirmText: 'Delete',
+        destructive: true,
+        onConfirm,
+        onCancel,
+      });
+    });
+    await screen.findByText('Delete forever?');
+
+    pressHardwareBack();
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText('Delete forever?')).toBeNull());
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('hardware back on a single-DESTRUCTIVE-button dialog DISMISSES without deleting', async () => {
+    // Back means "get me out of here" — it must never be read as consent to delete.
+    // `onRequestClose` still falls back to the LAST button when no button has style 'cancel' (so a
+    // one-button informational dialog runs its acknowledge handler), but a 'destructive' button is
+    // now never auto-pressed. Before that guard, BACK on this dialog EXECUTED the deletion. No
+    // shipped call site was shaped like this — every destructive dialog in src/ + app/ pairs the
+    // action with a 'cancel' button — so it was a defect-in-waiting the first cancel-less
+    // destructive dialog would have triggered.
+    const onDelete = jest.fn();
+    await renderWithTheme(<AppDialog />);
+    await act(async () => {
+      showDialog('Delete account?', undefined, [
+        { text: 'Delete', style: 'destructive', onPress: onDelete },
+      ]);
+    });
+    await screen.findByText('Delete account?');
+
+    pressHardwareBack();
+
+    expect(onDelete).not.toHaveBeenCalled();
+    // ...but the dialog still closes, so the user is not trapped.
+    await waitFor(() => expect(screen.queryByText('Delete account?')).toBeNull());
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('hardware back still runs a non-destructive lone button (informational acknowledge)', async () => {
+    // Guards the narrowness of the fix: only DESTRUCTIVE is skipped, not every lone button.
+    const onOk = jest.fn();
+    await renderWithTheme(<AppDialog />);
+    await act(async () => {
+      showDialog('Heads up', 'Sync finished', [{ text: 'OK', onPress: onOk }]);
+    });
+    await screen.findByText('Heads up');
+
+    pressHardwareBack();
+
+    expect(onOk).toHaveBeenCalledTimes(1);
+    expect(useDialogStore.getState().current).toBeNull();
   });
 
   it('renders 2 buttons for a confirm (side-by-side row) with the given labels', async () => {

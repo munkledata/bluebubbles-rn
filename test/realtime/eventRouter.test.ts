@@ -1,3 +1,4 @@
+import { SERVER_EVENTS, type ServerEventName } from '@core/config';
 import { EventRouter, type EventSink, type NormalizedEvent } from '@core/realtime';
 
 function collector() {
@@ -5,6 +6,35 @@ function collector() {
   const sink: EventSink = { onEvent: (event, source) => void events.push({ event, source }) };
   return { events, sink };
 }
+
+/**
+ * A minimal payload that MUST normalize for every event name the app advertises to the server.
+ *
+ * Typed as an exhaustive `Record<ServerEventName, …>` on purpose: adding a name to SERVER_EVENTS
+ * without adding it here is a compile error, and adding it here without a `normalize()` case makes
+ * the table-driven test below fail at runtime. That pairing is the regression guard — `test-notification`
+ * shipped as a constant with no normalize case once already, so the server reported "sent" while the
+ * router silently dropped every one of them (`default: return null`).
+ */
+const MINIMAL_PAYLOAD: Record<ServerEventName, unknown> = {
+  'new-message': { guid: 'tbl-new-1', text: 'hi' },
+  'updated-message': { guid: 'tbl-upd-1', dateDelivered: 1700000000000 },
+  'message-deleted': { guid: 'tbl-del-1' },
+  'typing-indicator': { chatGuid: 'tbl-c1', display: true },
+  'chat-read-status-changed': { chatGuid: 'tbl-c1', read: true },
+  'group-name-change': { chats: [] },
+  'participant-added': { chats: [] },
+  'participant-removed': { chats: [] },
+  'participant-left': { chats: [] },
+  'ft-call-status-changed': { uuid: 'tbl-ft-1', status_id: 6 },
+  'incoming-facetime': { uuid: 'tbl-ft-2', status_id: 4, address: '+15551234567' },
+  'imessage-aliases-removed': { aliases: ['someone@example.com'] },
+  'message-send-error': { tempGuid: 'tbl-temp-1', error: 'bridge failed' },
+  'new-server': 'https://rotated.example.com',
+  'rcs-alert': { kind: 'alert', alertType: 'GAIA_LOGGED_OUT' },
+  'rcs-bridge-down': { title: 'RCS down', body: 'reauth needed', reason: 'COOKIES_EXPIRED' },
+  'test-notification': { title: 'Gator', body: 'Push works' },
+};
 
 describe('EventRouter', () => {
   it('normalizes new-message and forwards to the sink', async () => {
@@ -116,5 +146,26 @@ describe('EventRouter', () => {
     const router = new EventRouter(sink);
     expect(await router.handle('message-deleted', { dateDeleted: 1 }, 'socket')).toBeNull();
     expect(events).toHaveLength(0);
+  });
+
+  describe('every SERVER_EVENTS name has a normalize() case', () => {
+    it('covers the whole constant list (no name is silently unhandled)', () => {
+      // Sanity: the table below is what the per-event cases iterate. If SERVER_EVENTS grows and the
+      // table doesn't, tsc already fails — this asserts it at runtime too, so a `skipLibCheck`-style
+      // escape can't hide a gap.
+      expect(Object.keys(MINIMAL_PAYLOAD).sort()).toEqual([...SERVER_EVENTS].sort());
+    });
+
+    it.each([...SERVER_EVENTS])('normalizes %s and forwards it to the sink', async (name) => {
+      const { events, sink } = collector();
+      const router = new EventRouter(sink);
+      const out = await router.handle(name, MINIMAL_PAYLOAD[name], 'socket');
+      // A missing `case` in EventRouter.normalize falls through to `default: return null`, which
+      // drops the event entirely — no DB write, no notification, no error anywhere.
+      expect(out).not.toBeNull();
+      expect(out?.type).toBe(name);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.event.type).toBe(name);
+    });
   });
 });

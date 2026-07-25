@@ -1,5 +1,12 @@
 import type { HttpClient } from '@core/api/http';
-import { sendReaction, sendText, type MessageMention } from '@core/api/endpoints/messages';
+import {
+  sendContact,
+  sendReaction,
+  sendText,
+  type ContactEmail,
+  type ContactPhone,
+  type MessageMention,
+} from '@core/api/endpoints/messages';
 import { logger } from '@core/secure';
 import {
   claimOutgoing,
@@ -29,6 +36,19 @@ interface ReactionPayload {
 interface AttachmentPayload {
   attachmentGuid: string;
   localPath?: string;
+}
+/**
+ * A contact card's STRUCTURED fields (the server rebuilds the vCard). Queued under its own
+ * kind so a retry re-sends the CARD — queuing contacts as 'text' made a failed send retry as
+ * a plain message containing the contact's display name.
+ */
+interface ContactPayload {
+  firstName?: string;
+  lastName?: string;
+  organization?: string;
+  phones?: ContactPhone[];
+  emails?: ContactEmail[];
+  selectedMessageGuid?: string;
 }
 
 /**
@@ -74,6 +94,18 @@ async function resend(
         selectedMessageGuid: p.selectedMessageGuid,
         reaction: p.reaction,
         emoji: p.emoji,
+      });
+    } else if (row.kind === 'contact') {
+      const p = JSON.parse(row.payload) as ContactPayload;
+      server = await sendContact(http, {
+        chatGuid: row.chatGuid,
+        tempGuid: row.tempGuid,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        organization: p.organization,
+        phones: p.phones,
+        emails: p.emails,
+        selectedMessageGuid: p.selectedMessageGuid,
       });
     } else if (row.kind === 'attachment') {
       const p = JSON.parse(row.payload) as AttachmentPayload;

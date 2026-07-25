@@ -478,6 +478,67 @@ describe('markMessageDeleted (deletion tombstone)', () => {
     expect(latestDate()).toBe(300); // retracted m3 counts; only the deleted m2 is excluded
   });
 
+  // THE RE-SYNC HAZARD. A deleted message stays in the Mac's chat.db (~30 days) and the server keeps
+  // returning it from query/sync, so the SAME guid is re-upserted after the tombstone. Two invariants
+  // in upsertMessages keep the deletion from undoing itself, and this test pins both:
+  //   1. `date_deleted` is absent from BOTH the insert values and the onConflictDoUpdate SET — that
+  //      absence IS the COALESCE-preserve, so the stored tombstone survives the re-upsert untouched.
+  //   2. its `latest_message_date` recompute filters `date_deleted IS NULL`, so re-ingesting the
+  //      deleted NEWEST message can't re-inflate the chat's inbox position back to its date.
+  it('a later sync re-upserting the SAME guid does NOT resurrect a tombstoned message', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m1 recv@100, m2 mine@200, m3 recv@300 (newest)
+    const handles = await upsertHandles(db, [{ address: 'b@x.com', displayName: 'Bob' }]);
+    const tombstone = (): number | null =>
+      (
+        raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get('m3') as {
+          d: number | null;
+        }
+      ).d;
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+
+    await markMessageDeleted(db, 'm3', 5000);
+    expect(tombstone()).toBe(5000);
+    expect(latestDate()).toBe(200); // dropped to the surviving m2
+
+    // The next sync re-ingests m3 verbatim (the server still has it in Recently Deleted). A wire
+    // MessageV1 NEVER carries the deletion — only the `message-deleted` EVENT does — so there is
+    // nothing here that could legitimately clear the tombstone.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm3',
+          text: 'latest',
+          dateCreated: 300,
+          dateRead: 350, // a receipt-shaped field DOES update — proves the row was really re-upserted
+          handle: { address: 'b@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+
+    // The re-upsert really happened (the row was touched) …
+    const read = (
+      raw.prepare('SELECT date_read r FROM messages WHERE guid = ?').get('m3') as {
+        r: number | null;
+      }
+    ).r;
+    expect(read).toBe(350);
+    // … yet the tombstone is untouched: date_deleted is not in the conflict SET.
+    expect(tombstone()).toBe(5000);
+    // … the message stays VANISHED from the thread …
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toEqual(['m2', 'm1']);
+    // … and the inbox sort key was NOT re-inflated to 300 by upsertMessages' own recompute.
+    expect(latestDate()).toBe(200);
+  });
+
   it('is a safe no-op for an unknown guid (returns false, changes nothing)', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);

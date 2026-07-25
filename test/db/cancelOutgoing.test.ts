@@ -101,6 +101,48 @@ describe('cancelOutgoing (2.3)', () => {
     expect(await cancelOutgoing(db, 'temp-nope')).toBe(false);
   });
 
+  /**
+   * REGRESSION GUARD for the `AND send_state IN ('sending','error')` filter.
+   *
+   * Every other test in this file reaches `cancelOutgoing`'s FIRST guard (no queue row →
+   * return false), so the send_state filter was executed by no test at all — deleting it from
+   * the query left the whole suite green.
+   *
+   * The state it defends against is real: a reconcile can promote the message to 'sent' while
+   * its queue row is still present (an ack that didn't clear the queue, or a drain racing the
+   * reconcile). Without the filter, Cancel then hard-DELETES a message that was already
+   * delivered — the user sees it vanish from a conversation the recipient has already read.
+   */
+  it('never deletes a DELIVERED message, even while its queue row still exists', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-sent',
+      chatId,
+      chatGuid: 'c1',
+      text: 'already delivered',
+      now: 100,
+    });
+    // Promote the message to 'sent' but deliberately LEAVE the queue row in place.
+    raw.prepare(`UPDATE messages SET send_state = 'sent' WHERE guid = 'temp-sent'`).run();
+    expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-sent')).toBe(1);
+
+    const cancelled = await cancelOutgoing(db, 'temp-sent');
+
+    // The stale queue row is cleared (so it can't be retried)...
+    expect(cancelled).toBe(true);
+    expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-sent')).toBe(0);
+    // ...but the delivered message MUST survive. This is the assertion the filter protects.
+    expect(count(raw, 'messages', 'guid = ?', 'temp-sent')).toBe(1);
+    const row = raw
+      .prepare(`SELECT send_state s, text t FROM messages WHERE guid = 'temp-sent'`)
+      .get() as { s: string; t: string };
+    expect(row.s).toBe('sent');
+    expect(row.t).toBe('already delivered');
+    // A delivered message was never in flight, so nothing should be marked cancelled.
+    expect(wasCancelledInFlight('temp-sent')).toBe(false);
+  });
+
   it('clears a stranded queue row whose temp message is gone', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');

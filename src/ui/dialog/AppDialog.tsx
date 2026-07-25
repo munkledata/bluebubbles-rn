@@ -25,9 +25,21 @@ export function AppDialog(): React.JSX.Element | null {
     b.onPress?.();
   };
 
+  /**
+   * Android hardware BACK. Back means "get me out of here" — it must never be read as consent.
+   *
+   * The fallback to the LAST button (for dialogs with no explicit cancel) is kept so an
+   * informational one-button dialog still runs its acknowledge handler. But a `destructive`
+   * button is never auto-pressed: on a dialog whose only/last button deletes something, the old
+   * fallback made BACK perform the deletion. Every current call site happens to pair a
+   * destructive action with an explicit cancel button, so this was a defect-in-waiting rather
+   * than a live bug — the first single-action destructive dialog would have triggered it.
+   * Back on such a dialog now just dismisses.
+   */
   const onRequestClose = (): void => {
     const cancel = buttons.find((b) => b.style === 'cancel') ?? buttons[buttons.length - 1];
     dismiss();
+    if (cancel?.style === 'destructive') return; // dismiss only — never delete on Back
     cancel?.onPress?.();
   };
 

@@ -14,7 +14,9 @@
  *   - row callback BINDING: the row's onLongPress fires the list's onLongPressMessage with the msg
  *     and the bubble's measured rect (which anchors the floating reaction/action menu);
  *   - the failed-message flow: tapping retry opens FailedMessageSheet, whose Try Again / Delete
- *     call `retry` / `discardMessage` from `@/services/send` with the right args;
+ *     call `retry` / `discardMessage` from `@/services/send` with the right args — including the
+ *     PHOTO branch, where the list rebuilds a PickedImage from the first attachment that still has
+ *     a localPath (without it, retry deletes the row and re-sends text only: the picture is lost);
  *   - empty state: "No messages yet" when there are no messages.
  *
  * In-file mocks:
@@ -31,6 +33,7 @@ import React from 'react';
 import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 import { formatSeparatorDate } from '@utils';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import type { AttachmentRow } from '@db/repositories';
 
 jest.mock('@shopify/flash-list', () => {
   const ReactLib = require('react');
@@ -169,6 +172,26 @@ function make(over: Partial<EnrichedMessage> = {}): EnrichedMessage {
     replyPreview: null,
     ...over,
   } as EnrichedMessage;
+}
+
+function att(over: Partial<AttachmentRow> = {}): AttachmentRow {
+  return {
+    id: 1,
+    guid: 'att-1',
+    messageId: 1,
+    mimeType: 'image/jpeg',
+    transferName: 'IMG_0042.jpg',
+    totalBytes: 2048,
+    height: 300,
+    width: 400,
+    blurhash: null,
+    hasLivePhoto: 0,
+    isSticker: 0,
+    hideAttachment: 0,
+    localPath: null,
+    service: null,
+    ...over,
+  };
 }
 
 const bubbleTexts = (): unknown[] =>
@@ -329,6 +352,86 @@ describe('MessageList — failed-message flow', () => {
     expect(retry).toHaveBeenCalledWith('x', {
       chatGuid: 'iMessage;-;+15550001111',
       text: 'oops',
+      image: undefined,
+    });
+  });
+
+  it('a failed PHOTO retries as an attachment, rebuilt from the downloaded row', async () => {
+    // The row the list must find: the FIRST attachment has no on-disk file, so `find(localPath)`
+    // (not `[0]`) is what makes the picture re-uploadable.
+    const messages = [
+      make({
+        id: 1,
+        guid: 'x',
+        text: null,
+        isFromMe: 1,
+        sendState: 'error',
+        error: 1,
+        hasAttachments: 1,
+        attachments: [
+          att({ id: 1, guid: 'a-gone', localPath: null }),
+          att({
+            id: 2,
+            guid: 'a-have',
+            localPath: 'file:///cache/IMG_0042.jpg',
+            transferName: 'IMG_0042.jpg',
+            mimeType: 'image/jpeg',
+            totalBytes: 2048,
+            width: 400,
+            height: 300,
+          }),
+        ],
+      }),
+    ];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-x'));
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+    // The sheet's copy differs for an attachment ("re-upload the picture").
+    expect(screen.getByTestId('sheet-attachment').props.children).toBe('true');
+
+    fireEvent.press(screen.getByTestId('sheet-retry'));
+    // MUST carry the image: with `image: undefined` the service deletes the errored row and
+    // re-sends text only — which loses the picture entirely.
+    expect(retry).toHaveBeenCalledWith('x', {
+      chatGuid: 'iMessage;-;+15550001111',
+      text: '',
+      image: {
+        uri: 'file:///cache/IMG_0042.jpg',
+        name: 'IMG_0042.jpg',
+        mimeType: 'image/jpeg',
+        size: 2048,
+        width: 400,
+        height: 300,
+      },
+    });
+  });
+
+  it('an attachment whose local file is gone is NOT re-sent as a fabricated image', async () => {
+    const messages = [
+      make({
+        id: 1,
+        guid: 'x',
+        text: 'caption',
+        isFromMe: 1,
+        sendState: 'error',
+        hasAttachments: 1,
+        attachments: [att({ localPath: null })],
+      }),
+    ];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-x'));
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+    expect(screen.getByTestId('sheet-attachment').props.children).toBe('false');
+
+    fireEvent.press(screen.getByTestId('sheet-retry'));
+    // No uri exists to re-upload; the service's own guard then decides what to do with the text.
+    expect(retry).toHaveBeenCalledWith('x', {
+      chatGuid: 'iMessage;-;+15550001111',
+      text: 'caption',
       image: undefined,
     });
   });

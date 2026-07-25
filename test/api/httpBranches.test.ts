@@ -82,6 +82,74 @@ describe('error mapping', () => {
   });
 });
 
+/**
+ * Retry WIRING (http.ts:180 `wantsRetry`). `withRetry` itself is unit-tested in
+ * test/core/retry.test.ts, but nothing covered which requests HttpClient actually opts in:
+ * idempotent GETs retry, writes do NOT (a retried POST is the documented double-send hazard —
+ * the outgoing queue owns send retries), and `retry: false` forces a single shot for the
+ * reachability ping. These use REAL timers because HttpClient doesn't expose `withRetry`'s
+ * injectable sleep; the default GET backoff is ≤400ms for one retry, and the opt-in write cases
+ * pass `baseMs: 1`.
+ */
+describe('retry wiring', () => {
+  const client = (): HttpClient =>
+    new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
+
+  it('retries a GET after a transient transport failure and returns the eventual success', async () => {
+    mockKy
+      .mockRejectedValueOnce(new Error('socket hang up')) // → ApiError('no_connection'), retryable
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await expect(client().get('/idempotent', okSchema)).resolves.toEqual({ ok: true });
+    expect(mockKy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry a POST — a retried write could double-send', async () => {
+    mockKy.mockRejectedValue(new Error('socket hang up'));
+    await expect(client().post('/message/text', okSchema, { json: { a: 1 } })).rejects.toMatchObject(
+      { kind: 'no_connection' },
+    );
+    // Exactly one attempt: the same failure on a GET above produced two.
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT retry a PUT or DELETE either', async () => {
+    mockKy.mockRejectedValue(new Error('socket hang up'));
+    await expect(client().put('/thing', okSchema, { json: {} })).rejects.toBeDefined();
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    await expect(client().delete('/thing', okSchema)).rejects.toBeDefined();
+    expect(mockKy).toHaveBeenCalledTimes(2);
+  });
+
+  it('`retry: false` forces a single shot on a GET (the fail-fast ping)', async () => {
+    mockKy.mockRejectedValue(new Error('socket hang up'));
+    await expect(client().get('/ping', okSchema, { retry: false })).rejects.toMatchObject({
+      kind: 'no_connection',
+    });
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it('an explicit policy opts a write IN to retrying', async () => {
+    mockKy
+      .mockRejectedValueOnce(new Error('socket hang up'))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await expect(
+      client().post('/opt-in', okSchema, {
+        json: {},
+        retry: { attempts: 2, baseMs: 1, random: () => 0 },
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(mockKy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a NON-transient failure on a GET (401 is not worth re-sending)', async () => {
+    mockKy.mockResolvedValue(new Response(null, { status: 401 }));
+    await expect(client().get('/secure', okSchema)).rejects.toMatchObject({
+      kind: 'unauthorized',
+    });
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('multipart upload (raw fetch path)', () => {
   it('uploads via the injected fetch, carrying auth headers and the form body', async () => {
     const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ ok: true }));

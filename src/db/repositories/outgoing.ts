@@ -90,6 +90,64 @@ export async function insertOutgoingText(
 }
 
 /**
+ * Optimistic CONTACT-CARD send: the same placeholder bubble as a text send, but queued under
+ * `kind:'contact'` so a retry re-POSTs the STRUCTURED contact fields.
+ *
+ * This kind exists specifically so a failed contact send cannot be retried as a text message.
+ * Queuing it as `kind:'text'` (what this used to do) made `runOutgoingQueue` re-send the
+ * bubble's placeholder — the contact's display NAME — as a plain message, so the recipient got
+ * "Craig Federighi" instead of a card and the bubble flipped to 'sent'.
+ *
+ * `text` is the caller-supplied placeholder (the contact's display name); the payload carries
+ * the structured fields the server needs to rebuild the vCard on a retry.
+ */
+export async function insertOutgoingContact(
+  db: AppDatabase,
+  args: {
+    tempGuid: string;
+    chatId: number;
+    chatGuid: string;
+    /** Placeholder bubble text (the contact's display name). */
+    text: string;
+    contact: {
+      firstName?: string;
+      lastName?: string;
+      organization?: string;
+      phones?: unknown[];
+      emails?: unknown[];
+    };
+    now: number;
+    selectedMessageGuid?: string;
+    threadOriginatorGuid?: string;
+  },
+): Promise<void> {
+  await db.insert(messages).values({
+    guid: args.tempGuid,
+    chatId: args.chatId,
+    text: args.text,
+    isFromMe: true,
+    dateCreated: args.now,
+    sendState: 'sending',
+    error: 0,
+    threadOriginatorGuid: args.threadOriginatorGuid ?? null,
+  });
+  await db.insert(outgoingQueue).values({
+    tempGuid: args.tempGuid,
+    chatGuid: args.chatGuid,
+    kind: 'contact',
+    payload: JSON.stringify({
+      firstName: args.contact.firstName,
+      lastName: args.contact.lastName,
+      organization: args.contact.organization,
+      phones: args.contact.phones?.length ? args.contact.phones : undefined,
+      emails: args.contact.emails?.length ? args.contact.emails : undefined,
+      selectedMessageGuid: args.selectedMessageGuid,
+    }),
+  });
+  await db.update(chats).set({ latestMessageDate: args.now }).where(eq(chats.id, args.chatId));
+}
+
+/**
  * Optimistically insert an outgoing reaction (an associated message row) + its
  * queue row. Unlike a text send this does NOT bump latestMessageDate — a tapback
  * must not reorder the inbox. `reaction` is e.g. 'love' or '-love' (removal).

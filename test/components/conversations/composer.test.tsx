@@ -610,10 +610,20 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
     act(() => dateCfg.onChange({ type: 'set' }, new Date(Date.now() + 2 * 86_400_000)));
     const timeCfg = openMock.mock.calls[1]![0];
     act(() => timeCfg.onChange({ type: 'dismissed' }, undefined));
+    // Same reasoning as the past-time test: the sheet never opened, so a queryBy-null would be
+    // vacuous. findBy must run to timeout and reject.
+    await expect(screen.findByText('Send once', {}, { timeout: 600 })).rejects.toBeTruthy();
     expect(onSchedule).not.toHaveBeenCalled();
   });
 
-  it('rejects a fully-past time (does not schedule)', async () => {
+  /**
+   * The past-time guard lives at `Composer.tsx`'s `if (when < currentMinute) return;`, which
+   * decides whether the RECURRENCE sheet (step 3) opens at all. `onSchedule` only fires after a
+   * further "Send once" press, so asserting `onSchedule` alone proves nothing — that assertion
+   * held even with the guard deleted (verified by mutation). The sheet's absence is the real
+   * discriminator, exactly as the neighbouring cancel test asserts it.
+   */
+  it('rejects a fully-past time: no recurrence sheet, no schedule', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
     fireEvent.changeText(input(), 'later');
@@ -623,7 +633,26 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
     act(() => dateCfg.onChange({ type: 'set' }, past));
     const timeCfg = openMock.mock.calls[1]![0];
     act(() => timeCfg.onChange({ type: 'set' }, past));
+    // THE discriminating assertion. The sheet is a Modal, so it appears asynchronously —
+    // `waitFor(() => expect(queryByText(...)).toBeNull())` is USELESS here because it passes on
+    // its first tick, before the sheet could have rendered (verified: that spelling still passed
+    // with the guard deleted). Letting findBy run to its timeout and asserting it REJECTS is the
+    // assertion that actually fails when the sheet opens.
+    await expect(screen.findByText('Send once', {}, { timeout: 600 })).rejects.toBeTruthy();
     expect(onSchedule).not.toHaveBeenCalled();
+  });
+
+  it('accepts a FUTURE time (proves the guard rejects for the right reason)', async () => {
+    const onSchedule = jest.fn();
+    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
+    fireEvent.changeText(input(), 'later');
+    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    const future = new Date(Date.now() + 2 * 86_400_000);
+    act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
+    act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
+    // The sheet DOES open here — so the assertion above is sensitive to the guard, not to the
+    // fact that the sheet never opens in this flow.
+    expect(await screen.findByText('Send once')).toBeTruthy();
   });
 
   it('does not show the schedule button while editing', async () => {

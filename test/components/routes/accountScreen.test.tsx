@@ -51,7 +51,7 @@ import * as icloudApi from '@core/api/endpoints/icloud';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
-import { ApiError } from '@core/api/errors';
+import { ApiError, UnimplementedEndpointError } from '@core/api/errors';
 
 const mockGetAccountInfo = icloudApi.getAccountInfo as jest.Mock;
 const mockSetActiveAlias = icloudApi.setActiveAlias as jest.Mock;
@@ -104,6 +104,22 @@ describe('AccountScreen — account query', () => {
     });
     expect(await screen.findByText('user@icloud.com')).toBeTruthy();
     expect(mockGetAccountInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it('a 404 (Unimplemented) is the calm "unsupported" state, not an error', async () => {
+    // getAccountInfo remaps the server's 404 → UnimplementedEndpointError; the screen must route
+    // that to `status: 'unsupported'` — a distinct branch from 'error'. Nothing is broken, so the
+    // copy must NOT blame the connection and must NOT offer a retry that can only 404 again.
+    mockGetAccountInfo.mockRejectedValueOnce(new UnimplementedEndpointError('/icloud/account'));
+    await renderScreen();
+    // Awaiting this first means the branch's commit has already happened — so the two absence
+    // checks below read that same commit and are not vacuous.
+    expect(await screen.findByText(/doesn.t provide iMessage account details yet/)).toBeTruthy();
+    expect(screen.queryByText(/Couldn.t load your account/)).toBeNull();
+    expect(screen.queryByText(/Private API helper on your Mac may be off/)).toBeNull();
+    expect(screen.queryByText('Try again')).toBeNull();
+    // The 'ready' rows must not render either (no account data was fetched).
+    expect(screen.queryByText('Apple ID')).toBeNull();
   });
 
   it('a 500 blames the Private API helper, not the connection (helper-off case)', async () => {

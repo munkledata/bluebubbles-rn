@@ -154,4 +154,65 @@ describe('incrementalSync', () => {
     await incrementalSync(db, api, { serverVersion: '1.5.0' });
     expect(seen!.mode).toBe('timestamp');
   });
+
+  /**
+   * REGRESSION: incrementalSync used to loop forever on a stalled cursor.
+   *
+   * The loop breaks only on an empty or SHORT page. `advanceMarker` takes a STRICT max, so a FULL
+   * page whose rows are none of them newer than the marker leaves it unchanged — and
+   * `buildSyncCursor` then rebuilds a byte-identical cursor and refetches the identical page.
+   * `GuidDeduper` makes `fresh` empty on the repeat, so there are no DB writes and no error: it
+   * spins on the network silently, forever.
+   *
+   * Reachable in timestamp mode (used whenever lastSyncedRowId is null, i.e. the first page after
+   * install and permanently if the server omits originalROWID) when >= batchSize messages share a
+   * timestamp inside the 5s overlap window, or a whole page has null dateCreated.
+   *
+   * Without the termination guard this test does not fail — it HANGS until jest times out.
+   */
+  it('stops instead of refetching forever when a full page does not advance the marker', async () => {
+    const { db } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: null, lastSyncedTimestamp: 5_000 });
+
+    let calls = 0;
+    // Every row sits AT the marker, so the strict-max advance is a no-op and the next cursor is
+    // identical. A full page (== batchSize) means the short-page break never fires either.
+    const stalled = [
+      Message.parse({
+        guid: 's1',
+        text: 'a',
+        dateCreated: 5_000,
+        chats: [{ guid: 'cS', participants: [{ address: 'alice@me.com' }] }],
+      }),
+      Message.parse({
+        guid: 's2',
+        text: 'b',
+        dateCreated: 5_000,
+        chats: [{ guid: 'cS', participants: [{ address: 'alice@me.com' }] }],
+      }),
+    ];
+
+    const api: SyncApi = {
+      serverVersion: async () => '1.5.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
+      fetchMessagesAfter: async () => {
+        calls += 1;
+        if (calls > 20) throw new Error('incrementalSync did not terminate — it refetched forever');
+        return stalled;
+      },
+    };
+
+    const result = await incrementalSync(db, api, {
+      serverVersion: '1.5.0',
+      batchSize: 2, // page length === batchSize → the "short page" break cannot fire
+      deduper: new GuidDeduper(),
+    });
+
+    // It must stop after detecting the stall, not spin.
+    expect(calls).toBe(1);
+    expect(result.messages).toBe(2); // the page's rows were still ingested before stopping
+    expect(await getSyncMarker(db)).toMatchObject({ lastSyncedTimestamp: 5_000 });
+  });
 });

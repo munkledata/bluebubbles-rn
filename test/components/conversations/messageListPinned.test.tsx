@@ -258,6 +258,54 @@ describe('MessageList — pinned-to-bottom convergence', () => {
     await waitFor(() => expect(queryByLabelText(FAB_LABEL)).toBeNull()); // pinned again
   });
 
+  /**
+   * `focusGuid` (a reminder deep-link / search hit) had ZERO test coverage repo-wide — a grep for
+   * it across test/ returned nothing. The test below this one drives the anchored FAB but never
+   * sets `focusGuid`, so the anchor path it names was executed by no test: not the
+   * `initialScrollIndex` landing, not the keyed remount, and not the frozen pin machine.
+   *
+   * `messages` is NEWEST-FIRST and the list reverses it, so for initial() the chronological rows
+   * are ['a', 'b'] — 'a' is index 0.
+   */
+  it('lands on the focus target via initialScrollIndex when it is inside the loaded window', async () => {
+    await renderWithTheme(
+      <MessageList chatGuid={GUID} isGroup={false} messages={initial()} focusGuid="a" />,
+    );
+    await waitFor(() => expect(mockListProps.current.initialScrollIndex).toBe(0));
+  });
+
+  it('degrades to a normal open when the focus target is NOT in the loaded window', async () => {
+    // The chat should just open normally rather than jumping somewhere arbitrary.
+    await renderWithTheme(
+      <MessageList chatGuid={GUID} isGroup={false} messages={initial()} focusGuid="not-loaded" />,
+    );
+    await waitFor(() => expect(mockListProps.current.data).toHaveLength(2));
+    expect(mockListProps.current.initialScrollIndex).toBeUndefined();
+  });
+
+  it('passes no initialScrollIndex on an ordinary (non-anchored) open', async () => {
+    await mountAtBottom(initial());
+    expect(mockListProps.current.initialScrollIndex).toBeUndefined();
+  });
+
+  /**
+   * THE behavioural consequence of anchoring: the window's bottom is NOT the newest message, so
+   * the convergence loop must be OFF. If the pin machine stayed live, every content growth would
+   * yank the user from the message they were deep-linked to down to the newest one.
+   */
+  it('freezes the pin machine while anchored — content growth must NOT scroll to the end', async () => {
+    await renderWithTheme(
+      <MessageList chatGuid={GUID} isGroup={false} messages={initial()} focusGuid="a" />,
+    );
+    await waitFor(() => expect(mockListProps.current.initialScrollIndex).toBe(0));
+    mockScrollToEnd.mockClear();
+
+    await drive('onContentSizeChange', 400, 2_100);
+    await drive('onContentSizeChange', 400, 2_400);
+
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+  });
+
   it('in an anchored session the button is always shown and exits the anchor instead of scrolling', async () => {
     const onExitAnchor = jest.fn();
     const { findByLabelText } = await renderWithTheme(

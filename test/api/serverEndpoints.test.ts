@@ -39,14 +39,46 @@ describe('server-management restart/logs go through the admin-command dispatcher
     expect(mockKy).not.toHaveBeenCalled();
   });
 
+  // The channel STRING is the whole contract here: every restart wrapper POSTs the same URL with
+  // the same schema, so a copy-paste slip that makes "Hard Restart" send `soft-restart` is
+  // invisible to a call-count assertion. Pin the exact channel each wrapper sends.
   it.each([
-    ['restartImessage', () => serverApi.restartImessage(client())],
-    ['softRestart', () => serverApi.softRestart(client())],
-    ['hardRestart', () => serverApi.hardRestart(client())],
-  ])('%s posts once to the dispatcher and resolves', async (_name, call) => {
+    ['restartImessage', 'restart-imessage', (h: HttpClient) => serverApi.restartImessage(h)],
+    ['softRestart', 'soft-restart', (h: HttpClient) => serverApi.softRestart(h)],
+    ['hardRestart', 'hard-restart', (h: HttpClient) => serverApi.hardRestart(h)],
+  ])('%s POSTs /admin/command with channel "%s"', async (_name, channel, call) => {
     mockKy.mockResolvedValueOnce(envelope({ success: true }));
-    await expect(call()).resolves.toBeDefined();
+    await expect(call(client())).resolves.toBeDefined();
     expect(mockKy).toHaveBeenCalledTimes(1);
+
+    const [url, init] = mockKy.mock.calls[0] as [string, { method: string; json: unknown }];
+    expect(url).toBe('https://x.test/api/v1/admin/command');
+    expect(init.method).toBe('POST');
+    expect(init.json).toEqual({ channel });
+    // Guard against the three wrappers collapsing onto one channel.
+    expect((init.json as { channel: string }).channel).toBe(channel);
+  });
+
+  it('the three restart wrappers send three DISTINCT channels', async () => {
+    // Fresh Response per call — a Response body can only be read once.
+    mockKy.mockImplementation(async () => envelope({ success: true }));
+    await serverApi.restartImessage(client());
+    await serverApi.softRestart(client());
+    await serverApi.hardRestart(client());
+    const channels = mockKy.mock.calls.map(
+      (c) => (c[1] as { json: { channel: string } }).json.channel,
+    );
+    expect(channels).toEqual(['restart-imessage', 'soft-restart', 'hard-restart']);
+    expect(new Set(channels).size).toBe(3);
+  });
+
+  it('serverLogs sends the get-logs channel with the requested line count', async () => {
+    mockKy.mockResolvedValueOnce(envelope({ logs: 'x' }));
+    await serverApi.serverLogs(client(), 250);
+    expect((mockKy.mock.calls[0] as [string, { json: unknown }])[1].json).toEqual({
+      channel: 'get-logs',
+      data: { count: 250 },
+    });
   });
 
   it('serverLogs returns the joined log text from the get-logs channel', async () => {

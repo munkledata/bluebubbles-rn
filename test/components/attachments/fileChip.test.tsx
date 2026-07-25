@@ -12,10 +12,12 @@
  *     NOT re-download; an undownloaded chip calls download(att).
  *
  * In-file mocks: `@/services/download` (its barrel pulls `ky`, an untransformed ESM pkg — only the
- * `download` fn identity matters) and `@ui/primitives` (Icon → a Text marker so the refresh icon is
- * queryable, and to keep native @expo/vector-icons out of the graph). The real download store is
- * seeded via setState (never mocked). safeOpenUrl is the real util; it opens through RN Linking,
- * which we spy on.
+ * `download` fn identity matters), `@ui/primitives` (Icon → a Text marker so the refresh icon is
+ * queryable, and to keep native @expo/vector-icons out of the graph), and `safeOpenUrl` on the
+ * `@utils` barrel — its REAL impl lazy-imports react-native via a dynamic `import()`, which throws
+ * under the jest-expo VM, so the open contract is asserted at the safeOpenUrl boundary (exactly as
+ * contactCard/locationCard do). fileTypeLabel/friendlySize stay REAL via requireActual. The real
+ * download store is seeded via setState (never mocked).
  */
 import React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
@@ -37,8 +39,14 @@ jest.mock('@ui/primitives', () => {
   };
 });
 
+// safeOpenUrl's real impl dynamic-imports react-native (throws under the jest-expo VM); mock ONLY it,
+// keeping every other @utils export (fileTypeLabel, friendlySize) real.
+jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
+
 // eslint-disable-next-line import/first
 import { FileChip } from '@ui/attachments/FileChip';
+// eslint-disable-next-line import/first
+import { safeOpenUrl } from '@utils';
 
 function makeAtt(over: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -62,6 +70,7 @@ function makeAtt(over: Partial<AttachmentRow> = {}): AttachmentRow {
 
 beforeEach(() => {
   mockDownload.mockClear();
+  (safeOpenUrl as jest.Mock).mockClear();
   useDownloadStore.setState({ progress: {}, status: {} });
 });
 
@@ -123,21 +132,22 @@ describe('FileChip — download-state affordances', () => {
 });
 
 describe('FileChip — press dispatch', () => {
-  it('downloads on tap when the file is not yet local', async () => {
+  it('downloads on tap when the file is not yet local (and opens nothing)', async () => {
     const att = makeAtt({ localPath: null });
     await renderWithTheme(<FileChip att={att} isFromMe={false} />);
     fireEvent.press(screen.getByText('report.pdf'));
     expect(mockDownload).toHaveBeenCalledWith(att);
+    expect(safeOpenUrl).not.toHaveBeenCalled();
   });
 
-  it('opens (does not re-download) a downloaded file — tap routes to safeOpenUrl, not download', async () => {
-    // NOTE: safeOpenUrl opens through a dynamic `import('react-native')`, which throws under jest
-    // (no --experimental-vm-modules), so the actual Linking.openURL cannot be observed here. The
-    // testable contract is the branch choice: a chip WITH a localPath must NOT call download().
+  it('opens the downloaded file via safeOpenUrl(localPath) and does NOT re-download', async () => {
     await renderWithTheme(
       <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
     );
     fireEvent.press(screen.getByText('report.pdf'));
+    // The open goes through safeOpenUrl (the scheme-validating helper), with the local path.
+    expect(safeOpenUrl).toHaveBeenCalledWith('file:///data/report.pdf');
+    expect(safeOpenUrl).toHaveBeenCalledTimes(1);
     expect(mockDownload).not.toHaveBeenCalled();
   });
 });

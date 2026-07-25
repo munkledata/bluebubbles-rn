@@ -1,5 +1,6 @@
 import { mapWithConcurrency } from '@core/async/pool';
 import { SYNC_BATCH_SIZE } from '@core/config';
+import { logger } from '@core/secure';
 import { advanceMarker, buildSyncCursor, GuidDeduper, type SyncMarker } from '@core/sync';
 import {
   getChatIdByGuid,
@@ -329,6 +330,7 @@ export async function incrementalSync(
       for (const c of embeddedChats) seenChats.add(c.guid);
     }
 
+    const prevMarker = marker;
     marker = advanceMarker(
       marker,
       batch.map((m) => ({ rowId: m.originalROWID ?? null, timestamp: m.dateCreated ?? null })),
@@ -340,6 +342,31 @@ export async function incrementalSync(
     opts.onProgress?.({ chats: seenChats.size, messages });
 
     if (batch.length < batchSize) break;
+
+    // TERMINATION GUARD. `advanceMarker` takes a STRICT max, so a full page in which no row is
+    // newer than the marker leaves it unchanged — and `buildSyncCursor` then rebuilds a
+    // byte-identical cursor, refetching the identical page forever. The dedupe makes `fresh`
+    // empty on the repeat, so there are no DB writes and no error: the loop just spins on the
+    // network, silently, until the process dies.
+    //
+    // Reachable in timestamp mode (chosen whenever lastSyncedRowId is null — the first page after
+    // install, and permanently if the server omits originalROWID) when a full page's rows all sit
+    // at or below the marker: >= batchSize messages sharing a timestamp inside TIMESTAMP_OVERLAP_MS,
+    // or a page whose dateCreated values are all null.
+    //
+    // If the marker can't advance we cannot make progress with this cursor at all, so stopping is
+    // strictly better than looping — any remainder is picked up by the next sync run.
+    if (
+      marker.lastSyncedRowId === prevMarker.lastSyncedRowId &&
+      marker.lastSyncedTimestamp === prevMarker.lastSyncedTimestamp
+    ) {
+      logger.warn(
+        `[sync] incremental cursor stalled after a full page (${batch.length} rows, marker rowId=${
+          marker.lastSyncedRowId ?? 'none'
+        } ts=${marker.lastSyncedTimestamp ?? 'none'}) — stopping to avoid refetching it forever`,
+      );
+      break;
+    }
   }
 
   return { chats: seenChats.size, messages };

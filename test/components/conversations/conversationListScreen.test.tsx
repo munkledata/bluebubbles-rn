@@ -19,7 +19,7 @@
  *     probes, so the assertions are about the SCREEN'S split/search/route wiring.
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import type { InboxRow } from '@db/repositories';
 
 const mockPush = jest.fn();
@@ -82,6 +82,14 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('@/services', () => ({ refreshInbox: jest.fn() }));
+// "Mark all read" is the one header action that WRITES — and it writes to EVERY chat. Stub just
+// that repository fn, keeping the rest of the real barrel. It MUST be mocked at the barrel
+// (`@db/repositories`), not at `@db/repositories/chats`: mocking the submodule does NOT reach
+// the barrel's `export *` re-export, so the screen would still get the real function.
+jest.mock('@db/repositories', () => ({
+  ...jest.requireActual('@db/repositories'),
+  markAllChatsReadLocal: jest.fn(),
+}));
 
 jest.mock('@ui/conversations/ConversationTile', () => {
   const ReactLib = require('react');
@@ -152,8 +160,18 @@ jest.mock('@ui/conversations/ChatActionsSheet', () => {
 import { ConversationListScreen } from '@ui/conversations/ConversationListScreen';
 // eslint-disable-next-line import/first
 import { useChats } from '@features/conversations/useChats';
+// eslint-disable-next-line import/first
+import { markAllChatsReadLocal } from '@db/repositories';
+// eslint-disable-next-line import/first
+import { useDialogStore } from '@ui/dialog/dialogStore';
 
 const useChatsMock = useChats as jest.Mock;
+const markAllReadMock = markAllChatsReadLocal as jest.Mock;
+
+beforeEach(() => {
+  // The confirm dialog lives in the store (AppDialog is mounted at the app root, not here).
+  useDialogStore.setState({ current: null, queue: [] });
+});
 
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
   return {
@@ -279,6 +297,32 @@ describe('ConversationListScreen — navigation & actions', () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/facetime'));
     fireEvent.press(screen.getByLabelText('Settings'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/settings'));
+  });
+
+  it('Mark all read confirms first, and only the confirm button writes to the DB', async () => {
+    setChats({ data: [makeRow({ guid: 'l1' })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    fireEvent.press(screen.getByLabelText('Mark all read'));
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Mark All Read'));
+    const dlg = useDialogStore.getState().current!;
+    expect(dlg.message).toBe('Mark every conversation as read?');
+    expect(dlg.buttons.map((b) => b.text)).toEqual(['Cancel', 'Mark All Read']);
+    // Opening the confirm must not touch the DB — the handler runs synchronously, so a missing
+    // gate would already show up here.
+    expect(markAllReadMock).not.toHaveBeenCalled();
+
+    // Cancel is a pure no-op (no handler at all).
+    await act(async () => {
+      dlg.buttons.find((b) => b.text === 'Cancel')?.onPress?.();
+    });
+    expect(markAllReadMock).not.toHaveBeenCalled();
+
+    // The destructive-ish confirm is what actually clears every badge.
+    await act(async () => {
+      dlg.buttons.find((b) => b.text === 'Mark All Read')?.onPress?.();
+    });
+    expect(markAllReadMock).toHaveBeenCalledTimes(1);
   });
 
   it('opens a chat (encoded guid) when a tile is tapped', async () => {

@@ -1,6 +1,6 @@
 import type { HttpClient } from '@core/api/http';
 import { sendContact, type ContactEmail, type ContactPhone } from '@core/api/endpoints/messages';
-import { getChatIdByGuid, insertOutgoingText } from '@db/repositories';
+import { getChatIdByGuid, insertOutgoingContact } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
@@ -61,12 +61,13 @@ export async function sendContactMessage(
   if (chatId == null) throw new Error(`unknown chat ${args.chatGuid}`);
 
   const tempGuid = generateTempGuid();
-  await insertOutgoingText(db, {
+  await insertOutgoingContact(db, {
     tempGuid,
     chatId,
     chatGuid: args.chatGuid,
     // Placeholder bubble text; the server echo replaces it with the rendered contact card.
     text: contactDisplayName(args.contact),
+    contact: args.contact,
     now,
     selectedMessageGuid: args.selectedMessageGuid,
     threadOriginatorGuid: args.selectedMessageGuid,
