@@ -162,6 +162,11 @@ const config: ExpoConfig = {
       },
     ],
     '@react-native-community/datetimepicker',
+    // expo-web-browser began shipping a config plugin in SDK 57.0.2 and now requires explicit
+    // registration (`expo install --fix` can't add it itself — it refuses to edit a dynamic
+    // TypeScript config, so this is a manual step on every such bump). Used by the FaceTime
+    // in-app browser tab (`src/features/facetime/useFaceTime.ts`).
+    'expo-web-browser',
     [
       'expo-build-properties',
       {
