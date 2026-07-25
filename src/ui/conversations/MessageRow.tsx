@@ -15,6 +15,7 @@ import {
   showTail,
   showTimestampAbove,
   statusFor,
+  type BubbleRect,
 } from '@utils';
 import { Avatar } from '../primitives';
 import { useTheme } from '../theme';
@@ -37,7 +38,7 @@ interface MessageRowProps {
   // Take the message so the list can pass STABLE callbacks (the per-row binding
   // happens here, inside the memoized row, not in the list's renderItem).
   onRetry?: (msg: EnrichedMessage) => void;
-  onLongPress?: (msg: EnrichedMessage) => void;
+  onLongPress?: (msg: EnrichedMessage, rect: BubbleRect) => void;
   /** Jump to a replied-to message by its guid (tap the reply quote). */
   onJumpToReply?: (originatorGuid: string) => void;
   /** Tap the reaction badges → show who reacted (the list owns the detail sheet). */
@@ -109,7 +110,10 @@ export const MessageRow = React.memo(function MessageRow({
   // outer handlers are unchanged — a fresh arrow per render would defeat the bubble's memo.
   const originator = msg.threadOriginatorGuid;
   const handleRetry = useCallback(() => onRetry?.(msg), [onRetry, msg]);
-  const handleLongPress = useCallback(() => onLongPress?.(msg), [onLongPress, msg]);
+  const handleLongPress = useCallback(
+    (rect: BubbleRect) => onLongPress?.(msg, rect),
+    [onLongPress, msg],
+  );
   const handleJumpToReply = useCallback(() => {
     if (originator) onJumpToReply?.(originator);
   }, [onJumpToReply, originator]);

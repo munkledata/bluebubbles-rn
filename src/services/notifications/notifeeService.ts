@@ -46,12 +46,42 @@ try {
 
 let channelReady: Promise<string> | null = null;
 function ensureChannel(): Promise<string> {
-  channelReady ??= notifee.createChannel({
-    id: CHANNEL_NEW_MESSAGE,
-    name: 'New Messages',
-    importance: AndroidImportance.HIGH,
-  });
+  // Don't memoize a REJECTED promise — clear the cache on failure so a later call retries.
+  // Without this reset, one transient createChannel failure poisoned the cache for the whole JS
+  // context: every subsequent postNotification awaited the same rejected promise and threw, so
+  // message notifications stopped permanently until the app was restarted. (The FaceTime and
+  // Reminder channels below always had this guard; the main one silently did not.)
+  channelReady ??= notifee
+    .createChannel({
+      id: CHANNEL_NEW_MESSAGE,
+      name: 'New Messages',
+      importance: AndroidImportance.HIGH,
+    })
+    .catch((e) => {
+      channelReady = null;
+      throw e;
+    });
   return channelReady;
+}
+
+/**
+ * Post a fixed-id, content-less STATUS notification (server notices + the app-locked placeholder).
+ * A stable id means repeated posts update in place instead of stacking. These carry no private
+ * message content — the text is app- or server-authored — so no redaction is applied here; callers
+ * that DO handle user content (postNotification's message branch) redact before calling.
+ */
+async function postStatusNotification(id: string, title: string, body: string): Promise<void> {
+  await ensureChannel();
+  await notifee.displayNotification({
+    id,
+    title,
+    body,
+    android: {
+      channelId: CHANNEL_NEW_MESSAGE,
+      smallIcon: 'ic_stat_gator',
+      pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
+    },
+  });
 }
 
 /** Stable per-chat notification channel id (Android channel ids allow only a safe charset). */
@@ -101,40 +131,26 @@ export async function postNotification(intent: NotificationIntent): Promise<void
     return;
   }
   if (intent.kind === 'rcs-bridge-down') {
-    await ensureChannel();
     // A server STATUS notice (RCS bridge dropped / auth expired). Carries no message content, so
-    // no redaction is applied — the server-supplied title/body are shown verbatim. A fixed id
-    // updates in place instead of stacking on repeated pushes.
-    await notifee.displayNotification({
-      id: 'bb-rcs-bridge-down',
-      title: intent.title,
-      body: intent.body,
-      android: {
-        channelId: CHANNEL_NEW_MESSAGE,
-        smallIcon: 'ic_stat_gator',
-        pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
-      },
-    });
+    // the server-supplied title/body are shown verbatim.
+    await postStatusNotification('bb-rcs-bridge-down', intent.title, intent.body);
+    return;
+  }
+  if (intent.kind === 'test-notification') {
+    // The server's push self-test. Seeing this IS the passing result, so it must render even in
+    // redacted mode (there is no user content in it to hide) — suppressing it would make a
+    // healthy pipeline look broken, which is the exact failure this probe exists to rule out.
+    await postStatusNotification('bb-test-notification', intent.title, intent.body);
     return;
   }
   if (intent.kind === 'alias-removed') {
-    await ensureChannel();
     // The alias is the user's OWN address; still honor redacted mode for the body.
     const body = hidePreview
       ? 'An iMessage alias was deregistered.'
       : intent.aliases.length === 1
         ? `${intent.aliases[0]} has been deregistered.`
         : `Aliases deregistered: ${intent.aliases.join(', ')}`;
-    await notifee.displayNotification({
-      id: 'bb-aliases-removed',
-      title: 'iMessage',
-      body,
-      android: {
-        channelId: CHANNEL_NEW_MESSAGE,
-        smallIcon: 'ic_stat_gator',
-        pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
-      },
-    });
+    await postStatusNotification('bb-aliases-removed', 'iMessage', body);
     return;
   }
   await ensureChannel();
@@ -212,17 +228,7 @@ export async function cancelForChat(chatGuid: string): Promise<void> {
  * the lock screen, after which sync delivers the real per-chat notifications.
  */
 export async function postLockedNotification(): Promise<void> {
-  await ensureChannel();
-  await notifee.displayNotification({
-    id: 'bb-locked-messages',
-    title: 'Gator',
-    body: 'You have new messages',
-    android: {
-      channelId: CHANNEL_NEW_MESSAGE,
-      smallIcon: 'ic_stat_gator',
-      pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
-    },
-  });
+  await postStatusNotification('bb-locked-messages', 'Gator', 'You have new messages');
 }
 
 let faceTimeChannelReady: Promise<string> | null = null;

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
 import { parsePayloadData } from '@core/models';
@@ -13,7 +13,14 @@ import type {
 import { isSafePreviewUrl } from '@/services/urlPreview';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useUrlPreview } from '@features/conversations/useUrlPreview';
-import { errorTitleForCode, firstUrl, isBigEmoji, resolveBubbleColor, safeOpenUrl } from '@utils';
+import {
+  errorTitleForCode,
+  firstUrl,
+  isBigEmoji,
+  resolveBubbleColor,
+  safeOpenUrl,
+  type BubbleRect,
+} from '@utils';
 import { useTheme } from '../theme';
 import { AttachmentGalleryGrid, AttachmentView } from '../attachments';
 import { BubbleEffectView } from './effects';
@@ -39,7 +46,9 @@ interface MessageBubbleProps {
    */
   chatService?: 'iMessage' | 'SMS' | 'RCS' | null;
   onRetry?: () => void;
-  onLongPress?: () => void;
+  /** Long-press the bubble → open the reaction/action menu, anchored to this bubble's
+   *  on-screen rectangle (measured here so the floating menu can pin above/below it). */
+  onLongPress?: (rect: BubbleRect) => void;
   /** Tap the reply quote → jump to the original message. */
   onJumpToReply?: () => void;
   /** Tap the reaction badges → open the "who reacted" detail. Omit → badges stay inert. */
@@ -76,6 +85,16 @@ export const MessageBubble = React.memo(function MessageBubble({
   const overlay = overlayTextStyle(hasBackground, theme.color.tertiaryLabel, theme.color.label);
   const pill = overlayPillStyle(hasBackground, theme.color.background);
   const redacted = useRedactedModeStore((s) => s.enabled);
+  // Measure the bubble on long-press so the reaction/action menu can float around its actual
+  // on-screen position (iMessage-style), rather than sit in a bottom sheet. measureInWindow is
+  // async (one frame) — fine for a long-press.
+  const bubbleRef = useRef<View>(null);
+  const handleLongPress = useCallback(() => {
+    if (!onLongPress) return;
+    const node = bubbleRef.current;
+    if (!node) return;
+    node.measureInWindow((x, y, width, height) => onLongPress({ x, y, width, height }));
+  }, [onLongPress]);
   const b = theme.color.bubble;
   const isFromMe = msg.isFromMe === 1;
   // From-me bubbles colour from the CHAT's service only — never the joined-handle `senderService`.
@@ -231,12 +250,18 @@ export const MessageBubble = React.memo(function MessageBubble({
 
   const bubble = (
     <Pressable
-      onLongPress={onLongPress}
+      ref={bubbleRef}
+      onLongPress={onLongPress ? handleLongPress : undefined}
       delayLongPress={350}
       style={{ opacity: isSending ? 0.6 : 1 }}
     >
       {msg.replyPreview && msg.threadOriginatorGuid ? (
-        <ReplyQuote preview={msg.replyPreview} isFromMe={isFromMe} onPress={onJumpToReply} />
+        <ReplyQuote
+          preview={msg.replyPreview}
+          isFromMe={isFromMe}
+          hasBackground={hasBackground}
+          onPress={onJumpToReply}
+        />
       ) : null}
       {redacted && atts.length > 0 ? (
         // Redacted mode hides attachment content (photos/videos/files) behind a placeholder,

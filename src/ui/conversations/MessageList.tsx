@@ -20,6 +20,7 @@ import {
   pinOnMomentumEnd,
   pinOnScroll,
   unpinExplicitly,
+  type BubbleRect,
   type ScrollPinState,
 } from '@utils';
 import { usePullToRefresh } from '../primitives';
@@ -48,7 +49,7 @@ interface MessageListProps {
   topInset?: number;
   /** Same, for the floating composer at the bottom. */
   bottomInset?: number;
-  onLongPressMessage?: (msg: EnrichedMessage) => void;
+  onLongPressMessage?: (msg: EnrichedMessage, rect: BubbleRect) => void;
   /** Swipe a bubble right past the threshold → set it as the reply target. */
   onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */

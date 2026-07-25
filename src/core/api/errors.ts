@@ -1,11 +1,20 @@
-/** Error categories mirroring the Flutter app's MessageError enum. */
+/**
+ * Error categories mirroring the Flutter app's MessageError enum.
+ *
+ * `local_file` is ours, not Flutter's: an attachment upload can fail because the file on THIS
+ * device is gone/unreadable (a share-sheet uri whose grant lapsed, an evicted cache entry),
+ * which has nothing to do with the network. Without it every such failure collapsed into
+ * `no_connection` and the bubble read "Connection Refused" — pointing the user at their server
+ * instead of at the file.
+ */
 export type ApiErrorKind =
   | 'no_connection'
   | 'timeout'
   | 'unauthorized'
   | 'bad_request'
   | 'server_error'
-  | 'parse_error';
+  | 'parse_error'
+  | 'local_file';
 
 export class ApiError extends Error {
   constructor(

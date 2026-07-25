@@ -9,6 +9,14 @@ SDK 57 / notify-kit upgrade so you can confirm it works before trusting it.
 Work top to bottom. Each `- [ ]` is one thing to check off. If something fails, note which
 box and what you saw — that's the bug report.
 
+> **2026-07-23 remote adb session (installed Play build 0.1.28 / versionCode 39, Galaxy
+> S25 Ultra, Android 16):** boxes marked `[x] (2026-07-23 …)` below were verified over adb
+> (screenshots + logcat + dumpsys), driving the INSTALLED release build — no dev client was
+> installed (that would force a data-wiping reinstall), so the section (a)/(f)/(k) dev-build
+> items and anything needing a human (biometics, FaceTime, incoming messages, visual share-
+> sheet row) remain open. Ticks apply to 0.1.28, which predates the RCS-send-reliability
+> commits (9db7b4d+) and the uncommitted reaction-menu rework.
+
 ---
 
 ## (a) Clean rebuild first
@@ -129,13 +137,21 @@ Capture lives at the ROOT (`ShareIntentCapture`, above the lock/auth gate) and s
 `shareIntentStore`; `ShareIntentNavigator` (in the `(app)` layout) opens the target once the app is
 ready. So the share must survive all three app states below. See `src/ui/ShareIntentHandler.tsx`.
 
-- [ ] From another app, **share some text** to Gator — it lands in the app ready to send.
-- [ ] From the gallery, **share an image** to Gator — it lands **staged as an attachment** in the
+- [x] From another app, **share some text** to Gator — it lands in the app ready to send.
+      *(2026-07-23 adb, v0.1.28: SEND text/plain delivered killed, backgrounded AND foreground —
+      all three cold/warm paths landed on New Message with the text staged.)*
+- [x] From the gallery, **share an image** to Gator — it lands **staged as an attachment** in the
       new-message composer (the original "picture not populated" bug).
+      *(2026-07-23 adb, v0.1.28: MediaStore content:// image SEND with read grant → thumbnail
+      staged with ✕ chip. Also confirmed the shipped manifest carries the SEND/SEND_MULTIPLE
+      filters — checked via dumpsys package, not app.config.)*
 - [ ] Repeat the image share with the app in each state, all must populate the photo:
       **(1) killed/force-stopped**, **(2) backgrounded-but-alive**, **(3) already open/foreground**.
+      *(2026-07-23: TEXT verified in all 3 states; IMAGE verified backgrounded only — killed/
+      foreground image repeats still open.)*
 - [ ] Share **multiple images** at once (`SEND_MULTIPLE`) and a **non-image file** (e.g. a PDF from
-      Downloads) — all stage correctly.
+      Downloads) — all stage correctly. *(not exercisable via adb — `am` can't build a
+      multi-stream ClipData; do this one by hand.)*
 
 ### Direct Share (priority "share to a person" row)
 
@@ -146,6 +162,10 @@ nothing — use a build where you have a few conversations. See AGENTS.md "Share
 - [ ] Open Gator (so `ConversationListScreen` publishes shortcuts), then from the gallery tap
       **Share** — your **recent conversations appear in the top row** of the share sheet (they may
       take a moment / a second share to surface as Android learns the targets).
+      *(2026-07-23 adb, v0.1.28: the PUBLICATION half is proven — `dumpsys shortcut` shows fresh
+      dynamic shortcuts tagged `…category.SHARE_TARGET`, each with a `Person`, published on inbox
+      mount; Gator also appears in the share sheet's all-apps grid. The visual TOP-ROW appearance
+      needs a real in-app share sheet — human check.)*
 - [ ] Tap a conversation in that top row — Gator **opens THAT chat** (not the new-message picker)
       with the shared **photo staged in the composer**; review and tap send.
 - [ ] Tap-behavior sanity: the chat opens with the photo staged (NOT auto-sent) — you press send.
@@ -155,12 +175,14 @@ nothing — use a build where you have a few conversations. See AGENTS.md "Share
 
 ## (i) Background sync + FCM token
 
-- [ ] After you connect to a server, confirm the **background sync task registered**: the dev
+- [x] After you connect to a server, confirm the **background sync task registered**: the dev
       log shows `[bg] background sync registered` (this is the ~15-minute catch-up sync).
-- [ ] Confirm **FCM token registration** succeeds after connecting — the device token is
+      *(2026-07-23 adb, v0.1.28: line observed in logcat on a cold start of the release build.)*
+- [x] Confirm **FCM token registration** succeeds after connecting — the device token is
       fetched (`getToken`, Firebase v25 API) and sent to the server. On failure you'd see
       `[fcm] device token registration failed` in the log; a clean connect should not log
-      that.
+      that. *(2026-07-23 adb, v0.1.28: cold start + 20s observation — no failure line logged.
+      Release build has no positive success line, so this is verified by absence, as written.)*
 
 ---
 
@@ -168,16 +190,43 @@ nothing — use a build where you have a few conversations. See AGENTS.md "Share
 
 A quick pass over the screens most likely to be disturbed by the RN 0.86 upgrade:
 
-- [ ] Open a chat and scroll — messages scroll smoothly and, when you tap the composer, the
+- [x] Open a chat and scroll — messages scroll smoothly and, when you tap the composer, the
       keyboard pushes the input up instead of hiding it behind the keyboard.
-- [ ] Open a chat that has a **wallpaper/background** — the header and composer bars are the
+      *(2026-07-23 adb, v0.1.28: scrolled a long thread both directions — reply-quotes, reactions,
+      date pills all render; keyboard open showed the composer above it. Smoothness/fps is a feel
+      judgment adb can't make — re-confirm by hand if it ever feels off.)*
+- [x] Open a chat that has a **wallpaper/background** — the header and composer bars are the
       frosted/translucent style and the message list runs under them without a smoky fringe.
+      *(2026-07-23 adb, v0.1.28: verified on a wallpapered group chat — frosted chips, edge-fade
+      dissolve under both bars, sender/date pills legible over the photo.)*
 - [ ] Open an **image/video in the media viewer** — it opens and plays.
+      *(2026-07-23 adb, v0.1.28: IMAGE verified — full-screen viewer, "n of n" counter,
+      share/save controls. VIDEO playback still open.)*
 - [ ] Send a message with a **send effect** (slam / confetti / balloons, etc.) — the effect
       animates once and cleans up (no leftover animation bleeding onto other rows).
 - [ ] In Settings → Downloads, change the **parallel-downloads** stepper, then open a chat with
       many attachments — no more than that many download at once (the cap lives in
       `featureSettingsStore` as `maxConcurrentDownloads`, applied in the download service).
+
+## (k) Reaction / action menu placement
+
+Long-press a message bubble in a chat. This is a JS-only change (no rebuild needed); the *math* is
+node-tested (`reactionMenuLayout.test.ts`) but the on-screen placement is device-only.
+
+- [ ] The chat dims and the pressed bubble stays **bright** ("lifts"), with the **tapback bar
+      floating just above that bubble** and the **Reply / Copy / … menu as a card below it** —
+      positioned to that specific message, not down at the bottom of the screen.
+- [ ] Long-press the **very first (top) message** — the tapback bar flips to just **below** the
+      bubble instead of clipping off the top edge.
+- [ ] Long-press a message **near the bottom** (just above the composer) — the action menu stacks
+      **above** the bar, and a very long menu scrolls inside its card.
+- [ ] Long-press your **own** (right-side) vs **the other person's** (left-side) bubble — the bar
+      and menu hug the correct side.
+- [ ] Tapping a reaction applies it and **dismisses immediately**; tapping the dimmed area (or the
+      bright bubble) dismisses **without** reacting.
+- [ ] The bar + menu sit at the **right height** (not shifted up/down by the status bar). If they're
+      off, it's the Android edge-to-edge window-coordinate caveat noted in `AGENTS.md` — the
+      `measureInWindow` vs `Modal` origin offset (adjust the safe-area clamp in `MessageActionsOverlay`).
 
 ---
 

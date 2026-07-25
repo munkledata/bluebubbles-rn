@@ -11,7 +11,8 @@
  *     never within the 30-min window);
  *   - SENDER-NAME visibility: shown for received messages in a GROUP at a sender/gap break,
  *     collapsed for consecutive same-sender runs, and never in a 1:1;
- *   - row callback BINDING: the row's onLongPress fires the list's onLongPressMessage with the msg;
+ *   - row callback BINDING: the row's onLongPress fires the list's onLongPressMessage with the msg
+ *     and the bubble's measured rect (which anchors the floating reaction/action menu);
  *   - the failed-message flow: tapping retry opens FailedMessageSheet, whose Try Again / Delete
  *     call `retry` / `discardMessage` from `@/services/send` with the right args;
  *   - empty state: "No messages yet" when there are no messages.
@@ -64,7 +65,9 @@ jest.mock('@ui/conversations/MessageBubble', () => {
   return {
     MessageBubble: (props: {
       msg: EnrichedMessage;
-      onLongPress?: () => void;
+      // The real bubble measures itself and forwards its on-screen rectangle (never the raw press
+      // event); emulate that so the row-binding assertion reflects the true (msg, rect) contract.
+      onLongPress?: (rect: { x: number; y: number; width: number; height: number }) => void;
       onRetry?: () => void;
     }) =>
       ReactLib.createElement(
@@ -73,7 +76,10 @@ jest.mock('@ui/conversations/MessageBubble', () => {
         ReactLib.createElement(Text, { testID: 'bubble-text' }, props.msg.text),
         ReactLib.createElement(
           Pressable,
-          { testID: `longpress-${props.msg.guid}`, onPress: props.onLongPress },
+          {
+            testID: `longpress-${props.msg.guid}`,
+            onPress: () => props.onLongPress?.({ x: 0, y: 0, width: 10, height: 10 }),
+          },
           ReactLib.createElement(Text, null, 'lp'),
         ),
         ReactLib.createElement(
@@ -297,7 +303,11 @@ describe('MessageList — row callback binding', () => {
       />,
     );
     fireEvent.press(screen.getByTestId('longpress-x'));
-    expect(onLongPressMessage).toHaveBeenCalledWith(expect.objectContaining({ guid: 'x' }));
+    // The row forwards (message, measured bubble rect) — the rect anchors the floating menu.
+    expect(onLongPressMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ guid: 'x' }),
+      expect.objectContaining({ width: 10, height: 10 }),
+    );
   });
 });
 

@@ -12,6 +12,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 
 /**
@@ -74,12 +75,13 @@ export class DbEventSink implements EventSink {
         // Reconcile our own optimistic send against this LIVE echo before the upsert: Gator's
         // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
         // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
-        // Live path only — never the sync path (see reconcileEchoByContent).
-        // TODO(low): wrap reconcileEchoByContent + upsertMessages in one db.transaction so the
-        // queue-delete and the guid-promote commit atomically — a hard crash in the sub-ms gap
+        // Live path only — never the sync path (see reconcileEchoByContent). One transaction so
+        // the queue-delete and the guid-promote commit atomically — a hard crash in the gap
         // could otherwise strand a queue-less unpromoted temp row (a permanent duplicate).
-        await reconcileEchoByContent(this.db, message, chatId);
-        const idMap = await upsertMessages(this.db, [message], () => chatId, handleMap);
+        const idMap = await withDbTransaction(this.db, async () => {
+          await reconcileEchoByContent(this.db, message, chatId);
+          return upsertMessages(this.db, [message], () => chatId, handleMap);
+        });
         // Notify the app (attachment auto-download) that this message + its rows are persisted.
         const storedId = idMap.get(message.guid);
         if (storedId != null) this.onMessageStored?.(storedId);

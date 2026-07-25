@@ -2,8 +2,8 @@
 
 A React Native (Expo) + TypeScript rebuild of the Flutter iMessage client.
 Android-only, iOS-styled. See `README.md` for the full picture and `docs/` for the spikes
-and per-phase dependency plan. The authoritative rebuild plan lives at
-`~/.claude/plans/i-ve-changed-to-the-robust-pine.md`.
+and per-phase dependency plan. The authoritative open-items tracker is
+`docs/WORK_PLAN_2026-07-17.md` (the old `~/.claude/plans/` rebuild plan no longer exists).
 
 ## Expo HAS CHANGED
 This project targets **Expo SDK 57** (React Native 0.86, React 19). Read the exact
@@ -95,8 +95,24 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
 - **notify-kit `AndroidStyle.MESSAGING` person.icon must be a string when present.** Passing
   `icon: undefined` throws at displayNotification; spread it conditionally. EventType values differ
   from some docs — always compare against the `EventType.ACTION_PRESS` constant, never a literal.
-- **notify-kit background handler (`onBackgroundEvent`) + TaskManager.defineTask must be module top-level**,
-  imported for side effect at the top of `app/_layout.tsx` — not inside a component — or killed-app delivery drops.
+- **Every headless registration must be imported from `index.js` (the bundle entry) — NOT from
+  `app/_layout.tsx`.** This is the corrected form of an earlier note that said `_layout` was enough; it
+  is NOT, and that mistake silently broke killed-app push. `setBackgroundMessageHandler` (RNFB),
+  `notifee.onBackgroundEvent`, and `TaskManager.defineTask` all register a named headless task that
+  Android looks up the instant it wakes the app — with NO render. But `app/_layout.tsx` is a ROUTE
+  module: expo-router loads it lazily through its `require.context` at RENDER time, so a headless wake
+  never evaluates it and the task is never registered. Symptom (logcat, release build):
+  `D/RNFirebaseMsgReceiver: broadcast received for message` immediately followed by
+  `W/ReactNativeJS: No task registered for key ReactNativeFirebaseMessagingHeadlessTask` — the push is
+  dropped with no app-side log at all. It masquerades as FLAKY push, because delivery keeps working
+  while the process happens to still be alive from the last time the user opened the app, and dies
+  the moment Android reclaims it. So `package.json` `main` is `index.js`, which imports the three
+  side-effect modules and THEN `expo-router/entry` (last — it registers the root component).
+  VERIFY WITH `adb shell am kill <pkg>`, NEVER `am force-stop`: force-stop puts the app in Android's
+  "stopped" state where the OS cancels ALL broadcasts until a manual launch (logcat shows
+  `broadcast intent callback: result=CANCELLED`), so the bug looks unreproducible. `am kill` mimics
+  real memory reclamation and still delivers pushes. Server-side proof that delivery itself is fine:
+  the `send-test-notification` admin channel returns `{sent, failed}` per device.
 - **A notification tap only reaches `onForegroundEvent` when the Activity is RESUMED.** notify-kit routes a
   PRESS to the foreground emitter ONLY if the app is truly on-screen; a tap while the app is
   alive-but-backgrounded (the COMMON case) is delivered to the headless `onBackgroundEvent`, which has no
@@ -126,26 +142,70 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   in `(app)/_layout.tsx` drains the store → `/new-chat` once the connected app is mounted. Pass
   `resetOnBackground:false` (we clear the native intent ourselves after capture) so the app-switch flicker
   doesn't wipe the pending share. Don't wrap the capture in a silent `fallback={null}` boundary — log via
-  `onError`. `ShareIntentFile.path` is a REAL cached file path (`toUri` → `file://`), which the disk-
-  streaming uploader (`attachmentUpload.ts`) reads fine — so an empty composer means capture never fired,
-  not a URI problem. Device-only: jest has no native half (mock `useShareIntentContext`). See
-  `src/ui/ShareIntentHandler.tsx`.
+  `onError`. Device-only: jest has no native half. See `src/ui/ShareIntentHandler.tsx`.
+- **NEVER trust `expo-share-intent`'s PARSED file `path` — read the RAW `onChange` payload and copy the
+  `content://` uri yourself.** (v8.0.1, the latest published — there is no upstream fix to wait for.) This is
+  why sharing a PDF appeared to do NOTHING. Four separate traps, only the first fixable from JS:
+  (A) native `getAbsolutePath` returns a RAW `/storage/emulated/0/…` path for the Files app (unreadable:
+  no `READ_EXTERNAL_STORAGE` above API 32 + scoped storage) and a BOGUS `/document/acc=1;doc=…` for any
+  DocumentProvider it doesn't special-case (Drive/Dropbox/carrier apps). It only stream-copies into cacheDir
+  for MediaStore uris — which is exactly why IMAGES work and documents don't. Worse, `parseShareIntent`
+  prefers that bad value (`path: file.path || 'file://'+filePath || contentUri`) and then DROPS `contentUri`,
+  the one source that always works. (B) `getFileInfo` uses `!!` on `resolver.query`/`resolver.getType` and
+  reads a possibly `-1` column index → the native side THROWS before JS hears anything. (C) a file delivered
+  via `ClipData` instead of `EXTRA_STREAM` only reports `"empty uri for file sharing"` on `onError`.
+  (D) the `!activity.isTaskRoot` re-broadcast (lines 115-123) loses the transient uri read grant.
+  FIX: subscribe to the RAW module (`ShareIntentModule.addListener('onChange'|'onError')` — it IS exported,
+  and Expo emitters allow multiple listeners, so `<ShareIntentProvider>` can stay mounted for its cold-start
+  pumping while nothing reads its parsed state). `src/services/share/` then prefers `contentUri`, rejects
+  SAF-junk paths, and copies into `<cache>/shared-in/<batchMs>/` via **legacy** `expo-file-system`
+  `copyAsync` (it passes the source string to native untouched; the modern `File` API round-trips it through
+  `new URL()` and mangles a non-special scheme). THREE non-obvious rules: copy at CAPTURE time, not send time
+  (the read grant is task-scoped and `sendAttachmentService` persists the path into `attachments.localPath`
+  for the retry queue to re-read after a restart); ALWAYS re-stat after copying (the SAF branch resolves
+  without writing when the provider reports no display name); and skip non-object entries in `files` (an
+  upstream bracket bug at `ExpoShareIntentModule.kt:145` injects a junk array into every single-file SEND).
+  ALWAYS subscribe to `onError` — not doing so is what made every one of these failures perfectly silent.
+- **An unreadable local file is NOT a network error.** `attachmentUpload.ts` used to wrap every
+  `uploadAsync` throw in `ApiError('no_connection')`, so a missing/ungranted file rendered as a red bubble
+  labelled "Connection Refused" (code 10004) and sent the user chasing their server. There is now a
+  `local_file` `ApiErrorKind` → `ClientErrorCode.attachmentUnreadable` (10009, "Attachment Unavailable"),
+  chosen by a pre-flight `expoFileExists` plus the pure `isLocalFileFailure` classifier
+  (`src/services/send/uploadErrors.ts` — kept separate so it's node-testable).
 - **Share-sheet PROMINENCE (top "Direct Share" row) = declaration + runtime shortcuts, split across two layers.**
   Declaring `SEND` intent filters only puts the app in the sheet's lower all-apps list. Two pieces get it into
   the priority row: (1) `plugins/withShareTargets.js` writes the `<share-target>` (`res/xml/shortcuts.xml`) +
   `android.app.shortcuts` meta-data on MainActivity — the DECLARATION; (2) the LOCAL native module
   `modules/gator-share-shortcuts` (autolinked, Android-only) PUBLISHES long-lived dynamic `ShortcutInfoCompat`s
   (one per recent chat, tagged with the SAME `…category.SHARE_TARGET` category + a `Person`) via
-  `ShortcutManagerCompat`. Both category strings MUST match or Android surfaces nothing. `ConversationListScreen`
-  calls `publishShareShortcuts(rows)` (keyed on the top-4 guids so it doesn't re-publish every reactive tick);
-  `forget()` clears them. Delivery: a Direct Share tap delivers the SEND intent to MainActivity with
+  `ShortcutManagerCompat`. Both category strings MUST match or Android surfaces nothing. THE `<share-target>`
+  MIME LIST IS A HARD FILTER: it declares `*/*` because listing only `image/*`/`video/*`/`text/*` meant a shared
+  PDF matched no share-target and the priority row came back EMPTY even though the shortcuts published fine
+  (it must stay a subset of the SEND filters in `app.config.ts`, which are `*/*`). Icons MUST be decoded through
+  `contentResolver.openInputStream` — expo-contacts stores the address book's `content://com.android.contacts/…`
+  `PHOTO_THUMBNAIL_URI`, which `BitmapFactory.decodeFile` cannot open, so every chip fell back to the launcher
+  icon; `IconCompat.createWithContentUri` is NOT a substitute (the system process has no READ_CONTACTS grant).
+  Don't hardcode the count — `getMaxShortcutCountPerActivity()` (devices allow ~10-15) then clamp, because
+  `setDynamicShortcuts` THROWS when the list exceeds it. `publishShareShortcuts(rows, {redacted})` de-dupes on
+  the SERIALIZED payload, not the guids: a guid-keyed memo silently ignored a renamed chat or a contact-photo
+  backfill. Redacted mode publishes NOTHING and must actively CLEAR — dynamic shortcuts are persistent system
+  state that outlives the process, so "we haven't published this session" is not a reason to skip clearing.
+  `refreshShareShortcuts()` (lazily imports `@db/database`/the redacted store, which would otherwise drag
+  op-sqlite into this module's node-test import graph) covers the paths where the inbox never mounts.
+  Notifications CANNOT carry a matching `shortcutId` — `react-native-notify-kit` strips the field — so
+  `reportShortcutUsed` (from `useChatNavigator`) is the only affinity signal. `forget()` clears them.
+  Delivery: a Direct Share tap delivers the SEND intent to MainActivity with
   `EXTRA_SHORTCUT_ID` (the chat guid) — expo-share-intent does NOT surface it, so the module captures it
   (OnNewIntent for the running app; a `ReactActivityLifecycleListener` for cold start, mirroring
   expo-share-intent's singleton) and exposes `getLaunchShortcutId()`. `ShareIntentNavigator` reads it → routes
   to `/chat/<guid>?share=1` (the chat consumes the staged share into the Composer via `initialAttachments`)
   instead of `/new-chat`. All JS→native calls go through `requireOptionalNativeModule` + try/catch, so a
-  pre-rebuild bundle / Jest just no-ops. Native (Kotlin) is device-only — jest can't compile it; verify
-  autolinking with `npx expo-modules-autolinking search` and the manifest via `expo prebuild`.
+  pre-rebuild bundle / Jest just no-ops. Native (Kotlin) can't be jest-tested, but it CAN be type-checked
+  cheaply without a full APK build:
+  `cd android && ./gradlew :gator-share-shortcuts:compileDebugKotlin --no-daemon` (~20s on a warm cache).
+  Verify autolinking with `npx expo-modules-autolinking search -p android` and the manifest via `expo prebuild`.
+  GOTCHA: an `AsyncFunction` block must not END on `runCatching {…}` — the bridge has no converter for a
+  Kotlin `Result`; finish on a statement (e.g. an `if` without `else`) so the block's value is `Unit`.
 - **Additive migrations are appended to `MIGRATIONS` by name** (`src/db/migrations.ts`); `runMigrations`
   skips already-applied names and wraps each in BEGIN/COMMIT. Use `ALTER TABLE ADD COLUMN` (no
   `IF NOT EXISTS` — SQLite lacks it; the name-guard is the idempotency). Never edit an applied migration.
@@ -187,6 +247,25 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   stored raw before the fix. Tapping a bubble's reaction badges opens `ReactionDetailsSheet` (who
   reacted, honoring redacted mode); the sheet is list-owned like `FailedMessageSheet`, so a test
   rendering `MessageList` without a `SafeAreaProvider` must mock it out (it calls `useSafeAreaInsets`).
+- **The long-press reaction/action menu is ANCHORED to the pressed bubble's measured rect (iMessage-
+  style), not a bottom sheet.** `MessageBubble` `measureInWindow`s itself on long-press and passes the
+  `BubbleRect` up (`onLongPress(rect)` → `MessageRow.handleLongPress(rect)` →
+  `MessageList.onLongPressMessage(msg, rect)` → `useMessageActions` stashes it as `selected.anchorRect`).
+  `MessageActionsOverlay` then floats the tapback bar ABOVE the bubble + the action menu (a scrolling
+  card) BELOW it, over a dim scrim that PUNCHES OUT the bubble's rect (4 rects around a hole) so the
+  pressed bubble stays bright ("lifts") — the real bubble showing through the transparent `Modal`, no
+  snapshot. WHERE each piece goes is pure, node-tested math in `@utils`/`reactionMenuLayout.ts`
+  (`placeReactionMenu`): the bar flips BELOW when the bubble hugs the top, the menu stacks ABOVE the bar
+  when it hugs the bottom, the menu scrolls past `menuMaxHeight`, and both hug the bubble's near side
+  (own→right, received→left). The overlay keeps a NO-RECT FALLBACK sheet — used when measure fails AND
+  by the component tests, which build `SelectedMessage` without `anchorRect` — so `anchorRect` MUST stay
+  OPTIONAL and every control must render in both branches (the picker buttons + action list are built
+  once and shared). Reaction/action BEHAVIOR (labels, toggle-to-remove, +-emoji, action gating) is
+  unchanged and still locked by `messageActionsOverlay.test.tsx`/`emojiReactions.test.tsx`; only the
+  layout moved. DEVICE-ONLY caveat: `measureInWindow` returns WINDOW coords and Android edge-to-edge can
+  offset them by the status-bar height vs the `Modal`'s origin — clamped with safe-area insets, but
+  pixel alignment is verify-on-device (`reactionMenuLayout.test.ts` covers the math; native
+  touches/`measureInWindow` can't run under jest). Pure JS change → no native rebuild.
 - **Backups must filter secret-looking kv keys + delete the cache export file.** The export reads only
   `kv`/`themes`/whitelisted `chats` columns (never SecureVault/messages/handles) and drops any key
   matching `/password|token|secret|credential|auth|key/i`; the plaintext file written to `Paths.cache`

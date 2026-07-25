@@ -3,7 +3,9 @@ import { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import { apiResponse } from '@core/models/common';
 import { logger } from '@core/secure';
+import { showToast } from '@ui/toast/toastStore';
 import type { AttachmentUploader } from './sendAttachmentService';
+import { isLocalFileFailure } from './uploadErrors';
 
 /**
  * Production attachment uploader: streams the file to the server's multipart route via
@@ -37,6 +39,15 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   mimeType,
 }) => {
   const url = http.buildUrl('/message/attachment/upload');
+
+  // Pre-flight: a missing local file is NOT a network problem, and saying so up front keeps the
+  // failed bubble from reading "Connection Refused" for a file the user can plainly see is gone.
+  if (!(await expoFileExists(uri))) {
+    logger.warn('[upload] attachment file is missing before upload');
+    showToast("Couldn't read that file — try attaching it again.");
+    throw new ApiError('local_file', 'Attachment file is no longer available');
+  }
+
   let result: FileSystem.FileSystemUploadResult;
   try {
     result = await FileSystem.uploadAsync(url, uri, {
@@ -51,6 +62,12 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
     logger.warn(
       `[upload] streaming upload failed err=${err instanceof Error ? err.message : String(err)}`,
     );
+    // The native uploader throws a plain IOException for both an unreadable local file and a
+    // dead network — classify so the bubble names the right problem.
+    if (isLocalFileFailure(err)) {
+      showToast("Couldn't read that file — try attaching it again.");
+      throw new ApiError('local_file', 'Attachment file could not be read', undefined, err);
+    }
     throw new ApiError('no_connection', 'Upload request failed', undefined, err);
   }
 

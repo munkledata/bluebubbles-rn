@@ -79,5 +79,13 @@ export async function syncContacts(): Promise<{ contacts: number; matched: numbe
   } catch (e) {
     logger.debug('[contacts] server-avatar backfill skipped', e);
   }
+  // Names and photos just changed, so the system's Direct Share chips are now stale. Lazily
+  // imported to keep this module's Node import graph free of the native shortcuts bridge.
+  try {
+    const { refreshShareShortcuts } = await import('@/services/shortcuts/shareShortcuts');
+    void refreshShareShortcuts();
+  } catch {
+    // best-effort
+  }
   return { contacts, matched };
 }

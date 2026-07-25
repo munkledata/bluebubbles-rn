@@ -7,6 +7,7 @@ import {
   ReadStatusPayload,
   RcsAlertPayload,
   RcsBridgeDownPayload,
+  TestNotificationPayload,
   TypingIndicatorPayload,
   type NormalizedEvent,
   type ServerEventName,
@@ -165,6 +166,10 @@ export class EventRouter {
       case 'rcs-bridge-down': {
         const p = RcsBridgeDownPayload.safeParse(data);
         return p.success ? { type: 'rcs-bridge-down', payload: p.data } : null;
+      }
+      case 'test-notification': {
+        const p = TestNotificationPayload.safeParse(data);
+        return p.success ? { type: 'test-notification', payload: p.data } : null;
       }
       case 'new-server': {
         // Payload is the new server URL (a bare string, or wrapped as { url } / { server }).

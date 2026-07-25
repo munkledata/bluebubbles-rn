@@ -1,6 +1,12 @@
 import { serverApi } from '@core/api';
 import { logger } from '@core/secure';
-import { DevPushTransport, type EventSink, EventRouter, FCM_ENABLED } from '@core/realtime';
+import {
+  DevPushTransport,
+  type EventSink,
+  type NotificationIntent,
+  EventRouter,
+  FCM_ENABLED,
+} from '@core/realtime';
 import { chatHasKnownSender } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { useFaceTimeStore } from '@state/faceTimeStore';
@@ -30,6 +36,21 @@ import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
 import { RcsAlertEventSink } from './realtime/rcsAlertEventSink';
 import { createServerUrlResolver } from './realtime/serverUrlResolver';
 import { SocketService } from './realtime/socketService';
+
+/**
+ * Fire-and-forget `postNotification` that can never become an UNHANDLED rejection.
+ *
+ * Every call site here is fire-and-forget (the DB write is already done and is the source of
+ * truth), but a bare `void postNotification(...)` meant any throw from the notification layer —
+ * a channel-create failure, a bad avatar uri, a notify-kit argument rejection — surfaced only as
+ * an unhandled promise rejection with no attribution. Log it at `warn` instead, so a notification
+ * that fails to POST is visible in App Logs rather than being silently absent.
+ */
+function postNotificationSafely(intent: NotificationIntent): void {
+  void postNotification(intent).catch((e) => {
+    logger.warn('[notify] failed to post notification', { kind: intent.kind, error: e });
+  });
+}
 
 let socket: SocketService | null = null;
 // Guards the ONE-TIME realtime setup (notification/FCM permission + token registration) so it
@@ -86,15 +107,15 @@ function realtimeSink(db: AppDatabase): EventSink {
                   // written regardless (this gate only decides whether to raise the notification).
                   void chatHasKnownSender(db, intent.chatGuid)
                     .then((known) => {
-                      if (known) void postNotification(intent);
+                      if (known) postNotificationSafely(intent);
                     })
                     .catch((e) => {
                       logger.warn('[notify] known-sender check failed — notifying anyway', e);
-                      void postNotification(intent);
+                      postNotificationSafely(intent);
                     });
                   return;
                 }
-                void postNotification(intent);
+                postNotificationSafely(intent);
               },
             ),
             // Chat-background changed/removed group event → refetch the synced wallpaper. Injected

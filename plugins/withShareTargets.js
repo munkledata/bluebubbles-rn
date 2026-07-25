@@ -12,12 +12,12 @@ const path = require('path');
  * writes `res/xml/shortcuts.xml` with a <share-target> and points MainActivity at it via the
  * `android.app.shortcuts` meta-data.
  *
- * IMPORTANT — this is the DECLARATION only. Android only shows Direct Share results for a
- * <share-target> once the app also PUBLISHES matching dynamic shortcuts at runtime
- * (ShortcutManagerCompat.pushDynamicShortcut, tagged with SHARE_TARGET_CATEGORY, one per recent
- * chat). That runtime step is a native follow-up; until it lands this declaration is the required
- * foundation but won't by itself populate the priority row. The generic app-list entry (from the
- * SEND intent filters) is unaffected and keeps working.
+ * IMPORTANT — this is the DECLARATION half only. Android shows Direct Share results for a
+ * <share-target> only once the app ALSO publishes matching dynamic shortcuts at runtime, tagged
+ * with the SAME category. That half lives in the local native module `modules/gator-share-shortcuts`
+ * (driven from `src/services/shortcuts/shareShortcuts.ts`); both category strings must stay
+ * identical or Android surfaces nothing. The generic app-list entry (from the SEND intent filters
+ * in app.config.ts) is independent and keeps working regardless.
  */
 
 // Kept in sync with app.config.ts `android.package`.
@@ -25,12 +25,15 @@ const PACKAGE = 'com.bluegreengatorapps.messages';
 const MAIN_ACTIVITY = `${PACKAGE}.MainActivity`;
 const SHARE_TARGET_CATEGORY = `${PACKAGE}.category.SHARE_TARGET`;
 
+// `*/*` on purpose. Android only offers Direct Share targets for a mime type the <share-target>
+// DECLARES, so listing only image/video/text meant a shared PDF (or audio, zip, vCard…) matched no
+// share-target and the priority row came back EMPTY — even though the app's SEND intent filters
+// accept `*/*` and the shortcuts were published correctly. It must stay a subset of those filters
+// (see the expo-share-intent block in app.config.ts, which declares `*/*`).
 const SHORTCUTS_XML = `<?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
   <share-target android:targetClass="${MAIN_ACTIVITY}">
-    <data android:mimeType="image/*" />
-    <data android:mimeType="video/*" />
-    <data android:mimeType="text/*" />
+    <data android:mimeType="*/*" />
     <category android:name="${SHARE_TARGET_CATEGORY}" />
   </share-target>
 </shortcuts>

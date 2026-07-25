@@ -410,6 +410,59 @@ describe('channel promises do not memoize a rejection', () => {
       expect(mockDisplay.mock.calls.at(-1)![0].id).toBe('ft-ft-retry');
     });
   });
+
+  // REGRESSION: the main "New Messages" channel was the ONLY one missing this guard — it
+  // memoized the rejected createChannel promise forever, so a single transient failure meant
+  // every later message notification awaited that rejection and threw. Message notifications
+  // then stopped for the rest of the JS context with nothing but an unhandled rejection to
+  // show for it. The reminder/facetime cases above always had the reset; this one did not.
+  it('new-messages channel: a failed createChannel is retried on the next call', async () => {
+    await jest.isolateModulesAsync(async () => {
+      const svc =
+        require('@/services/notifications/notifeeService') as typeof import('@/services/notifications/notifeeService');
+      const msg: NotificationIntent = {
+        kind: 'message',
+        chatGuid: 'chat-retry',
+        chatTitle: 'Alice',
+        senderName: 'Alice',
+        senderHandle: '+15551234567',
+        body: 'hi',
+        messageGuid: 'm-retry',
+        timestamp: 1000,
+        isGroup: false,
+      };
+      mockCreateChannel.mockRejectedValueOnce(new Error('msg channel boom'));
+      await expect(svc.postNotification(msg)).rejects.toThrow('msg channel boom');
+      // Cache cleared, not poisoned — the retry actually posts.
+      await svc.postNotification(msg);
+      expect(mockDisplay.mock.calls.at(-1)![0].id).toBe('chat-retry');
+    });
+  });
+});
+
+describe('postNotification — test-notification (the server push self-test)', () => {
+  it('shows the server-supplied title/body under a fixed id', async () => {
+    await postNotification({
+      kind: 'test-notification',
+      title: 'Gator',
+      body: 'Test notification from your Gator server 🐊',
+    });
+    const n = lastNotif();
+    expect(n.id).toBe('bb-test-notification');
+    expect(n.title).toBe('Gator');
+    expect(n.body).toBe('Test notification from your Gator server 🐊');
+    expect(n.android?.channelId).toBe(CHANNEL_NEW_MESSAGE);
+  });
+
+  it('still renders under redacted mode — seeing it IS the passing test result', async () => {
+    // It carries no user content, so there is nothing to hide. Masking it would make a healthy
+    // push pipeline look broken, which is the exact ambiguity this probe exists to remove.
+    setHideNotificationPreview(true);
+    await postNotification({ kind: 'test-notification', title: 'Gator', body: 'Test push' });
+    const n = lastNotif();
+    expect(n.title).toBe('Gator');
+    expect(n.body).toBe('Test push');
+  });
 });
 
 describe('cancel helpers', () => {

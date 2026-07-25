@@ -1,5 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PICKER_ORDER,
@@ -8,6 +18,7 @@ import {
   type ReactionBaseType,
 } from '@core/reactions/reactionType';
 import type { MessageSummaryInfo } from '@core/models';
+import { placeReactionMenu, type BubbleRect } from '@utils';
 import { useTheme } from '../theme';
 
 export interface SelectedMessage {
@@ -42,6 +53,9 @@ export interface SelectedMessage {
   inThread?: boolean;
   /** The thread originator's guid when this message is a reply (else it IS the originator). */
   threadOriginatorGuid?: string | null;
+  /** The pressed bubble's on-screen rectangle (window coords). Present → the menu floats around
+   *  the bubble (iMessage-style); absent → a centered fallback sheet (tests / measure failure). */
+  anchorRect?: BubbleRect;
 }
 
 interface MessageActionsOverlayProps {
@@ -78,9 +92,27 @@ interface MessageActionsOverlayProps {
 // iMessage allows edit/unsend on your own messages for ~15 minutes.
 const EDIT_WINDOW_MS = 15 * 60_000;
 
+// Floating-layout geometry (iMessage-style anchored menu).
+const GAP = 8;
+const SIDE_INSET = 12;
+const BAR_HEIGHT = 56; // the tapback pill's height (44px targets + padding)
+const HOLE_PAD = 6; // breathing room around the "lifted" bubble in the scrim punch-out
+const SCRIM = 'rgba(0,0,0,0.45)';
+
+/** One row in the action menu (Reply / Copy / … ), built once and rendered in either layout. */
+interface ActionDef {
+  key: string;
+  label: string;
+  onPress: () => void;
+  destructive?: boolean;
+}
+
 /**
- * Long-press menu: a tapback picker + Reply, plus Edit/Unsend on your own recent
- * messages. Built with a plain Modal + Pressable (no gesture-handler/reanimated).
+ * Long-press menu: a tapback picker + Reply/Copy/… actions, with Edit/Unsend on your own recent
+ * messages. iMessage-style — the tapback bar floats above the pressed bubble and the action menu
+ * below it, positioned to the bubble's measured rectangle. Falls back to a centered sheet when the
+ * bubble rectangle is missing. Built with a plain Modal + Pressable + Animated (no
+ * gesture-handler/reanimated).
  */
 export function MessageActionsOverlay({
   selected,
@@ -103,15 +135,22 @@ export function MessageActionsOverlay({
 }: MessageActionsOverlayProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const win = useWindowDimensions();
   const mine = new Set(selected?.mine ?? []);
   const myEmojis = selected?.myEmojis ?? [];
   const [emojiDraft, setEmojiDraft] = useState('');
   const [showEmojiInput, setShowEmojiInput] = useState(false);
-  // Fresh input state each time the menu opens for a (different) message.
+  // A single spring drives the pop-in (scrim fade + bar/menu scale) of the anchored layout.
+  const anim = useRef(new Animated.Value(0)).current;
+  // Fresh input state + a replayed pop each time the menu opens for a (different) message.
   useEffect(() => {
     setEmojiDraft('');
     setShowEmojiInput(false);
-  }, [selected?.guid]);
+    if (!selected?.anchorRect) return;
+    anim.setValue(0);
+    Animated.spring(anim, { toValue: 1, useNativeDriver: true, friction: 9, tension: 90 }).start();
+  }, [selected?.guid, selected?.anchorRect, anim]);
+
   const hasText = !!selected?.text && selected.text.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
 
@@ -155,229 +194,232 @@ export function MessageActionsOverlay({
     pickEmoji(glyph);
   };
 
-  return (
-    <Modal visible={!!selected} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <View
-          style={[
-            styles.sheet,
-            { paddingBottom: insets.bottom + 12, backgroundColor: theme.color.background },
-          ]}
+  // The tapback buttons — identical in both layouts (labels/toggle behaviour are asserted by tests).
+  const pickerButtons = (
+    <>
+      {PICKER_ORDER.map((t) => (
+        <Pressable
+          key={t}
+          onPress={() => pick(t)}
+          style={[styles.tap, mine.has(t) && { backgroundColor: theme.color.tint }]}
+          accessibilityRole="button"
+          accessibilityState={{ selected: mine.has(t) }}
+          accessibilityLabel={reactionMeta(t).label}
         >
-          <View style={[styles.picker, { backgroundColor: theme.color.secondaryBackground }]}>
-            {PICKER_ORDER.map((t) => (
-              <Pressable
-                key={t}
-                onPress={() => pick(t)}
-                style={[styles.tap, mine.has(t) && { backgroundColor: theme.color.tint }]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: mine.has(t) }}
-                accessibilityLabel={reactionMeta(t).label}
-              >
-                <Text style={styles.emoji}>{reactionMeta(t).emoji}</Text>
-              </Pressable>
-            ))}
-            {myEmojis.map((g) => (
-              <Pressable
-                key={`emoji-${g}`}
-                onPress={() => pickEmoji(g)}
-                style={[styles.tap, { backgroundColor: theme.color.tint }]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: true }}
-                accessibilityLabel={`Remove ${g} reaction`}
-              >
-                <Text style={styles.emoji}>{g}</Text>
-              </Pressable>
-            ))}
-            <Pressable
-              onPress={() => setShowEmojiInput((v) => !v)}
-              style={styles.tap}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: showEmojiInput }}
-              accessibilityLabel="React with any emoji"
-            >
-              <Text style={[styles.plus, { color: theme.color.secondaryLabel }]}>+</Text>
-            </Pressable>
+          <Text style={styles.emoji}>{reactionMeta(t).emoji}</Text>
+        </Pressable>
+      ))}
+      {myEmojis.map((g) => (
+        <Pressable
+          key={`emoji-${g}`}
+          onPress={() => pickEmoji(g)}
+          style={[styles.tap, { backgroundColor: theme.color.tint }]}
+          accessibilityRole="button"
+          accessibilityState={{ selected: true }}
+          accessibilityLabel={`Remove ${g} reaction`}
+        >
+          <Text style={styles.emoji}>{g}</Text>
+        </Pressable>
+      ))}
+      <Pressable
+        onPress={() => setShowEmojiInput((v) => !v)}
+        style={styles.tap}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showEmojiInput }}
+        accessibilityLabel="React with any emoji"
+      >
+        <Text style={[styles.plus, { color: theme.color.secondaryLabel }]}>+</Text>
+      </Pressable>
+    </>
+  );
+
+  const emojiInputNode = showEmojiInput ? (
+    <TextInput
+      value={emojiDraft}
+      onChangeText={setEmojiDraft}
+      onSubmitEditing={submitEmojiDraft}
+      placeholder="Type an emoji…"
+      placeholderTextColor={theme.color.secondaryLabel}
+      autoFocus
+      returnKeyType="send"
+      accessibilityLabel="Emoji reaction input"
+      style={[
+        styles.emojiInput,
+        { backgroundColor: theme.color.secondaryBackground, color: theme.color.label },
+      ]}
+    />
+  ) : null;
+
+  // Assemble the action list once (same gating as before) — order preserved.
+  const actions: ActionDef[] = [{ key: 'reply', label: 'Reply', onPress: onReply }];
+  if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
+  if (hasText || hasAttachments)
+    actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
+  if (hasAttachments) actions.push({ key: 'save', label: 'Save to Photos', onPress: onSave });
+  if (hasText || hasAttachments) actions.push({ key: 'share', label: 'Share…', onPress: onShare });
+  if (onViewThread && selected?.inThread)
+    actions.push({ key: 'thread', label: 'View Thread', onPress: onViewThread });
+  if (onViewEditHistory && selected?.isEdited)
+    actions.push({ key: 'edithistory', label: 'View Edit History', onPress: onViewEditHistory });
+  if (onDetails) actions.push({ key: 'details', label: 'Details', onPress: onDetails });
+  if (onSelect) actions.push({ key: 'select', label: 'Select', onPress: onSelect });
+  actions.push({ key: 'remind', label: 'Remind Me Later', onPress: onRemindLater });
+  if (canEditUnsend && selected?.text)
+    actions.push({ key: 'edit', label: 'Edit', onPress: onEdit });
+  if (canEditUnsend)
+    actions.push({ key: 'unsend', label: 'Unsend', onPress: onUnsend, destructive: true });
+  if (canCancel)
+    actions.push({
+      key: 'cancel',
+      label: selected?.sendState === 'error' ? 'Remove' : 'Cancel Sending',
+      onPress: onCancelSend,
+      destructive: true,
+    });
+  if (canDelete) actions.push({ key: 'delete', label: 'Delete', onPress: onDelete, destructive: true });
+
+  const renderAction = (a: ActionDef, i: number): React.JSX.Element => (
+    <Pressable
+      key={a.key}
+      style={[
+        styles.action,
+        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.color.separator },
+      ]}
+      onPress={() => {
+        a.onPress();
+        onClose();
+      }}
+      accessibilityRole="button"
+    >
+      <Text
+        style={[
+          styles.actionText,
+          { color: a.destructive ? theme.color.destructive : theme.color.tint },
+        ]}
+      >
+        {a.label}
+      </Text>
+    </Pressable>
+  );
+
+  // The floating pop-in transform, shared by the bar and the menu card.
+  const popStyle = {
+    opacity: anim,
+    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }],
+  };
+
+  // ANCHORED (iMessage-style) layout — used whenever we have the bubble's rectangle.
+  const rect = selected?.anchorRect;
+  let body: React.JSX.Element;
+  if (selected && rect) {
+    const place = placeReactionMenu({
+      bubble: rect,
+      screen: { width: win.width, height: win.height },
+      insets: { top: insets.top, bottom: insets.bottom },
+      isFromMe: selected.isFromMe,
+      barHeight: BAR_HEIGHT,
+      gap: GAP,
+      sideInset: SIDE_INSET,
+    });
+    const holeTop = Math.max(0, rect.y - HOLE_PAD);
+    const holeBottom = rect.y + rect.height + HOLE_PAD;
+    const holeLeft = Math.max(0, rect.x - HOLE_PAD);
+    const holeRight = rect.x + rect.width + HOLE_PAD;
+    const maxWidth = win.width - SIDE_INSET * 2;
+    // Absolute horizontal anchor ('left' or 'right') → the bar + menu hug the bubble's near side.
+    const sideStyle = { [place.align]: place.edgeOffset } as { left?: number; right?: number };
+    const menuVerticalStyle =
+      place.menu.anchor === 'top' ? { top: place.menu.value } : { bottom: place.menu.value };
+
+    body = (
+      <View style={StyleSheet.absoluteFill}>
+        {/* Tap anywhere off the bar/menu (incl. the highlighted bubble) to dismiss. */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Dismiss" />
+        {/* Dim scrim with a punch-out over the pressed bubble so it stays bright ("lifts"). */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: anim }]} pointerEvents="none">
+          <View style={[styles.scrim, { top: 0, left: 0, right: 0, height: holeTop }]} />
+          <View style={[styles.scrim, { top: holeBottom, left: 0, right: 0, bottom: 0 }]} />
+          <View
+            style={[styles.scrim, { top: holeTop, height: holeBottom - holeTop, left: 0, width: holeLeft }]}
+          />
+          <View
+            style={[styles.scrim, { top: holeTop, height: holeBottom - holeTop, left: holeRight, right: 0 }]}
+          />
+        </Animated.View>
+        {/* Floating tapback bar, hugging the bubble's near top corner. */}
+        <Animated.View style={[styles.floatBar, sideStyle, { top: place.barTop, maxWidth }, popStyle]}>
+          <View style={[styles.barPill, { backgroundColor: theme.color.secondaryBackground }]}>
+            {pickerButtons}
           </View>
-          {showEmojiInput ? (
-            <TextInput
-              value={emojiDraft}
-              onChangeText={setEmojiDraft}
-              onSubmitEditing={submitEmojiDraft}
-              placeholder="Type an emoji…"
-              placeholderTextColor={theme.color.secondaryLabel}
-              autoFocus
-              returnKeyType="send"
-              accessibilityLabel="Emoji reaction input"
-              style={[
-                styles.emojiInput,
-                {
-                  backgroundColor: theme.color.secondaryBackground,
-                  color: theme.color.label,
-                },
-              ]}
-            />
-          ) : null}
-          <Pressable
-            style={[styles.action, { borderTopColor: theme.color.separator }]}
-            onPress={() => {
-              onReply();
-              onClose();
-            }}
-          >
-            <Text style={[styles.actionText, { color: theme.color.tint }]}>Reply</Text>
-          </Pressable>
-          {hasText ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onCopy();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Copy</Text>
-            </Pressable>
-          ) : null}
-          {hasText || hasAttachments ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onForward();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Forward</Text>
-            </Pressable>
-          ) : null}
-          {hasAttachments ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onSave();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Save to Photos</Text>
-            </Pressable>
-          ) : null}
-          {hasText || hasAttachments ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onShare();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Share…</Text>
-            </Pressable>
-          ) : null}
-          {onViewThread && selected?.inThread ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onViewThread();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>View Thread</Text>
-            </Pressable>
-          ) : null}
-          {onViewEditHistory && selected?.isEdited ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onViewEditHistory();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>View Edit History</Text>
-            </Pressable>
-          ) : null}
-          {onDetails ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onDetails();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Details</Text>
-            </Pressable>
-          ) : null}
-          {onSelect ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onSelect();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Select</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.action, { borderTopColor: theme.color.separator }]}
-            onPress={() => {
-              onRemindLater();
-              onClose();
-            }}
-          >
-            <Text style={[styles.actionText, { color: theme.color.tint }]}>Remind Me Later</Text>
-          </Pressable>
-          {canEditUnsend && selected?.text ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onEdit();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.tint }]}>Edit</Text>
-            </Pressable>
-          ) : null}
-          {canEditUnsend ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onUnsend();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.destructive }]}>Unsend</Text>
-            </Pressable>
-          ) : null}
-          {canCancel ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onCancelSend();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.destructive }]}>
-                {selected?.sendState === 'error' ? 'Remove' : 'Cancel Sending'}
-              </Text>
-            </Pressable>
-          ) : null}
-          {canDelete ? (
-            <Pressable
-              style={[styles.action, { borderTopColor: theme.color.separator }]}
-              onPress={() => {
-                onDelete();
-                onClose();
-              }}
-            >
-              <Text style={[styles.actionText, { color: theme.color.destructive }]}>Delete</Text>
-            </Pressable>
-          ) : null}
+          {emojiInputNode}
+        </Animated.View>
+        {/* Floating action menu card. */}
+        <Animated.View
+          style={[styles.floatMenu, sideStyle, menuVerticalStyle, { maxWidth }, popStyle]}
+        >
+          <View style={[styles.menuCard, { backgroundColor: theme.color.secondaryBackground }]}>
+            <ScrollView style={{ maxHeight: place.menuMaxHeight }} bounces={false}>
+              {actions.map(renderAction)}
+            </ScrollView>
+          </View>
+        </Animated.View>
+      </View>
+    );
+  } else if (selected) {
+    // FALLBACK: a centered/bottom sheet when we couldn't measure the bubble.
+    body = (
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={[styles.picker, { backgroundColor: theme.color.secondaryBackground }]}>
+            {pickerButtons}
+          </View>
+          {emojiInputNode}
+          <View style={[styles.menuCard, { backgroundColor: theme.color.secondaryBackground }]}>
+            {actions.map(renderAction)}
+          </View>
         </View>
       </Pressable>
+    );
+  } else {
+    body = <></>;
+  }
+
+  return (
+    <Modal visible={!!selected} transparent animationType="none" onRequestClose={onClose}>
+      {body}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  // Floating shadow shared by the bar + menu card so they read as lifted above the dim.
+  scrim: { position: 'absolute', backgroundColor: SCRIM },
+  floatBar: { position: 'absolute', alignItems: 'flex-start' },
+  barPill: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    borderRadius: 26,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  floatMenu: { position: 'absolute', minWidth: 224 },
+  menuCard: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    minWidth: 224,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  // Fallback bottom sheet.
+  backdrop: { flex: 1, backgroundColor: SCRIM, justifyContent: 'flex-end' },
   sheet: { paddingHorizontal: 16, paddingTop: 16, gap: 12 },
   picker: {
     flexDirection: 'row',
@@ -389,7 +431,16 @@ const styles = StyleSheet.create({
   tap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   emoji: { fontSize: 22 },
   plus: { fontSize: 26, fontWeight: '300', lineHeight: 30 },
-  emojiInput: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 17 },
-  action: { paddingVertical: 14, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
+  emojiInput: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 17,
+    marginTop: 8,
+    // The floating bar is content-sized (no width to stretch into), so give the field a usable
+    // floor; in the fallback sheet it still stretches wider than this.
+    minWidth: 220,
+  },
+  action: { paddingVertical: 13, paddingHorizontal: 16 },
   actionText: { fontSize: 17, fontWeight: '500' },
 });

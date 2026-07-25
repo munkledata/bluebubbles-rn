@@ -15,6 +15,8 @@ export const ClientErrorCode = {
   editFailed: 10006,
   unsendFailed: 10007,
   userCanceled: 10008,
+  /** The attachment's file on THIS device is gone or unreadable — not a network failure. */
+  attachmentUnreadable: 10009,
 } as const;
 
 /** Friendly title per client error code (mirrors ClientMessageErrorExtension.friendlyTitles). */
@@ -27,6 +29,7 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.editFailed]: 'Edit Failed',
   [ClientErrorCode.unsendFailed]: 'Unsend Failed',
   [ClientErrorCode.userCanceled]: 'Manually Canceled',
+  [ClientErrorCode.attachmentUnreadable]: 'Attachment Unavailable',
 };
 
 /**

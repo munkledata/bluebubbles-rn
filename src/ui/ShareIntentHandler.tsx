@@ -1,49 +1,71 @@
 import { useRouter } from 'expo-router';
-import { useShareIntentContext } from 'expo-share-intent';
+import { ShareIntentModule } from 'expo-share-intent';
 import React, { useEffect, useRef } from 'react';
 import { logger } from '@core/secure';
+import { captureShareIntent } from '@/services/share';
 import { getLaunchShortcutId } from '@/services/shortcuts/shareShortcuts';
 import { useShareIntentStore } from '@state/shareIntentStore';
 import { LoadErrorBoundary } from './LoadErrorBoundary';
 import { useChatNavigator } from './useChatNavigator';
 
-/** A bare local file path → a usable file:// uri (expo-share-intent may return either form). */
-function toUri(path: string): string {
-  return /^[a-z]+:\/\//i.test(path) ? path : `file://${path}`;
-}
-
 /**
  * CAPTURE side — mounted ONCE at the app ROOT, inside `<ShareIntentProvider>`, ABOVE the app-lock /
- * auth gate. It reads the incoming Android share intent from the provider context and stashes it
- * into {@link useShareIntentStore} the instant it arrives, no matter which screen is showing
- * (locked, welcome, or the connected app). It deliberately does NOT navigate: on a cold start the
- * connected-app navigator isn't mounted yet, so pushing a route here would race navigation and drop
- * the share. {@link ShareIntentNavigator} opens new-chat once the app is actually ready. Splitting
- * capture (must always be mounted) from navigation (needs the connected navigator) is what makes a
- * share reliable when the app was killed or locked at share time.
+ * auth gate. It stashes an incoming Android share into {@link useShareIntentStore} the instant it
+ * arrives, no matter which screen is showing (locked, welcome, or the connected app). It
+ * deliberately does NOT navigate: on a cold start the connected-app navigator isn't mounted yet, so
+ * pushing a route here would race navigation and drop the share. {@link ShareIntentNavigator} opens
+ * new-chat once the app is actually ready. Splitting capture (must always be mounted) from
+ * navigation (needs the connected navigator) is what makes a share reliable when the app was killed
+ * or locked at share time.
+ *
+ * WHY WE SUBSCRIBE TO THE RAW NATIVE MODULE instead of reading `useShareIntentContext()`:
+ *
+ *  1. The library's parser DROPS `contentUri`, which is the only source we can reliably read for a
+ *     document (see `services/share/shareIntentPayload.ts`). The raw payload is a strict superset,
+ *     so there is nothing to gain from the parsed view.
+ *  2. It swallows its own failures. A native `onError` (e.g. "empty uri for file sharing") and a
+ *     parser throw both land in a context `error` field that this component never read — so a
+ *     failed share produced NO attachment, NO message, and NO log line. That silence is the single
+ *     hardest part of diagnosing a broken share; both channels are now logged.
+ *
+ * `<ShareIntentProvider>` stays mounted in `app/_layout.tsx` — it drives the cold-start/AppState
+ * pumping — we simply no longer read its parsed state. Emitters accept multiple listeners, and
+ * `getShareIntent` nulls the native singleton once handled, so the two coexist without
+ * double-capturing.
  */
 function ShareIntentCaptureInner(): null {
-  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
-
   useEffect(() => {
-    if (!hasShareIntent) return;
-    const files = (shareIntent.files ?? []).map((f) => ({
-      uri: toUri(f.path),
-      name: f.fileName,
-      mimeType: f.mimeType,
-      size: f.size ?? 0,
-    }));
-    // A shared web URL comes through as `webUrl`; plain text as `text`.
-    const text = shareIntent.webUrl ?? shareIntent.text ?? null;
-    if (text || files.length > 0) {
-      logger.debug(`[share] captured ${files.length} file(s)${text ? ' + text' : ''}`);
-      useShareIntentStore.getState().set({ text, files });
+    // Null pre-rebuild and under Jest (`requireOptionalNativeModule`).
+    const mod = ShareIntentModule;
+    if (!mod) {
+      logger.debug('[share] native share module unavailable — capture disabled');
+      return;
     }
-    // Clear the NATIVE intent (not our store) so the same share can't re-fire on the next
-    // foreground. Our store keeps the payload until new-chat consumes it.
-    resetShareIntent();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasShareIntent]);
+
+    const onChange = mod.addListener('onChange', (event: unknown) => {
+      void captureShareIntent((event as { value?: unknown } | null)?.value);
+    });
+    // The library reports "empty uri for file sharing", resolver failures, etc. here. Previously
+    // unread — this is where a share that "did nothing" now becomes visible in App Logs.
+    const onError = mod.addListener('onError', (event: unknown) => {
+      logger.error(`[share] native error: ${String((event as { value?: unknown } | null)?.value)}`);
+    });
+
+    // Drain a cold-start intent AFTER subscribing, so we can't miss the event we just asked for.
+    // Idempotent: the native side nulls the singleton once it has handled it.
+    try {
+      void (mod.getShareIntent('') as unknown as Promise<void> | void);
+    } catch (err) {
+      logger.warn(
+        `[share] initial drain failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    return () => {
+      onChange.remove();
+      onError.remove();
+    };
+  }, []);
 
   return null;
 }

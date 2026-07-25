@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import { Chat } from '@core/models';
 import { logger } from '@core/secure';
-import { sendErrorCode } from '@utils';
+import { ClientErrorCode, sendErrorCode } from '@utils';
 import { getChatIdByGuid, insertOutgoingText, upsertChats, upsertHandles } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from '@/services/send/sendOutcome';
@@ -79,6 +79,23 @@ describe('handleSendFailure', () => {
     expect(
       (raw.prepare('SELECT attempts FROM outgoing_queue').get() as { attempts: number }).attempts,
     ).toBe(1);
+  });
+
+  it('maps a local-file ApiError to "Attachment Unavailable", NOT the connection code', async () => {
+    // Both are status-less, so without the explicit kind check they'd collapse to the same
+    // "Connection Refused" bubble — blaming the server for a file problem on this device.
+    const { db, raw } = await createTestDb();
+    await seedOutgoing(db, 'temp-ffff0000', 1000);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    await handleSendFailure(
+      db,
+      'temp-ffff0000',
+      new ApiError('local_file', 'Attachment file is no longer available'),
+      'send-attachment',
+      'c1',
+    );
+    expect(msgRow(raw, 'temp-ffff0000')?.e).toBe(ClientErrorCode.attachmentUnreadable);
+    expect(msgRow(raw, 'temp-ffff0000')?.e).not.toBe(ClientErrorCode.connectionRefused);
   });
 
   it('maps a non-HTTP throw to the connection error code (no HTTP part in the log)', async () => {

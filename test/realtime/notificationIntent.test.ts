@@ -362,3 +362,43 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents[0]?.kind).toBe('rcs-bridge-down');
   });
 });
+
+/**
+ * REGRESSION: `test-notification` (the server's "Send Test Notification" button) had no entry in
+ * SERVER_EVENTS and no `normalize()` case, so the router dropped it at `default: return null`.
+ * The server reported `sent: N, failed: 0` while the device showed nothing — the one end-to-end
+ * probe of the push chain could only ever produce a false negative.
+ */
+describe('buildMessageIntents — test-notification (server push self-test)', () => {
+  it('emits a status intent from the server-supplied title/body', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'test-notification',
+      { title: 'Gator', body: 'Test notification from your Gator server 🐊' },
+      'fcm',
+    );
+    expect(intents).toEqual([
+      {
+        kind: 'test-notification',
+        title: 'Gator',
+        body: 'Test notification from your Gator server 🐊',
+      },
+    ]);
+  });
+
+  it('falls back to default copy when the push omits title/body', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle('test-notification', {}, 'fcm');
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({ kind: 'test-notification', title: 'Gator' });
+  });
+
+  it('is delivered over the socket too, not just FCM', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle('test-notification', { title: 'T', body: 'B' }, 'socket');
+    expect(intents).toEqual([{ kind: 'test-notification', title: 'T', body: 'B' }]);
+  });
+});

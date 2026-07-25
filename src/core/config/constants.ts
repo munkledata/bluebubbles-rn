@@ -57,6 +57,10 @@ export const SERVER_EVENTS = [
   // Server-fired high-priority push when the RCS bridge drops / auth expires — carries a
   // ready-made { title, body, reason } and posts a content-less status notification (no DB).
   'rcs-bridge-down',
+  // The server's "Send Test Notification" probe — posts a status notification so the user can
+  // confirm the whole server→FCM→device chain works. Must be listed here (and handled in the
+  // router) or it is dropped as unrecognized and the test silently proves nothing.
+  'test-notification',
 ] as const;
 
 export type ServerEventName = (typeof SERVER_EVENTS)[number];

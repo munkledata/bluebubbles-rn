@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as icloudApi from '@core/api/endpoints/icloud';
 import type { AccountInfo } from '@core/api/endpoints/icloud';
-import { isUnimplementedEndpoint } from '@core/api/errors';
+import { ApiError, isUnimplementedEndpoint } from '@core/api/errors';
 import { http } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { CheckRow, InfoRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
@@ -36,6 +36,12 @@ export default function AccountScreen(): React.JSX.Element {
           ? 'unsupported'
           : 'error'
         : 'ready';
+  // A 5xx means the request REACHED the server but it couldn't read the account — with this
+  // endpoint that's almost always the Private API helper being off/restarting (helper-off
+  // surfaces as a generic 500, not a 404 — see docs/IMESSAGE_ACCOUNT_PLAN.md). Say so instead
+  // of blaming the connection.
+  const helperDown =
+    accountQuery.error instanceof ApiError && (accountQuery.error.status ?? 0) >= 500;
 
   // vettedAliases gates which aliases can be selected (Apple must have enabled them for iMessage);
   // when the server can't determine the list, allow any alias.
@@ -80,7 +86,9 @@ export default function AccountScreen(): React.JSX.Element {
       ) : status === 'error' ? (
         <View style={styles.center}>
           <Text style={[styles.note, { color: theme.color.secondaryLabel, textAlign: 'center' }]}>
-            Couldn’t load your account. Check your server connection and try again.
+            {helperDown
+              ? 'The server responded, but couldn’t read your account — the Private API helper on your Mac may be off or restarting. Check the helper, then try again.'
+              : 'Couldn’t load your account. Check your server connection and try again.'}
           </Text>
           <Pressable onPress={() => void accountQuery.refetch()} style={styles.retry}>
             <Text style={{ color: theme.color.tint, fontSize: 16 }}>Try again</Text>

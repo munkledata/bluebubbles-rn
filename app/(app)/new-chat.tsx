@@ -304,7 +304,10 @@ export default function NewChatScreen(): React.JSX.Element {
           >
             {staged.map((f) => (
               <View key={f.uri} style={styles.stagedItem}>
-                {f.mimeType.startsWith('image/') ? (
+                {/* `mimeType` is typed non-null but a share intent can deliver null (the
+                    provider reported no type) — an unguarded `.startsWith` is a render crash
+                    into the root ErrorBoundary. Same idiom as MessageBubble. */}
+                {(f.mimeType ?? '').startsWith('image/') ? (
                   <Image source={{ uri: f.uri }} style={styles.stagedThumb} contentFit="cover" />
                 ) : (
                   <View
@@ -316,7 +319,9 @@ export default function NewChatScreen(): React.JSX.Element {
                   >
                     <Icon
                       name={
-                        f.mimeType.startsWith('video/') ? 'videocam-outline' : 'document-outline'
+                        (f.mimeType ?? '').startsWith('video/')
+                          ? 'videocam-outline'
+                          : 'document-outline'
                       }
                       size={22}
                       color={theme.color.secondaryLabel}

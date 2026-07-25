@@ -4,17 +4,39 @@ import type { MessagePreview } from '@db/repositories';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { redactMessageText, redactTitle } from '@utils/privacy';
 import { useTheme } from '../theme';
+import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
 interface ReplyQuoteProps {
   preview: MessagePreview;
   isFromMe: boolean;
   /** Tap to jump to the original message (set when the original is in the list). */
   onPress?: () => void;
+  /** A chat wallpaper is set → back the quote with a frosted pill + primary-label text so it stays
+   *  legible over the image, matching every other non-bubble label. */
+  hasBackground?: boolean;
 }
 
 /** A dimmed preview of the original message, shown above a reply bubble. Tappable. */
-export function ReplyQuote({ preview, isFromMe, onPress }: ReplyQuoteProps): React.JSX.Element {
+export function ReplyQuote({
+  preview,
+  isFromMe,
+  onPress,
+  hasBackground,
+}: ReplyQuoteProps): React.JSX.Element {
   const theme = useTheme();
+  // Over a wallpaper, back the quote with the same frosted pill + primary-label text the other
+  // non-bubble labels use (overlayText) — the muted colours below wash out on a busy photo.
+  const pill = overlayPillStyle(hasBackground, theme.color.background);
+  const whoColor = overlayTextStyle(
+    hasBackground,
+    theme.color.secondaryLabel,
+    theme.color.label,
+  ).color;
+  const textColor = overlayTextStyle(
+    hasBackground,
+    theme.color.tertiaryLabel,
+    theme.color.label,
+  ).color;
   const redacted = useRedactedModeStore((s) => s.enabled);
   // Redacted mode masks the quoted sender + text like every other content path ("You" reveals
   // nothing and stays, mirroring the tombstone in MessageBubble).
@@ -35,14 +57,16 @@ export function ReplyQuote({ preview, isFromMe, onPress }: ReplyQuoteProps): Rea
       style={[
         styles.wrap,
         { alignSelf: isFromMe ? 'flex-end' : 'flex-start', borderLeftColor: theme.color.tint },
+        pill,
+        hasBackground ? styles.wrapOnBackground : null,
       ]}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={onPress ? `Reply to ${who}. Tap to jump to the original.` : undefined}
     >
-      <Text numberOfLines={1} style={[styles.who, { color: theme.color.secondaryLabel }]}>
+      <Text numberOfLines={1} style={[styles.who, { color: whoColor }]}>
         {who}
       </Text>
-      <Text numberOfLines={2} style={[styles.text, { color: theme.color.tertiaryLabel }]}>
+      <Text numberOfLines={2} style={[styles.text, { color: textColor }]}>
         {text}
       </Text>
     </Pressable>
@@ -58,6 +82,9 @@ const styles = StyleSheet.create({
     marginBottom: 3,
     opacity: 0.95,
   },
+  // On a wallpaper the frosted pill carries legibility, so drop the slight dim that muted the
+  // quote against a solid theme background.
+  wrapOnBackground: { opacity: 1 },
   who: { fontSize: 11, fontWeight: '600' },
   text: { fontSize: 13, lineHeight: 17 },
 });

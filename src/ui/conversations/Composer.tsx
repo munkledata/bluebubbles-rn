@@ -90,6 +90,9 @@ export const Composer = React.memo(function Composer({
   // Over a wallpaper the composer bar disappears; the input pill + each control float as bubbles.
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.ctrlBubble, { backgroundColor: chip }] : null;
+  // Over a wallpaper the composer bar is transparent, so the reply/edit preview would sit straight
+  // on the image — back it with the same frosted chip the controls use.
+  const replyBarBg = translucent ? [styles.replyBarBubble, { backgroundColor: chip }] : null;
   const [text, setText] = useState('');
   const [subject, setSubject] = useState('');
   const [effectOpen, setEffectOpen] = useState(false);
@@ -322,7 +325,7 @@ export const Composer = React.memo(function Composer({
       ]}
     >
       {isEditing ? (
-        <View style={[styles.replyBar, { borderLeftColor: theme.color.tint }]}>
+        <View style={[styles.replyBar, { borderLeftColor: theme.color.tint }, replyBarBg]}>
           <View style={styles.replyText}>
             <Text style={[styles.replyWho, { color: theme.color.secondaryLabel }]}>
               Editing message
@@ -340,7 +343,7 @@ export const Composer = React.memo(function Composer({
         </View>
       ) : null}
       {replyTo && !isEditing ? (
-        <View style={[styles.replyBar, { borderLeftColor: theme.color.tint }]}>
+        <View style={[styles.replyBar, { borderLeftColor: theme.color.tint }, replyBarBg]}>
           <View style={styles.replyText}>
             <Text style={[styles.replyWho, { color: theme.color.secondaryLabel }]}>
               Replying to {replyWho}
@@ -373,7 +376,9 @@ export const Composer = React.memo(function Composer({
         >
           {pending.map((p) => (
             <View key={p.uri} style={styles.pendingItem}>
-              {p.mimeType.startsWith('image/') ? (
+              {/* Guarded: a shared file can arrive with a null mimeType despite the type
+                  saying otherwise — an unguarded `.startsWith` crashes the render. */}
+              {(p.mimeType ?? '').startsWith('image/') ? (
                 <Image source={{ uri: p.uri }} style={styles.pendingThumb} contentFit="cover" />
               ) : (
                 <View
@@ -384,7 +389,11 @@ export const Composer = React.memo(function Composer({
                   ]}
                 >
                   <Icon
-                    name={p.mimeType.startsWith('video/') ? 'videocam-outline' : 'document-outline'}
+                    name={
+                      (p.mimeType ?? '').startsWith('video/')
+                        ? 'videocam-outline'
+                        : 'document-outline'
+                    }
                     size={22}
                     color={theme.color.secondaryLabel}
                   />
@@ -554,6 +563,8 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     borderLeftWidth: 2,
   },
+  // Frosted pill behind the reply/edit bar when the composer floats over a wallpaper.
+  replyBarBubble: { borderRadius: 10, overflow: 'hidden', paddingVertical: 4 },
   replyText: { flex: 1 },
   replyWho: { fontSize: 12, fontWeight: '600' },
   replySnippet: { fontSize: 13, marginTop: 1 },

@@ -1,7 +1,7 @@
 import type { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import { logger } from '@core/secure';
-import { sendErrorCode } from '@utils';
+import { ClientErrorCode, sendErrorCode } from '@utils';
 import {
   markOutgoingSentNoGuid,
   reconcileOutgoingError,
@@ -52,7 +52,12 @@ export async function handleSendFailure(
   now?: number,
 ): Promise<void> {
   const status = err instanceof ApiError ? (err.status ?? null) : null;
-  const code = sendErrorCode(status);
+  // A local file problem has no HTTP status, so `sendErrorCode` would call it a connection
+  // refusal. Name it for what it is instead.
+  const code =
+    err instanceof ApiError && err.kind === 'local_file'
+      ? ClientErrorCode.attachmentUnreadable
+      : sendErrorCode(status);
   logger.warn(
     `[${logTag}] failed for chat ${chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
       err instanceof Error ? err.message : String(err)

@@ -84,6 +84,7 @@ describe('errorTitleForCode (2.4)', () => {
     expect(errorTitleForCode(10006)).toBe('Edit Failed');
     expect(errorTitleForCode(10007)).toBe('Unsend Failed');
     expect(errorTitleForCode(10008)).toBe('Manually Canceled');
+    expect(errorTitleForCode(10009)).toBe('Attachment Unavailable');
   });
 
   it('falls back to "iMessage Error (Code N)" for positive server codes', () => {

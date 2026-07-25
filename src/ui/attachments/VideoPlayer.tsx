@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import React, { useCallback, useState } from 'react';
+import { useVideoPlayer, VideoView, type VideoThumbnail } from 'expo-video';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
@@ -17,8 +17,8 @@ interface VideoPlayerProps {
 }
 
 /**
- * In-bubble video: a blurhash poster with a play badge that lazily mounts a
- * native VideoView on first tap. Downloads-then-plays when no local file yet;
+ * In-bubble video: a first-frame poster (generated from the local file) with a play badge that
+ * lazily mounts a native VideoView on first tap. Downloads-then-plays when no local file yet;
  * pauses on blur so a recycled/backgrounded row doesn't keep audio running.
  */
 export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): React.JSX.Element {
@@ -26,6 +26,7 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   const [playing, setPlaying] = useState(false);
+  const [thumb, setThumb] = useState<VideoThumbnail | null>(null);
 
   const player = useVideoPlayer(att.localPath ?? null, (p) => {
     p.loop = false;
@@ -46,6 +47,27 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
       [player],
     ),
   );
+
+  // Real poster: once the file is local, pull its first frame so the bubble shows the video's
+  // content instead of a gray box. expo-video's native generator returns an image the <Image>
+  // below renders directly (no new dependency). Guarded like player.pause() above — the player may
+  // be released on a recycled FlashList row and the call throws on a released/not-yet-loaded asset;
+  // cancel-on-unmount so a late resolve doesn't setState on a recycled row.
+  useEffect(() => {
+    if (!att.localPath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const thumbs = await player.generateThumbnailsAsync([0], { maxWidth: 600 });
+        if (!cancelled && thumbs[0]) setThumb(thumbs[0]);
+      } catch {
+        // player released, asset not ready, or codec unsupported — keep the gray poster + play badge.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [player, att.localPath]);
 
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
@@ -84,7 +106,7 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
   return (
     <Pressable onPress={onPress} style={[styles.wrap, box]}>
       <Image
-        source={null}
+        source={thumb}
         placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
         contentFit="cover"
         style={styles.fill}

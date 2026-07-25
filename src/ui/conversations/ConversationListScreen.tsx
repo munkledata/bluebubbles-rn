@@ -18,6 +18,7 @@ import { useChats } from '@features/conversations/useChats';
 import { getDatabase } from '@db/database';
 import { markAllChatsReadLocal, type InboxRow } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
@@ -43,16 +44,16 @@ export function ConversationListScreen(): React.JSX.Element {
   const { refreshControl } = usePullToRefresh(refreshInbox);
 
   // Publish the most-recent conversations as Android Direct Share targets (share sheet's priority
-  // row). Keyed on the top rows' identity so it only re-publishes when the leading chats actually
-  // change — not on every reactive tick. No-op on iOS / a build without the native module.
-  const topKey = rows
-    .slice(0, 4)
-    .map((r) => r.guid)
-    .join('|');
+  // row). No-op on a build without the native module. Running on EVERY reactive tick is deliberate:
+  // `publishShareShortcuts` de-dupes on the serialized payload, so a tick that changes nothing is a
+  // string compare — while a renamed chat or a newly synced contact photo now actually republishes
+  // (the old top-4-guid memo silently ignored both).
+  // Redacted mode publishes NOTHING (and clears what's there): a masked chip is untappable and the
+  // chip count alone still leaks how many conversations exist.
+  const shortcutsRedacted = useRedactedModeStore((s) => s.enabled);
   useEffect(() => {
-    if (rows.length > 0) publishShareShortcuts(rows);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topKey]);
+    if (rows.length > 0) publishShareShortcuts(rows, { redacted: shortcutsRedacted });
+  }, [rows, shortcutsRedacted]);
 
   // Only let the KeyboardAvoidingView add padding WHILE the keyboard is up. When it's down the KAV
   // is disabled (contributes 0), so it can't leave the nav-bar-sized residual gap under the bar that

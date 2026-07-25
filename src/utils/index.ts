@@ -7,6 +7,7 @@ export * from './mentions';
 export * from './swipeGesture';
 export * from './scrollPin';
 export * from './chatNavigation';
+export * from './reactionMenuLayout';
 export * from './groupEvent';
 export * from './chat';
 export * from './messageGrouping';

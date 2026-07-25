@@ -50,6 +50,8 @@ import AccountScreen from '../../../app/(app)/account';
 import * as icloudApi from '@core/api/endpoints/icloud';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
+// eslint-disable-next-line import/first
+import { ApiError } from '@core/api/errors';
 
 const mockGetAccountInfo = icloudApi.getAccountInfo as jest.Mock;
 const mockSetActiveAlias = icloudApi.setActiveAlias as jest.Mock;
@@ -102,6 +104,14 @@ describe('AccountScreen — account query', () => {
     });
     expect(await screen.findByText('user@icloud.com')).toBeTruthy();
     expect(mockGetAccountInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it('a 500 blames the Private API helper, not the connection (helper-off case)', async () => {
+    mockGetAccountInfo.mockRejectedValueOnce(new ApiError('server_error', 'Server error', 500));
+    await renderScreen();
+    expect(await screen.findByText(/Private API helper on your Mac may be off/)).toBeTruthy();
+    // Still recoverable the same way.
+    expect(screen.getByText('Try again')).toBeTruthy();
   });
 });
 

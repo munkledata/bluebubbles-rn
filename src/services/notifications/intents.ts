@@ -131,6 +131,15 @@ export async function buildMessageIntents(
       const body = event.payload.body ?? 'The RCS bridge went down — reconnect on the server.';
       return [{ kind: 'rcs-bridge-down', title, body }];
     }
+    case 'test-notification': {
+      // The server's push self-test. Always produces a notification — it is a user-initiated
+      // diagnostic, so it deliberately bypasses the message-kind gating (the "Message
+      // Notifications" toggle / unknown-sender filter) applied in realtimeControl. Falls back to
+      // fixed copy if the server omitted a field, so the probe can never render blank.
+      const title = event.payload.title ?? 'Gator';
+      const body = event.payload.body ?? 'Test notification from your Gator server.';
+      return [{ kind: 'test-notification', title, body }];
+    }
     default:
       return [];
   }

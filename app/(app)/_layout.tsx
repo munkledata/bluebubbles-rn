@@ -11,8 +11,10 @@ import {
 import { takePendingNotification } from '@/services/notifications/pendingNav';
 import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
 import { recoverOutgoing } from '@/services/send';
+import { refreshShareShortcuts } from '@/services/shortcuts/shareShortcuts';
 import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
+import { useRedactedModeStore } from '@state/redactedModeStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
 import { useChatNavigator } from '@ui/useChatNavigator';
@@ -68,6 +70,15 @@ export default function AppLayout(): React.JSX.Element {
   useEffect(() => {
     void flushErrorReports();
   }, []);
+
+  // Keep the system's Direct Share chips (the share sheet's priority row) current. The inbox screen
+  // publishes while it's mounted, but opening straight into a chat from a notification tap never
+  // mounts it — so publish once here too. Re-runs when redacted mode flips: turning it ON must
+  // actively CLEAR the chips, since they carry real names and photos into system UI.
+  const redacted = useRedactedModeStore((s) => s.enabled);
+  useEffect(() => {
+    void refreshShareShortcuts();
+  }, [redacted]);
 
   // Drain a pending notification tap and open its chat. Reads BOTH the notify-kit launch event
   // (getInitialNotification) and the pendingNav stash a background-alive tap leaves behind, once.

@@ -13,7 +13,7 @@ import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
-import { isLocalFileUri } from '@utils';
+import { isLocalFileUri, type BubbleRect } from '@utils';
 import { devSendFakeReaction, devUnsendFake } from './devSeed';
 import { buildForwardParams } from './forwardParams';
 import type { EnrichedMessage } from './useMessages';
@@ -57,7 +57,7 @@ export function useMessageActions({
 
   // Long-press a bubble → open the tapback/reply/edit menu. Stable so the
   // memoized message rows aren't re-rendered by a fresh closure each render.
-  const onLongPressMessage = useCallback((msg: EnrichedMessage): void => {
+  const onLongPressMessage = useCallback((msg: EnrichedMessage, rect: BubbleRect): void => {
     const mine = msg.reactions
       .filter((r) => r.isFromMe && r.baseType !== 'emoji')
       .map((r) => r.baseType)
@@ -97,6 +97,9 @@ export function useMessageActions({
         !!msg.threadOriginatorGuid ||
         messagesRef.current.some((m) => m.threadOriginatorGuid === msg.guid),
       threadOriginatorGuid: msg.threadOriginatorGuid,
+      // The pressed bubble's on-screen rectangle → the overlay floats the tapback bar + menu
+      // around it (iMessage-style). Absent → the overlay falls back to a centered sheet.
+      anchorRect: rect,
     });
   }, []);
 

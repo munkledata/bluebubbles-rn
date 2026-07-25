@@ -40,6 +40,24 @@ export const RcsBridgeDownPayload = z
   .loose();
 
 /**
+ * The server's `test-notification` push — the dashboard's "Send Test Notification" button
+ * (`send-test-notification` admin channel), which fans a `{ title, body }` out to every
+ * registered device through the exact same dispatch + encryption path a real message uses.
+ *
+ * WHY IT MATTERS: this is the ONE end-to-end probe of the push chain, and until it was handled
+ * here the app had no case for the event — the router hit `default: return null` and dropped it.
+ * So the server reported `sent: N, failed: 0` while the phone showed nothing, which reads as
+ * "push is broken" even on a perfectly healthy pipeline (and, worse, hid a genuinely broken one).
+ * Diagnostics that can only report false negatives are worse than no diagnostics.
+ */
+export const TestNotificationPayload = z
+  .object({
+    title: z.string().nullish(),
+    body: z.string().nullish(),
+  })
+  .loose();
+
+/**
  * The server's `message-deleted` event (macOS "Recently Deleted"; fanned out over socket + webhook +
  * FCM). `guid` is the only load-bearing field — the sink resolves the owning chat from the local
  * message row, and falls back to now() for an absent delete date — so `chatGuid`/`dateDeleted` are
@@ -91,7 +109,10 @@ export type NormalizedEvent =
   | { type: 'rcs-alert'; payload: z.infer<typeof RcsAlertPayload> }
   // The server's RCS bridge dropped / auth expired — posts a content-less status notification
   // from the server-supplied title/body. Never written to the DB.
-  | { type: 'rcs-bridge-down'; payload: z.infer<typeof RcsBridgeDownPayload> };
+  | { type: 'rcs-bridge-down'; payload: z.infer<typeof RcsBridgeDownPayload> }
+  // The server's push self-test ("Send Test Notification"). Posts a status notification and is
+  // never written to the DB — its only job is to prove the server→FCM→device chain end to end.
+  | { type: 'test-notification'; payload: z.infer<typeof TestNotificationPayload> };
 
 /**
  * Pure, transport-free description of a notification to show (or clear). Emitted
@@ -125,6 +146,9 @@ export type NotificationIntent =
   | { kind: 'alias-removed'; aliases: string[] }
   /** The RCS bridge dropped / auth expired — a content-less server status notice (no private
    *  content, so no redaction needed). Title/body are supplied by the server push. */
-  | { kind: 'rcs-bridge-down'; title: string; body: string };
+  | { kind: 'rcs-bridge-down'; title: string; body: string }
+  /** The server's push self-test landed. Shown verbatim (server-authored text, no user content,
+   *  so nothing to redact) — seeing it on the lock screen IS the successful test result. */
+  | { kind: 'test-notification'; title: string; body: string };
 
 export type { ServerEventName };
