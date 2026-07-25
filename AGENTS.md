@@ -166,6 +166,7 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   without writing when the provider reports no display name); and skip non-object entries in `files` (an
   upstream bracket bug at `ExpoShareIntentModule.kt:145` injects a junk array into every single-file SEND).
   ALWAYS subscribe to `onError` — not doing so is what made every one of these failures perfectly silent.
+  Full analysis, the four traps, and the device decision-tree: `docs/SHARE_INTENT_RELIABILITY.md`.
 - **An unreadable local file is NOT a network error.** `attachmentUpload.ts` used to wrap every
   `uploadAsync` throw in `ApiError('no_connection')`, so a missing/ungranted file rendered as a red bubble
   labelled "Connection Refused" (code 10004) and sent the user chasing their server. There is now a
