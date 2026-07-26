@@ -1,10 +1,21 @@
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Image } from 'expo-image';
-import React, { useEffect, useRef, useState } from 'react';
-import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  findNodeHandle,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MessagePreview } from '@db/repositories';
+import { attachPasteListener } from '@/services/paste';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { showToast } from '../toast/toastStore';
 import {
   activeMentionQuery,
   computeMentionRanges,
@@ -137,6 +148,37 @@ export const Composer = React.memo(function Composer({
 
   const addPending = (item: PendingAttachment): void =>
     setPending((cur) => (cur.some((p) => p.uri === item.uri) ? cur : [...cur, item]));
+
+  /**
+   * Pasted pictures/files (long-press Paste, a keyboard image/GIF/sticker commit, or a drop).
+   *
+   * The tag is captured from `onLayout` rather than a mount effect: the native lookup resolves
+   * through the UIManager's mounting layer, so asking before the Fabric mount has landed on the
+   * UI thread simply finds nothing and the listener is never registered.
+   */
+  const inputRef = useRef<TextInput | null>(null);
+  const [inputTag, setInputTag] = useState<number | null>(null);
+  const captureInputTag = useCallback((): void => {
+    const tag = findNodeHandle(inputRef.current);
+    if (typeof tag === 'number') setInputTag((cur) => (cur === tag ? cur : tag));
+  }, []);
+
+  useEffect(() => {
+    if (inputTag == null) return;
+    return attachPasteListener(inputTag, ({ files, dropped }) => {
+      // Only `setPending` (stable) is used here, so the listener never needs re-attaching when
+      // the composer re-renders — which would otherwise churn the native registration on every
+      // keystroke.
+      if (files.length > 0) {
+        setPending((cur) => {
+          const fresh = files.filter((f) => !cur.some((p) => p.uri === f.uri));
+          return fresh.length > 0 ? [...cur, ...fresh] : cur;
+        });
+      }
+      // Silence would read as "paste is broken" — say so when nothing could be staged.
+      if (files.length === 0 && dropped > 0) showToast("Couldn't read that pasted file");
+    });
+  }, [inputTag]);
   const removePending = (uri: string): void =>
     setPending((cur) => cur.filter((p) => p.uri !== uri));
   const toggleTray = (): void =>
@@ -458,9 +500,12 @@ export const Composer = React.memo(function Composer({
           </Pressable>
         ) : null}
         <TextInput
+          ref={inputRef}
           multiline
           value={text}
           onChangeText={onChangeText}
+          // Registers the native paste listener once the view exists (see captureInputTag).
+          onLayout={captureInputTag}
           // Track the caret so @mention autocomplete knows where the in-progress query is.
           onSelectionChange={(e) => setCursor(e.nativeEvent.selection.start)}
           onFocus={() => setTrayOpen(false)}

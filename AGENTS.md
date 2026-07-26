@@ -207,6 +207,36 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   Verify autolinking with `npx expo-modules-autolinking search -p android` and the manifest via `expo prebuild`.
   GOTCHA: an `AsyncFunction` block must not END on `runCatching {…}` — the bridge has no converter for a
   Kotlin `Result`; finish on a statement (e.g. an `if` without `else`) so the block's value is `Unit`.
+- **Pasting pictures/files into the composer needs a native listener — RN's TextInput can NEVER do it.**
+  `ReactEditText` (RN 0.86) never calls `EditorInfoCompat.setContentMimeTypes`, so Gboard refuses image/GIF/
+  sticker insertion ("this app doesn't support image insertion here"); worse,
+  `ReactEditText.onTextContextMenuItem` (`ReactEditText.kt:366-369`) rewrites EVERY `android.R.id.paste` into
+  `pasteAsPlainText`, so the system long-press Paste `coerceToText`s an image and drops a raw `content://…`
+  STRING into the input. Grepping the whole `react-native` package for `setContentMimeTypes|
+  OnReceiveContentListener|InputConnectionCompat` returns ZERO files, and there is no JS paste event at all.
+  THE FIX IS ONE CALL ON THE VIEW RN ALREADY BUILT — no fork, no subclass, no custom ViewManager:
+  `ReactEditText` extends androidx `AppCompatEditText`, which ALREADY contains the whole receive-content
+  implementation (the `setContentMimeTypes` + `InputConnectionCompat` wiring for API ≤30, and
+  `AppCompatReceiveContentHelper`, which intercepts BOTH `paste` and `pasteAsPlainText` — so RN's rewrite
+  still routes through it); API 31+ gets it from the framework `TextView`. It is simply DORMANT until a
+  listener is registered. `modules/gator-paste-input` (local Expo module, autolinked, Android-only) resolves
+  the input via `appContext.findView<EditText>(tag)` and calls `ViewCompat.setOnReceiveContentListener(view,
+  arrayOf("*/*"), …)` — which lights up long-press Paste, keyboard image/GIF/sticker commits AND
+  drag-and-drop at once, for ANY mime type including PDFs. FOUR non-obvious rules: (1) pass
+  `findNodeHandle(ref)` as a plain **Int**, never the ref object — Expo's ref converter reads `nativeTag`
+  while RN 0.86 Fabric exposes `__nativeTag`; (2) attach from the TextInput's **`onLayout`**, not a mount
+  effect — `findView` goes through the UIManager's mounting layer and finds nothing before the Fabric mount
+  lands (and it's `@UiThread`, so the AsyncFunction needs `.runOnQueue(Queues.MAIN)`); (3) call
+  `InputMethodManager.restartInput` after attaching — `contentMimeTypes` is only read when the input
+  connection is CREATED, so an already-focused field keeps advertising text-only; (4) COPY THE URI TO CACHE
+  **synchronously inside the listener** — for a keyboard commit androidx calls `releasePermission()` the
+  moment the listener returns, so a uri forwarded to JS is already dead (same transient-grant lesson as
+  `docs/SHARE_INTENT_RELIABILITY.md`). Because that copy is on the UI thread it is byte-bounded (`MAX_BYTES`)
+  so a huge pasted file can't ANR. Return the non-uri REMAINDER from the listener or ordinary text paste
+  breaks. JS half: `src/services/paste/` (`pastePayload.ts` is pure/node-tested; `pasteInput.ts` uses
+  `requireOptionalNativeModule` so a pre-rebuild bundle and Jest no-op). NOTE `findNodeHandle` returns NULL
+  under react-test-renderer — a component test must mock
+  `react-native/Libraries/ReactNative/RendererProxy`.
 - **Additive migrations are appended to `MIGRATIONS` by name** (`src/db/migrations.ts`); `runMigrations`
   skips already-applied names and wraps each in BEGIN/COMMIT. Use `ALTER TABLE ADD COLUMN` (no
   `IF NOT EXISTS` — SQLite lacks it; the name-guard is the idempotency). Never edit an applied migration.
