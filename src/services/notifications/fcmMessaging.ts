@@ -69,7 +69,25 @@ async function deliver(msg: RemoteMessage): Promise<void> {
  * reveal sender/content — it posts a content-less notification instead. The headless DB
  * open otherwise bypasses the lock entirely.
  */
-async function deliverRespectingLock(msg: RemoteMessage): Promise<void> {
+async function deliverRespectingLock(
+  msg: RemoteMessage,
+  source: 'background' | 'foreground',
+): Promise<void> {
+  // RECEIPT BREADCRUMB. Every push enters here — the killed-app background handler AND the
+  // foreground onMessage — so this is the one place that can record "a push physically arrived".
+  //
+  // WHY LOGGING A SUCCESS MATTERS: until this line, only FAILURES were logged, which made a
+  // dropped push and a silently-handled one indistinguishable in App Logs — both are simply
+  // absent (an `updated-message` receipt posts no notification by design). So "I didn't get a
+  // notification" could not be attributed to a side: server said sent, device said nothing, and
+  // the missing hop was unobservable. With this, the device's own log IS the delivery record —
+  // compare its timestamps against the server's sends and the failing hop is immediate.
+  //
+  // `source` is the axis the killed-app bug lives on (headless wake vs app-already-running), so
+  // it is recorded explicitly rather than inferred. Event NAME only, NEVER the body — that
+  // carries message text, and this line is written to the on-disk App Logs.
+  const { eventName: receivedEvent } = parseFcmData(msg.data);
+  logger.info('[fcm] push received', { event: receivedEvent, source });
   // No stored server = the user disconnected. `forget()` deletes both vault keys but CANNOT revoke
   // the push registration — the client API has no de-registration route (device removal is an
   // admin-only server command), so the old server keeps our token and keeps pushing. Without this
@@ -111,7 +129,7 @@ async function deliverRespectingLock(msg: RemoteMessage): Promise<void> {
 // in try/catch so a misconfigured Firebase project degrades to socket-only instead of
 // crashing app boot (the import + this call run on the startup path).
 try {
-  setBackgroundMessageHandler(getMessaging(), deliverRespectingLock);
+  setBackgroundMessageHandler(getMessaging(), (msg) => deliverRespectingLock(msg, 'background'));
 } catch (e) {
   logger.warn('[fcm] setBackgroundMessageHandler unavailable — push disabled', e);
 }
@@ -128,7 +146,7 @@ export async function startFcm(): Promise<void> {
     // POST_NOTIFICATIONS is requested via requestNotificationPermission() in notifeeService.ts
     // on the boot path, so the deprecated messaging().requestPermission() is redundant here.
     const m = getMessaging();
-    onMessage(m, deliverRespectingLock);
+    onMessage(m, (msg) => deliverRespectingLock(msg, 'foreground'));
     onTokenRefresh(m, () => void registerFcmToken());
   } catch (e) {
     logger.warn('[fcm] startFcm failed — falling back to socket-only', e);

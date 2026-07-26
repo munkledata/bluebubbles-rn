@@ -182,6 +182,47 @@ looks unreproducible. This cost real time during the investigation.
 
 ---
 
+## 3a. Follow-up, 2026-07-26 — the second round
+
+Push was still missing "at times", on a **second device** (Pixel 10 Pro XL, Android 17 / API 37;
+the first investigation was driven entirely against a Galaxy S25 Ultra on Android 16). Findings:
+
+**The §2.1 fix works.** The S25 now logs `RNFirebaseMsgReceiver: broadcast received` with **no**
+`No task registered` — the original signature is gone.
+
+**Ruled out on the Pixel, with evidence:** token registration (its row is current, re-registers on
+launch, token unchanged, FCM returns `failed: 0` — a dead token would 404 and auto-prune); app
+version (0.1.33 vc46, *newer* than the S25's vc44); OS restrictions (`POST_NOTIFICATIONS` granted,
+standby bucket 5, battery-exempt, Data Saver off, `RUN_ANY_IN_BACKGROUND: allow`, not dozing);
+app-side errors (App Logs show no `[fcm]`/`[notify]` failures); and the server (every send
+`sent: 2, failed: 0`).
+
+**The Pixel's chain does work.** Killed its process (`am kill-all`, 0 processes), fired a push, and
+Android logged `Start proc … for broadcast {ReactNativeFirebaseMessagingReceiver}` followed by the
+notification posting. Killed → woken → shown.
+
+**But it is genuinely intermittent.** Two *identical* killed-process tests a minute apart: the first
+never started the process and posted nothing; the second worked. Same device, same push, same state.
+Root cause of that last hop is **NOT yet established** — do not assume it is.
+
+Two theories were falsified along the way and are recorded so they aren't retried: a locked-device
+Keystore failure aborting `dispatchRealtimeEvent` at `ensureDatabase()` (dead — unlocking changed
+nothing), and the Pixel running an older build (dead — it is newer).
+
+**What was added:** a receipt breadcrumb, `[fcm] push received {event, source}`, logged in
+`deliverRespectingLock` — the single entry point both the headless background handler and the
+foreground `onMessage` share, with `source` recording which. Until then only FAILURES were logged,
+so a dropped push and a silently-handled one were indistinguishable in App Logs: both simply absent
+(an `updated-message` receipt posts no notification by design). That is why the Pixel's logs could
+not settle the question. Event NAME only — never the body, which carries message text and is written
+to disk. Next missed message, compare the device's receipts against the server's sends; the failing
+hop is then immediate rather than inferred.
+
+Also of note: measurement artifacts cost real time here. `RNFirebaseMsgReceiver` was briefly believed
+not to be emitted (it is — the capture window was wrong), and `dumpsys notification` counts are
+useless for repeat tests because the test notification uses a FIXED id and updates in place — read
+its `when=` epoch field instead.
+
 ## 4. The lesson
 
 Every layer reported success while the outcome was wrong: the server said `sent: 2, failed: 0`,
