@@ -22,8 +22,29 @@ private const val EVENT_PASTE = "onPaste"
 /** Batch directories live here, under the app's private cache. */
 private const val CACHE_DIR = "pasted-in"
 
-/** Accept everything — a paste is as likely to be a PDF as a screenshot. */
-private val ACCEPTED_MIME_TYPES = arrayOf("*/*")
+// Accept everything — a paste is as likely to be a PDF as a screenshot.
+//
+// MUST be enumerated by top-level type rather than the obvious catch-all wildcard. AOSP's
+// View.setOnReceiveContentListener hard-rejects any entry starting with a star
+// (Preconditions.checkArgument(!mimeType.startsWith("*"), "A MIME type set here must not start
+// with *")), so the catch-all throws at attach time and paste silently stays broken — a wildcard
+// is legal in the SUBTYPE only. This is the OPPOSITE of the manifest <share-target> in
+// plugins/withShareTargets.js, which does take the literal catch-all; unrelated APIs, opposite
+// rules. Listing every IANA top-level type is the real equivalent of "everything".
+//
+// (Line comments, not KDoc: a block comment containing the catch-all wildcard would be
+// terminated early by the star-slash inside it.)
+private val ACCEPTED_MIME_TYPES = arrayOf(
+  "image/*",
+  "video/*",
+  "audio/*",
+  "text/*",
+  "application/*",
+  "font/*",
+  "model/*",
+  "multipart/*",
+  "message/*",
+)
 
 /** A pathological multi-select paste shouldn't be able to flood the composer. */
 private const val MAX_FILES = 10

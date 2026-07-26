@@ -221,8 +221,14 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   still routes through it); API 31+ gets it from the framework `TextView`. It is simply DORMANT until a
   listener is registered. `modules/gator-paste-input` (local Expo module, autolinked, Android-only) resolves
   the input via `appContext.findView<EditText>(tag)` and calls `ViewCompat.setOnReceiveContentListener(view,
-  arrayOf("*/*"), …)` — which lights up long-press Paste, keyboard image/GIF/sticker commits AND
-  drag-and-drop at once, for ANY mime type including PDFs. FOUR non-obvious rules: (1) pass
+  ACCEPTED_MIME_TYPES, …)` — which lights up long-press Paste, keyboard image/GIF/sticker commits AND
+  drag-and-drop at once, for ANY mime type including PDFs. THE MIME LIST MUST NOT BE `"*/*"` (device-only
+  failure, found by logcat: `W GatorPasteInput: attach failed: A MIME type set here must not start with *`)
+  — AOSP `View.setOnReceiveContentListener` hard-rejects any entry starting with `*`, so the whole attach
+  throws and paste stays silently broken; a wildcard is legal in the SUBTYPE only, so enumerate the IANA
+  top-level types (`image/*`, `video/*`, `application/*`, …). NOTE this is the EXACT OPPOSITE of the
+  manifest `<share-target>` above, which does take a literal `*/*` — unrelated APIs, opposite rules.
+  FOUR further non-obvious rules: (1) pass
   `findNodeHandle(ref)` as a plain **Int**, never the ref object — Expo's ref converter reads `nativeTag`
   while RN 0.86 Fabric exposes `__nativeTag`; (2) attach from the TextInput's **`onLayout`**, not a mount
   effect — `findView` goes through the UIManager's mounting layer and finds nothing before the Fabric mount
