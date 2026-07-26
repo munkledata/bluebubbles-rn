@@ -30,10 +30,10 @@ import {
  */
 let syncInFlight: Promise<void> | null = null;
 /**
- * The origin `syncInFlight` was published under. A run is only shareable with a caller belonging to
- * the SAME session — see {@link startSync}.
+ * The session epoch `syncInFlight` was published under. A run is only shareable with a caller
+ * belonging to the SAME session instance — see {@link startSync}.
  */
-let inFlightOrigin: string | null = null;
+let inFlightEpoch: number | null = null;
 let trackedInFlight: Promise<void> | null = null;
 let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
@@ -52,19 +52,24 @@ function settledAll(runs: Array<Promise<void> | null>): Promise<unknown> {
  * Coalescing applies to OTHER foreground callers only. A tracked (background) run is waited on but
  * never returned in place of this one — see the slot comment above.
  *
- * And only to callers of the SAME SESSION. A run is bound to the origin it was published under,
- * because the slot can outlive its account: `forget()` gives a dying sync 20 seconds to unwind and
- * then wipes anyway, so a large account's backfill is routinely still in the slot when the user
- * connects to the next server. Coalescing on nothing but "a promise is present" handed `connect()`
- * the PREVIOUS account's doomed run as if it were the new server's initial sync — which therefore
- * never happened. Silently, too: that run resolves normally (its per-chat errors are isolated) and
- * reports `done`, so the banner clears over an empty inbox and nothing re-kicks it until a
- * pull-to-refresh or a relaunch. A mismatch chains behind the stale run instead of ignoring it, so
- * both stay visible to `awaitSyncIdle` and neither pages alongside the other.
+ * And only to callers of the SAME SESSION INSTANCE. A run is bound to the session epoch it was
+ * published under, because the slot can outlive its account: `forget()` gives a dying sync 20
+ * seconds to unwind and then wipes anyway, so a large account's backfill is routinely still in the
+ * slot when the user connects to the next server. Coalescing on nothing but "a promise is present"
+ * handed `connect()` the PREVIOUS account's doomed run as if it were the new server's initial sync
+ * — which therefore never happened. Silently, too: that run resolves normally (its per-chat errors
+ * are isolated) and reports `done`, so the banner clears over an empty inbox and nothing re-kicks
+ * it until a pull-to-refresh or a relaunch. A mismatch chains behind the stale run instead of
+ * ignoring it, so both stay visible to `awaitSyncIdle` and neither pages alongside the other.
+ *
+ * The EPOCH and not the origin, because the origin cannot tell "a different server" from "this
+ * session was destroyed and re-created": reconnecting to the SAME server after a Disconnect —
+ * a changed password, a rotated tunnel URL, an accidental tap, i.e. the ordinary reason people
+ * disconnect — restores a byte-identical origin string and so re-matched the dead run.
  */
 export function startSync(): Promise<void> {
-  const origin = sessionAccessors.getOrigin();
-  if (syncInFlight && inFlightOrigin === origin) return syncInFlight;
+  const epoch = sessionAccessors.getEpoch();
+  if (syncInFlight && inFlightEpoch === epoch) return syncInFlight;
   // Serialize behind a background catch-up (and behind a previous session's run) rather than
   // paging alongside it: both walk the same cursor, so overlapping them doubles the fetching and
   // interleaves two writers' marker writes.
@@ -76,12 +81,12 @@ export function startSync(): Promise<void> {
       // `forget()` — blind to a pipeline that is still writing.
       if (syncInFlight === slot) {
         syncInFlight = null;
-        inFlightOrigin = null;
+        inFlightEpoch = null;
       }
       lastSyncAt = Date.now();
     });
   syncInFlight = slot;
-  inFlightOrigin = origin;
+  inFlightEpoch = epoch;
   return slot;
 }
 
@@ -179,8 +184,13 @@ async function runSync(): Promise<void> {
   // local DB are not: they would re-create the previous account's rows after the wipe. This is how
   // they find out. Captured here, not at `startSync`, so it names the session the work is actually
   // being done under.
-  const originAtStart = sessionAccessors.getOrigin();
-  const sessionEnded = (): boolean => sessionAccessors.getOrigin() !== originAtStart;
+  //
+  // Compared by EPOCH, not by origin: `reset()` then `connected()` to the same server restores an
+  // identical origin string, so an origin comparison went FALSE again exactly when the run was at
+  // its most dangerous — the wipe had already emptied the DB, and the closing phases would put the
+  // pre-wipe chat snapshot back and commit a marker over the reset. The epoch never repeats.
+  const epochAtStart = sessionAccessors.getEpoch();
+  const sessionEnded = (): boolean => sessionAccessors.getEpoch() !== epochAtStart;
   try {
     const db = await ensureDatabase();
     const api = httpSyncApi(http);

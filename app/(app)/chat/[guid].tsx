@@ -17,6 +17,7 @@ import {
   getChatIdByGuid,
   getChatParticipants,
   getFirstUnreadInChat,
+  isChatHiddenByDeletion,
   kvGet,
   kvSet,
   type MessagePreview,
@@ -86,6 +87,33 @@ import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
 const VoiceRecorder = lazy(() =>
   import('@ui/conversations/VoiceRecorder').then((m) => ({ default: m.VoiceRecorder })),
 );
+
+/**
+ * Backfill this thread's history from the server, so it fills in even if the large initial sync
+ * hasn't reached it yet (or was interrupted). The reactive query picks up the upserted messages
+ * automatically. Driven both by opening the chat and by pull-to-refresh.
+ *
+ * SKIPPED FOR A CHAT THE USER DELETED, because this screen stays reachable for one (a tapped
+ * notification, a Direct Share chip published before the delete, `router.back()` out of chat
+ * settings) and `getChatHeader` is deliberately not visibility-filtered. Re-paging there restores
+ * the entire purged conversation — plaintext rows AND their FTS entries — while every restored row
+ * is `<= deleted_at`, so the chat stays out of the inbox, out of the archive and out of search: the
+ * user cannot see what came back and cannot delete it again, and nothing re-runs the purge. The
+ * delete is silently undone. A chat that legitimately came BACK is not affected — the check is the
+ * same predicate the lists use, so the moment real activity makes the thread visible again its
+ * history backfills exactly as before.
+ *
+ * A failed check FALLS THROUGH TO SYNCING: a DB read that throws must not be a silent way to
+ * disable history backfill for every chat.
+ */
+async function backfillUnlessDeleted(guid: string): Promise<void> {
+  try {
+    if (await isChatHiddenByDeletion(getDatabase(), guid)) return;
+  } catch (e) {
+    logger.debug('[chat] tombstone check failed; syncing anyway', { error: String(e) });
+  }
+  await ensureChatSynced(guid);
+}
 
 /**
  * Phase 4 conversation view: reactive message list + composer with optimistic send.
@@ -270,10 +298,7 @@ function ChatScreenInner({
       setArmedForGuid(guid);
     })();
     clearChatNotification(guid); // dismiss any tray notification for this chat
-    // Backfill this thread's history from the server on open, so it fills in even if the
-    // large initial sync hasn't reached it yet (or was interrupted). The reactive query
-    // picks up the upserted messages automatically.
-    void ensureChatSynced(guid);
+    void backfillUnlessDeleted(guid);
     // Fetch this chat's synced (macOS 26) background if a participant set/changed one — the
     // reactive `chats` query repaints the background once the downloaded uri is written.
     void ensureSyncedBackground(http, getDatabase(), guid);
@@ -571,7 +596,7 @@ function ChatScreenInner({
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={onLongPressMessage}
       onSwipeReply={onSwipeReply}
-      onRefresh={() => ensureChatSynced(guid)}
+      onRefresh={() => backfillUnlessDeleted(guid)}
       onLoadOlder={onLoadOlder}
       focusGuid={effFocusGuid}
       selectedGuids={selectedGuids}

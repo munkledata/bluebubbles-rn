@@ -9,7 +9,7 @@ import {
   restoreBackup,
   sealBackup,
 } from '@/services/backup/backup';
-import { isSecretKey, looksEncrypted } from '@/services/backup/backupSchema';
+import { isBackupKey, isSecretKey, looksEncrypted } from '@/services/backup/backupSchema';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
 
@@ -41,6 +41,24 @@ describe('isSecretKey', () => {
     expect(isSecretKey('serverApiKey')).toBe(true);
     expect(isSecretKey('theme.preset')).toBe(false);
     expect(isSecretKey('app.lock.timeout')).toBe(false);
+  });
+});
+
+describe('isBackupKey (the export ALLOW-list)', () => {
+  it('admits settings and nothing else', () => {
+    expect(isBackupKey('theme.preset')).toBe(true);
+    expect(isBackupKey('privacy.redactedMode')).toBe(true);
+    expect(isBackupKey('attachments.autoDownloadDestination')).toBe(true);
+    expect(isBackupKey('downloads.maxConcurrent')).toBe(true);
+    // Unsent message text keyed by the counterparty's address — content, not a setting.
+    expect(isBackupKey('draft.iMessage;-;+15555550123')).toBe(false);
+    // Device-local bookkeeping: carrying these between installs corrupts the target's state.
+    expect(isBackupKey('sync.deletionsSyncedAt')).toBe(false);
+    expect(isBackupKey('maintenance.searchTextBackfill.v1')).toBe(false);
+    // A row id, meaningless on any other device.
+    expect(isBackupKey('theme.custom')).toBe(false);
+    // Unknown/future keys are excluded by default — the point of inverting the filter.
+    expect(isBackupKey('some.newSetting')).toBe(false);
   });
 });
 
@@ -78,6 +96,21 @@ describe('buildBackup', () => {
     expect(keys).not.toContain('server.password');
     expect(keys).not.toContain('guidAuthKey');
     expect(b.kv.every((p) => !isSecretKey(p.key))).toBe(true);
+  });
+
+  it('NEVER exports composer drafts or device-local sync state (kv allow-list)', async () => {
+    const t = await createTestDb();
+    await kvSet(t.db, 'theme.preset', 'nord');
+    await kvSet(t.db, 'privacy.redactedMode', '1');
+    // A draft key embeds the counterparty's address and the value is unsent message text.
+    await kvSet(t.db, 'draft.iMessage;-;+15555550123', 'meet me at 4');
+    // Watermarks/flags that describe THIS install, not the user's preferences.
+    await kvSet(t.db, 'sync.deletionsSyncedAt', '1900000000000');
+    await kvSet(t.db, 'maintenance.searchTextBackfill.v1', 'done');
+    await kvSet(t.db, 'theme.custom', '7');
+
+    const keys = (await buildBackup(t.db, { exportedAt: 1 })).kv.map((p) => p.key);
+    expect(keys).toEqual(['privacy.redactedMode', 'theme.preset']); // ORDER BY key
   });
 });
 
@@ -191,6 +224,137 @@ describe('restoreBackup round-trip', () => {
       { tokens: '{"user":1}', is_preset: 0 },
       { tokens: '{"preset":1}', is_preset: 1 },
     ]);
+  });
+
+  it('restores TWIN themes (same name + mode) one-for-one instead of collapsing them', async () => {
+    // The editor seeds every new theme's name to 'My Theme', so two hand-built palettes sharing a
+    // (name, mode) is the ordinary case. `themes` has no unique index, so both rows are legal.
+    const src = await createTestDb();
+    const ins = src.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
+    );
+    ins.run('My Theme', 'dark', '{"a":1}');
+    ins.run('My Theme', 'dark', '{"b":2}');
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+
+    // Fresh device (the primary use of a backup): BOTH palettes must land, not one.
+    const dst = await createTestDb();
+    await restoreBackup(dst.db, backup);
+    const after = (): unknown[] => dst.raw.prepare('SELECT tokens FROM themes ORDER BY id').all();
+    expect(after()).toEqual([{ tokens: '{"a":1}' }, { tokens: '{"b":2}' }]);
+
+    // A second recovery attempt pairs 1:1 with the rows it just created — no twins multiply.
+    await restoreBackup(dst.db, backup);
+    expect(after()).toEqual([{ tokens: '{"a":1}' }, { tokens: '{"b":2}' }]);
+  });
+
+  it('a restore onto the SOURCE device leaves each twin its own palette', async () => {
+    const t = await createTestDb();
+    const ins = t.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
+    );
+    ins.run('My Theme', 'dark', '{"a":1}');
+    ins.run('My Theme', 'dark', '{"b":2}');
+    const backup = await buildBackup(t.db, { exportedAt: 1 });
+
+    await restoreBackup(t.db, backup);
+    // Same ids, each with the tokens it was exported with — a hand-built palette is never
+    // overwritten by its twin's.
+    expect(t.raw.prepare('SELECT id, tokens FROM themes ORDER BY id').all()).toEqual([
+      { id: 1, tokens: '{"a":1}' },
+      { id: 2, tokens: '{"b":2}' },
+    ]);
+  });
+
+  it('leaves a local twin the backup does not account for untouched', async () => {
+    const t = await createTestDb();
+    const ins = t.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
+    );
+    ins.run('My Theme', 'dark', '{"local1":1}');
+    ins.run('My Theme', 'dark', '{"local2":1}');
+
+    await restoreBackup(t.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [{ name: 'My Theme', mode: 'dark', tokens: '{"fromBackup":1}', isPreset: 0 }],
+      chatCustomizations: [],
+    });
+    expect(t.raw.prepare('SELECT tokens FROM themes ORDER BY id').all()).toEqual([
+      { tokens: '{"fromBackup":1}' },
+      { tokens: '{"local2":1}' },
+    ]);
+  });
+
+  it('a backup file cannot plant a draft or move this device’s deletion watermark', async () => {
+    const dst = await createTestDb();
+    await kvSet(dst.db, 'sync.deletionsSyncedAt', '1000000000000');
+    await kvSet(dst.db, 'draft.iMessage;-;+15555550123', 'my current draft');
+
+    // A hand-edited / foreign file: the import-side allow-list is what stops it.
+    const res = await restoreBackup(dst.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [
+        { key: 'theme.preset', value: 'nord' },
+        { key: 'sync.deletionsSyncedAt', value: '1900000000000' },
+        { key: 'draft.iMessage;-;+15555550123', value: 'someone else’s text' },
+      ],
+      themes: [],
+      chatCustomizations: [],
+    });
+    expect(res.kv).toBe(1);
+    const read = (key: string): string | undefined =>
+      (
+        dst.raw.prepare('SELECT value FROM kv WHERE key = ?').get(key) as
+          { value: string } | undefined
+      )?.value;
+    expect(read('theme.preset')).toBe('nord');
+    // A watermark dragged forward would make the deletion catch-up sync skip its window for good.
+    expect(read('sync.deletionsSyncedAt')).toBe('1000000000000');
+    expect(read('draft.iMessage;-;+15555550123')).toBe('my current draft');
+  });
+
+  it('does not resurrect a conversation deleted on THIS device', async () => {
+    const src = await createTestDb();
+    await seedChat(src, 'c1');
+    await setChatCustomization(src.db, 'c1', { customName: 'Squad' });
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+
+    const dst = await createTestDb();
+    await seedChat(dst, 'c1');
+    dst.raw.prepare("UPDATE chats SET deleted_at = 5000 WHERE guid = 'c1'").run();
+
+    await restoreBackup(dst.db, backup);
+    expect(
+      dst.raw
+        .prepare("SELECT custom_name, deleted_at, marked_unread_at FROM chats WHERE guid = 'c1'")
+        .get(),
+    ).toEqual({ custom_name: 'Squad', deleted_at: 5000, marked_unread_at: null });
+  });
+
+  it('never carries a tombstone or an unread mark across devices', async () => {
+    const src = await createTestDb();
+    await seedChat(src, 'c1');
+    await setChatCustomization(src.db, 'c1', { customName: 'Squad' });
+    src.raw
+      .prepare("UPDATE chats SET deleted_at = 9000, marked_unread_at = 9000 WHERE guid = 'c1'")
+      .run();
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    // Both columns are per-device state and are not even in the file.
+    expect(backup.chatCustomizations[0]).not.toHaveProperty('deletedAt');
+    expect(backup.chatCustomizations[0]).not.toHaveProperty('markedUnreadAt');
+
+    const dst = await createTestDb();
+    await seedChat(dst, 'c1');
+    await restoreBackup(dst.db, backup);
+    // The live conversation stays live and unbadged; only the customization travels.
+    expect(
+      dst.raw
+        .prepare("SELECT custom_name, deleted_at, marked_unread_at FROM chats WHERE guid = 'c1'")
+        .get(),
+    ).toEqual({ custom_name: 'Squad', deleted_at: null, marked_unread_at: null });
   });
 
   it('does not apply customizations to chats that do not exist locally', async () => {

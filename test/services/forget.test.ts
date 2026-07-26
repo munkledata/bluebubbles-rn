@@ -15,6 +15,8 @@ const listReminders = jest.fn(async () => [] as unknown[]);
 const clearShareShortcuts = jest.fn();
 const vaultDelete = jest.fn(async (_key: string) => undefined);
 const awaitSyncIdle = jest.fn(async () => undefined);
+const cancelAllNotifications = jest.fn(async () => undefined);
+const ensureDatabase = jest.fn(async (): Promise<unknown> => ({}));
 
 // `@core/api` pulls `ky`, which ships ESM only and is not in the node project's transform set.
 jest.mock('@core/api', () => ({ serverApi: { serverInfo: jest.fn() } }));
@@ -29,7 +31,7 @@ jest.mock('@/services/clients', () => ({
   runCryptoSelfTest: jest.fn(),
 }));
 jest.mock('@/services/databaseControl', () => ({
-  ensureDatabase: jest.fn(async () => ({})),
+  ensureDatabase,
   runSearchTextBackfillOnce: jest.fn(),
 }));
 jest.mock('@/services/realtimeControl', () => ({
@@ -47,6 +49,12 @@ jest.mock('@/services/lock', () => ({ hydrateLock: jest.fn() }));
 jest.mock('@native/deviceIntegrity', () => ({ checkDeviceIntegrity: jest.fn() }));
 jest.mock('@state/hydrateStores', () => ({ hydrateAllStores: jest.fn() }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({ clearShareShortcuts }));
+// The shared stub for this native module has no spy on it, and the tray cancel is the behaviour
+// under test here — so give this file its own.
+jest.mock('react-native-notify-kit', () => ({
+  __esModule: true,
+  default: { cancelAllNotifications },
+}));
 jest.mock('expo-file-system', () => ({
   Paths: { document: '/doc' },
   Directory: class {
@@ -64,6 +72,8 @@ beforeEach(() => {
   listReminders.mockResolvedValue([]);
   vaultDelete.mockResolvedValue(undefined);
   awaitSyncIdle.mockResolvedValue(undefined);
+  cancelAllNotifications.mockResolvedValue(undefined);
+  ensureDatabase.mockResolvedValue({});
   useSessionStore.setState({
     status: 'connected',
     origin: 'https://old.example',
@@ -100,6 +110,42 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     await forget();
 
     expect(useSessionStore.getState().origin).toBeNull();
+    expect(clearLocalCache).toHaveBeenCalledTimes(1);
+    expect(clearShareShortcuts).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A displayed notification is system state that outlives every row the wipe deletes, and a message
+ * notification carries the sender's name, avatar and body. Leaving them up meant the previous
+ * account's content stayed on the lock screen of whoever used the device next — through the
+ * Disconnect and through connecting to a different server — while the confirmation dialog promised
+ * conversations and messages were deleted from the device.
+ */
+describe('forget() — the tray is cleared with the rest of the account', () => {
+  it('cancels the displayed notifications', async () => {
+    await forget();
+
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it('still cancels them when the DB cannot be opened at all', async () => {
+    // The tray cancel must not sit behind `ensureDatabase()`. Enumerating which notifications to
+    // cancel is precisely the work that would need the DB — which is why nothing is enumerated,
+    // and why this runs ahead of the block that opens it.
+    ensureDatabase.mockRejectedValue(new Error('database not initialized'));
+
+    await expect(forget()).resolves.toBeUndefined();
+
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    expect(clearShareShortcuts).toHaveBeenCalledTimes(1);
+  });
+
+  it('completes the wipe even when the notification bridge is unreachable', async () => {
+    cancelAllNotifications.mockRejectedValue(new Error('notifee module not linked'));
+
+    await expect(forget()).resolves.toBeUndefined();
+
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(clearShareShortcuts).toHaveBeenCalledTimes(1);
   });

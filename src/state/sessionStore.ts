@@ -16,6 +16,24 @@ interface SessionState {
   password: string | null;
   serverInfo: ServerInfo | null;
   error: string | null;
+  /**
+   * Monotonic counter identifying THIS session instance — bumped by every transition that starts
+   * or destroys one (`hydrated`, `connected`, `reset`). Long-running work captures it and compares
+   * later to answer "am I still the current session?".
+   *
+   * The origin alone cannot answer that. `sanitizeServerAddress` is deterministic, so reconnecting
+   * to the SAME server after a Disconnect restores a byte-identical origin string — and a
+   * Disconnect is most often followed by exactly that (a changed password, a rotated tunnel URL, an
+   * accidental tap). A run that had been correctly disowned then looked current again: `startSync`
+   * handed the new session the DEAD run (so the new one never synced at all) and the dead run's own
+   * abort check went false again, letting its closing phases write the pre-wipe snapshot back over
+   * the wipe. The counter never repeats, so both halves stay decided.
+   *
+   * Deliberately NOT bumped by `setOrigin`: a `new-server` tunnel rotation re-points the SAME
+   * session at a new URL, and treating that as a new session would needlessly disown the sync
+   * already running against the same account and the same local DB.
+   */
+  epoch: number;
 
   /** Result of boot hydration (credentials found or not). */
   hydrated: (creds: { origin: string; password: string } | null) => void;
@@ -36,26 +54,55 @@ export const useSessionStore = create<SessionState>((set) => ({
   password: null,
   serverInfo: null,
   error: null,
+  epoch: 0,
 
   hydrated: (creds) =>
-    set(
+    set((s) =>
       creds
-        ? { status: 'connected', origin: creds.origin, password: creds.password, error: null }
-        : { status: 'unauthenticated', origin: null, password: null, error: null },
+        ? {
+            status: 'connected',
+            origin: creds.origin,
+            password: creds.password,
+            error: null,
+            epoch: s.epoch + 1,
+          }
+        : {
+            status: 'unauthenticated',
+            origin: null,
+            password: null,
+            error: null,
+            epoch: s.epoch + 1,
+          },
     ),
   beginConnecting: () => set({ status: 'connecting', error: null }),
   connected: (origin, password, info) =>
-    set({ status: 'connected', origin, password, serverInfo: info, error: null }),
+    set((s) => ({
+      status: 'connected',
+      origin,
+      password,
+      serverInfo: info,
+      error: null,
+      epoch: s.epoch + 1,
+    })),
   setServerInfo: (info) => set({ serverInfo: info }),
   setOrigin: (origin) => set({ origin }),
   failed: (message) => set({ status: 'error', error: message }),
   reset: () =>
-    set({ status: 'unauthenticated', origin: null, password: null, serverInfo: null, error: null }),
+    set((s) => ({
+      status: 'unauthenticated',
+      origin: null,
+      password: null,
+      serverInfo: null,
+      error: null,
+      epoch: s.epoch + 1,
+    })),
 }));
 
 /** Synchronous accessors for non-React code (the HttpClient auth hooks). */
 export const sessionAccessors = {
   getOrigin: (): string => useSessionStore.getState().origin ?? '',
+  /** The current session instance's id — see {@link SessionState.epoch}. */
+  getEpoch: (): number => useSessionStore.getState().epoch,
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
   /** Whether the connected server has the Gator Private API enabled. */
   privateApiEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.private_api,

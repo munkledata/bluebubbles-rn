@@ -9,10 +9,14 @@ import {
   getChatIdByGuid,
   insertOutgoingText,
   insertScheduled,
+  isChatHiddenByDeletion,
   kvGet,
   kvSet,
+  listChatAttachmentGuids,
   listChatsForInbox,
+  listOrphanedAttachmentGuids,
   markMessageDeleted,
+  resumeChatPurges,
   setChatArchive,
   setChatCustomization,
   setChatPin,
@@ -504,5 +508,214 @@ describe('chat actions repo', () => {
     await deleteChatLocal(db, 'nope', 5000);
     expect(counts(raw, 'chats')).toBe(1);
     expect(col(raw, 'c1', 'deleted_at')).toBeNull();
+  });
+
+  // The stamp floors the unread count as well as hiding the chat. `clearSupersededTombstones` hands
+  // that floor to the read marker when it retires the stamp — but it only runs from message/chat
+  // INGESTION, and the optimistic send path routes through neither, so this is the state where the
+  // `deleted_at` clause in `listChatsForInbox` is the only thing holding the badge down.
+  it('sending into a still-tombstoned chat does not badge its re-synced history', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+    // The only stored message is OUTGOING, so the delete-time handover finds no received candidate
+    // and the marker stays NULL — every re-synced message is "unread" as far as it is concerned.
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-a',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 3000,
+    });
+    await deleteChatLocal(db, 'c1', 5000);
+    expect(col(raw, 'c1', 'last_read_message_guid')).toBeNull();
+
+    // History the device never had backfills — all of it older than the stamp, so the chat stays
+    // hidden and nothing retires the tombstone.
+    await upsertMessages(
+      db,
+      [received('h1', 1000), received('h2', 2000), received('h3', 3500), received('h4', 4000)],
+      () => chatId,
+      handles,
+    );
+    expect(await listChatsForInbox(db)).toHaveLength(0);
+    expect(col(raw, 'c1', 'deleted_at')).toBe(5000);
+
+    // The user sends into the hidden thread (a surviving reminder deep-links into it, and
+    // `getChatHeader` is deliberately not visibility-filtered). That makes it visible WITHOUT
+    // clearing the stamp.
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-b',
+      chatId,
+      chatGuid: 'c1',
+      text: 'reply',
+      now: 6000,
+    });
+
+    const rows = await listChatsForInbox(db);
+    expect(rows.map((r) => r.guid)).toEqual(['c1']);
+    // Without the floor this is 4 — the whole conversation they deleted, badged as unread.
+    expect(rows[0]!.unreadCount).toBe(0);
+  });
+
+  // The chat screen stays reachable for a tombstoned chat by design, and its on-open backfill would
+  // otherwise re-page the purged conversation — messages AND FTS entries — into a chat that is in no
+  // list, so the user can neither see it nor delete it again.
+  it('isChatHiddenByDeletion tracks the tombstone the same way the LISTS do', async () => {
+    const { db } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+    await upsertMessages(db, [received('old', 1000)], () => chatId, handles);
+
+    expect(await isChatHiddenByDeletion(db, 'c1')).toBe(false);
+    await deleteChatLocal(db, 'c1', 5000);
+    expect(await isChatHiddenByDeletion(db, 'c1')).toBe(true);
+
+    // Re-synced history cannot un-hide it — this is exactly the refill the backfill must not do.
+    await upsertMessages(db, [received('old', 1000)], () => chatId, handles);
+    expect(await isChatHiddenByDeletion(db, 'c1')).toBe(true);
+
+    // Genuinely new activity brings it back, and the backfill must resume from that instant.
+    await upsertMessages(db, [received('new', 6000)], () => chatId, handles);
+    expect(await isChatHiddenByDeletion(db, 'c1')).toBe(false);
+
+    // A chat this device has never stored still backfills (that is how it gets its history).
+    expect(await isChatHiddenByDeletion(db, 'nope')).toBe(false);
+  });
+
+  it('a chat un-hidden by an optimistic SEND is not reported as deleted (its stamp is still set)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+
+    await deleteChatLocal(db, 'c1', 5000);
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-x',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 6000,
+    });
+
+    // `insertOutgoingText` clears no tombstone, so a bare `deleted_at IS NOT NULL` check would
+    // report a conversation the user is actively using as deleted and starve it of history.
+    expect(col(raw, 'c1', 'deleted_at')).toBe(5000);
+    expect(await listChatsForInbox(db)).toHaveLength(1);
+    expect(await isChatHiddenByDeletion(db, 'c1')).toBe(false);
+  });
+
+  it('resumeChatPurges finishes a purge that was interrupted, and touches nothing else', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedChat(db, 'c2');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const otherId = (await getChatIdByGuid(db, 'c2'))!;
+    const ins = raw.prepare(
+      'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
+    );
+    raw.transaction(() => {
+      for (let i = 0; i < 700; i++) ins.run(`m${i}`, chatId, 'x', 1000 + i);
+      ins.run('keep', otherId, 'other chat', 1000);
+    })();
+
+    // Android reclaims the process between chunks: chunk 1 has committed, chunk 2 never runs.
+    let deletes = 0;
+    const realPrepare = raw.prepare.bind(raw);
+    (raw as unknown as { prepare: (s: string) => unknown }).prepare = (s: string) => {
+      if (/DELETE\s+FROM\s+messages\b/i.test(s) && ++deletes === 2) throw new Error('process died');
+      return realPrepare(s);
+    };
+    try {
+      await expect(deleteChatLocal(db, 'c1', 5000)).rejects.toThrow('process died');
+    } finally {
+      (raw as unknown as { prepare: unknown }).prepare = realPrepare;
+    }
+    // The tombstone committed, so the leftovers are invisible — and nothing re-enters the loop.
+    expect(counts(raw, 'messages')).toBe(201);
+    expect(col(raw, 'c1', 'deleted_at')).toBe(5000);
+    expect(await listChatsForInbox(db)).toHaveLength(1); // only c2
+
+    // A message arrives in the meantime. The resume runs against the STORED stamp, so this is new
+    // activity that the delete never covered — taking it would silently lose a live message.
+    raw
+      .prepare(
+        'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
+      )
+      .run('live', chatId, 'landed after the delete', 9000);
+
+    await resumeChatPurges(db);
+
+    expect(
+      (raw.prepare('SELECT guid FROM messages ORDER BY guid').all() as Array<{ guid: string }>).map(
+        (r) => r.guid,
+      ),
+    ).toEqual(['keep', 'live']);
+    expect(col(raw, 'c1', 'deleted_at')).toBe(5000); // still deleted; only the leftovers went
+  });
+
+  it('resumeChatPurges never touches a revived chat, nor anything newer than the stamp', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1'); // tombstoned, but a message landed after the stamp
+    await seedChat(db, 'c2'); // revived: the stamp has been retired
+    const c1 = (await getChatIdByGuid(db, 'c1'))!;
+    const c2 = (await getChatIdByGuid(db, 'c2'))!;
+    const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+    await upsertMessages(db, [received('old-1', 1000)], () => c1, handles);
+    await upsertMessages(db, [received('old-2', 1000)], () => c2, handles);
+    await deleteChatLocal(db, 'c1', 5000);
+    await deleteChatLocal(db, 'c2', 5000);
+    // c1: a live message arrives after the delete (it survives the bound by design).
+    raw
+      .prepare(
+        'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
+      )
+      .run('live', c1, 'landed after the delete', 9000);
+    // c2: the same thing through the ingestion path, which also retires the stamp, and THEN its
+    // history re-syncs — the user un-deleted this conversation and it must keep its history.
+    await upsertMessages(db, [received('new-2', 9000)], () => c2, handles);
+    await upsertMessages(db, [received('old-2', 1000)], () => c2, handles);
+    expect(col(raw, 'c2', 'deleted_at')).toBeNull();
+
+    await resumeChatPurges(db);
+
+    expect(
+      (raw.prepare('SELECT guid FROM messages ORDER BY guid').all() as Array<{ guid: string }>).map(
+        (r) => r.guid,
+      ),
+    ).toEqual(['live', 'new-2', 'old-2']);
+  });
+
+  it('lists a chat’s DOWNLOADED attachment guids, and reports which ones the purge orphaned', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedChat(db, 'c2');
+    const c1 = (await getChatIdByGuid(db, 'c1'))!;
+    const c2 = (await getChatIdByGuid(db, 'c2'))!;
+    const insMsg = raw.prepare(
+      'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,1000)',
+    );
+    const insAtt = raw.prepare(
+      'INSERT INTO attachments (guid, message_id, local_path) VALUES (?,?,?)',
+    );
+    const msgId = (guid: string): number =>
+      (raw.prepare('SELECT id FROM messages WHERE guid = ?').get(guid) as { id: number }).id;
+    insMsg.run('m-down', c1, 'pic');
+    insMsg.run('m-never', c1, 'pic');
+    insMsg.run('m-other', c2, 'pic');
+    insAtt.run('a-down', msgId('m-down'), '/doc/attachments/a-down/img.jpg');
+    insAtt.run('a-never', msgId('m-never'), null); // never fetched — owns no file
+    insAtt.run('a-other', msgId('m-other'), '/doc/attachments/a-other/img.jpg');
+
+    const candidates = await listChatAttachmentGuids(db, 'c1');
+    expect(candidates).toEqual(['a-down']);
+
+    await deleteChatLocal(db, 'c1', 5000);
+
+    // Only the rows the purge actually destroyed may have their files deleted — a surviving row
+    // still renders its image.
+    expect(await listOrphanedAttachmentGuids(db, ['a-down', 'a-other'])).toEqual(['a-down']);
+    expect(await listOrphanedAttachmentGuids(db, [])).toEqual([]);
   });
 });

@@ -212,11 +212,13 @@ export async function fullSync(
   // INSERT … ON CONFLICT, so re-applying watermarks would RE-CREATE every chat of the account the
   // user just disconnected from; connect to a different server and they appear in ITS inbox. Bail.
   //
-  // The check is "is the origin still the one this run started under", not "is there an origin":
-  // a Disconnect followed by connecting to a NEW server before this point is the worse version of
-  // the same bug, and a session exists in that case. A tunnel rotation (`applyNewServerUrl`)
-  // rewrites the origin for the SAME server and so trips this too — that costs one skipped
-  // watermark pass, redone by the next sync, which is the cheap side of the trade.
+  // The check is "is this still the session this run started under", not "is there a session":
+  // a Disconnect followed by connecting to another server before this point is the worse version
+  // of the same bug, and a session exists in that case — as it does when the user reconnects to the
+  // SAME server, which is why `runSync` identifies the session by a counter that never repeats
+  // rather than by its URL. A tunnel rotation (`applyNewServerUrl`) re-points the same session at a
+  // new URL and deliberately does NOT trip this: the account and the local DB are unchanged, so
+  // there is nothing to protect and a skipped watermark pass would be pure loss.
   if (opts.shouldAbort?.()) {
     logger.warn(
       '[sync] the session ended mid-full-sync — skipping the read-watermark re-apply and the marker write',

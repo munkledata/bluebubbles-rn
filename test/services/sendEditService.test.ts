@@ -76,7 +76,7 @@ describe('sendEdit / sendUnsend', () => {
     expect(cap.body()).toMatchObject({ chatGuid: 'c1', partIndex: 0 });
   });
 
-  it('edit: reverts the text on failure', async () => {
+  it('edit: reverts the text when the POST THROWS', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
     const r = await sendEdit(db, failHttp, { messageGuid: 'm1', newText: 'edited!' }, 5000);
@@ -86,7 +86,46 @@ describe('sendEdit / sendUnsend', () => {
     );
   });
 
-  it('unsend: sets dateRetracted on success, clears it on failure', async () => {
+  // THE SOFT FAILURE: the transport succeeded, so nothing throws — the server just didn't confirm.
+  // These two are the only tests that reach the in-`try` revert branches; every other failure test
+  // in this file drives a THROWING client and lands in the catch, so without them both branches can
+  // be deleted outright and the whole suite still passes. The residue they prevent is PERMANENT:
+  // `date_edited` and `date_retracted` are COALESCE-preserved in `upsertMessages`' conflict clause
+  // (absence never clears a stamp), so no later re-page can remove a marker the optimistic write
+  // left behind — an "Edited" label on a message nobody else sees edited, or a retracted-looking
+  // bubble whose content every other participant still has.
+  it('edit: reverts the optimistic text when the POST returns 200 with NO guid', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    // A present guid is the Private-API confirmation the edit went through; its absence is the
+    // server saying "accepted, but nothing was edited".
+    const http = { post: async () => ({}) } as unknown as HttpClient;
+    expect((await sendEdit(db, http, { messageGuid: 'm1', newText: 'edited!' }, 5000)).ok).toBe(
+      false,
+    );
+    const row = one(raw, "SELECT text, date_edited d FROM messages WHERE guid='m1'") as {
+      text: string;
+      d: number | null;
+    };
+    expect(row.text).toBe('original');
+    expect(row.d).toBeNull(); // no stranded "Edited" marker on a message nobody else sees edited
+  });
+
+  it('unsend: clears the local retraction when the POST returns 200 with {unsent:false}', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    // Defensive: the server's `unsend-message` route currently hardcodes `{ unsent: true }`, so this
+    // is a contract guard rather than a path seen in the wild — but leaving a message showing as
+    // retracted to its sender while every other participant still sees it is the one failure here
+    // the user cannot detect, so the branch stays and stays pinned.
+    const http = { post: async () => ({ unsent: false }) } as unknown as HttpClient;
+    expect((await sendUnsend(db, http, { messageGuid: 'm1' }, 7000)).ok).toBe(false);
+    expect(
+      (one(raw, "SELECT date_retracted d FROM messages WHERE guid='m1'") as { d: number | null }).d,
+    ).toBeNull();
+  });
+
+  it('unsend: sets dateRetracted on success, clears it when the POST THROWS', async () => {
     const a = await createTestDb();
     await seed(a.db);
     expect((await sendUnsend(a.db, okHttp, { messageGuid: 'm1' }, 7000)).ok).toBe(true);

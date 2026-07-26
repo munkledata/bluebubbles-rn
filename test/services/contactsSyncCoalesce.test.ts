@@ -224,13 +224,44 @@ describe('syncContacts coalescing', () => {
     }
   });
 
+  // Only the run that still OWNS the coalescing slot may clear it. A forced call publishes a NEW
+  // slot over a run that is still going, so when that older run settles it must leave the slot
+  // alone — clearing it lets the next caller start a THIRD read concurrently with the forced one,
+  // which is the overlapping generation swap this whole module exists to prevent (see the header).
+  // No other test settles the OLD run while a forced one owns the slot, so this ordering is the
+  // only thing pinning the identity check.
+  it('a caller arriving after the OLD run settles joins the forced run, not a third one', async () => {
+    let releaseAuto!: () => void;
+    getContactsAsync
+      .mockImplementationOnce(() => new Promise((r) => (releaseAuto = () => r({ data: [] }))))
+      .mockImplementation(async () => ({ data: [] }));
+
+    const auto = syncContacts(); // the sync pipeline's fire-and-forget run
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getContactsAsync).toHaveBeenCalledTimes(1);
+
+    const forced = syncContacts({ force: true }); // takes the slot over, chained behind `auto`
+    expect(forced).not.toBe(auto);
+
+    releaseAuto(); // the OLDER run settles while the forced one owns the slot
+    await auto;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Everything arriving now must JOIN the forced run rather than race a fresh read alongside it.
+    expect(syncContacts()).toBe(forced);
+    await forced;
+    expect(getContactsAsync).toHaveBeenCalledTimes(2);
+  });
+
   /**
    * This run is fired-and-forgotten from the tail of every sync, so it routinely outlives its
-   * parent — including into a `forget()` wipe, which drops the Direct Share chips FIRST and then
-   * spends up to 20 seconds draining and deleting with `chats` still fully populated. Publishing
-   * there would put the previous account's conversation names and contact photos back into the
-   * system share sheet, where nothing later clears them (a refresh over an emptied inbox returns
-   * early rather than publishing zero).
+   * parent — and `awaitSyncIdle` explicitly does NOT wait for it, so it can still be running after
+   * `forget()` has wiped the DB and dropped the Direct Share chips (which `runForget` does LAST).
+   * Publishing then would put the previous account's conversation names and contact photos back
+   * into the system share sheet, where nothing later clears them (a refresh over an emptied inbox
+   * returns early rather than publishing zero). The absent session is the only thing that stops it.
    */
   describe('Direct Share chips', () => {
     afterEach(() => {
