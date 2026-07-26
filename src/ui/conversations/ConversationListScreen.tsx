@@ -29,6 +29,12 @@ import { InboxSeparator } from './FilteredChatListScreen';
 import { PinnedGrid } from './PinnedGrid';
 import { SearchResultsView } from './SearchResultsView';
 
+/** How long a corrective scroll-to-top stays armed after a message lands. Long enough to outlast
+ * FlashList's deferred offset correction and any late row measurement, short enough that the list
+ * can never be yanked long after the message that caused it — including for a user whose scrolls
+ * (TalkBack, programmatic) emit no drag to disarm it. See the convergence loop below. */
+const SCROLL_TO_TOP_WINDOW_MS = 1_000;
+
 /** Phase 3 inbox: a live (reactive) FlashList of iOS conversation tiles, with a BOTTOM search bar
  * that swaps the list for the unified search results (chats + message hits) the moment you type. */
 export function ConversationListScreen(): React.JSX.Element {
@@ -96,27 +102,96 @@ export function ConversationListScreen(): React.JSX.Element {
   const pinned = useMemo(() => visible.filter((r) => r.isPinned), [visible]);
   const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
 
-  // Scroll the inbox to the top when a DIFFERENT chat jumps to position 0 because it just got a
-  // NEWER message — yours or incoming — so the bumped thread is revealed instead of landing above
-  // a scrolled-down viewport (FlashList v2 anchors scroll position by default). Guards: only a
-  // change of the top chat (not a same-chat update or the user's own scrolling) AND a genuinely
-  // newer timestamp (so archiving/deleting the old top, which surfaces an OLDER chat, doesn't
-  // scroll). We advance the baseline every run — including while searching (the list is unmounted
-  // then) — so exiting search never fires a stale scroll; the first run just seeds the baseline.
+  // Reveal the bumped thread when ANY chat gets a NEWER message — yours or incoming — instead of
+  // letting it land above a scrolled-down viewport (FlashList v2 anchors scroll position by
+  // default). The trigger is the newest timestamp across ALL visible rows, PINNED INCLUDED:
+  // keying off "the chat at row 0 changed identity" missed the single most common case in the
+  // world — the conversation already at the top receiving another message — and for a pinned chat
+  // the effect didn't even re-run (pinned rows are split out of listData into the header grid).
+  // latest_message_date is MAX(date_created), so a delivery receipt / read marker / avatar or
+  // localPath backfill leaves it unchanged and cannot fire this; only a real message raises it.
+  // An OLDER chat surfacing (the top chat was archived or deleted) LOWERS it — also no scroll.
   // The inbox stays mounted under an open chat, so sending inside a thread reorders it here in the
   // background and it's already scrolled up by the time you return.
   const listRef = useRef<FlashListRef<InboxRow>>(null);
-  const prevTopRef = useRef<{ guid: string; date: number } | null>(null);
-  const topGuid = listData[0]?.guid;
-  const topDate = listData[0]?.latestMessageDate ?? 0;
+  const newestDate = useMemo(
+    () => visible.reduce((m, r) => Math.max(m, r.latestMessageDate ?? 0), 0),
+    [visible],
+  );
+  const prevNewestRef = useRef<number | null>(null);
+
+  // THE CONVERGENCE LOOP — the same machine MessageList uses to stay at the newest message, minus
+  // the parts the inbox doesn't need. A one-shot `scrollToTop({ animated: true })` from this
+  // passive effect loses a race it cannot win: FlashList v2 defers its maintainVisibleContentPosition
+  // offset correction by a commit, so it runs AFTER us and — through ReactScrollView's
+  // scrollToPreservingMomentum → recreateFlingAnimation — CANCELS the in-flight animated scroll,
+  // then scrolls to keep the OLD row 0 stationary, pushing the brand-new top chat above the fold
+  // with no recovery. So a corrective scroll is `animated: false` and is RE-ISSUED until the user
+  // takes over, from TWO triggers, because either one alone leaves a hole:
+  //   - `onContentSizeChange` catches late row-height changes (a preview wrapping to two lines).
+  //     It CANNOT catch a pure reorder: swapping two equal-height rows leaves the content height
+  //     identical (FlashList's scroll anchor is absolutely positioned, so it adds nothing to it)
+  //     and the event never fires — which is exactly the case this whole loop exists for.
+  //   - one deferred re-issue a frame later, which lands AFTER FlashList's deferred correction
+  //     commit and so undoes the "keep the old row 0 stationary" nudge for that reorder case.
+  //     A frame is enough because the correction is committed from a child layout effect one
+  //     commit behind us, not on a timer.
+  // `animated: true` stays reserved for user-initiated scrolls.
+  //
+  // The loop is TIME-BOUNDED as well as drag-bounded, so "armed" is a DEADLINE, not a flag. A drag
+  // is the only disarm a finger can produce, but plenty of scrolls never involve one — TalkBack's
+  // swipe-to-next-item moves the list through ACTION_SCROLL_FORWARD, which emits no drag — so a
+  // flag left true would keep yanking that reader back to row 0 on every later content-size change,
+  // with no gesture available to stop it. Every legitimate re-land (the deferred correction, a late
+  // row measurement, a two-line preview) happens within a frame or two of the message, so the
+  // window keeps all of the convergence benefit and none of the long tail. A deadline rather than a
+  // timer because there is then nothing pending to cancel — it simply stops being true.
+  const armedUntilRef = useRef(0);
+  const topRaf = useRef<number | null>(null);
+  const requestScrollToTop = useCallback((): void => {
+    armedUntilRef.current = Date.now() + SCROLL_TO_TOP_WINDOW_MS;
+    listRef.current?.scrollToTop({ animated: false });
+    if (topRaf.current != null) cancelAnimationFrame(topRaf.current);
+    topRaf.current = requestAnimationFrame(() => {
+      topRaf.current = null;
+      if (Date.now() < armedUntilRef.current) listRef.current?.scrollToTop({ animated: false });
+    });
+  }, []);
+  const onContentSizeChange = useCallback((): void => {
+    if (Date.now() < armedUntilRef.current) listRef.current?.scrollToTop({ animated: false });
+  }, []);
+  // A finger-down drag is the one signal programmatic scrolls never emit, so it is the one thing
+  // allowed to end the loop early — the user has taken over the list. Drop the pending frame with
+  // it so nothing is left in flight to fight the drag.
+  const onScrollBeginDrag = useCallback((): void => {
+    armedUntilRef.current = 0;
+    if (topRaf.current != null) cancelAnimationFrame(topRaf.current);
+    topRaf.current = null;
+  }, []);
+  // Unmount: a late frame must not scroll a list that no longer exists.
+  useEffect(
+    () => () => {
+      if (topRaf.current != null) cancelAnimationFrame(topRaf.current);
+    },
+    [],
+  );
+
   useEffect(() => {
-    const prev = prevTopRef.current;
-    prevTopRef.current = topGuid != null ? { guid: topGuid, date: topDate } : null;
-    if (searching || topGuid == null || prev == null) return;
-    if (prev.guid !== topGuid && topDate > prev.date) {
-      listRef.current?.scrollToTop({ animated: true });
-    }
-  }, [topGuid, topDate, searching]);
+    const prev = prevNewestRef.current;
+    // The baseline is a monotonic HIGH-WATER MARK — never null, never lower than it has been.
+    // Never null: `useReactiveQuery` sets `data: null` on ANY query error and the screen maps that
+    // to an empty list, so a single failed re-query would reset the baseline and make the next
+    // successful pass merely re-seed — swallowing a genuine bump. Never lower: `newestDate` is a
+    // max over the CURRENTLY VISIBLE rows, and that SET changes for reasons that are not messages
+    // — toggling "Filter Unknown Senders", a background contacts sync flipping a chat's
+    // hasKnownSender 0→1, un-archiving an old thread. Each of those shrinks then re-grows the max,
+    // and a non-monotonic baseline reads the re-grow as a brand-new message and yanks the list.
+    if (newestDate > 0) prevNewestRef.current = Math.max(prev ?? 0, newestDate);
+    // First pass seeds only. The baseline keeps advancing while searching (the list is swapped for
+    // SearchResultsView then), so leaving search can never fire a stale scroll.
+    if (searching || newestDate === 0 || prev == null) return;
+    if (newestDate > prev) requestScrollToTop();
+  }, [newestDate, searching, requestScrollToTop]);
 
   // The large title + actions stay PINNED at the top.
   const titleRow = (
@@ -289,6 +364,11 @@ export function ConversationListScreen(): React.JSX.Element {
               ListHeaderComponent={listHeader}
               ListFooterComponent={listData.length > 0 ? ListFooter : null}
               ItemSeparatorComponent={InboxSeparator}
+              // The convergence loop (see requestScrollToTop): re-issue the corrective scroll on
+              // every content-size change until a drag — or the arm window closing — hands the
+              // list back to the user.
+              onContentSizeChange={onContentSizeChange}
+              onScrollBeginDrag={onScrollBeginDrag}
               ListEmptyComponent={
                 isLoading ? (
                   <View style={styles.center}>

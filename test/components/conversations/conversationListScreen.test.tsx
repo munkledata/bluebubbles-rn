@@ -6,10 +6,22 @@
  *   - a chat that's pinned does NOT also appear in the list, and vice-versa;
  *   - empty / loading / error states;
  *   - typing in the bottom search bar swaps the list for SearchResultsView; clearing restores it;
- *   - header actions and tile taps route via expo-router; long-press opens the actions sheet.
+ *   - header actions and tile taps route via expo-router; long-press opens the actions sheet;
+ *   - the reveal-the-newest-thread scroll: WHEN it fires, that it's non-animated, that it keeps
+ *     re-issuing (content-size change AND one deferred frame) until the user drags, that a later
+ *     message re-arms it, and that it stops re-issuing once its arm window has passed.
  *
  * In-file mocks:
- *   - `@shopify/flash-list` → a plain renderer honoring data + Header/Empty/Footer slots.
+ *   - `@shopify/flash-list` → a plain renderer honoring data + Header/Empty/Footer slots. It also
+ *     forwards its ref (`scrollToTop`) and records its props: the screen's scroll behavior is only
+ *     observable through those, and an earlier version of this mock swallowed the ref, which is
+ *     precisely why the inbox shipped never scrolling for the chat already at the top.
+ *     MOCK LIMIT: it renders a plain View, so it cannot reproduce FlashList's
+ *     maintainVisibleContentPosition offset correction — the deferred scroll AGAINST which the
+ *     corrective scroll is racing on device. These tests prove the screen ISSUES the corrective
+ *     scrolls (and when it stops); they cannot prove one SURVIVES the correction. That last step is
+ *     device-only: scroll the inbox down, have a chat below the fold receive a SHORT (one-line)
+ *     message — a pure reorder, no content-height change — and confirm row 0 lands and stays.
  *   - `@features/conversations/useChats` → controllable `{ data, isLoading, error }` (real hook hits
  *     the reactive DB).
  *   - `expo-router` (useRouter) + `react-native-safe-area-context` (useSafeAreaInsets) → the RN
@@ -23,6 +35,9 @@ import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/ren
 import type { InboxRow } from '@db/repositories';
 
 const mockPush = jest.fn();
+const mockScrollToTop = jest.fn();
+/** Last props the screen handed the list — the config-level guard reads the scroll handlers here. */
+const mockListProps: { current: Record<string, unknown> } = { current: {} };
 
 jest.mock('@shopify/flash-list', () => {
   const ReactLib = require('react');
@@ -41,9 +56,15 @@ jest.mock('@shopify/flash-list', () => {
       ListHeaderComponent?: unknown;
       ListEmptyComponent?: unknown;
       ListFooterComponent?: unknown;
+      onContentSizeChange?: () => void;
+      onScrollBeginDrag?: () => void;
     },
-    _ref: unknown,
+    ref: unknown,
   ) {
+    // The imperative handle is the whole point: without it `listRef.current` is null and every
+    // corrective scroll is silently unobservable.
+    ReactLib.useImperativeHandle(ref, () => ({ scrollToTop: mockScrollToTop }), []);
+    mockListProps.current = props as unknown as Record<string, unknown>;
     const {
       data = [],
       renderItem,
@@ -171,6 +192,9 @@ const markAllReadMock = markAllChatsReadLocal as jest.Mock;
 beforeEach(() => {
   // The confirm dialog lives in the store (AppDialog is mounted at the app root, not here).
   useDialogStore.setState({ current: null, queue: [] });
+  // Reset in beforeEach, never afterEach: an afterEach mutation lands on a still-mounted tree.
+  mockScrollToTop.mockClear();
+  mockListProps.current = {};
 });
 
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
@@ -340,5 +364,283 @@ describe('ConversationListScreen — navigation & actions', () => {
     fireEvent(await screen.findByTestId('tile-l1'), 'longPress');
     const actions = await screen.findByTestId('actions');
     expect(actions.props.children).toBe('l1');
+  });
+});
+
+/**
+ * Revealing the newest thread. The inbox is anchored by FlashList v2's
+ * maintainVisibleContentPosition, so a chat that bumps to the top while the user is scrolled down
+ * stays above the fold unless the screen scrolls. The trigger is the newest latestMessageDate
+ * across ALL visible rows (pinned included) — NOT "row 0 changed identity", which never fired for
+ * the commonest case of all: the conversation already at the top getting another message.
+ */
+describe('ConversationListScreen — reveal the newest thread', () => {
+  // The corrective scroll's deferred re-issue is a requestAnimationFrame, and whether a REAL frame
+  // happens to land inside an awaited act() is luck — which would make every call count below
+  // flaky. Capture the frames instead of running them: the counts are then exact, and the deferred
+  // scroll fires only in the tests that explicitly flush it.
+  let frames: FrameRequestCallback[] = [];
+  let restoreRaf = (): void => {};
+  beforeEach(() => {
+    frames = [];
+    const spy = jest
+      .spyOn(global, 'requestAnimationFrame')
+      // The queue length doubles as the handle: always ≥ 1, so it never reads as falsy.
+      .mockImplementation((cb: FrameRequestCallback): number => frames.push(cb));
+    restoreRaf = (): void => {
+      spy.mockRestore();
+    };
+  });
+  afterEach(() => {
+    restoreRaf();
+  });
+  /** Run whatever the screen queued, the way the next display refresh would. */
+  function flushFrames(): void {
+    for (const cb of frames.splice(0, frames.length)) cb(0);
+  }
+
+  // Re-drive the reactive hook the way a DB write does, then let the screen re-render.
+  async function drive(
+    view: { rerender: (ui: React.ReactElement) => void },
+    state: { data?: InboxRow[]; isLoading?: boolean; error?: unknown },
+  ): Promise<void> {
+    setChats(state);
+    await act(async () => {
+      view.rerender(<ConversationListScreen />);
+    });
+  }
+
+  it('seeds the baseline on the first data arrival without scrolling', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+  });
+
+  // THE reported bug: an active conversation is already at row 0, so its guid never changes.
+  it('scrolls when the chat ALREADY at the top receives a newer message', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 2_000 })] });
+    // animated:false — an animated scroll is cancelled by FlashList's deferred offset correction.
+    expect(mockScrollToTop).toHaveBeenCalledWith({ animated: false });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+  });
+
+  it('scrolls when a different chat bumps to the top with a newer message', async () => {
+    setChats({
+      data: [
+        makeRow({ guid: 'a', latestMessageDate: 2_000 }),
+        makeRow({ guid: 'b', latestMessageDate: 1_000 }),
+      ],
+    });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, {
+      data: [
+        makeRow({ guid: 'b', latestMessageDate: 3_000 }),
+        makeRow({ guid: 'a', latestMessageDate: 2_000 }),
+      ],
+    });
+    expect(mockScrollToTop).toHaveBeenCalledWith({ animated: false });
+  });
+
+  // The nastiest case, and the one the whole loop exists for: a chat below the fold bumps to row 0
+  // with a ONE-LINE message. That's a pure reorder — the content height is identical, so
+  // onContentSizeChange never fires — while FlashList still runs its deferred offset correction a
+  // commit later and scrolls back to keep the old row 0 stationary. The deferred frame is the only
+  // re-issue that can land after that correction.
+  it('re-issues the corrective scroll one frame later, with no content-size change at all', async () => {
+    setChats({
+      data: [
+        makeRow({ guid: 'a', latestMessageDate: 2_000 }),
+        makeRow({ guid: 'b', latestMessageDate: 1_000 }),
+      ],
+    });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, {
+      data: [
+        makeRow({ guid: 'b', latestMessageDate: 3_000 }),
+        makeRow({ guid: 'a', latestMessageDate: 2_000 }),
+      ],
+    });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+
+    flushFrames();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(2);
+    expect(mockScrollToTop).toHaveBeenLastCalledWith({ animated: false });
+  });
+
+  it('drops the pending deferred scroll when the user drags first', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 2_000 })] });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+
+    // The frame is already queued when the finger lands; it must find the loop disarmed.
+    (mockListProps.current.onScrollBeginDrag as () => void)();
+    flushFrames();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+  });
+
+  // Archiving/deleting the top chat surfaces an OLDER one — the list content changed but nothing
+  // new arrived, so yanking the viewport would be wrong.
+  it('does not scroll when an OLDER chat surfaces (the top chat was archived)', async () => {
+    setChats({
+      data: [
+        makeRow({ guid: 'a', latestMessageDate: 2_000 }),
+        makeRow({ guid: 'b', latestMessageDate: 1_000 }),
+      ],
+    });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, { data: [makeRow({ guid: 'b', latestMessageDate: 1_000 })] });
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+  });
+
+  // The trigger reads a max over the VISIBLE rows, and that SET changes without a message arriving:
+  // toggling "Filter Unknown Senders", a background contacts sync flipping a chat's hasKnownSender
+  // 0→1, un-archiving an old thread. Each drops the max and then restores it. The baseline is a
+  // monotonic high-water mark precisely so the restore isn't read as a brand-new message.
+  it('does not scroll when an old chat merely re-enters the visible set', async () => {
+    setChats({
+      data: [
+        makeRow({ guid: 'a', latestMessageDate: 3_000 }),
+        makeRow({ guid: 'b', latestMessageDate: 5_000 }),
+      ],
+    });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    // b leaves the visible set (the filter went on / it was archived): the max drops to 3_000.
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 3_000 })] });
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+
+    // b comes back carrying its OLD date. Nothing was sent or received.
+    await drive(view, {
+      data: [
+        makeRow({ guid: 'a', latestMessageDate: 3_000 }),
+        makeRow({ guid: 'b', latestMessageDate: 5_000 }),
+      ],
+    });
+    flushFrames();
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+
+    // …and a genuine message after that still scrolls — the high-water mark mustn't go inert.
+    await drive(view, {
+      data: [
+        makeRow({ guid: 'b', latestMessageDate: 6_000 }),
+        makeRow({ guid: 'a', latestMessageDate: 3_000 }),
+      ],
+    });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+  });
+
+  // Pinned rows live in the header grid, not listData — the old row-0 trigger couldn't even see
+  // them, so a user who pins their important chats had a completely inert inbox.
+  it('scrolls when a PINNED chat receives a newer message', async () => {
+    setChats({
+      data: [
+        makeRow({ guid: 'p', isPinned: 1, latestMessageDate: 1_000 }),
+        makeRow({ guid: 'l', latestMessageDate: 900 }),
+      ],
+    });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, {
+      data: [
+        makeRow({ guid: 'p', isPinned: 1, latestMessageDate: 2_000 }),
+        makeRow({ guid: 'l', latestMessageDate: 900 }),
+      ],
+    });
+    expect(mockScrollToTop).toHaveBeenCalledWith({ animated: false });
+  });
+
+  // useReactiveQuery nulls `data` on ANY query error; nulling the baseline there would make the
+  // next successful pass merely re-seed and swallow a real bump.
+  it('keeps the baseline through a failed/empty pass and still scrolls on recovery', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, { data: undefined, error: new Error('db down') });
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 2_000 })] });
+    expect(mockScrollToTop).toHaveBeenCalledWith({ animated: false });
+  });
+
+  it('never scrolls while searching, and exiting search fires no stale scroll', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    fireEvent.changeText(screen.getByPlaceholderText('Search messages & chats'), 'hello');
+    await screen.findByTestId('search');
+
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 2_000 })] });
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+
+    // The baseline advanced under the search results, so restoring the list is not a bump.
+    fireEvent.press(screen.getByLabelText('Clear search'));
+    expect(await screen.findByTestId('tile-a')).toBeTruthy();
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+  });
+
+  // Config-level guard (same spirit as messageSwipeWrapper's PanResponder assertions): the loop is
+  // invisible in the rendered output, so pin the handlers and their behavior. Deleting either prop
+  // silently restores the one-shot scroll that FlashList's offset correction cancels.
+  it('runs the convergence loop until the user drags', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    const onContentSizeChange = mockListProps.current.onContentSizeChange;
+    const onScrollBeginDrag = mockListProps.current.onScrollBeginDrag;
+    expect(typeof onContentSizeChange).toBe('function');
+    expect(typeof onScrollBeginDrag).toBe('function');
+
+    // Before any bump the loop is idle — content growth alone must not hijack the viewport.
+    (onContentSizeChange as () => void)();
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 2_000 })] });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+
+    // A late row-height change (a preview wrapping to two lines) re-issues the scroll…
+    (mockListProps.current.onContentSizeChange as () => void)();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(2);
+
+    // …until a finger-down drag hands the list back to the user.
+    (mockListProps.current.onScrollBeginDrag as () => void)();
+    (mockListProps.current.onContentSizeChange as () => void)();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(2);
+
+    // …and the NEXT message re-arms it. A one-way "the user took over" latch would satisfy every
+    // assertion above while making the inbox reveal exactly one message per app launch and then go
+    // inert for the rest of the session.
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 3_000 })] });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(3);
+    (mockListProps.current.onContentSizeChange as () => void)();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(4);
+  });
+
+  // A drag is the only disarm a FINGER can produce, but plenty of scrolls never involve one:
+  // TalkBack's swipe-to-next-item moves the list through the accessibility API and emits no drag.
+  // Without the arm window such a reader would be pulled back to row 0 by every later content-size
+  // change, with no gesture available to stop it.
+  it('stops re-issuing once the arm window has passed, even with no drag', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    const view = await renderWithTheme(<ConversationListScreen />);
+
+    await drive(view, { data: [makeRow({ guid: 'a', latestMessageDate: 2_000 })] });
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+    try {
+      (mockListProps.current.onContentSizeChange as () => void)();
+      flushFrames();
+      expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

@@ -98,10 +98,22 @@ export default function SettingsScreen(): React.JSX.Element {
   const anyMatch = Object.values(SECTIONS).some(match);
 
   const onDisconnect = (): void => {
-    showDialog('Disconnect', 'Forget this server and clear stored credentials?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Disconnect', style: 'destructive', onPress: () => void forget() },
-    ]);
+    showDialog(
+      'Disconnect',
+      // This is the ONLY consent gate on the wipe (home.tsx's Disconnect is inside the __DEV__
+      // bar), so it has to name the UNRECOVERABLE half explicitly. Plenty of people tap Disconnect
+      // just to re-enter a changed password or a rotated tunnel URL; conversations do come back on
+      // reconnect, but nothing on the server holds their pins, custom names, wallpapers, reminders
+      // or unsent messages, and `clearLocalCache` deletes all of it (deliberately — a chat guid is
+      // identical across servers, so keeping it would hand it to the next account).
+      'Forget this server and clear stored credentials?\n\n' +
+        'Conversations, messages and downloaded attachments are deleted from this device and re-sync when you reconnect.\n\n' +
+        'Pins, mutes, custom chat names, chat themes and wallpapers, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => void forget() },
+      ],
+    );
   };
 
   const onRotateKey = (): void => {
@@ -136,7 +148,13 @@ export default function SettingsScreen(): React.JSX.Element {
   const onSyncContacts = async (): Promise<void> => {
     setSyncing(true);
     try {
-      const { contacts, matched } = await syncContacts();
+      // `force` because this button exists to refresh NOW: an unforced call would join whatever
+      // background run is already in flight (startSync fires one on every connect/resume) and
+      // report counts from an address-book read that began before the user's edit — telling them
+      // the sync succeeded while the contact they just added is still missing. A forced call still
+      // SERIALIZES behind that run (two overlapping contact syncs prune each other's rows), then
+      // re-reads the address book.
+      const { contacts, matched } = await syncContacts({ force: true });
       showDialog('Contacts synced', `Read ${contacts} contacts, matched ${matched}.`);
     } catch (e) {
       showDialog(

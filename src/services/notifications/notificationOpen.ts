@@ -78,6 +78,25 @@ export function openFromNotification(
 /** Minimal structural shape of a notify-kit InitialNotification / EventDetail read here. */
 export interface TappedNotification {
   notification?: { data?: Record<string, unknown> };
+  /**
+   * The press action the user interacted with. Present on a genuine press event and ABSENT on
+   * Android's launch-intent echo — the discriminator `drainNotificationTap` relies on.
+   */
+  pressAction?: { id?: string };
+}
+
+/**
+ * Is this a REAL press event, or Android replaying the intent that launched the Activity?
+ *
+ * `getInitialNotification()` is not read-once on Android. It pops the sticky press event, and when
+ * there is none it falls back to `activity.getIntent()` — which still carries the `notification`
+ * extra that the tap put there, for the Activity's ENTIRE lifetime (RN never calls `setIntent`).
+ * The sticky event's bundle carries the `pressAction` alongside the notification; the launch-intent
+ * fallback copies only `notification`. So a missing pressAction means "you have already seen this
+ * one", and every notification this app posts sets a `pressAction` on its body tap.
+ */
+function isRealPress(initial: TappedNotification | null): boolean {
+  return !!initial?.pressAction;
 }
 
 /**
@@ -89,11 +108,15 @@ export interface TappedNotification {
  *  - the `pendingNav` stash set by `onBackgroundEvent` (the deterministic same-JS-context backstop
  *    for a background-alive press, in case the sticky event isn't delivered).
  *
- * Both sources are CLEARED (getInitial is read-once; takePending empties the slot) so a stale tap
- * can't re-fire on a later resume, then a SINGLE `openFromNotification` runs — the two channels
- * describe the same press, so navigating once (preferring the initial's data) avoids pushing the
- * chat twice onto the stack. `runPressSideEffects` runs the DB side-effects (reminder cleanup) for
- * a real launch press. Every dependency is injected, so this is unit-testable without notifee or
+ * The pending stash is CLEARED (takePending empties the slot) so a stale tap can't re-fire on a
+ * later resume, and the launch event is accepted only when it is a genuine press (see
+ * `isRealPress`) — Android keeps re-serving the launching notification from the Activity's intent,
+ * which would otherwise TRAP the user: cold-start into chat A, press Back, and the next drain
+ * (this runs on every resume, and used to run on every navigation) pushes straight back into A,
+ * with the inbox unreachable. Then a SINGLE `openFromNotification` runs — the two channels describe
+ * the same press, so navigating once (preferring the initial's data) avoids pushing the chat twice
+ * onto the stack. `runPressSideEffects` runs the DB side-effects (reminder cleanup) for a real
+ * launch press. Every dependency is injected, so this is unit-testable without notifee or
  * expo-router.
  */
 export async function drainNotificationTap<T extends TappedNotification>(
@@ -102,7 +125,8 @@ export async function drainNotificationTap<T extends TappedNotification>(
   runPressSideEffects: (detail: T) => void | Promise<void>,
   navigate: (path: string) => void,
 ): Promise<void> {
-  const initial = await getInitial();
+  const raw = await getInitial();
+  const initial = isRealPress(raw) ? raw : null;
   const pending = takePending();
   if (initial) await runPressSideEffects(initial);
   openFromNotification(initial?.notification?.data ?? pending ?? undefined, navigate);

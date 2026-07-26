@@ -86,8 +86,15 @@ export function toShareShortcuts(
  *
  * `redacted` is passed IN rather than read from the store here, so this module needs no
  * store/DB import and the behaviour stays explicit at every call site.
+ *
+ * `loaded` says the caller KNOWS the inbox is empty, as opposed to not having read it yet — see the
+ * empty-list branch. It defaults to false, so a caller that cannot tell the two apart keeps the
+ * old, conservative behaviour.
  */
-export function publishShareShortcuts(rows: InboxRow[], opts: { redacted: boolean }): void {
+export function publishShareShortcuts(
+  rows: InboxRow[],
+  opts: { redacted: boolean; loaded?: boolean },
+): void {
   const native = getNative();
   if (!native) return;
   // Redacted mode must actively CLEAR, not merely skip publishing — dynamic shortcuts are
@@ -104,9 +111,24 @@ export function publishShareShortcuts(rows: InboxRow[], opts: { redacted: boolea
   }
 
   const shortcuts = toShareShortcuts(rows, { redacted: false });
-  // An empty inbox is usually "not loaded yet", not "nothing to show" — leave any existing chips
-  // alone rather than churning them.
-  if (shortcuts.length === 0) return;
+  if (shortcuts.length === 0) {
+    // "Not loaded yet" and "genuinely nothing to show" are the same LENGTH but opposite
+    // instructions, and length alone cannot tell them apart — so the caller says which.
+    //
+    // Unknown → leave the existing chips alone rather than churning them on every cold start.
+    // KNOWN-empty → clear, for the same reason the redacted branch above does: dynamic shortcuts
+    // are PERSISTENT system state that outlives the process, so "we published nothing this tick"
+    // is not the same as "there is nothing published". Deleting your last conversation used to
+    // leave that contact's name and photo live in the share sheet's priority row indefinitely, and
+    // tapping the orphan re-opened (and re-synced) the very thread the user deleted. The chat is
+    // hidden by its tombstone, so unlike the old hard delete nothing ever brings it back to make
+    // the chip truthful again. Sentinel-guarded so the clear happens once, not on every tick.
+    if (opts.loaded && lastPublished !== CLEARED) {
+      clearShareShortcuts();
+      lastPublished = CLEARED;
+    }
+    return;
+  }
 
   const key = JSON.stringify(shortcuts);
   if (key === lastPublished) return;
@@ -142,7 +164,12 @@ export async function refreshShareShortcuts(): Promise<void> {
     // `getDatabase` throws until the DB is open (e.g. while app-locked at boot) — nothing to
     // publish yet; the inbox screen and the next refresh will catch up.
     const rows = await listChatsForInbox(getDatabase());
-    publishShareShortcuts(rows, { redacted: useRedactedModeStore.getState().enabled });
+    // `loaded: true` — the query above just resolved, so an empty result really is an empty inbox
+    // and any surviving chips are orphans that must be cleared.
+    publishShareShortcuts(rows, {
+      redacted: useRedactedModeStore.getState().enabled,
+      loaded: true,
+    });
   } catch (err) {
     logger.debug('[shortcuts] refresh skipped', err);
   }

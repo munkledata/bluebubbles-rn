@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { chats, themes } from '../schema';
+import { chats } from '../schema';
 import type { AppDatabase } from '../types';
 import { kvSet, THEME_CUSTOM_KEY } from './kv';
 
@@ -55,12 +55,38 @@ export async function restoreKv(db: AppDatabase, items: KvPair[]): Promise<void>
   }
 }
 
+/**
+ * Restore custom themes, upserting on the natural key `(name, mode)` among user themes.
+ *
+ * Done by hand rather than with `onConflictDoUpdate` because `themes` has NO unique index — `id
+ * INTEGER PRIMARY KEY AUTOINCREMENT` is its only key and no id is supplied here, so a conflict
+ * clause has nothing to arbitrate on: it never fires (and naming a non-indexed target throws "ON
+ * CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"). Left as a plain insert,
+ * restoring the same backup twice — an utterly normal recovery action — left two indistinguishable
+ * copies of every custom theme, which no later restore could ever dedupe.
+ *
+ * Both halves put their condition IN the statement: the UPDATE reports what it matched, and the
+ * INSERT re-checks absence itself, so a row that appeared between the two writes still can't be
+ * duplicated. Update-then-insert, never delete-then-insert — every write commits on its own and
+ * wakes the reactive readers, so a theme the user is currently rendering must never blink out of
+ * existence on its way to being rewritten.
+ */
 export async function restoreThemes(db: AppDatabase, items: ThemeRow[]): Promise<void> {
   for (const t of items) {
-    await db
-      .insert(themes)
-      .values({ name: t.name, mode: t.mode, tokens: t.tokens, isPreset: false })
-      .onConflictDoNothing();
+    const updated = await db.all<{ id: number }>(sql`
+      UPDATE themes SET tokens = ${t.tokens}
+       WHERE name = ${t.name} AND mode = ${t.mode} AND is_preset = 0
+      RETURNING id
+    `);
+    if (updated.length > 0) continue;
+    await db.run(sql`
+      INSERT INTO themes (name, mode, tokens, is_preset)
+      SELECT ${t.name}, ${t.mode}, ${t.tokens}, 0
+       WHERE NOT EXISTS (
+         SELECT 1 FROM themes
+          WHERE name = ${t.name} AND mode = ${t.mode} AND is_preset = 0
+       )
+    `);
   }
 }
 

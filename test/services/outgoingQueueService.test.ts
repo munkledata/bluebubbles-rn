@@ -5,6 +5,7 @@ import type { HttpClient } from '@core/api/http';
 import { Chat } from '@core/models';
 import {
   applyServerSendError,
+  claimFailedOutgoingForRetry,
   getChatIdByGuid,
   insertOutgoingAttachment,
   insertOutgoingReaction,
@@ -74,9 +75,11 @@ const queueCount = (raw: Database.Database): number =>
 const stateOf = (raw: Database.Database, guid: string): string | undefined =>
   (raw.prepare('SELECT send_state s FROM messages WHERE guid = ?').get(guid) as { s: string })?.s;
 const attemptsOf = (raw: Database.Database, tempGuid: string): number | undefined =>
-  (raw.prepare('SELECT attempts a FROM outgoing_queue WHERE temp_guid = ?').get(tempGuid) as {
-    a: number;
-  })?.a;
+  (
+    raw.prepare('SELECT attempts a FROM outgoing_queue WHERE temp_guid = ?').get(tempGuid) as {
+      a: number;
+    }
+  )?.a;
 
 /** Insert an outgoing text whose created_at is forced old, so it's a stranded (eligible) row. */
 async function strandedText(
@@ -270,9 +273,9 @@ describe('runOutgoingQueue — attachment resend', () => {
     // error → sent (the swallow fix), queue cleared, local image retained for rendering.
     expect(stateOf(raw, 'temp-pic')).toBe('sent');
     expect(queueCount(raw)).toBe(0);
-    expect(
-      (raw.prepare('SELECT local_path lp FROM attachments').get() as { lp: string }).lp,
-    ).toBe('file:///pic.jpg');
+    expect((raw.prepare('SELECT local_path lp FROM attachments').get() as { lp: string }).lp).toBe(
+      'file:///pic.jpg',
+    );
   });
 
   it('a failed re-upload bumps attempts + reschedules backoff (bubble stays errored)', async () => {
@@ -312,7 +315,11 @@ describe('runOutgoingQueue — attachment resend', () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await strandedText(db, raw, 'c1', 'temp-z', 1000);
-    raw.prepare("UPDATE outgoing_queue SET kind='wormhole', next_retry_at=0 WHERE temp_guid='temp-z'").run();
+    raw
+      .prepare(
+        "UPDATE outgoing_queue SET kind='wormhole', next_retry_at=0 WHERE temp_guid='temp-z'",
+      )
+      .run();
     raw.prepare("UPDATE outgoing_queue SET attempts=1 WHERE temp_guid='temp-z'").run();
 
     const res = await runOutgoingQueue(db, {} as HttpClient, noAttachmentIo, 2_000_000);
@@ -333,7 +340,9 @@ describe('applyServerSendError', () => {
     expect(attemptsOf(raw, 'temp-async')).toBe(1);
     // Rescheduled with the ladder's backoff, not left at its insert-time value.
     const next = (
-      raw.prepare("SELECT next_retry_at n FROM outgoing_queue WHERE temp_guid='temp-async'").get() as {
+      raw
+        .prepare("SELECT next_retry_at n FROM outgoing_queue WHERE temp_guid='temp-async'")
+        .get() as {
         n: number;
       }
     ).n;
@@ -376,7 +385,9 @@ describe('applyServerSendError', () => {
     await applyServerSendError(db, 'temp-async-pic', 502, 5_000_000, true);
     expect(stateOf(raw, 'temp-async-pic')).toBe('error'); // failure surfaced on the bubble
     const row = raw
-      .prepare("SELECT kind, attempts, payload FROM outgoing_queue WHERE temp_guid='temp-async-pic'")
+      .prepare(
+        "SELECT kind, attempts, payload FROM outgoing_queue WHERE temp_guid='temp-async-pic'",
+      )
       .get() as { kind: string; attempts: number; payload: string };
     expect(row.kind).toBe('attachment');
     expect(row.attempts).toBe(1); // the failed relay WAS attempt one; also skips the grace window
@@ -468,5 +479,79 @@ describe('applyServerSendError', () => {
     await applyServerSendError(db, 'temp-react', 502, 5_000_000, true);
     expect(queueCount(raw)).toBe(0);
     expect(stateOf(raw, 'temp-react')).toBe('error');
+  });
+});
+
+/**
+ * The drain and the "Try Again" button run on the same rows, from the same screen, on one shared
+ * connection — the chat ticker drains every 20 s while the failed-message sheet is open.
+ *
+ * The dangerous outcome is not one of them losing: it is BOTH winning. The button re-sends under a
+ * BRAND-NEW temp guid, and the temp id is exactly the key the server's idempotency cache is built
+ * on — so a drain that POSTs the old row after the button already claimed it delivers the message
+ * twice. Whoever gets there first must therefore leave the other with nothing to do.
+ */
+describe('runOutgoingQueue vs "Try Again" on the same row', () => {
+  it('never lets both the drain and the manual claim act on one send', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const now = 10_000_000;
+    await strandedText(db, raw, 'c1', 'temp-race', now - 200_000);
+    raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-race'").run();
+    raw
+      .prepare("UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-race'")
+      .run();
+
+    let posts = 0;
+    const countingHttp = fakeHttp(async () => {
+      posts += 1;
+      return { guid: 'real-race', dateCreated: now, dateDelivered: null };
+    });
+
+    // Both started in the SAME tick, neither awaited first — the real interleave.
+    const drain = runOutgoingQueue(db, countingHttp, noAttachmentIo, now);
+    const claim = claimFailedOutgoingForRetry(db, 'temp-race');
+    const [res, handover] = await Promise.all([drain, claim]);
+
+    if (handover.claim === 'claimed') {
+      // The button owns the send: the row is leased and flipped to 'sending' under its ORIGINAL
+      // temp guid, so the drain found nothing eligible and POSTed nothing. (Exactly one
+      // idempotency key exists at the server for this message, whichever side wins.)
+      expect(posts).toBe(0);
+      expect(res.sent).toBe(0);
+      expect(handover.row?.tempGuid).toBe('temp-race');
+      expect(stateOf(raw, 'temp-race')).toBe('sending');
+    } else {
+      // The drain owns it: the claim was refused, and refusing must NOT have stripped the ladder
+      // out from under the attempt that is running.
+      expect(handover.claim).toBe('sending');
+      expect(posts).toBe(1);
+      expect(stateOf(raw, 'real-race')).toBe('sent');
+    }
+  });
+
+  it('flips the bubble to sending as part of the lease, so a claim mid-POST is refused', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const now = 10_000_000;
+    await strandedText(db, raw, 'c1', 'temp-mid', now - 200_000);
+    raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-mid'").run();
+    raw
+      .prepare("UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-mid'")
+      .run();
+
+    // The user taps "Try Again" while this attempt's POST is in flight.
+    let verdict: string | undefined;
+    const tapDuringPost = fakeHttp(async () => {
+      verdict = (await claimFailedOutgoingForRetry(db, 'temp-mid')).claim;
+      return { guid: 'real-mid', dateCreated: now, dateDelivered: null };
+    });
+
+    const res = await runOutgoingQueue(db, tapDuringPost, noAttachmentIo, now);
+
+    expect(verdict).toBe('sending'); // 'error' would have let the tap re-POST a live attempt
+    expect(res.sent).toBe(1);
+    expect(stateOf(raw, 'real-mid')).toBe('sent'); // the attempt reconciled normally
+    expect(queueCount(raw)).toBe(0);
   });
 });

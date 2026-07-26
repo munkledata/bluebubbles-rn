@@ -107,7 +107,7 @@ interface FindMyState {
 const isDev = isDevServer;
 
 /** Find My devices + friends. Dev session uses fixtures; prod fetches the server. */
-export const useFindMyStore = create<FindMyState>((set) => ({
+export const useFindMyStore = create<FindMyState>((set, get) => ({
   devices: [],
   friends: [],
   items: [],
@@ -144,6 +144,13 @@ export const useFindMyStore = create<FindMyState>((set) => ({
     }
   },
   refresh: async () => {
+    // ONE server refresh at a time — this is the coalescing guard the findmy screen relies on.
+    // It polls `refresh()` on a bare 60s interval and pull-to-refresh calls it directly; neither
+    // goes through the header button's `disabled={refreshing}`, and a slow iCloud re-poll easily
+    // outlives 60s. Overlapping runs both end with an unconditional `refreshing: false`, so the
+    // first to settle re-enables the button and whichever settles LAST wins the data write —
+    // which is not necessarily the run that fetched the freshest locations.
+    if (get().refreshing) return;
     if (isDev()) {
       set({
         devices: FIXTURE_DEVICES,

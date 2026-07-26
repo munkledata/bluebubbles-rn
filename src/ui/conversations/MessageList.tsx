@@ -129,8 +129,22 @@ export function MessageList({
   // Tapping the "!" on a not-delivered message opens a themed sheet (Try Again / Delete) instead
   // of silently discarding it. Try Again re-sends — and for a failed picture it RE-UPLOADS the
   // image (from its retained on-disk path), not just the (empty) text.
-  const [failed, setFailed] = useState<EnrichedMessage | null>(null);
-  const handleRetry = useCallback((m: EnrichedMessage) => setFailed(m), []);
+  // Held by GUID, then re-read from the live rows on every reactive tick — never as a frozen copy
+  // of the message. The automatic retry drain runs every 20 s and flips a failed bubble to
+  // 'sending' before its POST, so a snapshot taken when the sheet opened goes stale while the
+  // sheet is still on screen, and Try Again / Delete then act on a message that is mid-flight or
+  // already delivered. The sheet closes itself the moment its row stops being a failed one.
+  const [failedGuid, setFailedGuid] = useState<string | null>(null);
+  const failed = useMemo(
+    () => (failedGuid ? (rows.find((m) => m.guid === failedGuid) ?? null) : null),
+    [failedGuid, rows],
+  );
+  const stillFailed = failed != null && (failed.sendState === 'error' || failed.error !== 0);
+  // Render-phase reset (React's "adjust state when the data changes" pattern), not an effect: the
+  // target must be FORGOTTEN, not merely hidden, or a retry that fails again re-opens a sheet the
+  // user never asked for a second time.
+  if (failedGuid !== null && !stillFailed) setFailedGuid(null);
+  const handleRetry = useCallback((m: EnrichedMessage) => setFailedGuid(m.guid), []);
   // Tap a message's reaction badges → open the "who reacted" sheet (owned here, like FailedMessageSheet).
   const [reactionsFor, setReactionsFor] = useState<EnrichedMessage | null>(null);
   const handleShowReactions = useCallback((m: EnrichedMessage) => setReactionsFor(m), []);
@@ -211,6 +225,14 @@ export function MessageList({
   // Highlight the target once it's mounted in view (once per target); nudge it toward center.
   const focusedRef = useRef<string | null>(null);
   const focusScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The centering nudge must read the index at FIRE time, never close over it: `focusIndex` is
+  // recomputed when the anchored window finally lands (useReactiveQuery keeps serving the PREVIOUS
+  // deps' rows until then, and a mid-session jump doesn't remount — `jump` isn't in the screen's
+  // key), so the value captured 450ms earlier is normally stale. Out of range FlashList ignores it
+  // and the nudge is merely lost; IN range — a deep unread backlog, a ThreadSheet jump near the top
+  // of the window — it actively yanked the reader to the WRONG message half a second after landing.
+  const focusIndexRef = useRef(focusIndex);
+  focusIndexRef.current = focusIndex;
   useEffect(() => {
     if (!focusReady || focusedRef.current === focusGuid) return;
     focusedRef.current = focusGuid ?? null;
@@ -219,13 +241,17 @@ export function MessageList({
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 3000);
     if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
     focusScrollTimer.current = setTimeout(() => {
+      // -1 = the target left the loaded window while the timer was pending; scrollToIndex(-1)
+      // would be a scroll to nowhere.
+      const index = focusIndexRef.current;
+      if (index < 0) return;
       try {
-        listRef.current?.scrollToIndex({ index: focusIndex, animated: false, viewPosition: 0.35 });
+        listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
       } catch {
         // initialScrollIndex already placed it; centering is best-effort.
       }
     }, 450);
-  }, [focusReady, focusGuid, focusIndex]);
+  }, [focusReady, focusGuid]);
 
   // Unmount: clear all delayed one-shots so a late fire can't setState/scroll a dead list.
   useEffect(
@@ -430,15 +456,18 @@ export function MessageList({
         </Pressable>
       ) : null}
       <FailedMessageSheet
-        visible={failed !== null}
+        visible={stillFailed}
         isAttachment={failedImage !== undefined}
-        onClose={() => setFailed(null)}
+        onClose={() => setFailedGuid(null)}
         onRetry={() => {
-          if (failed)
-            void retry(failed.guid, { chatGuid, text: failed.text ?? '', image: failedImage });
+          // The GUID is all `retry` needs — it re-POSTs the queue payload under the same temp id.
+          // Passing the bubble's text/image is what made a failed contact card go out as a plain
+          // message reading the contact's name, and dropped a reply's target / effect / subject /
+          // mentions, none of which this component can see.
+          if (stillFailed && failed) void retry(failed.guid);
         }}
         onDelete={() => {
-          if (failed) void discardMessage(failed.guid);
+          if (stillFailed && failed) void discardMessage(failed.guid);
         }}
       />
       <ReactionDetailsSheet

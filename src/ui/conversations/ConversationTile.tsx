@@ -2,13 +2,8 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
-import {
-  deleteChatLocal,
-  setChatArchive,
-  setChatMute,
-  type InboxRow,
-} from '@db/repositories';
-import { markRead, markUnread } from '@/services';
+import { setChatArchive, setChatMute, type InboxRow } from '@db/repositories';
+import { deleteChat, markRead, markUnread } from '@/services';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
@@ -78,7 +73,7 @@ export const ConversationTile = React.memo(function ConversationTile({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => void deleteChatLocal(getDatabase(), row.guid),
+          onPress: () => void deleteChat(row.guid),
         },
       ],
     );

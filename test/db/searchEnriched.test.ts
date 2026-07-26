@@ -1,6 +1,8 @@
 import { Chat, Message } from '@core/models';
 import {
+  deleteChatLocal,
   markMessageDeleted,
+  searchChatGuidsByMessage,
   searchMessagesEnriched,
   upsertChats,
   upsertHandles,
@@ -86,5 +88,45 @@ describe('searchMessagesEnriched', () => {
     // `date_deleted IS NULL` filter is what makes the deleted message VANISH from search.
     await markMessageDeleted(db, 'm1', 5000);
     expect(await searchMessagesEnriched(db, 'keynote')).toEqual([]);
+  });
+
+  /**
+   * Search renders its rows DIRECTLY — no chat-list intersection filters them — so it is a reader
+   * of the chat tombstone exactly like the inbox is. Deleting a conversation removes its message
+   * rows, but the next `syncAllChats` re-inserts each chat's lastMessage, putting that text back in
+   * the FTS index; without the visibility predicate the hit was listed under the deleted thread's
+   * name and tapping it re-opened (and re-paged) the conversation the user deleted.
+   */
+  it('excludes hits in a locally-deleted chat, including a message the next sync re-inserted', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    await deleteChatLocal(db, 'c-craig', 5000);
+    expect(await searchMessagesEnriched(db, 'keynote')).toEqual([]);
+    expect(await searchChatGuidsByMessage(db, 'keynote')).toEqual([]);
+
+    // The re-sync's lastMessage upsert puts the text back into the index (the chat stays hidden:
+    // the re-inserted message is older than the tombstone).
+    const chatId = (await upsertChats(db, [Chat.parse({ guid: 'c-craig' })], new Map())).get(
+      'c-craig',
+    )!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'm1', text: 'You catch the keynote?', dateCreated: 100 })],
+      () => chatId,
+      new Map(),
+    );
+    expect(await searchMessagesEnriched(db, 'keynote')).toEqual([]);
+
+    // A genuinely NEW message un-hides the conversation, and its search hits come back with it.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'm9', text: 'keynote again?', dateCreated: 9000 })],
+      () => chatId,
+      new Map(),
+    );
+    expect((await searchMessagesEnriched(db, 'keynote')).map((r) => r.guid).sort()).toEqual([
+      'm1',
+      'm9',
+    ]);
   });
 });

@@ -132,7 +132,12 @@ describe('openFromNotification', () => {
 });
 
 describe('drainNotificationTap', () => {
-  const messageInitial = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
+  // A genuine press event carries the pressAction bundle alongside the notification; Android's
+  // launch-intent echo (below) carries only the notification.
+  const messageInitial = {
+    notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } },
+    pressAction: { id: 'open-chat' },
+  };
 
   it('does nothing when neither source has a tap (a plain foreground/resume tick)', async () => {
     const navigate = jest.fn();
@@ -180,9 +185,62 @@ describe('drainNotificationTap', () => {
   it('runs press side-effects but does NOT navigate for a launch that is not about a chat', async () => {
     const navigate = jest.fn();
     const press = jest.fn();
-    const reminderInitial = { notification: { data: { reminder: '1' } } };
+    const reminderInitial = {
+      notification: { data: { reminder: '1' } },
+      pressAction: { id: 'reminder' },
+    };
     await drainNotificationTap(async () => reminderInitial, () => null, press, navigate);
     expect(press).toHaveBeenCalledWith(reminderInitial);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('IGNORES the Android launch-intent echo (a notification with no pressAction)', async () => {
+    // getInitialNotification() is not read-once on Android: with the sticky press event consumed it
+    // falls back to the Activity's launch intent, which keeps its "notification" extra for the
+    // Activity's whole life — so it re-serves the launching notification on every later drain.
+    // Acting on it trapped the user: cold-start into a chat, press Back, get thrown right back in.
+    const navigate = jest.fn();
+    const press = jest.fn();
+    const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
+    await drainNotificationTap(async () => echo, () => null, press, navigate);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(press).not.toHaveBeenCalled();
+  });
+
+  it('drains the same press exactly once — a re-drain sees only the echo and stays put', async () => {
+    // The real sequence on a cold start: the first read pops the sticky press event, every read
+    // after it gets the launch-intent echo. Exactly one navigation must come out of that.
+    const navigate = jest.fn();
+    const press = jest.fn();
+    const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
+    let sticky: typeof messageInitial | typeof echo | null = messageInitial;
+    const getInitial = async (): Promise<typeof messageInitial | typeof echo | null> => {
+      const next = sticky;
+      sticky = echo; // notify-kit removes the sticky event on read; the intent extra remains
+      return next;
+    };
+    await drainNotificationTap(getInitial, () => null, press, navigate);
+    await drainNotificationTap(getInitial, () => null, press, navigate);
+    await drainNotificationTap(getInitial, () => null, press, navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(press).toHaveBeenCalledTimes(1);
+  });
+
+  it('still opens from the pending stash while the echo is being served', async () => {
+    // A background-alive tap stashes its data via onBackgroundEvent. That drain must work even
+    // though getInitialNotification() is simultaneously handing back the OLD launching intent.
+    const navigate = jest.fn();
+    const press = jest.fn();
+    const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
+    await drainNotificationTap(
+      async () => echo,
+      () => ({ chatGuid: 'c2', messageGuid: 'm2' }),
+      press,
+      navigate,
+    );
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/chat/c2');
+    expect(press).not.toHaveBeenCalled();
   });
 });

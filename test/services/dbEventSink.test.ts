@@ -9,6 +9,7 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { buildMessageIntents } from '@/services/notifications/intents';
@@ -174,6 +175,91 @@ describe('DbEventSink (live path)', () => {
     for (const c of chats) {
       expect(await listMessages(db, c.id)).toHaveLength(0);
     }
+  });
+});
+
+// Every write a message event makes must be in ONE transaction — including the handle/chat
+// upserts and the chat-id lookup that used to run as plain autocommit statements before it.
+// There is a SINGLE shared connection, so an "outside" statement joins whatever transaction is
+// already open, and a rollback on that side erases it while this handler is still holding the ids
+// it read back. The next statement then writes a message against a chat row that no longer exists.
+describe('DbEventSink — write atomicity under a concurrent transaction', () => {
+  it('a neighbouring rollback cannot erase the chat/handle rows this event just wrote', async () => {
+    const { db, raw } = await createTestDb();
+    const sink = new DbEventSink(db);
+
+    // Hold a transaction open (a doomed one), then start the sink while it is mid-flight.
+    let markBegun = (): void => {};
+    const begun = new Promise<void>((r) => {
+      markBegun = r;
+    });
+    let releaseGate = (): void => {};
+    const gate = new Promise<void>((r) => {
+      releaseGate = r;
+    });
+    const doomed = withDbTransaction(db, async () => {
+      markBegun();
+      await gate;
+      throw new Error('neighbouring transaction failed');
+    });
+    await begun; // BEGIN IMMEDIATE has run — the connection is inside a transaction
+
+    const message = Message.parse({
+      guid: 'atomic-1',
+      text: 'survives the neighbour',
+      dateCreated: 1700000000000,
+      handle: { address: 'zoe@x.com' },
+      chats: [{ guid: 'cAtomic', displayName: 'Zoe', participants: [{ address: 'zoe@x.com' }] }],
+    });
+    const handled = sink.onEvent({ type: 'new-message', message }, 'socket');
+    // Give the sink every chance to run its prologue inside the open transaction (microtasks
+    // drain before this macrotask), which is exactly what used to happen.
+    await new Promise((r) => setTimeout(r, 0));
+
+    releaseGate();
+    await expect(doomed).rejects.toThrow('neighbouring transaction failed');
+    await expect(handled).resolves.toBeUndefined();
+
+    // The chat + handle rows the event created are still here (they were never inside the
+    // neighbour's transaction), and the message landed against a chat id that really exists.
+    const chatId = await getChatIdByGuid(db, 'cAtomic');
+    expect(chatId).not.toBeNull();
+    expect(
+      (raw.prepare('SELECT COUNT(*) c FROM handles WHERE address = ?').get('zoe@x.com') as {
+        c: number;
+      }).c,
+    ).toBe(1);
+    const msgs = (await listMessages(db, chatId!)) as Array<{ guid: string }>;
+    expect(msgs.map((m) => m.guid)).toEqual(['atomic-1']);
+  });
+
+  it('an unresolvable chat still commits the handle/chat upserts (skip, not rollback)', async () => {
+    // The event carries only a top-level chatGuid for a chat that was never synced: the message
+    // is skipped (the next sync brings chat + message together), but the handles it did resolve
+    // are real work and must survive — returning early from the transaction, not throwing, is
+    // what keeps that true now the prologue lives inside it.
+    const { db, raw } = await createTestDb();
+    const sink = new DbEventSink(db);
+    const message = Message.parse({
+      guid: 'no-chat-row',
+      text: 'hi',
+      dateCreated: 1700000000000,
+      handle: { address: 'ghost@x.com' },
+      chatGuid: 'cNeverSynced',
+    });
+
+    await expect(sink.onEvent({ type: 'new-message', message }, 'socket')).resolves.toBeUndefined();
+
+    expect(
+      (raw.prepare('SELECT COUNT(*) c FROM handles WHERE address = ?').get('ghost@x.com') as {
+        c: number;
+      }).c,
+    ).toBe(1);
+    expect(
+      (raw.prepare('SELECT COUNT(*) c FROM messages WHERE guid = ?').get('no-chat-row') as {
+        c: number;
+      }).c,
+    ).toBe(0);
   });
 });
 

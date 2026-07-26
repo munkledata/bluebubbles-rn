@@ -458,4 +458,29 @@ export const MIGRATIONS: Migration[] = [
     name: '0027_message_payload_data',
     statements: [`ALTER TABLE messages ADD COLUMN payload_data TEXT`],
   },
+  {
+    // When the user deliberately tapped "Mark as Unread" (epoch ms), so that state is
+    // distinguishable from "never read" — both of which leave `last_read_message_guid` NULL.
+    // Without it the Mac's read watermark reconcile treated a NULL marker as `current = 0`, so
+    // its guards were trivially true and the very next sync re-pointed the marker at the newest
+    // received message: the blue dot the user asked for vanished on the next reconnect. DEVICE-
+    // LOCAL, and deliberately absent from `upsertChats`' conflict set (the same mechanism that
+    // protects is_pinned / custom_name). NULL for every existing row = "not marked unread".
+    // Additive; applied transactionally + idempotently by name.
+    name: '0028_chats_marked_unread_at',
+    statements: [`ALTER TABLE chats ADD COLUMN marked_unread_at INTEGER`],
+  },
+  {
+    // Local per-chat deletion TOMBSTONE (epoch ms), replacing the old hard `DELETE FROM chats`.
+    // Two things the hard delete got wrong: the delete is local-only, so the very next sync
+    // re-INSERTED the chat (the insert branch seeds only server fields, wiping pin/archive/mute,
+    // custom name + colour, per-chat theme, wallpaper and the read marker — none of which any
+    // re-sync can restore); and a resurrected row carried no memory of having been deleted.
+    // A timestamp rather than a boolean so the chat un-hides BY ITSELF the moment genuinely new
+    // activity arrives (a message created after the tombstone), which needs no edit to the
+    // ingestion path. NULL for every existing row = never deleted.
+    // Additive; applied transactionally + idempotently by name.
+    name: '0029_chats_deleted_at',
+    statements: [`ALTER TABLE chats ADD COLUMN deleted_at INTEGER`],
+  },
 ];

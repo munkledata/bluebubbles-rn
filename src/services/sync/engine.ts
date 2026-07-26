@@ -15,7 +15,8 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { Message } from '@core/models';
+import { withDbTransaction } from '@db/transaction';
+import type { Chat, Message } from '@core/models';
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from './types';
 
@@ -24,12 +25,67 @@ export interface SyncProgress {
   messages: number;
 }
 
+/** A chat this sync stored, plus enough of its payload to finish reconciling it. */
+export interface StoredChat {
+  guid: string;
+  chatId: number;
+  /**
+   * The chat's server payload with `participants`/`lastMessage` dropped — both were consumed by
+   * the pass that stored it, and holding them for every chat until a full sync ends is real memory
+   * on a phone. What remains is what re-applying the read watermark needs
+   * (see {@link reapplyReadWatermarks}).
+   */
+  chat: Chat;
+}
+
+/** Chats per re-apply statement — mirrors the chat page size, so it is never a bigger batch than
+ *  the one `upsertChats` already handles in a single INSERT. */
+const WATERMARK_REAPPLY_CHUNK = 200;
+
+/**
+ * Re-apply the macOS read watermarks (`Chat.lastReadMessageTimestamp`) of chats we have ALREADY
+ * stored, now that their messages exist locally.
+ *
+ * WHY THIS IS NEEDED AT ALL: the watermark reconcile lives inside `upsertChats` and resolves each
+ * timestamp against the LOCAL `messages` table — but a chat row is necessarily written BEFORE the
+ * messages that hang off it, so on a first sync it resolved against an EMPTY table: the monotonic
+ * guard `MAX(m.date_created) > current` evaluated NULL > 0, every UPDATE matched zero rows, and the
+ * Mac's read state was fetched and silently thrown away. A fresh install (and every reconnect after
+ * Disconnect) then opened with a full unread badge on every conversation the user had already read.
+ *
+ * Cheap to repeat: the reconcile is monotonic (it only ever advances a marker) and idempotent, so a
+ * chat whose watermark already landed does no work at all. Chats carrying no watermark are dropped,
+ * and the participants list is stripped from the re-run payload — `upsertChats` treats an absent
+ * participants list as "no information" and skips the per-chat link reconcile, which is the
+ * expensive part (one DELETE per chat). Every other value is the same object the first pass wrote,
+ * so the conflict clause re-writes identical values.
+ */
+async function reapplyReadWatermarks(db: AppDatabase, items: Chat[]): Promise<void> {
+  const carrying = items.filter((c) => c.lastReadMessageTimestamp != null);
+  if (carrying.length === 0) return;
+  // Participants are stripped, so the handle map is never read.
+  const noHandles = new Map<string, number>();
+  for (let i = 0; i < carrying.length; i += WATERMARK_REAPPLY_CHUNK) {
+    const slice = carrying
+      .slice(i, i + WATERMARK_REAPPLY_CHUNK)
+      .map((c) => ({ ...c, participants: null }));
+    await upsertChats(db, slice, noHandles);
+  }
+}
+
 export interface FullSyncOptions {
   chatPageSize?: number;
   messagePageSize?: number;
   /** Cap messages fetched per chat during the initial sync (0/undefined = all). */
   maxMessagesPerChat?: number;
   onProgress?: (p: SyncProgress) => void;
+  /**
+   * "Is the session this run started under still the current one?" — asked before the closing
+   * phases, which are the only ones that write WITHOUT first fetching (see the call site in
+   * `fullSync`). Injected rather than read from the session store here so this module stays
+   * store-free and node-testable; `runSync` supplies it.
+   */
+  shouldAbort?: () => boolean;
 }
 
 /**
@@ -42,8 +98,8 @@ export async function syncAllChats(
   db: AppDatabase,
   api: SyncApi,
   chatPageSize = 200,
-): Promise<{ guid: string; chatId: number }[]> {
-  const stored: { guid: string; chatId: number }[] = [];
+): Promise<StoredChat[]> {
+  const stored: StoredChat[] = [];
   let offset = 0;
   for (;;) {
     const batch = await api.fetchChats(offset, chatPageSize);
@@ -64,7 +120,11 @@ export async function syncAllChats(
     for (const chat of batch) {
       const chatId = chatMap.get(chat.guid);
       if (chatId == null) continue;
-      stored.push({ guid: chat.guid, chatId });
+      stored.push({
+        guid: chat.guid,
+        chatId,
+        chat: { ...chat, participants: null, lastMessage: null },
+      });
       if (chat.lastMessage != null) {
         lastMsgs.push(chat.lastMessage);
         chatIdByMsgGuid.set(chat.lastMessage.guid, chatId);
@@ -84,6 +144,9 @@ export async function syncAllChats(
         if (m.isFromMe && cid != null) await reconcileOutgoingAttachmentByContent(db, m, cid);
       }
       await upsertMessages(db, lastMsgs, (m) => chatIdByMsgGuid.get(m.guid), msgHandleMap);
+      // The chats above were written BEFORE these messages, so their read-watermark reconcile had
+      // nothing to resolve against — re-run it now that this page's newest message per chat exists.
+      await reapplyReadWatermarks(db, batch);
     }
     offset += batch.length;
     if (batch.length < chatPageSize) break;
@@ -137,6 +200,38 @@ export async function fullSync(
       }
     },
     { delayMs: CHAT_BACKFILL_DELAY_MS },
+  );
+
+  // EVERYTHING BELOW WRITES WITHOUT FETCHING FIRST, which is what makes this check load-bearing.
+  // A Disconnect landing mid-sync is neutralised everywhere else by the credential clear: with the
+  // origin gone every request fails, so a fetch-then-write phase persists nothing. Phase 3 replays
+  // the phase-1 snapshot from memory and phase 4 reads the local messages table, so neither is
+  // reached by that. `forget()` does wait for this run, but only for a bounded 20s, and phase 2 on
+  // a large account outlives that easily (every chat's fetch burns its full retry ladder now that
+  // the origin is gone) — so by here the wipe may already have emptied `chats`. `upsertChats` is an
+  // INSERT … ON CONFLICT, so re-applying watermarks would RE-CREATE every chat of the account the
+  // user just disconnected from; connect to a different server and they appear in ITS inbox. Bail.
+  //
+  // The check is "is the origin still the one this run started under", not "is there an origin":
+  // a Disconnect followed by connecting to a NEW server before this point is the worse version of
+  // the same bug, and a session exists in that case. A tunnel rotation (`applyNewServerUrl`)
+  // rewrites the origin for the SAME server and so trips this too — that costs one skipped
+  // watermark pass, redone by the next sync, which is the cheap side of the trade.
+  if (opts.shouldAbort?.()) {
+    logger.warn(
+      '[sync] the session ended mid-full-sync — skipping the read-watermark re-apply and the marker write',
+    );
+    return { chats, messages };
+  }
+
+  // Phase 3: re-apply the Mac's read watermarks. THIS is the run that matters on a fresh install —
+  // phase 1 could only resolve a watermark against each chat's single `lastMessage` (and against
+  // nothing at all when that message is one the user sent), so the marker it can reach is far
+  // behind what the backfill above just made available. One batched pass over the chats that carry
+  // a watermark; monotonic, so it can only move markers forward.
+  await reapplyReadWatermarks(
+    db,
+    stored.map((s) => s.chat),
   );
 
   await setSyncMarker(db, await maxMessageMarker(db));
@@ -268,6 +363,21 @@ export async function syncDeletedMessages(
   return applied;
 }
 
+/**
+ * Messages per page TRANSACTION (see {@link incrementalSync}).
+ *
+ * A page is up to `SYNC_BATCH_SIZE` (250) messages, and storing one is nowhere near "a couple of
+ * statements": `upsertHandles` runs a full contacts scan + an UPDATE per newly-linked handle,
+ * `upsertChats` issues a DELETE per chat carrying participants, and `upsertMessages` runs 1-2
+ * SELECTs per ATTACHMENT. A whole page in one transaction is therefore hundreds of round trips
+ * held under a lock that is GLOBAL — `withDbTransaction` serializes every caller onto one shared
+ * connection, so for that entire time a live message's write waits, and any plain autocommit write
+ * (an optimistic send, a read marker, a download's local-path write) silently JOINS the page's
+ * transaction and is destroyed with it if the page rolls back. Slicing bounds each lock to a few
+ * tens of statements and lets those writers interleave between slices.
+ */
+export const INCREMENTAL_TX_CHUNK = 50;
+
 export interface IncrementalSyncOptions {
   serverVersion: string;
   batchSize?: number;
@@ -288,10 +398,19 @@ export interface IncrementalSyncOptions {
  * incremental_sync_manager.dart. The marker advances on every batch (even
  * all-duplicate ones) to guarantee forward progress.
  *
- * Each page is committed by its own `upsertChats`/`upsertMessages` calls (NOT
- * batched into one transaction spanning the whole loop), so the drizzle adapter
- * flushes op-sqlite's reactive queries per page and `onProgress` ticks per page
- * — letting the inbox render as data arrives.
+ * WRITES ARE TRANSACTIONAL IN SLICES OF {@link INCREMENTAL_TX_CHUNK}, never one transaction per
+ * page and never one spanning the loop. Each slice is self-contained (its handles, its chats, its
+ * messages), and the marker rides the LAST slice's commit — so the invariant the slicing is FOR
+ * holds (the cursor can never become durable ahead of a slice that failed to write) without any
+ * single lock being long. Stated precisely because it is narrower than "ahead of the rows it
+ * claims we have": a row `upsertMessages` itself DECLINES — a message whose embedded chat list is
+ * empty has no thread to attach it to — is skipped, while `nextMarker` is computed from the whole
+ * page, so the cursor does move past it. That is the right behaviour (holding the marker back for
+ * a permanently chat-less row would refetch the same page forever), but it must not be silent, so
+ * the slice logs the count. Never wider than a slice, because `withDbTransaction` is a global mutex on one
+ * shared connection: a long transaction stalls live-message writes behind it and drags every
+ * concurrent autocommit writer into a rollback that has nothing to do with them. Each commit also
+ * flushes op-sqlite's reactive queries, which is what lets the inbox render as data arrives.
  */
 export async function incrementalSync(
   db: AppDatabase,
@@ -310,32 +429,75 @@ export async function incrementalSync(
     if (batch.length === 0) break;
 
     const fresh = batch.filter((m) => deduper.markIfNew(m.guid));
-    if (fresh.length > 0) {
-      const embeddedChats = fresh.flatMap((m) => m.chats ?? []);
-      const handleMap = await upsertHandles(db, [
-        ...embeddedChats.flatMap((c) => c.participants ?? []),
-        ...fresh.flatMap((m) => (m.handle ? [m.handle] : [])),
-      ]);
-      const chatMap = await upsertChats(db, embeddedChats, handleMap);
-      await upsertMessages(
-        db,
-        fresh,
-        (m) => {
-          const guid = m.chats?.[0]?.guid;
-          return guid ? chatMap.get(guid) : undefined;
-        },
-        handleMap,
-      );
-      messages += fresh.length;
-      for (const c of embeddedChats) seenChats.add(c.guid);
-    }
-
+    // Page-level, for the progress counters only — the writes below work slice by slice.
+    const embeddedChats = fresh.flatMap((m) => m.chats ?? []);
     const prevMarker = marker;
-    marker = advanceMarker(
+    // Computed BEFORE the writes so no transaction below holds anything but SQL. Pure function.
+    const nextMarker = advanceMarker(
       marker,
       batch.map((m) => ({ rowId: m.originalROWID ?? null, timestamp: m.dateCreated ?? null })),
     );
-    await setSyncMarker(db, marker);
+
+    // The rows and the marker that says "we already have them" must never diverge. There is ONE
+    // shared connection, so a plain autocommit write silently JOINS whatever transaction another
+    // writer (DbEventSink wraps every live message in one) happens to have open — and a rollback
+    // THERE takes those rows with it. The marker would still commit, because it is computed from
+    // what the SERVER returned rather than from what persisted, and `buildSyncCursor` is a strict
+    // forward cursor: those messages are never fetched again, and nothing ever notices.
+    //
+    // So every write owns a transaction — but a SLICE-sized one, not a page-sized one (see
+    // INCREMENTAL_TX_CHUNK for why the difference matters to every other writer on the
+    // connection). A slice carries its own handles and chats rather than sharing one hoisted pass,
+    // because each level hands row ids to the next: handles/chats written outside the lock could
+    // be rolled back as a bystander, leaving this slice inserting messages against ids that no
+    // longer exist.
+    if (fresh.length === 0) {
+      // An all-duplicate page still advances the cursor (that is what guarantees forward
+      // progress), and with no rows written there is nothing for the marker to outrun.
+      await setSyncMarker(db, nextMarker);
+    } else {
+      for (let i = 0; i < fresh.length; i += INCREMENTAL_TX_CHUNK) {
+        const slice = fresh.slice(i, i + INCREMENTAL_TX_CHUNK);
+        const isLastSlice = i + INCREMENTAL_TX_CHUNK >= fresh.length;
+        const sliceChats = slice.flatMap((m) => m.chats ?? []);
+        await withDbTransaction(db, async () => {
+          const handleMap = await upsertHandles(db, [
+            ...sliceChats.flatMap((c) => c.participants ?? []),
+            ...slice.flatMap((m) => (m.handle ? [m.handle] : [])),
+          ]);
+          const chatMap = await upsertChats(db, sliceChats, handleMap);
+          const stored = await upsertMessages(
+            db,
+            slice,
+            (m) => {
+              const guid = m.chats?.[0]?.guid;
+              return guid ? chatMap.get(guid) : undefined;
+            },
+            handleMap,
+          );
+          // `upsertMessages` drops any message whose chat it cannot resolve, and the cursor still
+          // advances past it (see the note on this function) — so this is the only place the drop
+          // is observable at all. Expected to be zero: the trigger we know of is a server row with
+          // an empty `chats` array, which has no thread to render in either way. A non-zero count
+          // against rows that DO have a thread would be real, invisible message loss.
+          if (stored.size < slice.length) {
+            logger.warn(
+              `[sync] ${slice.length - stored.size} message(s) in this page had no resolvable chat and were skipped`,
+            );
+          }
+          // The marker becomes durable ONLY with the last slice, so it can never claim a page an
+          // earlier slice failed to write. The other direction is deliberately allowed: slices
+          // committing without the marker just means the next run re-fetches the page, and every
+          // upsert here is idempotent, so the cost is one redundant request.
+          if (isLastSlice) await setSyncMarker(db, nextMarker);
+        });
+      }
+    }
+
+    // Only count what actually committed — the throw above propagates instead of reaching here.
+    marker = nextMarker;
+    messages += fresh.length;
+    for (const c of embeddedChats) seenChats.add(c.guid);
 
     // Per-page tick: this page's writes are already committed + flushed above, so
     // surfacing progress here lets the reactive inbox catch up immediately.

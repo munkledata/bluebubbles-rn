@@ -103,4 +103,73 @@ describe('sendEdit / sendUnsend', () => {
         .d,
     ).toBeNull();
   });
+
+  // The revert is a COMPARE-AND-SET on the marker our own optimistic write left behind. A failed
+  // POST does NOT prove the server didn't apply the change — a lost response still emits an echo,
+  // and that echo lands first. Reverting blindly on top of it is a lost update: for an edit the
+  // message reads the old wording to you and the new one to everyone else, permanently; for an
+  // unsend it puts content the user revoked from everyone back on their own screen.
+  it('edit: does NOT revert over an echo that landed while the POST was failing', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const http = {
+      post: async () => {
+        // The server applied the edit and echoed it; the echo wins the race, then our POST throws.
+        await upsertMessages(
+          db,
+          [
+            Message.parse({
+              guid: 'm1',
+              text: 'edited!',
+              isFromMe: true,
+              dateCreated: 100,
+              dateEdited: 9999, // the SERVER's stamp — never equal to our optimistic `now`
+            }),
+          ],
+          () => 1,
+          new Map(),
+        );
+        throw new ApiError('no_connection', 'offline', 0);
+      },
+    } as unknown as HttpClient;
+
+    const r = await sendEdit(db, http, { messageGuid: 'm1', newText: 'edited!' }, 5000);
+    expect(r.ok).toBe(false);
+    const row = one(raw, "SELECT text, date_edited d FROM messages WHERE guid='m1'") as {
+      text: string;
+      d: number | null;
+    };
+    expect(row.text).toBe('edited!'); // the echo's value survives — NOT reverted to 'original'
+    expect(row.d).toBe(9999);
+  });
+
+  it('unsend: does NOT clear a retraction the server actually stamped', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const http = {
+      post: async () => {
+        // The server retracted it and echoed with its OWN timestamp; then our POST throws.
+        await upsertMessages(
+          db,
+          [
+            Message.parse({
+              guid: 'm1',
+              text: 'original',
+              isFromMe: true,
+              dateCreated: 100,
+              dateRetracted: 8888,
+            }),
+          ],
+          () => 1,
+          new Map(),
+        );
+        throw new ApiError('no_connection', 'offline', 0);
+      },
+    } as unknown as HttpClient;
+
+    expect((await sendUnsend(db, http, { messageGuid: 'm1' }, 7000)).ok).toBe(false);
+    expect(
+      (one(raw, "SELECT date_retracted d FROM messages WHERE guid='m1'") as { d: number | null }).d,
+    ).toBe(8888); // still retracted — the revoked content is not put back on screen
+  });
 });

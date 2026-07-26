@@ -160,8 +160,10 @@ export function isSafePreviewUrl(raw: string): boolean {
  * redirects). Returns an {@link OgFetchResult} so the caller can cache definitive failures
  * but retry transient ones. Does NOT use the Gator HttpClient, so the server auth header
  * never leaks to third-party sites.
+ *
+ * Callers go through {@link fetchOgMetadata}, which dedupes concurrent lookups of the same URL.
  */
-export async function fetchOgMetadata(url: string): Promise<OgFetchResult> {
+async function fetchOgMetadataUncached(url: string): Promise<OgFetchResult> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
   try {
@@ -214,4 +216,25 @@ export async function fetchOgMetadata(url: string): Promise<OgFetchResult> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * At most ONE outbound request per URL at a time. Every link bubble's lookup runs INSIDE a
+ * reactive query subscribed to the whole `url_previews` table, and op-sqlite fires those
+ * callbacks per TABLE — so the moment one bubble's preview resolves and writes its row, every
+ * other mounted hook re-runs, finds no cache row of its own yet, and starts a SECOND fetch of a
+ * URL that is already in flight. With ten links in a thread that compounds into ~50 outbound
+ * requests to third-party hosts. Sharing the promise collapses them back to one.
+ */
+const inFlight = new Map<string, Promise<OgFetchResult>>();
+
+/** @see fetchOgMetadataUncached — same contract, deduped while a fetch for `url` is in flight. */
+export function fetchOgMetadata(url: string): Promise<OgFetchResult> {
+  const existing = inFlight.get(url);
+  if (existing) return existing;
+  // The fetcher resolves on every path (network errors become `transient`), but clear the entry
+  // from a `finally` regardless — a throw that slipped past it must not wedge this URL forever.
+  const pending = fetchOgMetadataUncached(url).finally(() => inFlight.delete(url));
+  inFlight.set(url, pending);
+  return pending;
 }

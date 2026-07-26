@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
 import { firstUrl, mediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
+import { withDbTransaction } from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 
@@ -69,6 +70,16 @@ export async function upsertAttachments(
         mimeType: sql`excluded.mime_type`,
         totalBytes: sql`excluded.total_bytes`,
         blurhash: sql`excluded.blurhash`,
+        // COALESCE, not a plain overwrite: absence is not a value here. A file shared INTO Gator
+        // carries no dimensions (SharedAttachment is uri/name/mimeType/size only) and is inserted
+        // with NULL width/height, so the real dimensions the server sends on every later fetch
+        // were being dropped on each re-upsert and the photo stayed boxed at the 0.78 fallback
+        // ratio forever — the row already exists, so no re-sync could ever correct it. The reverse
+        // must not happen either: a payload that legitimately omits them (the live socket echo)
+        // must not wipe good ones. `transfer_name` has the same shape (the display filename).
+        width: sql`COALESCE(excluded.width, ${attachments.width})`,
+        height: sql`COALESCE(excluded.height, ${attachments.height})`,
+        transferName: sql`COALESCE(excluded.transfer_name, ${attachments.transferName})`,
         emojiImageContentIdentifier: sql`excluded.emoji_image_content_identifier`,
         emojiImageShortDescription: sql`excluded.emoji_image_short_description`,
       },
@@ -300,7 +311,16 @@ export async function listChatAttachmentsByKind(
   return out;
 }
 
-/** Optimistically insert an outgoing image message + its local attachment + queue row. */
+/**
+ * Optimistically insert an outgoing image message + its local attachment + queue row.
+ *
+ * ALL THREE IN ONE TRANSACTION, unlike the text/contact/reaction helpers (which only order the
+ * queue row first). Here the unit that owns recovery is the queue row TOGETHER WITH the attachment
+ * row — the drain re-streams the file from `attachments.local_path`, so a queue row on its own is
+ * retired the first time it is drained and the picture is silently lost, while a message row on
+ * its own is a bubble frozen on 'sending' that nothing will ever retry. No ordering of three
+ * autocommits avoids both, so they commit together or not at all.
+ */
 export async function insertOutgoingAttachment(
   db: AppDatabase,
   args: {
@@ -317,37 +337,39 @@ export async function insertOutgoingAttachment(
     now: number;
   },
 ): Promise<void> {
-  await db.insert(messages).values({
-    guid: args.tempGuid,
-    chatId: args.chatId,
-    isFromMe: true,
-    dateCreated: args.now,
-    hasAttachments: true,
-    sendState: 'sending',
-    error: 0,
+  await withDbTransaction(db, async () => {
+    await db.insert(messages).values({
+      guid: args.tempGuid,
+      chatId: args.chatId,
+      isFromMe: true,
+      dateCreated: args.now,
+      hasAttachments: true,
+      sendState: 'sending',
+      error: 0,
+    });
+    const inserted = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.guid, args.tempGuid))
+      .limit(1);
+    await db.insert(attachments).values({
+      guid: args.attachmentGuid,
+      messageId: inserted[0]!.id,
+      mimeType: args.mimeType,
+      transferName: args.transferName,
+      totalBytes: args.totalBytes,
+      width: args.width ?? null,
+      height: args.height ?? null,
+      localPath: args.localPath,
+    });
+    await db.insert(outgoingQueue).values({
+      tempGuid: args.tempGuid,
+      chatGuid: args.chatGuid,
+      kind: 'attachment',
+      payload: JSON.stringify({ attachmentGuid: args.attachmentGuid, localPath: args.localPath }),
+    });
+    await db.update(chats).set({ latestMessageDate: args.now }).where(eq(chats.id, args.chatId));
   });
-  const inserted = await db
-    .select({ id: messages.id })
-    .from(messages)
-    .where(eq(messages.guid, args.tempGuid))
-    .limit(1);
-  await db.insert(attachments).values({
-    guid: args.attachmentGuid,
-    messageId: inserted[0]!.id,
-    mimeType: args.mimeType,
-    transferName: args.transferName,
-    totalBytes: args.totalBytes,
-    width: args.width ?? null,
-    height: args.height ?? null,
-    localPath: args.localPath,
-  });
-  await db.insert(outgoingQueue).values({
-    tempGuid: args.tempGuid,
-    chatGuid: args.chatGuid,
-    kind: 'attachment',
-    payload: JSON.stringify({ attachmentGuid: args.attachmentGuid, localPath: args.localPath }),
-  });
-  await db.update(chats).set({ latestMessageDate: args.now }).where(eq(chats.id, args.chatId));
 }
 
 /** Persist a downloaded file path (fires the reactive 'attachments' watcher). */

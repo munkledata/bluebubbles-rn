@@ -3,6 +3,7 @@ import { Chat, Message } from '@core/models';
 import {
   listChatsForInbox,
   markMessageDeleted,
+  setChatUnreadLocal,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
@@ -46,6 +47,14 @@ function marker(raw: Database.Database, chatGuid: string): string | null {
     .prepare('SELECT last_read_message_guid AS g FROM chats WHERE guid = ?')
     .get(chatGuid) as { g: string | null } | undefined;
   return row?.g ?? null;
+}
+
+/** When the user deliberately tapped "Mark as Unread" (null = not flagged). */
+function markedUnreadAt(raw: Database.Database, chatGuid: string): number | null {
+  const row = raw
+    .prepare('SELECT marked_unread_at AS t FROM chats WHERE guid = ?')
+    .get(chatGuid) as { t: number | null } | undefined;
+  return row?.t ?? null;
 }
 
 async function unreadCount(db: AppDatabase, chatGuid: string): Promise<number> {
@@ -187,8 +196,18 @@ describe('read-state reconciliation from lastReadMessageTimestamp', () => {
     const { db, raw } = await createTestDb();
     const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
     const map = await upsertChats(db, [chat('c1'), chat('c2')], handles);
-    await upsertMessages(db, [received('a1', 1000), received('a2', 2000)], () => map.get('c1')!, handles);
-    await upsertMessages(db, [received('b1', 1500), received('b2', 3000)], () => map.get('c2')!, handles);
+    await upsertMessages(
+      db,
+      [received('a1', 1000), received('a2', 2000)],
+      () => map.get('c1')!,
+      handles,
+    );
+    await upsertMessages(
+      db,
+      [received('b1', 1500), received('b2', 3000)],
+      () => map.get('c2')!,
+      handles,
+    );
     await setLastReadMessageGuid(db, 'c1', 'a2'); // c1 already read to 2000; c2 never read
 
     // Batch: c1's watermark (1500) is <= its marker date (2000) → pre-filter SKIP; c2's (2000) advances.
@@ -203,6 +222,106 @@ describe('read-state reconciliation from lastReadMessageTimestamp', () => {
 
     expect(marker(raw, 'c1')).toBe('a2'); // untouched — the pre-filter skipped it
     expect(marker(raw, 'c2')).toBe('b1'); // advanced to the newest received <= 2000 (b2@3000 excluded)
+  });
+
+  it('a marker advanced BETWEEN the batch read and this chat’s UPDATE still wins (no regression)', async () => {
+    // The batched reconcile loads every chat's marker date once, then loops with an `await` per
+    // chat — hundreds of milliseconds on a 200-chat sync page, every one of them a yield to the
+    // event loop. Opening a chat mid-loop (markRead → setLastReadMessageGuid) writes a NEWER
+    // marker, and the pre-loop snapshot doesn't know. Simulated here by writing that marker from
+    // a HOOKED db.run, i.e. from inside the reconcile loop itself, between the snapshot and the
+    // UPDATE for c2 — the guard must be re-read from the row, not from the snapshot.
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
+    const map = await upsertChats(db, [chat('c1'), chat('c2')], handles);
+    await upsertMessages(
+      db,
+      [received('a1', 1000), received('a2', 2000)],
+      () => map.get('c1')!,
+      handles,
+    );
+    await upsertMessages(
+      db,
+      [received('b1', 1000), received('b2', 2000)],
+      () => map.get('c2')!,
+      handles,
+    );
+
+    const realRun = db.run.bind(db);
+    let hooked = false;
+    (db as any).run = async (q: unknown) => {
+      if (!hooked) {
+        hooked = true; // fires while c1's UPDATE is in flight, i.e. before c2's
+        await setLastReadMessageGuid(db, 'c2', 'b2'); // the user just read c2 to the end
+      }
+      return realRun(q as never);
+    };
+    try {
+      await upsertChats(
+        db,
+        [
+          chat('c1', { lastReadMessageTimestamp: 2500 }),
+          chat('c2', { lastReadMessageTimestamp: 1500 }),
+        ],
+        handles,
+      );
+    } finally {
+      (db as any).run = realRun;
+    }
+
+    expect(marker(raw, 'c1')).toBe('a2'); // the ordinary advance still happens
+    expect(marker(raw, 'c2')).toBe('b2'); // NOT dragged back to b1 by the stale snapshot
+    expect(await unreadCount(db, 'c2')).toBe(0);
+  });
+
+  it('a deliberate "Mark as Unread" is NOT undone by a watermark from before the tap', async () => {
+    const { db, raw } = await createTestDb();
+    await seedThree(db);
+    await setLastReadMessageGuid(db, 'c1', 'm3'); // read on this device…
+    await setChatUnreadLocal(db, 'c1', 4000); // …then deliberately flagged unread at t=4000
+    expect(await unreadCount(db, 'c1')).toBe(3);
+
+    // The Mac's watermark is ALREADY ahead (opening the chat pushed a read receipt before the tap).
+    await ingestChat(db, chat('c1', { lastReadMessageTimestamp: 3500 }));
+
+    expect(marker(raw, 'c1')).toBeNull(); // flag survived
+    expect(await unreadCount(db, 'c1')).toBe(3);
+  });
+
+  it('…but a read that happened AFTER the tap does clear it, and retires the flag', async () => {
+    const { db, raw } = await createTestDb();
+    await seedThree(db);
+    await setChatUnreadLocal(db, 'c1', 4000);
+
+    await ingestChat(db, chat('c1', { lastReadMessageTimestamp: 4500 }));
+
+    expect(marker(raw, 'c1')).toBe('m3'); // newest received <= 4500
+    expect(markedUnreadAt(raw, 'c1')).toBeNull(); // cleared in the same write
+    expect(await unreadCount(db, 'c1')).toBe(0);
+  });
+
+  it('the mark-unread stamp does not survive the chat being read again', async () => {
+    const { db, raw } = await createTestDb();
+    await seedThree(db);
+    await setChatUnreadLocal(db, 'c1', 4000);
+
+    await setLastReadMessageGuid(db, 'c1', 'm3'); // the user opens the chat
+
+    expect(markedUnreadAt(raw, 'c1')).toBeNull();
+    // …so a later Mac watermark is free to reconcile normally again.
+    await ingestChat(db, chat('c1', { lastReadMessageTimestamp: 4500 }));
+    expect(marker(raw, 'c1')).toBe('m3');
+  });
+
+  it('a re-sync cannot clear the mark-unread stamp (it is not in the conflict set)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedThree(db);
+    await setChatUnreadLocal(db, 'c1', 4000);
+
+    await ingestChat(db, chat('c1', { displayName: 'Renamed' })); // plain re-sync, no watermark
+
+    expect(markedUnreadAt(raw, 'c1')).toBe(4000);
+    expect(marker(raw, 'c1')).toBeNull();
   });
 
   it('is idempotent: re-ingesting the same watermark leaves the marker unchanged', async () => {

@@ -1,5 +1,6 @@
 import {
   Chat,
+  ChatSummary,
   isGroup,
   isReaction,
   Message,
@@ -140,5 +141,28 @@ describe('Chat model', () => {
   it('omits lastReadMessageTimestamp when absent (presence-driven → undefined)', () => {
     const m = Chat.parse({ guid: 'c' });
     expect(m.lastReadMessageTimestamp).toBeUndefined();
+  });
+});
+
+describe('ChatSummary model (chats embedded in message payloads)', () => {
+  it('KEEPS backgroundChannelGuid — zod strips undeclared keys, and losing it wipes the wallpaper', () => {
+    const c = ChatSummary.parse({ guid: 'c', backgroundChannelGuid: 'CH-1' });
+    expect(c.backgroundChannelGuid).toBe('CH-1');
+  });
+
+  it('survives the real ingestion path: a live message payload carries it through to the chat', () => {
+    // Live socket/FCM events and the incremental sync parse the whole envelope as `Message`, whose
+    // embedded chats are ChatSummary — the exact boundary the value used to be discarded at.
+    const m = Message.parse({
+      guid: 'g',
+      text: 'hi',
+      chats: [{ guid: 'c', style: 43, backgroundChannelGuid: 'CH-2' }],
+    });
+    expect(m.chats?.[0]?.backgroundChannelGuid).toBe('CH-2');
+  });
+
+  it('omits it when absent (presence-driven, like the full Chat)', () => {
+    const c = ChatSummary.parse({ guid: 'c' });
+    expect('backgroundChannelGuid' in c).toBe(false);
   });
 });

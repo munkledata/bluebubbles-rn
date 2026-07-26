@@ -168,7 +168,20 @@ export class SocketService {
     });
     for (const event of SERVER_EVENTS) {
       this.socket.on(event, (data: unknown) => {
-        void this.router.handle(event, data, 'socket');
+        // Fire-and-forget by design (socket.io handlers are sync), but a bare `void` swallows
+        // every handler rejection — a failed DB write for an incoming message then disappears
+        // with no trace anywhere. The router already released its dedup claim; at least say so.
+        //
+        // ERROR, not warn, and that level is load-bearing: `ErrorReportSink` captures ONLY
+        // `error` lines into the uploadable `error_reports` queue (a warn is a local App-Logs
+        // line nobody will ever read), and handling the rejection here means the global
+        // unhandled-rejection tracker no longer sees it. Dropping to warn would take a lost
+        // incoming message off the crash-report pipeline entirely. The `[socket]` prefix is the
+        // tag the server fingerprints on. No feedback loop: the sink's `busy` guard drops errors
+        // logged during its own enqueue/drain and the upload path only ever logs at warn.
+        void this.router.handle(event, data, 'socket').catch((err: unknown) => {
+          logger.error('[socket] event handling failed', { event, error: err });
+        });
       });
     }
 

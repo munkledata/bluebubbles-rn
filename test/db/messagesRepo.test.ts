@@ -1,15 +1,18 @@
 import { Chat, Message } from '@core/models';
 import {
   applyLocalUnsend,
+  deleteMessageLocal,
   getChatHeader,
   listThreadMessages,
   getChatIdByGuid,
   getFirstUnreadInChat,
   getNewestReceivedGuid,
+  insertOutgoingText,
   listChatsForInbox,
   listMessagesAround,
   listMessagesWithSenders,
   markMessageDeleted,
+  markMessageSendError,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
@@ -409,6 +412,142 @@ describe('conversation-view repositories', () => {
   });
 });
 
+// The denormalized inbox sort key must agree with what the inbox actually RENDERS. Both the
+// preview CTE and the unread count in listChatsForInbox skip `associated_message_type IS NOT NULL`,
+// so a reaction that bumped latest_message_date would drag a chat to the top of the list carrying an
+// unchanged, days-old preview and timestamp. This also protects insertOutgoingReaction's no-bump
+// rule from the round-trip: the server echoes your own tapback back as an ordinary new-message.
+describe('latest_message_date recompute ignores reactions', () => {
+  it('an incoming tapback does not reorder the inbox, but a real message still does', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m1@100, m2@200, m3@300 (newest real message)
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+    expect(latestDate()).toBe(300);
+
+    // Someone "likes" the three-day-old m3. The reaction row is far newer than every message …
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'react1',
+          dateCreated: 9_000,
+          associatedMessageGuid: 'm3',
+          associatedMessageType: 'love',
+          handle: { address: 'a@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    // … yet the chat keeps its position: the preview would still read "latest" @300.
+    expect(latestDate()).toBe(300);
+
+    // The main path is untouched — a normal message still bumps the chat.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm4',
+          text: 'a real reply',
+          dateCreated: 10_000,
+          handle: { address: 'a@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    expect(latestDate()).toBe(10_000);
+  });
+
+  // MAX() over ZERO rows is NULL, and the reaction filter really can empty the candidate set: the
+  // server's per-chat `lastMessage` is the newest message with NO reaction filter, so a chat whose
+  // real history hasn't been backfilled yet (the whole of fullSync phase 2, and indefinitely for a
+  // chat whose page errored) can hold exactly one local row — a tapback. NULL sorts LAST under
+  // listChatsForInbox's `ORDER BY … latest_message_date DESC`, so without the COALESCE fallback that
+  // chat sinks to the bottom of the inbox, which is the very thing the lastMessage upsert exists to
+  // prevent. A tapback may not OUTRANK a real message; it may hold a spot nothing else is holding.
+  it('a chat whose ONLY stored row is a reaction still gets a real sort key (never NULL)', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db); // c1: m1@100, m2@200, m3@300 → latest 300
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const map = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'c2', displayName: 'Fresh', participants: [{ address: 'a@x.com' }] })],
+      handles,
+    );
+    const chatId = map.get('c2')!;
+
+    // All this chat has locally is the server-supplied lastMessage — and it is a tapback.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'react3',
+          dateCreated: 9_000,
+          associatedMessageGuid: 'not-yet-synced',
+          associatedMessageType: 'love',
+          handle: { address: 'a@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+
+    const latest = (
+      raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+        d: number | null;
+      }
+    ).d;
+    expect(latest).toBe(9_000); // NOT null
+    // … so it still ranks against the other chats instead of dropping under all of them.
+    expect((await listChatsForInbox(db)).map((r) => r.guid)).toEqual(['c2', 'c1']);
+  });
+
+  it('markMessageDeleted falls back past a NEWER reaction row, not onto it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m1@100, m2@200, m3@300
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'react2',
+          dateCreated: 9_000,
+          associatedMessageGuid: 'm3',
+          associatedMessageType: 'like',
+          handle: { address: 'a@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+
+    // Deleting the newest real message drops the chat to m2 @200 — the reaction @9000 is not a
+    // candidate, exactly as in upsertMessages' recompute (the two must never drift).
+    expect(await markMessageDeleted(db, 'm3', 5_000)).toBe(true);
+    expect(latestDate()).toBe(200);
+
+    // Tombstone the rest and the filtered candidate set is EMPTY. The twin recompute carries the
+    // same COALESCE fallback as upsertMessages, so the chat lands on the surviving reaction instead
+    // of on a NULL that would sink it to the bottom of the inbox.
+    expect(await markMessageDeleted(db, 'm2', 5_000)).toBe(true);
+    expect(await markMessageDeleted(db, 'm1', 5_000)).toBe(true);
+    expect(latestDate()).toBe(9_000);
+  });
+});
+
 describe('markMessageDeleted (deletion tombstone)', () => {
   it('tombstones the newest message, recomputes latest_message_date to the survivor, and hides it', async () => {
     const { db, raw } = await createTestDb();
@@ -552,6 +691,251 @@ describe('markMessageDeleted (deletion tombstone)', () => {
     expect(await markMessageDeleted(db, 'does-not-exist', 5000)).toBe(false);
     expect(latestDate()).toBe(before); // untouched
     // No stray tombstone landed on any real row.
+    const anyDeleted = raw
+      .prepare('SELECT COUNT(*) c FROM messages WHERE date_deleted IS NOT NULL')
+      .get() as { c: number };
+    expect(anyDeleted.c).toBe(0);
+  });
+});
+
+// Receipts, the edit marker and the unsend tombstone are MONOTONIC — the server never un-reports
+// one, and no payload ever means "this was undone". They must therefore be COALESCE-preserved in
+// the conflict set (present value wins, ABSENCE preserved) exactly like the delivery tiers. Without
+// that, ensureChatSynced — which re-pages up to 500 messages on EVERY chat open — can land a page
+// fetched BEFORE an unsend and carrying `dateRetracted: null`, which clears the tombstone; the
+// original text is still in the row (it's COALESCE-preserved), so revoked content renders in full.
+describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () => {
+  const marker = (
+    raw: { prepare: (s: string) => { get: (g: string) => unknown } },
+    guid: string,
+    col: string,
+  ): number | null =>
+    (raw.prepare(`SELECT ${col} v FROM messages WHERE guid = ?`).get(guid) as { v: number | null })
+      .v;
+
+  it('an older sync page landing after an unsend does NOT resurrect the message', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m3 recv@300, text "latest"
+    const handles = await upsertHandles(db, [{ address: 'b@x.com', displayName: 'Bob' }]);
+
+    // The sender unsends m3. The live event writes the retraction; the thread shows a tombstone and
+    // the inbox preview drops it.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm3',
+          text: 'latest',
+          dateCreated: 300,
+          dateRetracted: 8_000,
+          handle: { address: 'b@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    expect(marker(raw, 'm3', 'date_retracted')).toBe(8_000);
+
+    // Page 3 of the chat-open sync — fetched BEFORE the unsend, landing after it — carries no
+    // retraction at all.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm3',
+          text: 'latest',
+          dateCreated: 300,
+          dateRead: 9_000, // a receipt-shaped field proves the row really was re-upserted
+          handle: { address: 'b@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    expect(marker(raw, 'm3', 'date_read')).toBe(9_000); // the re-upsert happened …
+    expect(marker(raw, 'm3', 'date_retracted')).toBe(8_000); // … and the tombstone survived it
+  });
+
+  it('a flagless re-upsert does not blank a stored read/delivered receipt or the edit marker', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'r1',
+          text: 'edited body',
+          isFromMe: true,
+          dateCreated: 400,
+          dateDelivered: 410,
+          dateRead: 420,
+          dateEdited: 430,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+
+    // A leaner projection (a live event, a hydrated `lastMessage`) omits all four.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'r1', text: 'edited body', isFromMe: true, dateCreated: 400 })],
+      () => chatId,
+      new Map(),
+    );
+    expect(marker(raw, 'r1', 'date_delivered')).toBe(410);
+    expect(marker(raw, 'r1', 'date_read')).toBe(420);
+    expect(marker(raw, 'r1', 'date_edited')).toBe(430);
+  });
+
+  it('a PRESENT value still wins — only ABSENCE is preserved', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'p1', text: 'hi', isFromMe: true, dateCreated: 500, dateRead: 510 })],
+      () => chatId,
+      new Map(),
+    );
+    // A later, newer receipt must still overwrite (COALESCE preserves absence, not staleness) …
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'p1', text: 'hi', isFromMe: true, dateCreated: 500, dateRead: 600 })],
+      () => chatId,
+      new Map(),
+    );
+    expect(marker(raw, 'p1', 'date_read')).toBe(600);
+    // … and a genuine retraction still lands on a previously un-retracted row.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'p1',
+          text: 'hi',
+          isFromMe: true,
+          dateCreated: 500,
+          dateRetracted: 700,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+    expect(marker(raw, 'p1', 'date_retracted')).toBe(700);
+  });
+
+  // The v1 message DTO carries NO `error` field (send failures travel in the separate
+  // `message-send-error` envelope), so `excluded.error` could only ever be the hard-coded 0 seed —
+  // refreshing it on conflict erases rather than reflects.
+  it('a re-sync does not erase a stored send-error code', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const state = (): { error: number; sendState: string } =>
+      raw.prepare('SELECT error, send_state sendState FROM messages WHERE guid = ?').get('m3') as {
+        error: number;
+        sendState: string;
+      };
+
+    await markMessageSendError(db, 'm3', 22); // e.g. an RCS delivery failure keyed by its real guid
+    expect(state()).toEqual({ error: 22, sendState: 'error' });
+
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm3',
+          text: 'latest',
+          dateCreated: 300,
+          dateRead: 9_500, // proves the row was re-upserted
+          handle: { address: 'b@x.com' },
+        }),
+      ],
+      () => chatId,
+      await upsertHandles(db, [{ address: 'b@x.com' }]),
+    );
+
+    expect(
+      (raw.prepare('SELECT date_read v FROM messages WHERE guid = ?').get('m3') as { v: number }).v,
+    ).toBe(9_500);
+    expect(state()).toEqual({ error: 22, sendState: 'error' }); // the specific code survives
+  });
+});
+
+// The user's own Delete must be a TOMBSTONE, not a row removal: the deletion never leaves the
+// device, so the server still returns that guid and ensureChatSynced — which runs on EVERY chat
+// open — re-inserts it. A hard delete is undone the very next time the thread is opened.
+describe('deleteMessageLocal (the user’s own delete)', () => {
+  it('survives a re-sync of the same guids — the messages stay gone', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db); // m1@100, m2 mine@200, m3@300
+    const handles = await upsertHandles(db, [
+      { address: 'a@x.com', displayName: 'Alice' },
+      { address: 'b@x.com', displayName: 'Bob' },
+    ]);
+    const latestDate = (): number | null =>
+      (
+        raw.prepare('SELECT latest_message_date d FROM chats WHERE id = ?').get(chatId) as {
+          d: number | null;
+        }
+      ).d;
+
+    // The user selects m2 + m3 and deletes them (bulk delete shares one timestamp).
+    await deleteMessageLocal(db, 'm2', 6_000);
+    await deleteMessageLocal(db, 'm3', 6_000);
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toEqual(['m1']);
+    // The raw delete never did this: the inbox sort key follows the surviving message.
+    expect(latestDate()).toBe(100);
+
+    // Backing out and re-opening the chat re-pages it from the server, which still has both guids.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({ guid: 'm2', text: 'mine', isFromMe: true, dateCreated: 200 }),
+        Message.parse({
+          guid: 'm3',
+          text: 'latest',
+          dateCreated: 300,
+          handle: { address: 'b@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toEqual(['m1']);
+    expect(latestDate()).toBe(100); // and the chat didn't jump back up the inbox either
+  });
+
+  it('TOMBSTONES a temp- row and takes its queue row with it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-x1',
+      chatId,
+      chatGuid: 'c1',
+      text: 'bye',
+      now: 1,
+    });
+
+    await deleteMessageLocal(db, 'temp-x1', 6_000);
+
+    // A `temp-` guid is NOT proof the server never saw the message: on the guid-less ack paths a
+    // DELIVERED send keeps its temp guid, and an errored one may have landed anyway. Hard-deleting
+    // destroyed the row the later echo promotes in place, so the message came back untombstoned.
+    const row = raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get('temp-x1') as
+      | { d: number | null }
+      | undefined;
+    expect(row?.d).toBe(6_000);
+    expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).not.toContain('temp-x1');
+    const q = raw
+      .prepare('SELECT COUNT(*) c FROM outgoing_queue WHERE temp_guid = ?')
+      .get('temp-x1') as { c: number };
+    expect(q.c).toBe(0); // …and the retry processor can't re-send it
+  });
+
+  it('is a safe no-op for an unknown guid', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    await expect(deleteMessageLocal(db, 'never-synced', 6_000)).resolves.toBeUndefined();
     const anyDeleted = raw
       .prepare('SELECT COUNT(*) c FROM messages WHERE date_deleted IS NOT NULL')
       .get() as { c: number };

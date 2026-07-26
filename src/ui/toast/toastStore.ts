@@ -4,6 +4,12 @@ export interface ToastRequest {
   id: number;
   message: string;
   durationMs: number;
+  /**
+   * When `enqueue` accepted this toast. A headless FCM wake enqueues with no React host to drain
+   * the queue, so the host reads this to drop anything that has been sitting here since a
+   * previous, hostless life of the JS context (see {@link AppToast}).
+   */
+  createdAt: number;
 }
 
 interface ToastState {
@@ -11,7 +17,7 @@ interface ToastState {
   current: ToastRequest | null;
   /** Toasts waiting behind the current one, shown one at a time. */
   queue: ToastRequest[];
-  enqueue: (req: Omit<ToastRequest, 'id'>) => void;
+  enqueue: (req: Omit<ToastRequest, 'id' | 'createdAt'>) => void;
   /** Dismiss the current toast and promote the next queued one (if any). */
   dismiss: () => void;
 }
@@ -27,7 +33,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
   current: null,
   queue: [],
   enqueue: (req) => {
-    const full: ToastRequest = { ...req, id: nextId++ };
+    const full: ToastRequest = { ...req, id: nextId++, createdAt: Date.now() };
     if (get().current == null) set({ current: full });
     else set((s) => ({ queue: [...s.queue, full] }));
   },

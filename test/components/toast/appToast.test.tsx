@@ -6,7 +6,9 @@
  *   - the overlay NEVER captures touches (pointerEvents="none" over the whole screen) — the one
  *     property that separates this from AppDialog's Modal, and the reason it can float over chat;
  *   - the FIFO queue actually PLAYS BACK: a second toast enqueued behind the first is promoted by
- *     the auto-dismiss instead of being dropped.
+ *     the auto-dismiss instead of being dropped;
+ *   - a STALE toast (enqueued by a headless FCM wake in a previous, hostless life of the JS
+ *     context) is dropped on sight instead of replaying as a ghost pill.
  * Insets are mocked (the pill offsets by insets.bottom). Renders async under RNTL 14 → await.
  */
 import React from 'react';
@@ -85,6 +87,37 @@ describe('AppToast', () => {
     // whole point of the queue (a burst of toasts plays back instead of clobbering each other).
     expect(await screen.findByText('second', {}, { timeout: 1500 })).toBeTruthy();
     expect(screen.queryByText('first')).toBeNull();
+    expect(useToastStore.getState().queue).toHaveLength(0);
+  });
+
+  it('stamps createdAt at enqueue time', async () => {
+    const before = Date.now();
+    showToast('stamped');
+    const current = useToastStore.getState().current;
+    expect(current?.createdAt).toBeGreaterThanOrEqual(before);
+    expect(current?.createdAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('drops a stale toast instead of showing it, and drains a whole stale backlog', async () => {
+    // Auto-download calls showToast from a killed-app FCM wake, where there is no React host to
+    // dismiss anything. If Android later reuses that JS context for a real launch, this is the
+    // backlog the host inherits — pills describing downloads that happened hours ago.
+    const old = Date.now() - 60_000;
+    useToastStore.setState({
+      current: { id: 901, message: 'ghost one', durationMs: 2500, createdAt: old },
+      queue: [
+        { id: 902, message: 'ghost two', durationMs: 2500, createdAt: old },
+        { id: 903, message: 'live', durationMs: 2000, createdAt: Date.now() },
+      ],
+    });
+
+    await renderWithTheme(<AppToast />);
+
+    // Both stale pills are dropped without ever animating in; the fresh one behind them still
+    // shows — this is why the fix is per-toast staleness and NOT a mount-time store reset.
+    expect(await screen.findByText('live')).toBeTruthy();
+    expect(screen.queryByText('ghost one')).toBeNull();
+    expect(screen.queryByText('ghost two')).toBeNull();
     expect(useToastStore.getState().queue).toHaveLength(0);
   });
 });

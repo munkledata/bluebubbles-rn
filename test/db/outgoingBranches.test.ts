@@ -1,17 +1,19 @@
 /**
  * Branch top-ups for src/db/repositories/outgoing.ts — the guard clauses, backstops, and
- * cancelled-in-flight paths not exercised by echoReconcile/outgoingQueueService. Every case
+ * cancelled-send paths not exercised by echoReconcile/outgoingQueueService. Every case
  * asserts observable DB state (or a documented return value).
  */
 import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import {
+  applyServerSendError,
   cancelOutgoing,
   getChatIdByGuid,
   insertOutgoingAttachment,
   insertOutgoingText,
   listAttachmentsByMessageIds,
   listMessages,
+  listMessagesWithSenders,
   markOutgoingSentNoGuid,
   reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
@@ -20,7 +22,6 @@ import {
   upsertChats,
   upsertHandles,
   upsertMessages,
-  wasCancelledInFlight,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
@@ -32,8 +33,14 @@ async function seedChat(db: AppDatabase, guid: string): Promise<number> {
 }
 const msgState = (raw: Database.Database, guid: string) =>
   raw.prepare('SELECT send_state s, error e FROM messages WHERE guid = ?').get(guid) as
-    | { s: string; e: number }
-    | undefined;
+    { s: string; e: number } | undefined;
+/** date_deleted for a guid: undefined = no row, null = live, a number = tombstoned. */
+const tombstone = (raw: Database.Database, guid: string): number | null | undefined =>
+  (
+    raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get(guid) as
+      | { d: number | null }
+      | undefined
+  )?.d;
 const queueCount = (raw: Database.Database, tempGuid: string): number =>
   (
     raw.prepare('SELECT COUNT(*) c FROM outgoing_queue WHERE temp_guid = ?').get(tempGuid) as {
@@ -121,7 +128,10 @@ describe('cancelOutgoing — branches', () => {
     expect(await cancelOutgoing(db, 'nope')).toBe(false);
   });
 
-  it('clears a STRANDED queue row that has no matching temp message', async () => {
+  // Cleared, because an orphan queue row re-sends blind on the next drain — but reported as
+  // not-owned: clearing an orphan is not the same as removing the user's message, and the Delete
+  // path skips its tombstone when this answers true.
+  it('clears a STRANDED queue row that has no matching temp message, reporting not-owned', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -133,11 +143,11 @@ describe('cancelOutgoing — branches', () => {
     });
     // Delete only the message, leaving the queue row stranded.
     raw.prepare('DELETE FROM messages WHERE guid = ?').run('temp-s');
-    expect(await cancelOutgoing(db, 'temp-s')).toBe(true);
+    expect(await cancelOutgoing(db, 'temp-s')).toBe(false);
     expect(queueCount(raw, 'temp-s')).toBe(0);
   });
 
-  it("an 'error' cancel deletes the row but does NOT arm the cancelled-in-flight suppression", async () => {
+  it("an 'error' cancel TOMBSTONES rather than deleting — the server may still have it", async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -148,12 +158,17 @@ describe('cancelOutgoing — branches', () => {
       now: 1,
     });
     raw.prepare("UPDATE messages SET send_state = 'error' WHERE guid = ?").run('temp-err');
-    expect(await cancelOutgoing(db, 'temp-err')).toBe(true);
-    expect(msgState(raw, 'temp-err')).toBeUndefined(); // message deleted
-    expect(wasCancelledInFlight('temp-err')).toBe(false); // no in-flight POST to suppress
+    expect(await cancelOutgoing(db, 'temp-err', 9_000)).toBe(true);
+    // 'error' is NOT proof the server never got it: a send can fail client-side (a 30s HTTP
+    // timeout) after the origin processed it. The row has to survive so the later echo can
+    // carry the deletion onto the real guid.
+    expect(tombstone(raw, 'temp-err')).toBe(9_000);
+    // …and invisible either way (listMessagesWithSenders is the render query; it filters tombstones)
+    expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
+    expect(queueCount(raw, 'temp-err')).toBe(0);
   });
 
-  it("a 'sending' cancel arms suppression, and the later success-ack erases the server echo", async () => {
+  it("a 'sending' cancel survives a late success-ack whose echo already landed (dup branch)", async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -163,9 +178,8 @@ describe('cancelOutgoing — branches', () => {
       text: 'hi',
       now: 1,
     });
-    expect(await cancelOutgoing(db, 'temp-snd')).toBe(true);
-    expect(wasCancelledInFlight('temp-snd')).toBe(true);
-    // The in-flight POST resolves late: reconcile must drop BOTH the temp row and the real echo.
+    expect(await cancelOutgoing(db, 'temp-snd', 9_000)).toBe(true);
+    // The socket echo beat the ack and inserted the real message.
     await upsertMessages(
       db,
       [
@@ -180,16 +194,34 @@ describe('cancelOutgoing — branches', () => {
       () => chatId,
       new Map(),
     );
+    // The in-flight POST resolves late. The dup branch destroys the temp row, so it must carry the
+    // tombstone across first — a HARD delete of the real guid here was undone by the next re-page.
     await reconcileOutgoingSuccess(db, 'temp-snd', {
       guid: 'real-snd',
       dateCreated: 1,
       dateDelivered: null,
     });
-    expect(await listMessages(db, chatId)).toHaveLength(0); // cancelled stays cancelled
-    expect(wasCancelledInFlight('temp-snd')).toBe(false); // consumed
+    expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0); // cancelled stays cancelled
+    expect(tombstone(raw, 'real-snd')).toBe(9_000);
+    // A re-page cannot bring it back: date_deleted is absent from upsertMessages' conflict set.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'real-snd',
+          isFromMe: true,
+          dateCreated: 1,
+          text: 'hi',
+          chats: [{ guid: 'c1' }],
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+    expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
   });
 
-  it('a late NO-GUID (AppleScript) ack after a cancel erases the row instead of resurrecting it', async () => {
+  it('a late NO-GUID (AppleScript/RCS) ack after a cancel keeps the row hidden, not resurrected', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -199,14 +231,21 @@ describe('cancelOutgoing — branches', () => {
       text: 'hi',
       now: 1,
     });
-    expect(await cancelOutgoing(db, 'temp-ng')).toBe(true); // 'sending' → arms suppression + deletes
-    expect(wasCancelledInFlight('temp-ng')).toBe(true);
-    // The AppleScript fallback resolves late with no guid → markOutgoingSentNoGuid's cancelled
-    // branch drops any leftover row + queue entry (never flips a cancelled send back to 'sent').
+    expect(await cancelOutgoing(db, 'temp-ng', 9_000)).toBe(true);
+    // The guid-less ack resolves late. It flips the state, never the tombstone — the row has to
+    // stay so the fanout's rcs-<id> is promoted ONTO it (carrying date_deleted) instead of
+    // inserting a fresh, visible bubble.
     await markOutgoingSentNoGuid(db, 'temp-ng');
-    expect(msgState(raw, 'temp-ng')).toBeUndefined();
+    expect(msgState(raw, 'temp-ng')?.s).toBe('sent');
+    expect(tombstone(raw, 'temp-ng')).toBe(9_000);
     expect(queueCount(raw, 'temp-ng')).toBe(0);
-    expect(wasCancelledInFlight('temp-ng')).toBe(false); // consumed
+    await reconcileEchoByContent(
+      db,
+      { guid: 'rcs-42', isFromMe: true, text: 'hi', dateCreated: 1 },
+      chatId,
+    );
+    expect(tombstone(raw, 'rcs-42')).toBe(9_000);
+    expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
   });
 });
 
@@ -228,6 +267,115 @@ describe('reconcileOutgoingError — attempts + backoff', () => {
       .get('temp-e') as { a: number; n: number };
     expect(q.a).toBe(1);
     expect(q.n).toBe(1_000 + 30_000); // first backoff = 30s
+  });
+
+  it('reports FALSE when no queue row owns the guid (so a caller can fall through)', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-noq',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-noq'").run();
+
+    expect(await reconcileOutgoingError(db, 'temp-noq', 42, 1_000)).toBe(false);
+    // The bubble is still flipped — only the ladder had nothing to advance.
+    expect(msgState(raw, 'temp-noq')).toEqual({ s: 'error', e: 42 });
+  });
+});
+
+/**
+ * P3/P4 — the two guards in this file that used to read a value into JavaScript and then use the
+ * stale copy as the condition for a write. Both are now compare-and-set.
+ */
+describe('sticky-error and ladder-ownership guards are IN the write', () => {
+  it('markOutgoingSentNoGuid does not promote an errored row, and leaves its ladder alone', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-sticky',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
+    // The server-pushed failure landed just before the success ack.
+    await reconcileOutgoingError(db, 'temp-sticky', 77, 1_000);
+
+    await markOutgoingSentNoGuid(db, 'temp-sticky');
+
+    expect(msgState(raw, 'temp-sticky')).toEqual({ s: 'error', e: 77 });
+    expect(queueCount(raw, 'temp-sticky')).toBe(1); // retry ladder intact
+  });
+
+  it('markOutgoingSentNoGuid still clears a queue row whose message is gone (no blind re-send)', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-orph',
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 1,
+    });
+    raw.prepare("DELETE FROM messages WHERE guid='temp-orph'").run();
+
+    await markOutgoingSentNoGuid(db, 'temp-orph');
+
+    expect(queueCount(raw, 'temp-orph')).toBe(0);
+  });
+
+  /**
+   * The retryable branch of applyServerSendError only exists for the RCS immediate-ack flow, where
+   * the ack has ALREADY deleted the queue row by the time the failure arrives. Deciding on a
+   * separate "is there a queue row?" SELECT meant that when the ack landed between the read and the
+   * write, the UPDATE matched nothing, reported nothing, and the re-enqueue was never reached.
+   */
+  it('applyServerSendError re-enqueues when the ladder is gone, instead of silently doing nothing', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-reenq',
+      chatId,
+      chatGuid: 'c1',
+      text: 'relay me',
+      now: 1,
+    });
+    // The immediate ack: bubble marked sent, queue row consumed.
+    raw.prepare("UPDATE messages SET send_state='sent' WHERE guid='temp-reenq'").run();
+    raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-reenq'").run();
+
+    await applyServerSendError(db, 'temp-reenq', 502, 5_000_000, true);
+
+    expect(msgState(raw, 'temp-reenq')).toEqual({ s: 'error', e: 502 });
+    const q = raw
+      .prepare("SELECT kind, attempts a FROM outgoing_queue WHERE temp_guid='temp-reenq'")
+      .get() as { kind: string; a: number };
+    expect(q).toMatchObject({ kind: 'text', a: 1 });
+  });
+
+  it('applyServerSendError advances the EXISTING ladder rather than re-enqueuing a second one', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-live',
+      chatId,
+      chatGuid: 'c1',
+      text: 'fast fail',
+      now: 1,
+    });
+
+    await applyServerSendError(db, 'temp-live', 502, 5_000_000, true);
+
+    expect(queueCount(raw, 'temp-live')).toBe(1); // one ladder, not two
+    const q = raw
+      .prepare("SELECT attempts a, next_retry_at n FROM outgoing_queue WHERE temp_guid='temp-live'")
+      .get() as { a: number; n: number };
+    expect(q.a).toBe(1);
+    expect(q.n).toBe(5_000_000 + 30_000);
   });
 });
 
@@ -391,20 +539,35 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
   });
 });
 
-describe('cancelled-in-flight set — bounded eviction', () => {
-  it('evicts the oldest entry once the cap is exceeded', async () => {
-    const { db } = await createTestDb();
+describe('a cancelled send vs a later IDENTICAL one', () => {
+  /**
+   * Both rows match the echo by content, so the ORDER BY has to prefer the LIVE one. Promoting the
+   * tombstoned row instead would hide the message the user actually sent and leave the visible
+   * bubble stuck on its temp identity.
+   */
+  it('promotes the live send first, and the cancelled one only on its own echo', async () => {
+    const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    // Arm > CANCELLED_SET_MAX (256) cancels; each 'sending' cancel calls markCancelled.
-    const guids: string[] = [];
-    for (let i = 0; i < 300; i++) {
-      const g = `temp-evict-${i}`;
-      guids.push(g);
-      await insertOutgoingText(db, { tempGuid: g, chatId, chatGuid: 'c1', text: `m${i}`, now: i });
-      await cancelOutgoing(db, g);
-    }
-    // The first of the 300 is well past the cap → evicted; the last is still present.
-    expect(wasCancelledInFlight(guids[0]!)).toBe(false);
-    expect(wasCancelledInFlight(guids[299]!)).toBe(true);
+    await insertOutgoingText(db, { tempGuid: 'temp-a', chatId, chatGuid: 'c1', text: 'ok', now: 1 });
+    await cancelOutgoing(db, 'temp-a', 9_000);
+    await insertOutgoingText(db, { tempGuid: 'temp-b', chatId, chatGuid: 'c1', text: 'ok', now: 2 });
+
+    await reconcileEchoByContent(
+      db,
+      { guid: 'real-b', isFromMe: true, text: 'ok', dateCreated: 2 },
+      chatId,
+    );
+    expect(tombstone(raw, 'real-b')).toBeNull(); // the LIVE send took the echo
+    expect(msgState(raw, 'temp-a')).toBeDefined(); // the cancelled one is still waiting
+
+    // The cancelled send's own echo (it had left the device) then finds the only candidate left.
+    await reconcileEchoByContent(
+      db,
+      { guid: 'real-a', isFromMe: true, text: 'ok', dateCreated: 1 },
+      chatId,
+    );
+    expect(tombstone(raw, 'real-a')).toBe(9_000);
+    const visible = await listMessagesWithSenders(db, chatId);
+    expect(visible.map((m) => m.guid)).toEqual(['real-b']);
   });
 });

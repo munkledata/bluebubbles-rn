@@ -46,6 +46,15 @@ export async function sendTextMessage(
   http: HttpClient,
   args: SendTextArgs,
   now: number = Date.now(),
+  /**
+   * Awaited the instant the optimistic message + queue row are committed — i.e. the instant
+   * delivery becomes durable and owned by the outgoing queue rather than by this call. A caller
+   * holding its own claim on the work (the scheduled-message ticker) settles it here rather than
+   * after the POST, which can run for seconds: an app kill inside that window used to leave BOTH
+   * the queue row and a still-'sending' scheduled row alive, and the next launch re-sent one and
+   * re-fired the other.
+   */
+  onQueued?: () => Promise<void> | void,
 ): Promise<{ tempGuid: string }> {
   const chatId = await getChatIdByGuid(db, args.chatGuid);
   if (chatId == null) throw new Error(`unknown chat ${args.chatGuid}`);
@@ -67,6 +76,7 @@ export async function sendTextMessage(
     // Into the queue payload only, so a crash-recovery resend keeps the spans.
     mentions: args.mentions,
   });
+  await onQueued?.();
 
   try {
     // Subject lines + mentions, like replies/effects, are Private-API-only features.

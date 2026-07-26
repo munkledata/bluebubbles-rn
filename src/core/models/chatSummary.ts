@@ -16,5 +16,16 @@ export const ChatSummary = z.object({
   isPinned: z.boolean().nullish(),
   muteType: z.string().nullish(),
   participants: z.array(Handle).nullish(),
+  /**
+   * macOS 26 synced "transcript background" channel GUID — the same field `Chat` declares, and it
+   * MUST be declared here too: the server serializes embedded chats with the very same serializer
+   * (so a live `new-message` / incremental-sync payload really does carry it), but zod STRIPS keys
+   * a schema doesn't declare. Undeclared, the value was discarded at the schema boundary and
+   * `upsertChats` then wrote NULL over a perfectly good channel id — after which
+   * `ensureSyncedBackground` reads "no channel" as "the background was removed on the server" and
+   * drops the local wallpaper, which bites exactly when the metadata refresh can't correct it,
+   * i.e. offline.
+   */
+  backgroundChannelGuid: z.string().nullish(),
 });
 export type ChatSummary = z.infer<typeof ChatSummary>;

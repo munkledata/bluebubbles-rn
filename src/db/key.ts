@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import type { SecureVault } from '@core/secure';
+import { withDbWriteLock } from './transaction';
 
 const KEY_BYTES = 32;
 // MUST match database.ts DB_NAME (kept here so this module never imports the op-sqlite
@@ -74,11 +75,21 @@ export async function resolveDbKey(
  * DB, promote the staged key, then clear staging. A crash at any step is recoverable by
  * `resolveDbKey` on the next boot (the DB is never left with no matching stored key).
  * The open `dbInstance` keeps working — rekey updates the running connection.
+ *
+ * Step 2 runs under the SAME write lock every `withDbTransaction` caller queues on, because the
+ * rotation is offered from Settings while the app is live: a sync slice, a live socket/FCM message
+ * or an optimistic send can have a transaction open on this one shared connection at that instant.
+ * SQLCipher rekeys inside its own implicit transaction, so an uncoordinated PRAGMA either fails
+ * outright (the user just sees "Couldn't rotate the key", intermittently and unexplainably) or —
+ * the outcome that actually destroys data — commits as a bystander inside the neighbour's
+ * transaction and is undone by ITS rollback, while steps 3 and 4 below still promote the new key
+ * and delete the staged one. `resolveDbKey` would then have no key that opens the file.
  */
 export async function rotateDbKey(vault: SecureVault, rawDb: RawExec): Promise<void> {
   const newKey = toHex(Crypto.getRandomBytes(KEY_BYTES));
   await vault.set('dbEncryptionKeyPending', newKey); // 1. stage (recoverable)
-  await rawDb.execute(`PRAGMA rekey = '${newKey}'`); // 2. re-encrypt the open DB
+  // 2. re-encrypt the open DB, serialized against every transacting writer (see above).
+  await withDbWriteLock(() => rawDb.execute(`PRAGMA rekey = '${newKey}'`));
   await vault.set('dbEncryptionKey', newKey); // 3. promote
   await vault.delete('dbEncryptionKeyPending'); // 4. done
 }

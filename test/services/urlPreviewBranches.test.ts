@@ -162,6 +162,57 @@ describe('fetchOgMetadata', () => {
   });
 });
 
+describe('in-flight dedupe', () => {
+  it('collapses concurrent lookups of the same URL into ONE outbound request', async () => {
+    // Every link bubble's lookup lives in a reactive query subscribed to the whole url_previews
+    // table, so a sibling preview resolving re-runs every still-unresolved hook — each of which
+    // would otherwise start its own fetch of a URL that is already in flight.
+    let release!: (r: FakeResponse) => void;
+    mockFetch.mockReturnValueOnce(
+      new Promise<FakeResponse>((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    const first = fetchOgMetadata('https://example.com/dedupe');
+    const second = fetchOgMetadata('https://example.com/dedupe');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    release(
+      resp({
+        status: 200,
+        url: 'https://example.com/dedupe',
+        headers: { 'content-type': 'text/html' },
+        text: async () => HTML,
+      }),
+    );
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toBe(b); // the SAME promise, so both callers get the same result object
+    expect(a.kind).toBe('ok');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not share a result between DIFFERENT urls', async () => {
+    mockFetch.mockResolvedValue(
+      resp({ status: 200, headers: { 'content-type': 'text/html' }, text: async () => HTML }),
+    );
+    await Promise.all([
+      fetchOgMetadata('https://example.com/a'),
+      fetchOgMetadata('https://example.com/b'),
+    ]);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the url once the fetch settles, so a later mount can retry', async () => {
+    mockFetch.mockResolvedValue(resp({ status: 503, headers: {} }));
+    expect(await fetchOgMetadata('https://example.com/retry')).toEqual({ kind: 'transient' });
+    // A transient failure is deliberately not cached anywhere — if the in-flight entry leaked,
+    // this URL could never be fetched again for the life of the JS context.
+    expect(await fetchOgMetadata('https://example.com/retry')).toEqual({ kind: 'transient' });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('parseOgMetadata absolutize fallback', () => {
   it('keeps the raw image src when the base url is unparseable', () => {
     const html = '<meta property="og:image" content="/pic.png">';

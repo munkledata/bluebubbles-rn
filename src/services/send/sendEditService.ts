@@ -3,9 +3,10 @@ import type { HttpClient } from '@core/api/http';
 import {
   applyLocalEdit,
   applyLocalUnsend,
-  clearLocalUnsend,
   getChatGuidByMessageGuid,
   getMessageTextByGuid,
+  revertLocalEdit,
+  revertLocalUnsend,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 
@@ -44,12 +45,17 @@ export async function sendEdit(
       partIndex: 0,
     });
     if (!ack.guid) {
-      if (prev) await applyLocalEdit(db, args.messageGuid, prev.text ?? '', prev.dateEdited ?? 0);
+      // Compare-and-set, not a blind write: an edit the server DID apply whose response was lost
+      // still echoes over the socket, and that echo lands FIRST. Reverting blindly would overwrite
+      // it, leaving the message reading the old wording to you and the new one to everyone else.
+      // `prev.dateEdited` is passed through rather than `?? 0` — a literal 0 is not "never edited".
+      if (prev) await revertLocalEdit(db, args.messageGuid, prev.text ?? '', prev.dateEdited, now);
       return { ok: false };
     }
     return { ok: true };
   } catch {
-    if (prev) await applyLocalEdit(db, args.messageGuid, prev.text ?? '', prev.dateEdited ?? 0);
+    // Same compare-and-set as above: a transport failure does NOT prove the edit wasn't applied.
+    if (prev) await revertLocalEdit(db, args.messageGuid, prev.text ?? '', prev.dateEdited, now);
     return { ok: false };
   }
 }
@@ -80,12 +86,17 @@ export async function sendUnsend(
       partIndex: 0,
     });
     if (ack.unsent === false) {
-      await clearLocalUnsend(db, args.messageGuid);
+      // Compare-and-set — the privacy-relevant twin of the edit revert. If the server DID retract
+      // the message and only the response was lost, a blind clear puts content the user revoked
+      // from everyone back on their own screen. Guarding on our own marker leaves a server-stamped
+      // retraction alone.
+      await revertLocalUnsend(db, args.messageGuid, now);
       return { ok: false };
     }
     return { ok: true };
   } catch {
-    await clearLocalUnsend(db, args.messageGuid);
+    // Same compare-and-set as above: a transport failure does NOT mean the server didn't retract.
+    await revertLocalUnsend(db, args.messageGuid, now);
     return { ok: false };
   }
 }

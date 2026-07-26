@@ -1,9 +1,10 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Recurrence } from '@core/schedule';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -74,6 +75,7 @@ import {
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
+import { useLockStore } from '@state/lockStore';
 import { useTypingStore } from '@state/typingStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
@@ -220,9 +222,37 @@ function ChatScreenInner({
     count: number;
   } | null>(null);
 
+  // Is the app actually in FRONT? This screen stays MOUNTED while the app is backgrounded and
+  // underneath the app-lock overlay (the gate is an absolute-fill overlay at the ROOT layout, not a
+  // route swap), and FCM keeps writing incoming messages in both states — which flushes the
+  // reactive query and re-renders this screen. The live read marker below must not run then.
+  // `AppState.currentState` is null until the native module has reported in, and a chat screen only
+  // ever mounts because the user navigated to it, so "unknown" counts as on screen.
+  const [appActive, setAppActive] = useState(() => AppState.currentState !== 'background');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
+    return () => sub.remove();
+  }, []);
+  const locked = useLockStore((s) => s.locked);
+
+  // Gates the live read-marker effect below. The open-time effect MUST read the old marker before
+  // anything advances it (that's how firstUnread is computed), so live tracking stays disarmed
+  // until that capture is done — armed any earlier it would erase the jump target before use.
+  // STATE rather than a ref because arming has to RE-RENDER: when the message window happens to
+  // resolve before the capture finishes, a ref would leave the effect below never re-examined, and
+  // the first message to actually arrive would be mistaken for the baseline and swallowed. Holds
+  // the guid it was armed FOR (not a boolean) so a reused screen instance handed a DIFFERENT chat
+  // is disarmed by the compare, with no state reset cascading an extra render on every open.
+  const [armedForGuid, setArmedForGuid] = useState<string | null>(null);
+  const readTrackingArmed = armedForGuid === guid;
+  // The newest RECEIVED guid the read marker already covers; `undefined` until the first message
+  // window has been accounted for (see the effect below).
+  const markedThroughGuid = useRef<string | null | undefined>(undefined);
+
   // Runs once per guid (the deps are exactly [guid]) — no once-ref, so a reused screen
   // instance that receives a NEW guid marks the new chat read/synced too.
   useEffect(() => {
+    markedThroughGuid.current = undefined;
     if (!guid) return;
     void (async () => {
       // Capture the oldest-unread target BEFORE markRead clears the marker.
@@ -237,6 +267,7 @@ function ChatScreenInner({
         // best-effort — the chip just doesn't show
       }
       void markRead(guid);
+      setArmedForGuid(guid);
     })();
     clearChatNotification(guid); // dismiss any tray notification for this chat
     // Backfill this thread's history from the server on open, so it fills in even if the
@@ -247,6 +278,50 @@ function ChatScreenInner({
     // reactive `chats` query repaints the background once the downloaded uri is written.
     void ensureSyncedBackground(http, getDatabase(), guid);
   }, [guid]);
+
+  // Keep the read marker current while the thread STAYS open. The effect above fires exactly once
+  // per guid, so a message the user WATCHED arrive still left a bold unread badge on the inbox when
+  // they pressed Back, and left its heads-up notification sitting in the tray. A received message
+  // that has rendered here has been read.
+  // The rows are NEWEST-FIRST (listMessagesWithSenders orders `date_created DESC`), so the newest
+  // received row is the FIRST non-from-me entry. Keying the effect on that guid rather than on the
+  // rows is what keeps it off the hot path: every reactive flush rebuilds the array, but in-place
+  // ticks (delivery/read receipts, localPath writes, reaction joins) never move the guid — and a
+  // reaction can't become the newest row at all, since queryMessageRows excludes
+  // `associated_message_type IS NOT NULL`. Memoized over `messagesData`, not `messages`, because
+  // the latter's `?? []` fallback is a fresh array on every render.
+  const newestReceivedGuid = useMemo(
+    () => messagesData?.find((m) => m.isFromMe === 0)?.guid,
+    [messagesData],
+  );
+  // Has the window been read at least once? Tracked separately from the guid because a first window
+  // with NO received rows (an empty chat, or one where you sent everything) still has to be
+  // baselined — otherwise the first message to arrive there would be taken for the baseline.
+  const messagesResolved = messagesData != null;
+  useEffect(() => {
+    if (!guid || !readTrackingArmed || !messagesResolved) return;
+    if (markedThroughGuid.current === undefined) {
+      // Baseline, NOT a mark: `useReactiveQuery` renders `data: null` first and resolves the window
+      // afterwards, so the undefined→guid step is just the window arriving — everything in it was
+      // already covered by the open-time markRead above. Without this baseline every single chat
+      // open fired a second markRead: another `chats` write whose reactive flush re-runs the
+      // inbox query, plus a second POST /chat/:guid/read when read receipts are on.
+      markedThroughGuid.current = newestReceivedGuid ?? null;
+      return;
+    }
+    if (!newestReceivedGuid || newestReceivedGuid === markedThroughGuid.current) return;
+    // Only when the user can actually SEE the thread. Marking read from behind the lock screen or
+    // from the background would cancel the heads-up notification for a message they never saw
+    // (clearChatNotification kills the whole chat's notification by id) and clear the inbox badge
+    // with it — and, with read receipts on, tell the sender you read it while the phone is in your
+    // pocket. `appActive`/`locked` are deps, so coming back / unlocking re-runs this and marks the
+    // message read the moment the thread is genuinely on screen again — nothing is lost, only
+    // deferred.
+    if (!appActive || locked) return;
+    markedThroughGuid.current = newestReceivedGuid;
+    void markRead(guid);
+    clearChatNotification(guid);
+  }, [guid, readTrackingArmed, messagesResolved, newestReceivedGuid, appActive, locked]);
 
   const isDev = isDevServer;
 

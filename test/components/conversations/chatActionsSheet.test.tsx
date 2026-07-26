@@ -9,15 +9,17 @@
  *   - Mark as Read routes to the service `markRead(guid)`; Mark as Unread to `markUnread(guid)`
  *     (local flip + best-effort server sync — the service owns the RCS/Private-API gating);
  *   - Delete does NOT mutate directly — it closes the sheet and opens a confirm dialog whose
- *     message names the chat; the dialog's DESTRUCTIVE button is what actually calls
- *     deleteChatLocal (with the target's guid), and Cancel deletes nothing;
+ *     message names the chat; the dialog's DESTRUCTIVE button is what actually calls the
+ *     `deleteChat` SERVICE (with the target's guid), and Cancel deletes nothing. It must be the
+ *     service, not the repository: the repo call alone leaves the chat's reminders' OS alarms
+ *     armed, and those outlive the row;
  *   - a null target renders no rows.
  *
  * In-file mocks:
  *   - `@db/repositories`: the sheet imports the five chat mutations; the real barrel pulls
  *     op-sqlite/drizzle native at import. Stub each as a jest.fn resolving void.
- *   - `@/services`: only `markRead`/`markUnread` are referenced; its barrel loads native modules
- *     at import.
+ *   - `@/services`: `markRead`/`markUnread`/`deleteChat` are referenced; its barrel loads native
+ *     modules at import.
  *   - `@ui/dialog/dialogStore`: spy `showDialog` so the Delete-confirm can be asserted without
  *     driving the real dialog store/Modal.
  *   `@db/database` (getDatabase) is already stubbed by the shared setup to a jest.fn() → undefined,
@@ -29,8 +31,8 @@
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { ChatActionsSheet, type ChatActionTarget } from '@ui/conversations/ChatActionsSheet';
-import { setChatPin, setChatMute, setChatArchive, deleteChatLocal } from '@db/repositories';
-import { markRead, markUnread } from '@/services';
+import { setChatPin, setChatMute, setChatArchive } from '@db/repositories';
+import { deleteChat, markRead, markUnread } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 
 // Zero insets so useSafeAreaInsets() resolves without a SafeAreaProvider.
@@ -42,12 +44,12 @@ jest.mock('@db/repositories', () => ({
   setChatPin: jest.fn(() => Promise.resolve()),
   setChatMute: jest.fn(() => Promise.resolve()),
   setChatArchive: jest.fn(() => Promise.resolve()),
-  deleteChatLocal: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('@/services', () => ({
   markRead: jest.fn(() => Promise.resolve()),
   markUnread: jest.fn(() => Promise.resolve()),
+  deleteChat: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
@@ -58,7 +60,7 @@ const mockSetChatArchive = setChatArchive as jest.Mock;
 const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
-const mockDeleteChatLocal = deleteChatLocal as jest.Mock;
+const mockDeleteChat = deleteChat as jest.Mock;
 
 /** The `buttons` array handed to showDialog by the last call (dialogStore's 3rd arg). */
 interface DialogButton {
@@ -89,7 +91,7 @@ beforeEach(() => {
   mockMarkUnread.mockClear();
   mockMarkRead.mockClear();
   mockShowDialog.mockClear();
-  mockDeleteChatLocal.mockClear();
+  mockDeleteChat.mockClear();
 });
 
 async function renderSheet(target: ChatActionTarget) {
@@ -197,7 +199,7 @@ describe('ChatActionsSheet — Delete', () => {
     expect(heading).toBe('Delete Conversation');
     expect(message).toContain('Alice');
     // Pressing Delete must NOT have deleted anything yet — the dialog owns that.
-    expect(mockDeleteChatLocal).not.toHaveBeenCalled();
+    expect(mockDeleteChat).not.toHaveBeenCalled();
   });
 
   it("the dialog's destructive button deletes THIS chat locally", async () => {
@@ -213,9 +215,9 @@ describe('ChatActionsSheet — Delete', () => {
     // The actual deletion lives behind this callback — invoking it is the only way to prove
     // the sheet wired the RIGHT guid through the confirm dialog.
     destructive!.onPress?.();
-    expect(mockDeleteChatLocal).toHaveBeenCalledTimes(1);
+    expect(mockDeleteChat).toHaveBeenCalledTimes(1);
     // `getDatabase()` is stubbed to undefined by the shared setup.
-    expect(mockDeleteChatLocal).toHaveBeenCalledWith(undefined, 'iMessage;-;+15559998888');
+    expect(mockDeleteChat).toHaveBeenCalledWith('iMessage;-;+15559998888');
   });
 
   it("the dialog's Cancel button deletes nothing", async () => {
@@ -226,6 +228,6 @@ describe('ChatActionsSheet — Delete', () => {
     const cancel = lastDialogButtons().find((b) => b.style === 'cancel');
     expect(cancel?.text).toBe('Cancel');
     cancel?.onPress?.(); // no-op by design
-    expect(mockDeleteChatLocal).not.toHaveBeenCalled();
+    expect(mockDeleteChat).not.toHaveBeenCalled();
   });
 });

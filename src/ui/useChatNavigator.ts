@@ -1,5 +1,5 @@
 import { usePathname, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { reportChatOpened } from '@/services/shortcuts/shareShortcuts';
 import { resolveChatNavigation } from '@utils';
 
@@ -30,10 +30,23 @@ function chatGuidFromPath(path: string): string {
  *
  * The decision (push / replace / none) is the pure, node-tested `resolveChatNavigation`. Takes a
  * full `/chat/…` path (callers append their own `?focus=`/`?share=` query as needed).
+ *
+ * The returned callback is STABLE (it depends only on the router singleton). That matters far more
+ * than it looks: `usePathname()` is a `useSyncExternalStore` subscription, so depending on it
+ * directly changed this callback's identity on EVERY navigation — and callers hang "run once"
+ * effects off it. The connected layout's notification-tap drain is one of them, so every route
+ * change re-read `getInitialNotification()`, which on Android echoes the launch intent forever
+ * (see `drainNotificationTap`) and threw the user straight back into the chat they had just pressed
+ * Back out of. The same instability tore down and re-added the foreground-notification subscription
+ * and the AppState listener on every navigation, and defeated `React.memo` on every conversation
+ * tile. Reading the path from a ref written during render keeps the decision current without
+ * putting the path in the dependency list.
  */
 export function useChatNavigator(): (path: string) => void {
   const router = useRouter();
   const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   return useCallback(
     (path: string): void => {
       // Feed Android's People Service a usage signal so the share sheet's contact chips get
@@ -41,11 +54,13 @@ export function useChatNavigator(): (path: string) => void {
       // through, so it's the natural place. No-op until the native half ships.
       reportChatOpened(chatGuidFromPath(path));
 
-      const action = resolveChatNavigation(pathname, path);
+      // Read at CALL time — the ref holds the path from the latest render, so the push/replace/none
+      // rules see exactly what they saw before, without re-creating this callback per navigation.
+      const action = resolveChatNavigation(pathnameRef.current, path);
       if (action === 'push') router.push(path);
       else if (action === 'replace') router.replace(path);
       // 'none' → already on this exact thread; do nothing (no reload).
     },
-    [router, pathname],
+    [router],
   );
 }

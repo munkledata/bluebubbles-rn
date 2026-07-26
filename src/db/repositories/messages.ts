@@ -2,9 +2,15 @@ import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Attachment, Message } from '@core/models';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import { chatHandles, chats, messages, outgoingQueue } from '../schema';
+import { withDbTransaction } from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy, toFtsQuery } from './_shared';
 import { upsertAttachments } from './attachments';
+// The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader of
+// it like the inbox is (see the two FTS queries below). Imported from the module that owns the rule
+// rather than restated here, so the two can't drift; chats.ts imports nothing from this file, so
+// there is no cycle.
+import { chatVisible, clearSupersededTombstones } from './chats';
 import { handleMapKey } from './handles';
 
 /**
@@ -69,6 +75,10 @@ export async function upsertMessages(
           groupActionType: m.groupActionType ?? null,
           groupTitle: m.groupTitle ?? null,
           otherHandle: m.otherHandle ?? null,
+          // Insert-only seed (see the NOTE at the end of the conflict set). The wire never carries
+          // an error — a v1 message DTO has no such field, and send failures travel in the separate
+          // `message-send-error` envelope — so this is always the 0 a freshly-ingested server row
+          // deserves. The column itself is owned by the send/outgoing layer.
           error: m.error ?? 0,
           // NULL (not false) when the event omits the flag, so the COALESCE on conflict
           // (below) can keep a previously-stored `true` instead of being handed a 0 that
@@ -105,10 +115,30 @@ export async function upsertMessages(
         // handle-less fetch had handle_id NULL → "?" avatar). COALESCE so a fetch that OMITS
         // the handle (excluded = NULL) can never wipe an already-resolved sender.
         handleId: sql`COALESCE(excluded.handle_id, ${messages.handleId})`,
-        dateRead: sql`excluded.date_read`,
-        dateDelivered: sql`excluded.date_delivered`,
-        dateEdited: sql`excluded.date_edited`,
-        dateRetracted: sql`excluded.date_retracted`,
+        // Receipts, the edit marker and the unsend tombstone are MONOTONIC in the same sense as the
+        // delivery tiers below: the server never un-reports one, and no payload ever means "this was
+        // undone". A plain overwrite would hand a STALE page the power to erase them — ensureChatSynced
+        // re-pages up to 500 messages on EVERY chat open, so a page fetched BEFORE an unsend and landing
+        // AFTER it carries date_retracted = NULL, clears the tombstone, and the revoked text (which is
+        // COALESCE-preserved above, and so still in the row) renders in full again — in the thread AND
+        // as the inbox preview. The milder daily variants are a "Delivered"/"Read" receipt or the
+        // "Edited" marker silently disappearing off your own message. COALESCE: a present value still
+        // wins, only ABSENCE is preserved.
+        //
+        // TRADE-OFF, taken deliberately on date_retracted AND date_edited: both have an OPTIMISTIC
+        // local writer (applyLocalUnsend / applyLocalEdit) whose compare-and-set revert is skipped
+        // when the process dies with the POST in flight, and preserving absence means a re-sync can
+        // no longer clear the marker that write left behind. For date_retracted the residue HIDES
+        // content the user asked to revoke — the right direction for that column. For date_edited it
+        // is a permanent, cosmetic falsehood instead: the server's original text is restored by the
+        // COALESCE on `text` above, but the bubble keeps an "Edited" label (and offers "View Edit
+        // History" over an empty messageSummaryInfo) that no sync can remove. Accepted as the lesser
+        // of the two: the alternative — letting absence clear it — is a STALE page silently erasing
+        // the edit marker on a message that really was edited, on every chat open.
+        dateRead: sql`COALESCE(excluded.date_read, ${messages.dateRead})`,
+        dateDelivered: sql`COALESCE(excluded.date_delivered, ${messages.dateDelivered})`,
+        dateEdited: sql`COALESCE(excluded.date_edited, ${messages.dateEdited})`,
+        dateRetracted: sql`COALESCE(excluded.date_retracted, ${messages.dateRetracted})`,
         // Reflect the LATEST server value (plain overwrite, not COALESCE-preserve like the delivery
         // tiers). The server emits is_scheduled=true for a schedule_type=2 row both while pending AND
         // after it sends, so this flag does NOT clear on send — the "Scheduled" badge is instead
@@ -118,7 +148,6 @@ export async function upsertMessages(
         // is exactly what hides the badge. The wire always carries is_sent, so overwriting never
         // nulls a good value; never COALESCE-preserve here (we WANT the send to win).
         isSent: sql`excluded.is_sent`,
-        error: sql`excluded.error`,
         // Delivery tiers flip on a later updated-message event (Apple may report the
         // quiet delivery after the initial echo), so refresh them on conflict too — but
         // COALESCE so a later event that OMITS the flag (excluded = NULL) can't downgrade
@@ -150,6 +179,16 @@ export async function upsertMessages(
         // absence never means "the preview was removed" (a delivery/read-receipt re-upsert or a
         // leaner live projection just omits the blob), so overwrite-when-present only.
         payloadData: sql`COALESCE(excluded.payload_data, ${messages.payloadData})`,
+        // NOTE — `error` is DELIBERATELY absent from this conflict set (it IS in the insert values,
+        // as the 0 seed for a brand-new row). It is not a wire-carried field: the v1 message DTO has
+        // no `error` key at all — send failures travel in the separate `message-send-error` envelope
+        // — so `excluded.error` can only ever be the hard-coded 0 above. Refreshing it on conflict
+        // therefore doesn't "reflect the server", it ERASES: the next re-sync of a message that
+        // failed to deliver zeroes the stored code and the bubble degrades from a specific
+        // "iMessage Error (Code N)" to the generic "Message Failed to Send". The column is written
+        // ONLY by the send/outgoing layer, which both sets it (markMessageSendError) and clears it
+        // on every promotion/retry — so leaving it out of the set can't strand a stale code.
+        //
         // NOTE — `date_deleted` is DELIBERATELY absent from both the insert values (above) and this
         // conflict set, a documented deviation from the message-column checklist. It is NOT a
         // wire-carried field: a MessageV1 never carries the deletion — only the `message-deleted`
@@ -220,14 +259,39 @@ export async function upsertMessages(
   // position back to the deleted message's date — that must stay consistent with markMessageDeleted,
   // which recomputes the same way. (Retracted rows are intentionally NOT excluded: they still render
   // as tombstone bubbles in the thread, so they legitimately hold the chat's latest position.)
+  // REACTION rows are excluded too, so the sort key agrees with what the inbox actually SHOWS:
+  // listChatsForInbox's preview CTE and its unread count both skip `associated_message_type IS NOT
+  // NULL`, so without this a "liked" on a three-day-old message yanks the chat to the top of the
+  // inbox carrying an unchanged three-day-old preview and timestamp. It is also what makes
+  // insertOutgoingReaction's "a tapback must not reorder the inbox" rule survive the round-trip —
+  // that guarantee lasted exactly until the server echoed your own tapback back as a new-message.
+  //
+  // THE COALESCE IS LOAD-BEARING: MAX() over ZERO rows is NULL, and the reaction filter really can
+  // empty the candidate set — the server's per-chat `lastMessage` is the newest message with NO
+  // reaction filter, so `syncAllChats` upserts a lone tapback into a chat whose real messages
+  // haven't been backfilled yet (the whole of fullSync phase 2, and indefinitely for any chat whose
+  // page errored). Writing NULL there sorts the chat LAST under `ORDER BY … latest_message_date
+  // DESC` in listChatsForInbox, i.e. exactly the "sinks to the bottom of the inbox" outcome that
+  // upsert exists to prevent. So fall back to the unfiltered MAX: a reaction may not OUTRANK a real
+  // message, but it may hold a position nothing else is holding.
   const touched = [...new Set(withChat.map((x) => x.chatId))];
   if (touched.length > 0) {
     await db
       .update(chats)
       .set({
-        latestMessageDate: sql`(SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL)`,
+        latestMessageDate: sql`COALESCE(
+          (SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL AND associated_message_type IS NULL),
+          (SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL))`,
       })
       .where(inArray(chats.id, touched));
+    // Retire a local deletion tombstone the moment real new content lands, rather than leaving the
+    // chat's visibility to be re-derived on every read. Deriving it is not enough on its own: a chat
+    // brought back by one message would silently vanish AGAIN if that single message were later
+    // deleted or unsent. This is the MESSAGE-ingestion chokepoint; upsertChats covers the
+    // chat-ingestion one, and a chat can be revived by either. The CAS applies the same predicate
+    // `chatVisible` reads with, so re-synced history, a tapback and an unsent row still cannot
+    // resurrect a conversation the user deleted.
+    await clearSupersededTombstones(db, touched);
   }
   return map;
 }
@@ -284,6 +348,12 @@ export interface SearchResultRow {
 /**
  * FTS5 search enriched with chat + sender context for a results screen.
  * Excludes reaction rows; newest-first for parity with the Flutter search.
+ *
+ * Hits in a locally-deleted conversation are excluded (`chatVisible`) — the search page renders
+ * these rows DIRECTLY, so without it a message from a deleted thread was listed under that thread's
+ * name and tapping it opened the hidden conversation, whose `ensureChatSynced` then re-paged up to
+ * 500 of its messages back into the DB. The individual message rows are gone at delete time, but
+ * the next `syncAllChats` re-inserts each chat's `lastMessage` — straight back into the FTS index.
  */
 export async function searchMessagesEnriched(
   db: AppDatabase,
@@ -311,6 +381,7 @@ export async function searchMessagesEnriched(
     WHERE messages_fts MATCH ${match}
       AND m.associated_message_type IS NULL
       AND m.date_deleted IS NULL
+      AND ${chatVisible('c')}
     ORDER BY m.date_created DESC
     LIMIT ${limit}
   `);
@@ -343,8 +414,9 @@ export async function getFirstUnreadInChat(
   db: AppDatabase,
   chatId: number,
 ): Promise<{ guid: string; dateCreated: number; count: number } | null> {
-  const marker = await db.all<{ lastReadMessageGuid: string | null }>(
-    sql`SELECT last_read_message_guid AS lastReadMessageGuid FROM chats WHERE id = ${chatId} LIMIT 1`,
+  const marker = await db.all<{ lastReadMessageGuid: string | null; deletedAt: number | null }>(
+    sql`SELECT last_read_message_guid AS lastReadMessageGuid, deleted_at AS deletedAt
+        FROM chats WHERE id = ${chatId} LIMIT 1`,
   );
   const lastReadGuid = marker[0]?.lastReadMessageGuid ?? null;
   let readDate = 0;
@@ -354,6 +426,11 @@ export async function getFirstUnreadInChat(
     );
     readDate = r[0]?.d ?? 0;
   }
+  // Floor the scan at a tombstone: a deleted chat that came back (a message newer than the deletion
+  // arrived) must count only that NEW activity as unread. Without this the inbox badge says 1 while
+  // the in-chat "jump to N unread" chip offers to scroll back through the whole restored history —
+  // the same floor `chatVisible`/the inbox unread count already apply.
+  readDate = Math.max(readDate, marker[0]?.deletedAt ?? 0);
   const rows = await db.all<{ guid: string; dateCreated: number; count: number }>(sql`
     SELECT guid, date_created AS dateCreated,
       (SELECT COUNT(*) FROM messages mm
@@ -557,6 +634,10 @@ export async function listMessagesAround(
  * Distinct chat GUIDs that have at least one message matching the FTS query. Powers the inbox
  * top-bar so it filters chats by message CONTENT (incl. decoded edited/SMS text), keeping it
  * consistent with the dedicated search page instead of matching only chat names + the latest preview.
+ *
+ * Locally-deleted chats are excluded here too. The caller intersects this with the (already
+ * filtered) chat list, so today it changes nothing — but a guid list that includes hidden chats is
+ * a trap for the next caller that trusts it, and the rule is one line.
  */
 export async function searchChatGuidsByMessage(
   db: AppDatabase,
@@ -573,6 +654,7 @@ export async function searchChatGuidsByMessage(
     WHERE messages_fts MATCH ${match}
       AND m.associated_message_type IS NULL
       AND m.date_deleted IS NULL
+      AND ${chatVisible('c')}
     LIMIT ${limit}
   `);
   return rows.map((r: { guid: string }) => r.guid);
@@ -626,6 +708,53 @@ export async function deleteMessageByGuid(db: AppDatabase, guid: string): Promis
   await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, guid));
 }
 
+/**
+ * The USER's own "Delete message" (single or bulk) — the local counterpart of the server's
+ * `message-deleted` event, and it must use the same TOMBSTONE for the same reason.
+ *
+ * A hard delete does not stick: the deletion never leaves the device, so the server still returns
+ * that guid, and `ensureChatSynced` re-pages up to 500 messages on EVERY chat open — the row is
+ * re-inserted and the "deleted" message is back the next time the thread is opened (or mid-session,
+ * if the delete lands while that paging is in flight). {@link markMessageDeleted} is exactly the
+ * mechanism built against this: `date_deleted` is absent from upsertMessages' conflict set, so the
+ * tombstone survives the re-upsert, while every render/count/search query filters it out — the
+ * message VANISHES from the UI and stays gone. It also recomputes the chat's denormalized
+ * `latest_message_date`, which the raw delete never did (deleting the newest message used to leave
+ * the inbox sorting on a row nothing renders).
+ *
+ * There is NO hard-delete branch, deliberately. This used to restate `discardOutgoingMessage`'s
+ * guard ("a `temp-` guid still 'sending' or 'error' can't have been acknowledged, so nothing can
+ * re-insert it") as a second, slightly different copy of the rule — and the premise was wrong on
+ * both counts. On the guid-less ack paths (RCS bridge / AppleScript) a DELIVERED message KEEPS its
+ * temp guid, and an 'error' bubble can be a send that timed out client-side after the server
+ * processed it. Removing such a row destroys the one thing the later echo can carry the deletion
+ * onto: `upsertMessages` then inserts the message fresh under its real guid and the "deleted"
+ * bubble is back for good. The single rule now lives with the write that owns it
+ * (`discardOutgoingMessage`, which tombstones), and this is the plain fall-through for everything
+ * that write does not own.
+ *
+ * The tombstone survives promotion: `reconcileEchoByContent` /
+ * `reconcileOutgoingAttachmentByContent` promote IN PLACE (they rewrite guid/send_state/error and
+ * nothing else), so `date_deleted` rides onto the real identity, and it is deliberately absent from
+ * `upsertMessages`' conflict set — the message stays hidden through every later re-page.
+ */
+export async function deleteMessageLocal(
+  db: AppDatabase,
+  guid: string,
+  now: number,
+): Promise<void> {
+  // ONE transaction, three short statements. The ladder must not outlive the deletion (a surviving
+  // queue row re-POSTs the very message the user just deleted, with nothing on screen to tell
+  // them), and the tombstone must not outlive the chat sort-key recompute inside markMessageDeleted
+  // — as bare autocommits each half can be swallowed by whatever transaction a neighbouring writer
+  // happens to have open and lost with its rollback.
+  await withDbTransaction(db, async () => {
+    if (guid.startsWith('temp-'))
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, guid));
+    await markMessageDeleted(db, guid, now);
+  });
+}
+
 // ---- Edit / Unsend (operate on real guids; mutate in place, reactive watcher updates UI) ----
 
 /** Optimistically apply a local edit: new text + dateEdited marker (UI shows "Edited"). */
@@ -643,9 +772,62 @@ export async function applyLocalUnsend(db: AppDatabase, guid: string, now: numbe
   await db.update(messages).set({ dateRetracted: now }).where(eq(messages.guid, guid));
 }
 
-/** Clear a retraction (revert an optimistic unsend on POST failure). */
+/** Clear a retraction unconditionally (dev seeding / tests). Prod reverts use
+ *  {@link revertLocalUnsend}, which refuses to clobber a newer write. */
 export async function clearLocalUnsend(db: AppDatabase, guid: string): Promise<void> {
   await db.update(messages).set({ dateRetracted: null }).where(eq(messages.guid, guid));
+}
+
+/**
+ * Revert an optimistic edit after the POST failed — as a COMPARE-AND-SET on the marker our own
+ * optimistic write left behind, not a blind UPDATE.
+ *
+ * The blind form is a lost-update waiting to happen: an edit the server DID apply, whose HTTP
+ * response was lost (a read timeout the origin actually processed), still emits its echo over the
+ * socket. That echo lands first and writes the new text + the server's own `date_edited`; the
+ * revert then overwrites it, so the message reads the OLD wording to you and the new wording to
+ * everyone else, permanently. Guarding on `date_edited = appliedAt` — the exact value
+ * {@link applyLocalEdit} wrote microseconds earlier, and one no other writer can produce — means
+ * the revert only fires while our optimistic write is still the latest state of the row.
+ *
+ * Returns whether the revert actually applied; false means someone else owns the row now, which the
+ * caller must respect (there is nothing to repair — the newer value is the true one).
+ */
+export async function revertLocalEdit(
+  db: AppDatabase,
+  guid: string,
+  prevText: string,
+  prevDateEdited: number | null,
+  appliedAt: number,
+): Promise<boolean> {
+  const rows = await db.all<{ id: number }>(
+    sql`UPDATE messages SET text = ${prevText}, date_edited = ${prevDateEdited}
+        WHERE guid = ${guid} AND date_edited = ${appliedAt}
+        RETURNING id`,
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Revert an optimistic unsend after the POST failed — the compare-and-set twin of
+ * {@link revertLocalEdit}, and the privacy-relevant one: if the server DID retract the message and
+ * only the response was lost, a blind clear puts content the user revoked from everyone back on
+ * their own screen. Guarding on `date_retracted = appliedAt` keeps the server's own retraction
+ * (which carries the server's timestamp, never ours) untouched.
+ *
+ * Returns whether the retraction was actually cleared.
+ */
+export async function revertLocalUnsend(
+  db: AppDatabase,
+  guid: string,
+  appliedAt: number,
+): Promise<boolean> {
+  const rows = await db.all<{ id: number }>(
+    sql`UPDATE messages SET date_retracted = NULL
+        WHERE guid = ${guid} AND date_retracted = ${appliedAt}
+        RETURNING id`,
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -662,8 +844,13 @@ export async function clearLocalUnsend(db: AppDatabase, guid: string): Promise<v
  * and the server emits NOTHING on a 30-day recovery, so v1 does not resurrect a recovered message.
  *
  * The recompute counts RETRACTED (unsent) rows — they still render as tombstone bubbles in the
- * thread, so they legitimately hold the chat's latest position — and excludes only DELETED rows,
- * matching upsertMessages' own MAX(date_created) recompute so the two never drift.
+ * thread, so they legitimately hold the chat's latest position — and excludes DELETED rows and
+ * REACTION rows (a tapback must never OUTRANK a real message; the inbox preview + unread count skip
+ * them too), falling back to the unfiltered MAX when that filter leaves no candidate at all, so a
+ * chat whose only surviving row is a tapback keeps a real sort key instead of a NULL that sinks it
+ * to the bottom of the inbox. The expression must stay identical to upsertMessages' own
+ * MAX(date_created) recompute — the two write the same column and any drift shows up as a chat that
+ * jumps position on delete and jumps back on the next sync.
  *
  * Returns true if a local row matched the guid (tombstone applied), false for an unknown guid — a
  * safe no-op (e.g. a deletion for a message this device never synced, or already hard-deleted).
@@ -681,12 +868,17 @@ export async function markMessageDeleted(
   );
   const chatId = rows[0]?.chatId;
   if (chatId == null) return false;
-  // Recompute the inbox sort key over the surviving (non-deleted) rows. db.run — a non-returning
-  // UPDATE (db.all would throw "use run()" under better-sqlite3).
+  // Recompute the inbox sort key over the surviving (non-deleted, non-reaction) rows, with the same
+  // COALESCE fallback upsertMessages uses so an all-reactions remainder yields a date rather than
+  // the NULL that sorts a chat last. db.run — a non-returning UPDATE (db.all would throw "use
+  // run()" under better-sqlite3).
   await db.run(
     sql`UPDATE chats
-        SET latest_message_date =
-          (SELECT MAX(date_created) FROM messages WHERE chat_id = ${chatId} AND date_deleted IS NULL)
+        SET latest_message_date = COALESCE(
+          (SELECT MAX(date_created) FROM messages
+            WHERE chat_id = ${chatId} AND date_deleted IS NULL AND associated_message_type IS NULL),
+          (SELECT MAX(date_created) FROM messages
+            WHERE chat_id = ${chatId} AND date_deleted IS NULL))
         WHERE id = ${chatId}`,
   );
   return true;

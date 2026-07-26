@@ -16,6 +16,7 @@ import {
   retireOutgoing,
   type RetryableOutgoing,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import type { AttachmentUploader } from './sendAttachmentService';
@@ -61,20 +62,34 @@ export interface OutgoingQueueIO {
   fileExists: (uri: string) => Promise<boolean>;
 }
 
-/** Re-POST a single queued send (temp row + queue row already exist) and reconcile. */
-async function resend(
+/** What one re-POST attempt did. 'unsendable' = retired for good (nothing can ever fix it). */
+export type ResendOutcome = 'sent' | 'failed' | 'unsendable';
+
+/**
+ * Re-POST a single queued send (temp row + queue row already exist) and reconcile.
+ *
+ * Exported because the user's "Try Again" drives exactly one attempt through it: the manual retry
+ * must re-POST the QUEUE PAYLOAD under the row's ORIGINAL temp guid, like the drain does, not
+ * rebuild a send from the bubble under a fresh id. Rebuilding delivered a failed contact card as a
+ * plain text message reading the contact's name; a fresh id defeats the server's temp-id-keyed
+ * idempotency, so an ack-lost send goes out twice.
+ *
+ * `clock` is read at the OUTCOME, never at the top of the drain: a single attempt can run for
+ * minutes (an attachment upload has no timeout), and stamping the backoff with a timestamp taken
+ * before all the earlier rows in the batch schedules the next attempt too early — for a big upload,
+ * into the past, which makes the row re-eligible on the very next 20 s tick with no backoff at all.
+ */
+export async function resendOutgoingRow(
   db: AppDatabase,
   http: HttpClient,
   io: OutgoingQueueIO,
   row: RetryableOutgoing,
-  now: number,
-): Promise<boolean> {
+  clock: () => number,
+): Promise<ResendOutcome> {
   try {
-    // A retried row is 'error' from its last failure — flip it back to 'sending' FIRST, or the
-    // guid-less ack paths (RCS tempGuid echo / AppleScript) hit markOutgoingSentNoGuid's
-    // sticky-error guard and the retry's SUCCESS is swallowed: bubble stays errored, queue row
-    // survives un-bumped, and the same message re-sends on every later drain (duplicates).
-    await markOutgoingSending(db, row.tempGuid);
+    // The row is already flipped to 'sending' — that happens in the SAME transaction as the lease
+    // (see runOutgoingQueue), never here, so there is no instant in which a leased row still reads
+    // 'error' for the user's "Try Again" to claim out from under this attempt.
     let server;
     if (row.kind === 'text') {
       const p = JSON.parse(row.payload) as TextPayload;
@@ -119,7 +134,7 @@ async function resend(
         // and the sheet's Delete still works.
         logger.warn(`[queue] attachment retry has no local file — retiring`);
         await retireOutgoing(db, row.tempGuid);
-        return false;
+        return 'unsendable';
       }
       server = await io.upload({
         http,
@@ -134,13 +149,13 @@ async function resend(
       // drain forever (the old zombie behavior attachments used to have).
       logger.warn(`[queue] unknown outgoing kind '${row.kind}' — retiring`);
       await retireOutgoing(db, row.tempGuid);
-      return false;
+      return 'unsendable';
     }
-    await reconcileSendOutcome(db, row.tempGuid, server, now);
-    return true;
+    await reconcileSendOutcome(db, row.tempGuid, server, clock());
+    return 'sent';
   } catch (e) {
-    await handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, now);
-    return false;
+    await handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, clock());
+    return 'failed';
   }
 }
 
@@ -161,10 +176,33 @@ export async function runOutgoingQueue(
   now: number = Date.now(),
 ): Promise<{ eligible: number; sent: number }> {
   const rows = await listRetryableOutgoing(db, now);
+  // `now` anchors the drain (and is injectable, so tests keep a deterministic clock), but every
+  // claim and every outcome reads the time AGAIN through here. A single loop-start value both
+  // under-schedules the backoff of every row after the first and hands each row a lease measured
+  // from before the batch started — so a long upload can outlive its own 120 s lease and a second
+  // drain re-claims the row and uploads the same file again alongside it.
+  const startedAt = Date.now();
+  const clock = (): number => now + (Date.now() - startedAt);
   let sent = 0;
   for (const row of rows) {
-    if (!(await claimOutgoing(db, row.id, now))) continue; // another runner took it
-    if (await resend(db, http, io, row, now)) sent += 1;
+    // THE LEASE AND THE VISIBLE STATE FLIP ARE ONE STEP. The lease (`claimOutgoing`) lives in
+    // outgoing_queue.next_retry_at; 'sending' on the message row is what every OTHER actor reads
+    // — the "Try Again" button's claim is a compare-and-set on `send_state = 'error'`. Done as two
+    // separate writes, a row that had just been leased still read 'error', so a tap landing between
+    // them deleted the bubble + queue row and re-sent under a NEW temp guid while this attempt
+    // POSTed under the old one: two idempotency keys, one message delivered twice.
+    //
+    // The flip is also what keeps a retry's SUCCESS from being swallowed: a row retried from
+    // 'error' that acks without a guid (RCS tempGuid echo / AppleScript) hits
+    // markOutgoingSentNoGuid's sticky-error guard, and the bubble stays errored with its queue row
+    // un-bumped — so the same message re-sends on every later drain (duplicates).
+    const claimed = await withDbTransaction(db, async () => {
+      if (!(await claimOutgoing(db, row.id, clock()))) return false; // another runner took it
+      await markOutgoingSending(db, row.tempGuid);
+      return true;
+    });
+    if (!claimed) continue;
+    if ((await resendOutgoingRow(db, http, io, row, clock)) === 'sent') sent += 1;
   }
   return { eligible: rows.length, sent };
 }

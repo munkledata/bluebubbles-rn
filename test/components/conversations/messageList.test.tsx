@@ -17,6 +17,8 @@
  *     call `retry` / `discardMessage` from `@/services/send` with the right args — including the
  *     PHOTO branch, where the list rebuilds a PickedImage from the first attachment that still has
  *     a localPath (without it, retry deletes the row and re-sends text only: the picture is lost);
+ *     and the sheet tracking the LIVE row rather than a snapshot, so it closes itself the moment
+ *     the 20 s retry drain takes the message over or the message turns out to be delivered;
  *   - empty state: "No messages yet" when there are no messages.
  *
  * In-file mocks:
@@ -30,7 +32,7 @@
  *   - `@/services/send` → jest.fns for `retry` / `discardMessage` (its barrel pulls native http).
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { formatSeparatorDate } from '@utils';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import type { AttachmentRow } from '@db/repositories';
@@ -336,7 +338,7 @@ describe('MessageList — row callback binding', () => {
 
 describe('MessageList — failed-message flow', () => {
   it('opens the sheet on retry and Try Again re-sends via @/services/send', async () => {
-    const messages = [make({ id: 1, guid: 'x', text: 'oops' })];
+    const messages = [make({ id: 1, guid: 'x', text: 'oops', isFromMe: 1, sendState: 'error' })];
     await renderWithTheme(
       <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
     );
@@ -349,11 +351,11 @@ describe('MessageList — failed-message flow', () => {
     expect(screen.getByTestId('sheet-attachment').props.children).toBe('false');
 
     fireEvent.press(screen.getByTestId('sheet-retry'));
-    expect(retry).toHaveBeenCalledWith('x', {
-      chatGuid: 'iMessage;-;+15550001111',
-      text: 'oops',
-      image: undefined,
-    });
+    // The GUID is the WHOLE argument. Passing the bubble's text/image made the service rebuild the
+    // send from what this component could see — which delivered a failed contact card as a plain
+    // message reading the contact's name, and dropped a reply target / effect / subject / mentions
+    // that only the queue payload carries.
+    expect(retry).toHaveBeenCalledWith('x');
   });
 
   it('a failed PHOTO retries as an attachment, rebuilt from the downloaded row', async () => {
@@ -392,20 +394,10 @@ describe('MessageList — failed-message flow', () => {
     expect(screen.getByTestId('sheet-attachment').props.children).toBe('true');
 
     fireEvent.press(screen.getByTestId('sheet-retry'));
-    // MUST carry the image: with `image: undefined` the service deletes the errored row and
-    // re-sends text only — which loses the picture entirely.
-    expect(retry).toHaveBeenCalledWith('x', {
-      chatGuid: 'iMessage;-;+15550001111',
-      text: '',
-      image: {
-        uri: 'file:///cache/IMG_0042.jpg',
-        name: 'IMG_0042.jpg',
-        mimeType: 'image/jpeg',
-        size: 2048,
-        width: 400,
-        height: 300,
-      },
-    });
+    // Still just the guid: the queue row already knows this is an attachment send and holds the
+    // on-disk path, so the re-upload streams the same file under the same temp guid. The downloaded
+    // attachment is only used HERE to word the sheet ("re-upload the picture").
+    expect(retry).toHaveBeenCalledWith('x');
   });
 
   it('an attachment whose local file is gone is NOT re-sent as a fabricated image', async () => {
@@ -428,16 +420,13 @@ describe('MessageList — failed-message flow', () => {
     expect(screen.getByTestId('sheet-attachment').props.children).toBe('false');
 
     fireEvent.press(screen.getByTestId('sheet-retry'));
-    // No uri exists to re-upload; the service's own guard then decides what to do with the text.
-    expect(retry).toHaveBeenCalledWith('x', {
-      chatGuid: 'iMessage;-;+15550001111',
-      text: 'caption',
-      image: undefined,
-    });
+    // No downloaded file to describe, so the sheet reads as a plain message — but the retry itself
+    // is unchanged: the service re-POSTs whatever the queue row says was sent.
+    expect(retry).toHaveBeenCalledWith('x');
   });
 
   it('Delete discards the failed message via @/services/send', async () => {
-    const messages = [make({ id: 1, guid: 'x', text: 'oops' })];
+    const messages = [make({ id: 1, guid: 'x', text: 'oops', isFromMe: 1, sendState: 'error' })];
     await renderWithTheme(
       <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
     );
@@ -445,6 +434,56 @@ describe('MessageList — failed-message flow', () => {
     await screen.findByTestId('sheet');
     fireEvent.press(screen.getByTestId('sheet-delete'));
     expect(discardMessage).toHaveBeenCalledWith('x');
+  });
+
+  /**
+   * REGRESSION GUARD — the sheet must not act on a stale snapshot.
+   *
+   * The chat drains the outgoing retry queue every 20 s; when it picks the failed row up it flips
+   * the bubble to 'sending' and starts a POST. The sheet used to hold a FROZEN copy of the message
+   * taken when it opened, so it stayed on screen offering "Try Again" for a send that was already
+   * back in flight — and tapping it deleted the row mid-POST and re-sent under a fresh temp id,
+   * which is a different idempotency key server-side: the recipient gets the message twice.
+   */
+  it('closes itself when the failed row flips back to sending (the 20s drain took it over)', async () => {
+    const failedRow = make({ id: 1, guid: 'x', text: 'oops', isFromMe: 1, sendState: 'error' });
+    const view = await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={[failedRow]} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-x'));
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+
+    // The drain claims the row: send_state error → sending, error code cleared.
+    view.rerender(
+      <MessageList
+        chatGuid="iMessage;-;+15550001111"
+        isGroup={false}
+        messages={[{ ...failedRow, sendState: 'sending', error: 0 }]}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('sheet')).toBeNull());
+  });
+
+  it('closes itself when the failed row is promoted to sent while the sheet is open', async () => {
+    const failedRow = make({ id: 1, guid: 'x', text: 'oops', isFromMe: 1, sendState: 'error' });
+    const view = await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={[failedRow]} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-x'));
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+
+    // The retry the drain started succeeded (RCS/AppleScript keep the temp guid and only flip
+    // the state) — a "Try Again" from here would send a second copy of a delivered message.
+    view.rerender(
+      <MessageList
+        chatGuid="iMessage;-;+15550001111"
+        isGroup={false}
+        messages={[{ ...failedRow, sendState: 'sent', error: 0 }]}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('sheet')).toBeNull());
+    expect(retry).not.toHaveBeenCalled();
+    expect(discardMessage).not.toHaveBeenCalled();
   });
 });
 

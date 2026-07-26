@@ -1,10 +1,14 @@
 import * as scheduledApi from '@core/api/endpoints/scheduled';
+import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import {
-  cancelOutgoing as cancelOutgoingRepo,
-  deleteMessageByGuid,
+  claimFailedOutgoingForRetry,
+  countOutgoingQueueHealth,
+  deleteMessageLocal,
   deleteScheduled,
+  discardOutgoingMessage,
   getScheduledById,
+  listAllScheduled,
   reconcileServerScheduled,
   resetStuckScheduled,
   updateScheduled,
@@ -18,7 +22,11 @@ import { sendImageMessage, type PickedImage } from './sendAttachmentService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
 import { pickContact } from '../contacts/contactsService';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
-import { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
+import {
+  resendOutgoingRow,
+  runOutgoingQueue,
+  type OutgoingQueueIO,
+} from './outgoingQueueService';
 import { showToast } from '@ui/toast/toastStore';
 
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
@@ -90,9 +98,7 @@ export function sendContactCard(args: {
  * Kept here (not in the chat screen) so the screen depends only on the send barrel — and so the
  * expo-contacts native import stays out of the screen's module graph.
  */
-export async function pickAndSendContact(
-  chatGuid: string,
-): Promise<{ tempGuid: string } | null> {
+export async function pickAndSendContact(chatGuid: string): Promise<{ tempGuid: string } | null> {
   const contact = await pickContact();
   if (!contact || !hasContactContent(contact)) return null;
   return sendContactCard({ chatGuid, contact });
@@ -203,8 +209,20 @@ function normalizeSchedStatus(s: string | null | undefined): string {
   return 'pending'; // pending / scheduled → keep visible + cancellable
 }
 
+/** Server ids of the local server-backed rows still pending — the prune-exposure snapshot. */
+async function pendingServerIds(): Promise<Set<string>> {
+  const rows = await listAllScheduled(getDatabase());
+  return new Set(rows.map((r) => r.serverId).filter((id): id is string => id != null));
+}
+
 /** Pull the server's scheduled list into the local DB (keeps server-backed rows accurate). */
 export async function syncScheduledFromServer(): Promise<void> {
+  // Snapshot which rows this reconcile is ALLOWED to prune BEFORE the round trip. The server's
+  // answer describes the instant it was built, and the Scheduled screen's Edit re-creates a
+  // server-side message (delete + POST) — a row created while the GET was in flight is missing
+  // from that answer through no fault of its own, and pruning it deletes the local handle to a
+  // message the server will still fire.
+  const before = await pendingServerIds();
   let items: Awaited<ReturnType<typeof scheduledApi.getScheduled>>;
   try {
     items = await scheduledApi.getScheduled(http);
@@ -214,6 +232,15 @@ export async function syncScheduledFromServer(): Promise<void> {
   // EVERY id the server reported (even malformed items) — the prune set, so a row dropped by
   // the well-formed filter below is kept rather than pruned.
   const serverIds = items.map((it) => it.id);
+  // Rows that appeared locally during the round trip are added to the keep set. Only when the
+  // server actually reported something: an empty answer must still skip pruning entirely
+  // (reconcileServerScheduled's own guard against a transient empty view wiping live rows), so
+  // never let these turn an empty set into a non-empty one.
+  if (serverIds.length > 0) {
+    for (const id of await pendingServerIds()) {
+      if (!before.has(id)) serverIds.push(id);
+    }
+  }
   const mapped = items
     .map((it) => {
       if (!Number.isFinite(it.scheduledFor)) return null;
@@ -240,51 +267,118 @@ export function recoverStuckScheduled(): Promise<number> {
 }
 
 /**
+ * Once per JS context: report optimistic sends whose message row and queue row lost each other.
+ * The windows that can produce either half are single-digit milliseconds wide, so the only way to
+ * learn whether they happen in the wild is to count them on real devices. Best-effort and silent
+ * when clean — a diagnostic must never break the drain it rides on.
+ */
+let queueHealthReported = false;
+async function reportQueueHealthOnce(): Promise<void> {
+  if (queueHealthReported) return;
+  queueHealthReported = true;
+  try {
+    const health = await countOutgoingQueueHealth(getDatabase());
+    if (health.strandedSending > 0 || health.orphanQueueRows > 0) {
+      logger.warn(
+        `[queue] orphaned optimistic sends: ${health.strandedSending} stuck 'sending' with no queue row, ${health.orphanQueueRows} queue rows with no message`,
+      );
+    }
+  } catch (e) {
+    logger.debug('[queue] health check failed', e);
+  }
+}
+
+/**
  * Retry stranded/failed queued sends with backoff (the optimistic-send recovery).
  * Run at launch and from the background task — a crash mid-send no longer strands a
  * message; it retries automatically until it sends or retires to the error bubble.
  */
-export function recoverOutgoing(now = Date.now()): Promise<{ eligible: number; sent: number }> {
+export async function recoverOutgoing(
+  now = Date.now(),
+): Promise<{ eligible: number; sent: number }> {
+  // Before the drain, so the counts describe what the last session left behind rather than what
+  // this one just repaired. Gated to the first call, which is the boot drain.
+  await reportQueueHealthOnce();
   return runOutgoingQueue(getDatabase(), http, outgoingQueueIO, now);
 }
 
-/** Retry a failed send: drop the errored temp row, then re-send. */
-export async function retry(
-  oldTempGuid: string,
-  args: SendTextArgs & { image?: PickedImage },
-): Promise<{ tempGuid: string }> {
-  // Nothing re-sendable: the failed attachment's local file is gone (no image could be rebuilt
-  // from the row) and there's no text either. Keep the failed bubble untouched — deleting it
-  // and POSTing an empty text (the old fallthrough) silently destroyed the user's message.
-  if (!args.image && !args.text.trim()) {
-    showToast('Original file is no longer available');
-    return { tempGuid: oldTempGuid };
+/**
+ * Retry a failed send: take the errored row over, then drive ONE re-POST of its queue payload.
+ *
+ * THE SEND IS REBUILT FROM THE QUEUE ROW, NOT FROM THE BUBBLE, and it keeps its ORIGINAL temp guid.
+ * The old shape — delete the row, then re-send whatever the sheet could see — got both halves
+ * wrong. It re-sent the bubble's TEXT whatever had actually been queued, so a failed CONTACT CARD
+ * was delivered as a plain message reading the contact's display name (exactly what `kind:'contact'`
+ * exists to prevent), and a failed reply/effect/subject/mention send silently lost those fields;
+ * only the payload carries them, and the automatic drain has always used it. And the fresh temp id
+ * is the key the server's idempotency cache is built on, so a send that failed client-side (a 30 s
+ * HTTP timeout) yet landed server-side went out a SECOND time. Nothing is destroyed either, so a
+ * throw in the re-send can no longer leave the user with neither a bubble nor a queue row.
+ *
+ * The claim is guarded because this button races the automatic retry the app runs every 20 s: that
+ * drain leases the same row, flips the bubble to 'sending' and starts a POST that can run for
+ * seconds (an attachment upload has no timeout at all), while the sheet the user is tapping opened
+ * before any of that. Only an 'error' row with a live ladder is ours; anything else says so and
+ * re-sends nothing.
+ */
+export async function retry(tempGuid: string): Promise<void> {
+  // NEVER rejects. The only call site is a `void retry(...)` in a press handler, so a rejection
+  // here is an unhandled promise: no toast, no log, a tap that visibly did nothing. The bubble and
+  // its ladder survive any failure now, so there is nothing to repair — only something to report.
+  try {
+    const db = getDatabase();
+    const { claim, row } = await claimFailedOutgoingForRetry(db, tempGuid);
+    if (claim !== 'claimed' || !row) {
+      showToast(
+        claim === 'sending'
+          ? 'Already trying to send this message'
+          : claim === 'settled'
+            ? 'Message was already sent'
+            : 'This message can’t be sent again',
+      );
+      return;
+    }
+    // The same attempt the drain would make — same payload, same temp guid, same reconcile.
+    const outcome = await resendOutgoingRow(db, http, outgoingQueueIO, row, () => Date.now());
+    // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
+    // bubble keeps its error badge (Delete on the sheet still works) — say why rather than leave
+    // the tap looking like it did nothing.
+    if (outcome === 'unsendable') showToast('Original file is no longer available');
+  } catch (e) {
+    // A DB/driver failure in the claim itself. The automatic ladder still owns the row.
+    logger.warn('[send] manual retry failed', e);
+    showToast('Couldn’t retry — try again in a moment');
   }
-  // Drop the old errored row, then re-send. A failed ATTACHMENT must be re-uploaded as an
-  // attachment (re-streaming its on-disk file) — the old code only re-sent text, so retrying a
-  // failed picture just deleted it and sent nothing. When an image is supplied, re-send that.
-  await deleteMessageByGuid(getDatabase(), oldTempGuid);
-  if (args.image) {
-    return sendImageMessage(
-      getDatabase(),
-      http,
-      { chatGuid: args.chatGuid, image: args.image },
-      expoAttachmentUploader,
-    );
-  }
-  return sendTextMessage(getDatabase(), http, args);
-}
-
-/** Discard a failed/optimistic message (the "Delete" choice on a not-delivered message). */
-export function discardMessage(guid: string): Promise<void> {
-  return deleteMessageByGuid(getDatabase(), guid);
 }
 
 /**
- * Cancel a still-queued/sending (or errored) optimistic message: drop its queue
- * row + optimistic message. Guarded to a no-op once the send has reconciled to its
- * real guid (see cancelOutgoing repo helper). Returns whether anything was cancelled.
+ * Discard a message from the user's "Delete" (single or bulk), whatever state it is in.
+ *
+ * TWO STEPS, and each one puts its condition in its own write, so between them every state is
+ * covered exactly once:
+ *  1. `discardOutgoingMessage` claims ONLY an unconfirmed optimistic row (a `temp-` guid still
+ *     'sending' or 'error'): it tombstones the bubble and takes its queue row with it, so the
+ *     retry ladder can't re-POST what the user just removed.
+ *  2. Everything else — a real server guid, and a `temp-` row already flipped to 'sent' by a
+ *     guid-less ack (RCS / AppleScript) — falls through to `deleteMessageLocal`.
+ * BOTH steps tombstone; the difference is only which one owns the queue row and the ownership
+ * answer the caller gets. Every state here is a message the server may still have, and a hard
+ * delete of any of them is undone the next time the thread syncs (`ensureChatSynced` re-pages 500
+ * messages on EVERY chat open) — `date_deleted` is the only thing that survives that.
+ * The step-1 helper returning "I cleaned something up" instead of "I own this message" is what
+ * made a Delete silently do nothing, so it now reports ownership only.
  */
-export function cancelOutgoing(tempGuid: string): Promise<boolean> {
-  return cancelOutgoingRepo(getDatabase(), tempGuid);
+export async function discardMessage(guid: string, now: number = Date.now()): Promise<void> {
+  const db = getDatabase();
+  if (await discardOutgoingMessage(db, guid, now)) return;
+  await deleteMessageLocal(db, guid, now);
 }
+
+/*
+ * There is deliberately NO `cancelOutgoing` wrapper here any more. "Cancel Sending" and "Remove"
+ * are worded differently but ask for the same thing, and routing them at only
+ * `discardOutgoingMessage` made the tap a SILENT NO-OP whenever the send completed while the
+ * confirmation dialog was on screen (seconds — the guard then matches nothing and the boolean is
+ * discarded). Every user-facing removal goes through {@link discardMessage}, whose second step
+ * removes what the first does not own.
+ */

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, lte, sql } from 'drizzle-orm';
 import { emailKey, handleKey, phoneKey } from '@utils/contactMatch';
 import { contacts, handles } from '../schema';
 import type { AppDatabase } from '../types';
@@ -6,6 +6,9 @@ import { chunk } from './_shared';
 
 /** Max addresses per `IN (...)` list — well under SQLite's ~999 bound-variable limit. */
 const HANDLE_IN_CHUNK = 500;
+
+/** Contacts per multi-row INSERT — 7 bound values each, so ~700 per statement. */
+const CONTACT_INSERT_CHUNK = 100;
 
 // ---- Contacts sync ---------------------------------------------------------
 
@@ -19,21 +22,56 @@ export interface DeviceContact {
   avatar: string | null; // file:// uri (small) — not base64
 }
 
-/** Replace-all upsert of device contacts (the device is the source of truth). */
+/**
+ * Replace-all upsert of device contacts (the device is the source of truth).
+ *
+ * ADD-THEN-PRUNE, never truncate-then-refill. This runs on every boot, reconnect and
+ * pull-to-refresh, and every statement here commits on its own and wakes the reactive readers, so
+ * an intermediate state is genuinely observed: emptying the table first left a 1-2k-entry address
+ * book GONE for seconds at a time, during which a notification shows the raw phone number instead
+ * of the contact (`getHandleProfile` falls back to the address), a first message from a
+ * newly-added contact is DROPPED entirely under "Filter Unknown Senders" (a one-shot decision with
+ * no retry — the DB self-heals seconds later, the missed notification doesn't), and the recipient
+ * picker comes up blank.
+ *
+ * The generation cutoff is what makes it work without an upsert: `contacts.source_id` carries no
+ * unique index, so `onConflictDoUpdate({ target: contacts.sourceId })` would raise "ON CONFLICT
+ * clause does not match any PRIMARY KEY or UNIQUE constraint". Instead we note the highest id
+ * BEFORE writing, insert the whole new generation above it in batches, and delete everything at or
+ * below the cutoff in ONE statement. `contacts.id` is AUTOINCREMENT, so ids are never reused and
+ * the cutoff can never match a row this call just wrote. The worst observable state is a brief
+ * window where BOTH generations are present — duplicates, which every reader tolerates (the match
+ * index is keyed by phone/email so a duplicate collapses; `searchContactAddresses` de-dupes) — and
+ * the table is never empty.
+ *
+ * An EMPTY `items` still clears the table: that is the device honestly reporting an empty address
+ * book, not a missing read. Readers that must not act on emptiness guard it themselves (see
+ * `matchContactsToHandles`).
+ */
 export async function upsertContacts(db: AppDatabase, items: DeviceContact[]): Promise<number> {
-  await db.delete(contacts);
-  if (items.length === 0) return 0;
-  for (const c of items) {
-    await db.insert(contacts).values({
-      sourceId: c.sourceId,
-      displayName: c.displayName,
-      givenName: c.givenName,
-      familyName: c.familyName,
-      phones: JSON.stringify(c.phones),
-      emails: JSON.stringify(c.emails),
-      avatar: c.avatar,
-    });
+  const before = await db.all<{ cutoff: number | null }>(
+    sql`SELECT MAX(id) AS cutoff FROM contacts`,
+  );
+  const cutoff = before[0]?.cutoff ?? null;
+
+  // Batched inserts, not one statement per contact: the old row-at-a-time loop was thousands of
+  // sequential round trips on the single shared connection, which is what made the window seconds
+  // long rather than milliseconds.
+  for (const batch of chunk(items, CONTACT_INSERT_CHUNK)) {
+    await db.insert(contacts).values(
+      batch.map((c) => ({
+        sourceId: c.sourceId,
+        displayName: c.displayName,
+        givenName: c.givenName,
+        familyName: c.familyName,
+        phones: JSON.stringify(c.phones),
+        emails: JSON.stringify(c.emails),
+        avatar: c.avatar,
+      })),
+    );
   }
+
+  if (cutoff != null) await db.delete(contacts).where(lte(contacts.id, cutoff));
   return items.length;
 }
 
@@ -45,6 +83,17 @@ export interface ContactPick {
 /**
  * Flattened (name, address) pairs from synced device contacts, filtered by name or
  * address substring — for the new-chat recipient picker. Empty query → first `limit`.
+ *
+ * De-duped TWICE, and the order matters. `upsertContacts` writes the new generation before pruning
+ * the old one, so mid-sync every contact is present TWICE:
+ *  - `SELECT DISTINCT` collapses the duplicate generation IN SQL, i.e. BEFORE the row cap. A
+ *    JS-only de-dupe runs on rows the `LIMIT` has already truncated, so during that window the
+ *    cap of 1000 rows meant only ~500 distinct people, and a search matching someone in the second
+ *    half of the address book came back empty. The two generations project byte-identical values
+ *    on all three selected columns, so DISTINCT removes exactly one of them.
+ *  - the `seen` set below then collapses a contact who lists the SAME number under two labels
+ *    (home/mobile), and any generation pair whose values did change — neither of which DISTINCT
+ *    can catch, since they differ per row.
  */
 export async function searchContactAddresses(
   db: AppDatabase,
@@ -56,7 +105,7 @@ export async function searchContactAddresses(
     phones: string | null;
     emails: string | null;
   }>(
-    sql`SELECT display_name AS displayName, phones, emails FROM contacts ORDER BY display_name LIMIT 1000`,
+    sql`SELECT DISTINCT display_name AS displayName, phones, emails FROM contacts ORDER BY display_name LIMIT 1000`,
   );
   const q = query.trim().toLowerCase();
   const parse = (s: string | null): string[] => {
@@ -69,10 +118,15 @@ export async function searchContactAddresses(
     }
   };
   const out: ContactPick[] = [];
+  const seen = new Set<string>();
   for (const r of rows) {
     const name = r.displayName ?? '';
     for (const address of [...parse(r.phones), ...parse(r.emails)]) {
       if (!q || name.toLowerCase().includes(q) || address.toLowerCase().includes(q)) {
+        // NUL-joined so a name containing the separator can't forge a collision with another pair.
+        const key = `${name}\u0000${address}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         out.push({ name, address });
         if (out.length >= limit) return out;
       }
@@ -180,6 +234,17 @@ export async function linkHandlesToContacts(db: AppDatabase, addresses: string[]
  */
 export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
   const index = await buildContactIndex(db);
+  // An empty contacts read means "we don't know", not "every contact was deleted". Without this
+  // the revert branch below walks EVERY linked handle and writes display_name = serverDisplayName
+  // — which this server never sends (the wire handle DTO carries only address / country /
+  // uncanonicalizedId / service), so it writes NULL and the whole inbox degrades to raw phone
+  // numbers, one committed write at a time. `upsertContacts` no longer empties the table on its
+  // way to refilling it, but a device read can still come back empty on its own — a permission
+  // revoked between the prompt and the read, or a profile with no address book at all. Mirrors
+  // linkHandlesToContacts. TRADE-OFF: a user who deletes their ENTIRE address book keeps the old
+  // handle names until at least one contact exists again — a stale name is far cheaper than
+  // blanking every name on the device.
+  if (index.size === 0) return 0;
 
   const handleRows = await db.all<{
     id: number;

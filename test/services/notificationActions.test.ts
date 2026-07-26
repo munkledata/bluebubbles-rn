@@ -34,7 +34,10 @@ import {
   PRESS_OPEN,
   PRESS_REMINDER,
 } from '@/services/notifications/notifeeService';
-import { handleNotificationAction, handleNotificationPress } from '@/services/notifications/actions';
+import {
+  handleNotificationAction,
+  handleNotificationPress,
+} from '@/services/notifications/actions';
 
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
 jest.mock('react-native-notify-kit', () => ({
@@ -59,8 +62,21 @@ jest.mock('@db/database', () => ({
     throw new Error('Database not initialized — getDatabase must not run in a headless handler');
   }),
 }));
+// The real `sendTextMessage` awaits its `onQueued` callback the instant the optimistic row + queue
+// row are committed — the signal the action handler uses to decide the typed reply is safe to
+// throw away. The mock must honour that or it tests a contract the code doesn't have.
 jest.mock('@/services/send/sendService', () => ({
-  sendTextMessage: jest.fn(async () => undefined),
+  sendTextMessage: jest.fn(
+    async (
+      _db: unknown,
+      _http: unknown,
+      _args: unknown,
+      _now?: number,
+      onQueued?: () => void | Promise<void>,
+    ) => {
+      await onQueued?.();
+    },
+  ),
 }));
 jest.mock('@/services/send/sendReactionService', () => ({
   sendReactionMessage: jest.fn(async () => undefined),
@@ -114,10 +130,13 @@ describe('handleNotificationAction — reply', () => {
       chatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: '  hi there  ' }),
     );
     expect(mockSendText).toHaveBeenCalledTimes(1);
-    expect(mockSendText).toHaveBeenCalledWith(mockDb, expect.anything(), {
-      chatGuid: 'c1',
-      text: 'hi there',
-    });
+    expect(mockSendText).toHaveBeenCalledWith(
+      mockDb,
+      expect.anything(),
+      { chatGuid: 'c1', text: 'hi there' },
+      expect.any(Number),
+      expect.any(Function), // the queue handover — see the mock
+    );
     expect(mockNotifeeCancel).toHaveBeenCalledWith('c1');
   });
 
@@ -244,6 +263,52 @@ describe('handleNotificationAction — ignored / no-op cases', () => {
     await handleNotificationAction(chatDetail(ACTION_MARK_READ, {}));
     expect(mockMarkRead).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleNotificationAction — a failing action still clears the tray', () => {
+  // Headlessly there is no other feedback: if a throw escapes, the notification just sits there
+  // and the button reads as completely dead (the killed-app "Mark as read" symptom). The work is
+  // wrapped so the cancel always runs and the failure is at least logged.
+  it('swallows a throwing mark-read and cancels the notification anyway', async () => {
+    mockMarkRead.mockRejectedValueOnce(new Error('Database not initialized'));
+    await expect(
+      handleNotificationAction(chatDetail(ACTION_MARK_READ, { chatGuid: 'c7' })),
+    ).resolves.toBeUndefined();
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('c7');
+  });
+
+  // …with ONE exception. A reply carries text the user AUTHORED and that exists nowhere else —
+  // Android's RemoteInput does not re-populate the field — so the tray may only be cleared once
+  // the outgoing queue owns delivery. The handover callback is the signal.
+  it('KEEPS the notification when a reply throws before it was ever enqueued', async () => {
+    // Nothing durable was written (a failed first DB open on a headless wake, an unknown chat
+    // guid), so nothing will ever retry. Clearing the tray here destroys the typed message.
+    mockSendText.mockRejectedValueOnce(new Error('Database not initialized'));
+    await expect(
+      handleNotificationAction(chatDetail(ACTION_REPLY, { chatGuid: 'c8' }, { input: 'yo' })),
+    ).resolves.toBeUndefined();
+    expect(mockNotifeeCancel).not.toHaveBeenCalled();
+  });
+
+  it('clears the notification when a reply throws AFTER the queue took it', async () => {
+    // The reply is on its way; leaving the notification up would invite sending it twice.
+    mockSendText.mockImplementationOnce(async (...args: unknown[]) => {
+      await (args[4] as () => Promise<void> | void)?.();
+      throw new Error('boom after enqueue');
+    });
+    await expect(
+      handleNotificationAction(chatDetail(ACTION_REPLY, { chatGuid: 'c8b' }, { input: 'yo' })),
+    ).resolves.toBeUndefined();
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('c8b');
+  });
+
+  it('swallows a throwing love reaction and cancels the notification anyway', async () => {
+    mockSendReaction.mockRejectedValueOnce(new Error('boom'));
+    await expect(
+      handleNotificationAction(chatDetail(ACTION_LOVE, { chatGuid: 'c9', messageGuid: 'm9' })),
+    ).resolves.toBeUndefined();
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('c9');
   });
 });
 

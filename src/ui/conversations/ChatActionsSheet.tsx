@@ -3,14 +3,8 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
-import {
-  deleteChatLocal,
-  setChatArchive,
-  setChatMute,
-  setChatPin,
-  type InboxRow,
-} from '@db/repositories';
-import { markRead, markUnread } from '@/services';
+import { setChatArchive, setChatMute, setChatPin, type InboxRow } from '@db/repositories';
+import { deleteChat, markRead, markUnread } from '@/services';
 import { resolveTitle } from '@utils';
 import { useTheme } from '../theme';
 
@@ -65,7 +59,7 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => void deleteChatLocal(getDatabase(), t.guid),
+          onPress: () => void deleteChat(t.guid),
         },
       ],
     );

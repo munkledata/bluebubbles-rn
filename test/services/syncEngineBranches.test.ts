@@ -88,7 +88,14 @@ describe('syncAllChats — embedded lastMessage', () => {
             : [],
       }),
     );
-    expect(stored).toEqual([{ guid: 'cEmpty', chatId: (await getChatIdByGuid(db, 'cEmpty'))! }]);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      guid: 'cEmpty',
+      chatId: (await getChatIdByGuid(db, 'cEmpty'))!,
+      // The payload rides along so fullSync can re-apply this chat's read watermark once its
+      // messages are backfilled (see reapplyReadWatermarks).
+      chat: { guid: 'cEmpty' },
+    });
     expect(await listMessages(db, stored[0]!.chatId)).toHaveLength(0);
   });
 });

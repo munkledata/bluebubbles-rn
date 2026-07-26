@@ -5,10 +5,10 @@ import { Share } from 'react-native';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
 import { getDatabase } from '@db/database';
-import { deleteMessageByGuid, type MessagePreview } from '@db/repositories';
+import { type MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { scheduleReminder } from '@/services/notifications/remindersService';
-import { cancelOutgoing, react, unsend } from '@/services/send';
+import { discardMessage, react, unsend } from '@/services/send';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { showDialog } from '@ui/dialog/dialogStore';
@@ -165,8 +165,24 @@ export function useMessageActions({
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            const db = getDatabase();
-            for (const g of set) void deleteMessageByGuid(db, g);
+            // One timestamp for the whole selection so a bulk delete tombstones as one act.
+            const now = Date.now();
+            // SEQUENTIALLY, and that await is load-bearing. `discardMessage` opens a write
+            // TRANSACTION, and the transaction queue slot is claimed SYNCHRONOUSLY — so N
+            // unawaited calls claim all N slots in loop order before any of them runs, and each
+            // chain's later plain writes (the tombstone + the chat sort-key recompute) are then
+            // issued while the NEXT message's transaction is open and silently join it. Every
+            // tombstone but the last would be durable only because a sibling happened to commit,
+            // and one rollback would take the previous message's deletion with it — invisibly,
+            // since nothing awaits these. Awaiting means chain i is finished before chain i+1
+            // even constructs its transaction.
+            //
+            // discardMessage, not the raw tombstone: a selection can include an optimistic row
+            // whose POST is still in flight, and that one also has to take its retry ladder with
+            // it or the queue re-POSTs the message the user just deleted.
+            void (async () => {
+              for (const g of set) await discardMessage(g, now);
+            })();
             setSelectedGuids(null);
           },
         },
@@ -222,9 +238,17 @@ export function useMessageActions({
       [
         { text: 'Keep', style: 'cancel' },
         {
+          // discardMessage, NOT the optimistic-only cancel. `selected` is frozen at long-press and
+          // never re-derived, so by the time the user has read the menu and confirmed the dialog
+          // (seconds) the send may have completed — promoted to its real guid, or flipped to 'sent'
+          // keeping the temp guid on the RCS/AppleScript paths. The optimistic-only write then
+          // matches nothing, and its boolean is discarded: the dialog closes and the destructive
+          // action the user asked for silently does nothing, with Delete deliberately hidden from
+          // this menu as the alternative. discardMessage falls through to the tombstone for
+          // anything its guarded first step does not own, so the message is removed either way.
           text: sending ? 'Cancel Sending' : 'Remove',
           style: 'destructive',
-          onPress: () => void cancelOutgoing(g),
+          onPress: () => void discardMessage(g),
         },
       ],
     );
@@ -277,8 +301,9 @@ export function useMessageActions({
   };
 
   // Delete a message from the local device (parity with the old app's local Delete). The reactive
-  // query drops it from the list. Note: a later full re-sync of this chat can bring it back, since
-  // this is a local-only removal — same behavior as the old app.
+  // query drops it from the list. It is a TOMBSTONE, not a row removal (deleteMessageLocal): the
+  // server still has the message, and ensureChatSynced re-pages this chat on every open — a hard
+  // delete would be undone the very next time the thread is opened, not by some later full re-sync.
   const onDeleteSelected = (): void => {
     if (!selected) return;
     const g = selected.guid;
@@ -287,7 +312,7 @@ export function useMessageActions({
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => void deleteMessageByGuid(getDatabase(), g),
+        onPress: () => void discardMessage(g),
       },
     ]);
   };

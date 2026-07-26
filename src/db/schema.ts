@@ -72,6 +72,14 @@ export const chats = sqliteTable(
     /** Luminance of the effective wallpaper (true = light image → dark overlay text). Null = unknown. */
     backgroundIsLight: integer('background_is_light', { mode: 'boolean' }),
     lastReadMessageGuid: text('last_read_message_guid'),
+    /** When the user deliberately tapped "Mark as Unread" (epoch ms; null = never). Device-local.
+     *  Distinguishes "I want to come back to this" from "never read" — both leave the marker NULL,
+     *  and without it the Mac's read watermark silently undoes the flag on the next sync. */
+    markedUnreadAt: integer('marked_unread_at'),
+    /** When the user deleted this conversation on THIS device (epoch ms; null = never). Device-local
+     *  tombstone: the row survives so the columns above do, and the chat is hidden from the inbox
+     *  until a message NEWER than this arrives (see `deleteChatLocal` / `chatVisible`). */
+    deletedAt: integer('deleted_at'),
     /** Denormalized for fast inbox sorting without a join. */
     latestMessageDate: integer('latest_message_date'),
   },

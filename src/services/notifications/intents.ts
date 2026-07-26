@@ -26,7 +26,38 @@ export async function buildMessageIntents(
       // Honor the per-chat mute preference: a muted chat still writes the message to the DB
       // (badge/inbox update via the reactive query) but must NOT raise a notification. The Mute
       // switch / action sheet persists muteType='mute'; anything else (null) notifies as usual.
+      //
+      // THIS READS AS "NOT MUTED" WHENEVER THE HEADER IS NULL, which is why `getChatHeader` must
+      // stay an unfiltered identity lookup — the moment it hides any category of chat (a deletion
+      // tombstone, an archive flag), that chat's mute is silently switched off and it starts
+      // buzzing. Suppression must never treat "unknown" as "allowed"; only a genuinely unknown
+      // chat guid may fall through here, and it has no preferences to honour.
       if (header?.muteType === 'mute') return [];
+      // A conversation the user DELETED must not raise a notification it cannot be reached from.
+      //
+      // The tombstone hides the chat from the inbox, the archived list, unknown senders and search,
+      // and it is retired only by a message that satisfies `chatVisible` — real content, newer than
+      // the stamp. A tapback or an unsent message satisfies neither, so the other party hearting an
+      // old message in a thread you deleted (they have no idea you did, and tapbacks are routine)
+      // used to fire a heads-up alert with their name and photo for a chat that stays hidden
+      // FOREVER: nothing about that event can make it findable, and the notification body is
+      // usually the bare '📎 Attachment' fallback because a tapback carries no text.
+      //
+      // The test is the same one `chatVisible` / `clearSupersededTombstones` apply, evaluated
+      // against THIS message, so the two layers cannot disagree: if the message will un-hide the
+      // chat, notify (the alert is truthful — the thread is back); if it cannot, stay silent. It is
+      // checked against the message rather than by re-running the EXISTS because the DB write may
+      // not have landed yet, and because a qualifying message has already NULLed the stamp by the
+      // time it has. An undated message can't out-date the stamp, so it is treated as older.
+      const deletedAt = header?.deletedAt;
+      if (
+        deletedAt != null &&
+        (m.associatedMessageType != null ||
+          m.dateRetracted != null ||
+          (m.dateCreated ?? 0) <= deletedAt)
+      ) {
+        return [];
+      }
       // Resolve the sender's CONTACT name from the DB (the DbEventSink has already upserted +
       // contact-linked the handle by the time this runs), matching the in-app UI. The event's
       // `handle.displayName` is the server name (no device contact), so preferring it showed a

@@ -70,6 +70,24 @@ async function deliver(msg: RemoteMessage): Promise<void> {
  * open otherwise bypasses the lock entirely.
  */
 async function deliverRespectingLock(msg: RemoteMessage): Promise<void> {
+  // No stored server = the user disconnected. `forget()` deletes both vault keys but CANNOT revoke
+  // the push registration — the client API has no de-registration route (device removal is an
+  // admin-only server command), so the old server keeps our token and keeps pushing. Without this
+  // gate a `new-message` arriving minutes after Disconnect wakes us headlessly, `ensureDatabase()`
+  // (which needs no credentials) re-inserts that server's handle/chat/message rows into the DB the
+  // user just wiped, and we post a notification with the sender's name and body for an account
+  // this device is no longer connected to. Read from the VAULT, never from `useSessionStore`: a
+  // killed-app wake runs no React tree, so the store is at its module defaults and gating on it
+  // would drop EVERY killed-app push. Fail OPEN on a vault error — a transient Keystore failure
+  // must not cost a real delivery, and the lock gate below still withholds content.
+  try {
+    if (!(await vault.get('serverAddress'))) {
+      logger.debug('[fcm] push for a forgotten server — dropped');
+      return;
+    }
+  } catch (e) {
+    logger.warn('[fcm] session check failed — delivering anyway', e);
+  }
   // Fail CLOSED: if we can't determine the lock state we assume LOCKED, so a vault failure
   // can never leak sender/content. This does NOT drop delivery — postLockedNotification()
   // still posts a content-less notice; we just withhold the body until the user unlocks.

@@ -54,11 +54,26 @@ export async function deleteReminderByNotificationId(
   await db.delete(reminders).where(eq(reminders.notificationId, notificationId));
 }
 
+/**
+ * Point a reminder at a new time + trigger id. Returns whether a row actually matched.
+ *
+ * The boolean is load-bearing, not a convenience: an OS trigger notification is system state that
+ * outlives its row, and the caller arms the new trigger BEFORE this write. A silent zero-row update
+ * (the reminder was deleted while the time picker sat open — that dialog can be up for minutes)
+ * would leave a trigger armed with nothing behind it: it still fires, the Reminders screen can't
+ * show or cancel it, and even Disconnect misses it because `forget()` only cancels the triggers it
+ * can find via `listReminders`. Reported here so the caller can cancel the half that succeeded.
+ */
 export async function updateReminderTime(
   db: AppDatabase,
   id: number,
   scheduledFor: number,
   notificationId: string,
-): Promise<void> {
-  await db.update(reminders).set({ scheduledFor, notificationId }).where(eq(reminders.id, id));
+): Promise<boolean> {
+  const rows = await db
+    .update(reminders)
+    .set({ scheduledFor, notificationId })
+    .where(eq(reminders.id, id))
+    .returning({ id: reminders.id });
+  return rows.length > 0;
 }

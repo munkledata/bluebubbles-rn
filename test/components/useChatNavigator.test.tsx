@@ -15,8 +15,13 @@ const mockPush = jest.fn();
 const mockReplace = jest.fn();
 let mockPathname = '/home';
 
+// One object across renders, matching expo-router: `useRouter()` returns the module-level `router`
+// singleton, so its identity never changes. A fresh object per render would hide the fact that the
+// hook's callback is stable.
+const mockRouter = { push: mockPush, replace: mockReplace };
+
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  useRouter: () => mockRouter,
   usePathname: () => mockPathname,
 }));
 
@@ -76,5 +81,26 @@ describe('useChatNavigator — never stacks a thread on a thread', () => {
     result.current('/chat/abc');
     expect(mockPush).not.toHaveBeenCalled();
     expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('keeps ONE stable callback across navigations, and still sees the new path', async () => {
+    // `usePathname()` is a useSyncExternalStore subscription, so putting it in the dependency list
+    // changed this callback's identity on every route change — which re-ran callers' "once on
+    // mount" effects. The worst of those is the connected layout's notification-tap drain: it
+    // re-read getInitialNotification(), which on Android keeps echoing the launching intent, and
+    // threw the user back into the chat they had just pressed Back out of. The path must still be
+    // read at CALL time, or the fix would break the push/replace/none rules instead.
+    mockPathname = '/home';
+    const { result, rerender } = await renderHook(() => useChatNavigator());
+    const first = result.current;
+
+    mockPathname = '/chat/abc'; // navigated into a thread
+    await rerender({}); // RNTL 14 / React 19: rerender is async
+    expect(result.current).toBe(first);
+
+    // Same function object, but it must now REPLACE (thread → thread), not push.
+    result.current('/chat/def');
+    expect(mockReplace).toHaveBeenCalledWith('/chat/def');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

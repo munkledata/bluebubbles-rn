@@ -4,7 +4,8 @@
  *   - renders NOTHING (null) for an empty rows array;
  *   - one labelled cell per pinned row, titled via `resolveTitle` (a11y "Pinned conversation: …");
  *   - tapping a cell fires onPress with the row GUID; long-press fires onLongPress with the ROW;
- *   - redacted mode masks the title to "Contact" and drops the real name (privacy).
+ *   - redacted mode masks the title to "Contact" and drops the real name (privacy);
+ *   - an unread pinned chat shows a dot AND says so in its a11y label (presence only, no count).
  *
  * The avatars are the real primitives (Avatar/GroupAvatar); titles come from the pure `resolveTitle`
  * / `redactTitle` utils, so expected values are derived from those.
@@ -95,6 +96,41 @@ describe('PinnedGrid', () => {
     await renderWithTheme(<PinnedGrid rows={[row]} onPress={() => {}} onLongPress={onLongPress} />);
     fireEvent(screen.getByLabelText('Pinned conversation: Alice'), 'longPress');
     expect(onLongPress).toHaveBeenCalledWith(row);
+  });
+
+  // The grid has no preview, timestamp or badge, so before the dot a pinned chat gave the user no
+  // signal at all that it had unread messages — and it's the ListHeaderComponent, i.e. the first
+  // thing they look at.
+  it('shows an unread dot and announces it, only when the row has unread messages', async () => {
+    await renderWithTheme(
+      <PinnedGrid
+        rows={[
+          makeRow({ guid: 'g-alice', participantNames: 'Alice', unreadCount: 3 }),
+          makeRow({ guid: 'g-bob', participantNames: 'Bob', unreadCount: 0 }),
+        ]}
+        onPress={() => {}}
+        onLongPress={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('pinned-unread-g-alice')).toBeTruthy();
+    expect(screen.queryByTestId('pinned-unread-g-bob')).toBeNull();
+    // Presence only — the count must NOT leak into the label or the cell.
+    expect(screen.getByLabelText('Pinned conversation: Alice, unread')).toBeTruthy();
+    expect(screen.getByLabelText('Pinned conversation: Bob')).toBeTruthy();
+    expect(screen.queryByText('3')).toBeNull();
+  });
+
+  it('keeps the unread dot in redacted mode (it reveals nothing about the chat)', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(
+      <PinnedGrid
+        rows={[makeRow({ guid: 'g-alice', participantNames: 'Alice', unreadCount: 2 })]}
+        onPress={() => {}}
+        onLongPress={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('pinned-unread-g-alice')).toBeTruthy();
+    expect(screen.getByLabelText('Pinned conversation: Contact, unread')).toBeTruthy();
   });
 
   it('masks the title to "Contact" in redacted mode, hiding the real name', async () => {

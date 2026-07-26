@@ -37,16 +37,11 @@ export class DbEventSink implements EventSink {
       case 'new-message':
       case 'updated-message': {
         const message = event.message;
-        const embeddedChats = message.chats ?? [];
-        const handleMap = await upsertHandles(this.db, [
-          ...embeddedChats.flatMap((c) => c.participants ?? []),
-          ...(message.handle ? [message.handle] : []),
-        ]);
-        const chatMap = await upsertChats(this.db, embeddedChats, handleMap);
         // Resolve the target chat: prefer the hydrated `chats[0].guid`, else fall back to the
         // top-level `chatGuid` a live event may carry when the server didn't embed `chats[]`.
         // Without this fallback a chats-less event was silently filtered out by upsertMessages
-        // (no resolvable chat) → no row, no notification.
+        // (no resolvable chat) → no row, no notification. Pure (no DB), so it runs BEFORE the
+        // transaction — an unusable event must not take the write lock at all.
         const targetChatGuid = resolveMessageChatGuid(message);
         if (!targetChatGuid) {
           // Neither chats[] nor chatGuid: don't silently drop — log + skip (the message still
@@ -57,32 +52,59 @@ export class DbEventSink implements EventSink {
           });
           break;
         }
-        // The chat may already exist locally (from a prior sync) even when this event didn't
-        // embed it — resolve its id from the upsert map first, then the DB as a fallback.
-        const chatId =
-          chatMap.get(targetChatGuid) ??
-          (await getChatIdByGuid(this.db, targetChatGuid)) ??
-          undefined;
-        if (chatId == null) {
-          // We have a guid but no local chat row yet (event carried only chatGuid, chat unsynced).
-          // Skip the write rather than orphan the message; the next sync hydrates the chat + message.
+        const embeddedChats = message.chats ?? [];
+        // EVERY write for this event — handles, chats, echo-reconcile, message — goes in ONE
+        // transaction. Two reasons, and the first is the non-obvious one:
+        //
+        //  1. There is a single shared connection, so a statement issued OUTSIDE a transaction
+        //     while another handler's transaction is open silently JOINS it. Left as plain
+        //     autocommit writes, these handle/chat upserts would be erased by a rollback on the
+        //     other side — while `handleMap`/`chatId` here still held the ids of rows that no
+        //     longer exist, so `upsertMessages` would then hit the `messages.chat_id REFERENCES
+        //     chats(id)` FK (foreign keys are ON) and lose this message too. Being inside the
+        //     serialized transaction is what makes those ids trustworthy for the rest of the body.
+        //  2. The queue-delete and the temp→real guid promote must commit atomically — a hard
+        //     crash in the gap could otherwise strand a queue-less unpromoted temp row (a
+        //     permanent duplicate bubble).
+        //
+        // Everything in here is DB-only and short (no network, no native calls, and nothing that
+        // re-enters withDbTransaction — a nested call would deadlock on its own caller's lock).
+        // The auto-download hook stays OUTSIDE, below, for exactly that reason.
+        const idMap = await withDbTransaction(this.db, async () => {
+          const handleMap = await upsertHandles(this.db, [
+            ...embeddedChats.flatMap((c) => c.participants ?? []),
+            ...(message.handle ? [message.handle] : []),
+          ]);
+          const chatMap = await upsertChats(this.db, embeddedChats, handleMap);
+          // The chat may already exist locally (from a prior sync) even when this event didn't
+          // embed it — resolve its id from the upsert map first, then the DB as a fallback.
+          const chatId =
+            chatMap.get(targetChatGuid) ??
+            (await getChatIdByGuid(this.db, targetChatGuid)) ??
+            undefined;
+          // No local chat row yet (event carried only chatGuid, chat unsynced). RETURN, don't
+          // throw: the handle/chat upserts above are still worth committing, exactly as they were
+          // when they ran outside the transaction. The caller logs + skips the message.
+          if (chatId == null) return null;
+          // Reconcile our own optimistic send against this LIVE echo before the upsert: Gator's
+          // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
+          // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
+          // Live path only — never the sync path (see reconcileEchoByContent).
+          await reconcileEchoByContent(this.db, message, chatId);
+          return upsertMessages(this.db, [message], () => chatId, handleMap);
+        });
+        if (idMap == null) {
+          // Skipped the write rather than orphan the message; the next sync hydrates the chat
+          // and the message together.
           logger.info('[dbEventSink] chat not found for live message — skipped (will sync)', {
             chatGuid: targetChatGuid,
             guid: message.guid,
           });
           break;
         }
-        // Reconcile our own optimistic send against this LIVE echo before the upsert: Gator's
-        // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
-        // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
-        // Live path only — never the sync path (see reconcileEchoByContent). One transaction so
-        // the queue-delete and the guid-promote commit atomically — a hard crash in the gap
-        // could otherwise strand a queue-less unpromoted temp row (a permanent duplicate).
-        const idMap = await withDbTransaction(this.db, async () => {
-          await reconcileEchoByContent(this.db, message, chatId);
-          return upsertMessages(this.db, [message], () => chatId, handleMap);
-        });
         // Notify the app (attachment auto-download) that this message + its rows are persisted.
+        // Deliberately after COMMIT: it kicks off network/native work, which must never run with
+        // the write lock held.
         const storedId = idMap.get(message.guid);
         if (storedId != null) this.onMessageStored?.(storedId);
         break;

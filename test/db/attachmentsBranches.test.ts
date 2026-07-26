@@ -4,7 +4,6 @@
  * getAttachmentByGuid miss, the temp→real reconcile DELETE branch, and promoteAttachmentGuid's
  * dup vs update branches. Each case asserts observable DB state.
  */
-import type Database from 'better-sqlite3';
 import { Attachment, Chat, Message } from '@core/models';
 import {
   getAttachmentByGuid,
@@ -256,5 +255,103 @@ describe('updateAttachmentLocalPath', () => {
     await updateAttachmentLocalPath(db, 'att-dl', 'file:///downloaded.jpg');
     const atts = (await listAttachmentsByMessageIds(db, [id])).get(id)!;
     expect(atts[0]!.localPath).toBe('file:///downloaded.jpg');
+  });
+});
+
+/**
+ * D15 — the conflict clause must PRESERVE what a payload legitimately omits.
+ *
+ * A file shared INTO Gator arrives as {uri, name, mimeType, size} with no dimensions, so its
+ * attachment row is inserted with NULL width/height. The server then reports the real dimensions
+ * on every later fetch — and a plain `excluded.width` overwrite in one direction (or a NULL from
+ * the bare socket echo in the other) is what left a landscape photo boxed at the portrait fallback
+ * ratio permanently: the row already exists, so no re-sync could ever correct it.
+ */
+describe('upsertAttachments — width/height/transferName are COALESCE-preserved', () => {
+  it('fills in dimensions the first payload lacked', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db, 'cDim');
+    const id = await putMsg(db, chatId, {
+      guid: 'm-dim',
+      dateCreated: 1,
+      chats: [{ guid: 'cDim' }],
+    });
+    // Shared-in: no dimensions, no display name.
+    await upsertAttachments(db, [
+      {
+        att: Attachment.parse({ guid: 'att-dim', mimeType: 'image/jpeg' }),
+        messageId: id,
+      },
+    ]);
+    // The server's copy of the same attachment carries the real shape.
+    await upsertAttachments(db, [
+      {
+        att: Attachment.parse({
+          guid: 'att-dim',
+          mimeType: 'image/jpeg',
+          width: 4032,
+          height: 3024,
+          transferName: 'IMG_0042.jpg',
+        }),
+        messageId: id,
+      },
+    ]);
+
+    const row = (await getAttachmentByGuid(db, 'att-dim'))!;
+    expect(row.width).toBe(4032);
+    expect(row.height).toBe(3024);
+    expect(row.transferName).toBe('IMG_0042.jpg');
+  });
+
+  it('a later payload WITHOUT dimensions does not wipe the good ones', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db, 'cKeep');
+    const id = await putMsg(db, chatId, {
+      guid: 'm-keep',
+      dateCreated: 1,
+      chats: [{ guid: 'cKeep' }],
+    });
+    await upsertAttachments(db, [
+      {
+        att: Attachment.parse({
+          guid: 'att-keep',
+          mimeType: 'image/jpeg',
+          width: 1600,
+          height: 900,
+          transferName: 'wide.jpg',
+        }),
+        messageId: id,
+      },
+    ]);
+    // The bare live echo (and the lastMessage hydration) omit both.
+    await upsertAttachments(db, [
+      { att: Attachment.parse({ guid: 'att-keep', mimeType: 'image/jpeg' }), messageId: id },
+    ]);
+
+    const row = (await getAttachmentByGuid(db, 'att-keep'))!;
+    expect(row.width).toBe(1600);
+    expect(row.height).toBe(900);
+    expect(row.transferName).toBe('wide.jpg');
+  });
+
+  it('adding those columns did not drag local_path into the clause (a re-sync cannot blank it)', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db, 'cLp');
+    const id = await putMsg(db, chatId, {
+      guid: 'm-lp',
+      dateCreated: 1,
+      chats: [{ guid: 'cLp' }],
+    });
+    await upsertAttachments(db, [
+      { att: Attachment.parse({ guid: 'att-lp', mimeType: 'image/jpeg' }), messageId: id },
+    ]);
+    await updateAttachmentLocalPath(db, 'att-lp', 'file:///on-disk.jpg');
+    await upsertAttachments(db, [
+      {
+        att: Attachment.parse({ guid: 'att-lp', mimeType: 'image/jpeg', width: 10, height: 10 }),
+        messageId: id,
+      },
+    ]);
+    expect((await getAttachmentByGuid(db, 'att-lp'))!.localPath).toBe('file:///on-disk.jpg');
   });
 });

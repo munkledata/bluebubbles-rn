@@ -16,7 +16,6 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { chatsApi } from '@core/api';
 import { getDatabase } from '@db/database';
 import {
-  deleteChatLocal,
   getChatParticipants,
   getChatTheme,
   listChatAttachmentsByKind,
@@ -28,7 +27,7 @@ import {
   type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { computeBackgroundIsLight, http } from '@/services';
+import { computeBackgroundIsLight, deleteChat, http } from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import { removeGroupIcon, uploadGroupIcon } from '@/services/chat/groupIcon';
 import { useChatHeader } from '@features/conversations/useChatHeader';
@@ -104,7 +103,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           void (async () => {
             try {
               await chatsApi.leaveChat(http, guid);
-              await deleteChatLocal(getDatabase(), guid);
+              await deleteChat(guid);
               router.back();
             } catch {
               showDialog(

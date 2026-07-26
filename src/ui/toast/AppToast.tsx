@@ -5,6 +5,18 @@ import { useTheme } from '../theme';
 import { useToastStore } from './toastStore';
 
 /**
+ * Beyond this, a queued toast is assumed to be a leftover rather than something the user is
+ * waiting to read. `showToast` is callable from headless service code (auto-download runs on a
+ * killed-app FCM wake), where nothing renders and nothing dismisses; if Android later reuses that
+ * JS context for a real launch, the backlog would replay as ghost pills long after the fact.
+ * Dropping by AGE rather than resetting the store on mount keeps a toast that was legitimately
+ * enqueued in the same commit as the host mounting. Comfortably clear of a real burst: the tail of
+ * a FIFO queue only ages out past ~6 back-to-back toasts, and nothing enqueues that many (the
+ * auto-download path emits ONE batched toast per burst).
+ */
+const MAX_TOAST_AGE_MS = 15_000;
+
+/**
  * The single host for the app-wide toast (see {@link useToastStore}). Mounted once at the root,
  * inside ThemeProvider + SafeAreaProvider. A floating, NON-blocking pill near the bottom that fades
  * in and auto-dismisses after its duration. Unlike {@link AppDialog} it is NOT a Modal — it must
@@ -19,6 +31,13 @@ export function AppToast(): React.JSX.Element | null {
 
   useEffect(() => {
     if (!current) return;
+    // Stale backlog → skip it and promote the next one (which gets the same test, so a whole
+    // hostless burst drains at once). No animation was started, so `opacity` is still 0 and the
+    // pill never becomes visible for the frame it takes to unmount.
+    if (Date.now() - current.createdAt > MAX_TOAST_AGE_MS) {
+      dismiss();
+      return;
+    }
     const anim = Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true });
     anim.start();
     const timer = setTimeout(dismiss, current.durationMs);

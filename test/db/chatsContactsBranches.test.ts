@@ -113,6 +113,63 @@ describe('local read / unread markers', () => {
     await markAllChatsReadLocal(db);
     expect(readGuid(raw)).toBe('m1'); // newest (only) message
   });
+
+  it('markAllChatsReadLocal marks the newest RECEIVED message, never a pending outgoing one', async () => {
+    // An outgoing message is usually the newest row in its chat and carries a TEMPORARY guid that
+    // gets rewritten when the send reconciles — a marker pointing at it resolves to nothing, and
+    // the chat springs back to bold with its entire history unread. A send that failed offline
+    // keeps that temp guid indefinitely, so one stuck send anywhere is enough.
+    const { db, raw } = await seedChatWithMessage();
+    const chatId = (await getChatIdByGuid(db, 'g1'))!;
+    const handles = await upsertHandles(db, [{ address: '+15551112222' }]);
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'temp-stuck', text: 'oops', isFromMe: true, dateCreated: 5000 })],
+      () => chatId,
+      handles,
+    );
+
+    await markAllChatsReadLocal(db);
+
+    expect(readGuid(raw)).toBe('m1'); // the received message, not temp-stuck
+  });
+
+  it('markAllChatsReadLocal leaves an outgoing-only chat alone instead of NULLing its marker', async () => {
+    // The outer guard is narrowed the same way as the subquery: with no received message there is
+    // nothing to point at, and writing NULL would mean "never read" — the same everything-unread
+    // outcome, arrived at from the other direction.
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: '+15551112222' }]);
+    const map = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'g1', style: 43, participants: [{ address: '+15551112222' }] })],
+      handles,
+    );
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'temp-only', text: 'hi', isFromMe: true, dateCreated: 1000 })],
+      () => map.get('g1')!,
+      handles,
+    );
+    await setLastReadMessageGuid(db, 'g1', 'previous');
+
+    await markAllChatsReadLocal(db);
+
+    expect(readGuid(raw)).toBe('previous');
+  });
+
+  it('markAllChatsReadLocal also retires a deliberate "Mark as Unread"', async () => {
+    const { db, raw } = await seedChatWithMessage();
+    await setChatUnreadLocal(db, 'g1', 4000);
+
+    await markAllChatsReadLocal(db);
+
+    expect(readGuid(raw)).toBe('m1');
+    expect(
+      (raw.prepare("SELECT marked_unread_at t FROM chats WHERE guid='g1'").get() as { t: number })
+        .t,
+    ).toBeNull();
+  });
 });
 
 describe('server-avatar helpers', () => {

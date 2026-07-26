@@ -4,6 +4,8 @@ import {
   applyLocalUnsend,
   clearLocalUnsend,
   getMessageTextByGuid,
+  revertLocalEdit,
+  revertLocalUnsend,
   listMessagesWithSenders,
   upsertChats,
   upsertHandles,
@@ -165,5 +167,94 @@ describe('messageSummaryInfo persistence (edit history)', () => {
     );
     const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'mo1')!;
     expect(parseMessageSummaryInfo(row.messageSummaryInfo)?.editedParts?.['0']).toHaveLength(3);
+  });
+});
+
+// The optimistic edit/unsend revert is a COMPARE-AND-SET, not a blind UPDATE. The failure it
+// prevents: the server DID apply the edit/unsend and emitted its echo, but the HTTP response was
+// lost (a read timeout the origin actually processed). The echo lands first and writes the server's
+// own text/markers; a blind revert then overwrites them — the message reads one way to you and
+// another way to everyone else, and for an unsend that means content you revoked from everyone is
+// back on your own screen. Guarding on the exact marker our own optimistic write left means the
+// revert only fires while that write is still the latest state of the row.
+describe('edit/unsend revert is a compare-and-set', () => {
+  it('reverts an edit while our optimistic write is still the row’s latest state', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db); // m1 = "original", never edited
+    await applyLocalEdit(db, 'm1', 'oops typo', 5_000);
+
+    expect(await revertLocalEdit(db, 'm1', 'original', null, 5_000)).toBe(true);
+    const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
+    expect(row.text).toBe('original');
+    expect(row.dateEdited).toBeNull();
+  });
+
+  it('refuses to clobber the server’s echo when it landed first', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    await applyLocalEdit(db, 'm1', 'new wording', 5_000);
+
+    // The echo arrives over the socket while the POST is still hanging: the server's own
+    // date_edited replaces ours.
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm1',
+          text: 'new wording',
+          isFromMe: true,
+          dateCreated: 100,
+          dateEdited: 5_123,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+
+    // The POST then fails (read timeout). The revert must be a no-op — the newer value is true.
+    expect(await revertLocalEdit(db, 'm1', 'original', null, 5_000)).toBe(false);
+    const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
+    expect(row.text).toBe('new wording');
+    expect(row.dateEdited).toBe(5_123);
+  });
+
+  it('clears our own optimistic retraction, but never the server’s', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    const retracted = async (): Promise<number | null> =>
+      (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')?.dateRetracted ??
+      null;
+
+    // Our optimistic unsend, then a failed POST → cleared.
+    await applyLocalUnsend(db, 'm1', 7_000);
+    expect(await revertLocalUnsend(db, 'm1', 7_000)).toBe(true);
+    expect(await retracted()).toBeNull();
+
+    // Now the server DID retract it (its echo carries the server's timestamp) and only the
+    // response was lost. The revert must leave the revoked message hidden.
+    await applyLocalUnsend(db, 'm1', 8_000);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm1',
+          text: 'original',
+          isFromMe: true,
+          dateCreated: 100,
+          dateRetracted: 8_042,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+    expect(await revertLocalUnsend(db, 'm1', 8_000)).toBe(false);
+    expect(await retracted()).toBe(8_042);
+  });
+
+  it('is a safe no-op for an unknown guid', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    expect(await revertLocalUnsend(db, 'nope', 1)).toBe(false);
+    expect(await revertLocalEdit(db, 'nope', 'x', null, 1)).toBe(false);
   });
 });

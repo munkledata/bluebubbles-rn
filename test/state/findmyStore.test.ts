@@ -143,6 +143,50 @@ describe('prod refresh()', () => {
     expect(s.items).toEqual([]);
   });
 
+  it('coalesces overlapping refreshes: a second call while one is in flight is a no-op', async () => {
+    // The screen polls refresh() on a bare 60s interval and pull-to-refresh calls it directly —
+    // neither goes through the header button's `disabled={refreshing}`, and an iCloud re-poll can
+    // outlive 60s. Without the store-level guard both runs write, last-settler-wins.
+    let releaseDevices!: (v: unknown[]) => void;
+    api.refreshDevices.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseDevices = resolve as (v: unknown[]) => void;
+      }),
+    );
+    api.refreshFriends.mockResolvedValue([]);
+    api.refreshItems.mockResolvedValue([]);
+
+    const first = useFindMyStore.getState().refresh();
+    expect(useFindMyStore.getState().refreshing).toBe(true);
+
+    await useFindMyStore.getState().refresh();
+    expect(api.refreshDevices).toHaveBeenCalledTimes(1);
+    expect(api.refreshFriends).toHaveBeenCalledTimes(1);
+
+    releaseDevices([{ name: 'Watch', coordinates: [10, 20] }]);
+    await first;
+    expect(useFindMyStore.getState().refreshing).toBe(false);
+    expect(useFindMyStore.getState().devices[0]).toMatchObject({ name: 'Watch' });
+
+    // …and the guard releases: the next poll after the in-flight one settles DOES hit the server.
+    api.refreshDevices.mockResolvedValue([]);
+    await useFindMyStore.getState().refresh();
+    expect(api.refreshDevices).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves load() ungated (it is a one-shot mount effect, not a poll)', async () => {
+    api.getDevices.mockResolvedValue([]);
+    api.getFriends.mockResolvedValue([]);
+    api.getItems.mockResolvedValue([]);
+    api.refreshDevices.mockReturnValue(new Promise(() => {}));
+    api.refreshFriends.mockReturnValue(new Promise(() => {}));
+    api.refreshItems.mockReturnValue(new Promise(() => {}));
+
+    void useFindMyStore.getState().refresh(); // parks with refreshing=true forever
+    await useFindMyStore.getState().load();
+    expect(api.getDevices).toHaveBeenCalledTimes(1);
+  });
+
   it('sets an error and clears refreshing when a refresh rejects', async () => {
     api.refreshDevices.mockRejectedValue(new Error('boom'));
     api.refreshFriends.mockResolvedValue([]);

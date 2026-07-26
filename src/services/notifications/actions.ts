@@ -2,6 +2,7 @@ import notifee, { type EventDetail } from 'react-native-notify-kit';
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
 import { isFaceTimeLink } from '@core/facetime';
+import { logger } from '@core/secure';
 import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { http } from '../clients';
@@ -34,30 +35,56 @@ export async function handleNotificationAction(detail: EventDetail): Promise<voi
   const chatGuid = detail.notification?.data?.chatGuid as string | undefined;
   if (!chatGuid) return;
 
-  switch (detail.pressAction?.id) {
-    case ACTION_REPLY: {
-      const text = detail.input?.trim();
-      if (text) await replyTo(chatGuid, text);
-      await notifee.cancelNotification(chatGuid);
-      break;
+  const actionId = detail.pressAction?.id;
+  // Only inline action buttons act. A body/main press (open-chat, reminder) is EventType.PRESS,
+  // not ACTION_PRESS — handled by handleNotificationPress (side-effects) + openFromNotification
+  // (deep-link + scroll-to-message) — and an unknown id must leave the tray untouched.
+  const handled =
+    actionId === ACTION_REPLY || actionId === ACTION_MARK_READ || actionId === ACTION_LOVE;
+  if (!handled) return;
+
+  // The work is wrapped so the tray is cleared even when it throws. Tapping a button and having the
+  // notification just sit there is the user-visible symptom of any failure in here (they tap it
+  // again, and again), and headlessly there is no other feedback at all — notifee's background
+  // handler has no error path, so an escaping rejection is swallowed by the native bridge with
+  // nothing logged.
+  //
+  // REPLY IS THE ONE EXCEPTION, and it is not symmetric with the others: Mark-as-read and Love are
+  // idempotent and re-derivable, while a reply carries text the user AUTHORED that exists nowhere
+  // else — Android's RemoteInput does not re-populate the field, so once the notification is gone
+  // the words are gone. Clearing it only makes sense once delivery is durably owned by the outgoing
+  // queue; before that (a failed first DB open on a headless wake, an unknown chat guid) nothing
+  // was enqueued and NOTHING will retry, so the notification has to stay as the retype affordance.
+  let clearTray = true;
+  try {
+    switch (actionId) {
+      case ACTION_REPLY: {
+        const text = detail.input?.trim();
+        if (!text) break; // nothing typed → nothing to lose, clear as usual
+        clearTray = false; // …until the send is committed to the queue
+        await replyTo(chatGuid, text, () => {
+          clearTray = true;
+        });
+        break;
+      }
+      case ACTION_MARK_READ:
+        await markRead(chatGuid);
+        break;
+      case ACTION_LOVE: {
+        // "♥ Love" the message the notification is about. Needs the messageGuid the
+        // intent carried; without it there's nothing to react to.
+        const messageGuid = detail.notification?.data?.messageGuid as string | undefined;
+        if (messageGuid) await loveMessage(chatGuid, messageGuid);
+        break;
+      }
     }
-    case ACTION_MARK_READ:
-      await markRead(chatGuid);
-      await notifee.cancelNotification(chatGuid);
-      break;
-    case ACTION_LOVE: {
-      // "♥ Love" the message the notification is about. Needs the messageGuid the
-      // intent carried; without it there's nothing to react to.
-      const messageGuid = detail.notification?.data?.messageGuid as string | undefined;
-      if (messageGuid) await loveMessage(chatGuid, messageGuid);
-      await notifee.cancelNotification(chatGuid);
-      break;
-    }
-    default:
-      // Only inline action buttons reach here. A body/main press (open-chat, reminder) is
-      // EventType.PRESS, not ACTION_PRESS — handled by handleNotificationPress (side-effects)
-      // + openFromNotification (deep-link + scroll-to-message).
-      break;
+  } catch (e) {
+    logger.warn('[notif] action failed', { action: actionId, error: String(e) });
+  } finally {
+    // Note the flag is set from INSIDE the send (the queue handover), not after it returns: a
+    // throw AFTER the enqueue still clears, because the reply is already on its way and leaving
+    // the notification up would invite the user to send it twice.
+    if (clearTray) await notifee.cancelNotification(chatGuid);
   }
 }
 
@@ -113,15 +140,22 @@ async function handleFaceTimeAction(actionId: string | undefined, uuid: string):
   }
 }
 
-async function replyTo(chatGuid: string, text: string): Promise<void> {
+/**
+ * Send an inline notification reply. `onQueued` fires the instant the send is durable — the
+ * optimistic row + outgoing-queue row are committed, so the queue owns delivery and a POST failure
+ * is retried rather than lost. The caller uses it to decide whether the notification (the only copy
+ * of the typed text) may be cleared.
+ */
+async function replyTo(chatGuid: string, text: string, onQueued: () => void): Promise<void> {
   // DEV: simulate the round-trip locally so the reply shows Delivered without a server.
   if (isDevServer()) {
     const { devSendFake } = await import('@features/conversations/devSeed');
     await devSendFake(chatGuid, text);
+    onQueued(); // the fake write IS the durable point in dev
     return;
   }
   // ensureDatabase: a killed-app inline-reply runs headless with no prior DB open.
-  await sendTextMessage(await ensureDatabase(), http, { chatGuid, text });
+  await sendTextMessage(await ensureDatabase(), http, { chatGuid, text }, Date.now(), onQueued);
 }
 
 /** Send a 'love' tapback for the notification's message (mirrors the in-app react path). */

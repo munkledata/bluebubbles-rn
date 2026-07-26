@@ -112,6 +112,87 @@ describe('restoreBackup round-trip', () => {
     expect(chat.custom_name).toBe('Squad');
   });
 
+  it('restoring the SAME backup twice does not duplicate themes (upsert, not insert)', async () => {
+    const src = await createTestDb();
+    src.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
+      .run('Mine', 'dark', '{"a":1}');
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+
+    const dst = await createTestDb();
+    await restoreBackup(dst.db, backup);
+    await restoreBackup(dst.db, backup); // a second recovery attempt — an utterly normal action
+    const rows = dst.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").all() as {
+      tokens: string;
+    }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tokens).toBe('{"a":1}');
+  });
+
+  it('a restore REFRESHES an existing theme of the same name+mode instead of adding a twin', async () => {
+    const t = await createTestDb();
+    t.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
+      .run('Mine', 'dark', '{"old":1}');
+    const id = (t.raw.prepare("SELECT id FROM themes WHERE name='Mine'").get() as { id: number })
+      .id;
+
+    await restoreBackup(t.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [{ name: 'Mine', mode: 'dark', tokens: '{"new":2}', isPreset: 0 }],
+      chatCustomizations: [],
+    });
+
+    const rows = t.raw.prepare("SELECT id, tokens FROM themes WHERE name='Mine'").all() as {
+      id: number;
+      tokens: string;
+    }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tokens).toBe('{"new":2}');
+    // Same row id: the theme is updated in place, never deleted-and-recreated, so a kv pointer at
+    // the active custom theme (and the reactive theme list) never sees it missing.
+    expect(rows[0]?.id).toBe(id);
+  });
+
+  it('same name in a different mode is a DIFFERENT theme (the key is name + mode)', async () => {
+    const t = await createTestDb();
+    await restoreBackup(t.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [
+        { name: 'Mine', mode: 'dark', tokens: '{"d":1}', isPreset: 0 },
+        { name: 'Mine', mode: 'light', tokens: '{"l":1}', isPreset: 0 },
+      ],
+      chatCustomizations: [],
+    });
+    const rows = t.raw.prepare("SELECT mode FROM themes WHERE name='Mine' ORDER BY mode").all();
+    expect(rows).toEqual([{ mode: 'dark' }, { mode: 'light' }]);
+  });
+
+  it('never touches a built-in preset row that happens to share a name', async () => {
+    const t = await createTestDb();
+    t.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,1)')
+      .run('Mine', 'dark', '{"preset":1}');
+    await restoreBackup(t.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [{ name: 'Mine', mode: 'dark', tokens: '{"user":1}', isPreset: 0 }],
+      chatCustomizations: [],
+    });
+    const rows = t.raw
+      .prepare("SELECT tokens, is_preset FROM themes WHERE name='Mine' ORDER BY is_preset")
+      .all() as { tokens: string; is_preset: number }[];
+    expect(rows).toEqual([
+      { tokens: '{"user":1}', is_preset: 0 },
+      { tokens: '{"preset":1}', is_preset: 1 },
+    ]);
+  });
+
   it('does not apply customizations to chats that do not exist locally', async () => {
     const t = await createTestDb();
     const res = await restoreBackup(t.db, {
@@ -193,8 +274,7 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
       dst.raw.prepare("SELECT value FROM kv WHERE key='server.password'").get(),
     ).toBeUndefined();
     const ok = dst.raw.prepare("SELECT value FROM kv WHERE key='theme.preset'").get() as
-      | { value: string }
-      | undefined;
+      { value: string } | undefined;
     expect(ok?.value).toBe('nord');
   });
 });
