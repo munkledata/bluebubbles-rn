@@ -74,11 +74,19 @@ const mockShare = Sharing.shareAsync as jest.Mock;
 const mockAvailable = Sharing.isAvailableAsync as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 
+/** A composer draft: the key embeds the counterparty's number, the value is unsent text. */
+const DRAFT_KEY = 'draft.iMessage;-;+15555550123';
+const DRAFT_TEXT = 'half-typed and never sent';
+
 async function seedDb() {
   const t = await createTestDb();
   mockGetDatabase.mockReturnValue(t.db);
   await kvSet(t.db, 'theme.preset', 'nord');
   await kvSet(t.db, 'server.password', 'hunter2'); // must NEVER leave the device
+  // Neither of these is a setting, and neither may leave the device either: message content +
+  // the handle it was addressed to, and this install's deleted-message catch-up watermark.
+  await kvSet(t.db, DRAFT_KEY, DRAFT_TEXT);
+  await kvSet(t.db, 'sync.deletionsSyncedAt', '1900000000000');
   return t.db;
 }
 
@@ -111,6 +119,10 @@ describe('exportBackup', () => {
     expect(f.content).toContain('nord');
     expect(f.content).not.toContain('hunter2');
     expect(f.content).not.toContain('server.password');
+    // …nor unsent message text, the address it was aimed at, or device-local sync state.
+    expect(f.content).not.toContain(DRAFT_TEXT);
+    expect(f.content).not.toContain('+15555550123');
+    expect(f.content).not.toContain('sync.deletionsSyncedAt');
   });
 
   it('deletes the cache file even when the share sheet throws (the security pin)', async () => {
@@ -165,6 +177,10 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
     // The secret never round-trips — it was filtered out at build time.
     expect(await kvGet(fresh.db, 'server.password')).toBeNull();
+    // Nor does the draft, nor the source device's deletion watermark: restoring a newer
+    // watermark would make this install skip the deletions it has not caught up on.
+    expect(await kvGet(fresh.db, DRAFT_KEY)).toBeNull();
+    expect(await kvGet(fresh.db, 'sync.deletionsSyncedAt')).toBeNull();
   });
 
   it('rejects a wrong passphrase (tamper/auth failure surfaces, nothing restored)', async () => {

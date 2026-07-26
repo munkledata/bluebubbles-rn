@@ -382,7 +382,16 @@ export async function clearSupersededTombstones(db: AppDatabase, chatIds: number
  * every unrelated autocommit issued in that window (a read marker, a download's local path) into an
  * atomicity it has nothing to do with. Chunking is safe here precisely because the tombstone has
  * ALREADY committed: a partially-purged chat is invisible either way (every surviving row is
- * `<= deleted_at` by the floor below, so `chatVisible` stays false), and re-running finishes the job.
+ * `<= deleted_at` by the floor below, so `chatVisible` stays false).
+ *
+ * THE FLIP SIDE OF CHUNKING IS THAT THE LOOP CAN BE INTERRUPTED — Android reclaims the process while
+ * the tile has already vanished from the inbox — and the chunks already committed do not tell anyone
+ * where it stopped. Nothing re-enters this function on its own, so the leftovers (rows, their
+ * cascaded `attachments` rows and their FTS entries) would sit there forever, invisible but real,
+ * and reappear the day the chat revives. `resumeChatPurges` is the resume: it finds every chat whose
+ * tombstone still has purgeable rows under it and re-runs exactly this loop with the STORED stamp.
+ * Re-entry is safe by construction — the bound is a stored value, not a fresh clock reading, so a
+ * second pass can only finish what the first started.
  *
  * THE STAMP IS FLOORED AT THE CHAT'S NEWEST MESSAGE DATE, computed inside the statement. `now` is
  * the DEVICE clock; `messages.date_created` is the SERVER's Apple-derived timestamp, and the two
@@ -517,6 +526,116 @@ async function purgeChatMessages(db: AppDatabase, chatId: number, boundary: numb
     );
     if (purged.length < MESSAGE_PURGE_CHUNK) return;
   }
+}
+
+/**
+ * Finish any chat purge that was interrupted — the resume `deleteChatLocal` is written against.
+ *
+ * The purge yields the process-wide write lock between chunks, so a process death (or a chunk that
+ * throws) leaves a tombstoned chat holding part of its history with nobody left to remove it: the
+ * chat is hidden, so the user cannot even see the leftovers to delete them again, and they come back
+ * in full the day the chat revives.
+ *
+ * IT SELECTS ONLY CHATS THAT ACTUALLY HAVE LEFTOVERS, so the normal case (nothing interrupted, but
+ * possibly dozens of long-dead tombstones) costs ONE query and opens no transaction at all. Each
+ * re-run uses the chat's STORED stamp, so it deletes exactly what the original pass would have and
+ * nothing that arrived since — a chat whose tombstone was retired by a real message
+ * (`clearSupersededTombstones`, which every ingestion path runs) is not selected here at all, so a
+ * revived conversation's history is never touched. A still-stamped chat is by definition one the
+ * user deleted and that has had no ingested activity since, and everything at or before the stamp is
+ * what they asked to destroy.
+ *
+ * Driven from `deleteChat` — the one place a purge is ever started — so an interrupted purge is
+ * finished by the next delete, including its own if `deleteChatLocal`'s loop is what threw. Cheap
+ * and idempotent enough to run from a launch path as well.
+ */
+export async function resumeChatPurges(db: AppDatabase): Promise<void> {
+  const pending: Array<{ id: number; deletedAt: number }> = await db.all(sql`
+    SELECT c.id, c.deleted_at AS deletedAt
+      FROM chats c
+     WHERE c.deleted_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM messages m
+                    WHERE m.chat_id = c.id
+                      AND (m.date_created IS NULL OR m.date_created <= c.deleted_at))
+  `);
+  for (const c of pending) await purgeChatMessages(db, c.id, c.deletedAt);
+}
+
+/**
+ * Is this chat sitting under a local deletion tombstone, i.e. hidden from every list?
+ *
+ * The same predicate the lists read with, NOT a bare `deleted_at IS NOT NULL`: a chat that has been
+ * brought back by genuinely new activity is visible from that instant, and only becomes durably
+ * un-deleted when the next ingestion retires its stamp (`clearSupersededTombstones`). An optimistic
+ * SEND into a deleted thread is exactly that gap — it writes the message row directly and clears no
+ * stamp — so the coarser check would report a conversation the user is actively using as deleted.
+ *
+ * Its caller is the chat screen's on-open history backfill, which must not re-page a purged
+ * conversation back into the DB (and back into the FTS index) behind the user's back: the chat is in
+ * no list, so they can neither see the restored history nor delete it again. Unknown guid → false,
+ * so a chat that has not been stored yet still backfills normally.
+ */
+export async function isChatHiddenByDeletion(db: AppDatabase, guid: string): Promise<boolean> {
+  const rows: Array<{ hidden: number }> = await db.all(sql`
+    SELECT 1 AS hidden FROM chats c WHERE c.guid = ${guid} AND NOT ${chatVisible('c')} LIMIT 1
+  `);
+  return rows.length > 0;
+}
+
+/**
+ * The guids of this chat's DOWNLOADED attachments — the ones with a file on disk.
+ *
+ * `attachments.local_path` is the ONLY record that a download ever happened, and it cascades away
+ * with the messages, so this has to be read BEFORE the delete or the files become unreachable by any
+ * code path (the same argument `forget()`'s `deleteCachedMedia` is built on). `guid` is what names
+ * the on-disk directory, so that is what the caller needs; rows with no `local_path` were never
+ * fetched and own nothing to delete.
+ */
+export async function listChatAttachmentGuids(
+  db: AppDatabase,
+  chatGuid: string,
+): Promise<string[]> {
+  const rows: Array<{ guid: string }> = await db.all(sql`
+    SELECT DISTINCT a.guid AS guid
+      FROM attachments a
+      JOIN messages m ON m.id = a.message_id
+      JOIN chats c ON c.id = m.chat_id
+     WHERE c.guid = ${chatGuid} AND a.local_path IS NOT NULL
+  `);
+  return rows.map((r) => r.guid);
+}
+
+/** How many guids one `listOrphanedAttachmentGuids` probe binds (SQLite caps bound parameters). */
+const ATTACHMENT_GUID_PROBE_CHUNK = 400;
+
+/**
+ * Of `guids`, the ones whose `attachments` row is GONE — i.e. nothing in the database points at
+ * their file any more.
+ *
+ * The delete path reads the candidates before the purge and deletes files after it, and those are
+ * not the same instant: the purge is bounded at the tombstone stamp and can be interrupted, so a row
+ * can legitimately survive. Deleting its file anyway would leave a message rendering a permanently
+ * broken image. Re-checking is what makes "the purge orphaned it" the actual condition instead of an
+ * assumption. `guid` is UNIQUE in `attachments`, so a surviving row means exactly that.
+ */
+export async function listOrphanedAttachmentGuids(
+  db: AppDatabase,
+  guids: string[],
+): Promise<string[]> {
+  if (guids.length === 0) return [];
+  const surviving = new Set<string>();
+  for (let i = 0; i < guids.length; i += ATTACHMENT_GUID_PROBE_CHUNK) {
+    const chunk = guids.slice(i, i + ATTACHMENT_GUID_PROBE_CHUNK);
+    const inList = sql.join(
+      chunk.map((g) => sql`${g}`),
+      sql`, `,
+    );
+    const rows: Array<{ guid: string }> = await db.all(
+      sql`SELECT guid FROM attachments WHERE guid IN (${inList})`,
+    );
+    for (const r of rows) surviving.add(r.guid);
+  }
+  return guids.filter((g) => !surviving.has(g));
 }
 
 /**
@@ -754,6 +873,12 @@ export async function listChatsForInbox(
            -- A chat the user deleted and that later came back counts only what arrived AFTER the
            -- deletion. Its marker points at a message that went with the delete, so it resolves to
            -- 0 and the whole re-synced history would otherwise land as one enormous unread badge.
+           -- STILL LOAD-BEARING even though clearSupersededTombstones now hands the floor to the
+           -- read marker: that handover only runs from message/chat INGESTION, and the optimistic
+           -- send path (insertOutgoingText/Attachment) routes through neither. Sending into a
+           -- hidden thread therefore makes it visible with its stamp still set — the one state
+           -- where this clause is the only thing between the user and a badge carrying their whole
+           -- re-synced history.
            AND (c.deleted_at IS NULL OR um.date_created > c.deleted_at)
       ) AS unreadCount,
       EXISTS(SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id

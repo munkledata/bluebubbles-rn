@@ -188,6 +188,26 @@ async function runForget(): Promise<void> {
   // wedged we still owe the user the wipe, and by now it can't fetch anything new anyway.
   await withDeadline(awaitSyncIdle(), SYNC_DRAIN_DEADLINE_MS);
 
+  // Pull the previous account's notifications out of the tray. A DISPLAYED notification is system
+  // state that outlives every row this function is about to delete, and message notifications carry
+  // the sender's name, avatar and message body — so without this the wipe destroys the local copy
+  // while whoever picks the device up next still reads the content on the lock screen, and the
+  // Disconnect dialog has just promised the opposite. Tapping one after reconnecting is worse than
+  // useless too: a 1:1 guid is `service;-;address`, byte-identical across servers, so it opens the
+  // NEW account's thread with that person (or an empty screen for a chat that does not exist here).
+  //
+  // cancelAllNotifications rather than a per-chat loop: everything this app has posted belongs to
+  // the account being left, and enumerating them would need the DB — which is exactly what may be
+  // unavailable. Ahead of the DB block for the same reason, with its own lazy import (notify-kit's
+  // native bridge is deliberately kept out of this module's load graph) and its own try/catch, so
+  // an unreachable notification bridge cannot cost us the wipe below.
+  try {
+    const notifee = (await import('react-native-notify-kit')).default;
+    await notifee.cancelAllNotifications();
+  } catch (e) {
+    logger.warn('[forget] could not clear displayed notifications', e);
+  }
+
   // Wipe everything the DB cached FROM this server. Clearing the credentials alone leaves the
   // whole local store intact, so connecting to a DIFFERENT server next shows the previous
   // account's threads interleaved with the new ones — on a shared device, someone else's

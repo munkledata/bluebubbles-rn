@@ -51,6 +51,37 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   UN-adapted handle.
 - **Migrations are transactional** (`src/db/migrate.ts`) so a partial failure rolls back
   instead of leaving "table already exists" on retry.
+- **`withDbTransaction` (`src/db/transaction.ts`) is a process-wide MUTEX over ONE shared
+  connection — and a nested call wedges the app permanently.** It exists because op-sqlite gives us
+  a single connection, so only one BEGIN may be open at a time (a second one throws "cannot start a
+  transaction within a transaction" and kills that handler outright — a dropped live message), and
+  socket/FCM events are dispatched fire-and-forget, so two really do land on BEGIN at once. Callers
+  therefore queue. Consequences, all of them load-bearing:
+  - **Never call it from inside it, directly or transitively.** The inner call waits on a lock its
+    own caller holds, and because the queue is process-wide that stalls EVERY later DB write for the
+    life of the process — no send, no sync slice, no incoming message, nothing thrown, no crash. It
+    cannot be detected from inside (Hermes has no async-context propagation, and a module-level "in a
+    transaction" flag would be true for a legitimate concurrent caller too), so the only clue is the
+    watchdog's `[db] no write-lock holder released…` line.
+  - **THE TRAP: many repository helpers now transact INTERNALLY**, and read at the call site like
+    ordinary single writes — `insertOutgoingText`/`Contact`/`Reaction`/`Attachment`,
+    `discardOutgoingMessage`, `claimFailedOutgoingForRetry`, `reconcileOutgoingSuccess`,
+    `markOutgoingSentNoGuid`, `deleteMessageLocal`, `deleteChatLocal` (+ its `purgeChatMessages`),
+    `clearLocalCache`. Composing two of them, or calling one from inside another's callback, is all
+    it takes. Check before you compose. (`reconcileOutgoingSuccess` calls `markOutgoingSentNoGuid`
+    BEFORE opening its own transaction, deliberately — don't "tidy" it inside.)
+  - **A write issued OUTSIDE a transaction while one is open silently JOINS it** and is erased by
+    that transaction's rollback, while the caller still holds the ids it read back. So every write an
+    event depends on belongs inside the ONE callback (see `DbEventSink.onEvent`, which pulls its
+    handle/chat upserts and chat-id lookup in with the message write). The converse bystander hazard
+    is why the scope must stay small.
+  - **Keep every callback short, DB-only and BOUNDED** — a couple of statements, no network or
+    native calls, and nothing whose row count is unbounded (`deleteChatLocal` tombstones inside the
+    transaction and purges its messages OUTSIDE it, in chunks, for exactly this reason).
+  - The queue slot is claimed **synchronously**, so N unawaited calls to a transacting helper claim
+    all N slots in call order — a loop must `await` each one (see `useMessageActions` onBulkDelete).
+    `withDbWriteLock` (SQLCipher's `PRAGMA rekey`, via `rotateDbKey`) shares the same queue and the
+    same rules.
 - **Drizzle + op-sqlite v17 reactive lists:** use raw `db.all(sql\`…\`)` for read queries
   (works on both drivers); reactive hooks (`useReactiveQuery`) subscribe to table names and
   re-run the query — the write→flush is automatic via the adapter.
@@ -63,6 +94,50 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   better-sqlite3 (Node tests). Use `db.run` for a non-returning raw write, `db.all(sql\`… RETURNING\`)`
   when you need rows back, or a builder (`db.delete(t).where(…)`, `db.update(t).set({…})`,
   `db.insert(t).values({…}).returning({…})`).
+- **A local deletion is a TOMBSTONE, never a row removal — and un-hiding is a WRITE, not a derived
+  read.** The deletion never leaves the device, so the server keeps returning the row: a hard delete is
+  undone by the next sync (`ensureChatSynced` re-pages up to 500 messages on EVERY chat open). Hence
+  `messages.date_deleted` and `chats.deleted_at`, both deliberately absent from the upsert conflict
+  sets so they survive re-paging while every render/count/search query filters them out. Rules that go
+  with them:
+  - **What un-hides a chat is `chatVisible`**: a surviving message that is not deleted, not a reaction
+    and not retracted, with `date_created > deleted_at`. That predicate MUST stay identical in the read
+    (`chatVisible`) and in the write that retires the stamp (`clearSupersededTombstones`), and must
+    match the preview/unread filters — with a looser one, a heart tapped on an old message resurrected
+    a whole deleted thread showing its ORIGINAL pre-deletion preview and a 0 badge.
+  - **The un-hide is RECORDED, not just derived.** Derived visibility is revocable: a chat the user
+    deleted, got a message in, and has used for days would VANISH again the moment that one message
+    stops qualifying (someone unsends it, or the user deletes it). `clearSupersededTombstones` makes it
+    a one-way transition, like `date_deleted` on a message.
+  - **`deleted_at` does TWO jobs — it hides the chat AND floors the unread count**
+    (`listChatsForInbox` counts only `um.date_created > c.deleted_at`). So whoever drops the stamp must
+    HAND THE FLOOR TO THE READ MARKER in the same statement (`last_read_message_guid` ← newest received
+    message at/before the boundary, strictly-newer guard so it only moves forward), and `deleteChatLocal`
+    must pin that marker at delete time — after its purge there is no candidate row left to pin. The
+    floor itself stays load-bearing even with the handover in place: `insertOutgoing*` never routes
+    through `clearSupersededTombstones`, so a user replying into a still-tombstoned chat un-hides it via
+    `chatVisible` with the stamp still set, and the floor is the only thing holding the badge at 0.
+  - The stamp is floored at the chat's newest stored `date_created` (server-derived, vs `now` from the
+    device clock) — unfloored, a Mac even seconds ahead made the next sync's re-inserted last message
+    satisfy `date_created > deleted_at` and the conversation came back on every sync, forever.
+  - Tombstones survive promotion: the echo reconcilers rewrite guid/send_state/error and nothing else,
+    so `date_deleted` rides from a cancelled `temp-` row onto its real identity.
+- **ADD-THEN-PRUNE is the standing rule for any "replace a set of rows" write** (`upsertChats`'
+  participant links, `upsertContacts`). Never truncate-then-refill: each statement commits on its own
+  and flushes the reactive queries, and several readers are UN-debounced, so the empty intermediate
+  state is genuinely rendered AND acted on — a chat momentarily holding zero participant rows titles
+  itself with the raw phone number and answers "unknown" to the unknown-sender gate, which DROPS the
+  notification for good (a one-shot decision with no retry), and an emptied `contacts` table did the
+  same to every notification name and blanked the recipient picker for seconds. Resolve the new set
+  first (pure JS), insert it, then delete only what is genuinely gone: the worst observable state is a
+  superset — a duplicate, or one since-removed member — which readers already tolerate. With no unique
+  index to upsert on (`contacts.source_id`), note `MAX(id)` BEFORE inserting the new generation and
+  delete `<= cutoff` after (ids are AUTOINCREMENT, so the cutoff can never match a row you just wrote).
+  Decide explicitly what an EMPTY input means: for `upsertChats` participants it is "no information"
+  and is SKIPPED (a degraded server read emits `participants: []` for a whole 200-chat page, which
+  would blank the inbox); for `upsertContacts` it is the device honestly reporting an empty address
+  book, so it clears — and readers that must not act on emptiness guard it themselves
+  (`matchContactsToHandles`).
 
 ## UI gotchas
 - **Android edge-to-edge keyboard:** Expo SDK 57 / RN 0.86 enable edge-to-edge by default, so
@@ -408,8 +483,13 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   ({expo uploader, fileExists} — `outgoingQueueIO` in prod; fakes in Node tests) and re-streams the file at
   the attachment row's `localPath` under the SAME tempGuid (server idempotency absorbs ack-lost dups);
   file-gone/unknown-kind rows are RETIRED via `retireOutgoing` (attempts→cap), never claimed-and-skipped
-  forever. THE SWALLOW GUARD: `resend()` flips an 'error' row to 'sending' first (`markOutgoingSending`) —
-  without it the RCS tempGuid-echo/AppleScript ack path hits `markOutgoingSentNoGuid`'s sticky-error guard,
+  forever. THE SWALLOW GUARD — OWNED BY THE CLAIMER, NOT THE SENDER: `resendOutgoingRow` never flips the
+  row; it must ALREADY be 'sending'. `runOutgoingQueue` does `claimOutgoing` + `markOutgoingSending` in ONE
+  `withDbTransaction` (the lease and the visible state must flip together, or a "Try Again" tap landing
+  between them re-sends under a NEW temp guid alongside the drain's attempt — two idempotency keys, one
+  message delivered twice), and `claimFailedOutgoingForRetry` does the same compare-and-set inline for the
+  manual button. ANY NEW CALLER OF `resendOutgoingRow` MUST CLAIM FIRST —
+  without that the RCS tempGuid-echo/AppleScript ack path hits `markOutgoingSentNoGuid`'s sticky-error guard,
   the retry's SUCCESS is swallowed, and the queue re-sends the same message every drain (duplicates). The
   content-reconcilers (`reconcileEchoByContent` + `reconcileOutgoingAttachmentByContent`) also match 'error'
   rows so a client-side-failed-but-actually-delivered send is promoted by its echo instead of duplicated;

@@ -12,6 +12,7 @@
  * contacts sync) — only the slot bookkeeping is under test.
  */
 const incrementalSync = jest.fn();
+const fullSync = jest.fn();
 const syncAllChats = jest.fn();
 const getSyncMarker = jest.fn();
 const syncContacts = jest.fn();
@@ -20,7 +21,7 @@ jest.mock('@/services/clients', () => ({ http: {} }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
 jest.mock('@/services/contacts/contactsService', () => ({ syncContacts }));
 jest.mock('@/services/sync', () => ({
-  fullSync: jest.fn(async () => ({ chats: 0, messages: 0 })),
+  fullSync,
   httpSyncApi: () => ({ serverVersion: async () => '1.9.0' }),
   incrementalSync,
   syncAllChats,
@@ -31,11 +32,19 @@ jest.mock('@/services/sync', () => ({
 jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
 jest.mock('@db/repositories', () => ({ getSyncMarker }));
 
+import type { ServerInfo } from '@core/models';
 import { useSessionStore } from '@state/sessionStore';
 import { awaitSyncIdle, runTrackedSync, startSync } from '@/services/syncControl';
 
 /** Let every pending microtask AND timer callback run. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+const SERVER_INFO: ServerInfo = { server_version: '1.9.0' };
+
+/** Drive the session through the SAME transitions the app does — that is what mints an epoch. */
+const connectSession = (origin: string): void =>
+  useSessionStore.getState().connected(origin, 'hunter2', SERVER_INFO);
+const disconnectSession = (): void => useSessionStore.getState().reset();
 
 /** A promise plus the trigger that resolves it — a run we can hold open for as long as we like. */
 function gate(): { promise: Promise<void>; open: () => void } {
@@ -51,9 +60,11 @@ beforeEach(() => {
   getSyncMarker.mockResolvedValue({ lastSyncedRowId: 10, lastSyncedTimestamp: 1000 });
   syncAllChats.mockResolvedValue([]);
   incrementalSync.mockResolvedValue({ chats: 0, messages: 0 });
+  fullSync.mockResolvedValue({ chats: 0, messages: 0 });
   syncContacts.mockResolvedValue({ contacts: 0, matched: 0 });
-  // The slot is keyed by the session it belongs to, so every test starts from a known one.
-  useSessionStore.setState({ origin: null });
+  // The slot is keyed by the session INSTANCE it belongs to, so start each test from a fresh one
+  // (`reset` mints a new epoch, so nothing a previous test parked in the slot is shareable here).
+  disconnectSession();
 });
 
 describe('runTrackedSync — the background task participates in the coalescing slot', () => {
@@ -201,13 +212,14 @@ describe('startSync vs. the tracked slot', () => {
       return { chats: 0, messages: 0 };
     });
 
-    useSessionStore.setState({ origin: 'https://old.example' });
+    connectSession('https://old.example');
     const forServerA = startSync();
     await settle();
     expect(syncAllChats).toHaveBeenCalledTimes(1); // A's run is genuinely under way
 
     // Disconnect + connect to a different server while A's run is still unwinding.
-    useSessionStore.setState({ origin: 'https://new.example' });
+    disconnectSession();
+    connectSession('https://new.example');
     const forServerB = startSync();
     expect(forServerB).not.toBe(forServerA);
 
@@ -220,6 +232,60 @@ describe('startSync vs. the tracked slot', () => {
     await forServerB;
     // The new server got its OWN full pipeline run, which is what used to be skipped entirely.
     expect(syncAllChats).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * …and "one session" means one session INSTANCE, not one URL.
+   *
+   * Reconnecting to the SAME server is the ordinary reason people tap Disconnect — a changed
+   * password, a rotated tunnel URL, an accidental tap — and `sanitizeServerAddress` is
+   * deterministic, so the restored origin string is byte-identical. Keying on the origin therefore
+   * matched the DEAD run twice over: `connect()` was handed it (so the new session never synced at
+   * all — no first-sync branch, no chat-list refresh, no deletion catch-up, no contacts sync, no
+   * spinner) AND the dead run's own abort check went false again, so its closing phases put the
+   * pre-wipe chat snapshot back into the just-emptied DB and committed a marker over the wipe's
+   * reset — an inbox of unnamed, message-less chats and a permanent history hole.
+   */
+  it('never hands a RE-CREATED session the previous run, even on the very same server', async () => {
+    const SAME = 'https://gator.example';
+    // A post-wipe reconnect finds a reset marker, so this is the FULL-sync branch — the one whose
+    // closing phases write from memory and are gated on the abort check.
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+    const doomedRun = gate();
+    let deadRunShouldAbort: (() => boolean) | undefined;
+    fullSync.mockImplementation(
+      async (_db: unknown, _api: unknown, opts: { shouldAbort?: () => boolean }) => {
+        deadRunShouldAbort ??= opts.shouldAbort;
+        await doomedRun.promise;
+        return { chats: 0, messages: 0 };
+      },
+    );
+
+    connectSession(SAME);
+    const doomed = startSync();
+    await settle();
+    expect(fullSync).toHaveBeenCalledTimes(1); // genuinely paging
+    expect(deadRunShouldAbort?.()).toBe(false); // …under a live session
+
+    disconnectSession(); // Disconnect: the wipe follows, the run keeps unwinding
+    expect(deadRunShouldAbort?.()).toBe(true);
+
+    connectSession(SAME); // …and back to the same server, identical origin string
+    const fresh = startSync();
+    expect(fresh).not.toBe(doomed);
+    // The run belonging to the destroyed session must STAY disowned.
+    expect(deadRunShouldAbort?.()).toBe(true);
+
+    // Chained, not concurrent — both stay visible to the drain and neither pages alongside the other.
+    await settle();
+    expect(fullSync).toHaveBeenCalledTimes(1);
+
+    doomedRun.open();
+    await doomed;
+    await fresh;
+    // The reconnected session got its own full pipeline run.
+    expect(fullSync).toHaveBeenCalledTimes(2);
+    expect(syncContacts).toHaveBeenCalledTimes(2);
   });
 
   it('a foreground run in flight is still shared by other foreground callers', async () => {

@@ -768,7 +768,8 @@ export async function markMessageSendError(
  * the retry is acked again → fails async again → … Nothing durable survives each cycle (the
  * ack resets both the queue row and the message's error field), so the cap lives here: at most
  * MAX_REQUEUE_CYCLES automatic ladders per tempGuid per app session; after that the failure
- * stays on the bubble for a manual retry. Bounded like {@link cancelledTempGuids}.
+ * stays on the bubble for a manual retry. Bounded at {@link REQUEUE_MAP_MAX} entries (oldest key
+ * evicted on insert) so a long session cannot grow it without limit.
  */
 const requeueCycles = new Map<string, number>();
 const MAX_REQUEUE_CYCLES = 2;

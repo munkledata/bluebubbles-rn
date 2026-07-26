@@ -7,8 +7,11 @@ import {
   deleteScheduled,
   getChatIdByGuid,
   getNewestReceivedGuid,
+  listChatAttachmentGuids,
+  listOrphanedAttachmentGuids,
   listReminders,
   listScheduledByChat,
+  resumeChatPurges,
   setChatUnreadLocal,
   setLastReadMessageGuid,
   upsertChats,
@@ -18,6 +21,7 @@ import type { AppDatabase } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
+import { safePathSegment } from './download/pathSafety';
 import { getSocket } from './realtimeControl';
 
 /**
@@ -140,19 +144,94 @@ export async function markUnread(chatGuid: string): Promise<void> {
  * wrapper exists), and reminders are not touched by it at all, so both helpers still find exactly
  * the rows they need. What IS conditional is dropping the rows that track that external state —
  * see the two helpers.
+ *
+ * THE ONE THING THAT MUST BE READ BEFORE THE DELETE is the list of downloaded attachment files:
+ * `attachments.local_path` is the only record that a download ever happened and it cascades away
+ * with the messages, so afterwards the photos and videos of that thread are bytes no code path can
+ * reach and nothing but "Clear app data" could ever reclaim. It is one indexed local SELECT — no
+ * native bridge, no network — so it costs the tile nothing.
  */
 export async function deleteChat(chatGuid: string): Promise<void> {
   const db = await ensureDatabase();
+  // Never let this stop the delete: with no candidates the files are simply left behind, which is
+  // the state the delete had before this existed.
+  const downloaded = await listChatAttachmentGuids(db, chatGuid).catch((e) => {
+    logger.warn('[chats] could not list downloaded attachments for deleted chat', e);
+    return [] as string[];
+  });
   try {
     await deleteChatLocal(db, chatGuid);
   } finally {
     // `finally`, so moving the local delete first cannot cost the external cleanup its run. If the
     // delete fails part-way the chat is already tombstoned, and an uncancelled server-backed
     // scheduled send would fire into that hidden thread and un-hide it; if it failed before the
-    // tombstone, this is exactly what the previous ordering did anyway. Neither helper throws (both
-    // swallow their own failures), so nothing here can mask the original error.
+    // tombstone, this is exactly what the previous ordering did anyway. None of these helpers throws
+    // (each swallows its own failures), so nothing here can mask the original error.
+    //
+    // The tray cancel goes FIRST because it is the only one that is both instant (a local native
+    // call) and user-visible: `cancelServerScheduledForChat` is a sequential per-row HTTP loop that
+    // costs a full request timeout per row against a blackholing tunnel, and a notification for the
+    // conversation the user just deleted must not survive that.
+    await cancelChatNotification(chatGuid);
     await cancelServerScheduledForChat(db, chatGuid);
     await cancelRemindersForChat(db, chatGuid);
+    await deleteDownloadedAttachments(db, downloaded);
+    // Finish any purge that never got to complete — a previous delete killed mid-loop, or this
+    // one's own loop if that is what threw. One query when there is nothing to resume (the norm).
+    await resumeChatPurges(db).catch((e) => logger.warn('[chats] purge resume failed', e));
+  }
+}
+
+/**
+ * Dismiss the deleted chat's notification from the tray.
+ *
+ * A posted notification is SYSTEM state keyed by chat guid that outlives every row this delete
+ * touches — the same shape of problem as a reminder's alarm. Left up, it still shows the sender and
+ * the message preview of a conversation the user just deleted, and tapping it routes straight into
+ * the hidden thread. Own try/catch + lazy import so the native bridge can never cost the delete.
+ */
+async function cancelChatNotification(chatGuid: string): Promise<void> {
+  try {
+    const { cancelForChat } = await import('./notifications/notifeeService');
+    await cancelForChat(chatGuid);
+  } catch (e) {
+    logger.warn('[chats] tray notification cancel failed for deleted chat', e);
+  }
+}
+
+/**
+ * Delete the on-disk files of the attachments the purge just orphaned.
+ *
+ * `expoFetcher` writes each download to `{documents}/attachments/<safePathSegment(guid)>/…` —
+ * app-private PERSISTENT storage the OS never reclaims — and the rows holding those paths are gone,
+ * so without this a photo-heavy thread leaves gigabytes behind that nothing can ever find again.
+ * Same lazy import + per-directory try/catch as `forget()`'s `deleteCachedMedia`, because
+ * expo-file-system is a native module and a filesystem failure must never surface as a failed
+ * delete.
+ *
+ * IT RE-CHECKS THE ROWS FIRST. The candidates were read before the purge, and the purge is bounded
+ * at the tombstone stamp and can be interrupted — a surviving row still renders its image, so its
+ * file has to survive too. Only guids the database no longer knows about are deleted, and only the
+ * download directory named by the guid: `local_path` itself may point at a user-picked file that is
+ * not ours to remove. The directory is addressed with the SAME sanitiser the download used; the raw
+ * guid names nothing on disk.
+ */
+async function deleteDownloadedAttachments(db: AppDatabase, guids: string[]): Promise<void> {
+  if (guids.length === 0) return;
+  try {
+    const orphaned = await listOrphanedAttachmentGuids(db, guids);
+    if (orphaned.length === 0) return;
+    const { Directory, Paths } = await import('expo-file-system');
+    for (const guid of orphaned) {
+      try {
+        const dir = new Directory(Paths.document, 'attachments', safePathSegment(guid));
+        if (dir.exists) dir.delete();
+      } catch (e) {
+        logger.warn('[chats] could not delete a downloaded attachment of the deleted chat', e);
+      }
+    }
+  } catch (e) {
+    logger.warn('[chats] downloaded attachments left on disk for the deleted chat', e);
   }
 }
 

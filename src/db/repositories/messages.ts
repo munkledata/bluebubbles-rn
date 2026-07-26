@@ -702,7 +702,21 @@ export async function getMessageDateByGuid(db: AppDatabase, guid: string): Promi
   return rows[0]?.dateCreated ?? null;
 }
 
-/** Delete a message by guid (used to clear an errored temp row before retry). */
+/**
+ * @deprecated HARD delete of a message + its queue row — dev seeding and tests only. It has no
+ * production caller, and the shortest name must not be the one a new delete affordance reaches for.
+ *
+ * It fails BOTH ways a removal can fail here. It does not stick: nothing tells the server, so
+ * `ensureChatSynced` re-pages up to 500 messages on the next chat open and the row is simply back
+ * (only `date_deleted` survives a re-upsert — see {@link deleteMessageLocal}). And on a `temp-`
+ * guid it destroys a row the retry ladder may hold a lease on, as two separate autocommits: the
+ * in-flight attempt then acks against nothing while the caller re-sends under a fresh temp guid,
+ * so the server sees two idempotency keys and the recipient gets the message twice.
+ *
+ * Every production removal goes through `discardMessage`, which routes to
+ * `discardOutgoingMessage` (compare-and-set on a still-`sending`/`error` temp row, one
+ * transaction, tombstone not deletion) or {@link deleteMessageLocal}.
+ */
 export async function deleteMessageByGuid(db: AppDatabase, guid: string): Promise<void> {
   await db.delete(messages).where(eq(messages.guid, guid));
   await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, guid));

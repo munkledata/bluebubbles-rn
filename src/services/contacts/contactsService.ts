@@ -179,13 +179,15 @@ async function runContactsSync(): Promise<ContactsSyncResult> {
   // imported to keep this module's Node import graph free of the native shortcuts bridge.
   //
   // ONLY WHILE A SESSION EXISTS. This run is fire-and-forget from the tail of every sync, so it
-  // routinely outlives its parent — and `forget()` clears the Direct Share chips at the START of a
-  // wipe that can then spend up to 20 seconds draining and deleting, with `chats` still fully
-  // populated the whole time. Republishing there would put the PREVIOUS account's conversation
-  // names and contact photos back into the system share sheet, where they are persistent state
-  // that outlives the process: nothing later clears them, because a refresh over an emptied inbox
-  // returns early rather than publishing zero. `forget()` clears the credentials before it drains,
-  // so an absent origin is the signal that there is no account left to advertise.
+  // routinely outlives its parent — and `awaitSyncIdle` explicitly does NOT cover it, so it can
+  // still be running after `forget()` has finished. `forget()` clears the chips LAST (bootstrap's
+  // `runForget`, after the wipe) precisely so nothing still unwinding above it can republish; this
+  // run is the one writer that can outlive even that, from `chats` rows that were fully populated
+  // when it started. Republishing there would put the PREVIOUS account's conversation names and
+  // contact photos back into the system share sheet, where they are persistent state that outlives
+  // the process: nothing later clears them, because a refresh over an emptied inbox returns early
+  // rather than publishing zero. `forget()` resets the session before it drains, so an absent
+  // origin is the signal that there is no account left to advertise.
   if (sessionAccessors.getOrigin()) {
     try {
       const { refreshShareShortcuts } = await import('@/services/shortcuts/shareShortcuts');

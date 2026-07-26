@@ -8,14 +8,16 @@ import {
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import type { SecretBox } from '@core/crypto';
-import { BackupSchema, isSecretKey, type Backup } from './backupSchema';
+import { BackupSchema, isBackupKey, type Backup } from './backupSchema';
 
 /**
  * Gather a backup of the user's settings (kv), custom themes, and per-chat
  * customizations. Pure data assembly (no file IO) so it is Node-testable.
- * SECURITY: secret-looking kv keys are filtered out — the export must never
- * contain a server password, auth token, or the DB encryption key (those live
- * in the SecureVault, never here).
+ * SECURITY: kv is exported through the `isBackupKey` ALLOW-list, so only named
+ * settings leave the device — never a credential (those live in the SecureVault),
+ * never a per-chat draft (unsent text, keyed by the counterparty's address), and
+ * never device-local sync bookkeeping. See `backupSchema.ts` for why the list is
+ * inverted rather than a deny-list.
  */
 export async function buildBackup(
   db: AppDatabase,
@@ -30,7 +32,7 @@ export async function buildBackup(
     version: 1,
     exportedAt: opts.exportedAt,
     appVersion: opts.appVersion,
-    kv: kv.filter((p) => !isSecretKey(p.key)),
+    kv: kv.filter((p) => isBackupKey(p.key)),
     themes,
     chatCustomizations,
   };
@@ -45,9 +47,13 @@ export interface RestoreResult {
 /**
  * Apply a validated backup. kv + themes are upserted; chat customizations are
  * applied only to chats that already exist locally. Node-testable.
+ *
+ * The kv allow-list runs again on IMPORT: a backup file is untrusted input (hand-edited, or made
+ * by another install), and re-gating it here is what stops one from planting a composer draft or
+ * pushing this device's deletion watermark past messages it has not caught up on yet.
  */
 export async function restoreBackup(db: AppDatabase, backup: Backup): Promise<RestoreResult> {
-  const kv = backup.kv.filter((p) => !isSecretKey(p.key)); // defence-in-depth on import too
+  const kv = backup.kv.filter((p) => isBackupKey(p.key));
   await restoreKv(db, kv);
   await restoreThemes(
     db,
@@ -79,8 +85,8 @@ export async function sealBackup(
 /**
  * Open + validate an encrypted backup envelope. Throws on a wrong passphrase or tamper
  * (authenticated decryption) and on a malformed/old inner payload (parseBackup → zod).
- * The isSecretKey filter in `restoreBackup` still runs on import, so the no-secrets
- * guarantee survives the encrypt/decrypt round-trip.
+ * The `isBackupKey` allow-list in `restoreBackup` still runs on import, so the
+ * settings-only guarantee survives the encrypt/decrypt round-trip.
  */
 export async function openBackup(
   box: SecretBox,

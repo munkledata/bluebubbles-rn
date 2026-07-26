@@ -13,15 +13,22 @@
  *   - A SERVER-backed scheduled message is fired by the Mac, so dropping the local row cancels
  *     nothing; it just destroys the handle needed to cancel it. Cancel server-side first, and keep
  *     the row when the server refuses.
- *   - Neither of those may ever cost the user the delete itself.
+ *   - A posted TRAY notification is system state keyed by the chat guid: left up it still shows the
+ *     deleted conversation's sender and preview, and tapping it routes back into the hidden thread.
+ *   - Downloaded attachment FILES are only findable through `attachments.local_path`, which cascades
+ *     away with the messages — so they must be collected before the delete and removed after it,
+ *     and only where the row really did go.
+ *   - None of those may ever cost the user the delete itself.
  *   - The DB is opened with the lazy `ensureDatabase()`.
  *
  * The DB is REAL (in-memory better-sqlite3); everything native/network is mocked at the module
  * boundary, mirroring `markUnread.test.ts`.
  */
+import type Database from 'better-sqlite3';
 import { Chat } from '@core/models';
 import {
   createReminder,
+  getChatIdByGuid,
   insertScheduled,
   listChatsForInbox,
   listReminders,
@@ -35,7 +42,10 @@ import { createTestDb } from '../support/testDb';
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
 let mockDb: AppDatabase;
 const mockCancelReminder = jest.fn<Promise<void>, [string]>();
+const mockCancelForChat = jest.fn<Promise<void>, [string]>();
 const mockDeleteScheduled = jest.fn<Promise<unknown>, [unknown, string]>();
+/** Directories the delete removed, in order — `{documents}/attachments/<attachment guid>`. */
+const mockDeletedDirs: string[] = [];
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@/services/clients', () => ({ http: { __http: true } }));
@@ -52,6 +62,22 @@ jest.mock('@core/api', () => ({
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({
   cancelReminderNotification: (id: string) => mockCancelReminder(id),
+  cancelForChat: (guid: string) => mockCancelForChat(guid),
+}));
+// The filesystem half of the delete. `exists` is true so every candidate directory reaches
+// `delete()` and the assertions are about WHICH ones the service decided to remove.
+jest.mock('expo-file-system', () => ({
+  Paths: { document: '/doc' },
+  Directory: class {
+    path: string;
+    exists = true;
+    constructor(...segments: string[]) {
+      this.path = segments.join('/');
+    }
+    delete(): void {
+      mockDeletedDirs.push(this.path);
+    }
+  },
 }));
 
 import { deleteChat } from '@/services/chatActions';
@@ -72,9 +98,36 @@ async function seedReminder(db: AppDatabase, chatGuid: string, id: string): Prom
   });
 }
 
+/**
+ * A downloaded attachment: a message in `chatGuid` plus its `attachments` row carrying the
+ * `local_path` that `expoFetcher` wrote. Raw SQL — the point is the row the purge cascades away.
+ */
+async function seedDownloadedAttachment(
+  db: AppDatabase,
+  raw: Database.Database,
+  chatGuid: string,
+  messageGuid: string,
+  attachmentGuid: string,
+): Promise<void> {
+  const chatId = await getChatIdByGuid(db, chatGuid);
+  raw
+    .prepare(
+      'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,1000)',
+    )
+    .run(messageGuid, chatId, 'photo');
+  const { id } = raw.prepare('SELECT id FROM messages WHERE guid = ?').get(messageGuid) as {
+    id: number;
+  };
+  raw
+    .prepare('INSERT INTO attachments (guid, message_id, local_path) VALUES (?,?,?)')
+    .run(attachmentGuid, id, `/doc/attachments/${attachmentGuid}/IMG_0001.jpg`);
+}
+
 beforeEach(() => {
   mockCancelReminder.mockReset().mockResolvedValue(undefined);
+  mockCancelForChat.mockReset().mockResolvedValue(undefined);
   mockDeleteScheduled.mockReset().mockResolvedValue({ removed: true });
+  mockDeletedDirs.length = 0;
 });
 
 describe('deleteChat', () => {
@@ -234,5 +287,144 @@ describe('deleteChat', () => {
 
     expect(mockDeleteScheduled).not.toHaveBeenCalled();
     expect(await listScheduledByChat(db, 'c1')).toHaveLength(0);
+  });
+
+  // The notification is posted with `id = chatGuid` and nothing else on the delete path touches it.
+  // Left in the tray it keeps showing the deleted conversation's sender and message preview, and
+  // tapping it deep-links straight back into the thread the user just removed.
+  it('dismisses the deleted chat’s tray notification — before any network round trip', async () => {
+    const { db } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'fires tomorrow',
+      scheduledFor: 9_000,
+      serverId: 'srv-1',
+    });
+    let cancelledBeforeServer = false;
+    mockDeleteScheduled.mockImplementation(async () => {
+      cancelledBeforeServer = mockCancelForChat.mock.calls.length > 0;
+      return { removed: true };
+    });
+
+    await deleteChat('c1');
+
+    expect(mockCancelForChat.mock.calls.map((c) => c[0])).toEqual(['c1']);
+    // A blackholing tunnel costs a full request timeout per scheduled row; the notification for a
+    // deleted conversation must not sit there for it.
+    expect(cancelledBeforeServer).toBe(true);
+  });
+
+  it('still deletes the chat when the notification bridge is unreachable', async () => {
+    const { db } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    mockCancelForChat.mockRejectedValue(new Error('no native module'));
+
+    await expect(deleteChat('c1')).resolves.toBeUndefined();
+
+    expect(await listChatsForInbox(db)).toHaveLength(0);
+  });
+
+  it('deletes the downloaded attachment files the purge orphaned, and only those', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    await seedChat(db, 'c2');
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-photo', 'att-1');
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-video', 'att-2');
+    await seedDownloadedAttachment(db, raw, 'c2', 'm-other', 'att-other');
+
+    await deleteChat('c1');
+
+    // Their rows cascaded away with the messages, so nothing could ever find these files again —
+    // `local_path` was the only record that the download happened.
+    expect(mockDeletedDirs.sort()).toEqual(['/doc/attachments/att-1', '/doc/attachments/att-2']);
+    // Another conversation's photos are untouched.
+    expect(mockDeletedDirs).not.toContain('/doc/attachments/att-other');
+  });
+
+  it('leaves a file alone when its attachment row SURVIVED the delete', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-photo', 'att-1');
+    // The purge is bounded at the tombstone stamp and yields the write lock between chunks, so a
+    // row really can outlive it — and it still renders its image. Simulated by re-inserting the
+    // row the cascade removed, which is the state the file deleter must re-check for.
+    const realPrepare = raw.prepare.bind(raw);
+    (raw as unknown as { prepare: (s: string) => unknown }).prepare = (s: string) => {
+      if (/DELETE\s+FROM\s+messages\b/i.test(s)) {
+        (raw as unknown as { prepare: unknown }).prepare = realPrepare;
+        const stmt = realPrepare(s);
+        return {
+          all: (...args: unknown[]) => {
+            const rows = (stmt as unknown as { all: (...a: unknown[]) => unknown[] }).all(...args);
+            raw
+              .prepare('INSERT INTO attachments (guid, message_id, local_path) VALUES (?,NULL,?)')
+              .run('att-1', '/doc/attachments/att-1/IMG_0001.jpg');
+            return rows;
+          },
+        };
+      }
+      return realPrepare(s);
+    };
+    try {
+      await deleteChat('c1');
+    } finally {
+      (raw as unknown as { prepare: unknown }).prepare = realPrepare;
+    }
+
+    // The row really is still there (that is what the re-check has to notice)…
+    expect(raw.prepare('SELECT COUNT(*) c FROM attachments WHERE guid = ?').get('att-1')).toEqual({
+      c: 1,
+    });
+    // …so its file stays: deleting it leaves a message rendering a permanently broken image.
+    expect(mockDeletedDirs).toEqual([]);
+  });
+
+  // The purge yields the process-wide write lock between chunks, so it can die part-way — and
+  // nothing else in the app ever re-enters it. The leftovers are invisible under the tombstone, so
+  // the user cannot even see them to delete them again; they come back the day the chat revives.
+  it('finishes a purge whose chunk failed, leaving no orphaned history behind', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    const chatId = await getChatIdByGuid(db, 'c1');
+    const ins = raw.prepare(
+      'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
+    );
+    raw.transaction(() => {
+      for (let i = 0; i < 700; i++) ins.run(`m${i}`, chatId, 'x', 1000 + i);
+    })();
+
+    // Chunk 1 commits, chunk 2 dies — then the "process is back" and nothing else is sabotaged.
+    let deletes = 0;
+    const realPrepare = raw.prepare.bind(raw);
+    (raw as unknown as { prepare: (s: string) => unknown }).prepare = (s: string) => {
+      if (/DELETE\s+FROM\s+messages\b/i.test(s) && ++deletes === 2) {
+        (raw as unknown as { prepare: unknown }).prepare = realPrepare;
+        throw new Error('chunk failed');
+      }
+      return realPrepare(s);
+    };
+    try {
+      await expect(deleteChat('c1')).rejects.toThrow('chunk failed');
+    } finally {
+      (raw as unknown as { prepare: unknown }).prepare = realPrepare;
+    }
+
+    expect(raw.prepare('SELECT COUNT(*) c FROM messages').get()).toEqual({ c: 0 });
+  });
+
+  it('does not reach the filesystem for a chat with no downloaded attachments', async () => {
+    const { db } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+
+    await deleteChat('c1');
+
+    expect(mockDeletedDirs).toEqual([]);
   });
 });
