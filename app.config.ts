@@ -87,6 +87,12 @@ const config: ExpoConfig = {
     // app-list share entry from the SEND intent filters below is independent. See
     // plugins/withShareTargets.js.
     './plugins/withShareTargets',
+    // Build arm64-v8a ONLY. `android/` is regenerated on every build, so the ABI list has to be
+    // pinned here rather than in gradle.properties. Cuts the native compile (RN, Hermes,
+    // op-sqlite/SQLCipher, libsodium, the local modules) to a quarter of its work and peak memory —
+    // this machine has OOM-killed the release build before, and a killed build still burns a Play
+    // versionCode. Drops 32-bit ARM devices and x86 emulators. See plugins/withArm64Only.js.
+    './plugins/withArm64Only',
     // FCM push: the firebase plugin wires google-services.json + the messaging SDK
     // into the native build (the receive pipeline is already in JS).
     '@react-native-firebase/app',
