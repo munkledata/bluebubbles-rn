@@ -38,23 +38,40 @@ export const RCS_ALERT_TYPES = {
 
 /**
  * Derive the Server Health RCS row from the capability flag + the most-recent `rcs-alert`.
+ * This is the DEGRADED path — used only when the rich `get-rcs-status` block is unavailable
+ * (older server, or the fetch failed).
  *
  * - `enabled=false` → `off` ("RCS bridge: off").
  * - auth expired / fatal listen error → `error`, pointing at the dashboard re-auth (the phone
  *   cannot fix it).
  * - phone not responding → `warn` (the Android phone must be online).
  * - browser inactive → `warn` (the bridge idled; it should reconnect on its own).
- * - no alert, or a benign/recovery alert (phone-responding-again, browser-active, battery-low, …)
- *   → `ok` ("Connected"). Latest-alert-wins: a recovery alert naturally clears a prior warning.
+ * - a benign/recovery alert (phone-responding-again, browser-active, battery-low, an unknown
+ *   future alert, …) → `ok`. An alert ARRIVING is itself evidence the bridge's event stream is
+ *   alive, so this is information, not an assumption. Latest-alert-wins: a recovery alert
+ *   naturally clears a prior warning.
+ * - NO alert at all → `Unknown`, NOT "Connected".
+ *
+ * That last case is the fix for a real false-green: the row used to render a confident green
+ * "Connected" in the exact situation where the app knows NOTHING — the status fetch failed and
+ * no alert has ever arrived. During the 2026-07-23 outage the bridge was stone dead for four
+ * days while this surface said Connected, because the alert that would have corrected it is
+ * delivered over the very stream that was down. Absence of bad news is not good news.
  */
 export function deriveRcsHealth(
   enabled: boolean,
   lastAlertType: string | null | undefined,
 ): RcsHealthDisplay {
   if (!enabled) return { severity: 'off', status: 'Off' };
-  // No alert seen yet, or a benign/recovery alert (PHONE_RESPONDING_AGAIN, BROWSER_ACTIVE,
-  // MOBILE_BATTERY_LOW, RCS_CONNECTION, …): treat the bridge as healthy.
-  return mapAlert(lastAlertType) ?? { severity: 'ok', status: 'Connected' };
+  const mapped = mapAlert(lastAlertType);
+  if (mapped) return mapped;
+  // A benign/recovery alert still proves the stream is alive → genuinely healthy.
+  if (lastAlertType) return { severity: 'ok', status: 'Connected' };
+  return {
+    severity: 'warn',
+    status: 'Unknown',
+    detail: 'Could not read RCS bridge status from the server.',
+  };
 }
 
 /**
@@ -104,6 +121,11 @@ export interface RcsStatusSnapshot {
   phoneID?: string | null;
   browserActive?: boolean | null;
   lastAlert?: string | null;
+  /**
+   * Why the sidecar child last exited, when the server knows (`state:'failed'`). Server-authored
+   * and safe to display — it never carries credentials.
+   */
+  error?: string | null;
 }
 
 /**
@@ -133,6 +155,20 @@ export function deriveRcsHealthFromStatus(
   if (liveAlertType) {
     const overridden = mapAlert(liveAlertType);
     if (overridden) return overridden;
+  }
+
+  // The sidecar process itself is failing to start. This MUST be checked before the
+  // `running === false` branch below, or a crash-looping bridge renders as the reassuring
+  // "Starting…" forever — which is exactly what this surface told the user for four days
+  // during the 2026-07-23 outage while the supervisor had long since given up.
+  if (s.state === 'failed' && s.running === false) {
+    return {
+      severity: 'error',
+      status: 'Not running',
+      detail: s.error
+        ? `RCS bridge keeps failing to start (${s.error}) — check the server dashboard.`
+        : 'RCS bridge keeps failing to start — check the server dashboard.',
+    };
   }
 
   // Starting / not yet running.
@@ -171,6 +207,15 @@ export function deriveRcsHealthFromStatus(
     };
   }
 
-  // Flags indeterminate (version skew): fall back to the block's own lastAlert, then healthy.
-  return mapAlert(s.lastAlert) ?? { severity: 'ok', status: 'Connected' };
+  // Flags indeterminate (version skew): fall back to the block's own lastAlert. With no alert
+  // either, say Unknown — a green "Connected" derived from missing fields is the same
+  // false-green as the alert-only path above.
+  const mapped = mapAlert(s.lastAlert);
+  if (mapped) return mapped;
+  if (s.lastAlert) return { severity: 'ok', status: 'Connected' };
+  return {
+    severity: 'warn',
+    status: 'Unknown',
+    detail: 'The server did not report a usable RCS bridge state.',
+  };
 }

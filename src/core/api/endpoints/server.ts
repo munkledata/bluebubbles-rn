@@ -254,6 +254,30 @@ export type RcsStatus = z.infer<typeof RcsStatus>;
 export const rcsStatus = (http: HttpClient): Promise<RcsStatus> =>
   adminCommand(http, 'get-rcs-status', RcsStatus);
 
+/** Result of asking the server to re-authenticate the RCS bridge with its own cookies. */
+const RcsReauthResult = z
+  .object({
+    reauthed: z.boolean().nullish(),
+    staged: z.boolean().nullish(),
+    connected: z.boolean().nullish(),
+    stale: z.boolean().nullish(),
+    message: z.string().nullish(),
+  })
+  .loose();
+export type RcsReauthResult = z.infer<typeof RcsReauthResult>;
+
+/**
+ * Ask the SERVER to re-authenticate the RCS bridge using the Google cookies already sitting in
+ * its own Firefox profile.
+ *
+ * No credentials travel from the phone — the request body is empty. That is what makes this
+ * safe to expose to a password-authed app when every other RCS pairing route is dashboard-only:
+ * those take cookies as INPUT, this one takes none. It exists because the "RCS disconnected —
+ * re-authenticate on the server dashboard" notice was impossible to act on from the phone.
+ */
+export const rcsReauthNow = (http: HttpClient): Promise<RcsReauthResult> =>
+  http.post('/rcs/reauth-now', RcsReauthResult, { json: {} });
+
 /** The server's detected public IP (or null). */
 const PublicIp = z.object({ ip: z.string().nullish() }).loose().nullish();
 export const publicIp = (http: HttpClient): Promise<string | null> =>

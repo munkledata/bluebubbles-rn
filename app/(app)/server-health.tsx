@@ -1,7 +1,15 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useCallback } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import type { RcsStatus, ServerAlert } from '@core/api/endpoints/server';
@@ -9,6 +17,7 @@ import { deriveRcsHealth, deriveRcsHealthFromStatus, type RcsSeverity } from '@c
 import { http } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
+import { showToast } from '@ui/toast';
 import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Yes' : 'No');
@@ -213,6 +222,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
             statusFetchedAt={rcsFetchedAt}
             lastAlertType={rcsLastAlert}
             lastAlertAt={rcsLastAlertAt}
+            onReauthed={load}
           />
         )}
 
@@ -274,12 +284,14 @@ function RcsBridgeSection({
   statusFetchedAt,
   lastAlertType,
   lastAlertAt,
+  onReauthed,
 }: {
   capability: boolean;
   status: RcsStatus;
   statusFetchedAt: number | null;
   lastAlertType: string | null;
   lastAlertAt: number | null;
+  onReauthed: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
   // A socket alert is an immediacy override only when it arrived AFTER the block was fetched —
@@ -311,7 +323,53 @@ function RcsBridgeSection({
       </View>
       {phoneID ? <InfoRow label="Phone" value={phoneID} /> : null}
       {health.detail ? <NoteRow text={health.detail} /> : null}
+      {capability ? <RcsReconnectRow onDone={onReauthed} /> : null}
     </SettingsSection>
+  );
+}
+
+/**
+ * "Reconnect" — asks the SERVER to re-authenticate the RCS bridge with its own Firefox cookies.
+ *
+ * Before this, every RCS health state that needed action said "re-authenticate on the server
+ * dashboard" — advice you cannot follow from the phone that is showing it. The fix is not to move
+ * Google credentials onto the device (they never leave the Mac); it is to let the phone ask the
+ * server to do locally what the dashboard button already does.
+ */
+function RcsReconnectRow({ onDone }: { onDone: () => void }): React.JSX.Element {
+  const theme = useTheme();
+  const [busy, setBusy] = useState(false);
+
+  const run = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await serverApi.rcsReauthNow(http);
+      // Be honest about the three distinct outcomes — "staged" is NOT a success yet.
+      showToast(
+        res.staged
+          ? 'Bridge is down — fresh cookies saved, they will apply when it restarts.'
+          : res.connected
+            ? 'RCS bridge reconnected.'
+            : 'Cookies applied — the bridge is still connecting.',
+      );
+      onDone();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not reconnect the RCS bridge.');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, onDone]);
+
+  return (
+    <Pressable onPress={run} disabled={busy} style={styles.row} accessibilityRole="button">
+      <Text style={[styles.rowLabel, { color: theme.color.label }]}>Reconnect</Text>
+      {busy ? (
+        <ActivityIndicator />
+      ) : (
+        <Text style={[styles.action, { color: theme.color.tint }]}>Re-authenticate</Text>
+      )}
+    </Pressable>
   );
 }
 

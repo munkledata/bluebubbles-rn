@@ -14,11 +14,22 @@ describe('deriveRcsHealth', () => {
     });
   });
 
-  it('is healthy when enabled with no alert seen', () => {
+  // NO-FALSE-GREEN. This path runs only when the rich status block is unavailable, so with no
+  // alert either the app knows literally nothing about the bridge. It used to render a
+  // confident green "Connected" there — and did so for the four days of the 2026-07-23 outage,
+  // because the alert that would have corrected it travels over the stream that was down.
+  it('reports Unknown — NOT Connected — when enabled with no information at all', () => {
     const h = deriveRcsHealth(true, null);
+    expect(h.severity).toBe('warn');
+    expect(h.status).toBe('Unknown');
+    expect(h.detail).toMatch(/could not read/i);
+  });
+
+  it('still reports Connected when a benign alert proves the stream is alive', () => {
+    // An alert ARRIVING is positive evidence, unlike silence.
+    const h = deriveRcsHealth(true, RCS_ALERT_TYPES.browserActive);
     expect(h.severity).toBe('ok');
     expect(h.status).toBe('Connected');
-    expect(h.detail).toBeUndefined();
   });
 
   it('surfaces expired cookies as an error pointing at the dashboard re-auth', () => {
@@ -132,5 +143,32 @@ describe('deriveRcsHealthFromStatus', () => {
     const h = deriveRcsHealthFromStatus(connected, RCS_ALERT_TYPES.browserActive);
     expect(h.severity).toBe('ok');
     expect(h.status).toBe('Connected');
+  });
+});
+
+// ---- 2026-07-23 outage guards: a dead sidecar must never read as "Starting…" ----
+describe('deriveRcsHealthFromStatus — dead sidecar', () => {
+  it('reports an error (not Starting) once the server says the child keeps failing', () => {
+    const h = deriveRcsHealthFromStatus({
+      enabled: true,
+      running: false,
+      state: 'failed',
+      error: 'exited (code 1)',
+    });
+    expect(h.severity).toBe('error');
+    expect(h.status).toBe('Not running');
+    expect(h.detail).toContain('exited (code 1)');
+  });
+
+  it('still reports Starting while the child is genuinely coming up', () => {
+    const h = deriveRcsHealthFromStatus({ enabled: true, running: false, state: 'starting' });
+    expect(h.severity).toBe('warn');
+    expect(h.status).toBe('Starting');
+  });
+
+  it('reports Unknown rather than a green Connected when the flags are all missing', () => {
+    const h = deriveRcsHealthFromStatus({ enabled: true });
+    expect(h.severity).toBe('warn');
+    expect(h.status).toBe('Unknown');
   });
 });
