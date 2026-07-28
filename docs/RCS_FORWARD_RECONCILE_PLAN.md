@@ -221,7 +221,32 @@ cd /Users/munkle/github/BB/bluebubbles-server/packages/rcs-sidecar && \
 cd ../bbd && npm run typecheck && npm test -- test/rcsListener.test.ts
 ```
 
-### Phase 2 — Remember what we know (S/M, invisible)
+### Phase 2 — Remember what we know (S/M, invisible) — ✅ IMPLEMENTED 2026-07-27, NOT YET DEPLOYED
+
+> **As built.** Three sibling tables + a one-shot seed, no `ALTER TABLE`. Two deliberate
+> deviations from what is written below, both found while building:
+>
+> 1. **Seeding is guarded by a `seeded` marker, not by `INSERT OR IGNORE` alone.** The claim
+>    below that the raw statements are self-idempotent is true only for the rows they touch.
+>    `rcs_ingest_log.seq` is UNIQUE and the seed assigns `ROW_NUMBER()` over all of
+>    `rcs_messages`, so on a re-run any message that reached `rcs_messages` *without* a journal
+>    entry — which the backward backfill produces by design — would be handed a row number some
+>    existing row already owns, and `INSERT OR IGNORE` would swallow the collision. The message
+>    would be silently skipped rather than journalled.
+> 2. **A zero-message conversation gets NO `rcs_sync_state` row**, not a row with `hw_msg_id = 0`,
+>    because the seed derives watermarks from `rcs_messages GROUP BY conv_id`. On prod that is
+>    conversations **39 and 208** — precisely the two Phase 3 must repair. **Phase 3's never-swept
+>    test must therefore be `!state || state.hwMsgId === 0`**; a sweep checking only
+>    `state.hwMsgId === 0` reads `undefined`, skips, and never recovers them. Pinned by a test.
+>
+> **Rehearsed against a copy of prod's `rcs.db`** (4,475 messages / 33 conversations):
+> run 1 took **11 ms** and produced 4,475 journal rows, `maxSeq` 4,475, 33/33 watermarks
+> populated, **0 duplicate seqs**, and all 31 `rcs_cursor` rows untouched; run 2 took 0 ms and
+> produced a byte-identical snapshot.
+>
+> The live path (`#ingestMessage`) now calls `advanceWatermark` + `bumpIngestSeq` gated on
+> `isNew || changed`, wrapped so bookkeeping can never break message fanout. `#backfill` is
+> unchanged and deliberately does not journal.
 
 The three tables + seeding + the live-path writes. **No reconciler runs.** Nothing behaves differently.
 
