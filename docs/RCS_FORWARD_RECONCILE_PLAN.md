@@ -186,9 +186,27 @@ Every 60 seconds, `RcsReconciler.tick()`:
 
 ## 4. Phases
 
-### Phase 1 — Stop the bleeding: bound every RPC (S, no behaviour change)
+### Phase 1 — Stop the bleeding: bound every RPC (S, no behaviour change) — ✅ IMPLEMENTED 2026-07-27, NOT YET DEPLOYED
 
 **This is the correct first commit no matter what else you ever build.** Ship it alone.
+
+> **As built.** Both paging RPCs now go through `callRPC(rpcDeadline)` **and** `withReauthRetry`
+> (`bridge.go`); `GET /conversations` takes an optional `?folder=` that rejects an unrecognised
+> value rather than silently serving the inbox; `#fetchPage` and `#fetchMediaBytes` carry an
+> `AbortSignal.timeout` **around the body read as well as the request** (the signal aborts the
+> response stream too, so a half-delivered page rejects out of `json()`, not `fetch()`); and
+> `main.go` finally reads `BBD_RCS_PING_MINUTES`, which bbd has exported since day one and
+> nothing ever consumed — libgm therefore ran at its 60s constructor default instead of the 20m
+> that upstream mautrix-gmessages' own `example-config.yaml` ships. Each guard was
+> **mutation-tested**: with the wrapper removed the Go test hangs to its 12s deadline and both
+> bbd tests fail with the exact production symptom (the second conversation never backfills;
+> the queued media download never runs). Timeout-injection seams (`backfillPageTimeoutMs`,
+> `fetchTimeoutMs`, `rpcTimeoutOverride`) exist so those tests run in milliseconds.
+>
+> **The one real behaviour change is the ping cadence** (1,440 → 72 phone round-trips/day).
+> Everything else is strictly "a hang becomes an error". Watch for `PhoneNotResponding`
+> arriving later than before after deploy; `rcsPingMinutes` can be lowered in config without
+> a rebuild if that matters.
 
 `ListConversations` (`bridge.go:793`) and `FetchMessages` (`bridge.go:811`) are the only two libgm reads wrapped in **neither** `callRPC` **nor** `withReauthRetry`. libgm's response wait ends in a bare `return <-ch, nil` under a literal `// TODO hard timeout?` (`libgm/session_handler.go:167`). `#fetchPage` (`RcsListener.ts:603-614`) carries no `AbortSignal`, and the whole backfill is serialised behind one boolean (`RcsListener.ts:550-560`) whose `finally` never runs if the `await` never returns.
 
