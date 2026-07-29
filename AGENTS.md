@@ -540,6 +540,28 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   path in disguise. Only `addAssetsToAlbumAsync`/`removeAssetsFromAlbumAsync`/`deleteAssetsAsync` request
   consent; the `createAsset*` family never does. Device-only symptom (jest mocks the whole module) — locked
   by `test/services/media.test.ts`.
+- **Save-to-Photos asks for WRITE-ONLY permission, and every media action REPORTS ITS OUTCOME.** Two halves of
+  the same "the buttons in the fullscreen viewer don't work" report. (1) `requestPermissionsAsync()` with NO
+  argument asks for READ access to photos + video + **audio** as one all-or-nothing bundle (the granular
+  default is all three), so declining the separate "Music and audio" dialog — the obvious move when you're
+  saving a picture — makes the whole request come back not-granted, and Android stops asking after the second
+  decline, killing saving for good. Use `requestPermissionsAsync(true)` (`ensureSavePermission` in
+  `src/services/media.ts`): on API 33+ that resolves to an EMPTY permission set — granted, zero dialogs — and
+  the native save needs no runtime permission there anyway (`MediaLibraryModule.hasWritePermissions()` returns
+  "nothing missing" on TIRAMISU+); below 33 it correctly asks for `WRITE_EXTERNAL_STORAGE`. READING the gallery
+  (`AttachmentTray`'s picker) still needs the full request — don't unify them. (2) `app/(app)/media/[guid].tsx`
+  used to `await` both helpers and DISCARD the result: `saveAttachmentsToPhotos` returns saved|none|denied|error
+  and `shareAttachment` reports whether the sheet opened, and all of it — including complete success — rendered
+  as nothing, so a working save was pixel-identical to a dead button. `shareAttachment` compounded it by
+  swallowing every native throw into a `logger.warn` and then `return true`ing anyway; it now returns
+  `{ok:false, reason}` and logs at **error** (only error-level lines reach `ErrorReportSink`, so a warn never
+  gets uploaded). Rule: a helper returning a rich result must have its result consumed at the call site —
+  toast the happy path, dialog anything the user must act on. Locked by `test/components/routes/mediaViewer.test.tsx`.
+- **A downloaded attachment's file name must carry an EXTENSION.** `attachmentFileName` (`@utils/attachment`)
+  falls back to `<guid><ext-from-mime>`, never the bare guid: expo-media-library derives the MediaStore type
+  from the file name and rejects a dotless one outright ("Could not get the file's extension"), so such a file
+  could never be saved to the gallery — as a generic error with nothing pointing at the name. iMessage always
+  sends a `transferName`; RCS-bridged media can arrive with none.
 - **In-app toast: `AppToast` is a non-Modal host mounted once at the app root.** `showToast(msg)` (zero-React,
   callable from services) enqueues into `useToastStore` (FIFO, mirrors `dialogStore`); `AppToast`
   (`src/ui/toast/`) is an absolutely-positioned, `pointerEvents="none"`, auto-dismiss pill — NOT a `Modal`

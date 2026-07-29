@@ -16,25 +16,59 @@ export const GATOR_ALBUM = 'Gator';
  * {@link isLocalFileUri}.
  */
 
+/** Outcome of a share attempt. `ok: false` means the OS share sheet never opened. */
+export type ShareAttachmentResult = { ok: true } | { ok: false; reason: 'unavailable' | 'failed' };
+
 /**
- * Open the OS share sheet for a downloaded attachment file. Returns false when
- * sharing is unavailable on this device (the caller may fall back to sharing
- * text); a cancelled or failed share sheet is handled here and reads as true.
+ * Open the OS share sheet for a downloaded attachment file.
+ *
+ * A user who opens the sheet and backs out still counts as `ok` — Android resolves the share
+ * call on cancel. Only a genuine failure (sheet never opened) reports `ok: false`, and the
+ * caller is expected to say so: this used to swallow every throw into a `logger.warn` and then
+ * `return true` regardless, which made a hard native failure indistinguishable from a
+ * successful share and left the fullscreen viewer's share button looking dead.
  */
 export async function shareAttachment(
   localPath: string,
   mimeType?: string | null,
-): Promise<boolean> {
+): Promise<ShareAttachmentResult> {
   try {
-    // Lazy import: expo-sharing is a native module, kept off the screen-open path.
+    // Lazy import: expo-sharing is a native module, kept off the screen-open path. NOTE the
+    // import itself can reject (`requireNativeModule` throws when the module isn't linked into
+    // the running build), which is why it sits inside the try.
     const Sharing = await import('expo-sharing');
-    if (!(await Sharing.isAvailableAsync())) return false;
+    if (!(await Sharing.isAvailableAsync())) return { ok: false, reason: 'unavailable' };
     await Sharing.shareAsync(localPath, { mimeType: mimeType ?? undefined });
+    return { ok: true };
   } catch (e) {
-    // User cancelled the share sheet, or the native share failed — nothing to surface.
-    logger.warn('[media] share failed', e);
+    // `error`, not `warn`: ErrorReportSink only captures error-level lines, and this failure is
+    // otherwise invisible — there is no other signal that the share sheet failed to open.
+    logger.error('[media] share failed', e);
+    return { ok: false, reason: 'failed' };
   }
-  return true;
+}
+
+/**
+ * Ask for the WRITE half of the media-library permission only — never the read bundle.
+ *
+ * `requestPermissionsAsync()` with no argument asks for READ access to photos, video AND
+ * music/audio together (expo-media-library defaults `granularPermissions` to all three) and
+ * treats them as all-or-nothing. Refusing the separate "Music and audio" dialog — the obvious
+ * thing to do when you are trying to save a picture — makes the whole request come back
+ * not-granted, and after the second refusal Android stops showing it at all, so saving silently
+ * stops working for good.
+ *
+ * Saving needs none of that. On Android 13+ the native save requires NO runtime permission
+ * (`MediaLibraryModule.hasWritePermissions()` returns "nothing missing" on TIRAMISU+), and
+ * `writeOnly: true` resolves to an EMPTY permission list there — granted, with zero dialogs. On
+ * Android 12 and below it asks for WRITE_EXTERNAL_STORAGE, which is what is genuinely required.
+ *
+ * READING the gallery (the attachment tray's photo picker) still needs the full request — don't
+ * "tidy" this into that call site.
+ */
+async function ensureSavePermission(): Promise<boolean> {
+  const perm = await MediaLibrary.requestPermissionsAsync(true);
+  return perm.status === 'granted';
 }
 
 export type SaveToPhotosResult =
@@ -52,8 +86,7 @@ export async function saveAttachmentsToPhotos(
   paths: ReadonlyArray<string | null | undefined>,
 ): Promise<SaveToPhotosResult> {
   try {
-    const perm = await MediaLibrary.requestPermissionsAsync();
-    if (perm.status !== 'granted') return { status: 'denied' };
+    if (!(await ensureSavePermission())) return { status: 'denied' };
     let saved = 0;
     for (const p of paths) {
       if (isLocalFileUri(p)) {
@@ -82,8 +115,7 @@ export async function saveImageToLibrary(
 ): Promise<SaveImageResult> {
   if (!isLocalFileUri(uri)) return 'skipped';
   try {
-    const perm = await MediaLibrary.requestPermissionsAsync();
-    if (perm.status !== 'granted') return 'denied';
+    if (!(await ensureSavePermission())) return 'denied';
     if (!opts.album) {
       await MediaLibrary.saveToLibraryAsync(uri);
       return 'saved';

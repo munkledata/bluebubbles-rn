@@ -1,5 +1,6 @@
 import { updateAttachmentLocalPath } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { attachmentFileName } from '@utils/attachment';
 
 /** Filesystem/network boundary, injected so the orchestration is Node-testable. */
 export interface AttachmentFetcher {
@@ -65,6 +66,8 @@ export async function ensureDownloaded(
     guid: string;
     transferName: string | null;
     localPath: string | null;
+    /** Only used to give a nameless attachment a file extension — see {@link attachmentFileName}. */
+    mimeType?: string | null;
     service?: string | null;
   },
   onProgress?: (loaded: number, total: number) => void,
@@ -78,7 +81,7 @@ export async function ensureDownloaded(
     try {
       const path = await fetcher.download(
         att.guid,
-        att.transferName ?? att.guid,
+        attachmentFileName(att.transferName, att.guid, att.mimeType),
         onProgress,
         att.service,
       );

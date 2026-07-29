@@ -290,7 +290,16 @@ export function useMessageActions({
     if (!sel) return;
     void (async () => {
       const att = sel.attachments.find((a) => isLocalFileUri(a.localPath));
-      if (att?.localPath && (await shareAttachment(att.localPath, att.mimeType))) return;
+      if (att?.localPath) {
+        const res = await shareAttachment(att.localPath, att.mimeType);
+        if (res.ok) return;
+        // The file WAS downloaded and the share still failed, so don't fall through to the
+        // "open the attachment first" notice below — that would blame a missing download.
+        if (!sel.text) {
+          showDialog('Share', 'Couldn’t open the share sheet for this attachment.');
+          return;
+        }
+      }
       try {
         if (sel.text) await Share.share({ message: sel.text });
         else showDialog('Share', 'Open the attachment first to download it, then Share again.');

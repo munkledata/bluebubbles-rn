@@ -55,6 +55,52 @@ export function isLocalFileUri(path: string | null | undefined): path is string 
   return !!path && path.startsWith('file://');
 }
 
+/**
+ * File extension for a MIME type — used ONLY to name a downloaded file. An unknown type gets
+ * no extension.
+ */
+const MIME_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/3gpp': '.3gp',
+  'audio/mpeg': '.mp3',
+  'audio/mp4': '.m4a',
+  'audio/amr': '.amr',
+  'application/pdf': '.pdf',
+};
+
+export function extensionForMime(mimeType: string | null | undefined): string {
+  if (!mimeType) return '';
+  const base = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+  return MIME_EXTENSIONS[base] ?? '';
+}
+
+/**
+ * Local file name for a downloaded attachment: the server's transfer name when there is one,
+ * else the guid PLUS a MIME-derived extension.
+ *
+ * The extension is load-bearing, not cosmetic: expo-media-library derives the MediaStore type
+ * from the file name and REJECTS a name with no dot at all ("Could not get the file's
+ * extension"), so a bare-guid name can never be saved to the gallery — silently, since the
+ * failure surfaces as a generic error. iMessage always sends a transfer name; RCS-bridged media
+ * can arrive with none (the bridge maps an empty media name to null).
+ */
+export function attachmentFileName(
+  transferName: string | null | undefined,
+  guid: string,
+  mimeType?: string | null,
+): string {
+  if (transferName) return transferName;
+  return `${guid}${extensionForMime(mimeType)}`;
+}
+
 export const AUTO_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /** Images under the cap auto-download; everything else is tap-to-download. */

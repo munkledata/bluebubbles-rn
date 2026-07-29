@@ -108,6 +108,28 @@ describe('ensureDownloaded', () => {
     ]);
   });
 
+  // A nameless attachment (RCS-bridged media can arrive with none) used to be saved as the bare
+  // guid — a file name with no dot, which expo-media-library refuses to save to the gallery.
+  it('names a nameless attachment from its MIME type, not the bare guid', async () => {
+    const { db } = await createTestDb();
+    await seedAttachment(db, 'dn');
+    const names: string[] = [];
+    const fetcher: AttachmentFetcher = {
+      exists: () => false,
+      download: async (_g, name) => {
+        names.push(name);
+        return 'file:///docs/dn.jpg';
+      },
+    };
+    await ensureDownloaded(db, fetcher, {
+      guid: 'dn',
+      transferName: null,
+      localPath: null,
+      mimeType: 'image/jpeg',
+    });
+    expect(names).toEqual(['dn.jpg']);
+  });
+
   it('returns null on fetch failure (no localPath written)', async () => {
     const { db } = await createTestDb();
     await seedAttachment(db, 'd3');
