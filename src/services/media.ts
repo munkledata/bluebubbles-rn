@@ -130,14 +130,23 @@ export async function saveImageToLibrary(
     // `createAssetAsync(uri, album)` sets the MediaStore RELATIVE_PATH on INSERT instead — the app
     // is creating that row, so there is nothing to ask consent for — and, never having landed in
     // the camera roll first, it leaves no duplicate behind either.
-    const album = await MediaLibrary.getAlbumAsync(GATOR_ALBUM);
+    //
+    // `getAlbumAsync` is the ONE call on this path gated on READ permission
+    // (`requireSystemPermissions(false)` → `hasReadPermissions()`), which write-only never grants —
+    // so on a device that has never granted media read it THROWS before the album is even looked
+    // at, and every auto-downloaded picture would silently stop reaching the gallery. It's only a
+    // fast path, so treat a throw as "album unknown" and fall through to the seed call below, which
+    // is write-gated and idempotent (`createAlbumFile` is `exists() || mkdirs()`).
+    const album = await MediaLibrary.getAlbumAsync(GATOR_ALBUM).catch(() => null);
     if (album) {
       await MediaLibrary.createAssetAsync(uri, album);
       return 'saved';
     }
-    // Android can't create an EMPTY album, so the first save ever seeds it. Seed from the local
-    // FILE (the 4th argument), NOT from an already-created asset: the asset form is the
-    // move-with-consent path above, which would put the dialog right back on the first picture.
+    // Android can't create an EMPTY album, so the first save ever seeds it — and this is also the
+    // standing path when the album lookup above is unavailable. Seed from the local FILE (the 4th
+    // argument), NOT from an already-created asset: the asset form is the move-with-consent path
+    // above, which would put the dialog right back on the first picture. Internally this still
+    // sets RELATIVE_PATH at insert time (`CreateAssetWithAlbumFile`), so it asks for no consent.
     await MediaLibrary.createAlbumAsync(GATOR_ALBUM, undefined, false, uri);
     return 'saved';
   } catch (e) {

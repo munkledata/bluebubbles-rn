@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -83,9 +83,24 @@ export default function MediaViewer(): React.JSX.Element {
   // pills read as broken even when they worked. A toast for the happy path (non-blocking, and the
   // host is `pointerEvents:'none'` so it can't eat a swipe), a dialog when there is something the
   // user has to act on.
+  //
+  // The in-flight guards matter BECAUSE of that reporting: a user whose buttons appear dead taps
+  // twice, and expo-sharing throws "sharing already in progress" on a concurrent call — which
+  // would now raise a "couldn't open the share sheet" dialog (and upload an error report) for a
+  // sheet that opened perfectly on the first tap. Per-action refs, not one shared flag, so a share
+  // that never settles can't also disable saving.
+  const sharing = useRef(false);
+  const saving = useRef(false);
+
   const onShare = async (): Promise<void> => {
-    if (!current?.localPath || !local) return;
-    const res = await shareAttachment(current.localPath, current.mimeType);
+    if (!current?.localPath || !local || sharing.current) return;
+    sharing.current = true;
+    let res;
+    try {
+      res = await shareAttachment(current.localPath, current.mimeType);
+    } finally {
+      sharing.current = false;
+    }
     if (res.ok) return;
     showDialog(
       'Share',
@@ -96,8 +111,14 @@ export default function MediaViewer(): React.JSX.Element {
   };
 
   const onSave = async (): Promise<void> => {
-    if (!current?.localPath || !local) return;
-    const res = await saveAttachmentsToPhotos([current.localPath]);
+    if (!current?.localPath || !local || saving.current) return;
+    saving.current = true;
+    let res;
+    try {
+      res = await saveAttachmentsToPhotos([current.localPath]);
+    } finally {
+      saving.current = false;
+    }
     if (res.status === 'saved') showToast('Saved to Photos');
     else if (res.status === 'denied')
       showDialog('Save', 'Photos permission is required to save attachments.');

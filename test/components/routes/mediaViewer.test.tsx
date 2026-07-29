@@ -171,6 +171,84 @@ describe('MediaViewer share button', () => {
   });
 });
 
+describe('MediaViewer double-tap', () => {
+  // The reported symptom ("I tap and nothing happens") trains the user to tap twice. expo-sharing
+  // throws "sharing already in progress" on a concurrent call, so without this guard the second
+  // tap would raise a "couldn't open the share sheet" dialog — and upload an error report — for a
+  // sheet that opened perfectly on the first tap.
+  /**
+   * A promise the test settles by hand, so it can hold an action "in flight" across a second tap.
+   * EVERY deferred must be settled before the test ends and flushed — a promise still pending at
+   * teardown leaves work queued against an unmounted tree and corrupts every LATER test in the
+   * file (React 19 overlapping-act; see AGENTS.md).
+   */
+  function deferred<T>(): { promise: Promise<T>; settle: (v: T) => void } {
+    let settle!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      settle = r;
+    });
+    return { promise, settle };
+  }
+
+  /**
+   * Let a pending handler run to completion. NOT `act()` — the handlers under test touch refs and
+   * the toast/dialog stores, never component state, and a bare `act(async () => {})` between
+   * RNTL's own act-wrapped calls trips React 19's overlapping-act detection, which silently
+   * corrupts every LATER test in the file (they fail to render at all).
+   */
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('ignores a second share tap while the first is still in flight', async () => {
+    const d = deferred<{ ok: true }>();
+    share.mockReturnValue(d.promise);
+    await renderViewer();
+
+    fireEvent.press(pills()[0]!);
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    fireEvent.press(pills()[0]!);
+    await flush(); // let the second tap's handler run (or be refused)
+
+    expect(share).toHaveBeenCalledTimes(1);
+    d.settle({ ok: true });
+    await flush();
+    // The first share opened the sheet, so nothing is reported — and crucially the refused second
+    // tap did NOT raise a "couldn't open the share sheet" dialog.
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('ignores a second save tap while the first is still in flight', async () => {
+    const d = deferred<{ status: 'saved'; saved: number }>();
+    save.mockReturnValue(d.promise);
+    await renderViewer();
+
+    fireEvent.press(pills()[1]!);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    fireEvent.press(pills()[1]!);
+    await flush();
+
+    expect(save).toHaveBeenCalledTimes(1);
+    d.settle({ status: 'saved', saved: 1 });
+    await waitFor(() => expect(useToastStore.getState().current?.message).toBe('Saved to Photos'));
+  });
+
+  // Separate refs, not one shared flag: a share whose native promise hasn't settled must not also
+  // disable saving.
+  it('an unsettled share does not disable the save button', async () => {
+    const d = deferred<{ ok: true }>();
+    share.mockReturnValue(d.promise);
+    save.mockResolvedValue({ status: 'saved', saved: 1 });
+    await renderViewer();
+
+    fireEvent.press(pills()[0]!);
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    fireEvent.press(pills()[1]!);
+
+    await waitFor(() => expect(useToastStore.getState().current?.message).toBe('Saved to Photos'));
+    d.settle({ ok: true });
+    await flush();
+  });
+});
+
 describe('MediaViewer gating', () => {
   // The pills are disabled for an undownloaded photo, so no helper may be called at all. This is
   // the branch that must NOT start reporting outcomes — there is nothing to act on.

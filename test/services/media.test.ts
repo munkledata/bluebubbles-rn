@@ -209,6 +209,22 @@ describe('saveImageToLibrary', () => {
     expect(addToAlbum).not.toHaveBeenCalled();
   });
 
+  // THE GUARD for the write-only permission's one sharp edge. `getAlbumAsync` is the only call on
+  // this path gated on READ permission, which write-only never grants — so on a device that has
+  // never granted media read it THROWS, and without this fallback every auto-downloaded picture
+  // would silently stop reaching the Gator album (auto-download + the album destination are both
+  // ON by default, and the caller only toasts on 'saved', so the failure would be invisible).
+  it('still files into the album when the read-gated album LOOKUP throws', async () => {
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    getAlbum.mockRejectedValue(new Error('Missing MEDIA_LIBRARY permissions.'));
+    createAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
+    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
+    // Falls through to the write-gated, idempotent seed call — NOT to an unfiled gallery save.
+    expect(createAlbum).toHaveBeenCalledWith('Gator', undefined, false, 'file:///docs/a.jpg');
+    expect(saveToLibrary).not.toHaveBeenCalled();
+    expect(addToAlbum).not.toHaveBeenCalled();
+  });
+
   it('maps a native failure to error (no throw)', async () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     saveToLibrary.mockRejectedValue(new Error('disk full'));

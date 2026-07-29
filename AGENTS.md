@@ -774,6 +774,15 @@ the Android toolchain / EAS is available.
   ~74% in 2026-07). Files intentionally below the line are native-mock territory (VoiceRecorder,
   VideoPlayer, AudioAttachment, ThemeStudio, FindMyMap) — don't chase them with mock-testing-a-mock
   tests; on-device verification covers them.
+- **A bare `act(async () => {})` used as a "flush" corrupts every LATER test in the file** — same
+  overlapping-act failure mode as the un-awaited `fireEvent` below, and it looks innocent. Interleaved
+  with RNTL's own act-wrapped calls (`render`, `waitFor`), it trips React 19's detection and later
+  tests then fail to render AT ALL (`Unable to find an element with testID: …` on a tree that renders
+  fine in isolation — run the one test with `-t` to confirm it's pollution, not a real failure). If the
+  handler under test touches only refs/zustand stores and no component state, flush with a plain
+  `new Promise(r => setTimeout(r, 0))` instead; keep `act` for genuine state mutations. Also settle
+  EVERY deferred promise a test creates before it ends — one left pending at teardown poisons the rest
+  of the file the same way. See the `deferred`/`flush` helpers in `routes/mediaViewer.test.tsx`.
 - **An un-awaited `fireEvent` can corrupt every LATER test in the file** (React 19 "overlapping
   act()"), especially for components rendering inside a RN `Modal` — the failures appear only in
   full-file runs, never in isolation. `await waitFor(...)`/`findBy*` after EVERY state-mutating
