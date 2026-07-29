@@ -510,13 +510,53 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
   });
 
   it('shares a downloaded attachment file via shareAttachment', async () => {
-    (shareAttachment as jest.Mock).mockResolvedValue(true);
+    (shareAttachment as jest.Mock).mockResolvedValue({ ok: true });
     await renderWithTheme(<ChatScreen />);
     await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
     await run(() => mockCaptured.overlay!.onShare());
     await waitFor(() =>
       expect(shareAttachment).toHaveBeenCalledWith('file:///docs/a1.jpg', 'image/jpeg'),
     );
+    // The sheet opened, so nothing else happens — no fallback text share, no dialog.
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  // A file share that FAILS must not be reported as "open the attachment first to download it" —
+  // the file WAS downloaded; the share sheet is what broke.
+  it('reports a failed share honestly instead of blaming a missing download', async () => {
+    (shareAttachment as jest.Mock).mockResolvedValue({ ok: false, reason: 'failed' });
+    await renderWithTheme(<ChatScreen />);
+    await run(() =>
+      mockCaptured.list!.onLongPressMessage(
+        makeMsg({
+          guid: 'm9',
+          text: null,
+          attachments: [
+            { guid: 'a1', localPath: 'file:///docs/a1.jpg', mimeType: 'image/jpeg' },
+          ] as never,
+        }),
+      ),
+    );
+    await run(() => mockCaptured.overlay!.onShare());
+    await waitFor(() => expect(showDialog).toHaveBeenCalled());
+    const [title, message] = (showDialog as jest.Mock).mock.calls[0] as [string, string];
+    expect(title).toBe('Share');
+    expect(message).not.toMatch(/download/i);
+  });
+
+  // A CAPTIONED photo whose file share fails must not quietly share the caption instead — the user
+  // asked to share the picture, and an OS share sheet carrying only the text reads as success.
+  it('does not silently fall back to sharing the caption when the file share fails', async () => {
+    const rnShare = jest
+      .spyOn(require('react-native').Share, 'share')
+      .mockResolvedValue({ action: 'dismissedAction' });
+    (shareAttachment as jest.Mock).mockResolvedValue({ ok: false, reason: 'failed' });
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment())); // text: 'hey'
+    await run(() => mockCaptured.overlay!.onShare());
+    await waitFor(() => expect(showDialog).toHaveBeenCalled());
+    expect(rnShare).not.toHaveBeenCalled();
+    rnShare.mockRestore();
   });
 });
 

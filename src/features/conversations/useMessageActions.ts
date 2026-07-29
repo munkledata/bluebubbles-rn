@@ -290,7 +290,21 @@ export function useMessageActions({
     if (!sel) return;
     void (async () => {
       const att = sel.attachments.find((a) => isLocalFileUri(a.localPath));
-      if (att?.localPath && (await shareAttachment(att.localPath, att.mimeType))) return;
+      if (att?.localPath) {
+        const res = await shareAttachment(att.localPath, att.mimeType);
+        if (res.ok) return;
+        // Report it and STOP. The two tempting fall-throughs are both wrong here: the notice below
+        // blames a missing download (the file was there), and sharing `sel.text` would quietly send
+        // a captioned photo's CAPTION to whichever app the user picked, when they asked to share
+        // the picture. The text fallback stays for its original case — no downloaded attachment.
+        showDialog(
+          'Share',
+          res.reason === 'unavailable'
+            ? 'Sharing isn’t available on this device.'
+            : 'Couldn’t open the share sheet for this attachment.',
+        );
+        return;
+      }
       try {
         if (sel.text) await Share.share({ message: sel.text });
         else showDialog('Share', 'Open the attachment first to download it, then Share again.');

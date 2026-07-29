@@ -33,13 +33,14 @@ const shareAsync = Sharing.shareAsync as jest.Mock;
 beforeEach(() => {
   // The helpers log failures via the redacting logger's console sink — keep test output clean.
   jest.spyOn(console, 'warn').mockImplementation(() => {});
+  jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 describe('shareAttachment', () => {
-  it('opens the share sheet with the path + mimeType and reports handled', async () => {
+  it('opens the share sheet with the path + mimeType and reports ok', async () => {
     isAvailable.mockResolvedValue(true);
     shareAsync.mockResolvedValue(undefined);
-    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toBe(true);
+    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({ ok: true });
     expect(shareAsync).toHaveBeenCalledWith('file:///docs/a.jpg', { mimeType: 'image/jpeg' });
   });
 
@@ -50,20 +51,50 @@ describe('shareAttachment', () => {
     expect(shareAsync).toHaveBeenCalledWith('file:///docs/a.bin', { mimeType: undefined });
   });
 
-  it('returns false (caller may fall back) when sharing is unavailable', async () => {
+  it('reports unavailable (caller may fall back) when sharing is unavailable', async () => {
     isAvailable.mockResolvedValue(false);
-    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toBe(false);
+    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
     expect(shareAsync).not.toHaveBeenCalled();
   });
 
-  it('treats a cancelled/failed share sheet as handled (true, no throw)', async () => {
+  // THE REGRESSION GUARD. This used to swallow the throw and `return true` — so a share sheet that
+  // never opened was indistinguishable from one the user used, and the viewer's share button read
+  // as permanently dead with nothing anywhere to say why.
+  it('reports failure when the native share throws — never a false success', async () => {
     isAvailable.mockResolvedValue(true);
-    shareAsync.mockRejectedValue(new Error('cancelled'));
-    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toBe(true);
+    shareAsync.mockRejectedValue(new Error('Failed to share the file'));
+    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+  });
+
+  // `error`, not `warn`: ErrorReportSink only captures error-level lines, so a warn would never
+  // reach the uploaded error log — and there is no other signal that the sheet failed to open.
+  it('logs the failure at error level so it reaches the error report queue', async () => {
+    isAvailable.mockResolvedValue(true);
+    shareAsync.mockRejectedValue(new Error('boom'));
+    await shareAttachment('file:///docs/a.jpg', 'image/jpeg');
+    expect(console.error).toHaveBeenCalled();
   });
 });
 
 describe('saveAttachmentsToPhotos', () => {
+  // THE REGRESSION GUARD for the music-permission trap. A bare requestPermissionsAsync() asks for
+  // READ access to photos + video + AUDIO as one all-or-nothing bundle, so declining the separate
+  // "Music and audio" dialog silently killed saving for good — and after the second decline Android
+  // stops asking at all. writeOnly resolves to an EMPTY permission set on Android 13+ (where the
+  // native save needs no runtime permission anyway) and to WRITE_EXTERNAL_STORAGE below that.
+  it('asks for WRITE-ONLY permission — never the read/audio bundle', async () => {
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    saveToLibrary.mockResolvedValue(undefined);
+    await saveAttachmentsToPhotos(['file:///docs/a.jpg']);
+    expect(requestPerm).toHaveBeenCalledWith(true);
+  });
+
   it('reports denied (and saves nothing) without the Photos permission', async () => {
     requestPerm.mockResolvedValue({ status: 'denied' });
     await expect(saveAttachmentsToPhotos(['file:///docs/a.jpg'])).resolves.toEqual({
@@ -126,6 +157,13 @@ describe('saveImageToLibrary', () => {
     expect(saveToLibrary).not.toHaveBeenCalled();
   });
 
+  it('asks for WRITE-ONLY permission on the auto-download path too', async () => {
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    saveToLibrary.mockResolvedValue(undefined);
+    await saveImageToLibrary('file:///docs/a.jpg');
+    expect(requestPerm).toHaveBeenCalledWith(true);
+  });
+
   it('gallery save (no album) uses saveToLibraryAsync', async () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     saveToLibrary.mockResolvedValue(undefined);
@@ -168,6 +206,22 @@ describe('saveImageToLibrary', () => {
     await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
     expect(createAlbum).toHaveBeenCalledWith('Gator', undefined, false, 'file:///docs/a.jpg');
     expect(createAsset).not.toHaveBeenCalled();
+    expect(addToAlbum).not.toHaveBeenCalled();
+  });
+
+  // THE GUARD for the write-only permission's one sharp edge. `getAlbumAsync` is the only call on
+  // this path gated on READ permission, which write-only never grants — so on a device that has
+  // never granted media read it THROWS, and without this fallback every auto-downloaded picture
+  // would silently stop reaching the Gator album (auto-download + the album destination are both
+  // ON by default, and the caller only toasts on 'saved', so the failure would be invisible).
+  it('still files into the album when the read-gated album LOOKUP throws', async () => {
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    getAlbum.mockRejectedValue(new Error('Missing MEDIA_LIBRARY permissions.'));
+    createAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
+    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
+    // Falls through to the write-gated, idempotent seed call — NOT to an unfiled gallery save.
+    expect(createAlbum).toHaveBeenCalledWith('Gator', undefined, false, 'file:///docs/a.jpg');
+    expect(saveToLibrary).not.toHaveBeenCalled();
     expect(addToAlbum).not.toHaveBeenCalled();
   });
 

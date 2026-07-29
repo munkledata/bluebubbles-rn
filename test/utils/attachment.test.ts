@@ -1,5 +1,7 @@
 import {
+  attachmentFileName,
   attachmentKind,
+  extensionForMime,
   fileTypeLabel,
   friendlySize,
   isLocalFileUri,
@@ -46,6 +48,41 @@ describe('isLocalFileUri', () => {
     expect(isLocalFileUri('')).toBe(false);
     expect(isLocalFileUri(null)).toBe(false);
     expect(isLocalFileUri(undefined)).toBe(false);
+  });
+});
+
+describe('attachmentFileName', () => {
+  it('prefers the server-supplied transfer name', () => {
+    expect(attachmentFileName('holiday.jpg', 'guid-1', 'image/jpeg')).toBe('holiday.jpg');
+  });
+
+  // A nameless attachment used to be saved as the bare guid, which has no dot in it.
+  // expo-media-library derives the MediaStore type from the file name and rejects a dotless one
+  // outright ("Could not get the file's extension"), so Save-to-Photos could never work for it —
+  // and the failure surfaced as a generic error with nothing pointing at the file name.
+  it('gives a nameless attachment an extension from its MIME type', () => {
+    expect(attachmentFileName(null, 'guid-1', 'image/jpeg')).toBe('guid-1.jpg');
+    expect(attachmentFileName(null, 'guid-2', 'video/mp4')).toBe('guid-2.mp4');
+    expect(attachmentFileName('', 'guid-3', 'image/png')).toBe('guid-3.png');
+  });
+
+  it('falls back to the bare guid when the MIME type is unknown or absent', () => {
+    expect(attachmentFileName(null, 'guid-4', 'application/x-made-up')).toBe('guid-4');
+    expect(attachmentFileName(null, 'guid-5', null)).toBe('guid-5');
+    expect(attachmentFileName(null, 'guid-6')).toBe('guid-6');
+  });
+});
+
+describe('extensionForMime', () => {
+  it('ignores parameters and case', () => {
+    expect(extensionForMime('IMAGE/JPEG')).toBe('.jpg');
+    expect(extensionForMime('image/jpeg; charset=binary')).toBe('.jpg');
+  });
+
+  it('returns an empty string for anything it does not know', () => {
+    expect(extensionForMime('application/octet-stream')).toBe('');
+    expect(extensionForMime(null)).toBe('');
+    expect(extensionForMime(undefined)).toBe('');
   });
 });
 
