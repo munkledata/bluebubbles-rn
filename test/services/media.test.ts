@@ -134,25 +134,41 @@ describe('saveImageToLibrary', () => {
     expect(createAsset).not.toHaveBeenCalled();
   });
 
-  it('album save creates the album (moving the asset) when it does not exist yet', async () => {
+  // THE GUARD, and the reason the album path looks the way it does: `addAssetsToAlbumAsync(…,
+  // copy=false)` routes through `MediaStore.createWriteRequest` on Android 11+, which is a SYSTEM
+  // CONSENT DIALOG ("Allow Gator to modify this photo?"). It is raised per IMAGE — each new picture
+  // is a new URI the previous grant doesn't cover — and it needs a foreground Activity, so pictures
+  // auto-downloaded while the app is backgrounded queue their prompts and land on the user in a
+  // stack on the next resume, naming threads they never opened. Writing the asset straight into the
+  // album sets the MediaStore RELATIVE_PATH at INSERT time: nothing to consent to, and no
+  // camera-roll duplicate to clean up afterwards.
+  it('album save writes STRAIGHT into an existing album — never create-then-move', async () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
-    createAsset.mockResolvedValue({ id: 'asset-1' });
+    getAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
+    createAsset.mockResolvedValue({ id: 'asset-2' });
+    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
+    expect(createAsset).toHaveBeenCalledWith('file:///docs/a.jpg', {
+      id: 'album-1',
+      title: 'Gator',
+    });
+    // Exactly one call, and it carries the album: a bare createAssetAsync(uri) would put the image
+    // in the camera roll first, which is the duplicate the old move existed to clean up.
+    expect(createAsset).toHaveBeenCalledTimes(1);
+    expect(addToAlbum).not.toHaveBeenCalled();
+    expect(createAlbum).not.toHaveBeenCalled();
+  });
+
+  // Android can't create an EMPTY album, so the first save ever has to seed it. Seeding from an
+  // already-created ASSET is the move path in disguise (createAlbumAsync's copy=false branch) and
+  // would put the dialog right back on the very first picture — so seed from the local FILE.
+  it('album save seeds a missing album from the local file, not from an asset', async () => {
+    requestPerm.mockResolvedValue({ status: 'granted' });
     getAlbum.mockResolvedValue(null);
     createAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
     await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
-    expect(createAsset).toHaveBeenCalledWith('file:///docs/a.jpg');
-    expect(createAlbum).toHaveBeenCalledWith('Gator', { id: 'asset-1' }, false);
+    expect(createAlbum).toHaveBeenCalledWith('Gator', undefined, false, 'file:///docs/a.jpg');
+    expect(createAsset).not.toHaveBeenCalled();
     expect(addToAlbum).not.toHaveBeenCalled();
-  });
-
-  it('album save adds to the existing album (copy=false → move, no duplicate)', async () => {
-    requestPerm.mockResolvedValue({ status: 'granted' });
-    createAsset.mockResolvedValue({ id: 'asset-2' });
-    getAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
-    addToAlbum.mockResolvedValue(true);
-    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
-    expect(addToAlbum).toHaveBeenCalledWith([{ id: 'asset-2' }], { id: 'album-1', title: 'Gator' }, false);
-    expect(createAlbum).not.toHaveBeenCalled();
   });
 
   it('maps a native failure to error (no throw)', async () => {

@@ -88,13 +88,25 @@ export async function saveImageToLibrary(
       await MediaLibrary.saveToLibraryAsync(uri);
       return 'saved';
     }
-    // Album path: create the asset (also adds it to the gallery), then MOVE it into the named album
-    // (copy=false avoids a duplicate lingering in the camera roll). Android can't create an empty
-    // album, so the first save seeds it via createAlbumAsync.
-    const asset = await MediaLibrary.createAssetAsync(uri);
-    const existing = await MediaLibrary.getAlbumAsync(GATOR_ALBUM);
-    if (existing) await MediaLibrary.addAssetsToAlbumAsync([asset], existing, false);
-    else await MediaLibrary.createAlbumAsync(GATOR_ALBUM, asset, false);
+    // Album path: write the asset STRAIGHT INTO the album, rather than creating it in the camera
+    // roll and then MOVING it there. `addAssetsToAlbumAsync(…, copy=false)` routes through
+    // `MediaStore.createWriteRequest` on Android 11+, which is a SYSTEM CONSENT DIALOG ("Allow
+    // Gator to modify this photo?") — raised per IMAGE, since each new picture is a new URI the
+    // previous grant doesn't cover. Worse, it needs a foreground Activity, so pictures
+    // auto-downloaded while the app was backgrounded queue their prompts and ambush the user with
+    // a stack of them on the next resume, naming threads they never opened.
+    // `createAssetAsync(uri, album)` sets the MediaStore RELATIVE_PATH on INSERT instead — the app
+    // is creating that row, so there is nothing to ask consent for — and, never having landed in
+    // the camera roll first, it leaves no duplicate behind either.
+    const album = await MediaLibrary.getAlbumAsync(GATOR_ALBUM);
+    if (album) {
+      await MediaLibrary.createAssetAsync(uri, album);
+      return 'saved';
+    }
+    // Android can't create an EMPTY album, so the first save ever seeds it. Seed from the local
+    // FILE (the 4th argument), NOT from an already-created asset: the asset form is the
+    // move-with-consent path above, which would put the dialog right back on the first picture.
+    await MediaLibrary.createAlbumAsync(GATOR_ALBUM, undefined, false, uri);
     return 'saved';
   } catch (e) {
     logger.warn('[media] save image to library failed', e);

@@ -9,7 +9,9 @@
  *   - header actions and tile taps route via expo-router; long-press opens the actions sheet;
  *   - the reveal-the-newest-thread scroll: WHEN it fires, that it's non-animated, that it keeps
  *     re-issuing (content-size change AND one deferred frame) until the user drags, that a later
- *     message re-arms it, and that it stops re-issuing once its arm window has passed.
+ *     message re-arms it, and that it stops re-issuing once its arm window has passed;
+ *   - the re-land-on-return scroll: a LATER focus (back from a chat) and an AppState resume both
+ *     scroll to the top, mount-focus and backgrounding do not, and a drag still wins.
  *
  * In-file mocks:
  *   - `@shopify/flash-list` → a plain renderer honoring data + Header/Empty/Footer slots. It also
@@ -24,18 +26,22 @@
  *     message — a pure reorder, no content-height change — and confirm row 0 lands and stays.
  *   - `@features/conversations/useChats` → controllable `{ data, isLoading, error }` (real hook hits
  *     the reactive DB).
- *   - `expo-router` (useRouter) + `react-native-safe-area-context` (useSafeAreaInsets) → the RN
+ *   - `expo-router` (useRouter/usePathname, plus a `useFocusEffect` that registers its callback so
+ *     a test can replay a re-focus) + `react-native-safe-area-context` (useSafeAreaInsets) → the RN
  *     navigation/inset natives.
  *   - `@/services` (refreshInbox) → jest.fn (its barrel pulls native modules).
  *   - child components ConversationTile / PinnedGrid / SearchResultsView / ChatActionsSheet → light
  *     probes, so the assertions are about the SCREEN'S split/search/route wiring.
  */
 import React from 'react';
+import { AppState } from 'react-native';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import type { InboxRow } from '@db/repositories';
 
 const mockPush = jest.fn();
 const mockScrollToTop = jest.fn();
+/** Focus callbacks the mounted screen registered — `emitFocus()` replays them as a re-focus. */
+const mockFocusCallbacks: Array<() => void> = [];
 /** Last props the screen handed the list — the config-level guard reads the scroll handlers here. */
 const mockListProps: { current: Record<string, unknown> } = { current: {} };
 
@@ -98,6 +104,20 @@ jest.mock('@features/conversations/useChats', () => ({ useChats: jest.fn() }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
   usePathname: () => '/home',
+  // Mirrors React Navigation: the effect runs when the screen gains focus — which INCLUDES mount,
+  // the case the screen deliberately skips. Registering the callback here lets `emitFocus()` drive
+  // a later focus (coming back from a chat), which the real hook would fire and nothing else can.
+  useFocusEffect: (cb: () => void) => {
+    const ReactLib = require('react');
+    ReactLib.useEffect(() => {
+      cb();
+      mockFocusCallbacks.push(cb);
+      return () => {
+        const i = mockFocusCallbacks.indexOf(cb);
+        if (i >= 0) mockFocusCallbacks.splice(i, 1);
+      };
+    }, [cb]);
+  },
 }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -195,6 +215,7 @@ beforeEach(() => {
   // Reset in beforeEach, never afterEach: an afterEach mutation lands on a still-mounted tree.
   mockScrollToTop.mockClear();
   mockListProps.current = {};
+  mockFocusCallbacks.length = 0;
 });
 
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
@@ -642,5 +663,101 @@ describe('ConversationListScreen — reveal the newest thread', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * Coming BACK to the inbox re-lands it at the top unconditionally. The "reveal the newest thread"
+ * loop above can only fire for a message the screen WATCHED arrive; these two triggers cover the
+ * returns where it didn't — the texts landed while the user was inside a chat, or while the app was
+ * backgrounded, and the arm window closed long before they looked at the list again.
+ */
+describe('ConversationListScreen — re-land at the top on return', () => {
+  /** Replay the registered focus callbacks, as navigating back to this screen would. */
+  async function emitFocus(): Promise<void> {
+    await act(async () => {
+      for (const cb of [...mockFocusCallbacks]) cb();
+    });
+  }
+
+  // The screen's AppState subscribers, so a test can drive a resume. Installed for EVERY test in
+  // this block and deliberately never restored — same pattern as chatScreenReadMarker.test.tsx.
+  // HARNESS TRAP: `mockRestore()` does NOT give jest-expo's AppState its behavior back; the
+  // restored `addEventListener` returns `undefined`, so the screen's `sub.remove()` throws on the
+  // next unmount. (Verified: the untouched mock returns `{remove}`, the restored one returns
+  // undefined.) That is a jest-expo artifact, not a product bug — leave the spy in place.
+  const appStateHandlers: Array<(s: string) => void> = [];
+  beforeEach(() => {
+    appStateHandlers.length = 0;
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((
+      _type: string,
+      handler: (s: string) => void,
+    ) => {
+      appStateHandlers.push(handler);
+      return { remove: jest.fn() };
+    }) as unknown as typeof AppState.addEventListener);
+  });
+
+  /** Drive an AppState transition through the screen's own listener. */
+  async function emitAppState(state: string): Promise<void> {
+    await act(async () => {
+      for (const h of [...appStateHandlers]) h(state);
+    });
+  }
+
+  it('does NOT scroll on the first focus — mount is not a return', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(mockFocusCallbacks).toHaveLength(1); // the hook really is wired up
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+  });
+
+  // Back from a chat: the inbox stayed MOUNTED the whole time and kept its scroll offset, so no
+  // amount of new data would have moved it — only the focus event can.
+  it('scrolls to the top when the inbox regains focus', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    await emitFocus();
+    // Non-animated for the same reason the reveal loop is: an animated scroll gets cancelled by
+    // FlashList's deferred offset correction.
+    expect(mockScrollToTop).toHaveBeenCalledWith({ animated: false });
+  });
+
+  // THE reported bug: messages arrive while the app is backgrounded, so the reveal loop either
+  // never ran or ran and expired unseen. Focus was never lost, so only AppState can catch this.
+  it('scrolls to the top when the app resumes', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+
+    await emitAppState('active');
+    expect(mockScrollToTop).toHaveBeenCalledWith({ animated: false });
+  });
+
+  it('does not scroll when the app merely goes to the background', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    await emitAppState('background');
+    expect(mockScrollToTop).not.toHaveBeenCalled();
+  });
+
+  // The return scroll goes through the same requestScrollToTop, so it must inherit the convergence
+  // loop's escape hatch: the moment a finger drags, the list belongs to the user again.
+  it('re-issues after a return, but a drag still hands the list back', async () => {
+    setChats({ data: [makeRow({ guid: 'a', latestMessageDate: 1_000 })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    await emitFocus();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(1);
+
+    // Still armed: a late row measurement re-lands it.
+    (mockListProps.current.onContentSizeChange as () => void)();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(2);
+
+    (mockListProps.current.onScrollBeginDrag as () => void)();
+    (mockListProps.current.onContentSizeChange as () => void)();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(2);
   });
 });

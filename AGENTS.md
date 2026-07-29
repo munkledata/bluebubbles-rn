@@ -524,9 +524,22 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   throwing deprecation stubs — so importing `expo-media-library` (root) silently broke Save-to-Photos on
   device (caught → `{status:'error'}`, invisible in jest since the module is mocked). Import from
   `expo-media-library/legacy` (as `AttachmentTray` does). `src/services/media.ts` uses it for both the
-  gallery save AND the "Gator" album path (`createAssetAsync` → `getAlbumAsync`/`createAlbumAsync`/
-  `addAssetsToAlbumAsync` with `copy=false` to MOVE, not duplicate; Android can't create an empty album, so
-  the first save seeds it).
+  gallery save AND the "Gator" album path.
+- **NEVER `addAssetsToAlbumAsync(…, copy=false)` — a MOVE is a SYSTEM CONSENT DIALOG per image.** The
+  Kotlin module calls `requestMediaLibraryActionPermission` before the move, which on Android 11+ launches
+  `MediaStore.createWriteRequest` → "Allow Gator to modify this photo?". `checkUriPermission` is DENIED for
+  a MediaStore row even when the app created it (the own-your-own-media exemption lives inside MediaProvider,
+  not in the uri-grant table), so the prompt fires EVERY time, and each new picture is a new uri the last
+  grant doesn't cover. Worse, `writeLauncher.launch` needs a foreground Activity, so pictures auto-downloaded
+  while the app was backgrounded QUEUE their prompts and land in a stack on the next resume, naming chats the
+  user never opened — it reads as a random permission bug, not as auto-download. Instead write the asset
+  straight into the album: `createAssetAsync(uri, album)` (2nd arg is an `Album`/id) sets the MediaStore
+  `RELATIVE_PATH` at INSERT time — no modify, so nothing to consent to, and no camera-roll duplicate to
+  clean up. Android still can't create an EMPTY album, so seed a missing one from the local FILE via
+  `createAlbumAsync(name, undefined, false, uri)` — passing an ASSET there is the same move-with-consent
+  path in disguise. Only `addAssetsToAlbumAsync`/`removeAssetsFromAlbumAsync`/`deleteAssetsAsync` request
+  consent; the `createAsset*` family never does. Device-only symptom (jest mocks the whole module) — locked
+  by `test/services/media.test.ts`.
 - **In-app toast: `AppToast` is a non-Modal host mounted once at the app root.** `showToast(msg)` (zero-React,
   callable from services) enqueues into `useToastStore` (FIFO, mirrors `dialogStore`); `AppToast`
   (`src/ui/toast/`) is an absolutely-positioned, `pointerEvents="none"`, auto-dismiss pill — NOT a `Modal`
@@ -594,6 +607,23 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   (`reminder:'1'` in the data bag) deep-links with `?focus=…` (taps used to anchor on every notification,
   which froze bottom-follow in normal conversation). Decisions are jest-tested
   (`messageListPinned.test.tsx`, `scrollPin.test.ts`, `notificationOpen.test.ts`); layout timing is device-only.
+- **The INBOX re-lands at the top on a message it saw arrive AND on every RETURN — the second is not
+  redundant.** `ConversationListScreen` runs a smaller cousin of the chat's convergence loop: a rise in
+  `newestDate` (max over visible rows, pinned included) arms a 1s window that re-issues
+  `scrollToTop({animated:false})` on every content-size change plus one deferred frame, until a drag disarms
+  it. But it only ever fires for a message the screen WATCHED land — and the common complaint ("I come back
+  and it's not scrolled up") is exactly the case it can't see: the texts arrive while the user is inside a
+  chat or the app is backgrounded, the arm window opens and closes unobserved, and the list is left holding
+  a stale offset with nothing left to re-issue. So the re-land is ALSO hung off the return event itself, via
+  TWO triggers that don't imply each other: `useFocusEffect` (back from a chat/settings — the inbox stayed
+  MOUNTED and kept its offset) and AppState `'active'` (the app was backgrounded with the inbox already on
+  screen, so focus was never lost and the focus effect does not re-fire at all). Both route through the same
+  `requestScrollToTop`, so they inherit the convergence + drag-disarm behavior; while searching the FlashList
+  isn't rendered and `listRef.current` is null, so both no-op. The MOUNT focus is skipped by a ref — it isn't
+  a return, and arming over the first data burst only fights the initial load. TEST-HARNESS TRAP: `mockRestore()`
+  does NOT give jest-expo's `AppState.addEventListener` its behavior back (the restored fn returns `undefined`,
+  so the effect cleanup's `sub.remove()` throws on the next unmount) — install the spy for the whole block and
+  never restore it, as `chatScreenReadMarker.test.tsx` does.
 - **Open a chat ONLY via `useChatNavigator` (`src/ui/useChatNavigator.ts`) — never a raw `router.push` to
   `/chat/…`.** The app keeps ONE stack with the Messages list at its base; pushing a thread on top of an
   already-open thread (notification taps did this) left Back returning to the PREVIOUS thread, not the inbox

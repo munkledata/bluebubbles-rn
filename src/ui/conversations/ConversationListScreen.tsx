@@ -1,8 +1,10 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  type AppStateStatus,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -175,6 +177,43 @@ export function ConversationListScreen(): React.JSX.Element {
     },
     [],
   );
+
+  // COMING BACK to the inbox re-lands it at the top, exactly as if it had just been opened. The
+  // loop above only fires for a message it actually WATCHED arrive, and that is precisely the case
+  // that fails here: the texts land while you are inside a chat or the app is backgrounded, the
+  // list reorders under a viewport that is scrolled down, and by the time you look at it the arm
+  // window closed long ago with nothing left to re-issue the scroll. Hanging a re-land off the
+  // RETURN event instead makes it unconditional — you can't come back to a stale position, whether
+  // or not the screen was awake to see the message that made it stale. Two triggers, because
+  // neither implies the other:
+  //   - FOCUS: back from a chat / settings / archived. The inbox stayed MOUNTED underneath and kept
+  //     its scroll offset, so nothing else would ever move it.
+  //   - AppState 'active': the app was backgrounded with the inbox already on screen, so focus was
+  //     never lost and useFocusEffect does not re-fire at all.
+  // Both go through requestScrollToTop, so they inherit its convergence + drag-disarm behavior; a
+  // drag still hands the list straight back to the user. While searching the FlashList isn't
+  // rendered at all and `listRef.current` is null, so both are no-ops there.
+  //
+  // The screen also "gains focus" on MOUNT, and that one focus is not a return: the list is already
+  // at the top and the first data burst is still landing, so arming the loop over it would only
+  // fight the initial load. Skipped by a ref rather than by not registering, because every LATER
+  // focus on the same mounted screen is exactly the case this exists for.
+  const focusedOnceRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnceRef.current) {
+        focusedOnceRef.current = true;
+        return;
+      }
+      requestScrollToTop();
+    }, [requestScrollToTop]),
+  );
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') requestScrollToTop();
+    });
+    return () => sub.remove();
+  }, [requestScrollToTop]);
 
   useEffect(() => {
     const prev = prevNewestRef.current;
