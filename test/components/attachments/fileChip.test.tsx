@@ -23,6 +23,7 @@ import React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
 import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
+import { useUploadStore } from '@state/uploadStore';
 import type { AttachmentRow } from '@db/repositories';
 
 const mockDownload = jest.fn();
@@ -72,6 +73,7 @@ beforeEach(() => {
   mockDownload.mockClear();
   (safeOpenUrl as jest.Mock).mockClear();
   useDownloadStore.setState({ progress: {}, status: {} });
+  useUploadStore.setState({ byGuid: {} });
 });
 
 describe('FileChip — name + subtitle rendering', () => {
@@ -128,6 +130,57 @@ describe('FileChip — download-state affordances', () => {
     await renderWithTheme(<FileChip att={makeAtt()} isFromMe={false} />);
     expect(screen.getByText('Tap to retry')).toBeTruthy();
     expect(screen.getByText('ICON:refresh-outline')).toBeTruthy();
+  });
+});
+
+describe('FileChip — upload progress', () => {
+  const uploading = (over: Partial<{ sent: number; total: number }> = {}) =>
+    useUploadStore.setState({
+      byGuid: {
+        'att-1': {
+          chatGuid: 'c1',
+          name: 'report.pdf',
+          sent: 512 * 1024,
+          total: 2_621_440,
+          updatedAt: 0,
+          ...over,
+        },
+      },
+    });
+
+  it('replaces the resting subtitle with the byte readout + percentage while sending', async () => {
+    uploading();
+    await renderWithTheme(<FileChip att={makeAtt()} isFromMe />);
+    // friendlySize(512*1024) = '512 KB'; friendlySize(2_621_440) = '2.5 MB'; 512K/2.5M ≈ 20%.
+    expect(screen.getByText('512 KB of 2.5 MB • 20%')).toBeTruthy();
+    expect(screen.queryByText('PDF • 2.5 MB')).toBeNull();
+  });
+
+  it('omits the percentage until the total is known, keeping the size readout', async () => {
+    uploading({ total: 0 });
+    await renderWithTheme(<FileChip att={makeAtt()} isFromMe />);
+    expect(screen.getByText('512 KB')).toBeTruthy();
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it('wins over a stale download status for the same guid', async () => {
+    // A file we are SENDING came from this device and can never be downloading at the same time,
+    // so a leftover download entry must not hide the upload readout.
+    useDownloadStore.setState({ status: { 'att-1': 'downloading' }, progress: {} });
+    uploading();
+    await renderWithTheme(<FileChip att={makeAtt()} isFromMe />);
+    expect(screen.getByText('512 KB of 2.5 MB • 20%')).toBeTruthy();
+    expect(screen.queryByText('Downloading…')).toBeNull();
+  });
+
+  it('drops back to the resting subtitle once the upload settles', async () => {
+    // Settling REMOVES the entry — that removal is the whole "upload finished" signal, so a chip
+    // rendered afterwards must show no trace of it.
+    uploading();
+    useUploadStore.getState().settle('att-1');
+    await renderWithTheme(<FileChip att={makeAtt()} isFromMe />);
+    expect(screen.getByText('PDF • 2.5 MB')).toBeTruthy();
+    expect(screen.queryByText(/of 2.5 MB •/)).toBeNull();
   });
 });
 

@@ -7,3 +7,4 @@ export * from './VideoPlayer';
 export * from './ContactCard';
 export * from './LocationCard';
 export * from './ProgressRing';
+export * from './UploadProgressOverlay';

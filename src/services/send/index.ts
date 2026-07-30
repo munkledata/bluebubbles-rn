@@ -22,11 +22,8 @@ import { sendImageMessage, type PickedImage } from './sendAttachmentService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
 import { pickContact } from '../contacts/contactsService';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
-import {
-  resendOutgoingRow,
-  runOutgoingQueue,
-  type OutgoingQueueIO,
-} from './outgoingQueueService';
+import { uploadRegistry } from './uploadControl';
+import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 import { showToast } from '@ui/toast/toastStore';
 
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
@@ -369,6 +366,12 @@ export async function retry(tempGuid: string): Promise<void> {
  * made a Delete silently do nothing, so it now reports ownership only.
  */
 export async function discardMessage(guid: string, now: number = Date.now()): Promise<void> {
+  // STOP THE BYTES FIRST, before either tombstone. "Cancel Sending" used to be a pure DB write:
+  // the bubble vanished while the phone carried on streaming the entire file to the server — on a
+  // large video, for minutes, over the user's data. The upload simply had no cancel handle to
+  // reach for. Cancelling is safe for every other message kind too: nothing is registered under a
+  // text/reaction/contact temp guid, so this is a no-op for them.
+  uploadRegistry.cancel(guid);
   const db = getDatabase();
   if (await discardOutgoingMessage(db, guid, now)) return;
   await deleteMessageLocal(db, guid, now);

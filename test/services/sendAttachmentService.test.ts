@@ -95,8 +95,16 @@ describe('sendImageMessage', () => {
       name: 'photo.jpg',
       uri: 'file:///photo.jpg',
       mimeType: 'image/jpeg',
+      totalBytes: 1000,
     });
     expect(up.captured?.tempGuid).toBeTruthy();
+    // The uploader publishes byte progress under the ATTACHMENT guid, because that is what the
+    // attachment components render under — keyed by the message temp guid instead, the ring would
+    // have nothing to attach to. It must match the row actually written.
+    expect(up.captured?.attachmentGuid).toBe(`${up.captured?.tempGuid}-att`);
+    expect(up.captured?.attachmentGuid).toBe(
+      (one(raw, 'SELECT guid FROM attachments') as { guid: string }).guid,
+    );
     expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(1);
     const msg = one(raw, 'SELECT guid, send_state s, has_attachments h FROM messages');
     expect(msg.guid).toBe('real-msg'); // promoted via the ack guid

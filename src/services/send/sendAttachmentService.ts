@@ -24,9 +24,17 @@ export type AttachmentUploader = (args: {
   http: HttpClient;
   chatGuid: string;
   tempGuid: string;
+  /**
+   * The ATTACHMENT row's guid — the key byte progress is published under. It is not the message
+   * temp guid because the attachment components render under `att.guid`, so this is what lets the
+   * ring land on the right bubble.
+   */
+  attachmentGuid: string;
   name: string;
   uri: string;
   mimeType: string;
+  /** Size if the caller knows it, else 0/undefined — the uploader learns the real one natively. */
+  totalBytes?: number;
 }) => Promise<SendAck>;
 
 /**
@@ -67,9 +75,11 @@ export async function sendImageMessage(
       http,
       chatGuid: args.chatGuid,
       tempGuid,
+      attachmentGuid,
       name: args.image.name,
       uri: args.image.uri,
       mimeType: args.image.mimeType,
+      totalBytes: args.image.size,
     });
     // The server ack carries only the message GUID (no attachment guid) — the optimistic
     // attachment row keeps its local guid + local_path until the live socket `new-message`

@@ -69,6 +69,7 @@ import {
   ThreadSheet,
   ScreenEffectOverlay,
   TypingBubble,
+  UploadStatusBar,
   useTheme,
   type PendingAttachment,
 } from '@ui';
@@ -644,6 +645,10 @@ function ChatScreenInner({
   ) : (
     <>
       {isTyping ? <TypingBubble /> : null}
+      {/* Renders nothing unless this chat has an upload in flight. It lives INSIDE the measured
+          bottom bar, so appearing/disappearing re-lands the message list through the wrapper's
+          existing onLayout → pin convergence rather than stranding it behind the composer. */}
+      <UploadStatusBar chatGuid={guid} translucent={hasWallpaper} />
       <Composer
         placeholder={
           chatService === 'RCS'

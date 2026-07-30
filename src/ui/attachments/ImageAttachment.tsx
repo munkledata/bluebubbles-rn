@@ -7,10 +7,12 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useUploadStore } from '@state/uploadStore';
 import { shouldAutoDownload } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { ProgressRing } from './ProgressRing';
+import { UploadProgressOverlay } from './UploadProgressOverlay';
 
 interface ImageAttachmentProps {
   att: AttachmentRow;
@@ -32,6 +34,9 @@ export function ImageAttachment({
   const router = useRouter();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
+  // Present only while this file is being SENT. An entry exists for the duration of one upload
+  // attempt and is removed when it settles, so its presence is the whole condition.
+  const upload = useUploadStore((s) => s.byGuid[att.guid]);
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const wifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const netType = Network.useNetworkState().type;
@@ -99,9 +104,17 @@ export function ImageAttachment({
     <Pressable
       onPress={onPress}
       // Genmoji carry a natural-language description ("a smiling cat wearing a top hat") — surface it
-      // as the accessibility label (alt text). Ordinary images have none set, so this stays
-      // undefined for them (unchanged behavior).
-      accessibilityLabel={att.emojiImageShortDescription ?? undefined}
+      // as the accessibility label (alt text). Ordinary images have none, and leaving the label
+      // UNDEFINED made every photo bubble a focusable, clickable node that TalkBack announces with
+      // no name at all — indistinguishable from a video or any other bubble (measured on device: the
+      // chat's only unlabeled focusable nodes were the media bubbles). So fall back to a generic
+      // label that also states the tap outcome, because an undownloaded image DOWNLOADS on tap
+      // rather than opening the viewer — a difference a sighted user reads from the progress ring.
+      accessibilityRole="imagebutton"
+      accessibilityLabel={
+        att.emojiImageShortDescription ??
+        (upload ? 'Photo, uploading' : att.localPath ? 'Photo' : 'Photo, not downloaded')
+      }
       style={[
         styles.wrap,
         {
@@ -123,7 +136,16 @@ export function ImageAttachment({
         transition={150}
         style={styles.img}
       />
-      {status === 'downloading' ? (
+      {/* Upload wins over every download state: a file we are SENDING came from this device, so it
+          can never be downloading at the same time. Compact in a gallery cell or an inline
+          Genmoji — both are far too small for the byte readout to fit. */}
+      {upload ? (
+        <UploadProgressOverlay
+          sent={upload.sent}
+          total={upload.total}
+          compact={!!cellSize || isGenmoji}
+        />
+      ) : status === 'downloading' ? (
         <View style={styles.overlay} pointerEvents="none">
           <ProgressRing progress={progress ?? null} />
         </View>

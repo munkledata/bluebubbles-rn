@@ -177,6 +177,32 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   `createDownloadTask({onProgress})` → `downloadStore` (zustand) → ring/spinner. The actual
   image/video swap MUST stay driven by the reactive `localPath` DB write (`updateAttachmentLocalPath`),
   never the store — rendering from store state bypasses the op-sqlite reactive flush.
+- **UPLOAD progress needs `createUploadTask`, NOT `uploadAsync` — and the LEGACY module, not SDK 57's
+  `File` API.** `uploadAsync` and `createUploadTask` build the IDENTICAL request (both go through the
+  native `createUploadRequest`); the only difference is that `uploadAsync` passes a no-op body decorator
+  while the task form wraps the body in a counting one — so the task is the ONLY variant that emits byte
+  progress, and the only one with a cancel handle. On Android the counting decorator wraps just the FILE
+  part (`FileSystemLegacyModule.createRequestBody`), so the reported total is the file's exact length,
+  not the multipart envelope; native throttles events to one per 100 ms. Do NOT "modernize" this to
+  SDK 57's `File.createUploadTask`: it round-trips the source uri through `new URL()` (the same
+  non-special-scheme mangling documented for shared-in `content://` uris) and its own docs warn its
+  multipart byte counts may include framing overhead. A CANCELLED task resolves `null` instead of
+  rejecting — deref that and you crash; it maps to `ApiErrorKind 'cancelled'` → `ClientErrorCode.userCanceled`,
+  because without a name it reported as "Connection Refused". `UploadTask.uploadAsync()` also unsubscribes
+  from the native progress event ONLY on success, so a rejected upload leaks a listener unless you release
+  it yourself. Progress is keyed by ATTACHMENT guid (what the bubble renders under), never the message temp
+  guid. `uploadStore` SETTLES BY REMOVING the entry (unlike `downloadStore`, which parks at `idle`): the
+  entry set IS "is anything uploading" for the composer bar, and a retained entry leaves a stale 100% ring
+  on a recycled FlashList row — and a late native event must never resurrect a settled entry. Cancel is
+  registered BEFORE the concurrency gate, or every file still queued behind the 2-slot cap is
+  uncancellable — exactly the big-batch case where the user wants out. Full design + the device-only
+  checks: `docs/UPLOAD_PROGRESS.md`.
+- **A plain `View` carrying `accessibilityRole`/`accessibilityLabel` announces NOTHING without
+  `accessible`.** RN only makes Text/touchables accessibility elements implicitly; on a bare View the role
+  and value are dropped and TalkBack reads the children as separate unlabelled nodes. Caught by
+  `getByRole` failing in `uploadStatusBar.test.tsx` — a lesson worth generalizing: query by ROLE, not
+  testID, for anything with an a11y contract, since `getByTestId` passes happily on a tree no screen
+  reader can use.
 - **Notifications use `react-native-notify-kit`** (the Invertase-recommended, TurboModules-only drop-in
   fork of the archived `@notifee/react-native`; the named exports + API are 100% identical, so imports
   are just `from 'react-native-notify-kit'`). It's autolinked and, since 9.2.0, its native core COMPILES
@@ -220,6 +246,21 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   once. Reading `getInitialNotification()` only once on mount is NOT enough — it never re-fires for a
   background-alive resume, so the thread never opens. Keep `drainNotificationTap` idempotent (no-op when
   nothing is pending; single navigation when both sources describe the same press).
+- **A free-text "To:" field must treat the TYPED-BUT-UNCOMMITTED text as a recipient, and its commit handler
+  must resolve from the INCOMING text — not from state.** Two separate device-found bugs in `new-chat.tsx`,
+  both silent:
+  (1) `canStart` required `recipients.length > 0`, and the only things that committed a chip were a trailing
+  comma and `onSubmitEditing`. So typing a number that isn't a saved contact and tapping **Start** did
+  NOTHING — no chat, no dialog, not even a log line. Fix = derive a `pendingRecipient` from the raw query and
+  include it in an `effectiveRecipients` used by BOTH `canStart` and the create call. Gate it on a loose
+  `looksLikeAddress` (email needs `@` with text either side; phone needs ≥7 digits) so a half-typed contact
+  NAME like "Aar" can never start a garbage chat — the server stays the real validator.
+  (2) The comma branch called a `commitRaw()` that read the PREVIOUS `query` and never called `setQuery(t)`,
+  so a **paste** of `"+1555…,"` — one change event carrying address AND comma — committed nothing and silently
+  ERASED the field. Typing char-by-char masked it because `query` was already populated by then. Resolve from
+  the event's text; when it isn't addressable keep it visible minus the comma instead of dropping it.
+  TEST TRAP: every pre-existing test fired `submitEditing` first, which is exactly why the suite was green
+  while Start was dead — cover the uncommitted path explicitly (`newChatScreen.test.tsx`).
 - **Send-contact posts STRUCTURED fields; the SERVER builds the vCard.** The `send-contact` endpoint
   (`POST /api/v1/message/contact`) takes `{ firstName, lastName, organization, phones[], emails[] }` and
   the server assembles the vCard 3.0 + sends it as an attachment (client builds no file). Gate the UI on
@@ -349,6 +390,33 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
 - **Theme is preset-driven, not OS-scheme:** `useThemeStore` (preset key persisted in `kv`) → `ThemeProvider`
   → `resolvePreset(key)` tokens. Every component reads `useTheme().color.*`, so switching the preset recolors
   the whole tree with no per-component edits. Hydrate the store in the root mount effect.
+- **`groupedBackground` IS `background` in BOTH shipped presets — never use it to make a surface stand out.**
+  OLED Dark `#000000` and Gator `#0B1A2B` define the two byte-identical; only `secondaryBackground`
+  (`#1C1C1E` / `#16293E`) is distinct from `background` in every preset. A shared-media tile styled
+  `groupedBackground` therefore vanished into the page, so a poster-less video rendered as a bare ▶ floating on
+  nothing ("Videos · 12" showed naked play arrows beside a healthy "Photos · 60"). Two rules fall out: pick the
+  token by CONTRAST against its parent, not by name; and assert it across `PRESET_ORDER` rather than the
+  default preset alone, or a preset-specific collision stays invisible (`mediaSections.test.tsx` loops).
+- **An unstyled `<Text>` is near-BLACK on Android, so a glyph on a dark surface needs an explicit themed
+  colour.** `styles.thumbGlyph` set only `fontSize`, which was masked for as long as its tile was invisible —
+  fixing the token above immediately surfaced a black ▶ on a dark tile. Sibling styles that hardcode `#FFF`
+  (e.g. an overlay drawn over a poster) are NOT evidence the fallback branch is covered; they're different
+  branches. Anything drawn on a themed surface reads its colour from `useTheme().color.*`.
+- **Never give a text container a fixed `height` — system font scaling multiplies the text but cannot shrink
+  the box.** Use `minHeight` + vertical padding. The inbox search field pinned `height: 38` with `fontSize: 16`,
+  so at Android's larger accessibility sizes the placeholder was clipped top AND bottom (verified at
+  `font_scale 1.5`; restore the user's original value afterwards — theirs is `0.85`, not `1.0`). The composer
+  scaled fine because it already sized this way, which is the pattern to copy. Header, bubbles and tiles were
+  all clean, so audit by SETTING the scale rather than reasoning about it: `adb shell settings put system
+  font_scale 1.5`. Guard: `conversationListScreen.test.tsx` asserts no fixed `height`.
+- **An OG-metadata decoder MUST handle HEX numeric entities (`&#x27;`), not just decimal + named.** The hex
+  form is what Jinja2/Django/Rails emit by DEFAULT, so a named-only decoder leaves a literal `&#x27;` sitting
+  in real preview titles (found on a live card reading `Tyler&#x27;s Barbeque`; that page's `og:site_name`
+  carried it too). Order matters: decode `&amp;` LAST, or an escaped entity (`&amp;#x27;`) double-decodes into
+  an apostrophe instead of the literal text. Clamp out-of-range code points rather than letting
+  `String.fromCodePoint` throw. NOTE previews are cached in `url_previews` for **7 days**, so a decoder fix
+  does NOT repair rows already stored — to re-check on device, change the cache key (add a query param) rather
+  than concluding the fix failed. See `ogParser.test.ts`.
 - **URL-preview fetch hits an attacker-controlled URL** — guard it: http(s)-only, `content-type: text/html`,
   size + AbortController-timeout caps, render as plain `<Text>` (no HTML interpretation), and do NOT route it
   through `HttpClient` (keeps the server auth header off third-party sites). RN `fetch` is not CORS-limited.
@@ -475,8 +543,29 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   `SwipeableRow` (conversation-list actions) — both had the identical gap. Device-only to verify (jest can't
   drive native touches); a config-level regression guard lives in
   `test/components/conversations/messageSwipeWrapper.test.tsx` (spies `PanResponder.create`, asserts the guards).
+- **A scrollable whose children own gestures MUST set `keyboardShouldPersistTaps="handled"` — the RN default
+  is `"never"`, which EATS the touch.** Under `"never"`, while the keyboard is up ANY touch on the list is
+  consumed to dismiss it and the children never receive that touch at all. On `MessageList` this silently
+  killed swipe-to-reply whenever the composer had focus — i.e. mid-conversation, the common case. It reads as
+  the OEM gesture flakiness above but is NOT: measured identically on two vendors, which is the tell —
+  Pixel 10 Pro XL / Android 17 and Galaxy S25 Ultra / Android 16 both scored **keyboard CLOSED 4/4 and 12/12
+  replies, keyboard OPEN 0/6**. A PanResponder can't fix it (the touch never arrives), and it is list-wide,
+  not per-bubble, so probing a single Pressable proves nothing — discriminate by swiping an EMPTY area vs a
+  bubble. Every other scrollable in the app already set `"handled"`; MessageList was the outlier. Verified
+  6/6 with the keyboard confirmed up (`dumpsys input_method | grep mInputShown`). Config guard:
+  `test/components/conversations/messageListPinned.test.tsx`.
 - **Mark avatars `accessible={false}`** — they sit next to a label that already announces the name (tile title,
   chat header), so a labeled avatar double-announces under TalkBack. Decorative-by-default is correct here.
+- **Every media bubble needs its own `accessibilityLabel` — a Pressable with none is an ANONYMOUS button.**
+  Audit method (cheap, no TalkBack needed): `uiautomator dump` and count nodes with `focusable="true"` but no
+  `text`/`content-desc`. The inbox scored 75/75 labeled with zero focusable images (avatars correctly opted
+  out per the rule above); a chat screen had SIX unlabeled focusable nodes, and their bounds identified them
+  as exactly the photo + video bubbles. `AudioAttachment`/`ContactCard`/`LocationCard` already labeled
+  themselves; `ImageAttachment` passed `emojiImageShortDescription ?? undefined` (so `undefined` for every
+  ordinary photo) and `VideoPlayer` passed nothing. Labels must state the TAP OUTCOME, not just the kind,
+  because one tap does three different things — an undownloaded item downloads, an errored one retries, a
+  local one opens/plays — a distinction sighted users read off the progress ring. See
+  `videoPlayerLabel.test.tsx` (4 branches) + `imageAttachment.test.tsx`.
 - **Never call `console.*` directly — use `logger` from `@core/secure`** (the redacting logger over a
   `ConsoleSink`). It scrubs guid/password/token/authorization keys + `?guid=` URL params before any sink, and
   CI fails on a raw `console.*` outside `logger.ts`. `__DEV__`-only noise → `logger.debug` (the sink drops it
@@ -589,7 +678,11 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   (`src/ui/toast/`) is an absolutely-positioned, `pointerEvents="none"`, auto-dismiss pill — NOT a `Modal`
   (a Modal would capture touches). Mount it after `<AppDialog/>` in `app/_layout.tsx` (inside
   ThemeProvider+SafeAreaProvider). Headless FCM has no React host, so `showToast` just enqueues and nothing
-  renders — harmless.
+  renders — harmless. **Because it is NOT a Modal it gets no free native window, so the HOST must declare its
+  own stacking — `elevation` (Android) AND `zIndex` — not rely on being a later JSX sibling.** Only the inner
+  pill had `elevation`, and on Android elevation (not sibling order) decides what draws on top: the toast lost
+  to elevated surfaces and never appeared at all — 0 sightings on device across 3 attempts, while `AppDialog`
+  showed 3/3 precisely because a Modal brings its own window. Guard: `appToast.test.tsx`.
 - **Auto-download attachments runs on the INGESTION path via an injected callback.** `DbEventSink` takes an
   optional `onMessageStored?(messageId)` (2nd ctor arg) — undefined in unit tests so their Node import graph
   never pulls natives; the app wires it from `realtimeControl.ts` to `autoDownloadMessageAttachments`
