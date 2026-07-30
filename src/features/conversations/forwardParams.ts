@@ -49,13 +49,11 @@ export function buildForwardParams(sel: {
   if (text) params.forwardText = sel.text as string;
   if (downloaded.length > 0) {
     params.forwardAttachments = JSON.stringify(
-      downloaded.map(
-        (a): ForwardedAttachment => ({
-          uri: a.localPath as string,
-          name: nameFromUri(a.localPath as string),
-          mimeType: a.mimeType ?? 'application/octet-stream',
-        }),
-      ),
+      downloaded.map((a): ForwardedAttachment => ({
+        uri: a.localPath as string,
+        name: nameFromUri(a.localPath as string),
+        mimeType: a.mimeType ?? 'application/octet-stream',
+      })),
     );
   }
   if (params.forwardText == null && params.forwardAttachments == null) {

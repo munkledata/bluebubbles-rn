@@ -3,7 +3,10 @@ import { Stack } from 'expo-router';
 import { useCallback, useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
-import { handleNotificationAction, handleNotificationPress } from '@/services/notifications/actions';
+import {
+  handleNotificationAction,
+  handleNotificationPress,
+} from '@/services/notifications/actions';
 import {
   drainNotificationTap,
   openFromNotification,

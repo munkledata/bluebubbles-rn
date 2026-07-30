@@ -161,10 +161,7 @@ export const Message = z.object({
    * here at the schema boundary so EVERY ingestion path (live socket/FCM event + sync/query) is
    * covered at once. See {@link stripAssociatedGuidPrefix}.
    */
-  associatedMessageGuid: z
-    .string()
-    .transform(stripAssociatedGuidPrefix)
-    .nullish(),
+  associatedMessageGuid: z.string().transform(stripAssociatedGuidPrefix).nullish(),
   associatedMessageType: z.string().nullish(),
   /** Glyph of an arbitrary-emoji tapback (associatedMessageType 'emoji'/'-emoji'). */
   associatedMessageEmoji: z.string().nullish(),
@@ -211,9 +208,7 @@ export function resolveMessageChatGuid(m: Pick<Message, 'chats' | 'chatGuid'>): 
  * instead of crashing the long-press menu. Mirror of the write side (`JSON.stringify` in
  * `upsertMessages`).
  */
-export function parseMessageSummaryInfo(
-  raw: string | null | undefined,
-): MessageSummaryInfo | null {
+export function parseMessageSummaryInfo(raw: string | null | undefined): MessageSummaryInfo | null {
   if (!raw) return null;
   let parsed: unknown;
   try {

@@ -33,10 +33,10 @@ export function contactDisplayName(c: ContactCard): string {
 export function hasContactContent(c: ContactCard): boolean {
   return Boolean(
     c.firstName?.trim() ||
-      c.lastName?.trim() ||
-      c.organization?.trim() ||
-      c.phones?.some((p) => p.number?.trim()) ||
-      c.emails?.some((e) => e.address?.trim()),
+    c.lastName?.trim() ||
+    c.organization?.trim() ||
+    c.phones?.some((p) => p.number?.trim()) ||
+    c.emails?.some((e) => e.address?.trim()),
   );
 }
 

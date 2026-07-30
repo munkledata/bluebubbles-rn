@@ -9,8 +9,7 @@ import { isAtLeast } from '@utils/version';
 export type ConnectFailureKind = 'unauthorized' | 'unreachable' | 'outdated' | 'unknown';
 
 export type ConnectResult =
-  | { ok: true; serverInfo: ServerInfo }
-  | { ok: false; kind: ConnectFailureKind; message: string };
+  { ok: true; serverInfo: ServerInfo } | { ok: false; kind: ConnectFailureKind; message: string };
 
 export interface ConnectionDeps {
   /** Performs GET /server/info against the candidate origin (throws ApiError). */

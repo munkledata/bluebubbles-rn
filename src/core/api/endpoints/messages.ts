@@ -191,7 +191,10 @@ export type DeletedMessage = z.infer<typeof MessageDeletedPayload>;
  * exact ms may RE-EMIT (the server floors fractional ms), so applying a row must stay
  * idempotent — re-tombstoning already is. Gate calls on `supports_message_deleted`.
  */
-export async function deletedMessages(http: HttpClient, afterMs: number): Promise<DeletedMessage[]> {
+export async function deletedMessages(
+  http: HttpClient,
+  afterMs: number,
+): Promise<DeletedMessage[]> {
   const res = await http.get('/message/deleted', DeletedMessageList, {
     query: { after: afterMs },
   });

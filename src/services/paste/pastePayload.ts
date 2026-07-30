@@ -1,9 +1,5 @@
 import type { SharedAttachment } from '@state/shareIntentStore';
-import {
-  DEFAULT_MIME,
-  mimeForExtension,
-  safeShareFileName,
-} from '../share/shareIntentPayload';
+import { DEFAULT_MIME, mimeForExtension, safeShareFileName } from '../share/shareIntentPayload';
 
 /**
  * Pure parser for the `onPaste` event emitted by the `GatorPasteInput` native module

@@ -275,14 +275,18 @@ export function MessageActionsOverlay({
       onPress: onCancelSend,
       destructive: true,
     });
-  if (canDelete) actions.push({ key: 'delete', label: 'Delete', onPress: onDelete, destructive: true });
+  if (canDelete)
+    actions.push({ key: 'delete', label: 'Delete', onPress: onDelete, destructive: true });
 
   const renderAction = (a: ActionDef, i: number): React.JSX.Element => (
     <Pressable
       key={a.key}
       style={[
         styles.action,
-        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.color.separator },
+        i > 0 && {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.color.separator,
+        },
       ]}
       onPress={() => {
         a.onPress();
@@ -339,14 +343,22 @@ export function MessageActionsOverlay({
           <View style={[styles.scrim, { top: 0, left: 0, right: 0, height: holeTop }]} />
           <View style={[styles.scrim, { top: holeBottom, left: 0, right: 0, bottom: 0 }]} />
           <View
-            style={[styles.scrim, { top: holeTop, height: holeBottom - holeTop, left: 0, width: holeLeft }]}
+            style={[
+              styles.scrim,
+              { top: holeTop, height: holeBottom - holeTop, left: 0, width: holeLeft },
+            ]}
           />
           <View
-            style={[styles.scrim, { top: holeTop, height: holeBottom - holeTop, left: holeRight, right: 0 }]}
+            style={[
+              styles.scrim,
+              { top: holeTop, height: holeBottom - holeTop, left: holeRight, right: 0 },
+            ]}
           />
         </Animated.View>
         {/* Floating tapback bar, hugging the bubble's near top corner. */}
-        <Animated.View style={[styles.floatBar, sideStyle, { top: place.barTop, maxWidth }, popStyle]}>
+        <Animated.View
+          style={[styles.floatBar, sideStyle, { top: place.barTop, maxWidth }, popStyle]}
+        >
           <View style={[styles.barPill, { backgroundColor: theme.color.secondaryBackground }]}>
             {pickerButtons}
           </View>

@@ -79,8 +79,8 @@ export default function AccountScreen(): React.JSX.Element {
       ) : status === 'unsupported' ? (
         <View style={styles.center}>
           <Text style={[styles.note, { color: theme.color.secondaryLabel, textAlign: 'center' }]}>
-            This Gator server doesn’t provide iMessage account details yet. Nothing’s wrong with your
-            setup — the feature just isn’t available on this server.
+            This Gator server doesn’t provide iMessage account details yet. Nothing’s wrong with
+            your setup — the feature just isn’t available on this server.
           </Text>
         </View>
       ) : status === 'error' ? (

@@ -55,5 +55,7 @@ export function showDateSeparator(msg: MessageRow, older: MessageRow | null): bo
  */
 export function showTimestampAbove(msg: MessageRow, older: MessageRow | null): boolean {
   if (!older) return true;
-  return Math.floor((msg.dateCreated ?? 0) / 60_000) !== Math.floor((older.dateCreated ?? 0) / 60_000);
+  return (
+    Math.floor((msg.dateCreated ?? 0) / 60_000) !== Math.floor((older.dateCreated ?? 0) / 60_000)
+  );
 }
