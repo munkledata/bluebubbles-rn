@@ -219,7 +219,10 @@ describe('FileChip — press dispatch', () => {
       <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
     );
     fireEvent.press(screen.getByText('report.pdf'));
-    expect(mockOpenAttachmentFile).toHaveBeenCalledWith('file:///data/report.pdf', 'application/pdf');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(
+      'file:///data/report.pdf',
+      'application/pdf',
+    );
     expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(mockDownload).not.toHaveBeenCalled();
   });
@@ -247,7 +250,9 @@ describe('FileChip — press dispatch', () => {
       <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
     );
     fireEvent.press(screen.getByText('report.pdf'));
-    await waitFor(() => expect(useToastStore.getState().current?.message).toMatch(/open this file/));
+    await waitFor(() =>
+      expect(useToastStore.getState().current?.message).toMatch(/open this file/),
+    );
   });
 
   // No toast for either success path. 'shared' deliberately stays silent: the share sheet is a

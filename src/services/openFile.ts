@@ -138,7 +138,10 @@ export async function openAttachmentFile(
         new Promise<null>((resolve) => setTimeout(() => resolve(null), opts?.settleMs ?? 600)),
       ]);
       if (!failure) return { status: 'opened' };
-      logger.warn('[openFile] no viewer for this attachment, falling back to the share sheet', failure);
+      logger.warn(
+        '[openFile] no viewer for this attachment, falling back to the share sheet',
+        failure,
+      );
     }
 
     // Share fallback. NOTE: the FILE path goes here, never the content uri — expo-sharing

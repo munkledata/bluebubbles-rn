@@ -45,6 +45,7 @@ export function mkMessage(over: Partial<EnrichedMessage> = {}): EnrichedMessage 
     senderService: 'iMessage',
     attachments: [],
     reactions: [],
+    stickers: [],
     replyPreview: null,
     ...over,
   };

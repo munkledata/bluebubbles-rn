@@ -7,10 +7,12 @@ import {
   listMessagesAround,
   listMessagesWithSenders,
   listReactionsByMessageGuids,
+  listStickersForTargets,
   type AttachmentRow,
   type MessagePreview,
   type MessageRow,
   type ReactionRow,
+  type StickerRow,
 } from '@db/repositories';
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
 import { createRowIdentityCache } from './rowIdentity';
@@ -26,6 +28,8 @@ export interface MessageWithAttachments extends MessageRow {
 
 export interface EnrichedMessage extends MessageWithAttachments {
   reactions: ReactionRow[];
+  /** Stickers other people slapped ON this message, drawn as an overlay by the bubble. */
+  stickers: StickerRow[];
   replyPreview: MessagePreview | null;
 }
 
@@ -63,10 +67,12 @@ export function useMessages(
       // returns nothing for text-only messages.
       const ids = msgs.map((m) => m.id);
       const attByMsg = await listAttachmentsByMessageIds(db, ids);
-      const reactionsByGuid = await listReactionsByMessageGuids(
-        db,
-        msgs.map((m) => m.guid),
-      );
+      const guids = msgs.map((m) => m.guid);
+      const reactionsByGuid = await listReactionsByMessageGuids(db, guids);
+      // Stickers target a message the same way a reaction does, so they key off the same guid list.
+      // No new watched TABLE is needed: 'messages' covers the sticker row arriving and 'attachments'
+      // covers its local_path being written, which is what makes the image appear once downloaded.
+      const stickersByGuid = await listStickersForTargets(db, guids);
 
       // Reply originals: dedupe the target guids, fetch each once.
       const replyGuids = [
@@ -85,6 +91,7 @@ export function useMessages(
           ...m,
           attachments: attByMsg.get(m.id) ?? [],
           reactions: reactionsByGuid.get(m.guid) ?? [],
+          stickers: stickersByGuid.get(m.guid) ?? [],
           replyPreview: m.threadOriginatorGuid
             ? (previews.get(m.threadOriginatorGuid) ?? null)
             : null,

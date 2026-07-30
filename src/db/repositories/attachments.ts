@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
+import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { firstUrl, mediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
 import { withDbTransaction } from '../transaction';
@@ -152,6 +153,88 @@ export async function listAttachmentsByMessageIds(
     const list = out.get(r.messageId) ?? [];
     list.push(r);
     out.set(r.messageId, list);
+  }
+  return out;
+}
+
+/**
+ * A sticker targeting one of your messages: the sticker MESSAGE plus its image, if the image row
+ * has arrived yet.
+ *
+ * `attachment` is nullable on purpose. A sticker delivered on the LIVE socket/FCM path carries no
+ * attachment rows at all (the server's live fanout serializes with `extra = {chats, handle}` only,
+ * so `serializeMessage` omits `attachments` — the same reason an incoming photo has no attachment
+ * row until the next sync). The image lands on the next `ensureChatSynced`, i.e. chat open. The
+ * overlay therefore has to render a pending tile rather than assume an image exists.
+ */
+/** The sticker MESSAGE columns, before its image is joined on. */
+interface StickerMessageRow {
+  stickerMessageGuid: string;
+  stickerMessageId: number;
+  targetGuid: string;
+  isFromMe: number;
+  dateCreated: number;
+}
+
+export interface StickerRow extends StickerMessageRow {
+  attachment: AttachmentRow | null;
+}
+
+/**
+ * Stickers grouped by the guid of the message they were placed on.
+ *
+ * Two plain SELECTs, no transaction (and never call this from inside one — this module also holds
+ * helpers that transact internally, e.g. `insertOutgoingAttachment`).
+ *
+ * NOTE the discriminator is the sticker MESSAGE's associated type, never `attachments.is_sticker`:
+ * a legacy (Apple code 1000) sticker can arrive with `is_sticker = 0` on its attachment row and
+ * must still render. The `is_sticker = 0` filters in the shared-media queries below are a
+ * different concern (keeping stickers out of the media gallery) and stay as they are.
+ */
+export async function listStickersForTargets(
+  db: AppDatabase,
+  targetGuids: string[],
+): Promise<Map<string, StickerRow[]>> {
+  const out = new Map<string, StickerRow[]>();
+  if (targetGuids.length === 0) return out;
+  const inList = sql.join(
+    targetGuids.map((g) => sql`${g}`),
+    sql`, `,
+  );
+  // Annotated because AppDatabase's generics are `any`, so `db.all<T>()` resolves to `any` and a
+  // `.map(r => …)` callback below would otherwise trip noImplicitAny (a for-of does not).
+  const rows: StickerMessageRow[] = await db.all<StickerMessageRow>(sql`
+    SELECT
+      m.guid AS stickerMessageGuid,
+      m.id AS stickerMessageId,
+      m.associated_message_guid AS targetGuid,
+      m.is_from_me AS isFromMe,
+      m.date_created AS dateCreated
+    FROM messages m
+    WHERE m.associated_message_guid IN (${inList})
+      AND m.associated_message_type = ${STICKER_ASSOCIATED_TYPE}
+      AND m.date_deleted IS NULL
+      AND m.date_retracted IS NULL
+    ORDER BY m.date_created ASC, m.id ASC
+  `);
+  if (rows.length === 0) return out;
+
+  // Reuse the existing projection so blurhash/width/height/localPath and the RCS service CASE
+  // all come along for free.
+  const attsByMessage = await listAttachmentsByMessageIds(
+    db,
+    rows.map((r) => r.stickerMessageId),
+  );
+
+  for (const r of rows) {
+    const atts = attsByMessage.get(r.stickerMessageId) ?? [];
+    const list = out.get(r.targetGuid) ?? [];
+    if (atts.length === 0) {
+      list.push({ ...r, attachment: null });
+    } else {
+      for (const att of atts) list.push({ ...r, attachment: att });
+    }
+    out.set(r.targetGuid, list);
   }
   return out;
 }

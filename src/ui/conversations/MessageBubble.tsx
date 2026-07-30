@@ -8,6 +8,7 @@ import type {
   MessagePreview,
   MessageRow,
   ReactionRow,
+  StickerRow,
   UrlPreviewRow,
 } from '@db/repositories';
 import { isSafePreviewUrl } from '@/services/urlPreview';
@@ -22,7 +23,7 @@ import {
   type BubbleRect,
 } from '@utils';
 import { useTheme } from '../theme';
-import { AttachmentGalleryGrid, AttachmentView } from '../attachments';
+import { AttachmentGalleryGrid, AttachmentView, StickerOverlay } from '../attachments';
 import { BubbleEffectView } from './effects';
 import { ReactionCluster } from './ReactionCluster';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
@@ -33,6 +34,8 @@ interface MessageBubbleProps {
   msg: MessageRow & {
     attachments?: AttachmentRow[];
     reactions?: ReactionRow[];
+    /** Stickers placed ON this message, drawn as an overlay (see StickerOverlay). */
+    stickers?: StickerRow[];
     replyPreview?: MessagePreview | null;
   };
   showTail: boolean;
@@ -115,6 +118,11 @@ export const MessageBubble = React.memo(function MessageBubble({
   // so rendering them would show empty "file box" chips.
   const atts = (msg.attachments ?? []).filter((a) => !a.hideAttachment);
   const reactions = msg.reactions ?? [];
+  // Redacted mode must not render sticker imagery — same rule as the attachment placeholder below.
+  const stickers = redacted ? [] : (msg.stickers ?? []);
+  // Remount the overlay when the sticker SET changes so per-sticker fade/dismiss state can't ride
+  // onto a different sticker in a recycled FlashList row.
+  const stickerKey = stickers.map((s) => s.stickerMessageGuid).join('|');
   // EDITED messages keep their text in attributedBody (the `text` column goes empty), so derive the
   // body from the parsed runs rather than `msg.text` alone — otherwise an edit renders as a blank
   // bubble. `bodyTextOf` strips the U+FFFC attachment placeholder so an attachment-only message
@@ -197,8 +205,15 @@ export const MessageBubble = React.memo(function MessageBubble({
   const bigEmoji = !redacted && !hasSubject && atts.length === 0 && emojiOnly;
   // Reactions anchor to the text/subject/emoji bubble when there is one; for an attachment-ONLY
   // message they must anchor to the attachment instead, or a tapback on a photo shows nothing.
-  const attsReactionAnchor =
-    reactions.length > 0 && atts.length > 0 && !showText && !hasSubject && !bigEmoji;
+  // Reactions AND stickers anchor to the text/subject/emoji bubble when there is one; for an
+  // attachment-ONLY message they must anchor to the attachment instead, or an overlay on a photo
+  // shows nothing.
+  const attsOverlayAnchor =
+    (reactions.length > 0 || stickers.length > 0) &&
+    atts.length > 0 &&
+    !showText &&
+    !hasSubject &&
+    !bigEmoji;
   // A message that is ONLY images (≥2) collapses into a single two-column gallery grid bubble
   // (iMessage-style) instead of a tall vertical stack. Mixed image+file messages keep the stack.
   const imageOnlyGallery =
@@ -273,12 +288,17 @@ export const MessageBubble = React.memo(function MessageBubble({
             </Text>
           </View>
         </View>
-      ) : attsReactionAnchor ? (
+      ) : attsOverlayAnchor ? (
         // Attachment-only message with a tapback: wrap in a relative anchor so the (absolutely
         // positioned) reaction cluster pins to the attachment's top corner.
         <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
           {attachmentsNode}
-          <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
+          {reactions.length > 0 ? (
+            <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
+          ) : null}
+          {stickers.length ? (
+            <StickerOverlay key={stickerKey} stickers={stickers} isFromMe={isFromMe} />
+          ) : null}
         </View>
       ) : (
         attachmentsNode
@@ -300,6 +320,9 @@ export const MessageBubble = React.memo(function MessageBubble({
           </Text>
           {reactions.length > 0 ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
+          ) : null}
+          {stickers.length ? (
+            <StickerOverlay key={stickerKey} stickers={stickers} isFromMe={isFromMe} />
           ) : null}
         </View>
       ) : showText || hasSubject ? (
@@ -324,6 +347,16 @@ export const MessageBubble = React.memo(function MessageBubble({
           {reactions.length > 0 ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
           ) : null}
+          {stickers.length ? (
+            <StickerOverlay key={stickerKey} stickers={stickers} isFromMe={isFromMe} />
+          ) : null}
+        </View>
+      ) : stickers.length > 0 && atts.length === 0 ? (
+        // A sticker on a message with nothing else to render (no text, no subject, no attachment)
+        // still needs a positioned anchor, or the overlay has nothing to attach to and vanishes.
+        <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
+          <View style={styles.stickerOnlySpacer} />
+          <StickerOverlay key={stickerKey} stickers={stickers} isFromMe={isFromMe} />
         </View>
       ) : null}
       {isEdited && !deferEdited ? (
@@ -447,6 +480,8 @@ const styles = StyleSheet.create({
   // Bold subject line above the body inside a bubble.
   subject: { fontWeight: '700', marginBottom: 2 },
   // Emoji-only message: enlarged, no bubble; sits where the bubble would.
+  // Reserves the overlay's own box so a sticker-only message has something to anchor against.
+  stickerOnlySpacer: { width: 72, height: 72 },
   bigEmoji: { marginHorizontal: 6, marginVertical: 2 },
   tombstone: { fontStyle: 'italic', fontSize: 13, marginHorizontal: 14, marginVertical: 4 },
   edited: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },

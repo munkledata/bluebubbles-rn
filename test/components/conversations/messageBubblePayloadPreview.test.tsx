@@ -21,6 +21,10 @@ jest.mock('@ui/attachments', () => {
   return {
     AttachmentView: () => React.createElement(Text, null, 'ATT'),
     AttachmentGalleryGrid: () => React.createElement(Text, null, 'GRID'),
+    // A marker carrying the COUNT so wiring is assertable without rendering the real overlay
+    // (which pulls @/services/download -> ky, ESM and untransformed in this project).
+    StickerOverlay: ({ stickers }: { stickers: unknown[] }) =>
+      React.createElement(Text, null, 'STICKER:' + stickers.length),
   };
 });
 

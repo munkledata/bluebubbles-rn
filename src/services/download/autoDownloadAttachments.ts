@@ -44,7 +44,11 @@ export async function autoDownloadMessageAttachments(
 
     for (const att of eligible) {
       const path = await download(att).catch(() => null);
-      if (path && saveImageToLibrary) {
+      // Stickers are still DOWNLOADED — the in-bubble overlay needs the file — but they are never
+      // filed into the user's Photos. A tapback sticker is not a picture they received; before the
+      // overlay existed this was the only visible trace of a sticker at all, which is how a stray
+      // image plus a "Downloaded 1 image" toast became the sole symptom of an invisible message.
+      if (path && saveImageToLibrary && !att.isSticker) {
         const res = await saveImageToLibrary(path, { album: autoDownloadDestination === 'album' });
         if (res === 'saved') queueToast(autoDownloadDestination);
       }

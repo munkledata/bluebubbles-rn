@@ -23,6 +23,7 @@ import {
   listMessagesAround,
   listMessagesWithSenders,
   listReactionsByMessageGuids,
+  listStickersForTargets,
   type AttachmentRow,
   type MessagePreview,
   type ReactionRow,
@@ -72,6 +73,7 @@ jest.mock('@db/repositories', () => ({
   listMessagesAround: jest.fn(),
   listMessagesWithSenders: jest.fn(),
   listReactionsByMessageGuids: jest.fn(),
+  listStickersForTargets: jest.fn(),
 }));
 
 const mChatId = getChatIdByGuid as jest.MockedFunction<typeof getChatIdByGuid>;
@@ -82,6 +84,7 @@ const mRecent = listMessagesWithSenders as jest.MockedFunction<typeof listMessag
 const mReactions = listReactionsByMessageGuids as jest.MockedFunction<
   typeof listReactionsByMessageGuids
 >;
+const mStickers = listStickersForTargets as jest.MockedFunction<typeof listStickersForTargets>;
 
 function mkAttachment(over: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -132,6 +135,7 @@ beforeEach(() => {
   mAround.mockResolvedValue([]);
   mAtt.mockResolvedValue(new Map());
   mReactions.mockResolvedValue(new Map());
+  mStickers.mockResolvedValue(new Map());
   mPreview.mockResolvedValue(null);
 });
 

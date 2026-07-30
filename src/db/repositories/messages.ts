@@ -1,5 +1,6 @@
 import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Attachment, Message } from '@core/models';
+import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import { chatHandles, chats, messages, outgoingQueue } from '../schema';
 import { withDbTransaction } from '../transaction';
@@ -556,6 +557,34 @@ const MESSAGE_ROW_SELECT = sql`
   FROM messages m
   LEFT JOIN handles h ON h.id = m.handle_id`;
 
+/**
+ * Associated-message types the UI draws as an OVERLAY on the target bubble, so they must not also
+ * appear as messages of their own. Derived from the core constants (both directions) so this can
+ * never drift from `isOverlayAssociatedType`.
+ */
+const OVERLAY_ASSOCIATED_TYPES: string[] = [
+  ...REACTION_BASE_TYPES,
+  'emoji',
+  STICKER_ASSOCIATED_TYPE,
+].flatMap((t) => [t, `-${t}`]);
+
+/**
+ * Exclude only the types we render as an overlay — NOT every associated message.
+ *
+ * The old blanket `associated_message_type IS NULL` was doing two jobs with one test: it correctly
+ * hid reactions, and it silently swallowed STICKERS, which is why a received sticker rendered
+ * nowhere at all. It would also swallow any future associated type, including the raw numeric Apple
+ * codes the server emits for anything its own map doesn't recognise. Anything not in this list now
+ * falls through and renders as an ordinary message — the safe direction to fail.
+ */
+const notAnOverlayMessage = (): SQL => {
+  const list = sql.join(
+    OVERLAY_ASSOCIATED_TYPES.map((t) => sql`${t}`),
+    sql`, `,
+  );
+  return sql`(m.associated_message_type IS NULL OR m.associated_message_type NOT IN (${list}))`;
+};
+
 /** Run the shared message SELECT with extra WHERE conditions + an ORDER BY + LIMIT. */
 function queryMessageRows(
   db: AppDatabase,
@@ -567,7 +596,7 @@ function queryMessageRows(
   return db.all<MessageRow>(sql`
     ${MESSAGE_ROW_SELECT}
     WHERE m.chat_id = ${chatId} ${where}
-      AND m.associated_message_type IS NULL
+      AND ${notAnOverlayMessage()}
       AND m.date_deleted IS NULL
     ${order}
     LIMIT ${limit}

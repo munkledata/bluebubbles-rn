@@ -252,6 +252,26 @@ export async function seedFixtures(): Promise<number> {
           associatedMessageGuid: 'cr-1',
           associatedMessageType: 'love',
         }),
+        // A STICKER placed on the same message — renders as an overlay on that bubble, not as a
+        // message of its own. Seeded so the overlay is verifiable on a dev build with no server.
+        Message.parse({
+          guid: 'cr-sticker-1',
+          isFromMe: false,
+          dateCreated: now - 27 * 3600_000 + 6_000,
+          originalROWID: 222,
+          handle: { address: 'craig@apple.com' },
+          associatedMessageGuid: 'cr-1',
+          associatedMessageType: 'sticker',
+          attachments: [
+            Attachment.parse({
+              guid: 'cr-sticker-att',
+              mimeType: 'image/png',
+              isSticker: true,
+              width: 200,
+              height: 200,
+            }),
+          ],
+        }),
         Message.parse({
           guid: 'cr-reply-1',
           text: 'Yes! Watched it twice',
@@ -379,6 +399,12 @@ export async function seedFixtures(): Promise<number> {
     // DEV: render the first image from a real remote URL (localPath is normally a
     // downloaded file://; for the demo this avoids needing a server).
     await updateAttachmentLocalPath(db, 'cr-img-att', 'https://picsum.photos/seed/bb/1200/800');
+    // DEV: the sticker image, so the overlay draws something on the 'cr-1' bubble.
+    await updateAttachmentLocalPath(
+      db,
+      'cr-sticker-att',
+      'https://picsum.photos/seed/sticker/200/200',
+    );
     // DEV: a public sample mp4 plays inline via expo-video (HTTPS streams directly).
     await updateAttachmentLocalPath(
       db,

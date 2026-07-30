@@ -92,4 +92,21 @@ describe('autoDownloadMessageAttachments', () => {
       jest.useRealTimers();
     }
   });
+  // A sticker is downloaded (the in-bubble overlay needs the file) but must never be filed into the
+  // user's Photos. Before the overlay existed, that stray gallery image plus a "Downloaded 1 image"
+  // toast was the ONLY visible trace of a received sticker.
+  it('downloads a sticker but never saves it to the gallery, and pops no toast', async () => {
+    jest.useFakeTimers();
+    try {
+      useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
+      mockList.mockResolvedValue(new Map([[1, [imageRow({ isSticker: 1 })]]]));
+      await autoDownloadMessageAttachments(db, 1);
+      expect(mockDownload).toHaveBeenCalledWith(expect.objectContaining({ guid: 'a1' }));
+      expect(mockSave).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1300);
+      expect(useToastStore.getState().current).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

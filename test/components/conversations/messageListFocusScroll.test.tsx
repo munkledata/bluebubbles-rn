@@ -108,6 +108,7 @@ function make(guid: string, dateCreated: number): EnrichedMessage {
     senderService: null,
     attachments: [],
     reactions: [],
+    stickers: [],
     replyPreview: null,
   } as EnrichedMessage;
 }

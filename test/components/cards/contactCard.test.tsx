@@ -210,9 +210,7 @@ describe('ContactCard — tap contract', () => {
     );
     await screen.findByText('John Smith');
     fireEvent.press(screen.getByLabelText('Contact: John Smith'));
-    await waitFor(() =>
-      expect(useToastStore.getState().current?.message).toMatch(/contact cards/),
-    );
+    await waitFor(() => expect(useToastStore.getState().current?.message).toMatch(/contact cards/));
   });
 });
 
