@@ -230,4 +230,69 @@ node-tested (`reactionMenuLayout.test.ts`) but the on-screen placement is device
 
 ---
 
+---
+
+## (z) Batch 1 defect fixes — branch `bb2-batch1-defects` (2026-07-30)
+
+Three bugs from `BB_APP_2.0_COMPARISON_2026-07-30.md`. All three were INVISIBLE to the test
+suite before this work, and two of them are things jest fundamentally cannot prove (a real
+Android intent, a real screenshot). This section is the part of the fix that a machine can't
+sign off.
+
+Needs a **clean rebuild** (`npm run android` / a fresh dev client) — a JS reload is enough for
+the redaction and sticker items, but the document-open path touches native FileProvider
+plumbing, so build fresh to be sure of what you're testing.
+
+### Received documents can be opened (DOC-1 / DOC-2)
+
+- [ ] Have someone send you a **PDF**. Tap the chip in the thread. It should OPEN in a viewer
+      (or, if you have no PDF app, show the share sheet). Before this fix the tap did
+      **nothing at all** — no error, no toast, no log line.
+- [ ] Repeat with a **contact card (.vcf)** — expect the contacts importer or the share sheet.
+- [ ] With **no PDF viewer installed** (or after clearing defaults), confirm you get either the
+      share sheet or a toast reading "No app on this device can open PDF files" — never silence.
+- [ ] Clear the app's cache so the file is gone, then tap the chip: it should **re-download**
+      rather than error (that's the `missing` branch self-healing).
+- [ ] While tapping, watch logcat for `[openFile]`. A `no viewer for this attachment` warn line
+      is expected on the share-sheet fallback; an `error`-level line is a real failure worth
+      reporting.
+
+### Redacted mode hides locations (REDACT-1 / REDACT-2)
+
+- [ ] Settings → turn **Redacted Mode ON**. Open **Find My**.
+- [ ] The map is replaced by a panel reading "Map hidden in Redacted Mode". No pins anywhere.
+- [ ] Device rows read "Device" / "Item" (People tab: "Person"), with "Location available" or
+      "No location" — **no street address**, and **no battery percentage**.
+- [ ] There is **no "Open ↗" button**, and tapping a row does nothing (no map recenter).
+- [ ] **Take an actual screenshot and look at it.** Nothing in the image should identify where
+      any device is. This is the whole point of the mode, and it's the check only a human can do.
+- [ ] Open a chat containing a **shared location** card: it should read "Hidden in Redacted
+      Mode" instead of coordinates, and tapping it must NOT open Maps.
+- [ ] Turn Redacted Mode **OFF** and confirm everything comes back (map, pins, address,
+      battery, Open ↗). If it doesn't, the fail-closed guard is stuck — say so.
+
+### Received stickers are visible (STICKER-1..3)
+
+The dev seed includes a sticker on Craig's "Morning! ☀️" message, so you can check the
+rendering without waiting for someone to send one.
+
+- [ ] On a **dev build**, open the seeded Craig conversation. A small sticker image sits on the
+      corner of the "Morning! ☀️" bubble.
+- [ ] **Tap it** — it fades to ~25% so the bubble text underneath is readable. Tap again to
+      restore.
+- [ ] **Long-press it** — it disappears for this session.
+- [ ] Confirm the sticker does **not** also appear as its own separate bubble in the thread
+      (that would be a double-render).
+- [ ] Now the real thing: have someone on iMessage **send you a sticker** onto one of your
+      messages. It should appear on that bubble. Note whether it shows up **immediately** or
+      only after you leave and re-open the chat — the live push carries no image, so a delay
+      here is EXPECTED and is what decides whether the follow-up item `STICKER-4` is worth
+      building. **Please record which you saw.**
+- [ ] Check **Photos / the Gator album**: the received sticker must **NOT** be saved there, and
+      you should get no "Downloaded 1 image" toast for it. (Ordinary received photos should
+      still save as before — check one to be sure the skip is sticker-only.)
+- [ ] With Redacted Mode **ON**, confirm the sticker imagery is **not** rendered.
+
+_Report format that helps most: which box, what you saw, and a screenshot or the logcat line._
+
 _When every box is ticked, the SDK 57 / notify-kit upgrade is verified on-device._
