@@ -9,7 +9,7 @@ import { useReactiveQuery } from '@db/useReactiveQuery';
 import { cancelReminder, rescheduleReminder } from '@/services/notifications/remindersService';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
-import { formatChatDate, formatTime } from '@utils';
+import { reminderSubtitle } from '@utils';
 
 /** Saved message reminders, reactive; tap to reschedule, Delete to cancel. */
 export default function RemindersScreen(): React.JSX.Element {
@@ -50,7 +50,7 @@ export default function RemindersScreen(): React.JSX.Element {
         renderItem={({ item }: { item: Reminder }) => (
           <ActionListRow
             title={item.messagePreview || 'Message'}
-            subtitle={`${formatChatDate(item.scheduledFor)} · ${formatTime(item.scheduledFor)}`}
+            subtitle={reminderSubtitle(item.scheduledFor)}
             onPress={() => onReschedule(item)}
             action={{
               label: 'Delete',

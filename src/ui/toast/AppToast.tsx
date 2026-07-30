@@ -75,6 +75,18 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'flex-end',
     alignItems: 'center',
+    // THE HOST MUST DECLARE ITS OWN STACKING, not rely on being a later JSX sibling.
+    // `<AppToast/>` sits after `<ThemedStack/>`, but the stack renders through
+    // react-native-screens as NATIVE views, and Android does not order a plain sibling View
+    // above a native/elevated one by JSX position alone — so the pill was painted UNDERNEATH
+    // the current screen and never appeared on device. `AppDialog` never hit this because it is
+    // a `Modal` (its own native window), which is exactly why dialogs showed and toasts did not.
+    // Found on-device: three dialogs rendered fine while zero toasts ever did, and the toast's
+    // text never even reached the accessibility tree. Jest can't catch this — there is no native
+    // stack under react-test-renderer, so `appToast.test.tsx` passes either way.
+    // elevation (Android) + zIndex (iOS/Yoga) so it wins on both.
+    elevation: 24,
+    zIndex: 9999,
   },
   pill: {
     position: 'absolute',

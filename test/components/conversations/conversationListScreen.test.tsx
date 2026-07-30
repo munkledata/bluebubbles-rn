@@ -774,6 +774,29 @@ describe('ConversationListScreen — re-land at the top on return', () => {
 });
 
 /**
+ * Accessibility: the search field must GROW with the system font scale rather than clip.
+ * A fixed `height` cannot contain scaled text, and on device at font_scale 1.5 the placeholder
+ * lost the tops and tails of its glyphs — a silent failure, since nothing errors and the field
+ * still works. Asserting on the resolved style is the only jest-visible signal (RNTL cannot
+ * change the OS font scale), so this is a config-level guard like the MessageList
+ * keyboardShouldPersistTaps one.
+ */
+describe('ConversationListScreen search field sizing', () => {
+  it('sizes the search input with minHeight, never a fixed height', async () => {
+    setChats({ data: [makeRow({ guid: 'a' })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    const input = screen.getByPlaceholderText('Search messages & chats');
+    const flat = Object.assign({}, ...[input.props.style].flat(Infinity).filter(Boolean));
+
+    expect(flat.height).toBeUndefined();
+    expect(flat.minHeight).toBe(38);
+    // Padding is what actually buys the scaled glyphs their room.
+    expect(flat.paddingVertical).toBeGreaterThan(0);
+  });
+});
+
+/**
  * The bottom search bar's safe-area reservation — the inbox half of the "empty band above the
  * keyboard" fix (the chat half is conversations/composerKeyboardInset.test.tsx).
  *

@@ -445,7 +445,15 @@ const styles = StyleSheet.create({
   searchBar: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   searchWrap: { justifyContent: 'center' },
   searchInput: {
-    height: 38,
+    // `minHeight` + explicit vertical padding, NEVER a fixed `height`: system font scaling
+    // multiplies the 16pt text but cannot shrink a hard 38dp box, so at Android's larger
+    // accessibility sizes the placeholder/typed text was clipped top AND bottom (verified on
+    // device at font_scale 1.5 — "Search messages & chats" lost the tops and tails of its
+    // glyphs). The composer's own input already grows this way, which is why it scaled fine.
+    // At normal scales the text is ~21dp + 12dp padding < 38, so minHeight still wins and the
+    // field looks exactly as before.
+    minHeight: 38,
+    paddingVertical: 6,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingRight: 38,

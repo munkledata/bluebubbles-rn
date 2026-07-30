@@ -120,4 +120,29 @@ describe('AppToast', () => {
     expect(screen.queryByText('ghost two')).toBeNull();
     expect(useToastStore.getState().queue).toHaveLength(0);
   });
+
+  /**
+   * F7 (device-found): the toast was invisible in practice. AppToast is deliberately NOT a Modal
+   * (a Modal would swallow touches), so unlike AppDialog it gets NO free native window to sit in —
+   * it is an ordinary sibling View. Only the inner pill declared `elevation`, and on Android
+   * elevation, not JSX sibling order, decides what draws on top: the toast lost to elevated
+   * surfaces above it and never appeared (0 sightings across 3 attempts on device, while dialogs
+   * showed 3/3). The HOST must declare its own stacking — elevation for Android, zIndex for Yoga.
+   */
+  it('the host declares its own stacking so it cannot be drawn under other surfaces', async () => {
+    await renderWithTheme(<AppToast />);
+    await act(async () => {
+      showToast('heads up');
+    });
+    await screen.findByText('heads up');
+
+    const overlay = screen.root;
+    if (!overlay) throw new Error('AppToast rendered nothing while a toast is active');
+    const style = StyleSheet.flatten(overlay.props.style) as {
+      elevation?: number;
+      zIndex?: number;
+    };
+    expect(style.elevation).toBeGreaterThan(0);
+    expect(style.zIndex).toBeGreaterThan(0);
+  });
 });

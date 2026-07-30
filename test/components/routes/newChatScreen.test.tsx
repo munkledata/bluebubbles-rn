@@ -391,3 +391,149 @@ describe('NewChatScreen — create failure', () => {
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
   });
 });
+
+/**
+ * F2 (device-found, HIGH): Start used to require a COMMITTED chip, and the only things that
+ * committed one were a trailing comma and `submitEditing`. So typing a number and pressing Start —
+ * the obvious flow, and the one a user hits when the keyboard shows "Start" rather than a return
+ * key — silently did nothing at all: no chat, no dialog, no log. Every pre-existing test in this
+ * file fires `submitEditing` first, which is exactly why the suite was green while the screen was
+ * broken. These lock the UNCOMMITTED path.
+ *
+ * The pending recipient is deliberately loose (the server is the real validator) but strict enough
+ * that a half-typed contact NAME can never start a garbage chat — hence the negative cases.
+ */
+describe('NewChatScreen — Start works on a typed address that was never committed (F2)', () => {
+  it('creates the chat from raw input with NO submitEditing and NO trailing comma', async () => {
+    mockSearchParams = { forwardText: 'Hello there' };
+    await renderWithTheme(<NewChatScreen />);
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), '+15551234567');
+    });
+    // Deliberately NO submitEditing — this is the exact state that used to dead-end.
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551234567'], 'Hello there', 'iMessage'),
+    );
+  });
+
+  it('accepts a raw email the same way', async () => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), 'someone@example.com');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(['someone@example.com'], 'Hi', 'iMessage'),
+    );
+  });
+
+  it('tolerates a trailing comma without duplicating the recipient', async () => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), '+15551234567,');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+
+    // The comma commits a chip; the pending value must not ALSO be appended.
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
+    expect(mockCreateNewChat.mock.calls[0]?.[0]).toEqual(['+15551234567']);
+  });
+
+  it('refuses a half-typed contact NAME — that would start a garbage chat', async () => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), 'Aar');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+
+    await waitFor(() => expect(mockCreateNewChat).not.toHaveBeenCalled());
+  });
+
+  it('refuses too-few digits and a malformed email', async () => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+    const toInput = screen.getByPlaceholderText('Phone or email');
+
+    for (const bad of ['12345', 'nope@', '@nope.com', 'a@b']) {
+      await act(async () => {
+        fireEvent.changeText(toInput, bad);
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByText('Start'));
+      });
+      await waitFor(() => expect(mockCreateNewChat).not.toHaveBeenCalled());
+    }
+  });
+});
+
+/**
+ * F21 (found by the F2 tests above, pre-existing): the comma branch of `onChangeText` resolved the
+ * recipient from the PREVIOUS `query` state and never called `setQuery`, so a single change event
+ * carrying both the address and the comma — i.e. a PASTE — committed nothing and erased the field.
+ * Typing character-by-character masked it because `query` was already populated by then.
+ */
+describe('NewChatScreen — a pasted comma-terminated address (F21)', () => {
+  it('commits a pasted "address," instead of silently erasing it', async () => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+
+    // ONE event carrying address + comma, exactly what a paste produces.
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), '+15551234567,');
+    });
+
+    expect(await screen.findByText('+15551234567 ✕')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
+    expect(mockCreateNewChat.mock.calls[0]?.[0]).toEqual(['+15551234567']);
+  });
+
+  it('keeps non-addressable text visible (minus the comma) rather than dropping it', async () => {
+    await renderWithTheme(<NewChatScreen />);
+    const toInput = screen.getByPlaceholderText('Phone or email');
+
+    await act(async () => {
+      fireEvent.changeText(toInput, 'Aar,');
+    });
+
+    // Still in the field for the user to finish typing — not silently wiped.
+    await waitFor(() => expect(toInput.props.value).toBe('Aar'));
+    expect(screen.queryByText('Aar ✕')).toBeNull();
+  });
+
+  it('still commits char-by-char typing followed by a comma', async () => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+    const toInput = screen.getByPlaceholderText('Phone or email');
+
+    await act(async () => {
+      fireEvent.changeText(toInput, '+15551234567');
+    });
+    await act(async () => {
+      fireEvent.changeText(toInput, '+15551234567,');
+    });
+
+    expect(await screen.findByText('+15551234567 ✕')).toBeTruthy();
+  });
+});

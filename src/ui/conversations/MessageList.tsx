@@ -382,6 +382,18 @@ export function MessageList({
             ? undefined
             : { startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }
         }
+        // MUST be "handled" (the RN default is "never"). Under "never", while the keyboard is up
+        // ANY touch on the list dismisses it AND the children never receive that touch — which
+        // silently killed swipe-to-reply whenever the composer had focus. Measured identically on
+        // two OEMs (Pixel 10 Pro XL / Android 17 and Galaxy S25 Ultra / Android 16):
+        //   keyboard CLOSED → 4/4 and 12/12 replies      keyboard OPEN → 0/6 on BOTH
+        // and a 3-way probe confirmed the mechanism: a tap OR a horizontal swipe dismissed the
+        // keyboard (a vertical scroll correctly did not), and it fired for taps on bubbles, on the
+        // gaps between them, and on empty row space alike — i.e. list-wide, not the bubble's
+        // Pressable. Every other scrollable here already sets "handled" (Composer, AttachmentTray,
+        // SearchResultsView, settings, new-chat…); this list was the one that
+        // missed it. Jest can't catch it — RNTL has no soft keyboard.
+        keyboardShouldPersistTaps="handled"
         refreshControl={onRefresh ? refreshControl : undefined}
         onScroll={onScroll}
         onScrollBeginDrag={onScrollBeginDrag}

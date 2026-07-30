@@ -74,3 +74,21 @@ function shortDate(d: Date): string {
     day: 'numeric',
   }).format(d);
 }
+
+/**
+ * Subtitle for a saved message reminder: "7:45 PM" when it's due TODAY, "Thu, Jul 30 · 7:45 PM"
+ * otherwise.
+ *
+ * {@link formatChatDate} already collapses to time-only for today, so naively pairing it with
+ * {@link formatTime} rendered the same clock TWICE ("7:45 PM · 7:45 PM") — seen on device on the
+ * Reminders screen. The de-dupe compares the two RENDERED strings rather than re-deriving "is it
+ * today", so it stays correct if formatChatDate's bucketing thresholds ever change.
+ *
+ * `now` is injectable so this is deterministic under test (the today/not-today branch is the
+ * entire point of the function).
+ */
+export function reminderSubtitle(scheduledFor: number, now: number = Date.now()): string {
+  const day = formatChatDate(scheduledFor, now);
+  const time = formatTime(scheduledFor);
+  return day === time || day === '' ? time : `${day} · ${time}`;
+}

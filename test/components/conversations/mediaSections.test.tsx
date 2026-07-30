@@ -14,6 +14,7 @@
  * attachments/imageAttachment.test.tsx).
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 
 jest.mock('expo-image', () => {
   const RN = require('react-native');
@@ -36,6 +37,8 @@ jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.
 import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 // eslint-disable-next-line import/first
 import { MediaSections } from '@ui/conversations/MediaSections';
+
+import { PRESET_ORDER, PRESETS } from '@ui/theme';
 // eslint-disable-next-line import/first
 import { useRedactedModeStore } from '@state/redactedModeStore';
 // eslint-disable-next-line import/first
@@ -174,4 +177,58 @@ describe('MediaSections', () => {
     expect(screen.getByText('[link]')).toBeTruthy();
     expect(screen.queryByText('https://example.com/secret')).toBeNull();
   });
+});
+
+/**
+ * F15 + F17 (both device-found, and both PRESET-DEPENDENT — which is why they need a loop over
+ * PRESET_ORDER rather than a single default-theme assertion):
+ *
+ *  F15  The tile used `groupedBackground`, which is byte-identical to `background` in BOTH shipped
+ *       presets (OLED Dark #000000, Gator #0B1A2B). So a poster-less video rendered as a bare ▶
+ *       floating on nothing — on device "Videos · 12" showed five naked play arrows next to a
+ *       healthy "Photos · 60". `secondaryBackground` is distinct from `background` in every preset.
+ *
+ *  F17  The fallback glyph carried NO `color`, so it inherited Android's near-black default Text
+ *       colour — a black ▶ on a dark tile, which is how F15's fix exposed it. Its sibling
+ *       `thumbGlyphOverlay` hardcodes white, but that branch only runs over a blurhash poster.
+ *
+ * Both are invisible to a snapshot and to tsc; only the resolved style catches them.
+ */
+describe('MediaSections — fallback tile stays visible in every shipped preset', () => {
+  for (const preset of PRESET_ORDER) {
+    const tokens = PRESETS[preset].tokens.color;
+
+    it(`[${preset}] tile background differs from the page background`, async () => {
+      await renderWithTheme(
+        <MediaSections
+          media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4' })] })}
+          onOpenMedia={() => {}}
+        />,
+        { preset },
+      );
+
+      const tile = screen.getAllByRole('image')[0];
+      const style = StyleSheet.flatten(tile!.props.style) as { backgroundColor?: string };
+      expect(style.backgroundColor).toBe(tokens.secondaryBackground);
+      // The actual regression: a tile the same colour as the page is an invisible tile.
+      expect(style.backgroundColor).not.toBe(tokens.background);
+      // Guard the specific token that caused it, for however the presets evolve.
+      expect(style.backgroundColor).not.toBe(tokens.groupedBackground);
+    });
+
+    it(`[${preset}] fallback glyph is themed, not the default near-black`, async () => {
+      await renderWithTheme(
+        <MediaSections
+          media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4' })] })}
+          onOpenMedia={() => {}}
+        />,
+        { preset },
+      );
+
+      const glyph = screen.getByText('▶');
+      const style = StyleSheet.flatten(glyph.props.style) as { color?: string };
+      expect(style.color).toBe(tokens.secondaryLabel);
+      expect(style.color).toBeDefined();
+    });
+  }
 });

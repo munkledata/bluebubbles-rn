@@ -322,4 +322,16 @@ describe('MessageList — pinned-to-bottom convergence', () => {
     await waitFor(() => expect(onExitAnchor).toHaveBeenCalledTimes(1));
     expect(mockScrollToEnd).not.toHaveBeenCalled(); // the window bottom is not the newest — no lie
   });
+
+  // Regression guard (device-found, 2026-07-29): with the RN default
+  // keyboardShouldPersistTaps="never", a touch on the list while the keyboard is up dismisses the
+  // keyboard AND swallows the touch, so swipe-to-reply did nothing whenever the composer had focus.
+  // Measured 0/6 with the keyboard open vs 4/4/12/12 closed, identically on a Pixel 10 Pro XL
+  // (Android 17) and a Galaxy S25 Ultra (Android 16) — i.e. not OEM-specific. Config-level guard
+  // because RNTL has no soft keyboard to drive.
+  it('sets keyboardShouldPersistTaps="handled" so a touch cannot swallow row gestures', async () => {
+    await renderWithTheme(<MessageList chatGuid={GUID} isGroup={false} messages={initial()} />);
+    await waitFor(() => expect(mockListProps.current).toBeTruthy());
+    expect(mockListProps.current.keyboardShouldPersistTaps).toBe('handled');
+  });
 });

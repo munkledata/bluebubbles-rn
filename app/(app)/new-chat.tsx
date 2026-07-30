@@ -9,6 +9,7 @@ import { findChatByParticipantAddresses } from '@db/repositories';
 import { createNewChat, http } from '@/services';
 import { sendImages } from '@/services/send';
 import { checkIMessageAvailability } from '@core/api/endpoints/handles';
+import { logger } from '@core/secure';
 import { parseForwardAttachments } from '@features/conversations/forwardParams';
 import { useContactSearch } from '@features/contacts/useContactSearch';
 import { useRcsEnabled } from '@state/sessionStore';
@@ -20,6 +21,19 @@ import { ContactSuggestionList } from '@ui/ContactSuggestionList';
 interface Recipient {
   address: string;
   name: string;
+}
+
+/**
+ * PURE: does this raw typed string plausibly address someone? Deliberately loose — the server
+ * is the real validator — but strict enough that a half-typed contact NAME ("Aar") never becomes
+ * a recipient and starts a garbage chat. An email needs an `@` with text either side; a phone
+ * needs at least 7 digits (shortcodes are 5-6, but those aren't addressable outbound here).
+ */
+function looksLikeAddress(raw: string): boolean {
+  if (raw.length === 0) return false;
+  if (raw.includes('@')) return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw);
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 7 && /^[+\d\s()./-]+$/.test(raw);
 }
 
 /** Start a new conversation: pick recipient chips + an initial message. */
@@ -149,22 +163,57 @@ export default function NewChatScreen(): React.JSX.Element {
     }
   };
 
-  // Committing raw typed text (comma / return) as a chip, when it looks like an address.
-  const commitRaw = (): void => {
-    const raw = query.trim().replace(/,$/, '').trim();
-    if (raw.length === 0) return;
-    addRecipient({ address: raw, name: raw });
+  // The typed-but-uncommitted address, if it looks like one. Tapping "Start" must honour this:
+  // commitRaw() is only wired to a trailing comma and onSubmitEditing, so a user who types a
+  // number that ISN'T a saved contact and taps Start would otherwise hit `recipients.length > 0`
+  // and get a silent no-op — no navigation, no error. Treating it as a pending recipient makes
+  // Start work for an unsaved number, which is the whole point of a free-text "To:" field.
+  // Raw text → recipient, or null when it isn't addressable / is already chosen. Shared by the
+  // pending-recipient derivation and the comma handler so both agree on what counts.
+  const rawToRecipient = (text: string): Recipient | null => {
+    const raw = text.trim().replace(/,$/, '').trim();
+    if (!looksLikeAddress(raw) || chosen.has(raw.toLowerCase())) return null;
+    return { address: raw, name: raw };
   };
+
+  const pendingRecipient = rawToRecipient(query);
+
+  // Committing raw typed text (return key) as a chip, when it looks like an address.
+  const commitRaw = (): void => {
+    if (!pendingRecipient) return;
+    addRecipient(pendingRecipient);
+  };
+
+  /**
+   * The comma key means "commit this recipient". It MUST resolve from the INCOMING text, not from
+   * `query`: a PASTE delivers the whole address and the comma in ONE change event, so resolving
+   * from the previous `query` (still empty) committed nothing AND — because the comma branch never
+   * called setQuery — silently threw the pasted text away. Typing char-by-char hid this, since
+   * `query` was already populated by the time the comma arrived.
+   * When the text isn't addressable we keep it visible (minus the comma) rather than dropping it.
+   */
+  const onCommaCommit = (text: string): void => {
+    const rec = rawToRecipient(text);
+    if (rec) {
+      addRecipient(rec);
+      setQuery('');
+      return;
+    }
+    setQuery(text.replace(/,$/, ''));
+  };
+
+  // Recipients as they'd be at send time, including a still-uncommitted typed address.
+  const effectiveRecipients = pendingRecipient ? [...recipients, pendingRecipient] : recipients;
 
   // RCS chats are 1:1 (the server's RCS branch routes to the FIRST address only) — block a
   // multi-recipient create instead of silently dropping the extra people.
-  const rcsTooMany = service === 'RCS' && recipients.length > 1;
+  const rcsTooMany = service === 'RCS' && effectiveRecipients.length > 1;
 
   // A staged shared file can be sent even with no typed message.
   const canStart =
     !busy &&
     !rcsTooMany &&
-    recipients.length > 0 &&
+    effectiveRecipients.length > 0 &&
     (message.trim().length > 0 || staged.length > 0);
 
   const onStart = async (): Promise<void> => {
@@ -173,14 +222,18 @@ export default function NewChatScreen(): React.JSX.Element {
     try {
       // createNewChat is server-deduped, so it returns the existing chat if there is one.
       const guid = await createNewChat(
-        recipients.map((r) => r.address),
+        effectiveRecipients.map((r) => r.address),
         message.trim(),
         service,
       );
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) await sendImages({ chatGuid: guid, images: staged });
       router.replace(`/chat/${encodeURIComponent(guid)}`);
-    } catch {
+    } catch (e) {
+      // Log at ERROR: only error-level lines reach ErrorReportSink, and this is a user-visible
+      // dead end (found on-device — the dialog appeared with NO log line anywhere, so a real
+      // failure like an RCS bridge outage left zero telemetry).
+      logger.error('[new-chat] createNewChat failed', e);
       showDialog(
         'New message',
         'Couldn’t start the conversation. Check the address and your server connection.',
@@ -195,7 +248,14 @@ export default function NewChatScreen(): React.JSX.Element {
         title="New Message"
         onBack={() => router.back()}
         right={
-          <Pressable onPress={() => void onStart()} disabled={!canStart} accessibilityRole="button">
+          // `disabled` greys the label but does NOT reach the a11y tree on its own, so TalkBack
+          // would announce a dead button as actionable — state it explicitly.
+          <Pressable
+            onPress={() => void onStart()}
+            disabled={!canStart}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canStart }}
+          >
             <Text
               style={[
                 styles.start,
@@ -236,7 +296,7 @@ export default function NewChatScreen(): React.JSX.Element {
             <TextInput
               value={query}
               onChangeText={(t) => {
-                if (t.endsWith(',')) commitRaw();
+                if (t.endsWith(',')) onCommaCommit(t);
                 else setQuery(t);
               }}
               onKeyPress={(e) => onKeyPress(e.nativeEvent.key)}
@@ -263,7 +323,9 @@ export default function NewChatScreen(): React.JSX.Element {
           </Pressable>
         ) : null}
 
-        <View style={styles.serviceRow}>
+        {/* Transport picker. `radio` + `selected` so the active transport is ANNOUNCED — colour
+            alone leaves a screen-reader user unable to tell which one is armed. */}
+        <View style={styles.serviceRow} accessibilityRole="radiogroup">
           {(rcsEnabled
             ? (['iMessage', 'SMS', 'RCS'] as const)
             : (['iMessage', 'SMS'] as const)
@@ -274,6 +336,9 @@ export default function NewChatScreen(): React.JSX.Element {
                 serviceTouchedRef.current = true;
                 setService(s);
               }}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: service === s }}
+              accessibilityLabel={`Send as ${s}`}
               style={[
                 styles.serviceChip,
                 {

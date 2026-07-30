@@ -11,13 +11,33 @@ const CONTENT_RE = /content\s*=\s*["']([^"']*)["']/i;
 const TITLE_RE = /<title[^>]*>([^<]*)<\/title>/i;
 
 function decode(s: string): string {
-  return s
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .trim();
+  return (
+    s
+      // Numeric entities, BOTH decimal (`&#39;`) and hex (`&#x27;`). The hex form is what
+      // Jinja2/Django/Rails and most templating layers emit by default, so a named-only
+      // decoder leaves a literal `&#x27;` in the middle of real-world preview titles.
+      .replace(/&#(\d+);/g, (_m, d: string) => codePoint(parseInt(d, 10)))
+      .replace(/&#x([0-9a-f]+);/gi, (_m, h: string) => codePoint(parseInt(h, 16)))
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&nbsp;/g, ' ')
+      // `&amp;` LAST so an escaped entity (`&amp;#x27;`) decodes to the literal `&#x27;`
+      // rather than being double-decoded into an apostrophe.
+      .replace(/&amp;/g, '&')
+      .trim()
+  );
+}
+
+/** Numeric entity → character; out-of-range/invalid code points are dropped, never thrown. */
+function codePoint(n: number): string {
+  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';
+  try {
+    return String.fromCodePoint(n);
+  } catch {
+    return '';
+  }
 }
 
 function absolutize(src: string, base: string): string {
@@ -81,9 +101,7 @@ const MAX_REDIRECTS = 3;
  *                 bot-blocks that clear on retry) → cache NOTHING so the next mount retries
  */
 export type OgFetchResult =
-  | { kind: 'ok'; meta: OgMetadata }
-  | { kind: 'empty' }
-  | { kind: 'transient' };
+  { kind: 'ok'; meta: OgMetadata } | { kind: 'empty' } | { kind: 'transient' };
 
 /**
  * SSRF guard: true if `hostname` is a private/loopback/link-local/internal address. The
@@ -207,8 +225,7 @@ async function fetchOgMetadataUncached(url: string): Promise<OgFetchResult> {
     // content types (json/images/pdf) are rejected so we never mis-parse binary as HTML.
     if (!ctype.includes('text/html') && !ctype.includes('application/xhtml+xml'))
       return { kind: 'empty' };
-    if (Number(res.headers.get('content-length') ?? '0') > HARD_CAP_BYTES)
-      return { kind: 'empty' }; // absurdly large — the parse slice below is the real cap
+    if (Number(res.headers.get('content-length') ?? '0') > HARD_CAP_BYTES) return { kind: 'empty' }; // absurdly large — the parse slice below is the real cap
     const html = (await res.text()).slice(0, MAX_BYTES);
     return { kind: 'ok', meta: parseOgMetadata(html, current) };
   } catch {

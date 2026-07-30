@@ -31,7 +31,13 @@ function MediaThumb({
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      style={[styles.thumb, { backgroundColor: theme.color.groupedBackground }]}
+      // `secondaryBackground`, NOT `groupedBackground`: in 3 of the 5 presets (OLED Dark, Nord,
+      // and the default Gator) groupedBackground is byte-identical to `background`, so the tile
+      // vanished into the page and a poster-less video rendered as a bare ▶ floating on nothing.
+      // Seen on device in Shared Media: "Photos · 60" showed real thumbnails while "Videos · 12"
+      // showed five naked play arrows. secondaryBackground is distinct from background in EVERY
+      // preset, so the fallback (and an undownloaded photo) always reads as a tile.
+      style={[styles.thumb, { backgroundColor: theme.color.secondaryBackground }]}
       accessibilityRole="image"
     >
       {showImage ? (
@@ -52,7 +58,11 @@ function MediaThumb({
           <Text style={[styles.thumbGlyph, styles.thumbGlyphOverlay]}>▶</Text>
         </>
       ) : (
-        <Text style={styles.thumbGlyph}>{glyph}</Text>
+        // Themed, NOT the default Text colour: unstyled Text is near-black on Android, so on every
+        // dark preset the fallback ▶ / 🖼 was a black glyph on a dark tile (seen on device once the
+        // tile itself became visible). Its sibling `thumbGlyphOverlay` already hardcodes white for
+        // the poster case; this branch has no image behind it, so it follows the theme instead.
+        <Text style={[styles.thumbGlyph, { color: theme.color.secondaryLabel }]}>{glyph}</Text>
       )}
     </Pressable>
   );
