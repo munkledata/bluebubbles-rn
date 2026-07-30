@@ -52,12 +52,15 @@ export async function handleSendFailure(
   now?: number,
 ): Promise<void> {
   const status = err instanceof ApiError ? (err.status ?? null) : null;
-  // A local file problem has no HTTP status, so `sendErrorCode` would call it a connection
-  // refusal. Name it for what it is instead.
+  // Neither a local file problem nor a cancellation has an HTTP status, so `sendErrorCode` would
+  // call both a connection refusal. Name them for what they are instead.
+  const kind = err instanceof ApiError ? err.kind : null;
   const code =
-    err instanceof ApiError && err.kind === 'local_file'
+    kind === 'local_file'
       ? ClientErrorCode.attachmentUnreadable
-      : sendErrorCode(status);
+      : kind === 'cancelled'
+        ? ClientErrorCode.userCanceled
+        : sendErrorCode(status);
   logger.warn(
     `[${logTag}] failed for chat ${chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
       err instanceof Error ? err.message : String(err)

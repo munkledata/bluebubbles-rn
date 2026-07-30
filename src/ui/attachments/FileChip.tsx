@@ -3,7 +3,15 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
-import { fileTypeLabel, friendlySize, safeOpenUrl } from '@utils';
+import { useUploadStore } from '@state/uploadStore';
+import {
+  fileTypeLabel,
+  formatPercent,
+  formatTransferred,
+  friendlySize,
+  safeOpenUrl,
+  transferRatio,
+} from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
@@ -16,10 +24,20 @@ interface FileChipProps {
 export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
+  // Present only while this file is being SENT — the entry is removed once the attempt settles.
+  const upload = useUploadStore((s) => s.byGuid[att.guid]);
   const label = fileTypeLabel(att.mimeType, att.transferName);
   const baseSub = att.totalBytes ? `${label} • ${friendlySize(att.totalBytes)}` : label;
+  // A chip has a subtitle line already, so the upload readout goes there rather than as an overlay:
+  // "4.2 MB of 12.1 MB • 35%", dropping the percentage until the total is known (see transferRatio).
+  const uploadPercent = upload ? formatPercent(transferRatio(upload.sent, upload.total)) : null;
+  const uploadSub = upload
+    ? `${formatTransferred(upload.sent, upload.total)}${uploadPercent ? ` • ${uploadPercent}` : ''}`
+    : null;
+  // Upload wins: a file we are SENDING came from this device and can never be downloading too.
   const sub =
-    status === 'downloading' ? 'Downloading…' : status === 'error' ? 'Tap to retry' : baseSub;
+    uploadSub ??
+    (status === 'downloading' ? 'Downloading…' : status === 'error' ? 'Tap to retry' : baseSub);
 
   const onPress = (): void => {
     if (att.localPath) void safeOpenUrl(att.localPath);
@@ -38,7 +56,7 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
       ]}
     >
       <View style={[styles.icon, { backgroundColor: theme.color.tint }]}>
-        {status === 'downloading' ? (
+        {upload || status === 'downloading' ? (
           <ActivityIndicator color="#fff" size="small" />
         ) : status === 'error' ? (
           <Icon name="refresh-outline" size={20} color="#fff" />

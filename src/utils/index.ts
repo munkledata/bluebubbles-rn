@@ -13,6 +13,7 @@ export * from './chat';
 export * from './messageGrouping';
 export * from './messageStatus';
 export * from './attachment';
+export * from './uploadProgress';
 export * from './urls';
 export * from './contactMatch';
 export * from './handleFormat';

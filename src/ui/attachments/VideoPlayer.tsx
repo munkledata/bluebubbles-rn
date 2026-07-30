@@ -6,9 +6,11 @@ import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
+import { useUploadStore } from '@state/uploadStore';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { ProgressRing } from './ProgressRing';
+import { UploadProgressOverlay } from './UploadProgressOverlay';
 
 interface VideoPlayerProps {
   att: AttachmentRow;
@@ -25,6 +27,9 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
+  // Present only while this file is being SENT. An entry exists for the duration of one upload
+  // attempt and is removed when it settles, so its presence is the whole condition.
+  const upload = useUploadStore((s) => s.byGuid[att.guid]);
   const [playing, setPlaying] = useState(false);
   const [thumb, setThumb] = useState<VideoThumbnail | null>(null);
 
@@ -104,14 +109,36 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
   }
 
   return (
-    <Pressable onPress={onPress} style={[styles.wrap, box]}>
+    <Pressable
+      onPress={onPress}
+      // Without these the video bubble is a focusable, clickable node with NO name — TalkBack reads
+      // it as an anonymous button (verified on device). The label tracks `status`/`localPath`
+      // because the tap does three different things: download, retry, or play.
+      accessibilityRole="button"
+      accessibilityLabel={
+        upload
+          ? 'Video, uploading'
+          : status === 'downloading'
+            ? 'Video, downloading'
+            : status === 'error'
+              ? 'Video, download failed, tap to retry'
+              : att.localPath
+                ? 'Video, tap to play'
+                : 'Video, not downloaded'
+      }
+      style={[styles.wrap, box]}
+    >
       <Image
         source={thumb}
         placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
         contentFit="cover"
         style={styles.fill}
       />
-      {status === 'downloading' ? (
+      {/* Upload wins over every download state: a file we are SENDING came from this device, so
+          it can never be downloading at the same time, and the play badge would be misleading. */}
+      {upload ? (
+        <UploadProgressOverlay sent={upload.sent} total={upload.total} />
+      ) : status === 'downloading' ? (
         <View style={styles.overlay} pointerEvents="none">
           <ProgressRing progress={progress ?? null} />
         </View>

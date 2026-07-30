@@ -396,3 +396,39 @@ describe('ImageAttachment — auto-download effect', () => {
     });
   });
 });
+
+/**
+ * Accessibility: a photo bubble is focusable AND clickable, so an absent label makes it an
+ * anonymous "button" under TalkBack — indistinguishable from a video or any other bubble. Found on
+ * device: the media bubbles were the ONLY unlabeled focusable nodes in a chat. The label also has to
+ * state the tap outcome, since an undownloaded image downloads instead of opening the viewer.
+ */
+describe('ImageAttachment — accessibility label', () => {
+  it('labels a downloaded photo', async () => {
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: '/data/photo.jpg' })} isFromMe={false} showTail />,
+    );
+    expect(await screen.findByLabelText('Photo')).toBeTruthy();
+  });
+
+  it('says so when the photo is not downloaded yet', async () => {
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
+    expect(await screen.findByLabelText('Photo, not downloaded')).toBeTruthy();
+  });
+
+  it('still prefers a Genmoji description as the alt text when present', async () => {
+    await renderWithTheme(
+      <ImageAttachment
+        att={makeImg({
+          localPath: '/data/photo.jpg',
+          emojiImageShortDescription: 'a smiling cat wearing a top hat',
+        })}
+        isFromMe={false}
+        showTail
+      />,
+    );
+    expect(await screen.findByLabelText('a smiling cat wearing a top hat')).toBeTruthy();
+  });
+});

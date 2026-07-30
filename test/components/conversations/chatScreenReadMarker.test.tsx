@@ -60,6 +60,9 @@ jest.mock('@ui', () => {
     EdgeFade: () => null,
     ScreenEffectOverlay: () => null,
     TypingBubble: () => null,
+    // Must be present even as a stub — a missing export renders as `undefined` and fails the
+    // whole screen. Its own behavior lives in uploadStatusBar.test.tsx.
+    UploadStatusBar: () => null,
     MessageList: () => null,
     MessageActionsOverlay: () => null,
     Composer: () => null,

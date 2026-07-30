@@ -101,6 +101,11 @@ jest.mock('@ui', () => {
     EdgeFade: () => null,
     ScreenEffectOverlay: () => null,
     TypingBubble: () => R.createElement(Text, null, 'typing…'),
+    // Renders null here on purpose: its own behavior is covered by uploadStatusBar.test.tsx, and
+    // the real one subscribes to the upload store + runs a stall interval this screen test has no
+    // reason to drive. It must still be PRESENT — a missing export renders as `undefined` and
+    // takes the whole screen down.
+    UploadStatusBar: () => null,
     MessageList: capture('list'),
     MessageActionsOverlay: capture('overlay'),
     Composer: capture('composer'),

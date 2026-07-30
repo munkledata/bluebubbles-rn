@@ -16,4 +16,5 @@ export * from './EditHistorySheet';
 export * from './MessageDetailsSheet';
 export * from './UrlPreviewCard';
 export * from './TypingBubble';
+export * from './UploadStatusBar';
 export * from './effects';

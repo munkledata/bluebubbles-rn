@@ -140,9 +140,11 @@ export async function resendOutgoingRow(
         http,
         chatGuid: row.chatGuid,
         tempGuid: row.tempGuid,
+        attachmentGuid: att.guid,
         name: att.transferName ?? 'attachment',
         uri,
         mimeType: att.mimeType ?? 'application/octet-stream',
+        totalBytes: att.totalBytes ?? 0,
       });
     } else {
       // Unknown kind: retire rather than skip, or the row is claimed-and-skipped on every

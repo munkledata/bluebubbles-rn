@@ -6,6 +6,10 @@
  * which has nothing to do with the network. Without it every such failure collapsed into
  * `no_connection` and the bubble read "Connection Refused" — pointing the user at their server
  * instead of at the file.
+ *
+ * `cancelled` is ours too, and exists for the same reason: a user-cancelled attachment upload
+ * resolves with no response at all, which is indistinguishable from a dead network unless it is
+ * named. Without it, cancelling your own upload reported "Connection Refused".
  */
 export type ApiErrorKind =
   | 'no_connection'
@@ -14,7 +18,8 @@ export type ApiErrorKind =
   | 'bad_request'
   | 'server_error'
   | 'parse_error'
-  | 'local_file';
+  | 'local_file'
+  | 'cancelled';
 
 export class ApiError extends Error {
   constructor(
