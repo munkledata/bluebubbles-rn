@@ -4,9 +4,11 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
-import { parseVCard, safeOpenUrl, type VCardData } from '@utils';
+import { openAttachmentFile } from '@/services/openFile';
+import { parseVCard, type VCardData } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
+import { showToast } from '../toast/toastStore';
 
 interface ContactCardProps {
   att: AttachmentRow;
@@ -40,9 +42,30 @@ export function ContactCard({ att, isFromMe }: ContactCardProps): React.JSX.Elem
     };
   }, [att.localPath]);
 
+  // In-flight guard: opening is async and a double-tap would fire two intents.
+  const opening = React.useRef(false);
+
   const onPress = (): void => {
-    if (att.localPath) void safeOpenUrl(att.localPath);
-    else void download(att);
+    const path = att.localPath;
+    if (!path) {
+      void download(att);
+      return;
+    }
+    if (opening.current) return;
+    opening.current = true;
+    void (async () => {
+      try {
+        const res = await openAttachmentFile(path, att.mimeType);
+        // A 'missing' result here also explains an empty inline card (the effect above reads the
+        // same file), so re-downloading is the right response to both.
+        if (res.status === 'missing') void download(att);
+        else if (res.status === 'no_handler')
+          showToast('No app on this device can open contact cards');
+        else if (res.status === 'error') showToast('Couldn’t open this contact card');
+      } finally {
+        opening.current = false;
+      }
+    })();
   };
 
   const title = contact?.displayName ?? att.transferName ?? 'Contact';

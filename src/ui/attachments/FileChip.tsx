@@ -4,16 +4,17 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
+import { openAttachmentFile } from '@/services/openFile';
 import {
   fileTypeLabel,
   formatPercent,
   formatTransferred,
   friendlySize,
-  safeOpenUrl,
   transferRatio,
 } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
+import { showToast } from '../toast/toastStore';
 
 interface FileChipProps {
   att: AttachmentRow;
@@ -39,9 +40,32 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
     uploadSub ??
     (status === 'downloading' ? 'Downloading…' : status === 'error' ? 'Tap to retry' : baseSub);
 
+  // In-flight guard: opening is async and a double-tap would fire two intents.
+  const opening = React.useRef(false);
+
   const onPress = (): void => {
-    if (att.localPath) void safeOpenUrl(att.localPath);
-    else void download(att);
+    const path = att.localPath;
+    if (!path) {
+      void download(att);
+      return;
+    }
+    if (opening.current) return;
+    opening.current = true;
+    void (async () => {
+      try {
+        const res = await openAttachmentFile(path, att.mimeType);
+        // The result MUST be consumed here — a discarded one is exactly how "tapping the PDF
+        // does nothing" shipped. NOTE there is deliberately no toast for 'shared': the share
+        // sheet is a system window that appears immediately and IS the feedback, and AppToast
+        // is pointerEvents:'none' behind it, so a toast would be invisible and then gone.
+        if (res.status === 'missing') void download(att);
+        else if (res.status === 'no_handler')
+          showToast(`No app on this device can open ${label} files`);
+        else if (res.status === 'error') showToast('Couldn’t open this file');
+      } finally {
+        opening.current = false;
+      }
+    })();
   };
 
   return (

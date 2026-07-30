@@ -8,8 +8,10 @@
  *   - the subtitle is "LABEL • friendlySize" when totalBytes is set, else just "LABEL".
  *   - the download store drives the subtitle/badge: 'downloading' → "Downloading…" + spinner,
  *     'error' → "Tap to retry" + a refresh icon.
- *   - press dispatches: a downloaded chip (localPath set) opens the file via safeOpenUrl and does
- *     NOT re-download; an undownloaded chip calls download(att).
+ *   - press dispatches: a downloaded chip (localPath set) opens the file via openAttachmentFile
+ *     (which converts the app-private path to a content:// FileProvider uri) and does NOT
+ *     re-download; an undownloaded chip calls download(att). The RESULT is consumed: 'missing'
+ *     re-downloads, 'no_handler'/'error' toast, 'opened'/'shared' stay silent.
  *
  * In-file mocks: `@/services/download` (its barrel pulls `ky`, an untransformed ESM pkg — only the
  * `download` fn identity matters), `@ui/primitives` (Icon → a Text marker so the refresh icon is
@@ -21,7 +23,7 @@
  */
 import React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
 import type { AttachmentRow } from '@db/repositories';
@@ -40,14 +42,25 @@ jest.mock('@ui/primitives', () => {
   };
 });
 
-// safeOpenUrl's real impl dynamic-imports react-native (throws under the jest-expo VM); mock ONLY it,
-// keeping every other @utils export (fileTypeLabel, friendlySize) real.
+// safeOpenUrl is mocked for ONE reason now: so the negative can be asserted. A local attachment
+// path must never reach it (file:// is no longer allowlisted, and handing one to another app throws
+// FileUriExposedException). fileTypeLabel/friendlySize stay REAL via requireActual.
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
+
+// The open path itself. Mocked wholesale so no native module (expo-file-system /
+// expo-intent-launcher / expo-sharing) enters this test's graph; its real behaviour is covered by
+// the node test at test/services/openFile.test.ts.
+const mockOpenAttachmentFile = jest.fn();
+jest.mock('@/services/openFile', () => ({
+  openAttachmentFile: (...args: unknown[]) => mockOpenAttachmentFile(...args),
+}));
 
 // eslint-disable-next-line import/first
 import { FileChip } from '@ui/attachments/FileChip';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
+// eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
 
 function makeAtt(over: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -185,23 +198,70 @@ describe('FileChip — upload progress', () => {
 });
 
 describe('FileChip — press dispatch', () => {
+  beforeEach(() => {
+    useToastStore.setState({ current: null, queue: [] });
+    // clearMocks:true clears calls but keeps implementations, so set the result per test.
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'opened' });
+  });
+
   it('downloads on tap when the file is not yet local (and opens nothing)', async () => {
     const att = makeAtt({ localPath: null });
     await renderWithTheme(<FileChip att={att} isFromMe={false} />);
     fireEvent.press(screen.getByText('report.pdf'));
     expect(mockDownload).toHaveBeenCalledWith(att);
-    expect(safeOpenUrl).not.toHaveBeenCalled();
+    expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
   });
 
-  it('opens the downloaded file via safeOpenUrl(localPath) and does NOT re-download', async () => {
+  // FAILS ON THE OLD CODE, which passed the raw file:// path to safeOpenUrl — a uri Android
+  // forbids handing to another app, so the tap silently did nothing.
+  it('routes a downloaded file through openAttachmentFile, never through safeOpenUrl', async () => {
     await renderWithTheme(
       <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
     );
     fireEvent.press(screen.getByText('report.pdf'));
-    // The open goes through safeOpenUrl (the scheme-validating helper), with the local path.
-    expect(safeOpenUrl).toHaveBeenCalledWith('file:///data/report.pdf');
-    expect(safeOpenUrl).toHaveBeenCalledTimes(1);
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith('file:///data/report.pdf', 'application/pdf');
+    expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(mockDownload).not.toHaveBeenCalled();
+  });
+
+  it('re-downloads when the local file turned out to be missing (self-heal)', async () => {
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'missing' });
+    const att = makeAtt({ localPath: 'file:///data/report.pdf' });
+    await renderWithTheme(<FileChip att={att} isFromMe={false} />);
+    fireEvent.press(screen.getByText('report.pdf'));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(att));
+  });
+
+  it('toasts when no app on the device can open the file', async () => {
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'no_handler' });
+    await renderWithTheme(
+      <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
+    );
+    fireEvent.press(screen.getByText('report.pdf'));
+    await waitFor(() => expect(useToastStore.getState().current?.message).toMatch(/No app/));
+  });
+
+  it('toasts on an unexpected open failure', async () => {
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'error' });
+    await renderWithTheme(
+      <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
+    );
+    fireEvent.press(screen.getByText('report.pdf'));
+    await waitFor(() => expect(useToastStore.getState().current?.message).toMatch(/open this file/));
+  });
+
+  // No toast for either success path. 'shared' deliberately stays silent: the share sheet is a
+  // system window that appears immediately and IS the feedback, and AppToast is pointerEvents:'none'
+  // behind it, so a toast there would be invisible and then gone.
+  it.each(['opened', 'shared'] as const)('stays silent on a successful %s', async (status) => {
+    mockOpenAttachmentFile.mockResolvedValue({ status });
+    await renderWithTheme(
+      <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
+    );
+    fireEvent.press(screen.getByText('report.pdf'));
+    await waitFor(() => expect(mockOpenAttachmentFile).toHaveBeenCalled());
+    expect(useToastStore.getState().current).toBeNull();
+    expect(useToastStore.getState().queue).toHaveLength(0);
   });
 });
 

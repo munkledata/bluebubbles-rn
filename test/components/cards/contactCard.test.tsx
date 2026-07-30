@@ -9,8 +9,10 @@
  *     att.transferName ?? "Contact".
  *   - a file-read failure resets the parsed contact to null (falls back to the status/transferName
  *     text) rather than crashing.
- *   - tap CONTRACT (onPress in source): localPath present → safeOpenUrl(localPath) (opens the card);
- *     absent → download(att) (fetches the .vcf first).
+ *   - tap CONTRACT (onPress in source): localPath present → openAttachmentFile(localPath, mime),
+ *     which converts the app-private path to a content:// FileProvider uri (a file:// uri cannot be
+ *     handed to another app); absent → download(att). The RESULT is consumed: 'missing'
+ *     re-downloads, 'no_handler' toasts.
  *   - alignSelf follows isFromMe (flex-end for me, flex-start for them).
  *
  * In-file mocks: `expo-file-system` (controlled .vcf text via `mockVcfText`, so no disk),
@@ -21,7 +23,7 @@
  */
 import React from 'react';
 import { StyleSheet, type ViewStyle } from 'react-native';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -49,12 +51,21 @@ jest.mock('@/services/download', () => ({ download: jest.fn() }));
 // keeping every other @utils export (parseVCard, etc.) real.
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
 
+// The open path. Mocked wholesale so no native module enters this graph; the real behaviour is
+// covered by the node test at test/services/openFile.test.ts.
+const mockOpenAttachmentFile = jest.fn();
+jest.mock('@/services/openFile', () => ({
+  openAttachmentFile: (...args: unknown[]) => mockOpenAttachmentFile(...args),
+}));
+
 // eslint-disable-next-line import/first
 import { ContactCard } from '@ui/attachments/ContactCard';
 // eslint-disable-next-line import/first
 import { download } from '@/services/download';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
+// eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
 
 function makeAtt(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -157,22 +168,51 @@ describe('ContactCard — not-yet-local (status-driven subtitle)', () => {
 });
 
 describe('ContactCard — tap contract', () => {
+  beforeEach(() => {
+    useToastStore.setState({ current: null, queue: [] });
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'opened' });
+  });
+
   it('no localPath → download(att)', async () => {
     const att = makeAtt({ transferName: null }); // title defaults to "Contact"
     await renderWithTheme(<ContactCard att={att} isFromMe={false} />);
     fireEvent.press(screen.getByLabelText('Contact: Contact'));
     expect(download).toHaveBeenCalledWith(att);
-    expect(safeOpenUrl).not.toHaveBeenCalled();
+    expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
   });
 
-  it('localPath present → safeOpenUrl(localPath) opens the card, no download', async () => {
+  // FAILS ON THE OLD CODE, which handed the app-private file:// path to safeOpenUrl — a uri
+  // Android forbids passing to another app, so the tap silently did nothing.
+  it('localPath present → openAttachmentFile, never safeOpenUrl', async () => {
     await renderWithTheme(
       <ContactCard att={makeAtt({ localPath: 'file:///c/contact.vcf' })} isFromMe={false} />,
     );
     await screen.findByText('John Smith');
     fireEvent.press(screen.getByLabelText('Contact: John Smith'));
-    expect(safeOpenUrl).toHaveBeenCalledWith('file:///c/contact.vcf');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith('file:///c/contact.vcf', 'text/vcard');
+    expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
+  });
+
+  it('a missing local file re-downloads (the inline card would be empty too)', async () => {
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'missing' });
+    const att = makeAtt({ localPath: 'file:///c/contact.vcf' });
+    await renderWithTheme(<ContactCard att={att} isFromMe={false} />);
+    await screen.findByText('John Smith');
+    fireEvent.press(screen.getByLabelText('Contact: John Smith'));
+    await waitFor(() => expect(download).toHaveBeenCalledWith(att));
+  });
+
+  it('toasts when nothing on the device can open a contact card', async () => {
+    mockOpenAttachmentFile.mockResolvedValue({ status: 'no_handler' });
+    await renderWithTheme(
+      <ContactCard att={makeAtt({ localPath: 'file:///c/contact.vcf' })} isFromMe={false} />,
+    );
+    await screen.findByText('John Smith');
+    fireEvent.press(screen.getByLabelText('Contact: John Smith'));
+    await waitFor(() =>
+      expect(useToastStore.getState().current?.message).toMatch(/contact cards/),
+    );
   });
 });
 
