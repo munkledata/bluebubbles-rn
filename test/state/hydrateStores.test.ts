@@ -9,7 +9,6 @@ import { getDatabase } from '@db/database';
 import { HYDRATED_STORES, hydrateAllStores } from '@state/hydrateStores';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useThemeStore } from '@state/themeStore';
 
@@ -21,12 +20,11 @@ afterEach(() => {
 });
 
 describe('hydrateAllStores', () => {
-  it('registers all five kv-backed stores', () => {
-    expect(HYDRATED_STORES).toHaveLength(5);
+  it('registers all four kv-backed stores', () => {
+    expect(HYDRATED_STORES).toHaveLength(4);
     expect(HYDRATED_STORES).toEqual(
       expect.arrayContaining([
         useThemeStore,
-        useSmartReplyStore,
         useFeatureSettingsStore,
         useSyncSettingsStore,
         useRedactedModeStore,
@@ -48,12 +46,10 @@ describe('hydrateAllStores', () => {
     mockGetDatabase.mockImplementation(() => {
       throw new Error('Database not initialized');
     });
-    useSmartReplyStore.setState({ enabled: true, hydrated: false });
     useRedactedModeStore.setState({ enabled: false, hydrated: false });
     useSyncSettingsStore.setState({ messagesPerChat: 0, hydrated: false });
     await expect(hydrateAllStores()).resolves.toBeUndefined();
     // The stores' own guards hold: hydrated stays false so the home-mount pass retries.
-    expect(useSmartReplyStore.getState().hydrated).toBe(false);
     expect(useRedactedModeStore.getState().hydrated).toBe(false);
     expect(useSyncSettingsStore.getState().hydrated).toBe(false);
   });

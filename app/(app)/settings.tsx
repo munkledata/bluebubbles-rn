@@ -16,7 +16,6 @@ import { MESSAGES_PER_CHAT_OPTIONS, useSyncSettingsStore } from '@state/syncSett
 import { useLockStore } from '@state/lockStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
-import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useThemeStore } from '@state/themeStore';
 import {
   CheckRow,
@@ -46,8 +45,6 @@ export default function SettingsScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const preset = useThemeStore((s) => s.preset);
   const setPreset = useThemeStore((s) => s.setPreset);
-  const smartReplies = useSmartReplyStore((s) => s.enabled);
-  const setSmartReplies = useSmartReplyStore((s) => s.setEnabled);
   const appLock = useLockStore((s) => s.enabled);
   const redacted = useRedactedModeStore((s) => s.enabled);
   const setRedacted = useRedactedModeStore((s) => s.setEnabled);
@@ -80,7 +77,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const SECTIONS = {
     theme: 'theme appearance oled dark gator custom presets colors',
     contacts: 'contacts sync names photos address book',
-    general: 'general suggested smart replies app lock biometric reminders backup find my location',
+    general: 'general app lock biometric reminders backup find my location',
     messaging: 'messaging private api typing indicators read receipts subject lines',
     conversation: 'conversation message view send with return enter delivery timestamps',
     chatlist: 'chat list conversations compact dense appearance unknown senders filter spam',
@@ -221,12 +218,6 @@ export default function SettingsScreen(): React.JSX.Element {
 
         {match(SECTIONS.general) && (
           <SettingsSection label="GENERAL" style={styles.gap}>
-            <SwitchRow
-              label="Suggested Replies"
-              value={smartReplies}
-              onValueChange={(v) => void setSmartReplies(v)}
-              accessibilityLabel="Toggle suggested replies"
-            />
             <SwitchRow
               label="App Lock"
               value={appLock}

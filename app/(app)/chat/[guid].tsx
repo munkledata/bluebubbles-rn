@@ -68,7 +68,6 @@ import {
   Screen,
   ThreadSheet,
   ScreenEffectOverlay,
-  SmartReplyChips,
   TypingBubble,
   useTheme,
   type PendingAttachment,
@@ -168,7 +167,7 @@ function ChatScreenInner({
   const chatService = resolveChatService(guid, header.data?.handleServices);
   // When focusing a search hit, load a window CENTERED on it (context on both sides) instead of the
   // recent window; otherwise the normal recent window. ONE message subscription for the whole screen
-  // — fed to the list, smart-reply chips, and the screen-effect trigger (avoids 3× the query work).
+  // — fed to the list and the screen-effect trigger (avoids doubling the query work).
   const anchorNum = focusDate ? Number(focusDate) : NaN;
   const routeAnchorDate = Number.isFinite(anchorNum) ? anchorNum : undefined;
   // "Jump to oldest unread" reuses the search-hit anchor plumbing: tapping the chip anchors the
@@ -382,8 +381,8 @@ function ChatScreenInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // useCallback-stable: these feed the memoized Composer (and SmartReplyChips), so a reactive
-  // tick re-rendering the screen doesn't re-render the composer through fresh closures.
+  // useCallback-stable: these feed the memoized Composer, so a reactive tick re-rendering the
+  // screen doesn't re-render the composer through fresh closures.
   const onSchedule = useCallback(
     (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
       // Capture the active reply target so a scheduled reply still threads.
@@ -543,12 +542,14 @@ function ChatScreenInner({
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
+  // Also collapses the SELECTION bar's nav-bar reservation while the keyboard is up, for the same
+  // union-not-sum reason as the Composer's (see Composer.tsx's paddingBottom).
   const kbVisible = useKeyboardVisible();
 
   // Wallpaper mode: the header/composer float transparent over the image and the list runs UNDER
   // them, with BAR_GAP-padded content insets so resting messages clear the bars (scrolled-past
   // messages show through behind the transparent bars). Bar heights are measured (onLayout) since
-  // both vary (insets, reply bar, smart-reply chips) — and the wrappers are measured in BOTH
+  // both vary (insets, reply bar, typing bubble) — and the wrappers are measured in BOTH
   // modes, so real heights already exist by the time the (async, reactive) wallpaper flag flips
   // the styles. The estimates only cover the very first frames of a cold mount.
   const hasWallpaper = !!backgroundUri;
@@ -556,7 +557,9 @@ function ChatScreenInner({
   const insets = useSafeAreaInsets();
   const [headerH, setHeaderH] = useState(0);
   const [bottomBarH, setBottomBarH] = useState(0);
-  const topBar = headerH > 0 ? headerH : insets.top + 74;
+  // 94, not 74: the header gained a second line (the contact's number under their name), which
+  // adds ~20dp for a 1:1 chat. Only governs the frames before onLayout lands on a cold mount.
+  const topBar = headerH > 0 ? headerH : insets.top + 94;
   const bottomBar = bottomBarH > 0 ? bottomBarH : insets.bottom + 54;
 
   const headerNode = (
@@ -613,7 +616,10 @@ function ChatScreenInner({
     <View
       style={[
         styles.selectBar,
-        { borderTopColor: theme.color.separator, paddingBottom: insets.bottom + 14 },
+        {
+          borderTopColor: theme.color.separator,
+          paddingBottom: (kbVisible ? 0 : insets.bottom) + 14,
+        },
       ]}
     >
       <Text style={[styles.selectCount, { color: theme.color.label }]}>
@@ -638,7 +644,6 @@ function ChatScreenInner({
   ) : (
     <>
       {isTyping ? <TypingBubble /> : null}
-      <SmartReplyChips messages={messages} onPick={onSend} />
       <Composer
         placeholder={
           chatService === 'RCS'
@@ -684,16 +689,17 @@ function ChatScreenInner({
         />
       ) : null}
       {/* `padding` consumes the keyboard inset under Android edge-to-edge (RN 0.86 / Expo SDK 57
-          default), keeping the composer above the keyboard. `keyboardVerticalOffset={-insets.bottom}`
-          cancels the nav-bar-sized padding KAV would otherwise leave (the Composer already reserves
-          `insets.bottom` itself) — without it the composer floats a nav-bar's height above the
-          keyboard. Same fix the inbox uses (ConversationListScreen). */}
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior="padding"
-        enabled={kbVisible}
-        keyboardVerticalOffset={-insets.bottom}
-      >
+          default), keeping the composer above the keyboard.
+          NO `keyboardVerticalOffset`: it used to be `-insets.bottom`, purely to cancel the
+          nav-bar inset the Composer reserved unconditionally. That pair only balanced while the KAV
+          was the thing doing the lifting — RN clamps the KAV's padding at 0 but nothing clamped the
+          Composer's, so whenever the KAV contributed nothing the cancellation vanished and a full
+          nav-bar-sized band opened up between the composer and the keyboard. The Composer now takes
+          the union (max) of the keyboard and the nav bar instead of their sum, which is correct
+          regardless of which layer absorbs the IME, so the counterweight is not just unneeded —
+          keeping it would push the composer BEHIND the keyboard. See Composer.tsx's paddingBottom.
+          Same fix on the inbox (ConversationListScreen). */}
+      <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
         {/* ONE structural tree for both modes — the wallpaper flag only switches STYLES (bars go
             absolute, the list gains insets). The flag arrives ASYNC (reactive DB read, null on
             first render; a participant-set background can also land mid-chat), so branching element

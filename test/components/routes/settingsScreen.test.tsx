@@ -65,8 +65,6 @@ import { syncContacts } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
 import { kvSet } from '@db/repositories';
 // eslint-disable-next-line import/first
-import { useSmartReplyStore } from '@state/smartReplyStore';
-// eslint-disable-next-line import/first
 import { useRedactedModeStore } from '@state/redactedModeStore';
 // eslint-disable-next-line import/first
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -93,7 +91,6 @@ const mockKvSet = kvSet as jest.Mock;
 beforeEach(() => {
   // Reset the kv-backed stores to their defaults BEFORE each test (harness rule: reset in
   // beforeEach, never afterEach — an afterEach setState fires on a still-mounted tree).
-  useSmartReplyStore.setState({ enabled: true, hydrated: true });
   useRedactedModeStore.setState({ enabled: false, hydrated: true });
   useFeatureSettingsStore.setState({
     privateApiEnabled: true,
@@ -119,21 +116,6 @@ beforeEach(() => {
 });
 
 describe('SettingsScreen — toggles wire to the real stores + persist', () => {
-  it('flips Suggested Replies and calls the persist path', async () => {
-    await renderWithTheme(<SettingsScreen />);
-    const sw = screen.getByLabelText('Toggle suggested replies');
-    await act(async () => {
-      fireEvent(sw, 'valueChange', false);
-    });
-    expect(useSmartReplyStore.getState().enabled).toBe(false);
-    // The db handle is the shared-mock's getDatabase() (undefined here); assert on key+value.
-    await waitFor(() =>
-      expect(mockKvSet.mock.calls.some((c) => c[1] === 'smartReply.enabled' && c[2] === '0')).toBe(
-        true,
-      ),
-    );
-  });
-
   it('flips Redacted Mode on and persists it', async () => {
     await renderWithTheme(<SettingsScreen />);
     const sw = screen.getByLabelText('Hide message previews, names, and notification contents');

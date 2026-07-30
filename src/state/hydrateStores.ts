@@ -1,6 +1,5 @@
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useThemeStore } from '@state/themeStore';
 
@@ -12,7 +11,6 @@ import { useThemeStore } from '@state/themeStore';
  */
 export const HYDRATED_STORES = [
   useThemeStore,
-  useSmartReplyStore,
   useFeatureSettingsStore,
   useSyncSettingsStore,
   useRedactedModeStore,

@@ -15,6 +15,7 @@ export * from './messageStatus';
 export * from './attachment';
 export * from './urls';
 export * from './contactMatch';
+export * from './handleFormat';
 export * from './vcard';
 export * from './vlocation';
 export * from './privacy';

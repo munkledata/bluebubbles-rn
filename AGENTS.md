@@ -144,6 +144,28 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   legacy `windowSoftInputMode=adjustResize` does NOT push content up — a bottom composer hides
   behind the keyboard. Wrap chat-style screens in `<KeyboardAvoidingView behavior="padding">`
   (not `undefined`/`height`) to consume the keyboard inset. See `app/(app)/chat/[guid].tsx`.
+  **AND: a bottom bar inside that KAV must take the UNION (max) of the keyboard and the nav bar,
+  never their SUM** — `paddingBottom: (kbVisible ? 0 : insets.bottom) + gap`, with
+  `keyboardVerticalOffset` left at 0. `useSafeAreaInsets().bottom` is the NAVIGATION-BAR inset
+  (safe-area-context asks for `statusBars|displayCutout|navigationBars|captionBar`, never `ime()`),
+  so it does NOT shrink when the keyboard opens — but the keyboard COVERS the nav bar: Android's IME
+  inset is measured from the window bottom and already spans that strip (RN's own
+  `ReactRootView.checkForKeyboardEvents` subtracts `barInsets.bottom` back out of `imeInsets`).
+  Reserving it a second time is a double count and shows up as an empty band between the bar and the
+  keyboard, one nav bar tall (~32dp gesture, ~56dp 3-button). The trap that produced it: the two
+  screens used to CANCEL that reservation with `keyboardVerticalOffset={-insets.bottom}` on the KAV.
+  That balances ONLY while the KAV is doing the lifting — RN clamps the KAV's padding at
+  `Math.max(…, 0)` (`KeyboardAvoidingView.js`) and the bar's own padding is NOT clamped, so the
+  instant the KAV contributes 0 (the window itself resizing for the IME) the cancellation vanishes
+  and the full band appears, while the offset is invisible in Jest (no soft keyboard, zero insets).
+  Union-plus-no-offset is correct in BOTH regimes. The two halves must move together — re-adding the
+  offset now pushes the composer BEHIND the keyboard. Applied to `Composer`, the chat selection bar,
+  and the inbox search bar; guarded by `composerKeyboardInset.test.tsx` (padding arithmetic against a
+  non-zero inset) + a KAV-props assertion in `routes/chatScreen.test.tsx`. Related: the attachment
+  tray and the keyboard are mutually exclusive (the tray sits BELOW the input row at a fixed 104dp),
+  but Android's Back closes the IME WITHOUT blurring the input, so tapping the still-focused field
+  reopens the keyboard and fires NO `onFocus` — the Composer closes the tray on the keyboard-visible
+  transition to cover that path.
 - **FlashList v2 has no `inverted` prop.** For chat (newest at bottom), render chronological
   (oldest→newest) data with `maintainVisibleContentPosition={{ startRenderingFromBottom: true }}`.
 - **expo-video: calling a method on a released player crashes** ("Cannot use shared object that
@@ -338,8 +360,8 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   that needs NO `SCHEDULE_EXACT_ALARM` permission (exact alarms throw a SecurityException on API 31+).
 - **kv-hydrated zustand stores must guard `getDatabase()`** — it throws if the DB isn't open yet, and
   the root `_layout` effect runs the hydrate before connect. Wrap hydrate/persist in try/catch (leave
-  `hydrated` false on failure) and re-hydrate once the DB is open (home mount). See `smartReplyStore`/
-  `themeStore`. Forgetting the guard crashes the app with a LogBox "Database not initialized" overlay.
+  `hydrated` false on failure) and re-hydrate once the DB is open (home mount). See `themeStore`/
+  `syncSettingsStore`. Forgetting the guard crashes the app with a LogBox "Database not initialized" overlay.
 - **attributedBody runs may not tile the whole string** — iMessage often emits a single mention run
   inside a longer message, leaving gaps. A parser that only emits each run's range silently DROPS the
   uncovered text. Track a cursor and emit `[cursor, run.start)` + the trailing remainder as plain runs
@@ -617,8 +639,8 @@ versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/
   message taller than ~20% of the viewport defeats its near-bottom check even parked at the bottom). Only a
   user DRAG can unpin (`onScrollBeginDrag` — the one signal programmatic scrolls never emit; Android fires
   momentum for animated programmatic scrolls, so momentum may re-pin but never unpins); reaching the bottom
-  re-pins; sending re-pins from anywhere. VIEWPORT resizes (keyboard open/close via the KAV, typing bubble /
-  smart-reply chips / selection bar appearing) re-land via the wrapper View's `onLayout` while pinned —
+  re-pins; sending re-pins from anywhere. VIEWPORT resizes (keyboard open/close via the KAV, the typing
+  bubble or the selection bar appearing) re-land via the wrapper View's `onLayout` while pinned —
   onLayout fires AFTER the resize is committed, so metrics are fresh; the old `keyboardDidShow` + one-frame
   rAF raced the KAV layout and left the newest text behind the keyboard with no recovery. Unpinned shows the
   "jump to newest" FAB (badge = incoming missed while unpinned); in an anchored (search-hit/unread-jump)

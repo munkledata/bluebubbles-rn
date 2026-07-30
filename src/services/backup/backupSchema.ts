@@ -65,9 +65,8 @@ const BACKUP_KV_KEYS: ReadonlySet<string> = new Set([
   // themeStore — the active PRESET only. `theme.custom` is a row id, meaningless anywhere else
   // (restored themes get fresh ids), which is why `restoreKv` has always skipped it.
   'theme.preset',
-  // redactedModeStore / smartReplyStore / syncSettingsStore
+  // redactedModeStore / syncSettingsStore
   'privacy.redactedMode',
-  'smartReply.enabled',
   'sync.messagesPerChat',
   // featureSettingsStore — the boolean FLAGS…
   'privateApi.enabled',

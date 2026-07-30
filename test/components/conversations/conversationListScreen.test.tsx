@@ -119,8 +119,17 @@ jest.mock('expo-router', () => ({
     }, [cb]);
   },
 }));
+// Insets default to zero (what almost every test wants) but are MUTABLE, so the bottom-inset
+// suite below can hand the search bar a realistic 48dp navigation bar.
+let mockInsetBottom = 0;
 jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  useSafeAreaInsets: () => ({ top: 0, bottom: mockInsetBottom, left: 0, right: 0 }),
+}));
+// The search bar collapses its nav-bar reservation while the keyboard is up (union, not sum — see
+// Composer.tsx's paddingBottom). RNTL has no soft keyboard, so drive the hook directly.
+let mockKbVisible = false;
+jest.mock('@ui/hooks/useKeyboardVisible', () => ({
+  useKeyboardVisible: () => mockKbVisible,
 }));
 jest.mock('@/services', () => ({ refreshInbox: jest.fn() }));
 // "Mark all read" is the one header action that WRITES — and it writes to EVERY chat. Stub just
@@ -216,6 +225,8 @@ beforeEach(() => {
   mockScrollToTop.mockClear();
   mockListProps.current = {};
   mockFocusCallbacks.length = 0;
+  mockInsetBottom = 0;
+  mockKbVisible = false;
 });
 
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
@@ -759,5 +770,51 @@ describe('ConversationListScreen — re-land at the top on return', () => {
     (mockListProps.current.onScrollBeginDrag as () => void)();
     (mockListProps.current.onContentSizeChange as () => void)();
     expect(mockScrollToTop).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * The bottom search bar's safe-area reservation — the inbox half of the "empty band above the
+ * keyboard" fix (the chat half is conversations/composerKeyboardInset.test.tsx).
+ *
+ * THE RULE: the reservation is the UNION of the keyboard and the navigation bar, never their SUM.
+ * `useSafeAreaInsets().bottom` is the nav-bar inset and does not shrink when the keyboard opens,
+ * but Android's IME inset already spans that strip — reserving both leaves a nav-bar-tall band of
+ * dead space above the keyboard. Config-level, like the search-field sizing guard above: the gap
+ * itself is device-only, the arithmetic is not.
+ */
+describe('ConversationListScreen search bar bottom inset', () => {
+  const NAV_BAR = 48;
+
+  /** The search bar is the input's grandparent — walk up rather than add a testID for one test. */
+  function searchBarPaddingBottom(): number {
+    const input = screen.getByPlaceholderText('Search messages & chats');
+    const bar = input.parent?.parent;
+    const flat = Object.assign({}, ...[bar?.props.style].flat(Infinity).filter(Boolean));
+    return flat.paddingBottom;
+  }
+
+  it('clears the navigation bar while the keyboard is DOWN', async () => {
+    mockInsetBottom = NAV_BAR;
+    setChats({ data: [makeRow({ guid: 'a' })] });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(searchBarPaddingBottom()).toBe(NAV_BAR);
+  });
+
+  it('COLLAPSES the navigation-bar reservation while the keyboard is UP', async () => {
+    mockInsetBottom = NAV_BAR;
+    mockKbVisible = true;
+    setChats({ data: [makeRow({ guid: 'a' })] });
+    await renderWithTheme(<ConversationListScreen />);
+    // The keyboard covers the nav-bar strip; reserving it again is the band. 0 (not the composer's
+    // 8) is deliberate — it is what this screen already worked out to, so the fix stays a no-op here.
+    expect(searchBarPaddingBottom()).toBe(0);
+  });
+
+  it('keeps a 10dp floor when the device reports no bottom inset at all', async () => {
+    mockInsetBottom = 0;
+    setChats({ data: [makeRow({ guid: 'a' })] });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(searchBarPaddingBottom()).toBe(10);
   });
 });

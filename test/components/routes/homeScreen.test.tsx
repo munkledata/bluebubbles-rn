@@ -2,7 +2,7 @@
  * Home route (app/(app)/home.tsx): the connected inbox and the app's boot-completion hub.
  * Beyond rendering the (separately-tested) ConversationListScreen, its mount effect does the
  * launch-order recovery work that this suite locks in:
- *   - (re)hydrates the SIX kv-backed prefs stores AFTER the DB is open (the root layout's first
+ *   - (re)hydrates the kv-backed prefs stores AFTER the DB is open (the root layout's first
  *     hydrate runs pre-connect and silently fails — see src/state/themeStore.ts). Each fires once.
  *   - crash-recovers scheduled + optimistic-send rows, then catches up on due scheduled sends;
  *     the branch is gated by `isDevServer()` (dev → local fake send via runDueScheduled; prod →
@@ -15,12 +15,11 @@
  *
  * In-file mocks: @ui (ConversationListScreen probe), expo-router (push/replace), @/services
  * (forget/http), @/services/send (the 4 recovery fns), @features/conversations/devSeed (the dev
- * helpers), @utils/isDev (isDevServer). The SIX stores stay REAL — their `hydrate` action is spied
+ * helpers), @utils/isDev (isDevServer). The stores stay REAL — their `hydrate` action is spied
  * so we assert the call without running the DB-backed body.
  */
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
-import { useSmartReplyStore } from '@state/smartReplyStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
@@ -80,7 +79,6 @@ const isDevServerMock = isDevServer as jest.Mock;
 const recoverStuckScheduledMock = recoverStuckScheduled as jest.Mock;
 
 const STORES = [
-  useSmartReplyStore,
   useRedactedModeStore,
   useFeatureSettingsStore,
   useSyncSettingsStore,
@@ -117,7 +115,7 @@ describe('Home route — render', () => {
 });
 
 describe('Home route — boot-completion side-effects', () => {
-  it('re-hydrates all six prefs stores exactly once on mount', async () => {
+  it('re-hydrates every registered prefs store exactly once on mount', async () => {
     await renderWithTheme(<Home />);
     await waitFor(() => expect(recoverStuckScheduled).toHaveBeenCalled());
     for (const spy of hydrateSpies) {

@@ -3,7 +3,7 @@
  * SCREEN'S OWN wiring — how it maps a long-pressed message into a SelectedMessage, routes the
  * overlay/composer callbacks into the send services, drives the scheduled-message ticker, and
  * flips wallpaper chrome — while treating every child (MessageList, Composer,
- * MessageActionsOverlay, SmartReplyChips, …) as a probe (their internals are covered in their
+ * MessageActionsOverlay, …) as a probe (their internals are covered in their
  * own suites). The data hooks and the whole `@/services` + `@/services/send` surface are mocked
  * so assertions are about the ROUTE'S logic, not the DB/network.
  *
@@ -38,7 +38,6 @@ const mockCaptured: {
   list?: Record<string, any>;
   overlay?: Record<string, any>;
   composer?: Record<string, any>;
-  smartReply?: Record<string, any>;
 } = {};
 
 jest.mock('expo-router', () => ({
@@ -46,9 +45,35 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+// Zero by default (what the rest of the suite wants); mutable so the keyboard-inset test can hand
+// the selection bar a realistic navigation bar.
+let mockInsetBottom = 0;
 jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  useSafeAreaInsets: () => ({ top: 0, bottom: mockInsetBottom, left: 0, right: 0 }),
 }));
+// The screen's bottom bars collapse their nav-bar reservation while the keyboard is up (union, not
+// sum — see Composer.tsx's paddingBottom). RNTL has no soft keyboard, so drive the hook directly.
+let mockKbVisible = false;
+jest.mock('@ui/hooks/useKeyboardVisible', () => ({
+  useKeyboardVisible: () => mockKbVisible,
+}));
+
+/** Latest props the screen's KeyboardAvoidingView was rendered with (see the keyboard test). */
+let mockKavProps: Record<string, unknown> = {};
+// RNTL 14 dropped the UNSAFE_* type queries and its tree is host-only, so a composite's props are
+// unreachable from the render result — capture them by standing in for the module instead. The
+// stand-in renders a Fragment: under jest the real KAV's padding is always 0 (no soft keyboard),
+// so it contributes nothing to the tree the other tests read.
+jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () => {
+  const R = require('react');
+  return {
+    __esModule: true,
+    default: (props: Record<string, unknown>) => {
+      mockKavProps = props;
+      return R.createElement(R.Fragment, null, props.children as React.ReactNode);
+    },
+  };
+});
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
 jest.mock('expo-media-library', () => ({
@@ -65,7 +90,7 @@ jest.mock('expo-image', () => {
 jest.mock('@ui', () => {
   const R = require('react');
   const { View, Text } = require('react-native');
-  const capture = (key: 'list' | 'overlay' | 'composer' | 'smartReply') => (props: any) => {
+  const capture = (key: 'list' | 'overlay' | 'composer') => (props: any) => {
     mockCaptured[key] = props;
     return null;
   };
@@ -79,7 +104,6 @@ jest.mock('@ui', () => {
     MessageList: capture('list'),
     MessageActionsOverlay: capture('overlay'),
     Composer: capture('composer'),
-    SmartReplyChips: capture('smartReply'),
     ThreadSheet: () => null,
     EditHistorySheet: () => null,
     MessageDetailsSheet: () => null,
@@ -203,6 +227,8 @@ function reactionRow(over: Record<string, unknown>): any {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGuid = GUID;
+  mockInsetBottom = 0;
+  mockKbVisible = false;
   useTypingStore.setState({ typing: {} });
   useMessagesMock.mockReturnValue({ data: [], error: null });
   useChatHeaderMock.mockReturnValue({
@@ -357,11 +383,6 @@ describe('ChatScreen — send routing', () => {
     });
   });
 
-  it('a smart-reply chip pick routes through the same send()', async () => {
-    await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.smartReply!.onPick('on my way'));
-    expect(send).toHaveBeenCalledWith({ chatGuid: GUID, text: 'on my way', effectId: undefined });
-  });
 });
 
 describe('ChatScreen — reply flow', () => {
@@ -437,6 +458,41 @@ describe('ChatScreen — wallpaper chrome flip', () => {
     expect(mockCaptured.list!.hasBackground).toBe(true);
     expect(mockCaptured.list!.topInset).toBeGreaterThan(0);
     expect(mockCaptured.list!.bottomInset).toBeGreaterThan(0);
+  });
+});
+
+describe('ChatScreen — keyboard avoidance contract', () => {
+  // Half of the "empty band between the composer and the keyboard" fix. The Composer collapses its
+  // own nav-bar reservation while the keyboard is up (locked in conversations/
+  // composerKeyboardInset.test.tsx); this screen must therefore NOT also pass the old
+  // `keyboardVerticalOffset={-insets.bottom}` counterweight, which existed only to cancel that
+  // reservation. With both in place the composer is pushed BEHIND the keyboard — so the two
+  // invariants have to move together, and each side asserts its half.
+  // The real lift is device-only (RNTL has no soft keyboard); the PROPS are all jest can see.
+  it('uses behavior="padding" with NO keyboardVerticalOffset counterweight', async () => {
+    await renderWithTheme(<ChatScreen />);
+    expect(mockKavProps.behavior).toBe('padding');
+    expect(mockKavProps.keyboardVerticalOffset ?? 0).toBe(0);
+  });
+
+  // The SELECTION bar is the third copy of the union rule (Composer and the inbox search bar are
+  // the other two, each guarded in its own suite). It replaces the Composer in multi-select, so it
+  // owns the bottom safe area while it is up.
+  it('collapses the selection bar’s nav-bar reservation while the keyboard is up', async () => {
+    const NAV_BAR = 48;
+    mockInsetBottom = NAV_BAR;
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    await run(() => mockCaptured.overlay!.onSelect());
+    const bar = (await screen.findByText('1 selected')).parent;
+    const flat = Object.assign({}, ...[bar?.props.style].flat(Infinity).filter(Boolean));
+    expect(flat.paddingBottom).toBe(NAV_BAR + 14);
+
+    mockKbVisible = true;
+    await run(() => mockCaptured.list!.onToggleSelect(makeMsg({ guid: 'm2' })));
+    const barUp = (await screen.findByText('2 selected')).parent;
+    const flatUp = Object.assign({}, ...[barUp?.props.style].flat(Infinity).filter(Boolean));
+    expect(flatUp.paddingBottom).toBe(14);
   });
 });
 

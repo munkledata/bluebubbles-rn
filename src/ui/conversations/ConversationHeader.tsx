@@ -6,11 +6,14 @@ import type { ChatHeaderRow } from '@db/repositories';
 import { useFaceTime } from '@features/facetime/useFaceTime';
 import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
+  addressMatchesTitle,
   avatarSeed,
   dedupeParticipants,
+  formatHandleAddress,
   isGroupRow,
   participantAvatars,
   participantList,
+  primaryChatAddress,
   redactTitle,
   resolveChatService,
   resolveTitle,
@@ -58,6 +61,27 @@ export function ConversationHeader({
       )
     : { names: [] as string[], uris: [] as (string | null)[] };
 
+  /**
+   * The contact's phone number / email, shown under their name — the app's only place to see it.
+   *
+   * Four deliberate suppressions, each for its own reason:
+   *  - GROUPS: several people, no single number to show (and their identifier is a raw chat guid).
+   *  - REDACTED MODE: a number identifies a person exactly as much as their name does, so a header
+   *    masked to "Contact" must not print it underneath. Suppressed outright rather than masked to
+   *    a placeholder — there is nothing useful to say in its place.
+   *  - AN UNSAVED CONTACT: the title already IS the number (participantNames falls back to the
+   *    address), so a subtitle would just repeat the line above it.
+   *  - NO ADDRESS YET: the header row resolves async and pre-sync chats have no handles.
+   */
+  const rawAddress = data && !group ? primaryChatAddress(data) : '';
+  const subtitle =
+    rawAddress && !redacted && !addressMatchesTitle(rawAddress, title)
+      ? formatHandleAddress(rawAddress)
+      : '';
+  const detailsLabel = title
+    ? `${title}${subtitle ? `, ${subtitle}` : ''}, chat details`
+    : 'Chat details';
+
   return (
     <View
       style={[
@@ -86,7 +110,7 @@ export function ConversationHeader({
         onPress={() => router.push(`/chat-settings/${encodeURIComponent(chatGuid)}`)}
         style={styles.center}
         accessibilityRole="button"
-        accessibilityLabel={title ? `${title}, chat details` : 'Chat details'}
+        accessibilityLabel={detailsLabel}
       >
         {data ? (
           <View style={translucent ? [styles.avatarBubble, { backgroundColor: chip }] : null}>
@@ -121,6 +145,22 @@ export function ConversationHeader({
             />
           ) : null}
         </View>
+        {subtitle ? (
+          <Text
+            numberOfLines={1}
+            // Announced via the Pressable's accessibilityLabel (which swallows children), so mark
+            // it decorative here rather than letting TalkBack read the number twice.
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+            style={[
+              styles.subtitle,
+              { color: theme.color.secondaryLabel },
+              translucent ? [styles.subtitlePill, { backgroundColor: chip }] : null,
+            ]}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
       </Pressable>
       <View style={styles.rightGroup}>
         <Pressable
@@ -172,6 +212,9 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', gap: 2 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '90%' },
   title: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
+  // The contact's number/email under their name. Deliberately small + tight-leaded: it only adds
+  // ~14dp to the bar, which the wallpaper-mode onLayout measurement absorbs on its own.
+  subtitle: { fontSize: 12, lineHeight: 14, maxWidth: '90%' },
   // Floating-over-wallpaper chrome: each control sits in its own frosted bubble.
   bubble: {
     width: 36,
@@ -187,5 +230,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginTop: 1,
+  },
+  // Same frosted treatment as the title — over a wallpaper a bare 12pt line is unreadable.
+  subtitlePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
   },
 });

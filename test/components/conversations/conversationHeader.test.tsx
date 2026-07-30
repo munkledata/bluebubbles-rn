@@ -64,6 +64,7 @@ function makeHeader(overrides: Partial<ChatHeaderRow> = {}): ChatHeaderRow {
     participantCount: 1,
     participantNames: 'Alice',
     participantAvatars: null,
+    participantAddresses: '+15551230000',
     handleServices: null,
     ...overrides,
   };
@@ -113,6 +114,99 @@ describe('ConversationHeader — title resolution', () => {
   });
 });
 
+describe('ConversationHeader — contact number under the name', () => {
+  // The subtitle is marked accessibilityElementsHidden (the Pressable's label announces it once),
+  // so every query for it has to opt hidden elements in.
+  it('shows the 1:1 contact’s formatted number beneath their name', async () => {
+    mockHeaderData = makeHeader({ participantNames: 'Alice', participantAddresses: '+15551230000' });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.getByText('Alice')).toBeTruthy();
+    expect(screen.getByText('+1 (555) 123-0000', HIDDEN)).toBeTruthy();
+  });
+
+  it('shows an email handle verbatim', async () => {
+    mockHeaderData = makeHeader({
+      chatIdentifier: 'alice@example.com',
+      participantNames: 'Alice',
+      participantAddresses: 'alice@example.com',
+    });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.getByText('alice@example.com', HIDDEN)).toBeTruthy();
+  });
+
+  it('prefers the handle the thread is keyed on when the contact has two', async () => {
+    mockHeaderData = makeHeader({
+      chatIdentifier: 'alice@example.com',
+      participantCount: 2,
+      participantNames: 'Alice, Alice',
+      participantAddresses: '+15551230000|||alice@example.com',
+    });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.getByText('alice@example.com', HIDDEN)).toBeTruthy();
+    expect(screen.queryByText('+1 (555) 123-0000', HIDDEN)).toBeNull();
+  });
+
+  it('does NOT repeat the number when it is already the title (unsaved contact)', async () => {
+    // participantNames falls back to the raw address for a contact not in the address book, so the
+    // title IS the number — a subtitle here would just duplicate the line above it.
+    mockHeaderData = makeHeader({
+      participantNames: '+1 (555) 123-0000',
+      participantAddresses: '+15551230000',
+    });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.getAllByText('+1 (555) 123-0000', HIDDEN)).toHaveLength(1);
+    expect(screen.getByLabelText('+1 (555) 123-0000, chat details')).toBeTruthy();
+  });
+
+  it('shows no number for a GROUP chat', async () => {
+    mockHeaderData = makeHeader({
+      style: 43,
+      chatIdentifier: 'chat947991747861991169',
+      participantCount: 2,
+      participantNames: 'Alice, Bob',
+      participantAddresses: '+15551230000|||+15559990000',
+    });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.queryByText('+1 (555) 123-0000', HIDDEN)).toBeNull();
+    expect(screen.getByLabelText('Alice, Bob, chat details')).toBeTruthy();
+  });
+
+  it('falls back to the chat identifier when the handles have not synced yet', async () => {
+    mockHeaderData = makeHeader({
+      chatIdentifier: '+15551230000',
+      participantNames: 'Alice',
+      participantAddresses: null,
+    });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.getByText('+1 (555) 123-0000', HIDDEN)).toBeTruthy();
+  });
+
+  it('never surfaces a raw chat-guid identifier as if it were a number', async () => {
+    mockHeaderData = makeHeader({
+      chatIdentifier: 'chat947991747861991169',
+      participantNames: 'Alice',
+      participantAddresses: null,
+    });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.queryByText('chat947991747861991169', HIDDEN)).toBeNull();
+    expect(screen.getByLabelText('Alice, chat details')).toBeTruthy();
+  });
+});
+
 describe('ConversationHeader — service badge', () => {
   it('badges an RCS guid as "RCS"', async () => {
     mockHeaderData = makeHeader({ guid: 'RCS;-;+15551230000' });
@@ -153,7 +247,7 @@ describe('ConversationHeader — affordances', () => {
     const guid = 'iMessage;-;+15551230000';
     mockHeaderData = makeHeader({ guid });
     await renderWithTheme(<ConversationHeader chatGuid={guid} data={mockHeaderData} />);
-    fireEvent.press(screen.getByLabelText('Alice, chat details'));
+    fireEvent.press(screen.getByLabelText('Alice, +1 (555) 123-0000, chat details'));
     await waitFor(() =>
       expect(mockPush).toHaveBeenCalledWith(`/chat-settings/${encodeURIComponent(guid)}`),
     );
@@ -189,6 +283,17 @@ describe('ConversationHeader — redacted mode', () => {
     expect(screen.getByText('Contact')).toBeTruthy();
     expect(screen.queryByText('Alice')).toBeNull();
     // the details a11y label is redacted too (no identity leak to a screen reader)
+    expect(screen.getByLabelText('Contact, chat details')).toBeTruthy();
+  });
+
+  it('suppresses the number subtitle — a number identifies as precisely as a name', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    mockHeaderData = makeHeader({ participantNames: 'Alice', participantAddresses: '+15551230000' });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.queryByText('+1 (555) 123-0000', HIDDEN)).toBeNull();
+    expect(screen.queryByText('+15551230000', HIDDEN)).toBeNull();
     expect(screen.getByLabelText('Contact, chat details')).toBeTruthy();
   });
 });

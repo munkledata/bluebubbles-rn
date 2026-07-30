@@ -22,6 +22,7 @@ import {
   type MentionPick,
   type MentionRange,
 } from '@utils';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon } from '../primitives';
 import { useTheme, withAlpha } from '../theme';
 import type { Recurrence } from '@core/schedule';
@@ -98,6 +99,9 @@ export const Composer = React.memo(function Composer({
   const theme = useTheme();
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
   const insets = useSafeAreaInsets();
+  // Drives the bottom safe-area reservation below (see the `paddingBottom` comment) and enforces
+  // the tray/keyboard exclusion — NOT a keyboard-avoidance mechanism (the screen's KAV owns that).
+  const kbVisible = useKeyboardVisible();
   // Over a wallpaper the composer bar disappears; the input pill + each control float as bubbles.
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.ctrlBubble, { backgroundColor: chip }] : null;
@@ -186,6 +190,17 @@ export const Composer = React.memo(function Composer({
       if (!open) Keyboard.dismiss(); // the tray takes the keyboard's place
       return !open;
     });
+  // The tray and the keyboard are meant to be mutually exclusive — the tray occupies the keyboard's
+  // slot (fixed 104dp BELOW the input row), so both on screen at once stacks a second keyboard's
+  // worth of chrome under the composer. `toggleTray` (dismiss on open) and `onFocus` (close on
+  // focus) cover it from the tray's side, but they miss one path: Android's Back closes the IME
+  // WITHOUT blurring the input, so tapping the still-focused field reopens the keyboard and fires
+  // NO onFocus. Enforce the invariant from the keyboard's side too. Keyed on the kbVisible
+  // transition (not on trayOpen), so opening the tray while the keyboard is still on its way down
+  // isn't immediately undone.
+  useEffect(() => {
+    if (kbVisible) setTrayOpen(false);
+  }, [kbVisible]);
   const handlePickFiles = (): void => {
     const p = onPickFiles?.();
     if (p) void p.then((items) => items.forEach(addPending));
@@ -350,17 +365,36 @@ export const Composer = React.memo(function Composer({
     ? replyTo.text ||
       // Genmoji: prefer the natural-language description over the generic label. The reply bar shows
       // the message the user is actively replying to (already raw, unredacted), so no masking here.
-      (replyTo.hasAttachments === 1
-        ? replyTo.attachmentDescription?.trim() || '📎 Attachment'
-        : '')
+      (replyTo.hasAttachments === 1 ? replyTo.attachmentDescription?.trim() || '📎 Attachment' : '')
     : '';
 
   return (
     <View
+      // The bottom-inset rule below is device-only in effect but node-testable through this handle
+      // (composerKeyboardInset.test.tsx) — it regressed once and is easy to "tidy" back.
+      testID="composer-bar"
       style={[
         styles.wrap,
         {
-          paddingBottom: insets.bottom + 8,
+          // THE BOTTOM INSET IS A UNION, NOT A SUM — this is what put an empty band between the
+          // composer and the keyboard. `insets.bottom` is the NAVIGATION-BAR inset
+          // (safe-area-context asks for statusBars|displayCutout|navigationBars|captionBar — never
+          // `ime()`), so it does not shrink when the keyboard opens. But the keyboard COVERS the
+          // nav bar: Android's IME inset is measured from the window bottom and already spans that
+          // strip (RN's own ReactRootView subtracts `barInsets.bottom` back out of `imeInsets`).
+          // Reserving it again on top of whatever lifted the bar is a double count, and it shows up
+          // as `insets.bottom` of dead space above the keyboard — the taller the nav bar, the worse
+          // (~32dp gesture, ~56dp 3-button). Android's own rule for this is max(ime, navBar), which
+          // is what `kbVisible ? 0 : insets.bottom` expresses. The trailing 8 is the breathing room
+          // under the input pill, kept in BOTH states so the bar looks the same either way.
+          //
+          // This replaced a fragile pair of opposing hacks: the screen's KAV used to pass
+          // `keyboardVerticalOffset={-insets.bottom}` purely to cancel the reservation made here.
+          // That only balances while the KAV is actually doing the lifting — its padding term is
+          // clamped at `Math.max(…, 0)` and this one was not, so the moment the KAV contributed 0
+          // (the window itself resizing for the IME) the cancellation vanished and the full
+          // nav-bar-sized band appeared. Both offsets are now gone; see chat/[guid].tsx.
+          paddingBottom: (kbVisible ? 0 : insets.bottom) + 8,
           backgroundColor: translucent ? 'transparent' : theme.color.background,
           borderTopColor: translucent ? 'transparent' : theme.color.separator,
         },

@@ -272,7 +272,7 @@ receipts like the Flutter app.
 
 ## 6.1 Redacted (privacy) mode — **done**
 A `redactedModeStore` ([src/state/redactedModeStore.ts](./src/state/redactedModeStore.ts), kv-persisted,
-default OFF — mirrors `smartReplyStore`) drives masking via pure helpers
+default OFF) drives masking via pure helpers
 ([src/utils/privacy.ts](./src/utils/privacy.ts): `redactPreview`/`redactTitle`/`redactMessageText`, 3 tests).
 When ON it masks: inbox tile title + preview (ConversationTile), the pinned grid + conversation header
 titles, the chat bubble text + URL preview (MessageBubble), and the notification body (the existing

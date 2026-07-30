@@ -117,13 +117,12 @@ FTS5 search index.
 ### 8. kv prefs table (non-secret, inside the encrypted DB)
 `src/db/repositories/kv.ts`
 
-- Persisted non-secret prefs: `theme.preset`, `theme.custom`, `smartReply.enabled`,
-  `privacy.redactedMode`. Survives restart but unreadable until the DB is open.
+- Persisted non-secret prefs: `theme.preset`, `theme.custom`, `privacy.redactedMode`. Survives restart but unreadable until the DB is open.
 - `kvGet`/`kvSet` only (no delete; "clearing" writes an empty string). `kv(key TEXT PK,
   value TEXT)`.
 
 ### 9. In-memory zustand stores
-- *kv-mirroring*: `themeStore`, `smartReplyStore`, `redactedModeStore`, `featureSettingsStore`
+- *kv-mirroring*: `themeStore`, `redactedModeStore`, `featureSettingsStore`
   (feature flags + attachment auto-download / wifi-only settings), `syncSettingsStore`
   (messages-per-chat) — hydrate from `kv`, set memory first then best-effort `kvSet`.
 - *vault-mirroring*: `sessionStore` (credentials), `lockStore` (`appLockEnabled`) — never

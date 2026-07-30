@@ -302,7 +302,7 @@ export function MessageList({
   }, []);
 
   // The list's viewport RESIZES from the bottom — keyboard open/close (the chat screen's
-  // KeyboardAvoidingView), the typing bubble / smart-reply chips appearing, the selection bar —
+  // KeyboardAvoidingView), the typing bubble or the selection bar appearing —
   // and FlashList keeps its scroll offset, so the newest messages slide behind the composer.
   // While pinned, re-land at the bottom on ANY height change. This hangs off the wrapper's
   // onLayout, which fires AFTER the resize is committed, so the metrics are fresh — the old

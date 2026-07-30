@@ -926,6 +926,16 @@ export interface ChatHeaderRow {
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
+  /**
+   * `|||`-joined participant handle ADDRESSES (the raw phone/email), positionally aligned with
+   * `participantNames`/`participantAvatars`. Distinct from the names, which are
+   * `COALESCE(display_name, address)` — for a SAVED contact the name is the contact's name, so the
+   * address is the only place the actual number survives. The chat header shows it under the name.
+   *
+   * `|||` (not `, `) because an address must round-trip exactly. Optional so hand-built
+   * `ChatHeaderRow` test literals need not set it; the query below always provides it at runtime.
+   */
+  participantAddresses?: string | null;
   /** Comma-joined participant handle services ('iMessage'/'SMS'), for `resolveChatService`. */
   handleServices: string | null;
   /**
@@ -967,6 +977,9 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
       (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS participantAvatars,
+      (SELECT group_concat(COALESCE(h.address, ''), '|||' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS participantAddresses,
       (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS handleServices

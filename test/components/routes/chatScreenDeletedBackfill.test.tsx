@@ -54,7 +54,6 @@ jest.mock('@ui', () => {
     MessageList: () => null,
     MessageActionsOverlay: () => null,
     Composer: () => null,
-    SmartReplyChips: () => null,
     ThreadSheet: () => null,
     EditHistorySheet: () => null,
     MessageDetailsSheet: () => null,

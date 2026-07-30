@@ -10,7 +10,7 @@ security weaknesses of the original addressed from day one.
 > (dev / preview / production — internal APK / store AAB); a root **`ErrorBoundary`** mounted above the
 > providers so a render throw shows a recoverable fallback instead of a white screen; an **accessibility
 > sweep** (roles + labels on every icon button — send/attach/schedule/back/settings/search/reaction/
-> close, the mute + suggested-replies switches, conversation tiles announce sender·unread·preview,
+> close, the mute switch, conversation tiles announce sender·unread·preview,
 > avatars marked decorative); a **performance pass** — `React.memo` on `ConversationTile`, `MessageRow`,
 > `MessageBubble`, `Avatar`, with the list callbacks made stable (`useCallback` for retry/long-press/
 > open-chat) so the memos actually hold (rows no longer re-render on every composer/reply/selection state
@@ -53,7 +53,7 @@ security weaknesses of the original addressed from day one.
 > rebuild). See `AGENTS.md` for gotchas.
 >
 > Status (prior): **Phase 7d — the remaining Phase-7 features (per-chat customization, backup/restore,
-> reminders, rich-text mentions, suggested replies) complete & verified on-device.** Builds on
+> reminders, rich-text mentions) complete & verified on-device.** Builds on
 > Phases 0–7c. Adds: **per-chat customization** (tap the conversation header → set a custom name,
 > a bubble accent color, or mute; local-only, kept out of `upsertChats`' conflict set so a server
 > re-sync can't clobber it — migration `0005` adds `chats.custom_name`/`custom_color`); **backup &
@@ -64,9 +64,7 @@ security weaknesses of the original addressed from day one.
 > `0006` adds a `reminders` table; a Reminders screen lists/reschedules/cancels them); **rich-text
 > mentions** (a pure parser turns a message's `attributedBody` into styled runs — @mentions in the
 > accent color, with gap-filling so no text is ever dropped; scope-cut to mentions+links because
-> the upstream format carries no bold/italic data); and **suggested replies** (rule-based chips above the
-> composer when the last message is inbound, gated by a Settings toggle, behind a swappable
-> `SmartReplyProvider` so on-device ML Kit can drop in later). All JS-only — **no native rebuild**
+> the upstream format carries no bold/italic data). All JS-only — **no native rebuild**
 > (the two migrations run automatically). An adversarial multi-agent review then hardened the set:
 > the rich-text parser now gap-fills uncovered text; every reminder call site surfaces failures
 > (which caught the real bug — a current-minute pick is already past once seconds elapse, so the
@@ -76,10 +74,9 @@ security weaknesses of the original addressed from day one.
 > chat-customization repo incl. no-clobber + photo-only, the backup round-trip incl. the secret-export
 > guard, the reminders state machine incl. reschedule-failure-intact, the rule-reply engine) against
 > better-sqlite3; typecheck + expo-doctor (21/21) pass. On-device: a chat shows a custom name + green
-> bubbles + mute; a backup shares `gator-backup.json`; a reminder persists to its list; and
-> tapping a suggested-reply chip sends it. Tracked follow-ups: lift the duplicate per-chat message
-> subscription, reverting a handle to its server name when a device contact is deleted, and an ML Kit
-> smart-reply provider (no Expo-compatible native module exists today). See `AGENTS.md` for gotchas.
+> bubbles + mute; a backup shares `gator-backup.json`; and a reminder persists to its list.
+> Tracked follow-ups: lift the duplicate per-chat message subscription, and reverting a handle to its
+> server name when a device contact is deleted. See `AGENTS.md` for gotchas.
 >
 > Status (prior): **Phase 7c — contacts sync & scheduled messages complete & verified on-device.**
 > Builds on Phases 0–7b. Adds **contacts sync** (Settings → Sync Contacts reads the device address
@@ -108,7 +105,7 @@ security weaknesses of the original addressed from day one.
 > a seeded raw number into "Jenny Tutone" across the inbox + chat header, and a message scheduled for
 > a near-future minute appeared on the Scheduled list and fired at its time (re-verified after the
 > hardening). Tracked follow-ups: reverting a handle to its server name when a device contact is
-> deleted (needs a separate server-name column), reminders, attributed/rich text, smart replies,
+> deleted (needs a separate server-name column), reminders, attributed/rich text,
 > backup/restore. See `AGENTS.md` for the gotchas resolved across phases.
 
 ## Why this exists

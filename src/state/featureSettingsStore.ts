@@ -12,7 +12,7 @@ import {
  * Private API client behaviors (typing indicators, read receipts) and attachment auto-download.
  * Persisted in `kv`; each defaults to the app's prior always-on behavior, so an un-hydrated read
  * (before launch hydration) behaves exactly as before. Hydrate at app launch + home mount like the
- * other kv stores (see [[redactedModeStore]] / smartReplyStore).
+ * other kv stores (see [[redactedModeStore]] / [[syncSettingsStore]]).
  *
  * Beyond the boolean FLAGS this store also owns the typed VALUE_SETTINGS (currently the
  * parallel-download cap) — a value carries a parse/clamp, a serialize, and an `apply` side-effect

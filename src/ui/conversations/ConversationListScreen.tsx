@@ -335,16 +335,20 @@ export function ConversationListScreen(): React.JSX.Element {
   );
 
   // The search bar lives at the BOTTOM, inside the KeyboardAvoidingView below — its `padding`
-  // behavior lifts the bar above the keyboard. `keyboardVerticalOffset={-insets.bottom}` cancels
-  // the nav-bar-sized padding KAV otherwise leaves UNDER the bar when the keyboard is closed on
-  // Android edge-to-edge (the cause of the earlier black gap). paddingBottom keeps the input above
-  // the nav bar while the keyboard is down.
+  // behavior lifts the bar above the keyboard. The bottom reservation is the UNION of the keyboard
+  // and the nav bar, never their sum: the keyboard's inset already spans the nav-bar strip, so
+  // reserving `insets.bottom` on top of whatever lifted the bar double-counts it and leaves an
+  // empty band above the keyboard. Same rule (and the same removed `keyboardVerticalOffset`
+  // counterweight) as the chat composer — see Composer.tsx's paddingBottom for the full story.
+  // The keyboard-up value is 0, not the composer's 8, ON PURPOSE: it is what the old
+  // offset/reservation pair already worked out to here, so the bar looks exactly as it does today
+  // and this stays a pure bug fix for a screen nobody reported a problem with.
   const searchBar = (
     <View
       style={[
         styles.searchBar,
         {
-          paddingBottom: Math.max(insets.bottom, 10),
+          paddingBottom: kbVisible ? 0 : Math.max(insets.bottom, 10),
           borderTopColor: theme.color.separator,
           backgroundColor: theme.color.background,
         },
@@ -381,12 +385,7 @@ export function ConversationListScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior="padding"
-        enabled={kbVisible}
-        keyboardVerticalOffset={-insets.bottom}
-      >
+      <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
         {titleRow}
         <View style={styles.list}>
           {searching ? (
