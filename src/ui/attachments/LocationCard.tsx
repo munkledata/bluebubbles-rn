@@ -4,7 +4,14 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
-import { parseVLocation, safeOpenUrl, type VLocationData } from '@utils';
+import { useRedactedModeStore } from '@state/redactedModeStore';
+import {
+  parseVLocation,
+  redactLabel,
+  resolveDisplayPoint,
+  safeOpenUrl,
+  type VLocationData,
+} from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 
@@ -22,6 +29,10 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const [loc, setLoc] = useState<VLocationData | null>(null);
+  // Plain `enabled` here, NOT the fail-closed `enabled || !hydrated` of the Find My screen: a
+  // message bubble renders in a list long after boot, so there is no hydrate-timing exposure, and
+  // a redaction flicker on every location card would be worse than the (nonexistent) risk.
+  const redacted = useRedactedModeStore((s) => s.enabled);
 
   useEffect(() => {
     const path = att.localPath;
@@ -40,23 +51,32 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
     };
   }, [att.localPath]);
 
+  // Coordinates go through the shared resolver, so redacted mode withholds them here exactly as it
+  // does on the Find My map — the numbers never reach a string, an intent or the rendered tree.
+  const point = resolveDisplayPoint(loc?.latitude, loc?.longitude, redacted);
+
   const onPress = (): void => {
     if (!att.localPath) {
       void download(att);
       return;
     }
-    if (loc) {
-      void safeOpenUrl(`geo:${loc.latitude},${loc.longitude}?q=${loc.latitude},${loc.longitude}`);
+    // A redacted card is inert, consistent with Find My having no "Open ↗" under redaction. This
+    // is a FOURTH gate, not a replacement for the "localPath but loc null → do nothing" branch.
+    if (point.visible) {
+      const { latitude, longitude } = point;
+      void safeOpenUrl(`geo:${latitude},${longitude}?q=${latitude},${longitude}`);
     }
   };
 
-  const subtitle = loc
-    ? `${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`
-    : status === 'downloading'
-      ? 'Downloading…'
-      : status === 'error'
-        ? 'Tap to retry'
-        : 'Tap to open';
+  const subtitle = point.visible
+    ? `${point.latitude.toFixed(4)}, ${point.longitude.toFixed(4)}`
+    : redacted && loc
+      ? 'Hidden in Redacted Mode'
+      : status === 'downloading'
+        ? 'Downloading…'
+        : status === 'error'
+          ? 'Tap to retry'
+          : 'Tap to open';
 
   return (
     <Pressable
@@ -80,7 +100,7 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
       </View>
       <View style={styles.meta}>
         <Text numberOfLines={1} style={[styles.name, { color: theme.color.label }]}>
-          {att.transferName ?? 'Location'}
+          {redactLabel(att.transferName ?? 'Location', 'Location', redacted)}
         </Text>
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>{subtitle}</Text>
       </View>

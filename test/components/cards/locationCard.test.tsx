@@ -21,7 +21,7 @@
  * asserted at the safeOpenUrl boundary; parseVLocation stays the REAL util via requireActual).
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -55,6 +55,8 @@ import { LocationCard } from '@ui/attachments/LocationCard';
 import { download } from '@/services/download';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
+// eslint-disable-next-line import/first
+import { useRedactedModeStore } from '@state/redactedModeStore';
 
 function makeAtt(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -78,6 +80,9 @@ function makeAtt(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
 
 beforeEach(() => {
   useDownloadStore.setState({ progress: {}, status: {} });
+  // The shared support/setup.ts resets only the theme store, so pin the redaction flag explicitly
+  // rather than leaving it to whatever ran before.
+  useRedactedModeStore.setState({ enabled: false, hydrated: true });
   mockLocText = SF_LOC;
   (download as jest.Mock).mockClear();
   (safeOpenUrl as jest.Mock).mockClear();
@@ -160,5 +165,61 @@ describe('LocationCard — tap contract', () => {
     fireEvent.press(screen.getByLabelText('Location'));
     expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
+  });
+});
+
+describe('LocationCard — redacted mode', () => {
+  // Coordinates are NUMBERS, so these sweeps assert on 4-significant-digit prefixes of the SF
+  // fixture (37.7749 / -122.4194). A rounded, truncated or nearby-decoy leak still fails them.
+  const LAT_PREFIX = '37.77';
+  const LNG_PREFIX = '122.41';
+  const treeJson = (): string => JSON.stringify(screen.toJSON());
+
+  it('withholds the coordinates and says so', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+    );
+    expect(await screen.findByText('Hidden in Redacted Mode')).toBeTruthy();
+    expect(screen.queryByText('37.7749, -122.4194')).toBeNull();
+    expect(treeJson()).not.toContain(LAT_PREFIX);
+    expect(treeJson()).not.toContain(LNG_PREFIX);
+  });
+
+  it('is inert on tap — no maps intent is built', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+    );
+    await screen.findByText('Hidden in Redacted Mode');
+    fireEvent.press(screen.getByLabelText('Location'));
+    await waitFor(() => expect(safeOpenUrl).not.toHaveBeenCalled());
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it('masks a filename that itself names the place', async () => {
+    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+    await renderWithTheme(
+      <LocationCard
+        att={makeAtt({ localPath: 'file:///l/loc.vcf', transferName: 'Craig Home.loc.vcf' })}
+        isFromMe={false}
+      />,
+    );
+    await screen.findByText('Hidden in Redacted Mode');
+    expect(treeJson()).not.toContain('Craig');
+  });
+
+  // THE CONTROL. Without it the negatives above could pass simply because nothing rendered.
+  it('shows everything when redaction is OFF', async () => {
+    useRedactedModeStore.setState({ enabled: false, hydrated: true });
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+    );
+    expect(await screen.findByText('37.7749, -122.4194')).toBeTruthy();
+    expect(treeJson()).toContain(LAT_PREFIX);
+    fireEvent.press(screen.getByLabelText('Location'));
+    await waitFor(() =>
+      expect(safeOpenUrl).toHaveBeenCalledWith('geo:37.7749,-122.4194?q=37.7749,-122.4194'),
+    );
   });
 });

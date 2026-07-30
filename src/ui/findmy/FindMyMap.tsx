@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { useTheme } from '../theme';
 
 export interface MapMarker {
   id: string;
@@ -23,7 +24,14 @@ interface FindMyMapProps {
  * `injectJavaScript` (no reload). Leaflet + OSM tiles load from a CDN (Find My needs network
  * anyway). The HTML is app-generated (no user-supplied markup), and only lat/lng/label cross in.
  */
-export function FindMyMap({ markers, focusId, height = 260 }: FindMyMapProps): React.JSX.Element {
+/** Shared so the redacted placeholder reserves exactly the map's visual weight. */
+export const FINDMY_MAP_HEIGHT = 260;
+
+export function FindMyMap({
+  markers,
+  focusId,
+  height = FINDMY_MAP_HEIGHT,
+}: FindMyMapProps): React.JSX.Element {
   const ref = useRef<WebView>(null);
 
   // Rebuild the doc only when the marker set changes (recenter uses injectJavaScript instead).
@@ -35,7 +43,9 @@ export function FindMyMap({ markers, focusId, height = 260 }: FindMyMapProps): R
   }, [focusId]);
 
   return (
-    <View style={[styles.wrap, { height }]}>
+    // testID lets a test assert STRUCTURALLY that the WebView never mounts under redaction,
+    // which is a stronger guarantee than searching the rendered tree for coordinate strings.
+    <View testID="findmy-map" style={[styles.wrap, { height }]}>
       <WebView
         ref={ref}
         originWhitelist={['*']}
@@ -83,7 +93,39 @@ function buildHtml(markers: MapMarker[]): string {
 </body></html>`;
 }
 
+/**
+ * Stand-in for the map under redacted mode. Deliberately renders NO WebView and no coordinate —
+ * the point of redacted mode is that a screenshot is safe, and a real pin on a real street is
+ * more identifying than a name.
+ */
+export function FindMyMapHidden(): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <View
+      testID="findmy-map-hidden"
+      // `secondaryBackground`, NOT `groupedBackground`: the latter is byte-identical to
+      // `background` in both shipped presets, so the panel would vanish into the page.
+      // `minHeight`, NOT `height`: a fixed-height text box clips at Android font_scale 1.5.
+      style={[styles.hidden, { backgroundColor: theme.color.secondaryBackground }]}
+    >
+      {/* An unstyled <Text> is near-black on Android — the colour must be explicit. */}
+      <Text style={[styles.hiddenText, { color: theme.color.secondaryLabel }]}>
+        Map hidden in Redacted Mode
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   wrap: { width: '100%', backgroundColor: '#111' },
   web: { flex: 1, backgroundColor: '#111' },
+  hidden: {
+    width: '100%',
+    minHeight: FINDMY_MAP_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  hiddenText: { fontSize: 15, textAlign: 'center' },
 });

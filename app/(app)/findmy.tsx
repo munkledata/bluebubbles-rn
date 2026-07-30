@@ -1,24 +1,35 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Linking,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { FindMyDevice, FindMyFriend } from '@core/findmy';
 import { useFindMyStore } from '@state/findmyStore';
 import { useRedactedModeStore } from '@state/redactedModeStore';
-import { redactTitle } from '@utils';
+import {
+  hasCoordinates,
+  redactBatteryPercent,
+  redactLabel,
+  redactLocationDetail,
+  resolveDisplayPoint,
+  safeOpenUrl,
+  type DisplayPoint,
+} from '@utils';
 import { Screen, ScreenHeader, useTheme } from '@ui';
-import { FindMyMap, type MapMarker } from '@ui/findmy/FindMyMap';
+import { FindMyMap, FindMyMapHidden, type MapMarker } from '@ui/findmy/FindMyMap';
 
-function openInMaps(lat: number | null, lng: number | null, label: string): void {
-  if (lat == null || lng == null) return;
-  void Linking.openURL(`geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label)})`);
+/**
+ * Open the system maps app at a point.
+ *
+ * Takes a resolved {@link DisplayPoint} rather than raw store values ON PURPOSE: the type makes it
+ * impossible to hand this function a coordinate that redacted mode was supposed to hide, which is
+ * exactly the leak that used to exist here. Goes through `safeOpenUrl` (geo: is allowlisted)
+ * instead of `Linking.openURL` so the scheme is validated at one place.
+ */
+function openInMaps(point: DisplayPoint, label: string): void {
+  if (!point.visible) return;
+  const { latitude, longitude } = point;
+  void safeOpenUrl(
+    `geo:${latitude},${longitude}?q=${latitude},${longitude}(${encodeURIComponent(label)})`,
+  );
 }
 
 /** Find My: an interactive OSM map + devices/items/people with last location and battery. */
@@ -33,7 +44,12 @@ export default function FindMyScreen(): React.JSX.Element {
   const error = useFindMyStore((s) => s.error);
   const load = useFindMyStore((s) => s.load);
   const refresh = useFindMyStore((s) => s.refresh);
-  const redacted = useRedactedModeStore((s) => s.enabled);
+  // FAIL CLOSED: treat "not yet hydrated" as redacted. The flag is read from kv asynchronously at
+  // root mount, and this screen plots real home addresses — so a brief unredacted flash is the one
+  // outcome worth designing against. Defence in depth (Find My is only reachable from home or
+  // settings, both of which mount after hydrate) and it cannot flash the other way, since the
+  // Find My data itself has not loaded yet either.
+  const redacted = useRedactedModeStore((s) => s.enabled || !s.hydrated);
   const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
   const [focusId, setFocusId] = useState<string | null>(null);
 
@@ -53,7 +69,9 @@ export default function FindMyScreen(): React.JSX.Element {
   const midDevice = (d: FindMyDevice, k: 'd' | 'i'): string => `${k}:${d.id}`;
   const midFriend = (f: FindMyFriend): string => `p:${f.id}`;
 
-  // Every located entity becomes a map marker; redacted mode masks the popup label.
+  // Every located entity becomes a map marker — but the COORDINATE is resolved first, so under
+  // redaction nothing is pushed at all. Masking only the popup label (the old behaviour) still
+  // plotted a real pin at a real address, which defeats the point of the mode.
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = [];
     const push = (
@@ -63,13 +81,28 @@ export default function FindMyScreen(): React.JSX.Element {
       name: string,
       kind: string,
     ) => {
-      if (lat != null && lng != null) out.push({ id, lat, lng, label: redacted ? kind : name });
+      const pt = resolveDisplayPoint(lat, lng, redacted);
+      if (!pt.visible) return;
+      // Label stays redacted too, as belt-and-braces for any future partial-visibility branch.
+      out.push({
+        id,
+        lat: pt.latitude,
+        lng: pt.longitude,
+        label: redactLabel(name, kind, redacted),
+      });
     };
     devices.forEach((d) => push(midDevice(d, 'd'), d.latitude, d.longitude, d.name, 'Device'));
     items.forEach((d) => push(midDevice(d, 'i'), d.latitude, d.longitude, d.name, 'Item'));
     friends.forEach((f) => push(midFriend(f), f.latitude, f.longitude, f.name, 'Person'));
     return out;
   }, [devices, items, friends, redacted]);
+
+  // Carries no coordinate — just "is anything locatable", so the redacted screen can explain the
+  // missing map instead of silently dropping a 260dp panel out of the layout.
+  const anyLocated = useMemo(
+    () => [...devices, ...items, ...friends].some((e) => hasCoordinates(e.latitude, e.longitude)),
+    [devices, items, friends],
+  );
 
   const rows = tab === 'devices' ? devices : tab === 'items' ? items : friends;
 
@@ -87,7 +120,13 @@ export default function FindMyScreen(): React.JSX.Element {
         }
       />
 
-      {markers.length > 0 ? <FindMyMap markers={markers} focusId={focusId} /> : null}
+      {/* `focusId` is masked too: a marker id can embed a device NAME, and it would otherwise ride
+          into injectJavaScript. Under redaction there are no markers to recenter anyway. */}
+      {markers.length > 0 ? (
+        <FindMyMap markers={markers} focusId={redacted ? null : focusId} />
+      ) : redacted && anyLocated ? (
+        <FindMyMapHidden />
+      ) : null}
 
       <View style={[styles.tabs, { borderBottomColor: theme.color.separator }]}>
         {(['devices', 'items', 'people'] as const).map((t) => (
@@ -134,6 +173,7 @@ export default function FindMyScreen(): React.JSX.Element {
                 key={d.id}
                 device={d}
                 redacted={redacted}
+                kind="Device"
                 onFocus={() => setFocusId(midDevice(d, 'd'))}
               />
             ))
@@ -143,6 +183,7 @@ export default function FindMyScreen(): React.JSX.Element {
                   key={d.id}
                   device={d}
                   redacted={redacted}
+                  kind="Item"
                   onFocus={() => setFocusId(midDevice(d, 'i'))}
                 />
               ))
@@ -162,34 +203,38 @@ export default function FindMyScreen(): React.JSX.Element {
 function DeviceRow({
   device,
   redacted,
+  kind,
   onFocus,
 }: {
   device: FindMyDevice;
   redacted: boolean;
+  /** The items tab reuses this row, so the redacted placeholder must say "Item", not "Device". */
+  kind: 'Device' | 'Item';
   onFocus: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  const hasLoc = device.latitude != null && device.longitude != null;
-  const name = redacted ? redactTitle(device.name, true) : device.name;
+  const point = resolveDisplayPoint(device.latitude, device.longitude, redacted);
+  const located = hasCoordinates(device.latitude, device.longitude);
+  const name = redactLabel(device.name, kind, redacted);
+  const detail = redactLocationDetail(device.address, located, redacted);
+  const battery = redactBatteryPercent(device.batteryLevel, redacted);
   return (
+    // Gated on `point.visible`, NOT `located`: under redaction there is no map to recenter, so the
+    // row must be inert. One variable drives both gates so they cannot drift apart.
     <Pressable
-      onPress={hasLoc ? onFocus : undefined}
-      disabled={!hasLoc}
+      onPress={point.visible ? onFocus : undefined}
+      disabled={!point.visible}
       style={[styles.row, { borderBottomColor: theme.color.separator }]}
     >
       <View style={styles.rowText}>
         <Text style={[styles.name, { color: theme.color.label }]}>{name}</Text>
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>
-          {redacted
-            ? hasLoc
-              ? 'Location available'
-              : 'No location'
-            : (device.address ?? (hasLoc ? 'Location available' : 'No location'))}
-          {device.batteryLevel != null ? ` · 🔋 ${Math.round(device.batteryLevel * 100)}%` : ''}
+          {detail}
+          {battery != null ? ` · 🔋 ${battery}%` : ''}
         </Text>
       </View>
-      {hasLoc ? (
-        <Pressable onPress={() => openInMaps(device.latitude, device.longitude, name)} hitSlop={10}>
+      {point.visible ? (
+        <Pressable onPress={() => openInMaps(point, name)} hitSlop={10}>
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}
@@ -207,26 +252,22 @@ function FriendRow({
   onFocus: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  const hasLoc = friend.latitude != null && friend.longitude != null;
-  const name = redacted ? redactTitle(friend.name, true) : friend.name;
+  const point = resolveDisplayPoint(friend.latitude, friend.longitude, redacted);
+  const located = hasCoordinates(friend.latitude, friend.longitude);
+  const name = redactLabel(friend.name, 'Person', redacted);
+  const detail = redactLocationDetail(friend.address, located, redacted);
   return (
     <Pressable
-      onPress={hasLoc ? onFocus : undefined}
-      disabled={!hasLoc}
+      onPress={point.visible ? onFocus : undefined}
+      disabled={!point.visible}
       style={[styles.row, { borderBottomColor: theme.color.separator }]}
     >
       <View style={styles.rowText}>
         <Text style={[styles.name, { color: theme.color.label }]}>{name}</Text>
-        <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>
-          {redacted
-            ? hasLoc
-              ? 'Location available'
-              : 'No location'
-            : (friend.address ?? 'No location')}
-        </Text>
+        <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>{detail}</Text>
       </View>
-      {hasLoc ? (
-        <Pressable onPress={() => openInMaps(friend.latitude, friend.longitude, name)} hitSlop={10}>
+      {point.visible ? (
+        <Pressable onPress={() => openInMaps(point, name)} hitSlop={10}>
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}
