@@ -18,5 +18,5 @@ with the current Expo SDK) and registered as Expo config plugins in `app.config.
 | 7 — Secondary | `expo-system-ui` | smart replies (JS heuristic store, no ML Kit), menus, Monet |
 | 8 — Advanced | `react-native-webview` (Find My map via Leaflet/OSM) | message effects (JS particles via RN `Animated`, no Skia), Find My map |
 
-After adding native modules, rebuild the Dev Client (config plugins change native code):
-`eas build -p android --profile development` (or `npx expo run:android` with a local SDK).
+After adding native modules, rebuild the Dev Client locally (config plugins change native code):
+`npx expo run:android` with the local Android SDK. Hosted EAS builds are not a supported project path.

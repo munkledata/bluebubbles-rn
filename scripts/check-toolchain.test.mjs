@@ -86,8 +86,8 @@ test('rejects drift in every executable and declarative toolchain boundary', () 
     'npm on PATH',
     'invoking npm',
     'release:prepare:patch',
-    'release:android must equal the reviewed build-only command',
-    'release:android:local must equal the reviewed build-only command',
+    'release:android must equal the reviewed local-build-only command',
+    'release:android:local must equal the reviewed local-build-only command',
     'EAS CLI',
     'EAS base',
     'preview profile must extend base',
@@ -109,7 +109,7 @@ test('reads npm versions from npm user-agent strings', () => {
   assert.equal(npmVersionFromUserAgent(undefined), undefined);
 });
 
-test('rejects missing, indirect, wrong-target, submitting, and unpinned release commands', () => {
+test('rejects hosted, missing, indirect, wrong-target, submitting, and unpinned release commands', () => {
   const variants = [
     undefined,
     '',
@@ -129,9 +129,47 @@ test('rejects missing, indirect, wrong-target, submitting, and unpinned release 
     const errors = validateToolchain(input);
     assert.ok(
       errors.some((error) =>
-        error.includes('release:android must equal the reviewed build-only command'),
+        error.includes('release:android must equal the reviewed local-build-only command'),
       ),
       String(script),
+    );
+  }
+});
+
+test('rejects hosted or submitting drift in the local release implementation', () => {
+  const variants = [
+    "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production'",
+    "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --auto-submit'",
+    'npm run some-submit-wrapper',
+  ];
+
+  for (const script of variants) {
+    const input = validInput();
+    input.packageJson.scripts['release:android:local'] = script;
+    const errors = validateToolchain(input);
+    assert.ok(
+      errors.some((error) =>
+        error.includes('release:android:local must equal the reviewed local-build-only command'),
+      ),
+      script,
+    );
+  }
+});
+
+test('rejects additional release names and EAS build or submit entry points', () => {
+  const variants = [
+    ['release:android:cloud', 'npm run hidden-cloud-builder'],
+    ['build:android:cloud', 'npx --yes eas-cli@21.5.0 build -p android'],
+    ['submit:android', 'eas submit -p android --profile production'],
+  ];
+
+  for (const [scriptName, script] of variants) {
+    const input = validInput();
+    input.packageJson.scripts[scriptName] = script;
+    const errors = validateToolchain(input);
+    assert.ok(
+      errors.some((error) => error.includes(scriptName)),
+      scriptName,
     );
   }
 });

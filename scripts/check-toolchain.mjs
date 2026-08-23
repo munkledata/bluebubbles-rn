@@ -10,11 +10,16 @@ export const REQUIRED_NODE_ENGINE = '>=24.19.0 <25';
 export const REQUIRED_NPM_VERSION = '11.17.0';
 export const REQUIRED_EAS_CLI_VERSION = '21.5.0';
 export const REQUIRED_RELEASE_SCRIPTS = {
-  'release:android':
-    "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production'",
+  'release:android': 'npm run release:android:local',
   'release:android:local':
-    "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --output ./gator-release.aab'",
+    "npm run check:toolchain && npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --output ./gator-release.aab'",
 };
+const REVIEWED_RELEASE_SCRIPT_NAMES = new Set([
+  'release:prepare:patch',
+  ...Object.keys(REQUIRED_RELEASE_SCRIPTS),
+]);
+const EAS_BUILD_OR_SUBMIT_PATTERN =
+  /(?:(?:\beas\b|\beas-cli(?:@[^\s'\"]+)?\b)[^\n]*(?:\bbuild\b|\bsubmit\b)|--auto-submit\b)/;
 
 export function npmVersionFromUserAgent(userAgent) {
   return userAgent?.match(/(?:^|\s)npm\/([^ ]+)/)?.[1];
@@ -61,7 +66,24 @@ export function validateToolchain({
   }
   for (const [scriptName, expected] of Object.entries(REQUIRED_RELEASE_SCRIPTS)) {
     if (packageJson?.scripts?.[scriptName] !== expected) {
-      errors.push(`${scriptName} must equal the reviewed build-only command: ${expected}`);
+      errors.push(`${scriptName} must equal the reviewed local-build-only command: ${expected}`);
+    }
+  }
+  for (const [scriptName, script] of Object.entries(packageJson?.scripts ?? {})) {
+    if (scriptName.startsWith('release:') && !REVIEWED_RELEASE_SCRIPT_NAMES.has(scriptName)) {
+      errors.push(`${scriptName} is not a reviewed release command`);
+    }
+    if (
+      typeof script === 'string' &&
+      EAS_BUILD_OR_SUBMIT_PATTERN.test(script) &&
+      !(
+        scriptName === 'release:android:local' &&
+        script === REQUIRED_RELEASE_SCRIPTS['release:android:local']
+      )
+    ) {
+      errors.push(
+        `${scriptName} must not invoke an unreviewed EAS build or submit command; use release:android`,
+      );
     }
   }
 

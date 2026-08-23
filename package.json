@@ -32,8 +32,8 @@
     "check:android-build": "node --test scripts/check-android-build.test.mjs && node scripts/check-android-build.mjs",
     "doctor": "expo-doctor",
     "release:prepare:patch": "npm version patch --no-git-tag-version",
-    "release:android": "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production'",
-    "release:android:local": "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --output ./gator-release.aab'",
+    "release:android": "npm run release:android:local",
+    "release:android:local": "npm run check:toolchain && npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --output ./gator-release.aab'",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"test/**/*.{ts,tsx}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"test/**/*.{ts,tsx}\""
   },
