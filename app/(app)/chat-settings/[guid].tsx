@@ -53,6 +53,7 @@ import {
   useTheme,
 } from '@ui';
 import { MediaSections } from '@ui/conversations/MediaSections';
+import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import { requestPhotoLibraryAccess } from '@ui/permissions/photoLibraryPermission';
 import { adaptiveTokensFromImage } from '@ui/theme/adaptiveFromImage';
 import {
@@ -61,25 +62,20 @@ import {
   safeParseTokens,
   type ThemeTokens,
 } from '@ui/theme/tokens';
-
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
 const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'];
-
 type ChatSettingsLifetime = object;
 type PickerOperationToken = object;
-
 interface ChatSettingsGrant {
   chatGuid: string;
   lifetime: ChatSettingsLifetime;
   accountLease: RealtimeDeliveryLease;
 }
-
 interface PickerOwner {
   acquire(): PickerOperationToken | null;
   isCurrent(token: PickerOperationToken): boolean;
   release(token: PickerOperationToken): void;
 }
-
 /**
  * Copy a picked image into a STABLE app directory before we persist its path.
  *
@@ -118,6 +114,7 @@ export default function ChatSettingsRoute(): React.JSX.Element {
   const router = useRouter();
   const { guid } = useLocalSearchParams<{ guid: string }>();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const reduceMotion = useReduceMotionPreferenceRef();
   const ownerMountedRef = useRef(true);
   const accountRetiredRef = useRef(!accountLease.isCurrent());
   const [accountRetired, setAccountRetired] = useState(accountRetiredRef.current);
@@ -181,6 +178,7 @@ export default function ChatSettingsRoute(): React.JSX.Element {
           guid={guid}
           accountLease={accountLease}
           pickerOwner={pickerOwner}
+          reduceMotion={reduceMotion}
         />
       )}
     </Screen>
@@ -192,10 +190,12 @@ function ChatSettingsScreen({
   guid,
   accountLease,
   pickerOwner,
+  reduceMotion,
 }: {
   guid: string;
   accountLease: RealtimeDeliveryLease;
   pickerOwner: PickerOwner;
+  reduceMotion: ReturnType<typeof useReduceMotionPreferenceRef>;
 }): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
@@ -310,7 +310,7 @@ function ChatSettingsScreen({
   const hasChatTheme = isDarkThemeTokens(storedChatTheme);
   const hasUnavailableLightTheme = storedChatTheme?.mode === 'light';
   const hasBackground = !!chatThemeData?.backgroundUri;
-  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioAnimation, setStudioAnimation] = useState<'none' | 'slide' | null>(null);
 
   // Shared media (Phase 2.1): photos/videos/documents/links for the details sections.
   // Reactive on messages + attachments so a new shared item appears without a refresh.
@@ -327,7 +327,7 @@ function ChatSettingsScreen({
   const applyChatTheme = (tokens: ThemeTokens): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
-    setStudioOpen(false);
+    setStudioAnimation(null);
     queueScreenAccountTask(operationGrant, () =>
       setChatTheme(getDatabase(), guid, { themeTokens: JSON.stringify(tokens) }),
     );
@@ -620,11 +620,14 @@ function ChatSettingsScreen({
 
   const openStudio = (): void => {
     if (!grantIsCurrent(renderGrant)) return;
-    setStudioOpen(true);
+    const nextAnimation = modalAnimationFor(reduceMotion.current);
+    // Keep both the native dialog and its motion policy stable until this opening closes.
+    // A retained/double press or live setting change affects only the next opening.
+    setStudioAnimation((current) => current ?? nextAnimation);
   };
   const closeStudio = (): void => {
     if (!grantIsCurrent(renderGrant)) return;
-    setStudioOpen(false);
+    setStudioAnimation(null);
   };
   const openMedia = (messageGuid: string): void => {
     if (!grantIsCurrent(renderGrant)) return;
@@ -857,8 +860,14 @@ function ChatSettingsScreen({
         </Pressable>
       </ScrollView>
 
-      {studioOpen ? (
-        <Modal visible transparent animationType="slide" onRequestClose={closeStudio}>
+      {studioAnimation ? (
+        <Modal
+          visible
+          transparent
+          animationType={studioAnimation}
+          onRequestClose={closeStudio}
+          testID="chat-theme-studio-modal"
+        >
           <ThemeStudio
             title="Chat Theme"
             initialTokens={studioTokens()}
@@ -870,6 +879,10 @@ function ChatSettingsScreen({
       ) : null}
     </>
   );
+}
+
+function modalAnimationFor(reduceMotion: boolean | null): 'none' | 'slide' {
+  return reduceMotion === false ? 'slide' : 'none';
 }
 
 const styles = StyleSheet.create({

@@ -1,6 +1,6 @@
 /** Conversation Details: exact content plus GUID/account/picker ownership. */
 import React from 'react';
-import { Keyboard, Platform } from 'react-native';
+import { AccessibilityInfo, Keyboard, Platform } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 
 const mockBack = jest.fn();
@@ -24,6 +24,10 @@ const mockUseChatHeader = jest.fn();
 const mockReactiveHookCall = jest.fn();
 const mockDatabase = { kind: 'chat-settings-test-db' };
 const originalPlatformOS = Platform.OS;
+const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
+  typeof AccessibilityInfo.isReduceMotionEnabled
+>;
+const mockAddEventListener = AccessibilityInfo.addEventListener as jest.Mock;
 
 interface MockLease {
   generation: number;
@@ -45,6 +49,8 @@ let mockAccountLease = makeLease(73);
 let mockGuid = 'iMessage;-;chat-settings-private-guid';
 let mockPendingReactiveGuid: string | null = null;
 const mockInvalidationListeners = new Map<number, Set<() => void>>();
+let reduceMotionListener: ((enabled: boolean) => void) | undefined;
+let removeReduceMotionListener: jest.Mock;
 
 const PRIVATE_CUSTOM_TITLE = 'details-private-custom-title-19b7';
 const PRIVATE_SERVER_TITLE = 'details-private-server-title-a840';
@@ -436,6 +442,14 @@ const mockGetDatabase = getDatabase as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  reduceMotionListener = undefined;
+  removeReduceMotionListener = jest.fn();
+  mockIsReduceMotionEnabled.mockReset().mockResolvedValue(false);
+  mockAddEventListener.mockReset().mockImplementation((event, listener) => {
+    expect(event).toBe('reduceMotionChanged');
+    reduceMotionListener = listener as (enabled: boolean) => void;
+    return { remove: removeReduceMotionListener };
+  });
   mockGuid = CHAT_GUID;
   mockPendingReactiveGuid = null;
   mockAccountLease = makeLease(73);
@@ -486,6 +500,128 @@ function pickedAsset(uri: string): {
   };
 }
 
+async function settleMotionPreference(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+}
+
+async function emitReduceMotion(enabled: boolean): Promise<void> {
+  expect(reduceMotionListener).toBeDefined();
+  await act(async () => reduceMotionListener?.(enabled));
+}
+
+function studioModal() {
+  return screen.getByTestId('chat-theme-studio-modal');
+}
+
+async function requestCloseStudio(): Promise<void> {
+  const onRequestClose = studioModal().props.onRequestClose as () => void;
+  await act(async () => onRequestClose());
+}
+
+describe('ChatSettingsScreen reduced motion', () => {
+  it('latches an unresolved opening at none and applies later false only after Back and reopening', async () => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('none');
+
+    await act(async () => {
+      preference.resolve(false);
+      await preference.promise;
+    });
+    await view.rerender(<ChatSettingsScreen />);
+    expect(studioModal().props.animationType).toBe('none');
+
+    await requestCloseStudio();
+    expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull();
+    expect(mockSetChatTheme).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('slide');
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['enabled', true, 'none'],
+    ['query failure', new Error('motion preference unavailable'), 'slide'],
+  ] as const)('uses the expected opening after initial %s', async (_label, result, expected) => {
+    if (result instanceof Error) mockIsReduceMotionEnabled.mockRejectedValue(result);
+    else mockIsReduceMotionEnabled.mockResolvedValue(result);
+    await renderWithTheme(<ChatSettingsScreen />);
+    await settleMotionPreference();
+
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe(expected);
+  });
+
+  it('keeps a visible opening stable, then applies live changes after Cancel or Apply', async () => {
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+    await settleMotionPreference();
+    const themeRow = screen.getByText('Chat Theme…');
+    if (!themeRow.parent) throw new Error('Expected the Chat Theme Pressable');
+    const retainedOpen = retainConfiguredPress(themeRow.parent);
+
+    await fireEvent.press(themeRow);
+    expect(studioModal().props.animationType).toBe('slide');
+    await emitReduceMotion(true);
+    await view.rerender(<ChatSettingsScreen />);
+    await act(async () => retainedOpen());
+    expect(studioModal().props.animationType).toBe('slide');
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Close theme editor' }));
+    expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull();
+    expect(mockSetChatTheme).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('none');
+
+    await emitReduceMotion(false);
+    await view.rerender(<ChatSettingsScreen />);
+    expect(studioModal().props.animationType).toBe('none');
+    await fireEvent.press(screen.getByRole('button', { name: 'Apply test theme' }));
+    await waitFor(() => expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull());
+    await waitFor(() =>
+      expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
+        themeTokens: JSON.stringify({ mode: 'dark', canary: PRIVATE_THEME_TOKEN }),
+      }),
+    );
+
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('slide');
+  });
+
+  it('lets a synchronous registration event beat a stale query and removes the owner once', async () => {
+    const staleQuery = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(staleQuery.promise);
+    mockAddEventListener.mockImplementation((event, listener) => {
+      expect(event).toBe('reduceMotionChanged');
+      reduceMotionListener = listener as (enabled: boolean) => void;
+      reduceMotionListener(true);
+      return { remove: removeReduceMotionListener };
+    });
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await act(async () => {
+      staleQuery.resolve(false);
+      await staleQuery.promise;
+    });
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('none');
+
+    await requestCloseStudio();
+    await emitReduceMotion(false);
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('slide');
+
+    await view.unmount();
+    expect(removeReduceMotionListener).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('ChatSettingsScreen source and account ownership', () => {
   it.each([
     [CHAT_GUID, 73],
@@ -515,6 +651,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
     const view = await renderWithTheme(<ChatSettingsScreen />);
     const oldMedia = retainConfiguredPress(screen.getByRole('image'));
     const oldLink = retainConfiguredPress(screen.getByText(PRIVATE_LINK).parent!);
+    const oldOpenStudio = retainConfiguredPress(screen.getByText('Chat Theme…').parent!);
     await fireEvent.press(
       screen.getByRole('button', {
         name: 'Open system notification settings for this conversation',
@@ -528,6 +665,11 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(oldNotificationContext.isCurrent()).toBe(true);
 
     await fireEvent.press(screen.getByText('Chat Theme…'));
+    const oldApplyTheme = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Apply test theme' }),
+    );
+    await emitReduceMotion(true);
+    expect(studioModal().props.animationType).toBe('slide');
     await fireEvent.press(screen.getByRole('button', { name: 'Add Person…' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Rename Group…' }));
     await fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), PRIVATE_ADD_DRAFT);
@@ -538,12 +680,31 @@ describe('ChatSettingsScreen source and account ownership', () => {
     await view.rerender(<ChatSettingsScreen />);
     expect(screen.getByDisplayValue(PRIVATE_CUSTOM_TITLE_B)).toBeTruthy();
     expectPrivateCanariesAbsent(view.toJSON());
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+    expect(removeReduceMotionListener).not.toHaveBeenCalled();
+    await act(async () => {
+      oldOpenStudio();
+      oldApplyTheme();
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull();
+    expect(mockSetChatTheme).not.toHaveBeenCalled();
 
     mockPendingReactiveGuid = null;
     await view.rerender(<ChatSettingsScreen />);
     expect(screen.getByText(PRIVATE_MEMBER_B)).toBeTruthy();
     expect(JSON.stringify(view.toJSON())).toContain(PRIVATE_MEDIA_URI_B);
     expect(oldNotificationContext.isCurrent()).toBe(false);
+
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    expect(studioModal().props.animationType).toBe('none');
+    await fireEvent.press(screen.getByRole('button', { name: 'Apply test theme' }));
+    await waitFor(() =>
+      expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID_B, {
+        themeTokens: JSON.stringify({ mode: 'dark', canary: PRIVATE_THEME_TOKEN }),
+      }),
+    );
 
     mockPendingReactiveGuid = CHAT_GUID;
     mockGuid = CHAT_GUID;
@@ -590,16 +751,25 @@ describe('ChatSettingsScreen source and account ownership', () => {
     const view = await renderWithTheme(<ChatSettingsScreen />);
     const oldMedia = retainConfiguredPress(screen.getByRole('image'));
     const oldLink = retainConfiguredPress(screen.getByText(PRIVATE_LINK).parent!);
+    await fireEvent.press(screen.getByText('Chat Theme…'));
+    const oldApplyTheme = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Apply test theme' }),
+    );
 
     await retireLease(oldLease);
 
     expect(screen.getByRole('text', { name: ACCOUNT_CHANGED_COPY })).toBeTruthy();
     expectPrivateCanariesAbsent(view.toJSON());
     expect(keyboardDismissSpy).toHaveBeenCalled();
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+    expect(removeReduceMotionListener).not.toHaveBeenCalled();
     oldMedia();
     oldLink();
+    oldApplyTheme();
     expect(mockPush).not.toHaveBeenCalled();
     expect(mockSafeOpenUrl).not.toHaveBeenCalled();
+    expect(mockSetChatTheme).not.toHaveBeenCalled();
 
     await act(async () => view.unmount());
     mockGuid = CHAT_GUID_B;
