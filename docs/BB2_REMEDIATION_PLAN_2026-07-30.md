@@ -2,6 +2,10 @@
 
 _Created 2026-07-30. Companion to [`BB_APP_2.0_COMPARISON_2026-07-30.md`](BB_APP_2.0_COMPARISON_2026-07-30.md)._
 
+> **Superseded 2026-08-04:** [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) is authoritative.
+> Every `0030`–`0035` assignment below is retired planning history, not a migration reservation.
+> Future migrations receive the next number only during merge preparation under `MIG-01`.
+
 **73 work items, ~43–58 dev days, in 12 shippable batches + 1 decision-gated batch.** Each item was
 planned against the actual current code (not the comparison report alone), then a cross-cluster review
 checked all 73 for file conflicts, migration collisions and contradictions.
@@ -105,7 +109,7 @@ existing inbox tests rather than replacing them.
 HEAD is at `0029_chats_deleted_at`, so five were wrong. Migrations are never edited once applied, so
 discovering this after two branches ran on a dev device means hand-repairing the applied-names table.
 
-**Final assignment (land strictly in this order):**
+**Historical assignment (retired; do not implement these numbers):**
 
 | # | Name | Item | Batch | Note |
 |---|---|---|---|---|

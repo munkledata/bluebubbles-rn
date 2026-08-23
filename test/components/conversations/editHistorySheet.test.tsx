@@ -6,8 +6,6 @@
  *     original → current order, showing the revision text;
  *   - renders "Part N removed" (1-based) for each retractedParts index;
  *   - shows a part header ("Part N") only when there is more than one part;
- *   - redacted mode masks every revision body to "Message" (AGENTS.md privacy rule — the sheet
- *     must not leak content a redacted bubble hides);
  *   - an open sheet with no history shows the empty state; `data={null}` renders nothing.
  *
  * Prop-driven (the selection already carries the parsed history), so unlike ThreadSheet there is
@@ -15,9 +13,9 @@
  * mount is async → assert the first hit via findBy.
  */
 import React from 'react';
-import { renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
-import { useRedactedModeStore } from '@state/redactedModeStore';
+import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { MessageSummaryInfo } from '@core/models';
+import { formatSeparatorDate } from '@utils';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -26,28 +24,62 @@ jest.mock('react-native-safe-area-context', () => ({
 // eslint-disable-next-line import/first
 import { EditHistorySheet } from '@ui/conversations/EditHistorySheet';
 
+const PRIVATE_ORIGINAL = 'private-edit-original-x-a91d@example.test';
+const PRIVATE_EDITED = 'private-edit-final-x-7c91@example.test';
+const HIDDEN = { includeHiddenElements: true } as const;
+
+function regexFor(value: string): RegExp {
+  return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+}
+
+function expectCanariesAbsent(tree: unknown, ...canaries: string[]): void {
+  const json = JSON.stringify(tree);
+  for (const canary of canaries) {
+    expect(json).not.toContain(canary);
+    expect(screen.queryByText(regexFor(canary), HIDDEN)).toBeNull();
+    expect(screen.queryByLabelText(regexFor(canary))).toBeNull();
+  }
+}
+
 const INFO: MessageSummaryInfo = {
   editedParts: {
     '0': [
-      { date: 1_700_000_000_000, text: 'first version' },
-      { date: 1_700_000_100_000, text: 'final version' },
+      { date: 1_700_000_000_000, text: PRIVATE_ORIGINAL },
+      { date: 1_700_000_100_000, text: PRIVATE_EDITED },
     ],
   },
   retractedParts: [1],
 };
 
-describe('EditHistorySheet', () => {
-  beforeEach(() => {
-    useRedactedModeStore.setState({ enabled: false });
-  });
+type SheetData = NonNullable<React.ComponentProps<typeof EditHistorySheet>['data']>;
 
+function StatefulSheet({
+  initialData,
+  onClose,
+}: {
+  initialData: SheetData | null;
+  onClose: () => void;
+}): React.JSX.Element {
+  const [data, setData] = React.useState<SheetData | null>(initialData);
+  const close = React.useCallback(() => {
+    onClose();
+    setData(null);
+  }, [onClose]);
+
+  return <EditHistorySheet data={data} onClose={close} />;
+}
+
+describe('EditHistorySheet', () => {
   it('renders each revision (Original → Edited) with its text and a removed-part row', async () => {
     await renderWithTheme(<EditHistorySheet data={{ info: INFO }} onClose={jest.fn()} />);
     expect(await screen.findByText('Edit History')).toBeTruthy();
     expect(screen.getByText('Original')).toBeTruthy();
     expect(screen.getByText('Edited')).toBeTruthy();
-    expect(screen.getByText('first version')).toBeTruthy();
-    expect(screen.getByText('final version')).toBeTruthy();
+    expect(screen.getByRole('text', { name: PRIVATE_ORIGINAL })).toBeTruthy();
+    expect(screen.getByRole('text', { name: PRIVATE_EDITED })).toBeTruthy();
+    expect(screen.getByText(formatSeparatorDate(1_700_000_000_000))).toBeTruthy();
+    expect(JSON.stringify(screen.toJSON())).toContain(PRIVATE_ORIGINAL);
+    expect(JSON.stringify(screen.toJSON())).toContain(PRIVATE_EDITED);
     // retractedParts [1] → 1-based "Part 2 removed".
     expect(screen.getByText('Part 2 removed')).toBeTruthy();
   });
@@ -75,18 +107,6 @@ describe('EditHistorySheet', () => {
     expect(screen.queryByText('Part 1')).toBeNull();
   });
 
-  it('masks every revision body in redacted mode (no content leak)', async () => {
-    useRedactedModeStore.setState({ enabled: true });
-    await renderWithTheme(<EditHistorySheet data={{ info: INFO }} onClose={jest.fn()} />);
-    expect(await screen.findByText('Edit History')).toBeTruthy();
-    expect(screen.queryByText('first version')).toBeNull();
-    expect(screen.queryByText('final version')).toBeNull();
-    // Both revision bodies collapse to the generic placeholder.
-    expect(screen.getAllByText('Message').length).toBe(2);
-    // The structural labels still render.
-    expect(screen.getByText('Original')).toBeTruthy();
-  });
-
   it('shows the empty state when open with no synced history (e.g. an optimistic local edit)', async () => {
     await renderWithTheme(<EditHistorySheet data={{ info: null }} onClose={jest.fn()} />);
     expect(await screen.findByText('No edit history.')).toBeTruthy();
@@ -102,8 +122,26 @@ describe('EditHistorySheet', () => {
     expect(await screen.findByText('No edit history.')).toBeTruthy();
   });
 
+  it('dismisses visible history through the real backdrop and clears parent-owned data', async () => {
+    const onClose = jest.fn();
+    const view = await renderWithTheme(
+      <StatefulSheet initialData={{ info: INFO }} onClose={onClose} />,
+    );
+    expect(await screen.findByText(PRIVATE_ORIGINAL)).toBeTruthy();
+    expect(screen.getByTestId('edit-history-backdrop')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('edit-history-backdrop'));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Edit History', HIDDEN)).toBeNull();
+    expect(screen.queryByTestId('edit-history-backdrop')).toBeNull();
+    expectCanariesAbsent(view.toJSON(), PRIVATE_ORIGINAL, PRIVATE_EDITED);
+  });
+
   it('renders nothing when data is null (closed)', async () => {
-    await renderWithTheme(<EditHistorySheet data={null} onClose={jest.fn()} />);
+    const onClose = jest.fn();
+    await renderWithTheme(<EditHistorySheet data={null} onClose={onClose} />);
     await waitFor(() => expect(screen.queryByText('Edit History')).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,16 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
-import { upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import { logger } from '@core/secure';
+import {
+  claimScheduled,
+  getScheduledById,
+  insertScheduled,
+  upsertChats,
+  upsertHandles,
+  upsertMessages,
+} from '@db/repositories';
+import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { generateTempGuid, sendTextMessage } from '@/services/send/sendService';
 import { createTestDb } from '../support/testDb';
@@ -140,6 +149,7 @@ describe('sendTextMessage', () => {
   });
 
   it('marks the message errored on failure (one row, queue attempt bumped)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await sendTextMessage(
@@ -159,6 +169,9 @@ describe('sendTextMessage', () => {
     expect(
       (raw.prepare('SELECT attempts FROM outgoing_queue').get() as { attempts: number }).attempts,
     ).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[send] failed for chat c1 (code 401, HTTP 401): nope');
+    warn.mockRestore();
   });
 
   it('throws for an unknown chat', async () => {
@@ -170,5 +183,44 @@ describe('sendTextMessage', () => {
         { chatGuid: 'nope', text: 'x' },
       ),
     ).rejects.toThrow(/unknown chat/);
+  });
+
+  it('does not POST when a scheduled account is revoked after handoff but before the request', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const scheduledId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'account A only',
+      scheduledFor: 1,
+    });
+    expect(await claimScheduled(db, scheduledId)).toBe(true);
+
+    let current = true;
+    let posts = 0;
+    const send = sendTextMessage(
+      db,
+      fakeHttp(async () => {
+        posts += 1;
+        return { guid: 'must-not-send', dateCreated: 2, dateDelivered: null };
+      }),
+      { chatGuid: 'c1', text: 'account A only' },
+      1,
+      () => {
+        // The atomic handoff has committed; model Disconnect landing in the precise continuation
+        // before the service starts its HTTP request.
+        current = false;
+      },
+      {
+        scheduledId,
+        transition: { kind: 'sent' },
+        commitGuard: () => current,
+      },
+    );
+
+    await expect(send).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(posts).toBe(0);
+    expect(await getScheduledById(db, scheduledId)).toMatchObject({ status: 'sent' });
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 1 });
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 1 });
   });
 });

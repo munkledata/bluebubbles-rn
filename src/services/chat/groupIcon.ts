@@ -15,7 +15,8 @@ export async function uploadGroupIcon(
   chatGuid: string,
   file: { uri: string; name: string; mimeType: string },
 ): Promise<void> {
-  const url = http.buildUrl(`/chat/${encodeURIComponent(chatGuid)}/icon`);
+  const transport = http.snapshotTransport();
+  const url = transport.buildUrl(`/chat/${encodeURIComponent(chatGuid)}/icon`);
   let result: FileSystem.FileSystemUploadResult;
   try {
     result = await FileSystem.uploadAsync(url, file.uri, {
@@ -24,7 +25,7 @@ export async function uploadGroupIcon(
       fieldName: 'icon',
       mimeType: file.mimeType,
       parameters: { name: file.name },
-      headers: http.buildHeaders(),
+      headers: { ...transport.headers },
     });
   } catch (err) {
     logger.warn(

@@ -13,6 +13,7 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
@@ -30,10 +31,16 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# Local AI-tool settings and scheduler state; shared .claude/settings.json stays tracked.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
 
-# Firebase config (machine/project-specific; EAS uses the GOOGLE_SERVICES_JSON secret)
+# local env files (the example is deliberately safe and tracked)
+.env
+.env.*
+!.env.example
+
+# Firebase config (machine/project-specific; use GOOGLE_SERVICES_JSON for EAS once configured)
 google-services.json
 
 # Google Play service-account key (used by `eas submit` — secret, never commit)

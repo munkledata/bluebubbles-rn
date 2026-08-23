@@ -4,8 +4,11 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import { setChatArchive, setChatMute, type InboxRow } from '@db/repositories';
 import { deleteChat, markRead, markUnread } from '@/services';
+import {
+  captureRealtimeDeliveryLease,
+  runAccountScopedLocalMutation,
+} from '@/services/realtime/deliveryCoordinator';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
   buildPreview,
@@ -14,13 +17,11 @@ import {
   isGroupRow,
   participantAvatars,
   participantList,
-  redactPreview,
-  redactTitle,
   resolveChatService,
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 
 interface ConversationTileProps {
@@ -39,11 +40,14 @@ export const ConversationTile = React.memo(function ConversationTile({
   onLongPress,
 }: ConversationTileProps): React.JSX.Element {
   const theme = useTheme();
-  const redacted = useRedactedModeStore((s) => s.enabled);
+  // Swipe actions and the global delete dialog can fire after this row unmounts. Keep the account
+  // lease from the row instance that created those callbacks, rather than capturing a new account
+  // when a delayed callback is eventually invoked.
+  const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const compact = useFeatureSettingsStore((s) => s.compactChatList);
   const unread = row.unreadCount > 0;
-  const title = redactTitle(resolveTitle(row), redacted);
-  const preview = redactPreview(buildPreview(row), redacted);
+  const title = resolveTitle(row);
+  const preview = buildPreview(row);
   const group = isGroupRow(row);
   const muted = row.muteType === 'mute';
   // Service pill (iMessage / SMS / RCS) — same treatment for all three, coloured to match the
@@ -67,13 +71,13 @@ export const ConversationTile = React.memo(function ConversationTile({
   const confirmDelete = (): void => {
     showDialog(
       'Delete Conversation',
-      `Delete “${title}”? This removes it from this device (not from the server).`,
+      'Delete this conversation? This removes it from this device (not from the server).',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => void deleteChat(row.guid),
+          onPress: () => void deleteChat(row.guid, accountLease),
         },
       ],
     );
@@ -87,7 +91,8 @@ export const ConversationTile = React.memo(function ConversationTile({
       label: unread ? 'Read' : 'Unread',
       icon: unread ? 'mail-open-outline' : 'mail-unread-outline',
       color: '#34C759',
-      onPress: () => (unread ? void markRead(row.guid) : void markUnread(row.guid)),
+      onPress: () =>
+        unread ? void markRead(row.guid, accountLease) : void markUnread(row.guid, accountLease),
     },
   ];
   const rightActions: SwipeAction[] = [
@@ -96,14 +101,20 @@ export const ConversationTile = React.memo(function ConversationTile({
       label: muted ? 'Unmute' : 'Mute',
       icon: muted ? 'notifications-outline' : 'notifications-off-outline',
       color: '#FF9500',
-      onPress: () => void setChatMute(getDatabase(), row.guid, muted ? null : 'mute'),
+      onPress: () =>
+        void runAccountScopedLocalMutation(accountLease, () =>
+          setChatMute(getDatabase(), row.guid, muted ? null : 'mute'),
+        ),
     },
     {
       key: 'archive',
       label: row.isArchived ? 'Unarchive' : 'Archive',
       icon: 'archive-outline',
       color: '#8E8E93',
-      onPress: () => void setChatArchive(getDatabase(), row.guid, !row.isArchived),
+      onPress: () =>
+        void runAccountScopedLocalMutation(accountLease, () =>
+          setChatArchive(getDatabase(), row.guid, !row.isArchived),
+        ),
     },
     {
       key: 'delete',
@@ -135,19 +146,9 @@ export const ConversationTile = React.memo(function ConversationTile({
               always the spacer (keeps avatars aligned across read/unread rows). */}
           <View style={styles.dotSpacer} />
           {group ? (
-            <GroupAvatar
-              // Redacted mode masks the monogram + photo with deterministic seeded tiles
-              // (distinct per person, but revealing neither name nor photo).
-              names={redacted ? ['Contact', 'Contact'] : groupParts.names}
-              uris={redacted ? [] : groupParts.uris}
-              seeds={redacted ? participantList(row.participantNames) : undefined}
-            />
+            <GroupAvatar names={groupParts.names} uris={groupParts.uris} />
           ) : (
-            <Avatar
-              name={avatarSeed(row)}
-              uri={redacted ? null : participantAvatars(row.participantAvatars)[0]}
-              seed={redacted ? avatarSeed(row) : undefined}
-            />
+            <Avatar name={avatarSeed(row)} uri={participantAvatars(row.participantAvatars)[0]} />
           )}
         </View>
 
@@ -186,7 +187,10 @@ export const ConversationTile = React.memo(function ConversationTile({
           <View style={styles.trailingRow}>
             {unread ? (
               <View style={[styles.countBadge, { backgroundColor: theme.color.tint }]}>
-                <Text style={styles.countText} numberOfLines={1}>
+                <Text
+                  style={[styles.countText, { color: readableTextOn(theme.color.tint) }]}
+                  numberOfLines={1}
+                >
                   {row.unreadCount > 99 ? '99+' : row.unreadCount}
                 </Text>
               </View>
@@ -226,5 +230,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  countText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  countText: { fontSize: 12, fontWeight: '700' },
 });

@@ -6,6 +6,9 @@ import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
 import { syncContacts } from './contacts/contactsService';
+import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
+import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
+import { captureRealtimeDeliveryLease } from './realtime/deliveryCoordinator';
 import {
   fullSync,
   httpSyncApi,
@@ -35,14 +38,26 @@ let syncInFlight: Promise<void> | null = null;
  */
 let inFlightEpoch: number | null = null;
 let trackedInFlight: Promise<void> | null = null;
+/** On-demand chat backfills run alongside the main pipeline but still belong to its teardown. */
+const auxiliaryInFlight = new Set<Promise<unknown>>();
 let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
-/** How many chained runs `awaitSyncIdle` will sit through before giving up on a quiet moment. */
-const MAX_IDLE_WAITS = 3;
 
 /** Resolve once every currently-published run has STOPPED (settled), however it settled. */
 function settledAll(runs: Array<Promise<void> | null>): Promise<unknown> {
   return Promise.all(runs.map((p) => (p ? p.catch(() => undefined) : Promise.resolve())));
+}
+
+/** Publish non-coalesced sync work before it starts, so Disconnect cannot miss its first await. */
+function runTrackedAuxiliarySync<T>(run: () => Promise<T>): Promise<T> {
+  let slot!: Promise<T>;
+  slot = Promise.resolve()
+    .then(run)
+    .finally(() => {
+      auxiliaryInFlight.delete(slot);
+    });
+  auxiliaryInFlight.add(slot);
+  return slot;
 }
 
 /**
@@ -144,24 +159,27 @@ export function refreshInbox(): Promise<void> {
  * background catch-up) — BOTH slots, since a wipe cares about every writer, not about which
  * entry point started it.
  *
- * `runSync`'s trailing fire-and-forget `syncContacts()` can still outlive this. Its DB writes are
- * survivable (it rewrites `contacts`, which the wipe keeps, and UPDATEs handle rows, which an
- * emptied `handles` table matches none of), but the run also touches state OUTSIDE the DB — a
- * server round trip for avatars, and the system's Direct Share shortcuts. Those are guarded at the
- * source: `runContactsSync` publishes shortcuts only while a session exists, and `forget()` clears
- * the credentials before it drains, so a trailing run cannot re-publish the old account's chips.
+ * `runSync`'s trailing fire-and-forget `syncContacts()` can still outlive this sync-specific drain,
+ * because Android's permission/address-book promises are deliberately not teardown blockers.
+ * Contact sync therefore carries the account-generation lease itself: each short DB statement is
+ * admitted through the realtime drain, a late native/server result cannot enter the next DB, and
+ * the final Direct Share refresh uses the same lease. Device contact rows remain intentionally
+ * global across accounts; handle names/server avatars/system shortcuts do not.
  *
  * Never rejects: a run that failed is still an idle one, and the caller only cares that it stopped.
  */
 export async function awaitSyncIdle(): Promise<void> {
-  // Wait the slots out REPEATEDLY, not once: a run can be chained into either slot while we are
-  // already awaiting its predecessor, and returning at that moment would hand the wipe a pipeline
-  // that is still paging. Bounded, so a pathological chain can never wedge Disconnect (the caller
-  // applies its own deadline on top).
-  for (let waits = 0; waits < MAX_IDLE_WAITS && (syncInFlight || trackedInFlight); waits++) {
+  // Wait REPEATEDLY, not once: a run can be chained/published while we are awaiting its predecessor.
+  // The caller owns the 20-second deadline; returning early after an arbitrary number of chains
+  // would falsely report idle and let a still-live account-A page land after the wipe.
+  while (syncInFlight || trackedInFlight || auxiliaryInFlight.size > 0) {
+    const auxiliary = [...auxiliaryInFlight];
     // Never rethrows — a failed run is still an idle one; the caller only needs it to have
     // STOPPED writing.
-    await settledAll([syncInFlight, trackedInFlight]);
+    await Promise.all([
+      settledAll([syncInFlight, trackedInFlight]),
+      ...auxiliary.map((run) => run.catch(() => undefined)),
+    ]);
   }
 }
 
@@ -190,9 +208,22 @@ async function runSync(): Promise<void> {
   // its most dangerous — the wipe had already emptied the DB, and the closing phases would put the
   // pre-wipe chat snapshot back and commit a marker over the reset. The epoch never repeats.
   const epochAtStart = sessionAccessors.getEpoch();
-  const sessionEnded = (): boolean => sessionAccessors.getEpoch() !== epochAtStart;
+  const accountLease = captureRealtimeDeliveryLease();
+  const sessionEnded = (): boolean =>
+    sessionAccessors.getEpoch() !== epochAtStart || !accountLease.isCurrent();
   try {
     const db = await ensureDatabase();
+    if (sessionEnded()) return;
+    const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
+    // The session passed bootstrap's durable credential gates before startSync. Recover exact-file
+    // retirements only now—not from generic DB open paths used by locked/forgotten callers.
+    await attachmentCacheCoordinator
+      .retireInactiveEntries(db, { scope: attachmentCacheScope })
+      .catch((error) => logger.debug('[sync] attachment cache retirement deferred', error));
+    await attachmentCacheCoordinator
+      .drainDueRetirements(db, { scope: attachmentCacheScope })
+      .catch((error) => logger.debug('[sync] attachment cache recovery deferred', error));
+    if (sessionEnded()) return;
     const api = httpSyncApi(http);
     sync.begin();
 
@@ -203,24 +234,35 @@ async function runSync(): Promise<void> {
       // demand when a chat is opened, so a cap only bounds the first bulk pass.
       const perChat = useSyncSettingsStore.getState().messagesPerChat;
       const result = await fullSync(db, api, {
-        onProgress: (p) => sync.progress(p),
+        onProgress: (p) => {
+          if (!sessionEnded()) sync.progress(p);
+        },
         shouldAbort: sessionEnded,
-        ...(perChat > 0 ? { maxMessagesPerChat: perChat } : {}),
+        // Pass zero rather than omitting it: zero is the user's explicit "All" choice, while an
+        // absent engine option deliberately keeps the conservative 100-message default.
+        maxMessagesPerChat: perChat,
       });
-      sync.done(result);
+      if (!sessionEnded()) sync.done(result);
     } else {
       // Refresh the FULL chat list first so conversations the interrupted first sync never reached
       // (disproportionately older SMS threads) appear in the inbox; their history backfills on open.
       // Best-effort — a failure here must not block the incremental message sync below.
-      await syncAllChats(db, api).catch((e) => logger.debug('[sync] chat-list refresh failed', e));
+      await syncAllChats(db, api, 200, sessionEnded).catch((e) =>
+        logger.debug('[sync] chat-list refresh failed', e),
+      );
+      if (sessionEnded()) return;
       const version =
         useSessionStore.getState().serverInfo?.server_version ?? (await api.serverVersion());
+      if (sessionEnded()) return;
       // Per-page progress so the DB-reactive inbox hydrates mid-sync (not just at the end).
       const result = await incrementalSync(db, api, {
         serverVersion: version,
-        onProgress: (p) => sync.progress(p),
+        onProgress: (p) => {
+          if (!sessionEnded()) sync.progress(p);
+        },
+        shouldAbort: sessionEnded,
       });
-      sync.done(result);
+      if (!sessionEnded()) sync.done(result);
     }
 
     // R1 deletion catch-up: apply `message-deleted` events missed while the app was dead or
@@ -235,17 +277,32 @@ async function runSync(): Promise<void> {
     if (!sessionEnded()) {
       await syncDeletedMessages(db, api, {
         supported: sessionAccessors.messageDeletedSupported(),
+        shouldAbort: sessionEnded,
       }).catch((e) => logger.debug('[sync] deletion catch-up failed', e));
+      if (!sessionEnded()) {
+        await attachmentCacheCoordinator
+          .retireInactiveEntries(db, { scope: attachmentCacheScope })
+          .catch((error) =>
+            logger.debug('[sync] deleted-message cache retirement deferred', error),
+          );
+        await attachmentCacheCoordinator
+          .drainDueRetirements(db, { scope: attachmentCacheScope })
+          .catch((error) => logger.debug('[sync] deleted-message cache cleanup deferred', error));
+      }
     }
   } catch (e) {
-    sync.fail(e instanceof Error ? e.message : 'Sync failed');
+    // A retired account's late failure belongs to that retired run, not to the replacement
+    // account's banner. Its DB writes are guarded separately in the engine.
+    if (!sessionEnded()) sync.fail(e instanceof Error ? e.message : 'Sync failed');
   }
 
   // Resolve device contacts onto handles so chats — especially GROUPS — show contact names
   // instead of raw phone numbers in the inbox/headers. Fire-and-forget with its own catch:
   // a denied contacts permission (or any IO error) must NOT affect the message-sync status.
   // Runs after connect and on every boot-with-session (both call startSync); idempotent.
-  void syncContacts().catch((e) => logger.debug('[contacts] auto-sync skipped', e));
+  if (!sessionEnded()) {
+    void syncContacts().catch((e) => logger.debug('[contacts] auto-sync skipped', e));
+  }
 }
 
 /**
@@ -254,11 +311,24 @@ async function runSync(): Promise<void> {
  * was interrupted — independent of the global sync marker. Best-effort; never throws to the UI.
  */
 export async function ensureChatSynced(chatGuid: string): Promise<number> {
-  try {
-    const db = await ensureDatabase();
-    return await syncChatMessages(db, httpSyncApi(http), chatGuid, { maxMessages: 500 });
-  } catch (e) {
-    logger.warn('[sync] on-demand chat backfill failed', e);
-    return 0;
-  }
+  const epochAtStart = sessionAccessors.getEpoch();
+  const sessionEnded = (): boolean => {
+    const session = useSessionStore.getState();
+    return session.epoch !== epochAtStart || session.origin == null || session.password == null;
+  };
+  return runTrackedAuxiliarySync(async () => {
+    try {
+      if (sessionEnded()) return 0;
+      const db = await ensureDatabase();
+      if (sessionEnded()) return 0;
+      return await syncChatMessages(db, httpSyncApi(http), chatGuid, {
+        maxMessages: 500,
+        shouldAbort: sessionEnded,
+      });
+    } catch (e) {
+      // A retired request is expected teardown noise and must not become account B's diagnostic.
+      if (!sessionEnded()) logger.warn('[sync] on-demand chat backfill failed', e);
+      return 0;
+    }
+  });
 }

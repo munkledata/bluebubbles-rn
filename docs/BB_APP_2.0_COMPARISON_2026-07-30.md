@@ -568,7 +568,7 @@ state our overlay already reads, plus a native rebuild.
 | **Encryption at rest** | ObjectBox opened with **no key** — every message, handle and chat in plaintext on disk | SQLCipher, Keystore-held 256-bit key, crash-safe `PRAGMA rekey` rotation |
 | **Credential storage** | Server password in plaintext `FlutterSharedPreferences.xml` | `expo-secure-store` (Keystore + EncryptedSharedPreferences) |
 | **Auth transport** | Password in the **URL query** of every request | `Authorization` header, single injection point |
-| **App lock** | A blur overlay over an already-open plaintext DB | Lock flag read from the vault **before the DB exists**; SQLCipher key withheld until biometric auth |
+| **App lock** | A blur overlay over an already-open plaintext DB | Lock flag is read from the vault before the encrypted DB opens; the current lock is a UI gate and does **not** withhold or biometric-bind the SQLCipher key |
 | **Durable send queue** | In-memory; a hard kill freezes a bubble on "sending" forever | SQLite table with lease/backoff/attempt cap, 4 drain triggers |
 | **Retry idempotency** | Mints a **new** tempGuid — a client-failed-but-delivered send is **sent twice** | Reuses the original tempGuid |
 | **Sync run safety** | One bool + 30s cooldown | Session-epoch binding, chained in-flight slots, `awaitSyncIdle`, `shouldAbort` |

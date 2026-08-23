@@ -1,18 +1,6 @@
 import { usePathname, useRouter } from 'expo-router';
 import { useCallback, useRef } from 'react';
-import { reportChatOpened } from '@/services/shortcuts/shareShortcuts';
 import { resolveChatNavigation } from '@utils';
-
-/** `/chat/<encoded guid>?share=1` → the decoded chat guid ('' when the path isn't a chat). */
-function chatGuidFromPath(path: string): string {
-  const match = /^\/chat\/([^?]+)/.exec(path);
-  if (!match?.[1]) return '';
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
-}
 
 /**
  * Open a chat thread WITHOUT stacking one thread on another — and without RELOADING the thread
@@ -49,11 +37,6 @@ export function useChatNavigator(): (path: string) => void {
   pathnameRef.current = pathname;
   return useCallback(
     (path: string): void => {
-      // Feed Android's People Service a usage signal so the share sheet's contact chips get
-      // ranked by who the user actually messages. This is the one funnel every chat-open goes
-      // through, so it's the natural place. No-op until the native half ships.
-      reportChatOpened(chatGuidFromPath(path));
-
       // Read at CALL time — the ref holds the path from the latest render, so the push/replace/none
       // rules see exactly what they saw before, without re-creating this callback per navigation.
       const action = resolveChatNavigation(pathnameRef.current, path);

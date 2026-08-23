@@ -100,6 +100,17 @@ jest.mock('@utils/isDev', () => ({
   DEV_SERVER_ORIGIN: 'https://dev.local',
 }));
 
+// This suite owns read-marker behavior, not repository failures. Model an ordinary visible chat so
+// the route's deletion guard does not hit its intentional fallback against an undefined test DB.
+jest.mock('@db/repositories', () => ({
+  getChatIdByGuid: jest.fn(async () => null),
+  getChatParticipants: jest.fn(async () => []),
+  getFirstUnreadInChat: jest.fn(async () => null),
+  isChatHiddenByDeletion: jest.fn(async () => false),
+  kvGet: jest.fn(async () => null),
+  kvSet: jest.fn(async () => undefined),
+}));
+
 jest.mock('@/services', () => ({
   dispatchRealtimeEvent: jest.fn(),
   ensureChatSynced: jest.fn(),
@@ -223,7 +234,12 @@ async function appState(state: AppStateStatus): Promise<void> {
  */
 async function openChat(): Promise<{ rerender: (ui: React.ReactElement) => void }> {
   const { rerender } = await renderWithTheme(<ChatScreen />);
-  await waitFor(() => expect(markRead).toHaveBeenCalledWith(GUID));
+  await waitFor(() =>
+    expect(markRead).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    ),
+  );
   await flush(rerender, [INCOMING_1]);
   (markRead as jest.Mock).mockClear();
   (clearChatNotification as jest.Mock).mockClear();
@@ -236,8 +252,14 @@ describe('ChatScreen — live read marker while the thread is open', () => {
 
     await flush(rerender, [INCOMING_2, INCOMING_1]);
 
-    expect(markRead).toHaveBeenCalledWith(GUID);
-    expect(clearChatNotification).toHaveBeenCalledWith(GUID);
+    expect(markRead).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    expect(clearChatNotification).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
   it('does not re-mark for an in-place update or for the user’s own send', async () => {
@@ -258,7 +280,12 @@ describe('ChatScreen — live read marker while the thread is open', () => {
     // afterwards. Marking again here is a redundant `chats` write (which re-runs the inbox query)
     // plus a second POST /chat/:guid/read.
     const { rerender } = await renderWithTheme(<ChatScreen />);
-    await waitFor(() => expect(markRead).toHaveBeenCalledWith(GUID));
+    await waitFor(() =>
+      expect(markRead).toHaveBeenCalledWith(
+        GUID,
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
 
     await flush(rerender, [INCOMING_1]);
 
@@ -277,8 +304,14 @@ describe('ChatScreen — live read marker while the thread is open', () => {
     expect(clearChatNotification).not.toHaveBeenCalled();
 
     await appState('active');
-    expect(markRead).toHaveBeenCalledWith(GUID);
-    expect(clearChatNotification).toHaveBeenCalledWith(GUID);
+    expect(markRead).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    expect(clearChatNotification).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
   it('does not mark read behind the app-lock overlay, and catches up after unlocking', async () => {
@@ -296,7 +329,13 @@ describe('ChatScreen — live read marker while the thread is open', () => {
     await act(async () => {
       useLockStore.setState({ locked: false });
     });
-    expect(markRead).toHaveBeenCalledWith(GUID);
-    expect(clearChatNotification).toHaveBeenCalledWith(GUID);
+    expect(markRead).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    expect(clearChatNotification).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 });

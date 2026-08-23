@@ -21,7 +21,7 @@ const MINIMAL_PAYLOAD: Record<ServerEventName, unknown> = {
   'updated-message': { guid: 'tbl-upd-1', dateDelivered: 1700000000000 },
   'message-deleted': { guid: 'tbl-del-1' },
   'typing-indicator': { chatGuid: 'tbl-c1', display: true },
-  'chat-read-status-changed': { chatGuid: 'tbl-c1', read: true },
+  'chat-read-status-changed': { chatGuid: 'tbl-c1', status: true },
   'group-name-change': { chats: [] },
   'participant-added': { chats: [] },
   'participant-removed': { chats: [] },
@@ -93,6 +93,30 @@ describe('EventRouter', () => {
     const { sink } = collector();
     const router = new EventRouter(sink);
     expect(await router.handle('new-message', { text: 'no guid' }, 'socket')).toBeNull();
+  });
+
+  it.each([
+    ['message-deleted', { guid: '' }],
+    ['chat-read-status-changed', { chatGuid: '', read: true }],
+  ])('rejects an empty load-bearing identifier for %s', async (eventName, payload) => {
+    const { events, sink } = collector();
+    const router = new EventRouter(sink);
+
+    expect(await router.handle(eventName, payload, 'socket')).toBeNull();
+    expect(events).toHaveLength(0);
+  });
+
+  it.each([
+    { chatGuid: 'c1', read: false },
+    { chatGuid: 'c1', status: false },
+    { chatGuid: 'c1', read: true, status: false },
+    { chatGuid: 'c1', read: false, status: true },
+  ])('rejects an explicit unread status instead of marking the chat read', async (payload) => {
+    const { events, sink } = collector();
+    const router = new EventRouter(sink);
+
+    expect(await router.handle('chat-read-status-changed', payload, 'socket')).toBeNull();
+    expect(events).toHaveLength(0);
   });
 
   it('normalizes an rcs-alert and forwards its alertType to the sink', async () => {

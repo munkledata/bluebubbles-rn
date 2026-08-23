@@ -3,10 +3,17 @@
 import { ApiError } from '@core/api/errors';
 import { MIN_SERVER_VERSION } from '@core/config';
 import type { ServerInfo } from '@core/models';
-import { logger, type SecureVault } from '@core/secure';
+import {
+  ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE,
+  logger,
+  SERVER_SESSION_STATE,
+  type AccountRevocationMarker,
+  type SecureVault,
+} from '@core/secure';
 import { isAtLeast } from '@utils/version';
 
-export type ConnectFailureKind = 'unauthorized' | 'unreachable' | 'outdated' | 'unknown';
+export type ConnectFailureKind =
+  'unauthorized' | 'unreachable' | 'outdated' | 'cancelled' | 'unknown';
 
 export type ConnectResult =
   { ok: true; serverInfo: ServerInfo } | { ok: false; kind: ConnectFailureKind; message: string };
@@ -15,7 +22,22 @@ export interface ConnectionDeps {
   /** Performs GET /server/info against the candidate origin (throws ApiError). */
   fetchServerInfo: () => Promise<ServerInfo>;
   vault: SecureVault;
+  revocationMarker: AccountRevocationMarker;
   minServerVersion?: string;
+  /** False once Disconnect revokes this candidate while network/SecureStore work is suspended. */
+  isAttemptCurrent?: () => boolean;
+}
+
+function attemptIsCurrent(deps: ConnectionDeps): boolean {
+  return deps.isAttemptCurrent?.() !== false;
+}
+
+function cancelledResult(): ConnectResult {
+  return {
+    ok: false,
+    kind: 'cancelled',
+    message: 'Connection attempt was cancelled.',
+  };
 }
 
 /**
@@ -38,8 +60,11 @@ export async function connectToServer(
   try {
     info = await deps.fetchServerInfo();
   } catch (err) {
-    return mapError(err);
+    return attemptIsCurrent(deps) ? mapError(err) : cancelledResult();
   }
+  // Disconnect can run while the candidate request is in flight. It closes the attempt
+  // synchronously; never begin durable writes from a response that belongs to that old epoch.
+  if (!attemptIsCurrent(deps)) return cancelledResult();
 
   // Version is ADVISORY, not a hard gate. The Gator fork uses its own versioning and a
   // below-min (or version-less) server still works in a degraded mode — header auth is
@@ -51,9 +76,46 @@ export async function connectToServer(
     );
   }
 
-  // Validated — persist credentials securely (replaces plaintext SharedPreferences).
-  await deps.vault.set('serverAddress', origin);
-  await deps.vault.set('serverPassword', password);
+  // Correlate the two independent SecureStore keys. `writing` is durable BEFORE either credential
+  // changes, so a crash/rejection between them cannot make a mixed old/new pair look connected.
+  // `active` is the commit marker and is written only after both credential writes succeed.
+  try {
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    await deps.vault.set('serverSessionState', SERVER_SESSION_STATE.writing);
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    await deps.vault.set('serverAddress', origin);
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    await deps.vault.set('serverPassword', password);
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    await deps.vault.set('serverSessionState', SERVER_SESSION_STATE.active);
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+  } catch (err) {
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    logger.warn('[connect] secure credential persistence failed — session was not activated', err);
+    return {
+      ok: false,
+      kind: 'unknown',
+      message: 'Could not save the server credentials securely. Please try again.',
+    };
+  }
+
+  // The independent filesystem marker is the final half of the commit. It stays present through
+  // every SecureStore write, so an old disconnected account cannot become active if persistence is
+  // interrupted. Only a complete `writing -> credentials -> active` tuple earns this clear.
+  if (!attemptIsCurrent(deps)) return cancelledResult();
+  try {
+    deps.revocationMarker.clear();
+  } catch (err) {
+    logger.warn(
+      '[connect] account revocation marker clear failed — session was not activated',
+      err,
+    );
+    return {
+      ok: false,
+      kind: 'unknown',
+      message: ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE,
+    };
+  }
 
   return { ok: true, serverInfo: info };
 }

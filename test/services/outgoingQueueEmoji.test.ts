@@ -10,7 +10,6 @@ import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import {
-  getChatIdByGuid,
   insertOutgoingReaction,
   upsertChats,
   upsertHandles,

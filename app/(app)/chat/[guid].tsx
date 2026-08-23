@@ -34,8 +34,14 @@ import {
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
+import {
   editText,
   fireDueScheduled,
+  isContactsPermissionDeniedError,
   pickAndSendContact,
   recoverOutgoing,
   reply,
@@ -74,6 +80,7 @@ import {
   type PendingAttachment,
 } from '@ui';
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
+import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useLockStore } from '@state/lockStore';
@@ -81,6 +88,51 @@ import { useTypingStore } from '@state/typingStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
 import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
+
+interface DocumentPickerModule {
+  getDocumentAsync(options: { multiple: boolean; copyToCacheDirectory: boolean }): Promise<{
+    canceled: boolean;
+    assets: Array<{
+      uri: string;
+      name: string;
+      mimeType?: string | null;
+      size?: number | null;
+    }> | null;
+  }>;
+}
+
+type DocumentPickerLoader = () => Promise<DocumentPickerModule>;
+
+/**
+ * Open the account-neutral OS picker, then accept its result only if the screen that opened it
+ * still owns the active account. The loader is injectable solely to make the delayed native-return
+ * boundary deterministic in Node tests; production retains the lazy native import.
+ */
+export async function pickDocumentFilesForLease(
+  accountLease: { isCurrent(): boolean },
+  loadPicker: DocumentPickerLoader = () => import('expo-document-picker'),
+): Promise<PendingAttachment[]> {
+  try {
+    const DocumentPicker = await loadPicker();
+    if (!accountLease.isCurrent()) return [];
+    const res = await DocumentPicker.getDocumentAsync({
+      multiple: true,
+      copyToCacheDirectory: true,
+    });
+    if (!accountLease.isCurrent() || res.canceled || !res.assets || res.assets.length === 0) {
+      return [];
+    }
+    return res.assets.map((asset) => ({
+      uri: asset.uri,
+      name: asset.name,
+      mimeType: asset.mimeType ?? 'application/octet-stream',
+      size: asset.size ?? 0,
+    }));
+  } catch {
+    if (accountLease.isCurrent()) showDialog('Attach', 'Couldn’t open the file picker.');
+    return [];
+  }
+}
 
 // Lazy: expo-audio (native) is only pulled in when the user actually records a voice memo,
 // so the chat opens fine on a build that hasn't linked the module yet.
@@ -106,12 +158,22 @@ const VoiceRecorder = lazy(() =>
  * A failed check FALLS THROUGH TO SYNCING: a DB read that throws must not be a silent way to
  * disable history backfill for every chat.
  */
-async function backfillUnlessDeleted(guid: string): Promise<void> {
+async function backfillUnlessDeleted(
+  guid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  if (!accountLease.isCurrent()) return;
   try {
-    if (await isChatHiddenByDeletion(getDatabase(), guid)) return;
+    const hidden = await isChatHiddenByDeletion(getDatabase(), guid);
+    // The tombstone read can wait behind native SQLite while Disconnect wipes A and admits B.
+    // Stop before ensureChatSynced(), whose own session capture would otherwise bind this old
+    // screen continuation to B's perfectly current credentials.
+    if (!accountLease.isCurrent() || hidden) return;
   } catch (e) {
+    if (!accountLease.isCurrent()) return;
     logger.debug('[chat] tombstone check failed; syncing anyway', { error: String(e) });
   }
+  if (!accountLease.isCurrent()) return;
   await ensureChatSynced(guid);
 }
 
@@ -160,8 +222,13 @@ function ChatScreenInner({
   focusDate?: string;
   fromShare?: boolean;
 }): React.JSX.Element {
+  // This lease belongs to THIS mounted chat. Dialogs, pickers and lazy callbacks can outlive the
+  // account that rendered them; passing the mount lease prevents such an A callback from capturing
+  // B merely because it is invoked after reconnect.
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const header = useChatHeader(guid);
   const backgroundUri = useChatBackgroundUri(guid);
+  const visibleBackgroundUri = accountLease.isCurrent() ? backgroundUri : null;
   const isGroup = header.data ? isGroupRow(header.data) : false;
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
@@ -224,10 +291,10 @@ function ChatScreenInner({
   const [editing, setEditing] = useState<{ guid: string; text: string } | null>(null);
   const [recording, setRecording] = useState(false);
 
-  // Direct Share INTO this chat: consume the share the root captured (ShareIntentCapture) and stage
-  // it in the composer so the user reviews + taps send. Captured ONCE in lazy initializers (only
-  // when we arrived via a Direct Share tap, `?share=1`); the effect then clears the store so a
-  // normal chat open never picks it up.
+  // Dormant future bounded-share handoff. IPC-01 currently exposes no inbound Android share target,
+  // so production navigation never supplies `?share=1`. If an owned bounded intake is added later,
+  // capture the already-materialized batch ONCE in these lazy initializers; the effect then clears
+  // the store so a normal chat open never picks it up.
   const [sharedAttachments] = useState<PendingAttachment[]>(() =>
     fromShare
       ? useShareIntentStore
@@ -277,7 +344,7 @@ function ChatScreenInner({
   // window has been accounted for (see the effect below).
   const markedThroughGuid = useRef<string | null | undefined>(undefined);
 
-  // Runs once per guid (the deps are exactly [guid]) — no once-ref, so a reused screen
+  // Runs once per guid/account lease — no once-ref, so a reused screen
   // instance that receives a NEW guid marks the new chat read/synced too.
   useEffect(() => {
     markedThroughGuid.current = undefined;
@@ -294,15 +361,15 @@ function ChatScreenInner({
       } catch {
         // best-effort — the chip just doesn't show
       }
-      void markRead(guid);
+      void markRead(guid, accountLease);
       setArmedForGuid(guid);
     })();
-    clearChatNotification(guid); // dismiss any tray notification for this chat
-    void backfillUnlessDeleted(guid);
+    clearChatNotification(guid, accountLease); // dismiss any tray notification for this chat
+    void backfillUnlessDeleted(guid, accountLease);
     // Fetch this chat's synced (macOS 26) background if a participant set/changed one — the
     // reactive `chats` query repaints the background once the downloaded uri is written.
     void ensureSyncedBackground(http, getDatabase(), guid);
-  }, [guid]);
+  }, [accountLease, guid]);
 
   // Keep the read marker current while the thread STAYS open. The effect above fires exactly once
   // per guid, so a message the user WATCHED arrive still left a bold unread badge on the inbox when
@@ -344,9 +411,17 @@ function ChatScreenInner({
     // deferred.
     if (!appActive || locked) return;
     markedThroughGuid.current = newestReceivedGuid;
-    void markRead(guid);
-    clearChatNotification(guid);
-  }, [guid, readTrackingArmed, messagesResolved, newestReceivedGuid, appActive, locked]);
+    void markRead(guid, accountLease);
+    clearChatNotification(guid, accountLease);
+  }, [
+    accountLease,
+    guid,
+    readTrackingArmed,
+    messagesResolved,
+    newestReceivedGuid,
+    appActive,
+    locked,
+  ]);
 
   const isDev = isDevServer;
 
@@ -357,21 +432,35 @@ function ChatScreenInner({
   const firingRef = useRef(false);
   useEffect(() => {
     const tick = async (): Promise<void> => {
-      if (firingRef.current) return;
+      if (firingRef.current || !accountLease.isCurrent()) return;
       firingRef.current = true;
       try {
         if (isDev()) {
-          await runDueScheduled(getDatabase(), http, Date.now(), (g, t, s) =>
-            s ? devSendFakeReply(g, t, s) : devSendFake(g, t),
+          await runTrackedRealtimeWork(accountLease, () =>
+            runDueScheduled(
+              getDatabase(),
+              http,
+              Date.now(),
+              (g, t, s) =>
+                s
+                  ? devSendFakeReply(g, t, s, undefined, accountLease)
+                  : devSendFake(g, t, undefined, accountLease),
+              accountLease,
+            ),
           );
         } else {
           await fireDueScheduled();
+          if (!accountLease.isCurrent()) return;
           // Also drain the outgoing retry queue while a chat is open, so a failed send
           // (text or picture) recovers in ~30s instead of waiting for the next home
           // mount / 15-min background tick. next_retry_at backoff + the DB claim gate
           // the actual re-sends; an empty queue is a single indexed SELECT.
           await recoverOutgoing();
         }
+      } catch (error) {
+        // A revoked DEV ticker throws its ownership sentinel from the DB guards. It belongs to the
+        // retired screen; current-account failures remain a quiet, best-effort ticker diagnostic.
+        if (accountLease.isCurrent()) logger.debug('[chat] scheduled catch-up failed', error);
       } finally {
         firingRef.current = false;
       }
@@ -379,24 +468,30 @@ function ChatScreenInner({
     void tick();
     const id = setInterval(() => void tick(), 20_000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [accountLease, isDev]);
 
   // useCallback-stable: these feed the memoized Composer, so a reactive tick re-rendering the
   // screen doesn't re-render the composer through fresh closures.
   const onSchedule = useCallback(
     (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
       // Capture the active reply target so a scheduled reply still threads.
-      void schedule({
-        chatGuid: guid,
-        text,
-        scheduledFor,
-        selectedMessageGuid: replyTo?.guid,
-        recurrence,
+      void schedule(
+        {
+          chatGuid: guid,
+          text,
+          scheduledFor,
+          selectedMessageGuid: replyTo?.guid,
+          recurrence,
+        },
+        accountLease,
+      ).catch((error: unknown) => {
+        if (!accountLease.isCurrent()) return;
+        logger.warn('[chat] could not schedule message', error);
+        showDialog('Scheduled', 'Couldn’t schedule that message.');
       });
       setReplyTo(null);
     },
-    [guid, replyTo],
+    [accountLease, guid, replyTo],
   );
 
   const onSend = useCallback(
@@ -411,20 +506,21 @@ function ChatScreenInner({
       if (editing) {
         const g = editing.guid;
         setEditing(null);
-        if (isDev()) void devEditFake(g, text);
-        else void editText({ messageGuid: g, newText: text, chatGuid: guid });
+        if (isDev()) void devEditFake(g, text, accountLease);
+        else void editText({ messageGuid: g, newText: text, chatGuid: guid }, accountLease);
         return;
       }
       if (replyTo) {
-        if (isDev()) void devSendFakeReply(guid, text, replyTo.guid, effectId);
-        else void reply({ chatGuid: guid, text, replyToGuid: replyTo.guid, effectId });
+        if (isDev()) void devSendFakeReply(guid, text, replyTo.guid, effectId, accountLease);
+        else
+          void reply({ chatGuid: guid, text, replyToGuid: replyTo.guid, effectId }, accountLease);
         setReplyTo(null);
         return;
       }
-      if (isDev()) void devSendFake(guid, text, effectId);
-      else void send({ chatGuid: guid, text, effectId, subject, mentions });
+      if (isDev()) void devSendFake(guid, text, effectId, accountLease);
+      else void send({ chatGuid: guid, text, effectId, subject, mentions }, accountLease);
     },
-    [guid, editing, replyTo, isDev],
+    [accountLease, guid, editing, replyTo, isDev],
   );
 
   // The long-press menu / multi-select / swipe-reply handlers (selected, selectedGuids, and
@@ -465,6 +561,7 @@ function ChatScreenInner({
     guid,
     messages,
     chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
+    accountLease,
     setReplyTo,
     setEditing,
   });
@@ -473,19 +570,21 @@ function ChatScreenInner({
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    void kvGet(getDatabase(), `draft.${guid}`)
-      .then((v) => {
-        if (alive) setDraft(v ?? '');
-      })
-      .catch(() => {
-        if (alive) setDraft('');
-      });
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const value = await kvGet(getDatabase(), `draft.${guid}`);
+      if (alive && accountLease.isCurrent()) setDraft(value ?? '');
+    }).catch(() => {
+      if (alive && accountLease.isCurrent()) setDraft('');
+    });
     return () => {
       alive = false;
     };
-  }, [guid]);
+  }, [accountLease, guid]);
   const onDraftChange = useCallback(
     (text: string): void => {
+      // Composer flushes once while unmounting. If Disconnect caused that unmount, its old closure
+      // must not recreate the just-wiped A draft in B's fresh database.
+      if (!accountLease.isCurrent()) return;
       // Keep the local `draft` state in lockstep with kv. Entering multi-select UNMOUNTS the
       // Composer (bottomStack swaps to the selection bar); on exit it REMOUNTS and restores from
       // `initialText={draft}`. Without this setDraft, `draft` stays frozen at the chat-open value
@@ -493,53 +592,57 @@ function ChatScreenInner({
       // over the real kv draft. The Composer's unmount flush calls this before it unmounts, so
       // `draft` is fresh by the time it remounts.
       setDraft(text);
-      void kvSet(getDatabase(), `draft.${guid}`, text).catch(() => {
-        // best-effort — losing a draft persist is not worth surfacing
+      void runTrackedRealtimeWork(accountLease, async () => {
+        await kvSet(getDatabase(), `draft.${guid}`, text);
+      }).catch(() => {
+        // Best-effort while this account is live — losing a draft persist is not worth surfacing.
       });
     },
-    [guid],
+    [accountLease, guid],
   );
 
   // The inline tray's "Files" button — pick documents and return them to STAGE as pending
   // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
   // beyond the OS document picker itself.
-  const pickFiles = useCallback(async (): Promise<PendingAttachment[]> => {
-    try {
-      // Lazy import: expo-document-picker is a native module, kept off the chat-open path.
-      const DocumentPicker = await import('expo-document-picker');
-      const res = await DocumentPicker.getDocumentAsync({
-        multiple: true,
-        copyToCacheDirectory: true,
-      });
-      if (res.canceled || res.assets.length === 0) return [];
-      return res.assets.map((a) => ({
-        uri: a.uri,
-        name: a.name,
-        mimeType: a.mimeType ?? 'application/octet-stream',
-        size: a.size ?? 0,
-      }));
-    } catch {
-      showDialog('Attach', 'Couldn’t open the file picker.');
-      return [];
-    }
-  }, []);
+  const pickFiles = useCallback(
+    (): Promise<PendingAttachment[]> => pickDocumentFilesForLease(accountLease),
+    [accountLease],
+  );
 
   // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
   const onSendAttachments = useCallback(
-    (items: PendingAttachment[]): void => void sendImages({ chatGuid: guid, images: items }),
-    [guid],
+    (items: PendingAttachment[]): void =>
+      void sendImages({ chatGuid: guid, images: items }, accountLease),
+    [accountLease, guid],
   );
   const onCancelReply = useCallback((): void => setReplyTo(null), []);
   const onCancelEdit = useCallback((): void => setEditing(null), []);
-  const onTyping = useCallback((active: boolean): void => void sendTyping(guid, active), [guid]);
+  const onTyping = useCallback(
+    (active: boolean): void => {
+      // Composer debounce/unmount callbacks can run after Disconnect. The socket emit itself is
+      // synchronous, so a lease check is the complete atomic boundary here.
+      if (accountLease.isCurrent()) void sendTyping(guid, active);
+    },
+    [accountLease, guid],
+  );
   const onStartVoice = useCallback((): void => setRecording(true), []);
 
   // Contact card: only offered when the server can build vCards (supports_send_contact). Opens the
   // native picker and sends the chosen contact (optimistic bubble + reconcile inside the service).
   const supportsSendContact = useSendContactSupported();
   const onPickContact = useCallback((): void => {
-    pickAndSendContact(guid).catch((e) => logger.warn('[chat] contact pick/send failed', e));
-  }, [guid]);
+    pickAndSendContact(guid, accountLease).catch((e) => {
+      if (!accountLease.isCurrent()) return;
+      if (isContactsPermissionDeniedError(e)) {
+        showDialog(
+          'Contacts',
+          'Permission denied. Enable Contacts access in system settings to send a contact.',
+        );
+        return;
+      }
+      logger.warn('[chat] contact pick/send failed', e);
+    });
+  }, [accountLease, guid]);
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
@@ -553,7 +656,7 @@ function ChatScreenInner({
   // both vary (insets, reply bar, typing bubble) — and the wrappers are measured in BOTH
   // modes, so real heights already exist by the time the (async, reactive) wallpaper flag flips
   // the styles. The estimates only cover the very first frames of a cold mount.
-  const hasWallpaper = !!backgroundUri;
+  const hasWallpaper = !!visibleBackgroundUri;
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const [headerH, setHeaderH] = useState(0);
@@ -581,7 +684,9 @@ function ChatScreenInner({
         accessibilityRole="button"
         accessibilityLabel={`Jump to the first of ${firstUnread.count} unread messages`}
       >
-        <Text style={styles.unreadChipText}>↑ {firstUnread.count} unread — jump to first</Text>
+        <Text style={[styles.unreadChipText, { color: readableTextOn(theme.color.tint) }]}>
+          ↑ {firstUnread.count} unread — jump to first
+        </Text>
       </Pressable>
     ) : null;
   const listNode = messagesLoading ? (
@@ -600,12 +705,13 @@ function ChatScreenInner({
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={onLongPressMessage}
       onSwipeReply={onSwipeReply}
-      onRefresh={() => backfillUnlessDeleted(guid)}
+      onRefresh={() => backfillUnlessDeleted(guid, accountLease)}
       onLoadOlder={onLoadOlder}
       focusGuid={effFocusGuid}
       selectedGuids={selectedGuids}
       onToggleSelect={onToggleSelect}
       onExitAnchor={anchorDate != null || effFocusGuid ? exitAnchor : undefined}
+      accountLease={accountLease}
     />
   );
   // Multi-select replaces the composer with a selection action bar. The Composer's unmount flush
@@ -682,9 +788,9 @@ function ChatScreenInner({
 
   return (
     <Screen>
-      {backgroundUri ? (
+      {visibleBackgroundUri ? (
         <Image
-          source={{ uri: backgroundUri }}
+          source={{ uri: visibleBackgroundUri }}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           // Behind the message list; the list container is transparent so this shows
@@ -737,17 +843,32 @@ function ChatScreenInner({
           <Suspense fallback={null}>
             <VoiceRecorder
               onClose={() => setRecording(false)}
+              onPermissionDenied={() =>
+                showDialog(
+                  'Microphone',
+                  'Microphone access was denied. Enable it in system settings to record voice messages.',
+                )
+              }
+              onPermissionError={() =>
+                showDialog(
+                  'Microphone',
+                  'Microphone access is unavailable. Try again or enable it in system settings.',
+                )
+              }
               onSend={(uri) => {
                 setRecording(false);
-                void sendImage({
-                  chatGuid: guid,
-                  image: {
-                    uri,
-                    name: uri.split('/').pop() ?? 'voice.m4a',
-                    mimeType: 'audio/mp4',
-                    size: 0,
+                void sendImage(
+                  {
+                    chatGuid: guid,
+                    image: {
+                      uri,
+                      name: uri.split('/').pop() ?? 'voice.m4a',
+                      mimeType: 'audio/mp4',
+                      size: 0,
+                    },
                   },
-                });
+                  accountLease,
+                );
               }}
             />
           </Suspense>
@@ -787,16 +908,26 @@ function ChatScreenInner({
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />
       ) : null}
       {__DEV__ ? (
-        <Pressable style={styles.devFx} onPress={() => void devInjectEffect(guid)}>
+        <Pressable style={styles.devFx} onPress={() => void devInjectEffect(guid, accountLease)}>
           <Text style={styles.devFxText}>💥</Text>
         </Pressable>
       ) : null}
       {__DEV__ ? (
         <Pressable
           style={styles.devTyping}
-          onPress={() =>
-            void dispatchRealtimeEvent('typing-indicator', { chatGuid: guid, display: true })
-          }
+          onPress={() => {
+            if (!isDevServer() || !accountLease.isCurrent()) return;
+            void dispatchRealtimeEvent(
+              'typing-indicator',
+              { chatGuid: guid, display: true },
+              'dev',
+              accountLease,
+            ).catch((error: unknown) => {
+              if (accountLease.isCurrent()) {
+                logger.debug('[chat] DEV typing injection failed', error);
+              }
+            });
+          }}
         >
           <Text style={styles.devFxText}>⌨️</Text>
         </Pressable>
@@ -853,7 +984,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 16,
   },
-  unreadChipText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  unreadChipText: { fontSize: 13, fontWeight: '600' },
   // DEV-only: inject a send-effect message into this chat to demo effects.
   devFx: {
     position: 'absolute',

@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import type { DurableEventTransactionContext } from '@core/realtime';
 import { logger } from '@core/secure';
 import type { AppDatabase } from './types';
 
@@ -26,6 +27,25 @@ let lockReleases = 0;
  * an unguarded escalation would POST the same report once per blocked writer, forever.
  */
 let wedgeReported = false;
+
+/**
+ * Optional last-moment ownership check for account-scoped transactions. Returning `false` aborts
+ * before BEGIN when the caller was revoked while waiting for the mutex, or rolls the transaction
+ * back when revocation happened while its statements were running.
+ */
+export type DbCommitGuard = () => boolean;
+
+/** A guarded transaction lost ownership before it could safely commit. */
+export class DbCommitGuardRejectedError extends Error {
+  constructor() {
+    super('database commit guard rejected the transaction');
+    this.name = 'DbCommitGuardRejectedError';
+  }
+}
+
+function assertCommitAllowed(guard?: DbCommitGuard): void {
+  if (guard && !guard()) throw new DbCommitGuardRejectedError();
+}
 
 /**
  * Run `fn` inside an explicit BEGIN IMMEDIATE / COMMIT, rolling back if it throws.
@@ -64,7 +84,8 @@ let wedgeReported = false;
  * It cannot be detected from inside: a module-level "am I in a transaction" flag would be true for a
  * legitimate concurrent caller too (there is no async-context propagation in Hermes), so rejecting on
  * it would break the very queuing this exists to provide. What IS detectable is the SYMPTOM — a wait
- * that never ends ({@link LOCK_WAIT_WARN_MS}), which turns a silent hang into a greppable log line.
+ * that never ends ({@link LOCK_WAIT_WARN_MS}). The first warning is development-only; release
+ * reporting begins only at the finite ERROR escalation below.
  * The watchdog reports only what it MEASURED, never a diagnosis: a long wait alone proves nothing
  * about a cycle (a burst of live messages, or one oversized transaction, produces the same wait), so
  * it is a `warn`. It escalates to `error` only after a second interval in which not one lock holder
@@ -105,10 +126,10 @@ function armLockWatchdog(): () => void {
       // queue drains; this does not.
       if (lockReleases !== releasesAtEntry || wedgeReported) return;
       wedgeReported = true;
-      logger.error(
-        `[db] no write-lock holder released in ${2 * LOCK_WAIT_WARN_MS}ms — the write queue looks wedged; a withDbTransaction nested inside another is the known cause`,
-        { waitedMs: 2 * LOCK_WAIT_WARN_MS, waiting: waitingForLock },
-      );
+      logger.error('[db] write queue appears wedged', {
+        waitedMs: 2 * LOCK_WAIT_WARN_MS,
+        waiting: waitingForLock,
+      });
     }, LOCK_WAIT_WARN_MS);
   }, LOCK_WAIT_WARN_MS);
   return () => {
@@ -143,15 +164,14 @@ async function claimWriteLock(): Promise<() => void> {
 }
 
 /**
- * Serialize a statement that must not run inside — or alongside — anyone's transaction, WITHOUT
- * opening one of its own.
+ * Serialize database work that must not run inside — or alongside — anyone's transaction, WITHOUT
+ * opening a SQL transaction of its own.
  *
- * The one caller is SQLCipher's `PRAGMA rekey` (see `rotateDbKey`), which re-encrypts the whole
- * file in its own implicit transaction on the same single connection every transaction here runs
- * on. Issued blind it either errors outright (a transaction is already open) or — far worse —
- * appears to succeed as a bystander inside a neighbour's transaction and is undone by that
- * neighbour's ROLLBACK, after the rotation has already promoted the new key and discarded the
- * staged one: the next boot then opens the file with a key it no longer accepts.
+ * Callers are SQLCipher's `PRAGMA rekey` (see `rotateDbKey`) and account-cache maintenance. Rekey
+ * uses an implicit transaction on the same single connection; issued blind it can be undone by a
+ * neighbour's ROLLBACK after the new key was already promoted. Cache cleanup takes one slot per
+ * autocommit delete, and its final residue read takes another, so neither can join or observe a
+ * neighbour's uncommitted transaction. Do not put an entire unbounded cache wipe in one callback.
  *
  * Same nesting rule as {@link withDbTransaction}, and the same queue — `fn` must never call either.
  */
@@ -164,14 +184,26 @@ export async function withDbWriteLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function withDbTransaction<T>(db: AppDatabase, fn: () => Promise<T>): Promise<T> {
+export async function withDbTransaction<T>(
+  db: AppDatabase,
+  fn: (context: DbTransactionContext) => Promise<T>,
+  commitGuard?: DbCommitGuard,
+): Promise<T> {
   const release = await claimWriteLock();
   // The release lives in a finally that also wraps the BEGIN: if BEGIN itself throws (or the
   // driver rejects before it), an un-released lock would wedge every subsequent write forever.
   try {
+    // The caller may have waited behind another transaction longer than account teardown's bounded
+    // drain. Re-check immediately after acquiring the mutex, before touching the shared database.
+    assertCommitAllowed(commitGuard);
     await db.run(sql`BEGIN IMMEDIATE`);
     try {
-      const result = await fn();
+      // BEGIN itself is asynchronous on-device. Catch a revocation that landed while it opened.
+      assertCommitAllowed(commitGuard);
+      const result = await runTransactionOwner(db, fn);
+      // This is deliberately inside the rollback scope: if ownership changed during any statement,
+      // reject here so every partial write is rolled back instead of leaking into the next account.
+      assertCommitAllowed(commitGuard);
       await db.run(sql`COMMIT`);
       return result;
     } catch (err) {
@@ -185,4 +217,120 @@ export async function withDbTransaction<T>(db: AppDatabase, fn: () => Promise<T>
   } finally {
     release();
   }
+}
+
+/**
+ * Opaque runtime proof that work belongs to the currently active transaction. Only
+ * {@link withDbTransaction} creates one, and {@link runInTransactionContext} verifies its object
+ * identity against a private WeakMap before invoking any callback.
+ */
+export type DbTransactionContext = DurableEventTransactionContext;
+
+/** A transaction context was forged, stale, or used after its owner stopped accepting work. */
+export class DbTransactionContextRejectedError extends Error {
+  constructor() {
+    super('database transaction context is not active');
+    this.name = 'DbTransactionContextRejectedError';
+  }
+}
+
+type DbTransactionContextState = {
+  accepting: boolean;
+  db: AppDatabase;
+  tasks: Array<Promise<unknown>>;
+  violation?: DbTransactionContextRejectedError;
+};
+
+const dbTransactionContexts = new WeakMap<DbTransactionContext, DbTransactionContextState>();
+
+function observedRejection<T>(error: unknown): Promise<T> {
+  const rejected = Promise.reject<T>(error);
+  // The caller still receives the rejecting promise. This internal observer prevents a deliberately
+  // ignored registration from becoming an unhandled rejection before the owner can roll back.
+  void rejected.catch(() => undefined);
+  return rejected;
+}
+
+/**
+ * Register bounded DB-only work in an active transaction.
+ *
+ * Registration happens synchronously before `fn` starts. The owning transaction therefore waits
+ * for the task even when its immediate caller forgets to await it. A call made while that owner is
+ * closing rejects before `fn` and latches the violation so catching/ignoring the rejection cannot
+ * accidentally permit COMMIT.
+ */
+export function runInTransactionContext<T>(
+  context: DbTransactionContext,
+  fn: (db: AppDatabase) => Promise<T>,
+): Promise<T> {
+  const state =
+    typeof context === 'object' && context !== null
+      ? dbTransactionContexts.get(context)
+      : undefined;
+  if (!state) return observedRejection(new DbTransactionContextRejectedError());
+  if (!state.accepting) {
+    const violation = new DbTransactionContextRejectedError();
+    state.violation ??= violation;
+    return observedRejection(violation);
+  }
+
+  let resolveTask!: (value: T | PromiseLike<T>) => void;
+  let rejectTask!: (reason?: unknown) => void;
+  const task = new Promise<T>((resolve, reject) => {
+    resolveTask = resolve;
+    rejectTask = reject;
+  });
+  state.tasks.push(task);
+  void task.catch(() => undefined);
+
+  try {
+    Promise.resolve(fn(state.db)).then(resolveTask, rejectTask);
+  } catch (error) {
+    rejectTask(error);
+  }
+  return task;
+}
+
+type SettledFailure = { reason: unknown };
+
+async function settleRegisteredTasks(
+  state: DbTransactionContextState,
+): Promise<SettledFailure | undefined> {
+  const outcomes = await Promise.allSettled(state.tasks);
+  const rejected = outcomes.find(
+    (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+  );
+  return rejected ? { reason: rejected.reason } : undefined;
+}
+
+async function runTransactionOwner<T>(
+  db: AppDatabase,
+  fn: (context: DbTransactionContext) => Promise<T>,
+): Promise<T> {
+  const context = Object.freeze({}) as DbTransactionContext;
+  const state: DbTransactionContextState = { accepting: true, db, tasks: [] };
+  dbTransactionContexts.set(context, state);
+
+  let ownerOutcome: { ok: true; value: T } | { ok: false; reason: unknown };
+  try {
+    ownerOutcome = { ok: true, value: await fn(context) };
+  } catch (reason) {
+    ownerOutcome = { ok: false, reason };
+  }
+
+  // Close synchronously when the owner settles. The registered task set is now fixed: a task that
+  // tries to add later work rejects and latches a rollback-forcing violation instead.
+  state.accepting = false;
+  let taskFailure: SettledFailure | undefined;
+  try {
+    taskFailure = await settleRegisteredTasks(state);
+  } finally {
+    // The token is inactive before the final account guard and before COMMIT/ROLLBACK.
+    dbTransactionContexts.delete(context);
+  }
+
+  if (!ownerOutcome.ok) throw ownerOutcome.reason;
+  if (state.violation) throw state.violation;
+  if (taskFailure) throw taskFailure.reason;
+  return ownerOutcome.value;
 }

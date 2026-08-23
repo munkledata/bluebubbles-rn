@@ -16,9 +16,15 @@ import { cleanup } from '@testing-library/react-native';
 import { useThemeStore } from '@state/themeStore';
 import { DEFAULT_PRESET } from '@ui/theme/tokens';
 
-// getDatabase() throws when the DB isn't open (jest never opens it). Any store/component
-// that reads the DB during a component test relies on this stub.
-jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
+// getDatabase() throws when the DB isn't open (jest never opens it). Any store/component that
+// reads the DB during a component test relies on this stub. Reactive hooks also need the raw
+// subscription shape: omitting it made every otherwise-healthy mount log a fake
+// "getRawDatabase is not a function" failure. Individual hook tests replace this function with a
+// callback-capturing fake when they need to exercise re-runs.
+jest.mock('@db/database', () => ({
+  getDatabase: jest.fn(),
+  getRawDatabase: jest.fn(() => ({ reactiveExecute: () => () => undefined })),
+}));
 
 afterEach(async () => {
   // Unmount any tree the test rendered FIRST, so the store reset below has no live

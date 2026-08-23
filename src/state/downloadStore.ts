@@ -22,6 +22,8 @@ interface DownloadState {
   setProgress: (guid: string, loaded: number, total: number) => void;
   finish: (guid: string) => void;
   fail: (guid: string) => void;
+  /** Account teardown: discard presentation-only status from the previous server. */
+  reset: () => void;
 }
 
 /**
@@ -42,4 +44,5 @@ export const useDownloadStore = create<DownloadState>((set) => ({
   finish: (g) =>
     set((s) => ({ status: { ...s.status, [g]: 'idle' }, progress: { ...s.progress, [g]: 1 } })),
   fail: (g) => set((s) => ({ status: { ...s.status, [g]: 'error' } })),
+  reset: () => set({ progress: {}, status: {} }),
 }));

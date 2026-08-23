@@ -5,14 +5,25 @@
  * exposes the "button" role.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 import { Button } from '@ui/primitives/Button';
+import { PRESETS, PRESET_ORDER } from '@ui/theme/tokens';
+import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
 
 describe('Button', () => {
   it('renders its title and the button role', async () => {
     await renderWithTheme(<Button title="Send" onPress={jest.fn()} />);
     expect(screen.getByText('Send')).toBeTruthy();
     expect(screen.getByRole('button')).toBeTruthy();
+  });
+
+  it.each(PRESET_ORDER)('uses a readable filled foreground for the %s preset', async (preset) => {
+    await renderWithTheme(<Button title="Continue" onPress={jest.fn()} />, { preset });
+    const background = PRESETS[preset].tokens.color.tint;
+    const style = StyleSheet.flatten(screen.getByText('Continue').props.style);
+    expect(style.color).toBe(readableTextOn(background));
+    expect(contrastRatio(style.color, background)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('fires onPress when pressed', async () => {

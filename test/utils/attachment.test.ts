@@ -92,11 +92,21 @@ describe('shouldAutoDownload', () => {
       shouldAutoDownload({ mimeType: 'image/jpeg', totalBytes: 100_000, localPath: null }),
     ).toBe(true);
     expect(shouldAutoDownload({ mimeType: 'image/jpeg', totalBytes: null, localPath: null })).toBe(
-      true,
+      false,
     );
     expect(
-      shouldAutoDownload({ mimeType: 'image/jpeg', totalBytes: 9_000_000, localPath: null }),
+      shouldAutoDownload({
+        mimeType: 'image/jpeg',
+        totalBytes: 6 * 1024 * 1024,
+        localPath: null,
+      }),
     ).toBe(false);
+    expect(
+      shouldAutoDownload({ mimeType: 'image/jpeg', totalBytes: Number.NaN, localPath: null }),
+    ).toBe(false);
+    expect(shouldAutoDownload({ mimeType: 'image/jpeg', totalBytes: 0, localPath: null })).toBe(
+      false,
+    );
     expect(shouldAutoDownload({ mimeType: 'video/mp4', totalBytes: 1000, localPath: null })).toBe(
       false,
     );

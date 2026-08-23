@@ -133,8 +133,14 @@ const FILE_B: PendingAttachment = {
 };
 
 beforeEach(() => {
+  jest.useFakeTimers();
   // setup.ts resets only the theme store; the feature-settings flag is this suite's to control.
   useFeatureSettingsStore.setState({ sendWithReturn: false });
+});
+
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
 });
 
 function input() {
@@ -145,21 +151,21 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
   it('hides the send button until text is typed, then shows it', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} />);
     expect(screen.queryByLabelText('Send message')).toBeNull();
-    fireEvent.changeText(input(), 'hello');
+    await fireEvent.changeText(input(), 'hello');
     expect(await screen.findByLabelText('Send message')).toBeTruthy();
   });
 
   it('keeps send hidden for whitespace-only text', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} />);
-    fireEvent.changeText(input(), '    ');
+    await fireEvent.changeText(input(), '    ');
     expect(screen.queryByLabelText('Send message')).toBeNull();
   });
 
   it('fires onSend with the trimmed text (no effect) and clears the field', async () => {
     const onSend = jest.fn();
     await renderWithTheme(<Composer onSend={onSend} />);
-    fireEvent.changeText(input(), '  hey there  ');
-    fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.changeText(input(), '  hey there  ');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
     expect(onSend).toHaveBeenCalledWith('hey there', undefined, undefined, undefined);
     await waitFor(() => expect(input().props.value).toBe(''));
     // The send button disappears once the field is empty again (canSend false).
@@ -181,11 +187,11 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await renderWithTheme(<Composer onSend={onSend} subjectEnabled />);
     // Flush each controlled-value re-render before the next act-wrapped event (React 19 overlapping
     // act() — see the send-with-return tests).
-    fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Re: lunch');
+    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Re: lunch');
     await screen.findByDisplayValue('Re: lunch');
-    fireEvent.changeText(input(), 'you around?');
+    await fireEvent.changeText(input(), 'you around?');
     await screen.findByDisplayValue('you around?');
-    fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.press(await screen.findByLabelText('Send message'));
     await waitFor(() =>
       expect(onSend).toHaveBeenCalledWith('you around?', undefined, 'Re: lunch', undefined),
     );
@@ -201,29 +207,22 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
   it('clears the draft immediately on send', async () => {
     const onDraftChange = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onDraftChange={onDraftChange} />);
-    fireEvent.changeText(input(), 'about to send');
-    fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.changeText(input(), 'about to send');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
     await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith(''));
   });
 
   it('persists the draft after the typing debounce', async () => {
-    jest.useFakeTimers();
-    try {
-      const onDraftChange = jest.fn();
-      await renderWithTheme(<Composer onSend={jest.fn()} onDraftChange={onDraftChange} />);
-      // Under fake timers every state-mutating event must be act-wrapped (see the typing tests),
-      // or React's scheduled work is discarded by useRealTimers and later tests can't mount.
-      await act(async () => {
-        fireEvent.changeText(input(), 'brb');
-      });
-      expect(onDraftChange).not.toHaveBeenCalled(); // debounced
-      await act(async () => {
-        jest.advanceTimersByTime(600);
-      });
-      expect(onDraftChange).toHaveBeenCalledWith('brb');
-    } finally {
-      jest.useRealTimers();
-    }
+    const onDraftChange = jest.fn();
+    await renderWithTheme(<Composer onSend={jest.fn()} onDraftChange={onDraftChange} />);
+    // RNTL 14 fireEvent is async and supplies its own act scope; awaiting it keeps that scope
+    // closed before the fake timer is advanced.
+    await fireEvent.changeText(input(), 'brb');
+    expect(onDraftChange).not.toHaveBeenCalled(); // debounced
+    await act(() => {
+      jest.advanceTimersByTime(600);
+    });
+    expect(onDraftChange).toHaveBeenCalledWith('brb');
   });
 
   it('inserts an @mention from the picker and sends the resolved span', async () => {
@@ -231,13 +230,15 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await renderWithTheme(
       <Composer onSend={onSend} mentionParticipants={[{ address: 'a@x.com', name: 'Alice' }]} />,
     );
-    fireEvent.changeText(input(), '@Al');
+    await fireEvent.changeText(input(), '@Al');
     await screen.findByDisplayValue('@Al');
     // The picker keys off the caret — feed a selectionChange so the @query is detected.
-    fireEvent(input(), 'selectionChange', { nativeEvent: { selection: { start: 3, end: 3 } } });
-    fireEvent.press(await screen.findByLabelText('Mention Alice'));
+    await fireEvent(input(), 'selectionChange', {
+      nativeEvent: { selection: { start: 3, end: 3 } },
+    });
+    await fireEvent.press(await screen.findByLabelText('Mention Alice'));
     await screen.findByDisplayValue('@Alice ');
-    fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.press(await screen.findByLabelText('Send message'));
     await waitFor(() =>
       expect(onSend).toHaveBeenCalledWith('@Alice', undefined, undefined, [
         { start: 0, length: 6, address: 'a@x.com' },
@@ -250,11 +251,11 @@ describe('Composer — send-with-return feature flag (real store)', () => {
   it('does NOT submit on Enter when the flag is off (default)', async () => {
     const onSend = jest.fn();
     await renderWithTheme(<Composer onSend={onSend} />);
-    fireEvent.changeText(input(), 'via return');
+    await fireEvent.changeText(input(), 'via return');
     // Flush the controlled-value re-render before firing the next act-wrapped event, or React
     // 19's still-open async act from changeText overlaps this one ("overlapping act() calls").
     await screen.findByDisplayValue('via return');
-    fireEvent(input(), 'submitEditing');
+    await fireEvent(input(), 'submitEditing');
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -262,9 +263,9 @@ describe('Composer — send-with-return feature flag (real store)', () => {
     useFeatureSettingsStore.setState({ sendWithReturn: true });
     const onSend = jest.fn();
     await renderWithTheme(<Composer onSend={onSend} />);
-    fireEvent.changeText(input(), 'via return');
+    await fireEvent.changeText(input(), 'via return');
     await screen.findByDisplayValue('via return'); // flush before submitEditing (see note above)
-    fireEvent(input(), 'submitEditing');
+    await fireEvent(input(), 'submitEditing');
     expect(onSend).toHaveBeenCalledWith('via return', undefined, undefined, undefined);
   });
 });
@@ -288,7 +289,7 @@ describe('Composer — reply banner', () => {
     );
     expect(screen.getByText('Replying to Carol')).toBeTruthy();
     expect(screen.getByText('the original')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('Cancel reply'));
+    await fireEvent.press(screen.getByLabelText('Cancel reply'));
     expect(onCancelReply).toHaveBeenCalledTimes(1);
   });
 
@@ -347,8 +348,8 @@ describe('Composer — edit mode', () => {
       <Composer onSend={onSend} editingText="original" onCancelEdit={jest.fn()} />,
     );
     await screen.findByDisplayValue('original');
-    fireEvent.changeText(input(), 'edited body');
-    fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.changeText(input(), 'edited body');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
     expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
     await waitFor(() => expect(input().props.value).toBe(''));
   });
@@ -359,7 +360,7 @@ describe('Composer — edit mode', () => {
       <Composer onSend={jest.fn()} editingText="original" onCancelEdit={onCancelEdit} />,
     );
     await screen.findByDisplayValue('original');
-    fireEvent.press(screen.getByLabelText('Cancel edit'));
+    await fireEvent.press(screen.getByLabelText('Cancel edit'));
     expect(onCancelEdit).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(input().props.value).toBe(''));
   });
@@ -369,7 +370,7 @@ describe('Composer — edit mode', () => {
       <Composer onSend={jest.fn()} editingText="original" onCancelEdit={jest.fn()} />,
     );
     const send = await screen.findByLabelText('Send message');
-    fireEvent(send, 'longPress');
+    await fireEvent(send, 'longPress');
     expect(screen.queryByText('Send with effect')).toBeNull();
   });
 
@@ -382,11 +383,11 @@ describe('Composer — edit mode', () => {
     );
     await screen.findByDisplayValue('draft I was writing');
     // The parent starts an edit → the input prefills with the message being edited.
-    rerender(
+    await rerender(
       <Composer onSend={jest.fn()} onCancelEdit={jest.fn()} editingText="original message" />,
     );
     await screen.findByDisplayValue('original message');
-    fireEvent.press(screen.getByLabelText('Cancel edit'));
+    await fireEvent.press(screen.getByLabelText('Cancel edit'));
     // The displaced draft comes back — not a blank box.
     await waitFor(() => expect(input().props.value).toBe('draft I was writing'));
   });
@@ -403,7 +404,7 @@ describe('Composer — edit mode', () => {
       />,
     );
     await screen.findByDisplayValue('draft text');
-    rerender(
+    await rerender(
       <Composer
         onSend={onSend}
         onCancelEdit={jest.fn()}
@@ -412,8 +413,8 @@ describe('Composer — edit mode', () => {
       />,
     );
     await screen.findByDisplayValue('edit this');
-    fireEvent.changeText(input(), 'edited body');
-    fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.changeText(input(), 'edited body');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
     expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
     // The draft is restored, and the edit never clobbers kv with '' (that would wipe the draft).
     await waitFor(() => expect(input().props.value).toBe('draft text'));
@@ -426,12 +427,12 @@ describe('Composer — staged attachments', () => {
     const onSendAttachments = jest.fn();
     const onSend = jest.fn();
     await renderWithTheme(<Composer onSend={onSend} onSendAttachments={onSendAttachments} />);
-    fireEvent.press(screen.getByLabelText('Attach photo or file')); // open tray
-    fireEvent.press(await screen.findByLabelText('tray-pick-two')); // stage A + B in one commit
+    await fireEvent.press(screen.getByLabelText('Attach photo or file')); // open tray
+    await fireEvent.press(await screen.findByLabelText('tray-pick-two')); // stage A + B in one commit
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(2));
 
     // Empty text but staged attachments → send is enabled and sends the attachments only.
-    fireEvent.press(screen.getByLabelText('Send message'));
+    await fireEvent.press(screen.getByLabelText('Send message'));
     expect(onSendAttachments).toHaveBeenCalledWith([ITEM_A, ITEM_B]);
     expect(onSend).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByLabelText('Remove attachment')).toBeNull());
@@ -439,8 +440,8 @@ describe('Composer — staged attachments', () => {
 
   it('stages a single item picked from the tray thumbnails', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
-    fireEvent.press(screen.getByLabelText('Attach photo or file'));
-    fireEvent.press(await screen.findByLabelText('tray-pick-a'));
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-a'));
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
   });
 
@@ -455,18 +456,18 @@ describe('Composer — staged attachments', () => {
     );
     // The shared photo shows as a staged chip with NO tray interaction, and send is enabled.
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
-    fireEvent.press(screen.getByLabelText('Send message'));
+    await fireEvent.press(screen.getByLabelText('Send message'));
     expect(onSendAttachments).toHaveBeenCalledWith([ITEM_A]);
   });
 
   it('does not stage the same uri twice (dedupe by uri)', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
-    fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
     const pick = await screen.findByLabelText('tray-pick-a');
-    fireEvent.press(pick);
+    await fireEvent.press(pick);
     // Flush the first press's re-render before the second, or its still-open act overlaps this one.
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
-    fireEvent.press(pick); // dedupes → no state change → still one chip
+    await fireEvent.press(pick); // dedupes → no state change → still one chip
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
   });
 
@@ -478,22 +479,19 @@ describe('Composer — staged attachments', () => {
         onPickFiles={() => Promise.resolve([FILE_A, FILE_B])}
       />,
     );
-    fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
     const files = await screen.findByLabelText('tray-files');
-    // The picked items arrive via a resolved Promise (.then(addPending)); contain that microtask
-    // inside act so the setState doesn't leak past the test and corrupt the next one's act scope.
-    await act(async () => {
-      fireEvent.press(files);
-    });
+    // Await RNTL 14's async event so its act scope also contains the resolved picker Promise.
+    await fireEvent.press(files);
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(2));
   });
 
   it('removes a staged chip when its remove control is pressed', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
-    fireEvent.press(screen.getByLabelText('Attach photo or file'));
-    fireEvent.press(await screen.findByLabelText('tray-pick-two'));
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-two'));
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(2));
-    fireEvent.press(screen.getAllByLabelText('Remove attachment')[0]!);
+    await fireEvent.press(screen.getAllByLabelText('Remove attachment')[0]!);
     await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
   });
 
@@ -507,10 +505,10 @@ describe('Composer — send-effect long-press', () => {
   it('long-pressing send opens the effect picker; picking sends with that effect id', async () => {
     const onSend = jest.fn();
     await renderWithTheme(<Composer onSend={onSend} />);
-    fireEvent.changeText(input(), 'party');
-    fireEvent(await screen.findByLabelText('Send message'), 'longPress');
+    await fireEvent.changeText(input(), 'party');
+    await fireEvent(await screen.findByLabelText('Send message'), 'longPress');
     expect(await screen.findByText('Send with effect')).toBeTruthy();
-    fireEvent.press(screen.getByText('Slam'));
+    await fireEvent.press(screen.getByText('Slam'));
     expect(onSend).toHaveBeenCalledWith(
       'party',
       'com.apple.MobileSMS.expressivesend.impact',
@@ -523,9 +521,9 @@ describe('Composer — send-effect long-press', () => {
   it('"Send without effect" sends with no effect id', async () => {
     const onSend = jest.fn();
     await renderWithTheme(<Composer onSend={onSend} />);
-    fireEvent.changeText(input(), 'plain');
-    fireEvent(await screen.findByLabelText('Send message'), 'longPress');
-    fireEvent.press(await screen.findByText('Send without effect'));
+    await fireEvent.changeText(input(), 'plain');
+    await fireEvent(await screen.findByLabelText('Send message'), 'longPress');
+    await fireEvent.press(await screen.findByText('Send without effect'));
     expect(onSend).toHaveBeenCalledWith('plain', undefined, undefined, undefined);
   });
 });
@@ -535,23 +533,23 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
     expect(screen.queryByLabelText('Schedule message')).toBeNull();
-    fireEvent.changeText(input(), 'later');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'later');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
 
     expect(openMock).toHaveBeenCalledTimes(1);
     const dateCfg = openMock.mock.calls[0]![0];
     expect(dateCfg.mode).toBe('date');
     const future = new Date(Date.now() + 2 * 86_400_000);
-    act(() => dateCfg.onChange({ type: 'set' }, future));
+    await act(() => dateCfg.onChange({ type: 'set' }, future));
 
     expect(openMock).toHaveBeenCalledTimes(2);
     const timeCfg = openMock.mock.calls[1]![0];
     expect(timeCfg.mode).toBe('time');
-    act(() => timeCfg.onChange({ type: 'set' }, future));
+    await act(() => timeCfg.onChange({ type: 'set' }, future));
 
     // Step 3: the recurrence sheet opens; nothing is scheduled until a choice is made.
     expect(onSchedule).not.toHaveBeenCalled();
-    fireEvent.press(await screen.findByText('Send once'));
+    await fireEvent.press(await screen.findByText('Send once'));
 
     await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
     const [text, when, recurrence] = onSchedule.mock.calls[0]!;
@@ -564,12 +562,12 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
   it('picking a repeat cadence passes it to onSchedule', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    fireEvent.changeText(input(), 'daily later');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'daily later');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
     const future = new Date(Date.now() + 2 * 86_400_000);
-    act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
-    act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
-    fireEvent.press(await screen.findByText('Repeat daily'));
+    await act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
+    await act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
+    await fireEvent.press(await screen.findByText('Repeat daily'));
     await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
     expect(onSchedule.mock.calls[0]![0]).toBe('daily later');
     expect(onSchedule.mock.calls[0]![2]).toBe('daily');
@@ -579,12 +577,12 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
   it('cancelling the recurrence sheet aborts scheduling and keeps the typed text', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    fireEvent.changeText(input(), 'keep me');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'keep me');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
     const future = new Date(Date.now() + 2 * 86_400_000);
-    act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
-    act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
-    fireEvent.press(await screen.findByText('Cancel'));
+    await act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
+    await act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
+    await fireEvent.press(await screen.findByText('Cancel'));
     await waitFor(() => expect(screen.queryByText('Send once')).toBeNull());
     expect(onSchedule).not.toHaveBeenCalled();
     expect(input().props.value).toBe('keep me'); // draft not lost on cancel
@@ -593,10 +591,10 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
   it('cancelling the date step aborts scheduling (no time picker, no callback)', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    fireEvent.changeText(input(), 'later');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'later');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
     const dateCfg = openMock.mock.calls[0]![0];
-    act(() => dateCfg.onChange({ type: 'dismissed' }, undefined));
+    await act(() => dateCfg.onChange({ type: 'dismissed' }, undefined));
     expect(openMock).toHaveBeenCalledTimes(1); // no time picker opened
     expect(onSchedule).not.toHaveBeenCalled();
   });
@@ -604,12 +602,12 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
   it('cancelling the time step aborts scheduling', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    fireEvent.changeText(input(), 'later');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'later');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
     const dateCfg = openMock.mock.calls[0]![0];
-    act(() => dateCfg.onChange({ type: 'set' }, new Date(Date.now() + 2 * 86_400_000)));
+    await act(() => dateCfg.onChange({ type: 'set' }, new Date(Date.now() + 2 * 86_400_000)));
     const timeCfg = openMock.mock.calls[1]![0];
-    act(() => timeCfg.onChange({ type: 'dismissed' }, undefined));
+    await act(() => timeCfg.onChange({ type: 'dismissed' }, undefined));
     // Same reasoning as the past-time test: the sheet never opened, so a queryBy-null would be
     // vacuous. findBy must run to timeout and reject.
     await expect(screen.findByText('Send once', {}, { timeout: 600 })).rejects.toBeTruthy();
@@ -626,13 +624,13 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
   it('rejects a fully-past time: no recurrence sheet, no schedule', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    fireEvent.changeText(input(), 'later');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'later');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
     const dateCfg = openMock.mock.calls[0]![0];
     const past = new Date(Date.now() - 2 * 86_400_000);
-    act(() => dateCfg.onChange({ type: 'set' }, past));
+    await act(() => dateCfg.onChange({ type: 'set' }, past));
     const timeCfg = openMock.mock.calls[1]![0];
-    act(() => timeCfg.onChange({ type: 'set' }, past));
+    await act(() => timeCfg.onChange({ type: 'set' }, past));
     // THE discriminating assertion. The sheet is a Modal, so it appears asynchronously —
     // `waitFor(() => expect(queryByText(...)).toBeNull())` is USELESS here because it passes on
     // its first tick, before the sheet could have rendered (verified: that spelling still passed
@@ -645,11 +643,11 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
   it('accepts a FUTURE time (proves the guard rejects for the right reason)', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    fireEvent.changeText(input(), 'later');
-    fireEvent.press(await screen.findByLabelText('Schedule message'));
+    await fireEvent.changeText(input(), 'later');
+    await fireEvent.press(await screen.findByLabelText('Schedule message'));
     const future = new Date(Date.now() + 2 * 86_400_000);
-    act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
-    act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
+    await act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
+    await act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
     // The sheet DOES open here — so the assertion above is sensitive to the guard, not to the
     // fact that the sheet never opens in this flow.
     expect(await screen.findByText('Send once')).toBeTruthy();
@@ -674,13 +672,13 @@ describe('Composer — voice/mic affordance', () => {
     const onStartVoice = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onStartVoice={onStartVoice} />);
     const mic = screen.getByLabelText('Record voice message');
-    fireEvent.press(mic);
+    await fireEvent.press(mic);
     expect(onStartVoice).toHaveBeenCalledTimes(1);
   });
 
   it('hides the mic once text is typed (send takes its place)', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onStartVoice={jest.fn()} />);
-    fireEvent.changeText(input(), 'hi');
+    await fireEvent.changeText(input(), 'hi');
     await screen.findByLabelText('Send message');
     expect(screen.queryByLabelText('Record voice message')).toBeNull();
   });
@@ -705,55 +703,37 @@ describe('Composer — typing indicator (debounced emit)', () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onTyping={onTyping} />);
     // onTyping fires synchronously inside onChangeText (before any re-render), so assert then flush
     // the controlled-value re-render before the next changeText, or consecutive acts overlap.
-    fireEvent.changeText(input(), 'a');
+    await fireEvent.changeText(input(), 'a');
     expect(onTyping).toHaveBeenCalledWith(true);
     await screen.findByDisplayValue('a');
     onTyping.mockClear();
-    fireEvent.changeText(input(), 'ab');
+    await fireEvent.changeText(input(), 'ab');
     expect(onTyping).not.toHaveBeenCalled(); // already active → no repeat emit
     await screen.findByDisplayValue('ab');
-    fireEvent.changeText(input(), '');
+    await fireEvent.changeText(input(), '');
     expect(onTyping).toHaveBeenCalledWith(false);
     await waitFor(() => expect(input().props.value).toBe(''));
   });
 
   it('emits typing=false after the 3s debounce window', async () => {
-    jest.useFakeTimers();
-    try {
-      const onTyping = jest.fn();
-      await renderWithTheme(<Composer onSend={jest.fn()} onTyping={onTyping} />);
-      await act(async () => {
-        fireEvent.changeText(input(), 'hi');
-      });
-      expect(onTyping).toHaveBeenCalledWith(true);
-      onTyping.mockClear();
-      await act(async () => {
-        jest.advanceTimersByTime(3000);
-      });
-      expect(onTyping).toHaveBeenCalledWith(false);
-    } finally {
-      jest.useRealTimers();
-    }
+    const onTyping = jest.fn();
+    await renderWithTheme(<Composer onSend={jest.fn()} onTyping={onTyping} />);
+    await fireEvent.changeText(input(), 'hi');
+    expect(onTyping).toHaveBeenCalledWith(true);
+    onTyping.mockClear();
+    await act(() => {
+      jest.advanceTimersByTime(3000);
+    });
+    expect(onTyping).toHaveBeenCalledWith(false);
   });
 
   it('emits typing=false on unmount (leaving the chat while typing)', async () => {
-    jest.useFakeTimers();
-    try {
-      const onTyping = jest.fn();
-      const { unmount } = await renderWithTheme(
-        <Composer onSend={jest.fn()} onTyping={onTyping} />,
-      );
-      await act(async () => {
-        fireEvent.changeText(input(), 'hi'); // typingActive → true
-      });
-      expect(onTyping).toHaveBeenCalledWith(true);
-      onTyping.mockClear();
-      await act(async () => {
-        unmount();
-      });
-      expect(onTyping).toHaveBeenCalledWith(false);
-    } finally {
-      jest.useRealTimers();
-    }
+    const onTyping = jest.fn();
+    const { unmount } = await renderWithTheme(<Composer onSend={jest.fn()} onTyping={onTyping} />);
+    await fireEvent.changeText(input(), 'hi'); // typingActive → true
+    expect(onTyping).toHaveBeenCalledWith(true);
+    onTyping.mockClear();
+    await unmount();
+    expect(onTyping).toHaveBeenCalledWith(false);
   });
 });

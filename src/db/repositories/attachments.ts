@@ -3,88 +3,113 @@ import type { Attachment } from '@core/models';
 import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { firstUrl, mediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
-import { withDbTransaction } from '../transaction';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbCommitGuard,
+  type DbTransactionContext,
+} from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
+import { requireChatIdByGuidWithinTransaction } from './chats';
 
+/**
+ * Transaction-only attachment ingestion. Temp-row identity/local-path reconciliation and the
+ * final attachment upsert must remain in the owning message transaction.
+ */
+export function upsertAttachmentsWithinTransaction(
+  context: DbTransactionContext,
+  items: Array<{ att: Attachment; messageId: number }>,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    const deduped = dedupeBy(
+      items.filter((x) => !!x.att?.guid),
+      (x) => x.att.guid,
+    );
+    if (deduped.length === 0) return;
+
+    // Reconcile the optimistic-send path: the Gator attachment-send ack carries only the
+    // MESSAGE guid (not the attachment guid — see SendAck), so the local temp attachment
+    // row is reconciled here when the socket `new-message` echo lands. For each incoming
+    // real attachment whose message still has a pending optimistic temp attachment
+    // (guid like 'temp-…-att', identified by its retained local_path), re-point that temp
+    // row to the real guid in place — preserving its on-disk local_path so the image keeps
+    // rendering without a re-download, and avoiding a duplicate attachment on the bubble.
+    for (const { att, messageId } of deduped) {
+      const temp = await db.all<{ guid: string; localPath: string | null }>(
+        sql`SELECT guid, local_path AS localPath FROM attachments
+          WHERE message_id = ${messageId} AND guid LIKE '%-att' AND guid <> ${att.guid}
+          LIMIT 1`,
+      );
+      const t = temp[0];
+      if (!t) continue;
+      // If the real guid already exists (a prior echo inserted it), just drop the temp row.
+      const existing = await db.all<{ id: number }>(
+        sql`SELECT id FROM attachments WHERE guid = ${att.guid} LIMIT 1`,
+      );
+      if (existing[0]) {
+        await db.delete(attachments).where(eq(attachments.guid, t.guid));
+      } else {
+        await db
+          .update(attachments)
+          .set({ guid: att.guid, localPath: t.localPath })
+          .where(eq(attachments.guid, t.guid));
+      }
+    }
+
+    await db
+      .insert(attachments)
+      .values(
+        deduped.map(({ att, messageId }) => ({
+          guid: att.guid,
+          messageId,
+          mimeType: att.mimeType ?? null,
+          transferName: att.transferName ?? null,
+          totalBytes: att.totalBytes ?? null,
+          height: att.height ?? null,
+          width: att.width ?? null,
+          blurhash: att.blurhash ?? null,
+          hasLivePhoto: att.hasLivePhoto ?? false,
+          isSticker: att.isSticker ?? false,
+          hideAttachment: att.hideAttachment ?? false,
+          emojiImageContentIdentifier: att.emojiImageContentIdentifier ?? null,
+          emojiImageShortDescription: att.emojiImageShortDescription ?? null,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: attachments.guid,
+        set: {
+          mimeType: sql`excluded.mime_type`,
+          totalBytes: sql`excluded.total_bytes`,
+          blurhash: sql`excluded.blurhash`,
+          // COALESCE, not a plain overwrite: absence is not a value here. A file shared INTO Gator
+          // carries no dimensions (SharedAttachment is uri/name/mimeType/size only) and is inserted
+          // with NULL width/height, so the real dimensions the server sends on every later fetch
+          // were being dropped on each re-upsert and the photo stayed boxed at the 0.78 fallback
+          // ratio forever — the row already exists, so no re-sync could ever correct it. The reverse
+          // must not happen either: a payload that legitimately omits them (the live socket echo)
+          // must not wipe good ones. `transfer_name` has the same shape (the display filename).
+          width: sql`COALESCE(excluded.width, ${attachments.width})`,
+          height: sql`COALESCE(excluded.height, ${attachments.height})`,
+          transferName: sql`COALESCE(excluded.transfer_name, ${attachments.transferName})`,
+          emojiImageContentIdentifier: sql`excluded.emoji_image_content_identifier`,
+          emojiImageShortDescription: sql`excluded.emoji_image_short_description`,
+        },
+      });
+  });
+}
+
+/** Public standalone attachment ingestion. Never wrap this helper in another transaction. */
 export async function upsertAttachments(
   db: AppDatabase,
   items: Array<{ att: Attachment; messageId: number }>,
+  commitGuard?: DbCommitGuard,
 ): Promise<void> {
-  const deduped = dedupeBy(
-    items.filter((x) => !!x.att?.guid),
-    (x) => x.att.guid,
+  await withDbTransaction(
+    db,
+    (context) => upsertAttachmentsWithinTransaction(context, items),
+    commitGuard,
   );
-  if (deduped.length === 0) return;
-
-  // Reconcile the optimistic-send path: the Gator attachment-send ack carries only the
-  // MESSAGE guid (not the attachment guid — see SendAck), so the local temp attachment
-  // row is reconciled here when the socket `new-message` echo lands. For each incoming
-  // real attachment whose message still has a pending optimistic temp attachment
-  // (guid like 'temp-…-att', identified by its retained local_path), re-point that temp
-  // row to the real guid in place — preserving its on-disk local_path so the image keeps
-  // rendering without a re-download, and avoiding a duplicate attachment on the bubble.
-  for (const { att, messageId } of deduped) {
-    const temp = await db.all<{ guid: string; localPath: string | null }>(
-      sql`SELECT guid, local_path AS localPath FROM attachments
-          WHERE message_id = ${messageId} AND guid LIKE '%-att' AND guid <> ${att.guid}
-          LIMIT 1`,
-    );
-    const t = temp[0];
-    if (!t) continue;
-    // If the real guid already exists (a prior echo inserted it), just drop the temp row.
-    const existing = await db.all<{ id: number }>(
-      sql`SELECT id FROM attachments WHERE guid = ${att.guid} LIMIT 1`,
-    );
-    if (existing[0]) {
-      await db.delete(attachments).where(eq(attachments.guid, t.guid));
-    } else {
-      await db
-        .update(attachments)
-        .set({ guid: att.guid, localPath: t.localPath })
-        .where(eq(attachments.guid, t.guid));
-    }
-  }
-
-  await db
-    .insert(attachments)
-    .values(
-      deduped.map(({ att, messageId }) => ({
-        guid: att.guid,
-        messageId,
-        mimeType: att.mimeType ?? null,
-        transferName: att.transferName ?? null,
-        totalBytes: att.totalBytes ?? null,
-        height: att.height ?? null,
-        width: att.width ?? null,
-        blurhash: att.blurhash ?? null,
-        hasLivePhoto: att.hasLivePhoto ?? false,
-        isSticker: att.isSticker ?? false,
-        hideAttachment: att.hideAttachment ?? false,
-        emojiImageContentIdentifier: att.emojiImageContentIdentifier ?? null,
-        emojiImageShortDescription: att.emojiImageShortDescription ?? null,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: attachments.guid,
-      set: {
-        mimeType: sql`excluded.mime_type`,
-        totalBytes: sql`excluded.total_bytes`,
-        blurhash: sql`excluded.blurhash`,
-        // COALESCE, not a plain overwrite: absence is not a value here. A file shared INTO Gator
-        // carries no dimensions (SharedAttachment is uri/name/mimeType/size only) and is inserted
-        // with NULL width/height, so the real dimensions the server sends on every later fetch
-        // were being dropped on each re-upsert and the photo stayed boxed at the 0.78 fallback
-        // ratio forever — the row already exists, so no re-sync could ever correct it. The reverse
-        // must not happen either: a payload that legitimately omits them (the live socket echo)
-        // must not wipe good ones. `transfer_name` has the same shape (the display filename).
-        width: sql`COALESCE(excluded.width, ${attachments.width})`,
-        height: sql`COALESCE(excluded.height, ${attachments.height})`,
-        transferName: sql`COALESCE(excluded.transfer_name, ${attachments.transferName})`,
-        emojiImageContentIdentifier: sql`excluded.emoji_image_content_identifier`,
-        emojiImageShortDescription: sql`excluded.emoji_image_short_description`,
-      },
-    });
 }
 
 // ---- Attachments -----------------------------------------------------------
@@ -122,17 +147,34 @@ export interface AttachmentRow {
 /** SQL fragment: 'RCS' when the joined chat guid is an RCS bridge chat, else NULL. */
 const RCS_SERVICE_CASE = sql`CASE WHEN c.guid LIKE 'RCS;-;%' THEN 'RCS' ELSE NULL END`;
 
-/** Attachments for a set of message ids, grouped by messageId (stable id ASC order). */
+/**
+ * Attachments for a set of message ids, grouped by messageId (stable id ASC order).
+ *
+ * `rowLimit`, when supplied, is applied by SQLite before rows cross into JavaScript. Invalid
+ * explicit limits fail closed with an empty result; omitting it preserves the complete-read
+ * behavior used by conversation rendering and reconciliation. Deleted owners remain readable by
+ * default for cleanup/reconciliation; ingestion auto-download opts into excluding them.
+ */
+export interface ListAttachmentsByMessageIdsOptions {
+  excludeDeletedMessages?: boolean;
+}
+
 export async function listAttachmentsByMessageIds(
   db: AppDatabase,
   messageIds: number[],
+  rowLimit?: number,
+  options: ListAttachmentsByMessageIdsOptions = {},
 ): Promise<Map<number, AttachmentRow[]>> {
   const out = new Map<number, AttachmentRow[]>();
   if (messageIds.length === 0) return out;
+  if (rowLimit !== undefined && (!Number.isSafeInteger(rowLimit) || rowLimit <= 0)) return out;
   const inList = sql.join(
     messageIds.map((id) => sql`${id}`),
     sql`, `,
   );
+  const deletedMessageFilter = options.excludeDeletedMessages
+    ? sql`AND m.date_deleted IS NULL`
+    : sql``;
   const rows = await db.all<AttachmentRow>(sql`
     SELECT
       a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
@@ -147,7 +189,9 @@ export async function listAttachmentsByMessageIds(
     JOIN messages m ON m.id = a.message_id
     JOIN chats c ON c.id = m.chat_id
     WHERE a.message_id IN (${inList})
+      ${deletedMessageFilter}
     ORDER BY a.id ASC
+    LIMIT ${rowLimit ?? -1}
   `);
   for (const r of rows) {
     const list = out.get(r.messageId) ?? [];
@@ -404,26 +448,30 @@ export async function listChatAttachmentsByKind(
  * its own is a bubble frozen on 'sending' that nothing will ever retry. No ordering of three
  * autocommits avoids both, so they commit together or not at all.
  */
+export interface InsertOutgoingAttachmentArgs {
+  tempGuid: string;
+  attachmentGuid: string;
+  /** @deprecated Ignored. The transaction resolves `chatGuid` to its committed local id. */
+  chatId?: number;
+  chatGuid: string;
+  localPath: string;
+  mimeType: string;
+  transferName: string;
+  totalBytes: number;
+  width?: number;
+  height?: number;
+  now: number;
+}
+
 export async function insertOutgoingAttachment(
   db: AppDatabase,
-  args: {
-    tempGuid: string;
-    attachmentGuid: string;
-    chatId: number;
-    chatGuid: string;
-    localPath: string;
-    mimeType: string;
-    transferName: string;
-    totalBytes: number;
-    width?: number;
-    height?: number;
-    now: number;
-  },
+  args: InsertOutgoingAttachmentArgs,
 ): Promise<void> {
   await withDbTransaction(db, async () => {
+    const chatId = await requireChatIdByGuidWithinTransaction(db, args.chatGuid);
     await db.insert(messages).values({
       guid: args.tempGuid,
-      chatId: args.chatId,
+      chatId,
       isFromMe: true,
       dateCreated: args.now,
       hasAttachments: true,
@@ -451,35 +499,60 @@ export async function insertOutgoingAttachment(
       kind: 'attachment',
       payload: JSON.stringify({ attachmentGuid: args.attachmentGuid, localPath: args.localPath }),
     });
-    await db.update(chats).set({ latestMessageDate: args.now }).where(eq(chats.id, args.chatId));
+    await db
+      .update(chats)
+      .set({
+        latestMessageDate: sql`MAX(${args.now}, COALESCE(${chats.latestMessageDate}, ${args.now}))`,
+      })
+      .where(eq(chats.id, chatId));
   });
 }
 
-/** Persist a downloaded file path (fires the reactive 'attachments' watcher). */
+/**
+ * Transaction-scoped form of {@link updateAttachmentLocalPath}. Use only when the caller already
+ * owns the process-wide DB transaction and needs this path change to commit atomically with other
+ * writes (currently attachment-cache ledger promotion).
+ */
+export function updateAttachmentLocalPathWithinTransaction(
+  context: DbTransactionContext,
+  attachmentGuid: string,
+  localPath: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const updated = await db.all<{ id: number }>(sql`
+    UPDATE attachments
+       SET local_path = ${localPath}
+     WHERE guid = ${attachmentGuid}
+       AND EXISTS (
+         SELECT 1 FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+          WHERE m.id = attachments.message_id
+            AND m.date_deleted IS NULL
+            AND m.date_retracted IS NULL
+            AND (
+              c.deleted_at IS NULL
+              OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
+            )
+       )
+    RETURNING id
+  `);
+    return updated.length > 0;
+  });
+}
+
+/**
+ * Persist a downloaded file path (fires the reactive `attachments` watcher).
+ *
+ * Returns false when the attachment disappeared, or its owning message was locally deleted,
+ * while native transfer work was in flight. The caller must then discard the newly downloaded
+ * file instead of reporting a success that no visible row owns.
+ */
 export async function updateAttachmentLocalPath(
   db: AppDatabase,
   attachmentGuid: string,
   localPath: string,
-): Promise<void> {
-  await db.update(attachments).set({ localPath }).where(eq(attachments.guid, attachmentGuid));
-}
-
-/** Re-point a temp attachment to its server guid after an upload reconcile (no dup). */
-export async function promoteAttachmentGuid(
-  db: AppDatabase,
-  tempAttachmentGuid: string,
-  serverAttachmentGuid: string,
-  localPath: string,
-): Promise<void> {
-  const dup = await db.all<{ id: number }>(
-    sql`SELECT id FROM attachments WHERE guid = ${serverAttachmentGuid} LIMIT 1`,
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    updateAttachmentLocalPathWithinTransaction(context, attachmentGuid, localPath),
   );
-  if (dup[0]) {
-    await db.delete(attachments).where(eq(attachments.guid, tempAttachmentGuid));
-  } else {
-    await db
-      .update(attachments)
-      .set({ guid: serverAttachmentGuid, localPath })
-      .where(eq(attachments.guid, tempAttachmentGuid));
-  }
 }

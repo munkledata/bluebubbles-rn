@@ -1,10 +1,12 @@
 import type Database from 'better-sqlite3';
+import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
   clearChatTombstone,
   createReminder,
   deleteChatLocal,
   findChatByParticipantAddresses,
+  getAttachmentCacheEntry,
   getChatHeader,
   getChatIdByGuid,
   insertOutgoingText,
@@ -16,6 +18,7 @@ import {
   listChatsForInbox,
   listOrphanedAttachmentGuids,
   markMessageDeleted,
+  recordAttachmentCacheEntry,
   resumeChatPurges,
   setChatArchive,
   setChatCustomization,
@@ -25,6 +28,8 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { kv, outgoingQueue, scheduledMessages } from '@db/schema';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -68,6 +73,71 @@ const col = (raw: Database.Database, guid: string, c: string): number | string |
 const counts = (raw: Database.Database, table: string): number =>
   (raw.prepare(`SELECT COUNT(*) c FROM ${table}`).get() as { c: number }).c;
 
+const nextEventLoopTurn = (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+interface DriverGate {
+  didStart: boolean;
+  held: Promise<void>;
+  finished: Promise<void>;
+  release(): void;
+  markFinished(): void;
+}
+
+function driverGate(): DriverGate {
+  let release!: () => void;
+  let markFinished!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const finished = new Promise<void>((resolve) => {
+    markFinished = resolve;
+  });
+  return { didStart: false, held, finished, release, markFinished };
+}
+
+function gateThenable<T extends object>(thenable: T, gate: DriverGate): T {
+  return new Proxy(thenable, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== 'then') {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (onFulfilled: unknown, onRejected: unknown) => {
+        gate.didStart = true;
+        return gate.held
+          .then(() =>
+            Reflect.apply(value as (...args: unknown[]) => unknown, target, [
+              onFulfilled,
+              onRejected,
+            ]),
+          )
+          .finally(gate.markFinished);
+      };
+    },
+  });
+}
+
+async function waitForDriverGate(gate: DriverGate, label: string): Promise<void> {
+  for (let turn = 0; turn < 20 && !gate.didStart; turn += 1) {
+    await nextEventLoopTurn();
+  }
+  if (!gate.didStart) throw new Error(`${label} did not start within 20 event-loop turns`);
+}
+
+function errorMessageChain(error: unknown): unknown[] {
+  const messages: unknown[] = [];
+  let current = error;
+  for (let depth = 0; depth < 4 && typeof current === 'object' && current != null; depth += 1) {
+    const record = current as { message?: unknown; cause?: unknown };
+    messages.push(record.message);
+    current = record.cause;
+  }
+  return messages;
+}
+
 describe('chat actions repo', () => {
   it('pins and unpins a chat locally', async () => {
     const { db, raw } = await createTestDb();
@@ -82,6 +152,38 @@ describe('chat actions repo', () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await setChatArchive(db, 'c1', true);
+    expect(col(raw, 'c1', 'is_archived')).toBe(1);
+  });
+
+  it('queues pin and archive behind a rolling-back neighbouring transaction', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+
+    let releaseNeighbour!: () => void;
+    let neighbourStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async (context) => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const pin = setChatPin(db, 'c1', true);
+    const archive = setChatArchive(db, 'c1', true);
+    await Promise.resolve();
+    expect(col(raw, 'c1', 'is_pinned')).toBe(0);
+    expect(col(raw, 'c1', 'is_archived')).toBe(0);
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await Promise.all([pin, archive]);
+    expect(col(raw, 'c1', 'is_pinned')).toBe(1);
     expect(col(raw, 'c1', 'is_archived')).toBe(1);
   });
 
@@ -129,6 +231,469 @@ describe('chat actions repo', () => {
     // …but NOT from the identity/preferences lookup, which is not a list: a null header reads as
     // "no such chat" to the notification builder, which silently switches the chat's MUTE off.
     expect((await getChatHeader(db, 'c1'))?.guid).toBe('c1');
+  });
+
+  it('resolves the target inside its owner so a rolled-back chat id cannot delete its innocent replacement', async () => {
+    const { db, raw } = await createTestDb();
+    let releaseNeighbour!: () => void;
+    let markNeighbourStarted!: () => void;
+    let transientId: number | undefined;
+    const neighbourStarted = new Promise<void>((resolve) => {
+      markNeighbourStarted = resolve;
+    });
+    const neighbourHeld = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbourOutcome = withDbTransaction(db, async (context) => {
+      const inserted = await db.all<{ id: number }>(sql`
+        INSERT INTO chats (guid) VALUES ('rollback-target') RETURNING id
+      `);
+      transientId = inserted[0]?.id;
+      markNeighbourStarted();
+      await neighbourHeld;
+      throw new Error('chat identity neighbour rollback');
+    }).then(
+      (value) => ({ kind: 'resolved' as const, value }),
+      (error: unknown) => ({ kind: 'rejected' as const, error }),
+    );
+    await neighbourStarted;
+
+    let innocentId: number | undefined;
+    let innocentSettled = false;
+    const innocentOutcome = withDbTransaction(db, async (context) => {
+      const inserted = await db.all<{ id: number }>(sql`
+        INSERT INTO chats (guid, latest_message_date)
+        VALUES ('innocent-replacement', 7000)
+        RETURNING id
+      `);
+      innocentId = inserted[0]?.id;
+      await db.run(sql`
+        INSERT INTO messages (guid, chat_id, text, is_from_me, date_created)
+        VALUES ('innocent-message', ${innocentId}, 'keep me', 0, 7000)
+      `);
+    })
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        innocentSettled = true;
+      });
+    let deleteSettled = false;
+    const deleteOutcome = deleteChatLocal(db, 'rollback-target', 8_000)
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        deleteSettled = true;
+      });
+
+    try {
+      await nextEventLoopTurn();
+      expect(transientId).toBeDefined();
+      expect(innocentSettled).toBe(false);
+      expect(deleteSettled).toBe(false);
+      expect(raw.prepare('SELECT id FROM chats WHERE guid = ?').get('rollback-target')).toEqual({
+        id: transientId,
+      });
+      expect(
+        raw.prepare('SELECT id FROM chats WHERE guid = ?').get('innocent-replacement'),
+      ).toBeUndefined();
+
+      releaseNeighbour();
+      const [neighbour, innocent, deletion] = await Promise.all([
+        neighbourOutcome,
+        innocentOutcome,
+        deleteOutcome,
+      ]);
+      expect(neighbour.kind).toBe('rejected');
+      if (neighbour.kind === 'rejected') {
+        expect(errorMessageChain(neighbour.error)).toContain('chat identity neighbour rollback');
+      }
+      expect(innocent).toEqual({ kind: 'resolved', value: undefined });
+      expect(deletion).toEqual({ kind: 'resolved', value: undefined });
+      expect(innocentId).toBe(transientId);
+      expect(
+        raw.prepare('SELECT id FROM chats WHERE guid = ?').get('rollback-target'),
+      ).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT id, deleted_at AS deletedAt, latest_message_date AS latestMessageDate
+             FROM chats WHERE guid = ?`,
+          )
+          .get('innocent-replacement'),
+      ).toEqual({ id: innocentId, deletedAt: null, latestMessageDate: 7000 });
+      expect(
+        raw
+          .prepare(
+            `SELECT guid, chat_id AS chatId, text, date_created AS dateCreated
+             FROM messages WHERE guid = ?`,
+          )
+          .get('innocent-message'),
+      ).toEqual({
+        guid: 'innocent-message',
+        chatId: innocentId,
+        text: 'keep me',
+        dateCreated: 7000,
+      });
+    } finally {
+      releaseNeighbour();
+      await Promise.allSettled([neighbourOutcome, innocentOutcome, deleteOutcome]);
+    }
+  });
+
+  it('queues a committed chat deletion behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'queued-delete');
+    const chatId = (await getChatIdByGuid(db, 'queued-delete'))!;
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-queued-delete',
+      chatId,
+      chatGuid: 'queued-delete',
+      text: 'remove me',
+      now: 1_000,
+    });
+    await insertScheduled(db, {
+      chatGuid: 'queued-delete',
+      text: 'later',
+      scheduledFor: 9_000,
+    });
+    await kvSet(db, 'draft.queued-delete', 'half typed');
+
+    let releaseNeighbour!: () => void;
+    let markNeighbourStarted!: () => void;
+    const neighbourStarted = new Promise<void>((resolve) => {
+      markNeighbourStarted = resolve;
+    });
+    const neighbourHeld = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbourOutcome = withDbTransaction(db, async (context) => {
+      await db.run(sql`
+        INSERT INTO kv (key, value) VALUES ('chat.delete.neighbour.phantom', 'rollback')
+      `);
+      markNeighbourStarted();
+      await neighbourHeld;
+      throw new Error('chat delete neighbour rollback');
+    }).then(
+      (value) => ({ kind: 'resolved' as const, value }),
+      (error: unknown) => ({ kind: 'rejected' as const, error }),
+    );
+    await neighbourStarted;
+
+    let deleteSettled = false;
+    const deleteOutcome = deleteChatLocal(db, 'queued-delete', 5_000)
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        deleteSettled = true;
+      });
+    try {
+      await nextEventLoopTurn();
+      expect(deleteSettled).toBe(false);
+      expect(col(raw, 'queued-delete', 'deleted_at')).toBeNull();
+      expect(counts(raw, 'messages')).toBe(1);
+      expect(counts(raw, 'outgoing_queue')).toBe(1);
+      expect(counts(raw, 'scheduled_messages')).toBe(1);
+      expect(await kvGet(db, 'draft.queued-delete')).toBe('half typed');
+      expect(await kvGet(db, 'chat.delete.neighbour.phantom')).toBe('rollback');
+
+      releaseNeighbour();
+      const [neighbour, deletion] = await Promise.all([neighbourOutcome, deleteOutcome]);
+      expect(neighbour.kind).toBe('rejected');
+      if (neighbour.kind === 'rejected') {
+        expect(errorMessageChain(neighbour.error)).toContain('chat delete neighbour rollback');
+      }
+      expect(deletion).toEqual({ kind: 'resolved', value: undefined });
+      expect(col(raw, 'queued-delete', 'deleted_at')).toBe(5_000);
+      expect(col(raw, 'queued-delete', 'latest_message_date')).toBeNull();
+      expect(counts(raw, 'messages')).toBe(0);
+      expect(counts(raw, 'outgoing_queue')).toBe(0);
+      expect(counts(raw, 'scheduled_messages')).toBe(0);
+      expect(await kvGet(db, 'draft.queued-delete')).toBeNull();
+      expect(await kvGet(db, 'chat.delete.neighbour.phantom')).toBeNull();
+    } finally {
+      releaseNeighbour();
+      await Promise.allSettled([neighbourOutcome, deleteOutcome]);
+    }
+  });
+
+  it('rolls every deletion decision back when the final draft delete fails, then retries', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'trigger-delete');
+    const chatId = (await getChatIdByGuid(db, 'trigger-delete'))!;
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-trigger-delete',
+      chatId,
+      chatGuid: 'trigger-delete',
+      text: 'keep on rollback',
+      now: 1_000,
+    });
+    await insertScheduled(db, {
+      chatGuid: 'trigger-delete',
+      text: 'keep on rollback',
+      scheduledFor: 9_000,
+    });
+    await kvSet(db, 'draft.trigger-delete', 'keep on rollback');
+
+    const triggerName = 'reject_final_chat_draft_delete';
+    const canary = 'CHAT_DRAFT_DELETE_RAW_CANARY';
+    raw.exec(`
+      CREATE TRIGGER ${triggerName}
+      BEFORE DELETE ON kv
+      WHEN OLD.key = 'draft.trigger-delete'
+      BEGIN
+        SELECT RAISE(ABORT, '${canary}');
+      END
+    `);
+    type All = (query: unknown) => unknown;
+    const realAll = db.all.bind(db) as All;
+    let purgeStarted = false;
+    const allSpy = jest.spyOn(db, 'all').mockImplementation(((query: unknown) => {
+      const shape = JSON.stringify(query).replace(/\s+/g, ' ').toLowerCase();
+      if (shape.includes('delete from messages') && shape.includes('returning id')) {
+        purgeStarted = true;
+      }
+      return realAll(query);
+    }) as unknown as AppDatabase['all']);
+    let deleteOutcome:
+      Promise<{ kind: 'resolved'; value: void } | { kind: 'rejected'; error: unknown }> | undefined;
+    try {
+      deleteOutcome = deleteChatLocal(db, 'trigger-delete', 5_000).then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      );
+      const failed = await deleteOutcome;
+      expect(failed.kind).toBe('rejected');
+      if (failed.kind === 'rejected') expect(errorMessageChain(failed.error)).toContain(canary);
+      expect(raw.inTransaction).toBe(false);
+      expect(purgeStarted).toBe(false);
+      expect(col(raw, 'trigger-delete', 'deleted_at')).toBeNull();
+      expect(col(raw, 'trigger-delete', 'latest_message_date')).toBe(1_000);
+      expect(counts(raw, 'messages')).toBe(1);
+      expect(counts(raw, 'outgoing_queue')).toBe(1);
+      expect(counts(raw, 'scheduled_messages')).toBe(1);
+      expect(await kvGet(db, 'draft.trigger-delete')).toBe('keep on rollback');
+
+      raw.exec(`DROP TRIGGER ${triggerName}`);
+      await expect(deleteChatLocal(db, 'trigger-delete', 5_000)).resolves.toBeUndefined();
+      expect(purgeStarted).toBe(true);
+      expect(col(raw, 'trigger-delete', 'deleted_at')).toBe(5_000);
+      expect(col(raw, 'trigger-delete', 'latest_message_date')).toBeNull();
+      expect(counts(raw, 'messages')).toBe(0);
+      expect(counts(raw, 'outgoing_queue')).toBe(0);
+      expect(counts(raw, 'scheduled_messages')).toBe(0);
+      expect(await kvGet(db, 'draft.trigger-delete')).toBeNull();
+    } finally {
+      if (deleteOutcome) await Promise.allSettled([deleteOutcome]);
+      allSpy.mockRestore();
+      raw.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+    }
+  });
+
+  it('awaits every outer decision, commits it, then awaits the first independent purge chunk', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'delayed-delete');
+    const chatId = (await getChatIdByGuid(db, 'delayed-delete'))!;
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-delayed-delete',
+      chatId,
+      chatGuid: 'delayed-delete',
+      text: 'delayed',
+      now: 1_000,
+    });
+    await insertScheduled(db, {
+      chatGuid: 'delayed-delete',
+      text: 'delayed',
+      scheduledFor: 9_000,
+    });
+    await kvSet(db, 'draft.delayed-delete', 'delayed');
+
+    type All = (query: unknown) => unknown;
+    type Run = (query: unknown) => unknown;
+    type Delete = (table: unknown) => { where(condition: unknown): object };
+    const originalAll = db.all as All;
+    const originalRun = db.run as Run;
+    const originalDelete = db.delete as unknown as Delete;
+    const realAll = db.all.bind(db) as All;
+    const realRun = db.run.bind(db) as Run;
+    const realDelete = db.delete.bind(db) as unknown as Delete;
+    const stages = {
+      stamp: driverGate(),
+      queue: driverGate(),
+      scheduled: driverGate(),
+      draft: driverGate(),
+      purge: driverGate(),
+    };
+    const transactionStatements: string[] = [];
+    (db as unknown as { run: Run }).run = (query) => {
+      const shape = JSON.stringify(query).replace(/\s+/g, ' ');
+      transactionStatements.push(shape);
+      return realRun(query);
+    };
+    (db as unknown as { all: All }).all = (query) => {
+      const shape = JSON.stringify(query).replace(/\s+/g, ' ').toLowerCase();
+      if (
+        !stages.stamp.didStart &&
+        shape.includes('update chats') &&
+        shape.includes('returning id')
+      ) {
+        stages.stamp.didStart = true;
+        return stages.stamp.held.then(() => realAll(query)).finally(stages.stamp.markFinished);
+      }
+      if (
+        !stages.purge.didStart &&
+        shape.includes('delete from messages') &&
+        shape.includes('returning id')
+      ) {
+        stages.purge.didStart = true;
+        return stages.purge.held.then(() => realAll(query)).finally(stages.purge.markFinished);
+      }
+      return realAll(query);
+    };
+    (db as unknown as { delete: Delete }).delete = (table) => {
+      const builder = realDelete(table);
+      const gate =
+        table === outgoingQueue
+          ? stages.queue
+          : table === scheduledMessages
+            ? stages.scheduled
+            : table === kv
+              ? stages.draft
+              : undefined;
+      if (!gate) return builder;
+      return new Proxy(builder, {
+        get(target, property) {
+          const value = Reflect.get(target, property, target);
+          if (property !== 'where') {
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (condition: unknown) => gateThenable(target.where(condition), gate);
+        },
+      });
+    };
+
+    let deleteSettled = false;
+    const deleteOutcome = deleteChatLocal(db, 'delayed-delete', 5_000)
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        deleteSettled = true;
+      });
+    try {
+      await waitForDriverGate(stages.stamp, 'chat tombstone update');
+      await nextEventLoopTurn();
+      expect(deleteSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(col(raw, 'delayed-delete', 'deleted_at')).toBeNull();
+      expect(counts(raw, 'outgoing_queue')).toBe(1);
+      expect(stages.queue.didStart).toBe(false);
+      expect(stages.scheduled.didStart).toBe(false);
+      expect(stages.draft.didStart).toBe(false);
+      expect(stages.purge.didStart).toBe(false);
+
+      stages.stamp.release();
+      await stages.stamp.finished;
+      await waitForDriverGate(stages.queue, 'chat outgoing-queue delete');
+      expect(deleteSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(col(raw, 'delayed-delete', 'deleted_at')).toBe(5_000);
+      expect(col(raw, 'delayed-delete', 'latest_message_date')).toBeNull();
+      expect(counts(raw, 'outgoing_queue')).toBe(1);
+      expect(stages.scheduled.didStart).toBe(false);
+      expect(stages.draft.didStart).toBe(false);
+      expect(stages.purge.didStart).toBe(false);
+
+      stages.queue.release();
+      await stages.queue.finished;
+      await waitForDriverGate(stages.scheduled, 'chat scheduled-message delete');
+      expect(deleteSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(counts(raw, 'outgoing_queue')).toBe(0);
+      expect(counts(raw, 'scheduled_messages')).toBe(1);
+      expect(stages.draft.didStart).toBe(false);
+      expect(stages.purge.didStart).toBe(false);
+
+      stages.scheduled.release();
+      await stages.scheduled.finished;
+      await waitForDriverGate(stages.draft, 'chat draft delete');
+      expect(deleteSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(counts(raw, 'scheduled_messages')).toBe(0);
+      expect(await kvGet(db, 'draft.delayed-delete')).toBe('delayed');
+      expect(stages.purge.didStart).toBe(false);
+
+      stages.draft.release();
+      await stages.draft.finished;
+      await waitForDriverGate(stages.purge, 'first chat message-purge chunk');
+      await nextEventLoopTurn();
+      expect(deleteSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(counts(raw, 'messages')).toBe(1);
+      expect(await kvGet(db, 'draft.delayed-delete')).toBeNull();
+      expect(
+        transactionStatements.filter((shape) => shape.includes('BEGIN IMMEDIATE')),
+      ).toHaveLength(2);
+      expect(transactionStatements.filter((shape) => shape.includes('COMMIT'))).toHaveLength(1);
+      expect(transactionStatements.filter((shape) => shape.includes('ROLLBACK'))).toHaveLength(0);
+
+      stages.purge.release();
+      const [outcome] = await Promise.all([deleteOutcome, stages.purge.finished]);
+      expect(outcome).toEqual({ kind: 'resolved', value: undefined });
+      expect(deleteSettled).toBe(true);
+      expect(raw.inTransaction).toBe(false);
+      expect(counts(raw, 'messages')).toBe(0);
+      expect(counts(raw, 'outgoing_queue')).toBe(0);
+      expect(counts(raw, 'scheduled_messages')).toBe(0);
+      expect(await kvGet(db, 'draft.delayed-delete')).toBeNull();
+      expect(transactionStatements.filter((shape) => shape.includes('COMMIT'))).toHaveLength(2);
+    } finally {
+      Object.values(stages).forEach((gate) => gate.release());
+      const drains: Promise<unknown>[] = [deleteOutcome];
+      for (const gate of Object.values(stages)) {
+        if (gate.didStart) drains.push(gate.finished);
+      }
+      await Promise.allSettled(drains);
+      (db as unknown as { delete: Delete }).delete = originalDelete;
+      (db as unknown as { all: All }).all = originalAll;
+      (db as unknown as { run: Run }).run = originalRun;
+    }
+  });
+
+  it('keeps a purged chat file accounted for until the post-commit coordinator retires it', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c-cache');
+    const chatId = (await getChatIdByGuid(db, 'c-cache'))!;
+    const cachePath = 'file:///documents/attachments/media-att-cache/generation-1/media-photo.jpg';
+    raw
+      .prepare(
+        'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,1000)',
+      )
+      .run('m-cache', chatId, 'photo');
+    const message = raw.prepare('SELECT id FROM messages WHERE guid = ?').get('m-cache') as {
+      id: number;
+    };
+    raw
+      .prepare('INSERT INTO attachments (guid, message_id, local_path) VALUES (?,?,?)')
+      .run('att-cache', message.id, cachePath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: cachePath, bytes: 1234, lastUsedAt: 100 }),
+    );
+
+    await deleteChatLocal(db, 'c-cache', 5000);
+
+    expect(raw.prepare('SELECT COUNT(*) c FROM attachments').get()).toEqual({ c: 0 });
+    expect(await getAttachmentCacheEntry(db, cachePath)).toMatchObject({
+      path: cachePath,
+      state: 'active',
+      bytes: 1234,
+    });
   });
 
   it('floors the tombstone at the newest stored message, so a fast Mac clock cannot resurrect it', async () => {
@@ -335,6 +900,43 @@ describe('chat actions repo', () => {
     expect((await listChatsForInbox(db)).map((r) => r.guid)).toEqual(['c1']);
   });
 
+  it('queues a standalone tombstone clear behind a rolling-back neighbour', async () => {
+    const { db } = await createTestDb();
+    await seedChat(db, 'c1');
+    await deleteChatLocal(db, 'c1', 5000);
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async (context) => {
+      neighbourStarted();
+      await held;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let clearSettled = false;
+    const clear = clearChatTombstone(db, 'c1').finally(() => {
+      clearSettled = true;
+    });
+    await Promise.resolve();
+    const settledWhileNeighbourHeld = clearSettled;
+    const visibleWhileNeighbourHeld = (await listChatsForInbox(db)).map((row) => row.guid);
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await clear;
+
+    expect(settledWhileNeighbourHeld).toBe(false);
+    expect(visibleWhileNeighbourHeld).toEqual([]);
+    expect((await listChatsForInbox(db)).map((row) => row.guid)).toEqual(['c1']);
+  });
+
   // The floor has to be captured by the DELETE, because the delete is what destroys every message
   // that could carry it. Both un-hide paths below drop `deleted_at` at a point where the boundary
   // message no longer exists, so a handover attempted there matches nothing.
@@ -510,8 +1112,9 @@ describe('chat actions repo', () => {
     expect(col(raw, 'c1', 'deleted_at')).toBeNull();
   });
 
-  // The stamp floors the unread count as well as hiding the chat. `clearSupersededTombstones` hands
-  // that floor to the read marker when it retires the stamp — but it only runs from message/chat
+  // The stamp floors the unread count as well as hiding the chat.
+  // `clearSupersededTombstonesWithinTransaction` hands that floor to the read marker when it retires
+  // the stamp — but it only runs from message/chat
   // INGESTION, and the optimistic send path routes through neither, so this is the state where the
   // `deleted_at` clause in `listChatsForInbox` is the only thing holding the badge down.
   it('sending into a still-tombstoned chat does not badge its re-synced history', async () => {
@@ -687,7 +1290,7 @@ describe('chat actions repo', () => {
     ).toEqual(['live', 'new-2', 'old-2']);
   });
 
-  it('lists a chat’s DOWNLOADED attachment guids, and reports which ones the purge orphaned', async () => {
+  it('lists all chat attachment guids for cancellation, and reports which ones the purge orphaned', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await seedChat(db, 'c2');
@@ -709,13 +1312,16 @@ describe('chat actions repo', () => {
     insAtt.run('a-other', msgId('m-other'), '/doc/attachments/a-other/img.jpg');
 
     const candidates = await listChatAttachmentGuids(db, 'c1');
-    expect(candidates).toEqual(['a-down']);
+    expect(candidates).toEqual(['a-down', 'a-never']);
 
     await deleteChatLocal(db, 'c1', 5000);
 
     // Only the rows the purge actually destroyed may have their files deleted — a surviving row
     // still renders its image.
-    expect(await listOrphanedAttachmentGuids(db, ['a-down', 'a-other'])).toEqual(['a-down']);
+    expect(await listOrphanedAttachmentGuids(db, ['a-down', 'a-never', 'a-other'])).toEqual([
+      'a-down',
+      'a-never',
+    ]);
     expect(await listOrphanedAttachmentGuids(db, [])).toEqual([]);
   });
 });

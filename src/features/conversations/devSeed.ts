@@ -1,7 +1,5 @@
-import { eq } from 'drizzle-orm';
 import { Attachment, Chat, Message } from '@core/models';
 import { getDatabase } from '@db/database';
-import { chats as chatsTable } from '@db/schema';
 import {
   applyLocalEdit,
   applyLocalUnsend,
@@ -11,15 +9,26 @@ import {
   insertOutgoingText,
   listChatsForInbox,
   reconcileOutgoingSuccess,
+  setLastReadMessageGuid,
   updateAttachmentLocalPath,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import { devPush } from '@/services';
 import { setAttachmentFetcher } from '@/services/download';
 import { devProgressFetcher } from '@/services/download/devFetcher';
+import {
+  devPersistRealtimeEventWithoutDrain,
+  devPush,
+  devResumePersistedRealtimeEvents,
+} from '@/services/realtimeControl';
+import {
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { generateTempGuid } from '@/services/send/sendService';
+import { logger } from '@core/secure';
+import { isDevServer } from '@utils/isDev';
 
 // Canonical sample blurhash (Woltapp) for the dev attachment fixtures.
 const SAMPLE_BLURHASH = 'LEHV6nWB2yk8pyo0adR*.7kCMdnj';
@@ -191,10 +200,7 @@ export async function seedFixtures(): Promise<number> {
       handleMap,
     );
     if (f.read) {
-      await db
-        .update(chatsTable)
-        .set({ lastReadMessageGuid: msgGuid })
-        .where(eq(chatsTable.guid, f.guid));
+      await setLastReadMessageGuid(db, f.guid, msgGuid);
     }
   }
 
@@ -351,7 +357,7 @@ export async function seedFixtures(): Promise<number> {
             }),
           ],
         }),
-        // Auto-download image (no localPath, < 5 MB) → fires the dev fetcher on
+        // Auto-download image (no localPath, known size < 5 MiB) → fires the dev fetcher on
         // mount → progress ring → reactive swap to the downloaded file.
         Message.parse({
           guid: 'cr-auto',
@@ -416,33 +422,70 @@ export async function seedFixtures(): Promise<number> {
   return data.length;
 }
 
-/** DEV: optimistically send an image (rendered from a remote URL, reconciled locally). */
-export async function devSendFakeImage(chatGuid: string): Promise<void> {
-  const db = getDatabase();
-  const chatId = await getChatIdByGuid(db, chatGuid);
-  if (chatId == null) return;
-  const tempGuid = generateTempGuid();
-  const now = Date.now();
-  await insertOutgoingAttachment(db, {
-    tempGuid,
-    attachmentGuid: `${tempGuid}-att`,
-    chatId,
-    chatGuid,
-    localPath: `https://picsum.photos/seed/${tempGuid}/800/600`,
-    mimeType: 'image/jpeg',
-    transferName: 'photo.jpg',
-    totalBytes: 180_000,
-    width: 800,
-    height: 600,
-    now,
-  });
+async function runDevAccountWrite(
+  accountLease: RealtimeDeliveryLease,
+  write: () => Promise<void>,
+): Promise<void> {
+  await runTrackedRealtimeWork(accountLease, write);
+}
+
+/** Keep the simulated delayed acknowledgement on the same account as its optimistic row. */
+function queueDevSendReconcile(
+  db: ReturnType<typeof getDatabase>,
+  tempGuid: string,
+  now: number,
+  options: {
+    delayMs: number;
+    delivered: boolean;
+    accountLease: RealtimeDeliveryLease;
+  },
+): void {
+  const { delayMs, delivered, accountLease } = options;
   setTimeout(() => {
-    void reconcileOutgoingSuccess(db, tempGuid, {
-      guid: `real-${tempGuid}`,
-      dateCreated: now,
-      dateDelivered: Date.now(),
+    if (!accountLease.isCurrent()) return;
+    const reconcile = (): Promise<void> =>
+      reconcileOutgoingSuccess(db, tempGuid, {
+        guid: `real-${tempGuid}`,
+        dateCreated: now,
+        dateDelivered: delivered ? Date.now() : null,
+      });
+    const pending = runTrackedRealtimeWork(accountLease, reconcile);
+    void pending.catch((error: unknown) => {
+      if (accountLease.isCurrent()) logger.debug('[dev] fake-send reconcile failed', error);
     });
-  }, 700);
+  }, delayMs);
+}
+
+/** DEV: optimistically send an image (rendered from a remote URL, reconciled locally). */
+export async function devSendFakeImage(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const chatId = await getChatIdByGuid(db, chatGuid);
+    if (chatId == null || !accountLease.isCurrent()) return;
+    const tempGuid = generateTempGuid();
+    const now = Date.now();
+    await insertOutgoingAttachment(db, {
+      tempGuid,
+      attachmentGuid: `${tempGuid}-att`,
+      chatId,
+      chatGuid,
+      localPath: `https://picsum.photos/seed/${tempGuid}/800/600`,
+      mimeType: 'image/jpeg',
+      transferName: 'photo.jpg',
+      totalBytes: 180_000,
+      width: 800,
+      height: 600,
+      now,
+    });
+    queueDevSendReconcile(db, tempGuid, now, {
+      delayMs: 700,
+      delivered: true,
+      accountLease,
+    });
+  });
 }
 
 /**
@@ -453,21 +496,22 @@ export async function devSendFakeImage(chatGuid: string): Promise<void> {
 export async function devSendFake(
   chatGuid: string,
   text: string,
-  effectId?: string,
+  effectId: string | undefined,
+  accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  const db = getDatabase();
-  const chatId = await getChatIdByGuid(db, chatGuid);
-  if (chatId == null) return;
-  const tempGuid = generateTempGuid();
-  const now = Date.now();
-  await insertOutgoingText(db, { tempGuid, chatId, chatGuid, text, now, effectId });
-  setTimeout(() => {
-    void reconcileOutgoingSuccess(db, tempGuid, {
-      guid: `real-${tempGuid}`,
-      dateCreated: now,
-      dateDelivered: Date.now(),
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const chatId = await getChatIdByGuid(db, chatGuid);
+    if (chatId == null || !accountLease.isCurrent()) return;
+    const tempGuid = generateTempGuid();
+    const now = Date.now();
+    await insertOutgoingText(db, { tempGuid, chatId, chatGuid, text, now, effectId });
+    queueDevSendReconcile(db, tempGuid, now, {
+      delayMs: 700,
+      delivered: true,
+      accountLease,
     });
-  }, 700);
+  });
 }
 
 /** DEV: optimistic tapback (pass '-love' to remove), reconciled locally. */
@@ -475,39 +519,53 @@ export async function devSendFakeReaction(
   chatGuid: string,
   targetGuid: string,
   reaction: string,
-  emoji?: string,
+  emoji: string | undefined,
+  accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  const db = getDatabase();
-  const chatId = await getChatIdByGuid(db, chatGuid);
-  if (chatId == null) return;
-  const tempGuid = generateTempGuid();
-  const now = Date.now();
-  await insertOutgoingReaction(db, {
-    tempGuid,
-    chatId,
-    chatGuid,
-    targetGuid,
-    reaction,
-    emoji,
-    now,
-  });
-  setTimeout(() => {
-    void reconcileOutgoingSuccess(db, tempGuid, {
-      guid: `real-${tempGuid}`,
-      dateCreated: now,
-      dateDelivered: null,
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const chatId = await getChatIdByGuid(db, chatGuid);
+    if (chatId == null || !accountLease.isCurrent()) return;
+    const tempGuid = generateTempGuid();
+    const now = Date.now();
+    await insertOutgoingReaction(db, {
+      tempGuid,
+      chatId,
+      chatGuid,
+      targetGuid,
+      reaction,
+      emoji,
+      now,
     });
-  }, 600);
+    queueDevSendReconcile(db, tempGuid, now, {
+      delayMs: 600,
+      delivered: false,
+      accountLease,
+    });
+  });
 }
 
 /** DEV: locally edit a message's text (no server) so the bubble shows it + "Edited". */
-export async function devEditFake(messageGuid: string, newText: string): Promise<void> {
-  await applyLocalEdit(getDatabase(), messageGuid, newText, Date.now());
+export async function devEditFake(
+  messageGuid: string,
+  newText: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  await runDevAccountWrite(accountLease, async () => {
+    if (!accountLease.isCurrent()) return;
+    await applyLocalEdit(getDatabase(), messageGuid, newText, Date.now());
+  });
 }
 
 /** DEV: locally retract a message (no server) so the bubble becomes the tombstone. */
-export async function devUnsendFake(messageGuid: string): Promise<void> {
-  await applyLocalUnsend(getDatabase(), messageGuid, Date.now());
+export async function devUnsendFake(
+  messageGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  await runDevAccountWrite(accountLease, async () => {
+    if (!accountLease.isCurrent()) return;
+    await applyLocalUnsend(getDatabase(), messageGuid, Date.now());
+  });
 }
 
 /** DEV: optimistic threaded reply (renders its quote), reconciled locally. */
@@ -515,78 +573,167 @@ export async function devSendFakeReply(
   chatGuid: string,
   text: string,
   replyToGuid: string,
-  effectId?: string,
+  effectId: string | undefined,
+  accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  const db = getDatabase();
-  const chatId = await getChatIdByGuid(db, chatGuid);
-  if (chatId == null) return;
-  const tempGuid = generateTempGuid();
-  const now = Date.now();
-  await insertOutgoingText(db, {
-    tempGuid,
-    chatId,
-    chatGuid,
-    text,
-    now,
-    selectedMessageGuid: replyToGuid,
-    threadOriginatorGuid: replyToGuid,
-    effectId,
-  });
-  setTimeout(() => {
-    void reconcileOutgoingSuccess(db, tempGuid, {
-      guid: `real-${tempGuid}`,
-      dateCreated: now,
-      dateDelivered: Date.now(),
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const chatId = await getChatIdByGuid(db, chatGuid);
+    if (chatId == null || !accountLease.isCurrent()) return;
+    const tempGuid = generateTempGuid();
+    const now = Date.now();
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid,
+      text,
+      now,
+      selectedMessageGuid: replyToGuid,
+      threadOriginatorGuid: replyToGuid,
+      effectId,
     });
-  }, 700);
+    queueDevSendReconcile(db, tempGuid, now, {
+      delayMs: 700,
+      delivered: true,
+      accountLease,
+    });
+  });
 }
 
 let injectCounter = 0;
+let queuedInjectCounter = 0;
+const DEV_PROCESS_DEATH_CHAT_GUID = 'c-mom';
+
+/**
+ * DEV process-death proof: persist and claim a harmless inbound fixture through the production
+ * durable intake, but intentionally leave its handler untouched. Queue health is aggregate-only
+ * and never logs the envelope, event key, chat guid, or message guid.
+ */
+export async function devQueueIncomingMessageWithoutDrain(
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  if (!isDevServer()) return;
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const inbox = await listChatsForInbox(db, { includeArchived: true });
+    if (!accountLease.isCurrent()) return;
+    const target = inbox.find((chat) => chat.guid === DEV_PROCESS_DEATH_CHAT_GUID);
+    if (!target) return;
+    queuedInjectCounter += 1;
+    const now = Date.now();
+    const messageGuid = `dev-proof-${now}-${queuedInjectCounter}`;
+    const health = await devPersistRealtimeEventWithoutDrain(
+      'new-message',
+      {
+        guid: messageGuid,
+        text: 'Recovered after process death 🧪',
+        isFromMe: false,
+        dateCreated: now,
+        originalROWID: 200_000 + queuedInjectCounter,
+        // Reuse the fixture's existing participant so the proof cannot mutate membership/title.
+        handle: { address: '+15551234567', displayName: 'Mom' },
+        chats: [
+          {
+            guid: target.guid,
+            chatIdentifier: target.chatIdentifier,
+            displayName: target.displayName,
+            style: target.style,
+            isArchived: !!target.isArchived,
+            isPinned: !!target.isPinned,
+            muteType: target.muteType,
+          },
+        ],
+      },
+      accountLease,
+      { transportOccurrenceId: `dev-proof:${messageGuid}` },
+    );
+    if (!accountLease.isCurrent()) return;
+    if (!health) {
+      logger.warn('[incomingEvents] DEV persist-without-drain was refused');
+      return;
+    }
+    logger.info('[incomingEvents] DEV persisted without drain', health);
+  });
+}
+
+/** Drain any proof row retained by a prior DEV process after Home captures its fresh account lease. */
+export async function devResumeQueuedIncomingMessages(
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  if (!isDevServer()) return;
+  await runDevAccountWrite(accountLease, async () => {
+    const health = await devResumePersistedRealtimeEvents(accountLease);
+    if (accountLease.isCurrent() && health) {
+      logger.info('[incomingEvents] DEV resume health', health);
+    }
+  });
+}
 
 /**
  * DEV: inject a fresh inbound message as if a push arrived. Routes through the
- * real pipeline (DevPushTransport → EventRouter → DB sink + Notifee), so this one
+ * real durable dispatcher → EventRouter → DB sink + Notifee pipeline, so this one
  * button exercises receive → DB → notification (with Reply/Mark-read). The chat
  * payload echoes the existing row's fields so the upsert preserves name/pins.
  */
-export async function injectMessage(): Promise<void> {
-  const db = getDatabase();
-  const inbox = await listChatsForInbox(db, { includeArchived: true });
-  const target = inbox[0];
-  if (!target) return;
-  injectCounter += 1;
-  await devPush.inject('new-message', {
-    guid: `inject-${injectCounter}-${target.guid}`,
-    text: `Live update #${injectCounter} ⚡`,
-    isFromMe: false,
-    dateCreated: Date.now(),
-    originalROWID: 100_000 + injectCounter,
-    handle: { address: 'live@x.com', displayName: 'Live Sender' },
-    chats: [
+export async function injectMessage(accountLease: RealtimeDeliveryLease): Promise<void> {
+  if (!isDevServer()) return;
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const inbox = await listChatsForInbox(db, { includeArchived: true });
+    if (!accountLease.isCurrent()) return;
+    const target = inbox[0];
+    if (!target) return;
+    injectCounter += 1;
+    const messageGuid = `inject-${injectCounter}-${target.guid}`;
+    await devPush.inject(
+      'new-message',
       {
-        guid: target.guid,
-        chatIdentifier: target.chatIdentifier,
-        displayName: target.displayName,
-        style: target.style,
-        isArchived: !!target.isArchived,
-        isPinned: !!target.isPinned,
-        muteType: target.muteType,
+        guid: messageGuid,
+        text: `Live update #${injectCounter} ⚡`,
+        isFromMe: false,
+        dateCreated: Date.now(),
+        originalROWID: 100_000 + injectCounter,
+        handle: { address: 'live@x.com', displayName: 'Live Sender' },
+        chats: [
+          {
+            guid: target.guid,
+            chatIdentifier: target.chatIdentifier,
+            displayName: target.displayName,
+            style: target.style,
+            isArchived: !!target.isArchived,
+            isPinned: !!target.isPinned,
+            muteType: target.muteType,
+          },
+        ],
       },
-    ],
+      accountLease,
+      { transportOccurrenceId: `dev:${messageGuid}` },
+    );
   });
 }
 
 let ftCounter = 0;
 
 /** DEV: simulate an incoming FaceTime (ft-call-status-changed, status_id 4). */
-export async function devInjectIncomingFaceTime(): Promise<void> {
-  ftCounter += 1;
-  await devPush.inject('ft-call-status-changed', {
-    uuid: `dev-ft-${ftCounter}`,
-    status_id: 4,
-    address: 'Mom (dev)',
-    is_audio: false,
-    handle: { address: '+15558675309' },
+export async function devInjectIncomingFaceTime(
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  if (!isDevServer()) return;
+  await runDevAccountWrite(accountLease, async () => {
+    ftCounter += 1;
+    const callUuid = `dev-ft-${ftCounter}`;
+    await devPush.inject(
+      'ft-call-status-changed',
+      {
+        uuid: callUuid,
+        status_id: 4,
+        address: 'Mom (dev)',
+        is_audio: false,
+        handle: { address: '+15558675309' },
+      },
+      accountLease,
+      { transportOccurrenceId: `dev:${callUuid}` },
+    );
   });
 }
 
@@ -607,32 +754,45 @@ let effectIdx = 0;
  * chat (cycles through bubble + screen effects). Injecting into the OPEN chat lets
  * both the bubble animation and the full-screen overlay play in place.
  */
-export async function devInjectEffect(chatGuid: string): Promise<void> {
-  const db = getDatabase();
-  const inbox = await listChatsForInbox(db, { includeArchived: true });
-  const target = inbox.find((c) => c.guid === chatGuid) ?? inbox[0];
-  if (!target) return;
-  const effectId = EFFECT_CYCLE[effectIdx % EFFECT_CYCLE.length]!;
-  effectIdx += 1;
-  injectCounter += 1;
-  await devPush.inject('new-message', {
-    guid: `fx-${injectCounter}-${target.guid}`,
-    text: effectId.split('.').pop() ?? 'effect',
-    isFromMe: false,
-    dateCreated: Date.now(),
-    originalROWID: 100_000 + injectCounter,
-    expressiveSendStyleId: effectId,
-    handle: { address: 'live@x.com', displayName: 'Live Sender' },
-    chats: [
+export async function devInjectEffect(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  if (!isDevServer()) return;
+  await runDevAccountWrite(accountLease, async () => {
+    const db = getDatabase();
+    const inbox = await listChatsForInbox(db, { includeArchived: true });
+    if (!accountLease.isCurrent()) return;
+    const target = inbox.find((c) => c.guid === chatGuid) ?? inbox[0];
+    if (!target) return;
+    const effectId = EFFECT_CYCLE[effectIdx % EFFECT_CYCLE.length]!;
+    effectIdx += 1;
+    injectCounter += 1;
+    const messageGuid = `fx-${injectCounter}-${target.guid}`;
+    await devPush.inject(
+      'new-message',
       {
-        guid: target.guid,
-        chatIdentifier: target.chatIdentifier,
-        displayName: target.displayName,
-        style: target.style,
-        isArchived: !!target.isArchived,
-        isPinned: !!target.isPinned,
-        muteType: target.muteType,
+        guid: messageGuid,
+        text: effectId.split('.').pop() ?? 'effect',
+        isFromMe: false,
+        dateCreated: Date.now(),
+        originalROWID: 100_000 + injectCounter,
+        expressiveSendStyleId: effectId,
+        handle: { address: 'live@x.com', displayName: 'Live Sender' },
+        chats: [
+          {
+            guid: target.guid,
+            chatIdentifier: target.chatIdentifier,
+            displayName: target.displayName,
+            style: target.style,
+            isArchived: !!target.isArchived,
+            isPinned: !!target.isPinned,
+            muteType: target.muteType,
+          },
+        ],
       },
-    ],
+      accountLease,
+      { transportOccurrenceId: `dev:${messageGuid}` },
+    );
   });
 }

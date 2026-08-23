@@ -1,7 +1,7 @@
 /**
  * ConversationHeader (src/ui/conversations/ConversationHeader.tsx): the iOS chat nav bar. Locks in:
  *   - the TITLE resolves via the same resolveTitle semantics as the tile (custom name → real
- *     display name → participant names), and is masked to "Contact" in redacted mode;
+ *     display name → participant names), with the exact address and avatar photo where available;
  *   - the SERVICE badge derives from the chat guid prefix via resolveChatService (RCS/SMS/iMessage);
  *   - the affordances fire the right navigation/call side-effects: back → router.back(); the
  *     centered avatar/title → router.push('/chat-settings/<encoded guid>'); the video button →
@@ -18,12 +18,10 @@
  *   - `react-native-safe-area-context` → zero insets.
  *   - `@expo/vector-icons` → a synchronous Text marker (the real Ionicons does an async font-load
  *     setState that trips overlapping-act; the header renders two icons).
- *   `useRedactedModeStore` is the REAL store, driven via setState (reset in afterEach).
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { ConversationHeader } from '@ui/conversations/ConversationHeader';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import type { ChatHeaderRow } from '@db/repositories';
 
 const mockPush = jest.fn();
@@ -43,13 +41,43 @@ jest.mock('react-native-safe-area-context', () => ({
 
 // Ionicons' async font-load setState trips overlapping-act; render its name synchronously.
 jest.mock('@expo/vector-icons', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Text } = require('react-native');
   return { Ionicons: ({ name }: { name: string }) => React.createElement(Text, null, name) };
 });
 
 // ServiceBadge marks its label accessibilityElementsHidden → opt hidden elements in.
 const HIDDEN = { includeHiddenElements: true } as const;
+const PRIVATE_TITLE = 'private-header-title-7c91@example.test';
+const PRIVATE_PARTICIPANT = 'private-header-person-a31d@example.test';
+const PRIVATE_ADDRESS = 'private-header-address-5d02@example.test';
+const PRIVATE_AVATAR_URI = 'file:///private-header-avatar-64e9-contact-photo.jpg';
+const PRIVATE_GROUP_PERSON_A = 'private-header-group-person-a-9f11@example.test';
+const PRIVATE_GROUP_PERSON_B = 'private-header-group-person-b-38da-+15557654321';
+const PRIVATE_GROUP_ADDRESS_A = 'private-header-group-address-a@example.test';
+const PRIVATE_GROUP_ADDRESS_B = '+15559876543';
+const PRIVATE_GROUP_AVATAR_A = 'file:///private-header-group-avatar-a-808d.jpg';
+const PRIVATE_GROUP_AVATAR_B = 'file:///private-header-group-avatar-b-d197.jpg';
+
+function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
+  const responder = node.props.onStartShouldSetResponder;
+  if (typeof responder !== 'function') {
+    throw new Error('Expected an accessible Pressable responder callback');
+  }
+  const readConfig = (
+    responder as typeof responder & {
+      testOnly_pressabilityConfig?: () => { onPress?: (event: object) => void };
+    }
+  ).testOnly_pressabilityConfig;
+  if (typeof readConfig !== 'function') {
+    throw new Error('Expected React Native test-only Pressability configuration');
+  }
+  const onPress = readConfig().onPress;
+  if (typeof onPress !== 'function') throw new Error('Expected configured Pressable onPress');
+  return () => onPress({ nativeEvent: {} });
+}
 
 function makeHeader(overrides: Partial<ChatHeaderRow> = {}): ChatHeaderRow {
   return {
@@ -75,11 +103,6 @@ beforeEach(() => {
   mockBack.mockClear();
   mockStartCall.mockClear();
   mockHeaderData = null;
-  useRedactedModeStore.setState({ enabled: false, hydrated: true });
-});
-
-afterEach(() => {
-  useRedactedModeStore.setState({ enabled: false, hydrated: false });
 });
 
 describe('ConversationHeader — title resolution', () => {
@@ -112,13 +135,60 @@ describe('ConversationHeader — title resolution', () => {
     );
     expect(screen.getByText('Alice, Bob')).toBeTruthy();
   });
+
+  it('renders exact 1:1 title, address, avatar URI, and details accessibility label', async () => {
+    mockHeaderData = makeHeader({
+      chatIdentifier: PRIVATE_ADDRESS,
+      customName: PRIVATE_TITLE,
+      participantNames: PRIVATE_PARTICIPANT,
+      participantAddresses: PRIVATE_ADDRESS,
+      participantAvatars: PRIVATE_AVATAR_URI,
+    });
+    const view = await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+
+    expect(screen.getByText(PRIVATE_TITLE)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_ADDRESS, HIDDEN)).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: `${PRIVATE_TITLE}, ${PRIVATE_ADDRESS}, chat details`,
+      }),
+    ).toBeEnabled();
+    expect(JSON.stringify(view.toJSON())).toContain(PRIVATE_AVATAR_URI);
+  });
+
+  it('renders exact group title, both avatar URIs, and details accessibility label', async () => {
+    const groupTitle = `${PRIVATE_GROUP_PERSON_A}, ${PRIVATE_GROUP_PERSON_A}, ${PRIVATE_GROUP_PERSON_B}`;
+    mockHeaderData = makeHeader({
+      guid: 'RCS;-;chat-private-group',
+      style: 43,
+      participantCount: 3,
+      participantNames: groupTitle,
+      participantAddresses: `${PRIVATE_GROUP_ADDRESS_A}|||${PRIVATE_GROUP_ADDRESS_A}|||${PRIVATE_GROUP_ADDRESS_B}`,
+      participantAvatars: `${PRIVATE_GROUP_AVATAR_A}|||${PRIVATE_GROUP_AVATAR_A}|||${PRIVATE_GROUP_AVATAR_B}`,
+    });
+    const view = await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+
+    expect(screen.getByText(groupTitle)).toBeTruthy();
+    expect(screen.getByRole('button', { name: `${groupTitle}, chat details` })).toBeEnabled();
+    const tree = JSON.stringify(view.toJSON());
+    expect(tree).toContain(PRIVATE_GROUP_AVATAR_A);
+    expect(tree).toContain(PRIVATE_GROUP_AVATAR_B);
+    expect(screen.getByText('RCS', HIDDEN)).toBeTruthy();
+  });
 });
 
 describe('ConversationHeader — contact number under the name', () => {
   // The subtitle is marked accessibilityElementsHidden (the Pressable's label announces it once),
   // so every query for it has to opt hidden elements in.
   it('shows the 1:1 contact’s formatted number beneath their name', async () => {
-    mockHeaderData = makeHeader({ participantNames: 'Alice', participantAddresses: '+15551230000' });
+    mockHeaderData = makeHeader({
+      participantNames: 'Alice',
+      participantAddresses: '+15551230000',
+    });
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
@@ -239,7 +309,7 @@ describe('ConversationHeader — affordances', () => {
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
-    fireEvent.press(screen.getByLabelText('Go back'));
+    await fireEvent.press(screen.getByLabelText('Go back'));
     await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
   });
 
@@ -247,7 +317,15 @@ describe('ConversationHeader — affordances', () => {
     const guid = 'iMessage;-;+15551230000';
     mockHeaderData = makeHeader({ guid });
     await renderWithTheme(<ConversationHeader chatGuid={guid} data={mockHeaderData} />);
-    fireEvent.press(screen.getByLabelText('Alice, +1 (555) 123-0000, chat details'));
+    const detailsPress = retainConfiguredPress(
+      screen.getByRole('button', {
+        name: 'Alice, +1 (555) 123-0000, chat details',
+      }),
+    );
+    await act(async () => {
+      detailsPress();
+      await Promise.resolve();
+    });
     await waitFor(() =>
       expect(mockPush).toHaveBeenCalledWith(`/chat-settings/${encodeURIComponent(guid)}`),
     );
@@ -257,7 +335,7 @@ describe('ConversationHeader — affordances', () => {
     const guid = 'iMessage;-;+15551230000';
     mockHeaderData = makeHeader({ guid });
     await renderWithTheme(<ConversationHeader chatGuid={guid} data={mockHeaderData} />);
-    fireEvent.press(screen.getByLabelText('Start FaceTime call'));
+    await fireEvent.press(screen.getByLabelText('Start FaceTime call'));
     await waitFor(() =>
       expect(mockStartCall).toHaveBeenCalledWith({ chatGuid: guid, video: true }),
     );
@@ -268,33 +346,8 @@ describe('ConversationHeader — affordances', () => {
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
-    fireEvent.press(screen.getByLabelText('View scheduled messages'));
+    await fireEvent.press(screen.getByLabelText('View scheduled messages'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/scheduled'));
-  });
-});
-
-describe('ConversationHeader — redacted mode', () => {
-  it('masks the title to "Contact" and hides the real name', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    mockHeaderData = makeHeader({ participantNames: 'Alice' });
-    await renderWithTheme(
-      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
-    );
-    expect(screen.getByText('Contact')).toBeTruthy();
-    expect(screen.queryByText('Alice')).toBeNull();
-    // the details a11y label is redacted too (no identity leak to a screen reader)
-    expect(screen.getByLabelText('Contact, chat details')).toBeTruthy();
-  });
-
-  it('suppresses the number subtitle — a number identifies as precisely as a name', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    mockHeaderData = makeHeader({ participantNames: 'Alice', participantAddresses: '+15551230000' });
-    await renderWithTheme(
-      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
-    );
-    expect(screen.queryByText('+1 (555) 123-0000', HIDDEN)).toBeNull();
-    expect(screen.queryByText('+15551230000', HIDDEN)).toBeNull();
-    expect(screen.getByLabelText('Contact, chat details')).toBeTruthy();
   });
 });
 

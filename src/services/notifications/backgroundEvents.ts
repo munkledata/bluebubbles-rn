@@ -1,18 +1,20 @@
 import notifee, { EventType } from 'react-native-notify-kit';
 import { logger } from '@core/secure';
+import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
 import { handleNotificationAction, handleNotificationPress } from './actions';
 import { stashPendingNotification } from './pendingNav';
 
 /**
  * Headless background notification handler. MUST be registered at module top
  * level (not in a component) so a press wakes the app even when killed.
- * Imported for its side effect at the top of `app/_layout.tsx`.
+ * Imported for its side effect from `index.js`, before `expo-router/entry`.
  *
  * Nothing may escape this callback. notifee awaits it across the native bridge and gives it no
  * error path of its own, so a rejection is simply swallowed: every headless failure — a DB that
  * couldn't be opened, a send that threw — used to look identical to "the button does nothing",
- * with not one line in logcat to say otherwise. warn, not error, because this path also runs while
- * disconnected and an `error` line would be queued for upload.
+ * with no diagnostic to say otherwise. The `warn` breadcrumb is development-only; it deliberately
+ * is not an ERROR because this path also runs while disconnected and ERROR would enter the durable
+ * reporting queue. Release investigation uses the deterministic recovery path and native traces.
  */
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   try {
@@ -26,10 +28,12 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       // case, same JS context), and run the headless side-effects (reminder cleanup) now. A
       // killed-app tap ALSO deep-links via getInitialNotification() on next mount; the layout
       // drains both, once.
-      stashPendingNotification(detail.notification?.data);
-      await handleNotificationPress(detail);
+      await handleNotificationPress(detail, stashPendingNotification);
     }
   } catch (e) {
     logger.warn('[notif] background event failed', { type, error: String(e) });
+  } finally {
+    // Android may tear down this headless runtime as soon as the native callback settles.
+    await flushPersistentLogsForHeadlessCompletion();
   }
 });

@@ -1,11 +1,13 @@
 import React, { Suspense } from 'react';
+import { View } from 'react-native';
 import type { AttachmentRow } from '@db/repositories';
-import { attachmentKind } from '@utils';
+import { attachmentKind, isLocalFileUri } from '@utils';
 import { LoadErrorBoundary } from '../LoadErrorBoundary';
 import { ContactCard } from './ContactCard';
 import { FileChip } from './FileChip';
 import { ImageAttachment } from './ImageAttachment';
 import { LocationCard } from './LocationCard';
+import { useAttachmentCachePathProtection } from './useAttachmentCachePathProtection';
 import { VideoPlayer } from './VideoPlayer';
 
 // Lazy so `expo-audio` (a native module) is only pulled in when an audio attachment
@@ -29,6 +31,16 @@ export function AttachmentView({
   isFromMe,
   showTail,
 }: AttachmentViewProps): React.JSX.Element {
+  // Every mounted bubble kind may hand its local file to a native decoder/player/share action.
+  // Pin once at the dispatcher so image, video, audio, contact, location, and document paths all
+  // receive the same eviction safety without six subtly different copies of the lifecycle.
+  const protectedPath = useAttachmentCachePathProtection(att.localPath);
+  if (isLocalFileUri(att.localPath) && protectedPath !== att.localPath) {
+    // Do not mount a leaf with a synthetic `localPath:null`: ImageAttachment would interpret that
+    // transient value as undownloaded and could start an unnecessary auto-download before this
+    // layout-effect gate settles. A refused path remains a neutral, non-reading placeholder.
+    return <View />;
+  }
   switch (attachmentKind(att.mimeType)) {
     case 'image':
       return <ImageAttachment att={att} isFromMe={isFromMe} showTail={showTail} />;

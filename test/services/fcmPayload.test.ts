@@ -1,5 +1,5 @@
 import { EventRouter, type EventSink, type NormalizedEvent } from '@core/realtime';
-import { parseFcmData } from '@/services/notifications/fcmPayload';
+import { parseFcmData, rehydrateFcmEnvelopeChatGuid } from '@/services/notifications/fcmPayload';
 
 function collector() {
   const events: NormalizedEvent[] = [];
@@ -25,6 +25,7 @@ describe('parseFcmData', () => {
     expect(parseFcmData(undefined)).toEqual({
       eventName: '',
       body: undefined,
+      envelopeChatGuid: undefined,
       encrypted: false,
       encryptionType: '',
     });
@@ -68,8 +69,9 @@ describe('parseFcmData', () => {
     }
   });
 
-  it('F-1: hoists a top-level envelope `chatGuid` into the body so the chats-less fallback works', async () => {
-    // The server carries chatGuid as a sibling of type/data when it didn't embed chats[].
+  it('F-1: tolerates an envelope `chatGuid` from a compatible server build', async () => {
+    // Current Gator normally keeps this identity inside data; retain sibling compatibility for
+    // other builds so a lean message still reaches the chats-less fallback.
     const fcm = {
       type: 'new-message',
       data: JSON.stringify({ guid: 'srv-3', text: 'hi' }),
@@ -88,6 +90,27 @@ describe('parseFcmData', () => {
       expect(out.message.chatGuid).toBe('cFallback');
     }
     expect(events).toHaveLength(1);
+  });
+
+  it('retains an envelope chatGuid while encrypted and rehydrates it only after decrypt', () => {
+    const encrypted = parseFcmData({
+      type: 'new-message',
+      data: 'ciphertext-is-not-json',
+      encrypted: 'true',
+      encryptionType: 'AEAD_GCM_V1',
+      chatGuid: 'cEncryptedFallback',
+    });
+
+    expect(encrypted.body).toBe('ciphertext-is-not-json');
+    expect(encrypted.envelopeChatGuid).toBe('cEncryptedFallback');
+    expect(
+      rehydrateFcmEnvelopeChatGuid(
+        JSON.stringify({ guid: 'encrypted-lean', text: 'decrypted' }),
+        encrypted.envelopeChatGuid,
+      ),
+    ).toBe(
+      JSON.stringify({ guid: 'encrypted-lean', text: 'decrypted', chatGuid: 'cEncryptedFallback' }),
+    );
   });
 
   it('F-1: does NOT override a chatGuid the body already carries', () => {

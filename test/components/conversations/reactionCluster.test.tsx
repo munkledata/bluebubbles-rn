@@ -102,7 +102,9 @@ describe('ReactionCluster', () => {
   });
 
   it('stays inert (no button) when no handler is given', async () => {
-    await renderWithTheme(<ReactionCluster reactions={[reaction({ baseType: 'love' })]} isFromMe={false} />);
+    await renderWithTheme(
+      <ReactionCluster reactions={[reaction({ baseType: 'love' })]} isFromMe={false} />,
+    );
     expect(screen.queryByRole('button', { name: 'View who reacted' })).toBeNull();
   });
 });

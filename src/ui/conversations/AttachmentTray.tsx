@@ -63,12 +63,15 @@ export function AttachmentTray({
   const theme = useTheme();
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [perm, setPerm] = useState<'loading' | 'granted' | 'denied'>('loading');
+  const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const p = await MediaLibrary.requestPermissionsAsync();
+        // Ask only for the two categories this tray renders. The SDK default also requests
+        // READ_MEDIA_AUDIO, which has no matching user flow in Gator.
+        const p = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
         if (cancelled) return;
         if (!p.granted && p.accessPrivileges !== 'limited') {
           setPerm('denied');
@@ -100,7 +103,11 @@ export function AttachmentTray({
   const capture = async (): Promise<void> => {
     try {
       const p = await ImagePicker.requestCameraPermissionsAsync();
-      if (!p.granted) return;
+      if (!p.granted) {
+        setCameraPermissionDenied(true);
+        return;
+      }
+      if (cameraPermissionDenied) setCameraPermissionDenied(false);
       const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
       const a = res.assets?.[0];
       if (res.canceled || !a) return;
@@ -179,6 +186,14 @@ export function AttachmentTray({
             <Icon name="person-outline" size={26} color={theme.color.tint} />
             <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Contact</Text>
           </Pressable>
+        ) : null}
+
+        {cameraPermissionDenied ? (
+          <View style={styles.msg}>
+            <Text style={[styles.msgText, { color: theme.color.secondaryLabel }]}>
+              Camera access was denied. Enable it in system settings to take a photo.
+            </Text>
+          </View>
         ) : null}
 
         {perm === 'denied' ? (

@@ -1,6 +1,6 @@
 # Gator RN — Data Caching Architecture
 
-*Reference notes, generated 2026-06-24 from a code-verified subsystem audit.*
+_Reference notes, generated 2026-06-24 from a code-verified subsystem audit._
 
 ## TL;DR
 
@@ -16,6 +16,7 @@ FTS5 search index.
 ## Layers (bottom → top)
 
 ### 1. Encrypted SQLite database — the canonical store
+
 `src/db/database.ts`, `migrate.ts`, `migrations.ts`, `schema.ts`
 
 - op-sqlite compiled with `sqlcipher: true` + `fts5: true` (package.json). AES-encrypted
@@ -29,19 +30,20 @@ FTS5 search index.
   (used by killed-app FCM/notification handlers).
 
 **Tables cached here:**
-- *Content*: `messages` (incl. `attributedBody`, edited/SMS fields, `has_attachments`),
+
+- _Content_: `messages` (incl. `attributedBody`, edited/SMS fields, `has_attachments`),
   `chats`, `handles`, `attachments` (metadata only), `chat_handles`.
-- *Search*: `messages_fts` (FTS5 index — see layer 6).
-- *Operational/queue state*: `scheduled_messages`, the outgoing send/retry queue,
+- _Search_: `messages_fts` (FTS5 index — see layer 6).
+- _Operational/queue state_: `scheduled_messages`, the outgoing send/retry queue,
   `sync_markers` (the incremental cursor), `url_previews` (negative-cached), `kv`, `themes`.
 
 ### 2. DB encryption key + SecureVault (Android Keystore)
+
 `src/db/key.ts`, `src/native/secureVault.ts`, `src/core/secure/vault.ts`, `src/services/index.ts`
 
 - Secrets that **cannot** live in the encrypted DB (they must be readable at cold boot
-  *before* the DB opens): the SQLCipher `dbEncryptionKey` (+ pending-rotation slot),
-  `serverAddress`/`serverPassword`, iCloud account, automation token, `appLockEnabled`,
-  cert pins.
+  _before_ the DB opens): the SQLCipher `dbEncryptionKey` (+ pending-rotation slot),
+  `serverAddress`/`serverPassword`, iCloud account, automation token, and `appLockEnabled`.
 - `ExpoSecureVault` wraps expo-secure-store (Keystore + EncryptedSharedPrefs).
   `getOrCreateDbKey` generates 32 random bytes hex-encoded to 64 chars on first run.
   `resolveDbKey` completes an interrupted rotation; `rotateDbKey` is a 4-step crash-safe
@@ -51,6 +53,7 @@ FTS5 search index.
   (not an at-rest custody guarantee).
 
 ### 3. Sync write path + persisted cursor
+
 `src/services/sync/engine.ts`, `src/services/syncControl.ts`, `src/core/sync/cursor.ts`,
 `src/db/repositories/sync.ts`, `src/services/background/backgroundSync.ts`, `src/services/index.ts`
 
@@ -68,6 +71,7 @@ FTS5 search index.
   so sync resumes after a kill. Only this path advances the marker.
 
 ### 4. Realtime write path (FCM + socket → EventRouter → DbEventSink)
+
 `src/core/realtime/eventRouter.ts`, `src/services/realtime/dbEventSink.ts`,
 `src/services/notifications/fcmPayload.ts`
 
@@ -81,6 +85,7 @@ FTS5 search index.
   the idempotent upsert + `GuidDeduper` absorb it.
 
 ### 5. Reactive read path
+
 `src/db/useReactiveQuery.ts`, `src/features/conversations/useChats.ts`, `useMessages.ts`,
 `src/db/repositories/messages.ts`, `chats.ts`
 
@@ -93,46 +98,78 @@ FTS5 search index.
   `[messages, handles, attachments]`.
 
 ### 6. FTS5 full-text search index (`messages_fts`)
+
 - External-content virtual table `messages_fts USING fts5(text, content='messages',
-  content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DELETE/UPDATE
+content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DELETE/UPDATE
   triggers.
 - Queried via `messages_fts MATCH … JOIN messages`.
 - **Indexes ONLY the `text` column** — `subject` and `attributed_body` are not searchable.
   (FTS5 must be compiled in, or it fails on device only.)
 
 ### 7. Attachment binary file cache (filesystem)
-`src/services/download/*` (downloader — `downloadService`, `expoFetcher`/`devFetcher`, `pathSafety`), `src/db/repositories/attachments.ts` (`updateAttachmentLocalPath`), `src/ui/attachments/*` (UI trigger/render layer only)
 
-- Only `local_path` is cached in the DB row. The bytes are downloaded **on demand** (images
-  < 5 MB auto, everything else tap-to-download) to `Paths.document/attachments/{guid}/`,
+`src/services/download/*` (downloader, quota coordinator, and startup recovery),
+`src/native/boundedDownload.ts`, `modules/gator-bounded-download/`,
+`src/db/repositories/attachmentCache.ts`, `src/db/repositories/attachments.ts`,
+`src/ui/attachments/*`
+
+- Attachment metadata keeps `local_path`; the encrypted `attachment_cache_entries` ledger owns
+  each distinct physical cache path once, including its exact bytes, last-use time, and
+  `reserved`/`active`/`retiring` lifecycle. Retiring and crash-surviving reserved files stay
+  charged until exact native deletion is confirmed.
+- Bytes are downloaded **on demand** (images
+  known size <= 5 MiB automatic, everything else tap-to-download with a 512 MiB hard cap) to
+  `Paths.document/attachments/media-{encoded-guid}/generation-{account}/media-{encoded-name}` via
+  a verified `*.part` file,
   concurrency-capped at a configurable limit (default `DEFAULT_MAX_CONCURRENT_DOWNLOADS = 2`,
   adjustable up to `MAX_CONCURRENT_DOWNLOADS_LIMIT = 6`), with per-guid dedup of concurrent calls.
+- Before native work can create a destination, the coordinator durably reserves the transfer's
+  maximum bytes. The global ordinary-attachment cache is limited to **2 GiB / 4,096 files** and
+  preserves at least **512 MiB free**. Deterministic least-recently-used eviction protects files
+  used in the last ten minutes, mounted/current readers, in-flight identities, and outgoing
+  send/retry inputs. If protected or cleanup-pending files prevent proof of capacity, the new
+  download is refused rather than bypassing the limit.
+- All shipped native file-download routes share the same actual-byte/timeout boundary: attachment
+  transfers use 2-minute automatic or 15-minute manual deadlines; server contact thumbnails use
+  5 MiB / 30 seconds; synced chat wallpapers use 10 MiB / 60 seconds. Each route downloads to a
+  Gator-owned `*.part`, verifies a positive final stat, promotes it, and prunes abandoned partials.
 - On success, `updateAttachmentLocalPath` writes `local_path` → adapter flush → `useMessages`
-  re-queries → the image swaps from placeholder to media (driven by the **DB write**, never
-  the store).
+  re-queries → the image swaps from placeholder to media (driven by the **DB write**, never the
+  store). The reservation remains identity-owned across this reactive handoff so a mounted reader
+  can pin the path before eviction becomes possible.
+- Authorized startup/explicit connect collects one complete bounded native manifest before any
+  cache mutation, adopts old pre-ledger files in 100-row transactions, repairs missing entries,
+  retires zero-byte/orphan/crash-owned files, and proactively conforms the quota before persistent
+  downloads open. The scanner supports both the legacy `attachments/{safe-guid}/{safe-name}`
+  layout and the canonical generation layout, with hard limits of 8,192 files and 32,768 nodes.
+  Malformed/symlinked/partial inventories fail closed. On Android 7 (API 24/25), persistent
+  downloads remain disabled because the bounded streaming directory API begins at Android 8.
 - `downloadStore` (zustand) is **presentation-only** byte progress (`0..1 | null`, status) —
   it never carries the path. expo-image runs its own native memory/disk bitmap cache (never
   cleared).
 
 ### 8. kv prefs table (non-secret, inside the encrypted DB)
+
 `src/db/repositories/kv.ts`
 
 - Persisted non-secret prefs: `theme.preset`, `theme.custom`, `privacy.redactedMode`. Survives restart but unreadable until the DB is open.
 - `kvGet`/`kvSet` only (no delete; "clearing" writes an empty string). `kv(key TEXT PK,
-  value TEXT)`.
+value TEXT)`.
 
 ### 9. In-memory zustand stores
-- *kv-mirroring*: `themeStore`, `redactedModeStore`, `featureSettingsStore`
+
+- _kv-mirroring_: `themeStore`, `redactedModeStore`, `featureSettingsStore`
   (feature flags + attachment auto-download / wifi-only settings), `syncSettingsStore`
   (messages-per-chat) — hydrate from `kv`, set memory first then best-effort `kvSet`.
-- *vault-mirroring*: `sessionStore` (credentials), `lockStore` (`appLockEnabled`) — never
+- _vault-mirroring_: `sessionStore` (credentials), `lockStore` (`appLockEnabled`) — never
   persisted by zustand.
-- *purely ephemeral* (reset every reload): `downloadStore`, `syncStore`, `typingStore`,
+- _purely ephemeral_ (reset every reload): `downloadStore`, `syncStore`, `typingStore`,
   `findmyStore`.
 - Gotcha: `hydrate()` wraps `getDatabase()` in try/catch (it throws pre-connect) and re-runs
   on home mount.
 
 ### 10. Bounded in-memory dedup / cancel sets
+
 - `GuidDeduper` (Set + insertion-order array, cap 5000, evicts oldest) de-dups FCM-vs-socket
   message overlap; can be shared with the live path.
 - `EventRouter` has its own `seen` Set (cap 500) to suppress duplicate **notifications**
@@ -157,57 +194,71 @@ FTS5 search index.
 - **Full per-chat message history** — bulk sync caps at ~100 messages/chat; up to 500 more
   is backfilled **only when a thread is opened** (`ensureChatSynced`/`syncChatMessages`).
   Older un-pulled history is never reached by the incremental cursor.
-- **Pull-to-refresh** deliberately does a *light* sync and does not bulk re-fetch existing
+- **Pull-to-refresh** deliberately does a _light_ sync and does not bulk re-fetch existing
   chats' messages (avoids wedging the single-threaded server).
-- **URL/Open-Graph previews** — fetched on demand, negative-cached (`error=1`) so dead URLs
-  aren't refetched.
-- **Encrypted FCM payloads (AES)** — not decrypted in RN; recovered on the next sync.
-- **Backups** — export *settings only* (kv minus secret-looking keys + user themes + per-chat
-  customizations). Message history, handles, attachments, and the DB key are never exported;
-  restoring on a fresh device requires a full re-sync.
+- **URL/Open-Graph previews** — current containment is cache-only: previously stored metadata may
+  render, but displaying a message does not fetch its arbitrary remote URL. A future proxy/native
+  bounded-fetch design is tracked in the master work plan.
+- **Encrypted FCM payloads (AES-GCM)** — supported `AEAD_GCM_V1` frames are decrypted on-device and
+  enter `EventRouter` when the App Lock policy allows DB work. Unsupported/bad frames and locked
+  delivery catch up on the next sync; locked delivery posts only a generic notice.
+- **Backups** — the UI exports settings only (kv minus secret-looking keys + user themes + per-chat
+  customizations), encrypted under a user passphrase before its temporary file is written. Message
+  history, handles, attachments, and the DB key are never exported; restoring on a fresh device
+  requires a full re-sync. Legacy plaintext backups can be imported but are not exported by the UI.
+  Import stats a picked file before reading it (6 MiB cap), bounds encoded text before base64 decode
+  (6 MiB), bounds decrypted/legacy plaintext before JSON parsing (4 MiB), and applies per-collection
+  and per-string schema limits. Argon2 cost is a fixed application setting, not attacker-controlled
+  envelope data. New exports require a 12-character, non-common passphrase; old encrypted backups
+  keep their original passphrase compatibility. The complete document is validated before writes,
+  but restore intentionally uses short writes/transactions because the app has one shared DB write
+  lock; an unexpected storage failure can therefore still leave a partially applied restore rather
+  than holding one unbounded transaction across thousands of chat customizations.
 
 ---
 
 ## Characteristics & caveats
 
-- **No TTL / eviction / pruning anywhere.** Nothing deletes old messages, chats, handles, or
-  downloaded media. The DB and on-disk media cache grow **unbounded** with history. Only
-  per-entity user/server-driven deletes exist (`deleteChatLocal` cascade, `deleteMessageByGuid`,
-  and the full contacts wipe in `upsertContacts` via `db.delete(contacts)`). No size cap, age cap, LRU, or cleanup job; expo-image's bitmap cache is
-  never cleared. *(This is the place to add a cache-size cap if ever wanted.)*
-- **Logout does not wipe the cache.** `forget()` removes only `serverAddress` +
-  `serverPassword` and resets the session store — it leaves the DB key in the vault and the
-  entire encrypted DB on disk. Reconnecting to the same server reuses the existing cache.
-- **App-lock is a UI gate, not at-rest key custody (Android).** It withholds the DB key only
-  on the foreground boot path; a headless FCM push still opens + decrypts the DB while locked.
+- **Only ordinary attachment files use the app-managed global LRU.** The 2 GiB/4,096-file ledger
+  does not govern SQLCipher history or third-party Expo Image/WebView caches. Synced backgrounds
+  have their own native 100 MiB/256-file quota; Android/Expo-managed caches remain outside this
+  ledger and may follow OS/library cleanup policy.
+- **Disconnect is a verified account wipe.** `forget()` closes the authorization window, clears
+  credentials and account-scoped DB contents, cancels known reminders/notifications/shortcuts, and
+  removes persistent attachment/avatar/background/wallpaper directories. It clears the in-memory
+  and persisted app logs last, while deliberately retaining the reusable DB key and OS-evictable
+  cache. A required cleanup failure keeps the next connection blocked so the idempotent sweep can
+  retry; the release device matrix must still inspect the exact native candidate.
+- **App-lock is a UI/policy gate, not at-rest key custody (Android).** Foreground boot and the
+  locked headless FCM path both defer opening the DB; the latter posts a generic notice and catches
+  up after unlock. However, the SecureStore-held key itself is not biometric-bound, and an unlocked
+  headless wake can open the DB.
 - **FTS5 indexes only `text`** — but edited/SMS messages, whose body arrives in `attributedBody`
   with an empty `text` column, now have `text` populated from the decoded attributedBody at upsert
   (plus a one-time boot backfill for already-cached history), so they **are** full-text searchable.
   `subject` is still not indexed.
 - **Best-effort kv persistence.** kv setters set memory first then swallow `kvSet` failures,
   so a toggle can silently fail to survive a restart.
-- **Echo reconcile + upsert are not yet one transaction** (TODO in `dbEventSink.ts`): a hard
-  crash in the sub-ms gap could strand an unpromoted `temp-` row as a duplicate bubble.
 - **Adapter-bypass staleness.** A write directly on `getRawDatabase()` mutates data but does
   not flush, so the UI silently goes stale until another adapter write.
 - **Test-vs-device divergence.** FTS5/SQLCipher are op-sqlite build flags — without them
-  `messages_fts`/rekey fail *only on device* (Node's better-sqlite3 has FTS5 and no SQLCipher
+  `messages_fts`/rekey fail _only on device_ (Node's better-sqlite3 has FTS5 and no SQLCipher
   codec, so green Jest does not prove device-correct encryption or search).
 
 ---
 
 ## Key files
 
-| File | Role |
-|------|------|
-| `src/db/database.ts` | Open DB, drizzle adapter, reactive flush |
-| `src/db/key.ts` | DB encryption key generate/resolve/rotate |
-| `src/native/secureVault.ts` | Keystore-backed secret storage |
-| `src/db/schema.ts` / `migrations.ts` | Tables + schema evolution |
-| `src/db/useReactiveQuery.ts` | Table-keyed reactive read subscriptions |
-| `src/services/sync/engine.ts` | full/incremental sync, marker |
-| `src/core/realtime/eventRouter.ts` | socket + FCM normalization |
-| `src/services/realtime/dbEventSink.ts` | realtime → DB upserts |
-| `src/db/repositories/*` | upserts, reads, kv, sync marker |
-| `src/services/download/*` | on-demand media download, concurrency cap, per-guid dedup, on-disk file cache |
-| `src/ui/attachments/*` | UI trigger/render layer (fires the download, swaps on the DB `local_path` write) |
+| File                                   | Role                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------- |
+| `src/db/database.ts`                   | Open DB, drizzle adapter, reactive flush                                         |
+| `src/db/key.ts`                        | DB encryption key generate/resolve/rotate                                        |
+| `src/native/secureVault.ts`            | Keystore-backed secret storage                                                   |
+| `src/db/schema.ts` / `migrations.ts`   | Tables + schema evolution                                                        |
+| `src/db/useReactiveQuery.ts`           | Table-keyed reactive read subscriptions                                          |
+| `src/services/sync/engine.ts`          | full/incremental sync, marker                                                    |
+| `src/core/realtime/eventRouter.ts`     | socket + FCM normalization                                                       |
+| `src/services/realtime/dbEventSink.ts` | realtime → DB upserts                                                            |
+| `src/db/repositories/*`                | upserts, reads, kv, sync marker                                                  |
+| `src/services/download/*`              | on-demand media download, concurrency cap, per-guid dedup, on-disk file cache    |
+| `src/ui/attachments/*`                 | UI trigger/render layer (fires the download, swaps on the DB `local_path` write) |

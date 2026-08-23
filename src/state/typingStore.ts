@@ -5,6 +5,8 @@ interface TypingState {
   typing: Record<string, boolean>;
   /** Apply a typing-indicator event. `display=false` clears immediately. */
   setTyping: (chatGuid: string, display: boolean) => void;
+  /** Account teardown: clear indicators and the private TTL timers that could restore them. */
+  reset: () => void;
 }
 
 // Typing indicators are best-effort: the server sends `display:true` while typing and
@@ -28,5 +30,10 @@ export const useTypingStore = create<TypingState>((set) => ({
       );
     }
     set((s) => ({ typing: { ...s.typing, [chatGuid]: display } }));
+  },
+  reset: () => {
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
+    set({ typing: {} });
   },
 }));

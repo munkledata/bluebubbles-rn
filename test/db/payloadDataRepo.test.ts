@@ -5,7 +5,12 @@
  * flagless re-upsert (delivery/read receipt) omits it.
  */
 import { Chat, Message, parsePayloadData } from '@core/models';
-import { listMessagesWithSenders, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import {
+  listMessagesWithSenders,
+  upsertChats,
+  upsertHandles,
+  upsertMessages,
+} from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 

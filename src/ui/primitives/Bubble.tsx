@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 
 interface BubbleProps {
   text: string;
@@ -25,7 +25,7 @@ export function Bubble({ text, isFromMe, service = 'iMessage' }: BubbleProps): R
         ? (b.rcsBackground ?? b.smsBackground)
         : b.senderBackground
     : b.receivedBackgroundBottom;
-  const color = isFromMe ? b.senderText : b.receivedText;
+  const color = isFromMe ? readableTextOn(backgroundColor) : b.receivedText;
 
   return (
     <View

@@ -1,4 +1,5 @@
 import { getUrlPreview, setUrlPreview } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 
 const URL = 'https://example.com/article';
@@ -74,5 +75,37 @@ describe('url preview cache repository', () => {
     await setUrlPreview(t.db, 'https://other.example', { title: 'B' }, 1);
     expect((await getUrlPreview(t.db, URL))?.title).toBe('A');
     expect((await getUrlPreview(t.db, 'https://other.example'))?.title).toBe('B');
+  });
+
+  it('queues an upsert behind a rolling-back neighbour instead of joining it', async () => {
+    const t = await createTestDb();
+    await setUrlPreview(t.db, URL, { title: 'Old' }, 1);
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const update = setUrlPreview(t.db, URL, { title: 'New' }, 2);
+    await Promise.resolve();
+    expect(
+      (t.raw.prepare('SELECT title FROM url_previews WHERE url = ?').get(URL) as { title: string })
+        .title,
+    ).toBe('Old');
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await update;
+    expect(await getUrlPreview(t.db, URL)).toMatchObject({ title: 'New', fetchedAt: 2 });
   });
 });

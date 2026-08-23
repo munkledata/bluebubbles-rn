@@ -6,9 +6,10 @@
  */
 import React from 'react';
 import { Text, View } from 'react-native';
-import { renderWithTheme, screen } from './support/renderWithTheme';
-import { useTheme } from '@ui/theme/ThemeProvider';
-import { darkTheme, gatorTheme } from '@ui/theme/tokens';
+import { render, renderWithTheme, screen } from './support/renderWithTheme';
+import { ThemeProvider, useTheme } from '@ui/theme/ThemeProvider';
+import { useThemeStore } from '@state/themeStore';
+import { darkTheme, gatorTheme, lightTheme } from '@ui/theme/tokens';
 
 /** A minimal component that surfaces theme colors as observable output (text + style). */
 function ThemeProbe(): React.JSX.Element {
@@ -29,6 +30,18 @@ function ThemeProbe(): React.JSX.Element {
 }
 
 describe('renderWithTheme applies the requested preset', () => {
+  it('can render the boot shell with the safe fallback before persisted theme hydration', async () => {
+    useThemeStore.setState({ hydrated: false });
+
+    await render(
+      <ThemeProvider renderWithFallbackTheme>
+        <Text>Boot shell</Text>
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByText('Boot shell')).toBeTruthy();
+  });
+
   it("renders the 'oled-dark' preset's colors", async () => {
     await renderWithTheme(<ThemeProbe />, { preset: 'oled-dark' });
     // Rendered text content = the exact token value (user-observable output).
@@ -67,5 +80,21 @@ describe('renderWithTheme applies the requested preset', () => {
     expect(darkTint).toBe(darkTheme.color.tint);
     expect(gatorTint).toBe(gatorTheme.color.tint);
     expect(darkTint).not.toBe(gatorTint);
+  });
+
+  it('contains a legacy light custom selection and renders the selected dark preset', async () => {
+    useThemeStore.setState({
+      preset: 'gator',
+      customThemeId: 17,
+      customTokens: lightTheme,
+      hydrated: true,
+    });
+    await render(
+      <ThemeProvider>
+        <ThemeProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('bg').props.children).toBe(gatorTheme.color.background);
+    expect(screen.getByTestId('bg').props.children).not.toBe(lightTheme.color.background);
   });
 });

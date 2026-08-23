@@ -15,6 +15,8 @@ describe('progressRatio (pure)', () => {
 });
 
 describe('useDownloadStore', () => {
+  beforeEach(() => useDownloadStore.getState().reset());
+
   it('transitions start → setProgress → finish', () => {
     const s = useDownloadStore.getState();
     s.start('g1');
@@ -35,5 +37,16 @@ describe('useDownloadStore', () => {
     s.fail('g2');
     expect(useDownloadStore.getState().status['g2']).toBe('error');
     expect(useDownloadStore.getState().status['g1']).not.toBe('error');
+  });
+
+  it('clears all account-scoped presentation state', () => {
+    const state = useDownloadStore.getState();
+    state.start('old-account-attachment');
+    state.setProgress('old-account-attachment', 4, 10);
+
+    state.reset();
+
+    expect(useDownloadStore.getState().status).toEqual({});
+    expect(useDownloadStore.getState().progress).toEqual({});
   });
 });

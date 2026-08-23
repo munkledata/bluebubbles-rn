@@ -18,11 +18,10 @@ interface ShareIntentState {
 }
 
 /**
- * Holds content shared INTO Gator from another app (via `expo-share-intent`) between the capture
- * point (`ShareIntentCapture`, mounted at the root above the lock/auth gate) and its consumer (the
- * new-chat creator, which stages it and clears the store). `ShareIntentNavigator` (in the connected
- * (app) layout) opens new-chat once a share is pending here. Files can't ride expo-router URL
- * params, so they pass through this store instead. See `src/ui/ShareIntentHandler.tsx`.
+ * Dormant handoff store retained for a future owned, bounded inbound-share implementation. IPC-01
+ * currently mounts no producer or navigator, and the release manifest accepts no Android share
+ * intents. Files cannot ride expo-router URL params, so a safe future intake can stage an atomic,
+ * fully materialized batch here before its connected-layout consumer navigates.
  */
 export const useShareIntentStore = create<ShareIntentState>((set) => ({
   text: null,

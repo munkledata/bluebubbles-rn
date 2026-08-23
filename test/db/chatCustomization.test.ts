@@ -7,6 +7,7 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { isHexColor, resolveBubbleColor } from '@utils';
 import { createTestDb } from '../support/testDb';
 
@@ -77,6 +78,39 @@ describe('chat customization repo', () => {
     expect((await getChatHeader(t.db, 'c1'))?.muteType).toBe('mute');
     await setChatMute(t.db, 'c1', null);
     expect((await getChatHeader(t.db, 'c1'))?.muteType).toBeNull();
+  });
+
+  it('queues customization and mute behind a rolling-back neighbouring transaction', async () => {
+    const t = await createTestDb();
+    await seed(t, 'c1', 'Server');
+
+    let releaseNeighbour!: () => void;
+    let neighbourStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const customize = setChatCustomization(t.db, 'c1', { customName: 'Queued' });
+    const mute = setChatMute(t.db, 'c1', 'mute');
+    await Promise.resolve();
+    expect(await getChatHeader(t.db, 'c1')).toMatchObject({ customName: null, muteType: null });
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await Promise.all([customize, mute]);
+    expect(await getChatHeader(t.db, 'c1')).toMatchObject({
+      customName: 'Queued',
+      muteType: 'mute',
+    });
   });
 
   it('a server re-sync does NOT clobber local custom name/color/mute', async () => {

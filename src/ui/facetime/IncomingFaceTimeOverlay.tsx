@@ -2,28 +2,37 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIncomingFaceTime } from '@features/facetime/useIncomingFaceTime';
 import { useFaceTimeStore } from '@state/faceTimeStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 
 /**
  * Full-screen in-app ring for an INCOMING FaceTime call (Phase 4). Shows Answer/Decline;
- * Answer hands off to the in-call WebView overlay. Hidden once a call is active (the
- * WebView overlay takes over) or in redacted mode the caller is masked to "FaceTime".
- * A touch-catching modal (unlike the send-effect overlay) — it blocks the screen behind
- * until answered/declined.
+ * Answer hands off to the external-browser call overlay. Hidden once a call is active (the
+ * handoff overlay takes over). A touch-catching modal (unlike the send-effect overlay) — it blocks
+ * the screen behind until answered/declined.
  */
 export function IncomingFaceTimeOverlay(): React.JSX.Element | null {
   const incoming = useFaceTimeStore((s) => s.incoming);
   const activeCall = useFaceTimeStore((s) => s.call);
-  const redacted = useRedactedModeStore((s) => s.enabled);
+  const generation = useFaceTimeStore((s) => s.generation);
   const { answer, decline } = useIncomingFaceTime();
   const insets = useSafeAreaInsets();
 
   // Don't ring over an active call; nothing to show otherwise.
   if (!incoming || activeCall) return null;
 
-  // Redacted mode: never reveal the caller on a glanceable full-screen overlay.
-  const name = redacted ? 'FaceTime' : incoming.callerName;
+  const name = incoming.callerName;
   const subtitle = incoming.isAudio ? 'FaceTime Audio…' : 'FaceTime Video…';
+  const capturedIncoming = incoming;
+  const resolveCurrentIncoming = (): typeof capturedIncoming | null => {
+    const current = useFaceTimeStore.getState();
+    if (
+      current.generation !== generation ||
+      current.call !== null ||
+      current.incoming?.uuid !== capturedIncoming.uuid
+    ) {
+      return null;
+    }
+    return current.incoming;
+  };
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.container, { paddingTop: insets.top + 80 }]}>
@@ -36,7 +45,10 @@ export function IncomingFaceTimeOverlay(): React.JSX.Element | null {
       <View style={[styles.row, { paddingBottom: insets.bottom + 40 }]}>
         <Pressable
           style={[styles.btn, styles.decline]}
-          onPress={() => decline(incoming.uuid)}
+          onPress={() => {
+            const current = resolveCurrentIncoming();
+            if (current) decline(current.uuid);
+          }}
           accessibilityRole="button"
           accessibilityLabel="Decline FaceTime call"
         >
@@ -44,7 +56,10 @@ export function IncomingFaceTimeOverlay(): React.JSX.Element | null {
         </Pressable>
         <Pressable
           style={[styles.btn, styles.answer]}
-          onPress={() => void answer(incoming)}
+          onPress={() => {
+            const current = resolveCurrentIncoming();
+            if (current) void answer(current);
+          }}
           accessibilityRole="button"
           accessibilityLabel="Answer FaceTime call"
         >

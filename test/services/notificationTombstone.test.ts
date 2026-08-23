@@ -37,6 +37,31 @@ function inbound(fields: Record<string, unknown>): NormalizedEvent {
   };
 }
 
+/** Match the production NotifyingEventSink contract: derive intents only after DbEventSink lands. */
+async function buildAfterDbWrite(
+  db: AppDatabase,
+  event: NormalizedEvent,
+): ReturnType<typeof buildMessageIntents> {
+  if (event.type !== 'new-message') return buildMessageIntents(db, event);
+  const message = event.message;
+  const chat = message.chats?.[0];
+  if (!chat) return buildMessageIntents(db, event);
+  const handles = await upsertHandles(db, message.handle ? [message.handle] : []);
+  let chatId = await getChatIdByGuid(db, chat.guid);
+  if (chatId == null) {
+    await upsertChats(
+      db,
+      [Chat.parse({ ...chat, participants: message.handle ? [message.handle] : [] })],
+      handles,
+    );
+    chatId = await getChatIdByGuid(db, chat.guid);
+  }
+  const resolvedChatId = chatId;
+  if (resolvedChatId == null) throw new Error('notification fixture failed to create its chat');
+  await upsertMessages(db, [message], () => resolvedChatId, handles);
+  return buildMessageIntents(db, event);
+}
+
 async function seedDeletedChat(): Promise<AppDatabase> {
   const { db } = await createTestDb();
   const handles = await upsertHandles(db, [{ address: 'bob@x.com' }]);
@@ -61,7 +86,7 @@ describe('buildMessageIntents + a deleted chat', () => {
     const db = await seedDeletedChat();
     // The other party has no idea the thread was deleted, and tapbacks are routine. A reaction row
     // has no content of its own, so `chatVisible` refuses to un-hide on it.
-    const intents = await buildMessageIntents(
+    const intents = await buildAfterDbWrite(
       db,
       inbound({
         guid: 'rx',
@@ -75,7 +100,7 @@ describe('buildMessageIntents + a deleted chat', () => {
 
   it('stays silent for an unsent (retracted) message', async () => {
     const db = await seedDeletedChat();
-    const intents = await buildMessageIntents(
+    const intents = await buildAfterDbWrite(
       db,
       inbound({ guid: 'gone', text: 'oops', dateCreated: 9000, dateRetracted: 9100 }),
     );
@@ -84,7 +109,7 @@ describe('buildMessageIntents + a deleted chat', () => {
 
   it('stays silent for re-synced history that predates the deletion', async () => {
     const db = await seedDeletedChat();
-    const intents = await buildMessageIntents(
+    const intents = await buildAfterDbWrite(
       db,
       inbound({ guid: 'old', text: 'old', dateCreated: 1000 }),
     );
@@ -93,7 +118,7 @@ describe('buildMessageIntents + a deleted chat', () => {
 
   it('DOES notify for genuinely new content — that message brings the chat back', async () => {
     const db = await seedDeletedChat();
-    const intents = await buildMessageIntents(
+    const intents = await buildAfterDbWrite(
       db,
       inbound({ guid: 'new', text: 'hello again', dateCreated: 6000 }),
     );
@@ -112,7 +137,7 @@ describe('buildMessageIntents + a deleted chat', () => {
       handles,
     );
     // Deliberately OLDER than the tombstone value used above: with no stamp there is no floor.
-    const intents = await buildMessageIntents(
+    const intents = await buildAfterDbWrite(
       db,
       inbound({ guid: 'n1', text: 'yo', dateCreated: 1000 }),
     );
@@ -124,7 +149,7 @@ describe('buildMessageIntents + a deleted chat', () => {
     await setChatMute(db, 'c1', 'mute');
     // A muted chat is silent for a qualifying message too; if `getChatHeader` were filtered by the
     // tombstone the header would be null, which reads as "not muted", and the chat would buzz.
-    const intents = await buildMessageIntents(
+    const intents = await buildAfterDbWrite(
       db,
       inbound({ guid: 'new', text: 'hello again', dateCreated: 6000 }),
     );
@@ -133,7 +158,7 @@ describe('buildMessageIntents + a deleted chat', () => {
 
   it('notifies for a chat guid we have never seen (no header ⇒ no tombstone to apply)', async () => {
     const db = await seedDeletedChat();
-    const intents = await buildMessageIntents(db, {
+    const intents = await buildAfterDbWrite(db, {
       type: 'new-message',
       message: Message.parse({
         guid: 'u1',

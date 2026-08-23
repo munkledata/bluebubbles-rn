@@ -2,6 +2,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { Icon } from '../primitives';
@@ -23,6 +24,7 @@ export function AudioAttachment({
   isFromMe: boolean;
 }): React.JSX.Element {
   const theme = useTheme();
+  const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const dl = useDownloadStore((s) => s.status[att.guid]);
   // Hook must run unconditionally; a null source leaves the player idle until downloaded.
   const player = useAudioPlayer(att.localPath ? { uri: att.localPath } : null);
@@ -33,7 +35,7 @@ export function AudioAttachment({
 
   const onToggle = (): void => {
     if (!ready) {
-      void download(att);
+      void download(att, 'manual', accountLease);
       return;
     }
     if (status.playing) {

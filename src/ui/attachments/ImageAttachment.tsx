@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -31,6 +32,7 @@ export function ImageAttachment({
   cellSize,
 }: ImageAttachmentProps): React.JSX.Element {
   const theme = useTheme();
+  const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const router = useRouter();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
@@ -51,7 +53,7 @@ export function ImageAttachment({
     // permanently-failing image (e.g. some RCS/MMS media the server 404s) would re-download on
     // EVERY reactive flush and hog the 2 concurrency slots, stalling images that WOULD load.
     if (status !== undefined) return;
-    if (shouldAutoDownload(att)) void download(att);
+    if (shouldAutoDownload(att)) void download(att, 'automatic', accountLease);
     // Keyed on guid/localPath/status — NOT the whole `att`, which useMessages rebuilds as a fresh
     // object on every reactive flush (that identity churn is what caused the re-download storm).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,7 +99,7 @@ export function ImageAttachment({
 
   const onPress = (): void => {
     if (att.localPath) router.push(`/media/${encodeURIComponent(att.guid)}`);
-    else void download(att);
+    else void download(att, 'manual', accountLease);
   };
 
   return (

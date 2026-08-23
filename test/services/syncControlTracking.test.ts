@@ -14,18 +14,53 @@
 const incrementalSync = jest.fn();
 const fullSync = jest.fn();
 const syncAllChats = jest.fn();
+const syncChatMessages = jest.fn();
 const getSyncMarker = jest.fn();
 const syncContacts = jest.fn();
+const serverVersion = jest.fn();
+const mockSyncDb = { testId: 'sync-control-db' };
+let mockAccountLeaseCurrent = true;
+const mockAccountLease = {
+  generation: 731,
+  isCurrent: jest.fn(() => mockAccountLeaseCurrent),
+};
+const mockAttachmentCacheScope = { testId: 'sync-attachment-cache-scope' };
+const mockEnsureDatabase = jest.fn<Promise<typeof mockSyncDb>, []>(async () => mockSyncDb);
+const mockCreateAttachmentCacheAccountScope = jest.fn<
+  typeof mockAttachmentCacheScope,
+  [unknown, typeof mockAccountLease]
+>(() => mockAttachmentCacheScope);
+const mockCaptureRealtimeDeliveryLease = jest.fn<typeof mockAccountLease, []>(
+  () => mockAccountLease,
+);
+const mockRetireInactiveEntries = jest.fn<Promise<void>, [unknown, { scope: unknown }]>(
+  async () => undefined,
+);
+const mockDrainDueRetirements = jest.fn<Promise<void>, [unknown, { scope: unknown }]>(
+  async () => undefined,
+);
 
 jest.mock('@/services/clients', () => ({ http: {} }));
-jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
+jest.mock('@/services/databaseControl', () => ({ ensureDatabase: mockEnsureDatabase }));
 jest.mock('@/services/contacts/contactsService', () => ({ syncContacts }));
+jest.mock('@/services/download/attachmentCacheAccountScope', () => ({
+  createAttachmentCacheAccountScope: mockCreateAttachmentCacheAccountScope,
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: {
+    retireInactiveEntries: mockRetireInactiveEntries,
+    drainDueRetirements: mockDrainDueRetirements,
+  },
+}));
+jest.mock('@/services/realtime/deliveryCoordinator', () => ({
+  captureRealtimeDeliveryLease: mockCaptureRealtimeDeliveryLease,
+}));
 jest.mock('@/services/sync', () => ({
   fullSync,
-  httpSyncApi: () => ({ serverVersion: async () => '1.9.0' }),
+  httpSyncApi: () => ({ serverVersion }),
   incrementalSync,
   syncAllChats,
-  syncChatMessages: jest.fn(),
+  syncChatMessages,
   syncDeletedMessages: jest.fn(async () => 0),
 }));
 // The stores syncControl pulls in reach `@db/database`, which loads op-sqlite's native binding.
@@ -34,7 +69,8 @@ jest.mock('@db/repositories', () => ({ getSyncMarker }));
 
 import type { ServerInfo } from '@core/models';
 import { useSessionStore } from '@state/sessionStore';
-import { awaitSyncIdle, runTrackedSync, startSync } from '@/services/syncControl';
+import { useSyncStore } from '@state/syncStore';
+import { awaitSyncIdle, ensureChatSynced, runTrackedSync, startSync } from '@/services/syncControl';
 
 /** Let every pending microtask AND timer callback run. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -56,15 +92,53 @@ function gate(): { promise: Promise<void>; open: () => void } {
 }
 
 beforeEach(() => {
+  mockAccountLeaseCurrent = true;
   // Non-null marker → runSync takes the incremental branch (no full sync).
   getSyncMarker.mockResolvedValue({ lastSyncedRowId: 10, lastSyncedTimestamp: 1000 });
   syncAllChats.mockResolvedValue([]);
   incrementalSync.mockResolvedValue({ chats: 0, messages: 0 });
   fullSync.mockResolvedValue({ chats: 0, messages: 0 });
+  syncChatMessages.mockResolvedValue(0);
   syncContacts.mockResolvedValue({ contacts: 0, matched: 0 });
+  serverVersion.mockResolvedValue('1.9.0');
+  useSyncStore.getState().reset();
   // The slot is keyed by the session INSTANCE it belongs to, so start each test from a fresh one
   // (`reset` mints a new epoch, so nothing a previous test parked in the slot is shareable here).
   disconnectSession();
+});
+
+describe('ensureChatSynced — on-demand work participates in account teardown', () => {
+  it('keeps the idle barrier closed and aborts an account-A backfill after Disconnect', async () => {
+    const request = gate();
+    let shouldAbort: (() => boolean) | undefined;
+    syncChatMessages.mockImplementation(
+      async (_db: unknown, _api: unknown, _guid: string, opts: { shouldAbort?: () => boolean }) => {
+        shouldAbort = opts.shouldAbort;
+        await request.promise;
+        return shouldAbort?.() ? 0 : 7;
+      },
+    );
+
+    connectSession('https://old.example');
+    const backfill = ensureChatSynced('chat-a');
+    await settle();
+    expect(syncChatMessages).toHaveBeenCalledTimes(1);
+    expect(shouldAbort?.()).toBe(false);
+
+    let idle = false;
+    const waiting = awaitSyncIdle().then(() => {
+      idle = true;
+    });
+    disconnectSession();
+    expect(shouldAbort?.()).toBe(true);
+    await settle();
+    expect(idle).toBe(false);
+
+    request.open();
+    await expect(backfill).resolves.toBe(0);
+    await waiting;
+    expect(idle).toBe(true);
+  });
 });
 
 describe('runTrackedSync — the background task participates in the coalescing slot', () => {
@@ -175,6 +249,102 @@ describe('runTrackedSync — the background task participates in the coalescing 
  * user did not ask for and clears having done none of the work they did.
  */
 describe('startSync vs. the tracked slot', () => {
+  it('passes the session ownership check into incremental commits', async () => {
+    const request = gate();
+    let shouldAbort: (() => boolean) | undefined;
+    incrementalSync.mockImplementation(
+      async (_db: unknown, _api: unknown, opts: { shouldAbort?: () => boolean }) => {
+        shouldAbort = opts.shouldAbort;
+        await request.promise;
+        return { chats: 0, messages: 0 };
+      },
+    );
+
+    connectSession('https://guarded.example');
+    const running = startSync();
+    await settle();
+    expect(shouldAbort?.()).toBe(false);
+
+    disconnectSession();
+    expect(shouldAbort?.()).toBe(true);
+
+    request.open();
+    await running;
+  });
+
+  it('cannot overwrite a replacement account banner or launch its contacts sync after retiring', async () => {
+    const request = gate();
+    incrementalSync.mockImplementation(async () => {
+      await request.promise;
+      return { chats: 7, messages: 70 };
+    });
+
+    connectSession('https://old.example');
+    const oldRun = startSync();
+    await settle();
+    expect(useSyncStore.getState().status).toBe('syncing');
+
+    disconnectSession();
+    connectSession('https://new.example');
+    // Represent the replacement account's own pending banner while A unwinds behind the scenes.
+    useSyncStore.getState().reset();
+    useSyncStore.getState().begin();
+
+    request.open();
+    await oldRun;
+
+    expect(useSyncStore.getState()).toMatchObject({
+      status: 'syncing',
+      chats: 0,
+      messages: 0,
+      error: null,
+    });
+    expect(syncContacts).not.toHaveBeenCalled();
+  });
+
+  it('does not publish an old account error after its session is retired', async () => {
+    const request = gate();
+    incrementalSync.mockImplementation(async () => {
+      await request.promise;
+      throw new Error('old account failed late');
+    });
+
+    connectSession('https://old.example');
+    const oldRun = startSync();
+    await settle();
+    disconnectSession();
+    connectSession('https://new.example');
+    useSyncStore.getState().reset();
+
+    request.open();
+    await oldRun;
+
+    expect(useSyncStore.getState()).toMatchObject({ status: 'idle', error: null });
+    expect(syncContacts).not.toHaveBeenCalled();
+  });
+
+  it('abandons a server-version response that returns after Disconnect', async () => {
+    const request = gate();
+    serverVersion.mockImplementation(async () => {
+      await request.promise;
+      return '1.9.0';
+    });
+
+    connectSession('https://old.example');
+    // Force the fallback request instead of using the already-cached connected server info.
+    useSessionStore.setState({ serverInfo: null });
+    const oldRun = startSync();
+    await settle();
+    expect(serverVersion).toHaveBeenCalledTimes(1);
+
+    disconnectSession();
+    request.open();
+    await oldRun;
+
+    expect(incrementalSync).not.toHaveBeenCalled();
+    expect(syncContacts).not.toHaveBeenCalled();
+  });
+
   it('still runs the WHOLE pipeline when a tracked run holds the slot', async () => {
     const background = gate();
     const tracked = runTrackedSync(() => background.promise);
@@ -285,7 +455,8 @@ describe('startSync vs. the tracked slot', () => {
     await fresh;
     // The reconnected session got its own full pipeline run.
     expect(fullSync).toHaveBeenCalledTimes(2);
-    expect(syncContacts).toHaveBeenCalledTimes(2);
+    // The retired run must not launch contact work under the replacement account.
+    expect(syncContacts).toHaveBeenCalledTimes(1);
   });
 
   it('a foreground run in flight is still shared by other foreground callers', async () => {
@@ -302,5 +473,81 @@ describe('startSync vs. the tracked slot', () => {
     foregroundGate.open();
     await first;
     expect(syncAllChats).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses one pre-open account scope for both attachment-cache retirement phases', async () => {
+    const callOrder: string[] = [];
+    mockEnsureDatabase.mockImplementationOnce(async () => {
+      // The account lease must be captured before the first await can cross a Disconnect boundary.
+      expect(mockCaptureRealtimeDeliveryLease).toHaveBeenCalledTimes(1);
+      return mockSyncDb;
+    });
+    mockRetireInactiveEntries
+      .mockImplementationOnce(async () => {
+        callOrder.push('retire');
+      })
+      .mockImplementationOnce(async () => {
+        callOrder.push('retire');
+      });
+    mockDrainDueRetirements
+      .mockImplementationOnce(async () => {
+        callOrder.push('drain');
+      })
+      .mockImplementationOnce(async () => {
+        callOrder.push('drain');
+      });
+
+    await startSync();
+
+    expect(mockCaptureRealtimeDeliveryLease).toHaveBeenCalledTimes(1);
+    expect(mockCreateAttachmentCacheAccountScope).toHaveBeenCalledTimes(1);
+    expect(mockCreateAttachmentCacheAccountScope).toHaveBeenCalledWith(mockAccountLease);
+    expect(mockRetireInactiveEntries).toHaveBeenCalledTimes(2);
+    expect(mockRetireInactiveEntries).toHaveBeenNthCalledWith(1, mockSyncDb, {
+      scope: mockAttachmentCacheScope,
+    });
+    expect(mockRetireInactiveEntries).toHaveBeenNthCalledWith(2, mockSyncDb, {
+      scope: mockAttachmentCacheScope,
+    });
+    expect(mockDrainDueRetirements).toHaveBeenCalledTimes(2);
+    expect(mockDrainDueRetirements).toHaveBeenNthCalledWith(1, mockSyncDb, {
+      scope: mockAttachmentCacheScope,
+    });
+    expect(mockDrainDueRetirements).toHaveBeenNthCalledWith(2, mockSyncDb, {
+      scope: mockAttachmentCacheScope,
+    });
+    expect(callOrder).toEqual(['retire', 'drain', 'retire', 'drain']);
+  });
+
+  it('stops after account ownership expires without a session-epoch change', async () => {
+    const request = gate();
+    incrementalSync.mockImplementation(async () => {
+      await request.promise;
+      return { chats: 7, messages: 70 };
+    });
+
+    connectSession('https://lease-guarded.example');
+    const running = startSync();
+    await settle();
+    expect(incrementalSync).toHaveBeenCalledTimes(1);
+    expect(mockRetireInactiveEntries).toHaveBeenCalledTimes(1);
+    expect(mockDrainDueRetirements).toHaveBeenCalledTimes(1);
+
+    // Revoke only the realtime account lease: the session epoch deliberately stays unchanged.
+    mockAccountLeaseCurrent = false;
+    useSyncStore.getState().reset();
+    useSyncStore.getState().begin();
+    request.open();
+    await running;
+
+    expect(mockRetireInactiveEntries).toHaveBeenCalledTimes(1);
+    expect(mockDrainDueRetirements).toHaveBeenCalledTimes(1);
+    expect(syncContacts).not.toHaveBeenCalled();
+    expect(useSyncStore.getState()).toMatchObject({
+      status: 'syncing',
+      chats: 0,
+      messages: 0,
+      error: null,
+    });
   });
 });

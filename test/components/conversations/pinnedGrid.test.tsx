@@ -4,17 +4,37 @@
  *   - renders NOTHING (null) for an empty rows array;
  *   - one labelled cell per pinned row, titled via `resolveTitle` (a11y "Pinned conversation: …");
  *   - tapping a cell fires onPress with the row GUID; long-press fires onLongPress with the ROW;
- *   - redacted mode masks the title to "Contact" and drops the real name (privacy);
  *   - an unread pinned chat shows a dot AND says so in its a11y label (presence only, no count).
  *
  * The avatars are the real primitives (Avatar/GroupAvatar); titles come from the pure `resolveTitle`
- * / `redactTitle` utils, so expected values are derived from those.
+ * utility, so expected values are derived from it.
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { StyleSheet } from 'react-native';
+import { fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
 import { PinnedGrid } from '@ui/conversations/PinnedGrid';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import type { InboxRow } from '@db/repositories';
+
+const PRIVATE_GUID = 'iMessage;-;private-pinned-guid-7c91@example.test';
+const PRIVATE_TITLE = 'private-pinned-title-4f22@example.test';
+const PRIVATE_AVATAR_URI = 'file:///private-pinned-avatar-64e9-contact-photo.jpg';
+const PRIVATE_GROUP_MEMBER_A = 'private-pinned-group-member-a-9f11@example.test';
+const PRIVATE_GROUP_MEMBER_B = 'private-pinned-group-member-b-38da-+15557654321';
+const PRIVATE_GROUP_AVATAR_A = 'file:///private-pinned-group-avatar-a-808d.jpg';
+const PRIVATE_GROUP_AVATAR_B = 'file:///private-pinned-group-avatar-b-d197.jpg';
+
+function regexFor(value: string): RegExp {
+  return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+}
+
+function expectPrivateCanariesAbsent(tree: unknown, ...canaries: string[]): void {
+  const json = JSON.stringify(tree);
+  for (const canary of canaries) {
+    expect(json).not.toContain(canary);
+    expect(screen.queryByText(canary)).toBeNull();
+    expect(screen.queryByLabelText(regexFor(canary))).toBeNull();
+  }
+}
 
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
   return {
@@ -47,10 +67,6 @@ function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
     ...overrides,
   };
 }
-
-beforeEach(() => {
-  useRedactedModeStore.setState({ enabled: false, hydrated: false });
-});
 
 describe('PinnedGrid', () => {
   it('renders nothing when there are no pinned rows', async () => {
@@ -86,7 +102,7 @@ describe('PinnedGrid', () => {
         onLongPress={() => {}}
       />,
     );
-    fireEvent.press(screen.getByLabelText('Pinned conversation: Alice'));
+    await fireEvent.press(screen.getByLabelText('Pinned conversation: Alice'));
     expect(onPress).toHaveBeenCalledWith('g-alice');
   });
 
@@ -94,7 +110,7 @@ describe('PinnedGrid', () => {
     const onLongPress = jest.fn();
     const row = makeRow({ guid: 'g-alice', participantNames: 'Alice' });
     await renderWithTheme(<PinnedGrid rows={[row]} onPress={() => {}} onLongPress={onLongPress} />);
-    fireEvent(screen.getByLabelText('Pinned conversation: Alice'), 'longPress');
+    await fireEvent(screen.getByLabelText('Pinned conversation: Alice'), 'longPress');
     expect(onLongPress).toHaveBeenCalledWith(row);
   });
 
@@ -102,48 +118,82 @@ describe('PinnedGrid', () => {
   // signal at all that it had unread messages — and it's the ListHeaderComponent, i.e. the first
   // thing they look at.
   it('shows an unread dot and announces it, only when the row has unread messages', async () => {
-    await renderWithTheme(
+    const unreadGuid = 'private-unread-guid-a11c@example.test';
+    const secondUnreadGuid = 'private-unread-guid-c93f@example.test';
+    const readGuid = 'private-read-guid-b02d@example.test';
+    const view = await renderWithTheme(
       <PinnedGrid
         rows={[
-          makeRow({ guid: 'g-alice', participantNames: 'Alice', unreadCount: 3 }),
-          makeRow({ guid: 'g-bob', participantNames: 'Bob', unreadCount: 0 }),
+          makeRow({ guid: unreadGuid, participantNames: 'Alice', unreadCount: 3 }),
+          makeRow({ guid: secondUnreadGuid, participantNames: 'Carol', unreadCount: 8 }),
+          makeRow({ guid: readGuid, participantNames: 'Bob', unreadCount: 0 }),
         ]}
         onPress={() => {}}
         onLongPress={() => {}}
       />,
     );
-    expect(screen.getByTestId('pinned-unread-g-alice')).toBeTruthy();
-    expect(screen.queryByTestId('pinned-unread-g-bob')).toBeNull();
+    const unreadDots = [
+      screen.getByTestId('pinned-unread-0'),
+      screen.getByTestId('pinned-unread-1'),
+    ];
+    expect(screen.queryByTestId('pinned-unread-2')).toBeNull();
+    expect(screen.queryByTestId(regexFor(unreadGuid))).toBeNull();
+    for (const dot of unreadDots) {
+      expect(StyleSheet.flatten(dot.props.style)).toMatchObject({
+        position: 'absolute',
+        width: 16,
+        height: 16,
+        borderWidth: 2,
+      });
+    }
+    expectPrivateCanariesAbsent(view.toJSON(), unreadGuid, secondUnreadGuid, readGuid);
     // Presence only — the count must NOT leak into the label or the cell.
     expect(screen.getByLabelText('Pinned conversation: Alice, unread')).toBeTruthy();
+    expect(screen.getByLabelText('Pinned conversation: Carol, unread')).toBeTruthy();
     expect(screen.getByLabelText('Pinned conversation: Bob')).toBeTruthy();
     expect(screen.queryByText('3')).toBeNull();
+    expect(screen.queryByText('8')).toBeNull();
   });
 
-  it('keeps the unread dot in redacted mode (it reveals nothing about the chat)', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    await renderWithTheme(
-      <PinnedGrid
-        rows={[makeRow({ guid: 'g-alice', participantNames: 'Alice', unreadCount: 2 })]}
-        onPress={() => {}}
-        onLongPress={() => {}}
-      />,
+  it('renders an exact 1:1 title and photo while retaining exact guid and row callbacks', async () => {
+    const onPress = jest.fn();
+    const onLongPress = jest.fn();
+    const row = makeRow({
+      guid: PRIVATE_GUID,
+      customName: PRIVATE_TITLE,
+      participantNames: 'private-pinned-member-a31d@example.test',
+      participantAvatars: PRIVATE_AVATAR_URI,
+    });
+    const view = await renderWithTheme(
+      <PinnedGrid rows={[row]} onPress={onPress} onLongPress={onLongPress} />,
     );
-    expect(screen.getByTestId('pinned-unread-g-alice')).toBeTruthy();
-    expect(screen.getByLabelText('Pinned conversation: Contact, unread')).toBeTruthy();
+    expect(screen.getByText(PRIVATE_TITLE)).toBeTruthy();
+    const cell = screen.getByLabelText(`Pinned conversation: ${PRIVATE_TITLE}`);
+    expect(JSON.stringify(view.toJSON())).toContain(PRIVATE_AVATAR_URI);
+    await fireEvent.press(cell);
+    await fireEvent(cell, 'longPress');
+    expect(onPress).toHaveBeenCalledWith(PRIVATE_GUID);
+    expect(onLongPress).toHaveBeenCalledWith(row);
   });
 
-  it('masks the title to "Contact" in redacted mode, hiding the real name', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    await renderWithTheme(
-      <PinnedGrid
-        rows={[makeRow({ guid: 'g-alice', participantNames: 'Alice' })]}
-        onPress={() => {}}
-        onLongPress={() => {}}
-      />,
+  it('renders exact group member title and both participant photos', async () => {
+    const title = `${PRIVATE_GROUP_MEMBER_A}, ${PRIVATE_GROUP_MEMBER_B}`;
+    const row = makeRow({
+      guid: PRIVATE_GUID,
+      style: 43,
+      participantCount: 2,
+      customName: null,
+      participantNames: title,
+      participantAvatars: `${PRIVATE_GROUP_AVATAR_A}|||${PRIVATE_GROUP_AVATAR_B}`,
+    });
+    const view = await renderWithTheme(
+      <PinnedGrid rows={[row]} onPress={() => {}} onLongPress={() => {}} />,
     );
-    expect(screen.getByText('Contact')).toBeTruthy();
-    expect(screen.queryByText('Alice')).toBeNull();
-    expect(screen.getByLabelText('Pinned conversation: Contact')).toBeTruthy();
+
+    expect(screen.getByText(title)).toBeTruthy();
+    expect(screen.getByLabelText(`Pinned conversation: ${title}`)).toBeTruthy();
+    const tree = JSON.stringify(view.toJSON());
+    expect(tree).toContain(PRIVATE_GROUP_AVATAR_A);
+    expect(tree).toContain(PRIVATE_GROUP_AVATAR_B);
   });
 });

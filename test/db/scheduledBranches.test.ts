@@ -18,7 +18,6 @@ import {
   resetStuckScheduled,
   updateScheduled,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const attempts = (raw: Database.Database, id: number): number =>
@@ -62,6 +61,18 @@ describe('scheduled reads', () => {
     await insertScheduled(db, { chatGuid: 'cA', text: 'future', scheduledFor: 500 });
     const due = await listDueScheduled(db, 200);
     expect(due.map((r) => r.text)).toEqual(['due']);
+  });
+
+  it('listDueScheduled applies an explicit oldest-first headless cap', async () => {
+    const { db } = await createTestDb();
+    await insertScheduled(db, { chatGuid: 'cA', text: 'third', scheduledFor: 300 });
+    await insertScheduled(db, { chatGuid: 'cA', text: 'first', scheduledFor: 100 });
+    await insertScheduled(db, { chatGuid: 'cA', text: 'second', scheduledFor: 200 });
+
+    const due = await listDueScheduled(db, 500, 2);
+
+    expect(due.map((row) => row.text)).toEqual(['first', 'second']);
+    expect(await listDueScheduled(db, 500, 0)).toEqual([]);
   });
 });
 
@@ -192,7 +203,8 @@ describe('claim / send / fail / recover', () => {
   it('markScheduledSent records the server id', async () => {
     const { db, raw } = await createTestDb();
     const id = await insertScheduled(db, { chatGuid: 'cA', text: 'x', scheduledFor: 100 });
-    await markScheduledSent(db, id, 'srv-sent');
+    await claimScheduled(db, id);
+    expect(await markScheduledSent(db, id, 'srv-sent')).toBe(true);
     expect(statusOf(raw, id)).toBe('sent');
     expect(rawServerId(raw, id)).toBe('srv-sent');
   });
@@ -202,12 +214,55 @@ describe('claim / send / fail / recover', () => {
     const id = await insertScheduled(db, { chatGuid: 'cA', text: 'x', scheduledFor: 100 });
     // Attempts 1..4 → still 'pending' (SCHED_MAX_ATTEMPTS = 5).
     for (let i = 1; i <= 4; i++) {
+      expect(await claimScheduled(db, id)).toBe(true);
       expect(await markScheduledFailed(db, id)).toBe('pending');
       expect(attempts(raw, id)).toBe(i);
     }
     // 5th failure hits the cap → retired to 'error' (stops retrying every tick).
+    expect(await claimScheduled(db, id)).toBe(true);
     expect(await markScheduledFailed(db, id)).toBe('error');
     expect(statusOf(raw, id)).toBe('error');
+  });
+
+  it('terminal helpers report stale and do not overwrite a claim they no longer own', async () => {
+    const { db, raw } = await createTestDb();
+    const pending = await insertScheduled(db, {
+      chatGuid: 'cA',
+      text: 'still pending',
+      scheduledFor: 100,
+    });
+    const sent = await insertScheduled(db, {
+      chatGuid: 'cA',
+      text: 'already sent',
+      scheduledFor: 200,
+    });
+    raw.prepare("UPDATE scheduled_messages SET status = 'sent' WHERE id = ?").run(sent);
+
+    expect(await markScheduledSent(db, pending)).toBe(false);
+    expect(await markScheduledFailed(db, pending)).toBe('stale');
+    expect(await markScheduledSent(db, sent)).toBe(false);
+    expect(await markScheduledFailed(db, sent)).toBe('stale');
+    expect(statusOf(raw, pending)).toBe('pending');
+    expect(attempts(raw, pending)).toBe(0);
+    expect(statusOf(raw, sent)).toBe('sent');
+    expect(attempts(raw, sent)).toBe(0);
+  });
+
+  it('terminal helpers refuse a server-backed sending row', async () => {
+    const { db, raw } = await createTestDb();
+    const id = await insertScheduled(db, {
+      chatGuid: 'cA',
+      text: 'server owns this',
+      scheduledFor: 100,
+      serverId: 'server-owned',
+    });
+    expect(await claimScheduled(db, id)).toBe(true);
+
+    expect(await markScheduledSent(db, id)).toBe(false);
+    expect(await markScheduledFailed(db, id)).toBe('stale');
+    expect(statusOf(raw, id)).toBe('sending');
+    expect(attempts(raw, id)).toBe(0);
+    expect(rawServerId(raw, id)).toBe('server-owned');
   });
 
   it('resetStuckScheduled returns interrupted sending rows to pending and reports the count', async () => {
@@ -218,6 +273,21 @@ describe('claim / send / fail / recover', () => {
     expect(await resetStuckScheduled(db)).toBe(2);
     expect(statusOf(raw, a)).toBe('pending');
     expect(statusOf(raw, b)).toBe('pending');
+  });
+
+  it('resetStuckScheduled bounds headless recovery without losing the remainder', async () => {
+    const { db, raw } = await createTestDb();
+    const ids = await Promise.all(
+      ['a', 'b', 'c'].map((text) =>
+        insertScheduled(db, { chatGuid: 'cA', text, scheduledFor: 100 }),
+      ),
+    );
+    raw.prepare("UPDATE scheduled_messages SET status = 'sending'").run();
+
+    expect(await resetStuckScheduled(db, 2)).toBe(2);
+    expect(ids.filter((id) => statusOf(raw, id) === 'sending')).toHaveLength(1);
+    expect(await resetStuckScheduled(db, 2)).toBe(1);
+    expect(ids.every((id) => statusOf(raw, id) === 'pending')).toBe(true);
   });
 
   it('deleteScheduled removes the row', async () => {

@@ -1,4 +1,5 @@
-import { Chat, Message } from '@core/models';
+import type Database from 'better-sqlite3';
+import { Attachment, Chat, Message } from '@core/models';
 import {
   applyLocalUnsend,
   deleteMessageLocal,
@@ -13,14 +14,163 @@ import {
   listMessagesWithSenders,
   markMessageDeleted,
   markMessageSendError,
+  reconcileOutgoingSuccess,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { messageDeletionLedger, outgoingQueue } from '@db/schema';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { buildGroupEventText } from '@utils';
 import { createTestDb } from '../support/testDb';
+
+async function holdRollingBackTransaction(
+  db: AppDatabase,
+  beforeHold: () => void = () => undefined,
+): Promise<{
+  release: () => void;
+  failure: Promise<unknown>;
+}> {
+  let markStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const neighbour = withDbTransaction(db, async () => {
+    beforeHold();
+    markStarted();
+    await held;
+    throw new Error('neighbour rollback');
+  });
+  const failure = neighbour.then(
+    () => null,
+    (error: unknown) => error,
+  );
+  await started;
+  return { release, failure };
+}
+
+const nextEventLoopTurn = (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+interface DriverGate {
+  didStart: boolean;
+  held: Promise<void>;
+  finished: Promise<void>;
+  release(): void;
+  markFinished(): void;
+}
+
+function driverGate(): DriverGate {
+  let release!: () => void;
+  let markFinished!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const finished = new Promise<void>((resolve) => {
+    markFinished = resolve;
+  });
+  return { didStart: false, held, finished, release, markFinished };
+}
+
+function gateThenable<T extends object>(thenable: T, gate: DriverGate): T {
+  return new Proxy(thenable, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== 'then') {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (onFulfilled: unknown, onRejected: unknown) => {
+        gate.didStart = true;
+        return gate.held
+          .then(() =>
+            Reflect.apply(value as (...args: unknown[]) => unknown, target, [
+              onFulfilled,
+              onRejected,
+            ]),
+          )
+          .finally(gate.markFinished);
+      };
+    },
+  });
+}
+
+async function waitForDriverGate(gate: DriverGate, label: string): Promise<void> {
+  for (let turn = 0; turn < 20 && !gate.didStart; turn += 1) {
+    await nextEventLoopTurn();
+  }
+  if (!gate.didStart) throw new Error(`${label} did not start within 20 event-loop turns`);
+}
+
+function errorMessageChain(error: unknown): unknown[] {
+  const messages: unknown[] = [];
+  let current = error;
+  for (let depth = 0; depth < 4 && typeof current === 'object' && current != null; depth += 1) {
+    const record = current as { message?: unknown; cause?: unknown };
+    messages.push(record.message);
+    current = record.cause;
+  }
+  return messages;
+}
+
+function queueCount(raw: Database.Database, guid: string): number {
+  return (
+    raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue WHERE temp_guid = ?').get(guid) as {
+      count: number;
+    }
+  ).count;
+}
+
+function tombstone(raw: Database.Database, guid: string): number | null | undefined {
+  return (
+    raw.prepare('SELECT date_deleted AS value FROM messages WHERE guid = ?').get(guid) as
+      { value: number | null } | undefined
+  )?.value;
+}
+
+function deletionLedgerDate(raw: Database.Database, guid: string): number | undefined {
+  return (
+    raw
+      .prepare('SELECT date_deleted AS value FROM message_deletion_ledger WHERE guid = ?')
+      .get(guid) as { value: number } | undefined
+  )?.value;
+}
+
+function latestMessageDate(raw: Database.Database, chatId: number): number | null {
+  return (
+    raw.prepare('SELECT latest_message_date AS value FROM chats WHERE id = ?').get(chatId) as {
+      value: number | null;
+    }
+  ).value;
+}
+
+async function finishAfterQueuedObservation<T>(
+  neighbour: { release: () => void; failure: Promise<unknown> },
+  pending: Promise<T>,
+  observe: () => void | Promise<void>,
+): Promise<T> {
+  let observationError: unknown;
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await observe();
+  } catch (error) {
+    observationError = error;
+  } finally {
+    neighbour.release();
+  }
+  const neighbourError = await neighbour.failure;
+  const result = await pending;
+  if (observationError) throw observationError;
+  expect(String(neighbourError)).toContain('neighbour rollback');
+  return result;
+}
 
 async function seed(db: AppDatabase) {
   const handles = await upsertHandles(db, [
@@ -61,6 +211,325 @@ async function seed(db: AppDatabase) {
   );
   return chatId;
 }
+
+describe('upsertMessages transaction ownership', () => {
+  it('queues a public upsert behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'owner@example.com' }]);
+    const chatMap = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'ownership-chat', participants: [{ address: 'owner@example.com' }] })],
+      handles,
+    );
+    const chatId = chatMap.get('ownership-chat');
+    if (chatId == null) throw new Error('ownership test chat was not stored');
+
+    const neighbour = await holdRollingBackTransaction(db);
+    const pending = upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'queued-message',
+          text: 'wait for your own transaction',
+          dateCreated: 100,
+          handle: { address: 'owner@example.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+
+    const stored = await finishAfterQueuedObservation(neighbour, pending, () => {
+      expect(
+        raw.prepare("SELECT guid FROM messages WHERE guid = 'queued-message'").get(),
+      ).toBeUndefined();
+    });
+
+    expect(stored.has('queued-message')).toBe(true);
+    expect(raw.prepare("SELECT guid FROM messages WHERE guid = 'queued-message'").get()).toEqual({
+      guid: 'queued-message',
+    });
+  });
+
+  it('rolls back an inserted message when a later attachment write fails', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'atomic@example.com' }]);
+    const chatMap = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'atomic-chat', participants: [{ address: 'atomic@example.com' }] })],
+      handles,
+    );
+    const chatId = chatMap.get('atomic-chat');
+    if (chatId == null) throw new Error('atomicity test chat was not stored');
+    raw.exec(`
+      CREATE TRIGGER fail_message_attachment
+      BEFORE INSERT ON attachments
+      WHEN NEW.guid = 'forced-failure-att'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced attachment failure');
+      END
+    `);
+
+    let failure: unknown;
+    try {
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'atomic-message',
+            text: 'must roll back',
+            dateCreated: 200,
+            handle: { address: 'atomic@example.com' },
+            attachments: [Attachment.parse({ guid: 'forced-failure-att', mimeType: 'image/png' })],
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(String(failure)).toContain('forced attachment failure');
+    expect(
+      raw.prepare("SELECT guid FROM messages WHERE guid = 'atomic-message'").get(),
+    ).toBeUndefined();
+    expect(
+      raw.prepare("SELECT guid FROM attachments WHERE guid = 'forced-failure-att'").get(),
+    ).toBeUndefined();
+  });
+
+  it('refreshes rich bodies atomically while preserving lean receipt projections', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'rich@example.com' }]);
+    const chatMap = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'rich-refresh-chat', participants: [{ address: 'rich@example.com' }] })],
+      handles,
+    );
+    const chatId = chatMap.get('rich-refresh-chat');
+    if (chatId == null) throw new Error('rich refresh chat was not stored');
+    const oldBody = [{ string: 'cobalt predecessor', runs: [] }];
+    const newBody = [{ string: 'saffron replacement', runs: [] }];
+    const restoredBody = [{ string: 'ember same marker', runs: [] }];
+    const row = () =>
+      raw
+        .prepare(
+          `SELECT text, attributed_body AS attributedBody, date_edited AS dateEdited,
+                  date_read AS dateRead, date_delivered AS dateDelivered
+             FROM messages WHERE guid = 'rich-refresh-message'`,
+        )
+        .get();
+    const hits = (term: string): number =>
+      (
+        raw
+          .prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE messages_fts MATCH ?')
+          .get(term) as { count: number }
+      ).count;
+    let triggerInstalled = false;
+    try {
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'rich-refresh-message',
+            text: '',
+            attributedBody: oldBody,
+            dateCreated: 100,
+            dateEdited: 1_000,
+            handle: { address: 'rich@example.com' },
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+      expect(row()).toEqual({
+        text: 'cobalt predecessor',
+        attributedBody: JSON.stringify(oldBody),
+        dateEdited: 1_000,
+        dateRead: null,
+        dateDelivered: null,
+      });
+
+      raw.exec(`CREATE TRIGGER fail_rich_refresh_attachment
+        BEFORE INSERT ON attachments
+        WHEN NEW.guid = 'rich-refresh-failure'
+        BEGIN SELECT RAISE(ABORT, 'RICH_BODY_REFRESH_CANARY'); END`);
+      triggerInstalled = true;
+      let failure: unknown;
+      try {
+        await upsertMessages(
+          db,
+          [
+            Message.parse({
+              guid: 'rich-refresh-message',
+              text: '',
+              attributedBody: newBody,
+              dateCreated: 100,
+              dateEdited: 2_000,
+              handle: { address: 'rich@example.com' },
+              attachments: [
+                Attachment.parse({ guid: 'rich-refresh-failure', mimeType: 'image/png' }),
+              ],
+            }),
+          ],
+          () => chatId,
+          handles,
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(errorMessageChain(failure)).toContain('RICH_BODY_REFRESH_CANARY');
+      expect(row()).toEqual({
+        text: 'cobalt predecessor',
+        attributedBody: JSON.stringify(oldBody),
+        dateEdited: 1_000,
+        dateRead: null,
+        dateDelivered: null,
+      });
+      expect(hits('cobalt')).toBe(1);
+      expect(hits('saffron')).toBe(0);
+
+      raw.exec('DROP TRIGGER fail_rich_refresh_attachment');
+      triggerInstalled = false;
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'rich-refresh-message',
+            text: '',
+            attributedBody: newBody,
+            dateCreated: 100,
+            dateEdited: 2_000,
+            handle: { address: 'rich@example.com' },
+            attachments: [
+              Attachment.parse({ guid: 'rich-refresh-failure', mimeType: 'image/png' }),
+            ],
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+      expect(row()).toEqual({
+        text: 'saffron replacement',
+        attributedBody: JSON.stringify(newBody),
+        dateEdited: 2_000,
+        dateRead: null,
+        dateDelivered: null,
+      });
+      expect(hits('cobalt')).toBe(0);
+      expect(hits('saffron')).toBe(1);
+
+      // A newer marker alone is still a lean projection: without replacement text it cannot
+      // prove that the rich rendering source should be cleared.
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'rich-refresh-message',
+            attributedBody: null,
+            dateCreated: 100,
+            dateEdited: 2_500,
+            dateDelivered: 2_600,
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+      expect(row()).toEqual({
+        text: 'saffron replacement',
+        attributedBody: JSON.stringify(newBody),
+        dateEdited: 2_500,
+        dateRead: null,
+        dateDelivered: 2_600,
+      });
+
+      // A strictly newer plain edit is authoritative and must clear the old rich rendering source.
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'rich-refresh-message',
+            text: 'violet plain replacement',
+            attributedBody: null,
+            dateCreated: 100,
+            dateEdited: 3_000,
+            dateRead: 3_100,
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+      expect(row()).toEqual({
+        text: 'violet plain replacement',
+        attributedBody: null,
+        dateEdited: 3_000,
+        dateRead: 3_100,
+        dateDelivered: 2_600,
+      });
+      expect(hits('saffron')).toBe(0);
+      expect(hits('violet')).toBe(1);
+
+      // The richer projection can arrive second with the same marker and must restore rich runs.
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'rich-refresh-message',
+            text: '',
+            attributedBody: restoredBody,
+            dateCreated: 100,
+            dateEdited: 3_000,
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+      expect(row()).toEqual({
+        text: 'ember same marker',
+        attributedBody: JSON.stringify(restoredBody),
+        dateEdited: 3_000,
+        dateRead: 3_100,
+        dateDelivered: 2_600,
+      });
+
+      // Equal-marker explicit NULL and an undated omitted body are lean projections, not clears.
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'rich-refresh-message',
+            text: 'ember same marker',
+            attributedBody: null,
+            dateCreated: 100,
+            dateEdited: 3_000,
+            dateDelivered: 3_200,
+          }),
+        ],
+        () => chatId,
+        handles,
+      );
+      await upsertMessages(
+        db,
+        [Message.parse({ guid: 'rich-refresh-message', dateCreated: 100, dateRead: 3_300 })],
+        () => chatId,
+        handles,
+      );
+      expect(row()).toEqual({
+        text: 'ember same marker',
+        attributedBody: JSON.stringify(restoredBody),
+        dateEdited: 3_000,
+        dateRead: 3_300,
+        dateDelivered: 3_200,
+      });
+      expect(hits('violet')).toBe(0);
+      expect(hits('ember')).toBe(1);
+    } finally {
+      if (triggerInstalled) raw.exec('DROP TRIGGER IF EXISTS fail_rich_refresh_attachment');
+      raw.close();
+    }
+  });
+});
 
 describe('conversation-view repositories', () => {
   it('getChatIdByGuid resolves hit/miss', async () => {
@@ -620,8 +1089,8 @@ describe('markMessageDeleted (deletion tombstone)', () => {
   // THE RE-SYNC HAZARD. A deleted message stays in the Mac's chat.db (~30 days) and the server keeps
   // returning it from query/sync, so the SAME guid is re-upserted after the tombstone. Two invariants
   // in upsertMessages keep the deletion from undoing itself, and this test pins both:
-  //   1. `date_deleted` is absent from BOTH the insert values and the onConflictDoUpdate SET — that
-  //      absence IS the COALESCE-preserve, so the stored tombstone survives the re-upsert untouched.
+  //   1. `date_deleted` comes only from the local deletion ledger and the conflict set preserves the
+  //      later local tombstone, so a wire re-upsert cannot clear it.
   //   2. its `latest_message_date` recompute filters `date_deleted IS NULL`, so re-ingesting the
   //      deleted NEWEST message can't re-inflate the chat's inbox position back to its date.
   it('a later sync re-upserting the SAME guid does NOT resurrect a tombstoned message', async () => {
@@ -670,7 +1139,7 @@ describe('markMessageDeleted (deletion tombstone)', () => {
       }
     ).r;
     expect(read).toBe(350);
-    // … yet the tombstone is untouched: date_deleted is not in the conflict SET.
+    // … yet the locally sourced tombstone is untouched by the wire re-upsert.
     expect(tombstone()).toBe(5000);
     // … the message stays VANISHED from the thread …
     expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toEqual(['m2', 'm1']);
@@ -864,6 +1333,431 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
 // device, so the server still returns that guid and ensureChatSynced — which runs on EVERY chat
 // open — re-inserts it. A hard delete is undone the very next time the thread is opened.
 describe('deleteMessageLocal (the user’s own delete)', () => {
+  it('owns an exact current-temp deletion independently of a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const tempGuid = 'temp-delete-current-neighbour';
+    const phantomKey = 'message-delete.real-neighbour';
+    const deletedAt = 6_000;
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'delete the exact current temp row',
+      now: 400,
+    });
+    const neighbour = await holdRollingBackTransaction(db, () => {
+      raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(phantomKey, 'phantom');
+    });
+    let helperSettled = false;
+    const helperOutcome = deleteMessageLocal(db, tempGuid, deletedAt)
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        helperSettled = true;
+      });
+
+    let observationError: unknown;
+    try {
+      await nextEventLoopTurn();
+      expect(helperSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(raw.prepare('SELECT value FROM kv WHERE key = ?').get(phantomKey)).toEqual({
+        value: 'phantom',
+      });
+      expect(tombstone(raw, tempGuid)).toBeNull();
+      expect(queueCount(raw, tempGuid)).toBe(1);
+      expect(deletionLedgerDate(raw, tempGuid)).toBeUndefined();
+      expect(latestMessageDate(raw, chatId)).toBe(400);
+    } catch (error) {
+      observationError = error;
+    } finally {
+      neighbour.release();
+    }
+
+    const [neighbourFailure, outcome] = await Promise.all([neighbour.failure, helperOutcome]);
+    if (observationError) throw observationError;
+    expect(String(neighbourFailure)).toContain('neighbour rollback');
+    expect(outcome).toEqual({ kind: 'resolved', value: 'applied' });
+    expect(raw.inTransaction).toBe(false);
+    expect(raw.prepare('SELECT value FROM kv WHERE key = ?').get(phantomKey)).toBeUndefined();
+    expect(tombstone(raw, tempGuid)).toBe(deletedAt);
+    expect(queueCount(raw, tempGuid)).toBe(0);
+    expect(deletionLedgerDate(raw, tempGuid)).toBe(deletedAt);
+    expect(latestMessageDate(raw, chatId)).toBe(300);
+  });
+
+  it('resolves a stale temp guid only after the queued real-guid promotion commits', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const tempGuid = 'temp-delete-after-promotion';
+    const realGuid = 'real-delete-after-promotion';
+    const deletedAt = 6_000;
+    const phantomKey = 'message-delete.promotion-neighbour';
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'promote before deleting me',
+      now: 400,
+    });
+    const neighbour = await holdRollingBackTransaction(db, () => {
+      raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(phantomKey, 'phantom');
+    });
+    let promotionSettled = false;
+    let deletionSettled = false;
+    const promotionOutcome = reconcileOutgoingSuccess(db, tempGuid, {
+      guid: realGuid,
+      dateCreated: 450,
+      dateDelivered: 500,
+    })
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        promotionSettled = true;
+      });
+    const deletionOutcome = deleteMessageLocal(db, tempGuid, deletedAt)
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        deletionSettled = true;
+      });
+
+    let observationError: unknown;
+    try {
+      await nextEventLoopTurn();
+      expect(promotionSettled).toBe(false);
+      expect(deletionSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(raw.prepare('SELECT value FROM kv WHERE key = ?').get(phantomKey)).toEqual({
+        value: 'phantom',
+      });
+      expect(
+        raw.prepare('SELECT guid, send_state FROM messages WHERE guid = ?').get(tempGuid),
+      ).toEqual({ guid: tempGuid, send_state: 'sending' });
+      expect(raw.prepare('SELECT guid FROM messages WHERE guid = ?').get(realGuid)).toBeUndefined();
+      expect(
+        raw
+          .prepare('SELECT canonical_guid FROM message_guid_aliases WHERE alias_guid = ?')
+          .get(tempGuid),
+      ).toBeUndefined();
+      expect(queueCount(raw, tempGuid)).toBe(1);
+      expect(deletionLedgerDate(raw, tempGuid)).toBeUndefined();
+      expect(deletionLedgerDate(raw, realGuid)).toBeUndefined();
+      expect(latestMessageDate(raw, chatId)).toBe(400);
+    } catch (error) {
+      observationError = error;
+    } finally {
+      neighbour.release();
+    }
+
+    const [neighbourFailure, promotion, deletion] = await Promise.all([
+      neighbour.failure,
+      promotionOutcome,
+      deletionOutcome,
+    ]);
+    if (observationError) throw observationError;
+    expect(String(neighbourFailure)).toContain('neighbour rollback');
+    expect(promotion).toEqual({ kind: 'resolved', value: undefined });
+    expect(deletion).toEqual({ kind: 'resolved', value: 'applied' });
+    expect(raw.inTransaction).toBe(false);
+    expect(raw.prepare('SELECT value FROM kv WHERE key = ?').get(phantomKey)).toBeUndefined();
+    expect(raw.prepare('SELECT guid FROM messages WHERE guid = ?').get(tempGuid)).toBeUndefined();
+    expect(
+      raw
+        .prepare(
+          'SELECT guid, date_created, date_delivered, send_state, error, date_deleted FROM messages WHERE guid = ?',
+        )
+        .get(realGuid),
+    ).toEqual({
+      guid: realGuid,
+      date_created: 450,
+      date_delivered: 500,
+      send_state: 'sent',
+      error: 0,
+      date_deleted: deletedAt,
+    });
+    expect(
+      raw
+        .prepare('SELECT canonical_guid FROM message_guid_aliases WHERE alias_guid = ?')
+        .get(tempGuid),
+    ).toEqual({ canonical_guid: realGuid });
+    expect(queueCount(raw, tempGuid)).toBe(0);
+    expect(deletionLedgerDate(raw, tempGuid)).toBeUndefined();
+    expect(deletionLedgerDate(raw, realGuid)).toBe(deletedAt);
+    expect(latestMessageDate(raw, chatId)).toBe(300);
+  });
+
+  it('awaits every temp-delete write and rolls them all back when the final chat update fails', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const tempGuid = 'temp-delete-delayed-writes';
+    const deletedAt = 6_000;
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'delay every deletion write',
+      now: 400,
+    });
+    const messageFixture = raw
+      .prepare(
+        `SELECT guid, chat_id AS chatId, text, is_from_me AS isFromMe,
+                date_created AS dateCreated, send_state AS sendState, error,
+                date_deleted AS dateDeleted
+           FROM messages WHERE guid = ?`,
+      )
+      .get(tempGuid) as {
+      guid: string;
+      chatId: number;
+      text: string;
+      isFromMe: number;
+      dateCreated: number;
+      sendState: string;
+      error: number;
+      dateDeleted: number | null;
+    };
+    const queueFixture = raw
+      .prepare(
+        `SELECT temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts,
+                next_retry_at AS nextRetryAt
+           FROM outgoing_queue WHERE temp_guid = ?`,
+      )
+      .get(tempGuid);
+    const storedMessage = (): unknown =>
+      raw
+        .prepare(
+          `SELECT guid, chat_id AS chatId, text, is_from_me AS isFromMe,
+                  date_created AS dateCreated, send_state AS sendState, error,
+                  date_deleted AS dateDeleted
+             FROM messages WHERE guid = ?`,
+        )
+        .get(tempGuid);
+    const storedQueue = (): unknown =>
+      raw
+        .prepare(
+          `SELECT temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts,
+                  next_retry_at AS nextRetryAt
+             FROM outgoing_queue WHERE temp_guid = ?`,
+        )
+        .get(tempGuid);
+
+    const triggerName = 'reject_delete_message_final_chat_update';
+    const canary = 'DELETE_MESSAGE_FINAL_CHAT_RAW_CANARY';
+    raw.exec(`
+      CREATE TRIGGER ${triggerName}
+      BEFORE UPDATE OF latest_message_date ON chats
+      WHEN NEW.id = ${chatId} AND NEW.latest_message_date = 300
+      BEGIN
+        SELECT RAISE(ABORT, '${canary}');
+      END
+    `);
+
+    const stages = {
+      queue: driverGate(),
+      ledger: driverGate(),
+      message: driverGate(),
+      chat: driverGate(),
+    };
+    type Delete = (table: unknown) => { where(condition: unknown): object };
+    type ConflictBuilder = { onConflictDoUpdate(config: unknown): object };
+    type Insert = (table: unknown) => { values(values: unknown): ConflictBuilder };
+    type All = (query: unknown) => unknown;
+    type Run = (query: unknown) => unknown;
+    const realDelete = db.delete.bind(db) as unknown as Delete;
+    const realInsert = db.insert.bind(db) as unknown as Insert;
+    const realAll = db.all.bind(db) as All;
+    const realRun = db.run.bind(db) as Run;
+    const deleteSpy = jest.spyOn(db, 'delete').mockImplementation(((table: unknown) => {
+      const builder = realDelete(table);
+      if (table !== outgoingQueue) return builder;
+      return new Proxy(builder, {
+        get(target, property) {
+          const value = Reflect.get(target, property, target);
+          if (property !== 'where') {
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (condition: unknown) => gateThenable(target.where(condition), stages.queue);
+        },
+      });
+    }) as unknown as AppDatabase['delete']);
+    const insertSpy = jest.spyOn(db, 'insert').mockImplementation(((table: unknown) => {
+      const builder = realInsert(table);
+      if (table !== messageDeletionLedger) return builder;
+      return new Proxy(builder, {
+        get(target, property) {
+          const value = Reflect.get(target, property, target);
+          if (property !== 'values') {
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (values: unknown) => {
+            const conflictBuilder = target.values(values);
+            return new Proxy(conflictBuilder, {
+              get(conflictTarget, conflictProperty) {
+                const conflictValue = Reflect.get(conflictTarget, conflictProperty, conflictTarget);
+                if (conflictProperty !== 'onConflictDoUpdate') {
+                  return typeof conflictValue === 'function'
+                    ? conflictValue.bind(conflictTarget)
+                    : conflictValue;
+                }
+                return (config: unknown) =>
+                  gateThenable(conflictTarget.onConflictDoUpdate(config), stages.ledger);
+              },
+            });
+          };
+        },
+      });
+    }) as unknown as AppDatabase['insert']);
+    let delayedMessageUpdate: Promise<unknown> | undefined;
+    const allSpy = jest.spyOn(db, 'all').mockImplementation(((query: unknown) => {
+      const shape = JSON.stringify(query).replace(/\s+/g, ' ').toLowerCase();
+      if (
+        !stages.message.didStart &&
+        shape.includes('update messages') &&
+        shape.includes('set date_deleted') &&
+        shape.includes('returning chat_id')
+      ) {
+        stages.message.didStart = true;
+        delayedMessageUpdate = stages.message.held
+          .then(() => realAll(query))
+          .finally(stages.message.markFinished);
+        void delayedMessageUpdate.catch(() => undefined);
+        return delayedMessageUpdate;
+      }
+      return realAll(query);
+    }) as unknown as AppDatabase['all']);
+    let delayedChatUpdate: Promise<unknown> | undefined;
+    const runSpy = jest.spyOn(db, 'run').mockImplementation(((query: unknown) => {
+      const shape = JSON.stringify(query).replace(/\s+/g, ' ').toLowerCase();
+      if (
+        !stages.chat.didStart &&
+        shape.includes('update chats') &&
+        shape.includes('latest_message_date') &&
+        shape.includes('associated_message_type is null')
+      ) {
+        stages.chat.didStart = true;
+        delayedChatUpdate = stages.chat.held
+          .then(() => realRun(query))
+          .finally(stages.chat.markFinished);
+        void delayedChatUpdate.catch(() => undefined);
+        return delayedChatUpdate;
+      }
+      return realRun(query);
+    }) as unknown as AppDatabase['run']);
+
+    let helperSettled = false;
+    let helperOutcome:
+      | Promise<
+          | { kind: 'resolved'; value: Awaited<ReturnType<typeof deleteMessageLocal>> }
+          | { kind: 'rejected'; error: unknown }
+        >
+      | undefined;
+    try {
+      try {
+        helperOutcome = deleteMessageLocal(db, tempGuid, deletedAt)
+          .then(
+            (value) => ({ kind: 'resolved' as const, value }),
+            (error: unknown) => ({ kind: 'rejected' as const, error }),
+          )
+          .finally(() => {
+            helperSettled = true;
+          });
+
+        await waitForDriverGate(stages.queue, 'message-delete outgoing-queue delete');
+        expect(helperSettled).toBe(false);
+        expect(raw.inTransaction).toBe(true);
+        expect(queueCount(raw, tempGuid)).toBe(1);
+        expect(deletionLedgerDate(raw, tempGuid)).toBeUndefined();
+        expect(tombstone(raw, tempGuid)).toBeNull();
+        expect(latestMessageDate(raw, chatId)).toBe(400);
+        expect(stages.ledger.didStart).toBe(false);
+        expect(stages.message.didStart).toBe(false);
+        expect(stages.chat.didStart).toBe(false);
+        stages.queue.release();
+        await stages.queue.finished;
+
+        await waitForDriverGate(stages.ledger, 'message-delete ledger insert');
+        expect(helperSettled).toBe(false);
+        expect(raw.inTransaction).toBe(true);
+        expect(queueCount(raw, tempGuid)).toBe(0);
+        expect(deletionLedgerDate(raw, tempGuid)).toBeUndefined();
+        expect(tombstone(raw, tempGuid)).toBeNull();
+        expect(latestMessageDate(raw, chatId)).toBe(400);
+        expect(stages.message.didStart).toBe(false);
+        expect(stages.chat.didStart).toBe(false);
+        stages.ledger.release();
+        await stages.ledger.finished;
+
+        await waitForDriverGate(stages.message, 'message-delete tombstone update');
+        expect(helperSettled).toBe(false);
+        expect(raw.inTransaction).toBe(true);
+        expect(queueCount(raw, tempGuid)).toBe(0);
+        expect(deletionLedgerDate(raw, tempGuid)).toBe(deletedAt);
+        expect(tombstone(raw, tempGuid)).toBeNull();
+        expect(latestMessageDate(raw, chatId)).toBe(400);
+        expect(stages.chat.didStart).toBe(false);
+        stages.message.release();
+        await stages.message.finished;
+
+        await waitForDriverGate(stages.chat, 'message-delete final chat update');
+        expect(helperSettled).toBe(false);
+        expect(raw.inTransaction).toBe(true);
+        expect(queueCount(raw, tempGuid)).toBe(0);
+        expect(deletionLedgerDate(raw, tempGuid)).toBe(deletedAt);
+        expect(tombstone(raw, tempGuid)).toBe(deletedAt);
+        expect(latestMessageDate(raw, chatId)).toBe(400);
+
+        stages.chat.release();
+        const [outcome] = await Promise.all([helperOutcome, stages.chat.finished]);
+        expect(outcome.kind).toBe('rejected');
+        if (outcome.kind === 'rejected') {
+          expect(errorMessageChain(outcome.error)).toContain(canary);
+        }
+        expect(helperSettled).toBe(true);
+        expect(raw.inTransaction).toBe(false);
+        expect(queueCount(raw, tempGuid)).toBe(1);
+        expect(storedQueue()).toEqual(queueFixture);
+        expect(deletionLedgerDate(raw, tempGuid)).toBeUndefined();
+        expect(tombstone(raw, tempGuid)).toBeNull();
+        expect(storedMessage()).toEqual(messageFixture);
+        expect(latestMessageDate(raw, chatId)).toBe(400);
+      } finally {
+        for (const gate of Object.values(stages)) gate.release();
+        try {
+          const drains: Promise<unknown>[] = [];
+          if (helperOutcome) drains.push(helperOutcome);
+          for (const gate of Object.values(stages)) {
+            if (gate.didStart) drains.push(gate.finished);
+          }
+          if (delayedMessageUpdate) drains.push(delayedMessageUpdate);
+          if (delayedChatUpdate) drains.push(delayedChatUpdate);
+          await Promise.allSettled(drains);
+        } finally {
+          runSpy.mockRestore();
+          allSpy.mockRestore();
+          insertSpy.mockRestore();
+          deleteSpy.mockRestore();
+        }
+      }
+    } finally {
+      raw.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+    }
+
+    await expect(deleteMessageLocal(db, tempGuid, deletedAt)).resolves.toBe('applied');
+    expect(raw.inTransaction).toBe(false);
+    expect(queueCount(raw, tempGuid)).toBe(0);
+    expect(deletionLedgerDate(raw, tempGuid)).toBe(deletedAt);
+    expect(tombstone(raw, tempGuid)).toBe(deletedAt);
+    expect(storedMessage()).toEqual({ ...messageFixture, dateDeleted: deletedAt });
+    expect(latestMessageDate(raw, chatId)).toBe(300);
+  });
+
   it('survives a re-sync of the same guids — the messages stay gone', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db); // m1@100, m2 mine@200, m3@300
@@ -922,8 +1816,7 @@ describe('deleteMessageLocal (the user’s own delete)', () => {
     // DELIVERED send keeps its temp guid, and an errored one may have landed anyway. Hard-deleting
     // destroyed the row the later echo promotes in place, so the message came back untombstoned.
     const row = raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get('temp-x1') as
-      | { d: number | null }
-      | undefined;
+      { d: number | null } | undefined;
     expect(row?.d).toBe(6_000);
     expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).not.toContain('temp-x1');
     const q = raw
@@ -935,7 +1828,7 @@ describe('deleteMessageLocal (the user’s own delete)', () => {
   it('is a safe no-op for an unknown guid', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
-    await expect(deleteMessageLocal(db, 'never-synced', 6_000)).resolves.toBeUndefined();
+    await expect(deleteMessageLocal(db, 'never-synced', 6_000)).resolves.toBe('recorded');
     const anyDeleted = raw
       .prepare('SELECT COUNT(*) c FROM messages WHERE date_deleted IS NOT NULL')
       .get() as { c: number };

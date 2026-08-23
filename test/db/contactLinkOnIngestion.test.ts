@@ -6,6 +6,7 @@ import {
   upsertHandles,
   type DeviceContact,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { Chat } from '@core/models';
 import { createTestDb } from '../support/testDb';
 
@@ -25,6 +26,45 @@ const contact = (over: Partial<DeviceContact>): DeviceContact => ({
 // without waiting for the next contacts sync. 1.5(b) name priority: the linked
 // contact name then wins over the raw address in participant/title resolution.
 describe('contact-link on handle ingestion (1.5)', () => {
+  it('queues a standalone handle upsert behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      raw
+        .prepare(
+          `INSERT INTO handles (address, service, display_name)
+           VALUES ('phantom@x.com', '', 'Phantom')`,
+        )
+        .run();
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const ingestion = upsertHandles(db, [{ address: 'durable@x.com' }]);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(raw.prepare("SELECT address FROM handles WHERE address = 'durable@x.com'").get()).toBe(
+      undefined,
+    );
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await ingestion;
+    expect(raw.prepare('SELECT address FROM handles ORDER BY address').all()).toEqual([
+      { address: 'durable@x.com' },
+    ]);
+  });
+
   it('links a freshly-ingested handle to an existing contact (name + avatar + contact_id)', async () => {
     const { db, raw } = await createTestDb();
     // Contacts are already synced on the device...

@@ -1,3 +1,7 @@
+import { logger } from '@core/secure';
+import { stashPendingNotification } from './pendingNav';
+import { resolveNotificationData } from './notificationRouting';
+
 /**
  * Turn a tapped notification's `data` into a chat deep-link, and navigate there.
  *
@@ -33,7 +37,15 @@ export interface NotificationOpenTarget {
  * Tolerant of the loosely-typed native `data` (values may arrive as strings over the bridge).
  */
 export function notificationOpenTarget(
-  data: Record<string, unknown> | undefined,
+  data:
+    | {
+        [key: string]: unknown;
+        chatGuid?: unknown;
+        messageGuid?: unknown;
+        messageDate?: unknown;
+        reminder?: unknown;
+      }
+    | undefined,
 ): NotificationOpenTarget | null {
   const chatGuid = typeof data?.chatGuid === 'string' ? data.chatGuid : undefined;
   if (!chatGuid) return null;
@@ -64,15 +76,25 @@ export function chatDeepLink(target: NotificationOpenTarget): string {
 
 /**
  * Navigate to the chat a tapped notification is about, if any. `navigate` is the caller's
- * `router.push` — injected so this is testable without expo-router. A no-op for a
- * notification that isn't about a chat.
+ * `router.push` — injected so this is testable without expo-router. Returns `true` when the
+ * payload was handled (including an intentional no-op for a non-chat notification), or `false`
+ * when route resolution/navigation failed and a one-shot caller should preserve the payload.
  */
-export function openFromNotification(
+export async function openFromNotification(
   data: Record<string, unknown> | undefined,
   navigate: (path: string) => void,
-): void {
-  const target = notificationOpenTarget(data);
-  if (target) navigate(chatDeepLink(target));
+): Promise<boolean> {
+  try {
+    const target = notificationOpenTarget((await resolveNotificationData(data)) ?? undefined);
+    if (target) navigate(chatDeepLink(target));
+    return true;
+  } catch (error) {
+    // New native payloads need the encrypted DB to resolve local keys. A foreground caller invokes
+    // this fire-and-forget, so contain a failed DB open here rather than creating an unhandled
+    // rejection. Returning false lets the one-shot tap drain preserve its payload for a later retry.
+    logger.warn('[notif] notification route could not be opened', error);
+    return false;
+  }
 }
 
 /** Minimal structural shape of a notify-kit InitialNotification / EventDetail read here. */
@@ -108,15 +130,15 @@ function isRealPress(initial: TappedNotification | null): boolean {
  *  - the `pendingNav` stash set by `onBackgroundEvent` (the deterministic same-JS-context backstop
  *    for a background-alive press, in case the sticky event isn't delivered).
  *
- * The pending stash is CLEARED (takePending empties the slot) so a stale tap can't re-fire on a
- * later resume, and the launch event is accepted only when it is a genuine press (see
- * `isRealPress`) — Android keeps re-serving the launching notification from the Activity's intent,
- * which would otherwise TRAP the user: cold-start into chat A, press Back, and the next drain
- * (this runs on every resume, and used to run on every navigation) pushes straight back into A,
- * with the inbox unreachable. Then a SINGLE `openFromNotification` runs — the two channels describe
- * the same press, so navigating once (preferring the initial's data) avoids pushing the chat twice
- * onto the stack. `runPressSideEffects` runs the DB side-effects (reminder cleanup) for a real
- * launch press. Every dependency is injected, so this is unit-testable without notifee or
+ * The pending stash is destructively read (takePending empties the slot), and the launch event is
+ * accepted only when it is a genuine press (see `isRealPress`) — Android keeps re-serving the
+ * launching notification from the Activity's intent, which would otherwise TRAP the user:
+ * cold-start into chat A, press Back, and the next drain pushes straight back into A. Then a SINGLE
+ * `openFromNotification` runs — the two channels describe the same press, so navigating once
+ * (preferring the initial's data) avoids pushing the chat twice onto the stack. A failed route lookup
+ * restores that one chosen payload to the pending slot; a successful open consumes it permanently.
+ * Navigation (or restoration) happens BEFORE best-effort press cleanup, so a cleanup failure cannot
+ * cost the one-shot tap. Every dependency is injected, so this is unit-testable without notifee or
  * expo-router.
  */
 export async function drainNotificationTap<T extends TappedNotification>(
@@ -124,10 +146,18 @@ export async function drainNotificationTap<T extends TappedNotification>(
   takePending: () => Record<string, unknown> | null,
   runPressSideEffects: (detail: T) => void | Promise<void>,
   navigate: (path: string) => void,
+  restorePending: (data: Record<string, unknown>) => void = stashPendingNotification,
 ): Promise<void> {
   const raw = await getInitial();
   const initial = isRealPress(raw) ? raw : null;
   const pending = takePending();
+  const tapData = initial?.notification?.data ?? pending ?? undefined;
+  const handled = await openFromNotification(tapData, navigate);
+  // Both native launch state and the pending slot are destructive reads. Preserve ONE copy when
+  // the encrypted route lookup failed so the next foreground drain can retry instead of silently
+  // losing the tap. When both sources described the same press, `tapData` already chose one.
+  if (!handled && tapData) restorePending(tapData);
+  // A cleanup failure is still reported to the layout-level task boundary, but only after the
+  // one-shot route either opened successfully or was preserved for a later retry.
   if (initial) await runPressSideEffects(initial);
-  openFromNotification(initial?.notification?.data ?? pending ?? undefined, navigate);
 }

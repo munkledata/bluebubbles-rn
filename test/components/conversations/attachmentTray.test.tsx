@@ -18,7 +18,8 @@
  * is stubbed to a plain host View.
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import { logger } from '@core/secure';
 
 jest.mock('expo-image', () => {
   const React = require('react');
@@ -51,6 +52,10 @@ const getAssets = MediaLibrary.getAssetsAsync as unknown as jest.Mock;
 const getAssetInfo = MediaLibrary.getAssetInfoAsync as unknown as jest.Mock;
 const requestCamera = ImagePicker.requestCameraPermissionsAsync as unknown as jest.Mock;
 const launchCamera = ImagePicker.launchCameraAsync as unknown as jest.Mock;
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 /** A device photo asset as expo-media-library/legacy returns it. */
 const PHOTO = {
@@ -93,6 +98,12 @@ describe('AttachmentTray — always-visible controls', () => {
 });
 
 describe('AttachmentTray — media library', () => {
+  it('requests photo/video access without requesting the audio library', async () => {
+    grantWith([]);
+    await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+    await waitFor(() => expect(requestPerm).toHaveBeenCalledWith(false, ['photo', 'video']));
+  });
+
   it('renders a thumbnail per asset with photo/video-specific labels', async () => {
     grantWith([PHOTO, VIDEO]);
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
@@ -140,12 +151,18 @@ describe('AttachmentTray — media library', () => {
 
   it('falls back to the raw asset uri when getAssetInfoAsync throws', async () => {
     grantWith([PHOTO]);
-    getAssetInfo.mockRejectedValue(new Error('scoped storage'));
+    const error = new Error('scoped storage');
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    getAssetInfo.mockRejectedValue(error);
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
     fireEvent.press(await screen.findByLabelText('Attach photo'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ uri: 'ph://p1' })),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      '[attachment-tray] getAssetInfoAsync failed; staging raw asset uri',
+      error,
     );
   });
 
@@ -159,12 +176,15 @@ describe('AttachmentTray — media library', () => {
   });
 
   it('shows the allow-access prompt when the media load throws', async () => {
+    const error = new Error('boom');
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     requestPerm.mockResolvedValue({ granted: true, accessPrivileges: 'all' });
-    getAssets.mockRejectedValue(new Error('boom'));
+    getAssets.mockRejectedValue(error);
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
     expect(
       await screen.findByText('Allow photo access in Settings to attach from your library.'),
     ).toBeTruthy();
+    expect(warn).toHaveBeenCalledWith('[attachment-tray] could not load media library', error);
   });
 });
 
@@ -243,15 +263,23 @@ describe('AttachmentTray — camera capture', () => {
     );
   });
 
-  it('stages nothing when camera permission is denied', async () => {
+  it('stages nothing and explains recovery when camera permission is denied', async () => {
     grantWith([]);
     requestCamera.mockResolvedValue({ granted: false });
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
-    fireEvent.press(screen.getByLabelText('Take a photo'));
-    await waitFor(() => expect(requestCamera).toHaveBeenCalled());
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Take a photo'));
+      await Promise.resolve();
+    });
+    expect(requestCamera).toHaveBeenCalled();
     expect(launchCamera).not.toHaveBeenCalled();
     expect(onPick).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        'Camera access was denied. Enable it in system settings to take a photo.',
+      ),
+    ).toBeTruthy();
   });
 
   it('stages nothing when the capture is cancelled', async () => {

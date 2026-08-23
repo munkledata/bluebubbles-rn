@@ -6,6 +6,10 @@ plugins {
 group = 'com.gator.pasteinput'
 version = '0.1.0'
 
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}
+
 // androidx.core (ViewCompat.setOnReceiveContentListener / ContentInfoCompat, both added in core
 // 1.7) is on the classpath transitively: expo-modules-core exposes `api "androidx.core:core-ktx"`
 // (currently 1.17.0), so no explicit dependency is needed — same as gator-share-shortcuts.

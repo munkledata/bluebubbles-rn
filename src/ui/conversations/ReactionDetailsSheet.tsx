@@ -3,8 +3,6 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { reactionMeta } from '@core/reactions/reactionType';
 import type { ReactionRow } from '@db/repositories';
-import { useRedactedModeStore } from '@state/redactedModeStore';
-import { redactTitle } from '@utils';
 import { useTheme } from '../theme';
 
 interface ReactionDetailsSheetProps {
@@ -24,9 +22,8 @@ function glyphOf(r: ReactionRow): string {
 /**
  * "Who reacted": a tap on a message's reaction badges opens this sheet listing each reactor and the
  * reaction they gave. The badge cluster on the bubble only shows one badge per distinct type (and
- * whether it's yours) — in a group that hides WHO reacted, which this surfaces. Reactor names honor
- * redacted mode (masked like the sender header) so the sheet can't leak identity a redacted thread
- * hides. Same plain Modal + Pressable bottom-sheet pattern as EditHistorySheet.
+ * whether it's yours) — in a group that hides WHO reacted, which this surfaces. Same plain Modal +
+ * Pressable bottom-sheet pattern as EditHistorySheet.
  */
 export function ReactionDetailsSheet({
   data,
@@ -34,12 +31,12 @@ export function ReactionDetailsSheet({
 }: ReactionDetailsSheetProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const redacted = useRedactedModeStore((s) => s.enabled);
-  const reactions = data?.reactions ?? [];
+  if (!data) return <></>;
+  const reactions = data.reactions;
 
   return (
     <Modal visible={!!data} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      <Pressable testID="reaction-details-backdrop" style={styles.backdrop} onPress={onClose}>
         <Pressable
           style={[
             styles.sheet,
@@ -52,11 +49,7 @@ export function ReactionDetailsSheet({
           <Text style={[styles.title, { color: theme.color.label }]}>Reactions</Text>
           <ScrollView style={styles.list}>
             {reactions.map((r, i) => {
-              const name = r.isFromMe
-                ? 'You'
-                : redacted
-                  ? redactTitle(r.senderName ?? '', true)
-                  : (r.senderName ?? 'Unknown');
+              const name = r.isFromMe ? 'You' : (r.senderName ?? 'Unknown');
               return (
                 <View
                   key={`${r.isFromMe ? 'me' : (r.senderName ?? '?')}-${r.baseType}-${r.emoji ?? ''}-${i}`}

@@ -6,7 +6,7 @@ import {
   readableTextOn,
   relativeLuminance,
 } from '@ui/theme/adaptiveFromImage';
-import type { ThemeMode, ThemeTokens } from '@ui/theme/tokens';
+import { PRESETS, type ThemeMode, type ThemeTokens } from '@ui/theme/tokens';
 
 const HEX = /^#[0-9A-F]{6}$/;
 
@@ -74,6 +74,40 @@ describe('pure colour helpers', () => {
     // It clears AA on both extremes.
     expect(contrastRatio(onLight, '#FFFFFF')).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(onDark, '#000000')).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('built-in interactive foreground contrast', () => {
+  it('keeps every preset bubble, filled control, badge, and mention foreground at WCAG AA', () => {
+    for (const [presetKey, { tokens }] of Object.entries(PRESETS)) {
+      const { color } = tokens;
+      const b = color.bubble;
+      const surfaces = {
+        'filled tint button': color.tint,
+        'filled destructive button': color.destructive,
+        'unread badge': color.tint,
+        'iMessage sent bubble': b.senderBackground,
+        'SMS sent bubble': b.smsBackground,
+        'RCS sent bubble': b.rcsBackground,
+      };
+
+      for (const [role, background] of Object.entries(surfaces)) {
+        const foreground = readableTextOn(background);
+        const ratio = contrastRatio(foreground, background);
+        if (ratio < 4.5) {
+          throw new Error(
+            `${presetKey} ${role}: ${foreground} on ${background} is ${ratio.toFixed(2)}:1`,
+          );
+        }
+      }
+
+      // Received mentions retain the accent only when that pair clears AA; otherwise the same
+      // readable body foreground is used. This mirrors MessageBubble's received-mention rule.
+      const receivedBg = b.receivedBackgroundBottom;
+      const receivedMention =
+        contrastRatio(color.tint, receivedBg) >= 4.5 ? color.tint : readableTextOn(receivedBg);
+      expect(contrastRatio(receivedMention, receivedBg)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

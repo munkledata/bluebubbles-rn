@@ -11,6 +11,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -33,8 +34,7 @@ function count(raw: Database.Database, table: string, where: string, ...args: un
 const tombstone = (raw: Database.Database, guid: string): number | null | undefined =>
   (
     raw.prepare('SELECT date_deleted d FROM messages WHERE guid = ?').get(guid) as
-      | { d: number | null }
-      | undefined
+      { d: number | null } | undefined
   )?.d;
 
 describe('cancelOutgoing (2.3)', () => {
@@ -214,7 +214,14 @@ describe('cancelOutgoing (2.3)', () => {
       // THE REGRESSION: a hard delete here was undone by the very next chat open.
       await upsertMessages(
         db,
-        [Message.parse({ guid: 'real-flight', isFromMe: true, text: 'too late', dateCreated: 100 })],
+        [
+          Message.parse({
+            guid: 'real-flight',
+            isFromMe: true,
+            text: 'too late',
+            dateCreated: 100,
+          }),
+        ],
         () => chatId,
         new Map(),
       );
@@ -270,10 +277,12 @@ describe('cancelOutgoing (2.3)', () => {
       // The send had actually gone through; its echo arrives minutes later. Promoted in place,
       // still hidden — a hard delete here left nothing for the echo to attach the deletion to and
       // the message returned as an ordinary sent bubble.
-      await reconcileEchoByContent(
-        db,
-        { guid: 'real-errd', isFromMe: true, text: 'failed', dateCreated: 100 },
-        chatId,
+      await withDbTransaction(db, (context) =>
+        reconcileEchoByContent(
+          context,
+          { guid: 'real-errd', isFromMe: true, text: 'failed', dateCreated: 100 },
+          chatId,
+        ),
       );
       expect(tombstone(raw, 'real-errd')).toBe(9_000);
       expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);

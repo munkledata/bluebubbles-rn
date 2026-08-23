@@ -76,6 +76,18 @@ describe('useUploadStore', () => {
     expect(entries()['att-1']).toBeUndefined();
     expect(entries()['att-2']).toMatchObject({ sent: 2500, total: 5000, name: 'clip.mp4' });
   });
+
+  it('clears every account-scoped progress entry on reset', () => {
+    useUploadStore.getState().start('att-1', INFO);
+    useUploadStore.getState().start('att-2', { ...INFO, name: 'clip.mp4' });
+
+    useUploadStore.getState().reset();
+
+    expect(entries()).toEqual({});
+    // Native progress can race teardown. With no entry left, it must not resurrect old-account UI.
+    useUploadStore.getState().progress('att-1', 900, 1000);
+    expect(entries()).toEqual({});
+  });
 });
 
 describe('uploadStoreSink', () => {

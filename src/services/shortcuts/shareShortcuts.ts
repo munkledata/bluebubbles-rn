@@ -1,242 +1,55 @@
 import { requireOptionalNativeModule } from 'expo';
 import { logger } from '@core/secure';
-import type { InboxRow } from '@db/repositories';
-import { participantAvatars } from '@utils/chat';
-
-// NOTE: `@db/database` and `@state/redactedModeStore` are imported LAZILY inside
-// `refreshShareShortcuts` on purpose — both pull in op-sqlite at module load, which would drag a
-// native dependency into this module's import graph (and break its node-project tests).
 
 /**
- * Android Direct Share bridge. Publishes recent conversations as dynamic "sharing shortcuts" so
- * Gator shows in the share sheet's PRIORITIZED row (tap a chat → share straight into it). All native
- * calls go through the OPTIONAL native module `GatorShareShortcuts` (see
- * `modules/gator-share-shortcuts/`): on a JS bundle running against a build that hasn't linked it yet
- * (pre-rebuild), or under Jest, the lookup returns null and every function below is a safe no-op — so
- * this never crashes the app or the tests. See the delivery side in `ShareIntentNavigator`.
+ * IPC-01 one-way cleanup bridge.
  *
- * NOTE: which MIME types the chips appear for is a NATIVE/manifest decision, not a JS one — see the
- * `<share-target>` in `plugins/withShareTargets.js`. Publishing here is necessary but not sufficient.
+ * Older Gator builds published persistent Android Direct Share shortcuts containing conversation
+ * names and contact photos. Removing the manifest declaration does not remove that system state,
+ * so the root layout keeps this local native module long enough to clear it on every app start.
+ *
+ * Deliberately expose NO publish, launch-target, or usage-reporting API here. Re-enabling those
+ * methods before an owned, bounded inbound-share module exists would recreate a privacy leak and
+ * leave useless launcher shortcuts behind even though the candidate accepts no share intents.
  */
 
-export interface ShareShortcut {
-  id: string;
-  name: string;
-  avatarPath?: string | null;
-}
-
-interface GatorShareShortcutsNative {
-  setShareShortcuts: (items: ShareShortcut[]) => Promise<void>;
-  clearShareShortcuts: () => void;
-  getLaunchShortcutId: () => string | null;
-  /** Added alongside the Direct Share native batch; absent on older builds. */
-  reportShortcutUsed?: (id: string) => Promise<void>;
+interface GatorShareShortcutsCleanupNative {
+  clearShareShortcuts: (revision: number) => void;
 }
 
 /**
- * How many conversations to offer the system. The NATIVE side does the real clamp against
- * `getMaxShortcutCountPerActivity()` (devices typically allow 10-15), so sending a few extra
- * candidates is safe even on a build whose native half still caps lower.
+ * Seed from wall time so a React-context reload in the same Android process advances beyond clear
+ * revisions issued by the previous context. Values remain below Number.MAX_SAFE_INTEGER.
  */
-const MAX = 10;
+const shortcutMutationRevisionBase = Date.now() * 1000;
+let shortcutMutationSequence = 0;
 
-/** Guarded so a build without the native module (pre-rebuild) or Jest just gets null → no-ops. */
-function getNative(): GatorShareShortcutsNative | null {
+function nextShortcutMutationRevision(): number {
+  shortcutMutationSequence += 1;
+  return shortcutMutationRevisionBase + shortcutMutationSequence;
+}
+
+function getNative(): GatorShareShortcutsCleanupNative | null {
   try {
-    return requireOptionalNativeModule<GatorShareShortcutsNative>('GatorShareShortcuts');
+    return requireOptionalNativeModule<GatorShareShortcutsCleanupNative>('GatorShareShortcuts');
   } catch {
     return null;
   }
 }
 
 /**
- * The last payload we handed to the system, so repeat publishes are a string compare.
- *
- * This replaces the old "top-4 guids" memo in ConversationListScreen, which never noticed a
- * RENAMED chat or a newly synced contact photo — the shortcut kept its stale label/icon until the
- * chat order happened to change. Keying on the CONTENT fixes that while still making the frequent
- * reactive ticks free.
+ * Remove every shortcut persisted by an older build. Best-effort and synchronous so root startup
+ * can sanitize system UI before account/DB boot; false means the optional module was unavailable
+ * or Android rejected the clear.
  */
-let lastPublished: string | null = null;
-
-/** Sentinel for "we have already cleared the chips" — distinct from any real serialized payload. */
-const CLEARED = 'redacted-cleared';
-
-/**
- * Pure mapping from inbox rows to Direct Share targets.
- *
- * Redacted mode publishes NOTHING: a masked chip ("Contact", no photo) is useless to tap, and the
- * bare existence of N chips still leaks how many conversations there are. Clearing is both more
- * private and simpler than masking.
- */
-export function toShareShortcuts(
-  rows: InboxRow[],
-  opts: { redacted: boolean; max?: number },
-): ShareShortcut[] {
-  if (opts.redacted) return [];
-  return rows.slice(0, opts.max ?? MAX).map((r) => ({
-    id: r.guid,
-    name: chatTitle(r),
-    avatarPath: firstAvatar(r.participantAvatars),
-  }));
-}
-
-/**
- * Publish the most-recent conversations as Direct Share targets (best-effort, never throws).
- *
- * `redacted` is passed IN rather than read from the store here, so this module needs no
- * store/DB import and the behaviour stays explicit at every call site.
- *
- * `loaded` says the caller KNOWS the inbox is empty, as opposed to not having read it yet — see the
- * empty-list branch. It defaults to false, so a caller that cannot tell the two apart keeps the
- * old, conservative behaviour.
- */
-export function publishShareShortcuts(
-  rows: InboxRow[],
-  opts: { redacted: boolean; loaded?: boolean },
-): void {
+export function clearShareShortcuts(): boolean {
   const native = getNative();
-  if (!native) return;
-  // Redacted mode must actively CLEAR, not merely skip publishing — dynamic shortcuts are
-  // PERSISTENT system state that outlives the process, so chips published in an earlier
-  // (non-redacted) session are still live on the share sheet after a restart. Guarding on the
-  // sentinel (rather than on `lastPublished !== null`) makes the first call after any restart
-  // clear exactly once, while later ticks stay free.
-  if (opts.redacted) {
-    if (lastPublished !== CLEARED) {
-      clearShareShortcuts();
-      lastPublished = CLEARED;
-    }
-    return;
-  }
-
-  const shortcuts = toShareShortcuts(rows, { redacted: false });
-  if (shortcuts.length === 0) {
-    // "Not loaded yet" and "genuinely nothing to show" are the same LENGTH but opposite
-    // instructions, and length alone cannot tell them apart — so the caller says which.
-    //
-    // Unknown → leave the existing chips alone rather than churning them on every cold start.
-    // KNOWN-empty → clear, for the same reason the redacted branch above does: dynamic shortcuts
-    // are PERSISTENT system state that outlives the process, so "we published nothing this tick"
-    // is not the same as "there is nothing published". Deleting your last conversation used to
-    // leave that contact's name and photo live in the share sheet's priority row indefinitely, and
-    // tapping the orphan re-opened (and re-synced) the very thread the user deleted. The chat is
-    // hidden by its tombstone, so unlike the old hard delete nothing ever brings it back to make
-    // the chip truthful again. Sentinel-guarded so the clear happens once, not on every tick.
-    if (opts.loaded && lastPublished !== CLEARED) {
-      clearShareShortcuts();
-      lastPublished = CLEARED;
-    }
-    return;
-  }
-
-  const key = JSON.stringify(shortcuts);
-  if (key === lastPublished) return;
+  if (!native) return false;
   try {
-    void native.setShareShortcuts(shortcuts)?.catch?.((err: unknown) => {
-      lastPublished = null; // let the next tick retry
-      logger.warn(
-        `[shortcuts] publish rejected: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
-    lastPublished = key;
-  } catch {
-    // best-effort — a failed publish must never break the inbox
-  }
-}
-
-/**
- * Read the inbox and publish, without needing a mounted list. Safe to call from anywhere, any
- * number of times — the content dedupe makes a redundant call nearly free.
- *
- * Needed because ConversationListScreen is NOT always mounted: opening the app straight into a
- * chat from a notification tap, or a background contact sync landing new avatars, would otherwise
- * leave the system shortcuts stale indefinitely.
- */
-export async function refreshShareShortcuts(): Promise<void> {
-  if (!getNative()) return;
-  try {
-    const [{ getDatabase }, { listChatsForInbox }, { useRedactedModeStore }] = await Promise.all([
-      import('@db/database'),
-      import('@db/repositories'),
-      import('@state/redactedModeStore'),
-    ]);
-    // `getDatabase` throws until the DB is open (e.g. while app-locked at boot) — nothing to
-    // publish yet; the inbox screen and the next refresh will catch up.
-    const rows = await listChatsForInbox(getDatabase());
-    // `loaded: true` — the query above just resolved, so an empty result really is an empty inbox
-    // and any surviving chips are orphans that must be cleared.
-    publishShareShortcuts(rows, {
-      redacted: useRedactedModeStore.getState().enabled,
-      loaded: true,
-    });
+    native.clearShareShortcuts(nextShortcutMutationRevision());
+    return true;
   } catch (err) {
-    logger.debug('[shortcuts] refresh skipped', err);
+    logger.warn(`[shortcuts] clear failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
-}
-
-/** Remove all published Direct Share targets (e.g. on logout, or when redacted mode turns on). */
-export function clearShareShortcuts(): void {
-  try {
-    getNative()?.clearShareShortcuts();
-  } catch {
-    // best-effort
-  }
-  // Reset the dedupe key so the next publish always goes through.
-  lastPublished = null;
-}
-
-/**
- * The chat guid of the Direct Share target the user just tapped, or null for a plain share. Consumed
- * once per share by the navigator to route to that chat instead of the new-message picker.
- */
-export function getLaunchShortcutId(): string | null {
-  try {
-    return getNative()?.getLaunchShortcutId() ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Tell Android this conversation was used, so its People Service learns who the user actually
- * messages and ranks the chips accordingly. No-op on a build whose native half predates it.
- */
-export function reportChatOpened(chatGuid: string): void {
-  if (!chatGuid) return;
-  try {
-    void getNative()?.reportShortcutUsed?.(chatGuid);
-  } catch {
-    // best-effort ranking signal only
-  }
-}
-
-/** Best display name for a shortcut label (mirrors the inbox tile's title resolution). */
-function chatTitle(r: InboxRow): string {
-  return (
-    r.customName?.trim() ||
-    r.displayName?.trim() ||
-    r.participantNames?.split(',')[0]?.trim() ||
-    r.chatIdentifier ||
-    'Conversation'
-  );
-}
-
-/**
- * First participant avatar as a uri (native falls back to the app icon when absent).
- *
- * MUST use the shared `participantAvatars` parser: the inbox query joins avatars with `'|||'`
- * (`group_concat(COALESCE(h.avatar, ''), '|||')`), NOT `','` — a comma split handed the native
- * side the whole unsplit blob for every group chat (and any single avatar uri containing a
- * comma), so the icon never decoded and every row fell back to the launcher icon.
- */
-function firstAvatar(avatars: string | null): string | null {
-  // First AVAILABLE avatar, not the first slot — the list has a null per participant without a
-  // photo, so a group whose first member has none would otherwise get the launcher icon.
-  return participantAvatars(avatars).find((a) => a !== null) ?? null;
-}
-
-/** TEST ONLY — reset the publish dedupe between cases. */
-export function __resetShareShortcutsCache(): void {
-  lastPublished = null;
 }

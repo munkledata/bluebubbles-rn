@@ -16,14 +16,18 @@
  * coalescing wrapper is under test here.
  */
 const requestPermissionsAsync = jest.fn();
+const getPermissionsAsync = jest.fn();
 const getContactsAsync = jest.fn();
+const presentContactPickerAsync = jest.fn();
 const matchContactsToHandles = jest.fn();
 const upsertContacts = jest.fn();
 const refreshShareShortcuts = jest.fn();
 
 jest.mock('expo-contacts/legacy', () => ({
   requestPermissionsAsync,
+  getPermissionsAsync,
   getContactsAsync,
+  presentContactPickerAsync,
   Fields: {
     Name: 'name',
     FirstName: 'firstName',
@@ -41,17 +45,66 @@ jest.mock('@/services/contacts/serverAvatars', () => ({
 }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({ refreshShareShortcuts }));
 
-import { syncContacts } from '@/services/contacts/contactsService';
+// eslint-disable-next-line import/first
+import {
+  ContactsPermissionDeniedError,
+  isContactsAccountChangedError,
+  isContactsPermissionDeniedError,
+  pickContact,
+  syncContacts,
+} from '@/services/contacts/contactsService';
+// eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 // jest's clearMocks wipes call history but not implementations — re-arm both every test.
 beforeEach(() => {
   requestPermissionsAsync.mockResolvedValue({ status: 'granted' });
+  getPermissionsAsync.mockResolvedValue({ status: 'granted' });
   upsertContacts.mockResolvedValue(0);
   matchContactsToHandles.mockResolvedValue(0);
 });
 
+describe('pickContact permission outcome', () => {
+  it('distinguishes permission denial from a canceled picker', async () => {
+    requestPermissionsAsync.mockResolvedValueOnce({ status: 'denied' });
+
+    const denied = pickContact();
+    await expect(denied).rejects.toBeInstanceOf(ContactsPermissionDeniedError);
+    await denied.catch((error) => expect(isContactsPermissionDeniedError(error)).toBe(true));
+    expect(presentContactPickerAsync).not.toHaveBeenCalled();
+
+    requestPermissionsAsync.mockResolvedValueOnce({ status: 'granted' });
+    presentContactPickerAsync.mockResolvedValueOnce(null);
+    await expect(pickContact()).resolves.toBeNull();
+  });
+});
+
 describe('syncContacts coalescing', () => {
+  it('checks an existing grant without prompting during automatic startup sync', async () => {
+    getPermissionsAsync.mockResolvedValueOnce({ status: 'undetermined' });
+
+    await expect(syncContacts()).rejects.toThrow('contacts-permission-denied');
+
+    expect(getPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(requestPermissionsAsync).not.toHaveBeenCalled();
+    expect(getContactsAsync).not.toHaveBeenCalled();
+  });
+
+  it('requests permission for the explicit forced Settings sync', async () => {
+    getContactsAsync.mockResolvedValueOnce({ data: [] });
+
+    await expect(syncContacts({ force: true })).resolves.toEqual({ contacts: 0, matched: 0 });
+
+    expect(requestPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(getPermissionsAsync).not.toHaveBeenCalled();
+    expect(getContactsAsync).toHaveBeenCalledTimes(1);
+  });
+
   it('shares one in-flight run, then allows a fresh one once it settles', async () => {
     let release!: () => void;
     getContactsAsync.mockImplementation(
@@ -255,31 +308,97 @@ describe('syncContacts coalescing', () => {
     expect(getContactsAsync).toHaveBeenCalledTimes(2);
   });
 
-  /**
-   * This run is fired-and-forgotten from the tail of every sync, so it routinely outlives its
-   * parent — and `awaitSyncIdle` explicitly does NOT wait for it, so it can still be running after
-   * `forget()` has wiped the DB and dropped the Direct Share chips (which `runForget` does LAST).
-   * Publishing then would put the previous account's conversation names and contact photos back
-   * into the system share sheet, where nothing later clears them (a refresh over an emptied inbox
-   * returns early rather than publishing zero). The absent session is the only thing that stops it.
-   */
-  describe('Direct Share chips', () => {
+  it("does not let account B join account A's delayed native contact read", async () => {
+    let finishAccountA!: (value: { data: [] }) => void;
+    getContactsAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ data: [] }>((resolve) => {
+            finishAccountA = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ data: [] });
+
+    const accountA = syncContacts().catch((error: unknown) => error);
+    for (let i = 0; i < 10 && finishAccountA == null; i += 1) await Promise.resolve();
+    expect(finishAccountA).toBeDefined();
+
+    // Permission/contact reads are deliberately outside the teardown drain, so Disconnect can
+    // finish immediately even while Android still owns the pending native promise.
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+
+    const accountB = syncContacts();
+    await expect(accountB).resolves.toEqual({ contacts: 0, matched: 0 });
+    expect(getContactsAsync).toHaveBeenCalledTimes(2);
+    expect(upsertContacts).toHaveBeenCalledTimes(1);
+    expect(matchContactsToHandles).toHaveBeenCalledTimes(1);
+
+    finishAccountA({ data: [] });
+    expect(isContactsAccountChangedError(await accountA)).toBe(true);
+    // A's late result never gets a DB phase after B has opened.
+    expect(upsertContacts).toHaveBeenCalledTimes(1);
+    expect(matchContactsToHandles).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains an admitted DB statement, then stops before the next write after Disconnect', async () => {
+    getContactsAsync.mockResolvedValue({ data: [] });
+    let enteredCommit!: () => void;
+    let finishCommit!: () => void;
+    const commitEntered = new Promise<void>((resolve) => {
+      enteredCommit = resolve;
+    });
+    const commitGate = new Promise<void>((resolve) => {
+      finishCommit = resolve;
+    });
+    upsertContacts.mockImplementationOnce(
+      async (
+        _db: unknown,
+        _items: unknown,
+        runDbTask: (task: () => Promise<number>) => Promise<number>,
+      ) =>
+        runDbTask(async () => {
+          enteredCommit();
+          await commitGate;
+          return 1;
+        }),
+    );
+
+    const run = syncContacts().catch((error: unknown) => error);
+    await commitEntered;
+
+    let teardownFinished = false;
+    const teardown = pauseRealtimeDeliveries().then(() => {
+      teardownFinished = true;
+    });
+    await Promise.resolve();
+    expect(teardownFinished).toBe(false);
+
+    finishCommit();
+    await teardown;
+    expect(isContactsAccountChangedError(await run)).toBe(true);
+    expect(matchContactsToHandles).not.toHaveBeenCalled();
+    resumeRealtimeDeliveries();
+  });
+
+  /** IPC-01 containment: contact sync must never republish persistent chat names/photos. */
+  describe('disabled Direct Share publication', () => {
     afterEach(() => {
       useSessionStore.getState().reset();
     });
 
-    it('are not re-published once the session is gone', async () => {
+    it('does not refresh shortcuts without a session', async () => {
       getContactsAsync.mockResolvedValue({ data: [] });
-      useSessionStore.getState().reset(); // what forget() does before it drains + wipes
+      useSessionStore.getState().reset();
       await syncContacts();
       expect(refreshShareShortcuts).not.toHaveBeenCalled();
     });
 
-    it('are refreshed while a session exists (names/photos just changed)', async () => {
+    it('does not refresh shortcuts even when names/photos change in a live session', async () => {
       getContactsAsync.mockResolvedValue({ data: [] });
       useSessionStore.getState().hydrated({ origin: 'https://server.example', password: 'pw' });
       await syncContacts();
-      expect(refreshShareShortcuts).toHaveBeenCalledTimes(1);
+      expect(refreshShareShortcuts).not.toHaveBeenCalled();
     });
   });
 });

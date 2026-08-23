@@ -3,11 +3,13 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import { upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
 import { createTestDb } from '../support/testDb';
 
 const okHttp = { post: async () => ({ guid: 'm1' }) } as unknown as HttpClient;
+const unsendOkHttp = { post: async () => ({ unsent: true }) } as unknown as HttpClient;
 const failHttp = {
   post: async () => {
     throw new ApiError('no_connection', 'offline', 0);
@@ -29,7 +31,54 @@ function capturingHttp(impl: () => Promise<unknown>): { http: HttpClient; body()
 const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 
-async function seed(db: AppDatabase) {
+function attributedBody(text: string): string {
+  return JSON.stringify([{ string: text, runs: [] }]);
+}
+
+function ftsHits(raw: Database.Database, query: string): number {
+  const row = raw
+    .prepare('SELECT COUNT(*) AS count FROM messages_fts WHERE messages_fts MATCH ?')
+    .get(query) as { count: number };
+  return row.count;
+}
+
+type Outcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; error: unknown };
+
+function observe<T>(promise: Promise<T>): { outcome: Promise<Outcome<T>>; settled: () => boolean } {
+  let didSettle = false;
+  const outcome = promise.then<Outcome<T>, Outcome<T>>(
+    (value) => ({ kind: 'fulfilled', value }),
+    (error: unknown) => ({ kind: 'rejected', error }),
+  );
+  void outcome.then(() => {
+    didSettle = true;
+  });
+  return { outcome, settled: () => didSettle };
+}
+
+async function waitFor(predicate: () => boolean, description: string): Promise<void> {
+  for (let turn = 0; turn < 20; turn += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`timed out waiting for ${description}`);
+}
+
+function errorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    const record = current as { message?: unknown; cause?: unknown };
+    if (typeof record.message === 'string') messages.push(record.message);
+    current = record.cause;
+  }
+  return messages;
+}
+
+async function seed(db: AppDatabase): Promise<{
+  chatId: number;
+  handleMap: Map<string, number>;
+}> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -42,6 +91,7 @@ async function seed(db: AppDatabase) {
     () => map.get('c1')!,
     hm,
   );
+  return { chatId: map.get('c1')!, handleMap: hm };
 }
 
 describe('sendEdit / sendUnsend', () => {
@@ -53,6 +103,22 @@ describe('sendEdit / sendUnsend', () => {
     const row = one(raw, "SELECT text, date_edited e FROM messages WHERE guid='m1'");
     expect(row.text).toBe('edited!');
     expect(row.e).toBe(5000);
+
+    let missingPostCalls = 0;
+    const missing = await sendEdit(
+      db,
+      {
+        post: async () => {
+          missingPostCalls += 1;
+          return { guid: 'missing' };
+        },
+      } as unknown as HttpClient,
+      { chatGuid: 'c1', messageGuid: 'missing', newText: 'must not post' },
+      5001,
+    );
+    expect(missing).toEqual({ ok: false });
+    expect(missingPostCalls).toBe(0);
+    expect(one(raw, "SELECT COUNT(*) AS count FROM messages WHERE guid='missing'").count).toBe(0);
   });
 
   it('edit: posts the server-required body {chatGuid, editedText, backwardsCompatText} (F-4)', async () => {
@@ -76,6 +142,73 @@ describe('sendEdit / sendUnsend', () => {
     expect(cap.body()).toMatchObject({ chatGuid: 'c1', partIndex: 0 });
   });
 
+  it('unsend: resolves committed row identity inside its owner and never posts a missing row', async () => {
+    const { db, raw } = await createTestDb();
+    const { handleMap } = await seed(db);
+    raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+    const secondChat = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'c2', participants: [{ address: 'a@x.com' }] })],
+      handleMap,
+    );
+    let neighbourDidStart = false;
+    let releaseNeighbour!: () => void;
+    const neighbourRelease = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = observe(
+      withDbTransaction(db, async () => {
+        raw
+          .prepare("UPDATE messages SET chat_id = ?, date_retracted = 9999 WHERE guid = 'm1'")
+          .run(secondChat.get('c2'));
+        neighbourDidStart = true;
+        await neighbourRelease;
+        throw new Error('unsend identity neighbour rollback');
+      }),
+    );
+    const postedBodies: unknown[] = [];
+    const http = {
+      post: async (_path: string, _schema: unknown, options?: { json?: unknown }) => {
+        postedBodies.push(options?.json);
+        throw new ApiError('no_connection', 'unsend identity request failed', 0);
+      },
+    } as unknown as HttpClient;
+    let unsend: ReturnType<typeof observe<{ ok: boolean }>> | undefined;
+    try {
+      try {
+        await waitFor(() => neighbourDidStart, 'unsend identity neighbour');
+        unsend = observe(sendUnsend(db, http, { messageGuid: 'm1' }, 7_000));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(unsend.settled()).toBe(false);
+        expect(postedBodies).toEqual([]);
+        expect(
+          one(
+            raw,
+            "SELECT c.guid FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.guid='m1'",
+          ),
+        ).toEqual({
+          guid: 'c2',
+        });
+      } finally {
+        releaseNeighbour();
+        await Promise.allSettled([neighbour.outcome, ...(unsend ? [unsend.outcome] : [])]);
+      }
+
+      expect(await neighbour.outcome).toMatchObject({ kind: 'rejected' });
+      expect(await unsend?.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(postedBodies).toEqual([{ chatGuid: 'c1', partIndex: 0 }]);
+      expect(one(raw, "SELECT date_retracted AS value FROM messages WHERE guid='m1'")).toEqual({
+        value: 4_321,
+      });
+
+      const missing = await sendUnsend(db, http, { chatGuid: 'c1', messageGuid: 'missing' }, 7_001);
+      expect(missing).toEqual({ ok: false });
+      expect(postedBodies).toHaveLength(1);
+    } finally {
+      raw.close();
+    }
+  });
+
   it('edit: reverts the text when the POST THROWS', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
@@ -84,6 +217,380 @@ describe('sendEdit / sendUnsend', () => {
     expect((one(raw, "SELECT text FROM messages WHERE guid='m1'") as { text: string }).text).toBe(
       'original',
     );
+  });
+
+  it('edit: restores searchable rich text for both NULL and empty legacy rows after failure', async () => {
+    const legacyStates = [
+      { storedText: null, previousEdited: 4321, label: 'null' },
+      { storedText: '', previousEdited: null, label: 'empty' },
+    ] as const;
+    for (const { storedText, previousEdited, label } of legacyStates) {
+      const { db, raw } = await createTestDb();
+      try {
+        await seed(db);
+        const originalBody = attributedBody(`birthday original ${label}`);
+        raw
+          .prepare(
+            `UPDATE messages
+                SET text = ?, attributed_body = ?, date_edited = ?
+              WHERE guid = 'm1'`,
+          )
+          .run(storedText, originalBody, previousEdited);
+        raw
+          .prepare(
+            `INSERT INTO kv(key, value) VALUES ('maintenance.searchTextBackfill.v1', 'done')
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          )
+          .run();
+
+        let optimisticRow: Record<string, unknown> | undefined;
+        let optimisticHits: number | undefined;
+        const http = {
+          post: async () => {
+            optimisticRow = one(
+              raw,
+              "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+            );
+            optimisticHits = ftsHits(raw, 'optimistic');
+            throw new ApiError('no_connection', 'offline', 0);
+          },
+        } as unknown as HttpClient;
+
+        await expect(
+          sendEdit(db, http, { messageGuid: 'm1', newText: 'optimistic searchable' }, 5000),
+        ).resolves.toEqual({ ok: false });
+        expect(optimisticRow).toEqual({ text: 'optimistic searchable', body: null, edited: 5000 });
+        expect(optimisticHits).toBe(1);
+        expect(
+          one(
+            raw,
+            "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+          ),
+        ).toEqual({
+          text: `birthday original ${label}`,
+          body: originalBody,
+          edited: previousEdited,
+        });
+        expect(ftsHits(raw, 'birthday')).toBe(1);
+        expect(ftsHits(raw, 'optimistic')).toBe(0);
+      } finally {
+        raw.close();
+      }
+    }
+  });
+
+  it('edit: preserves NULL versus empty when an undecodable body cannot supply restore text', async () => {
+    for (const storedText of [null, ''] as const) {
+      const { db, raw } = await createTestDb();
+      try {
+        await seed(db);
+        raw
+          .prepare("UPDATE messages SET text = ?, attributed_body = 'not-json' WHERE guid = 'm1'")
+          .run(storedText);
+
+        await expect(
+          sendEdit(
+            db,
+            failHttp,
+            { messageGuid: 'm1', chatGuid: 'c1', newText: 'optimistic' },
+            5_000,
+          ),
+        ).resolves.toEqual({ ok: false });
+
+        const row = one(raw, "SELECT text, attributed_body FROM messages WHERE guid = 'm1'");
+        expect(row).toEqual({ text: storedText, attributed_body: 'not-json' });
+      } finally {
+        raw.close();
+      }
+    }
+  });
+
+  it('edit: snapshots only after a rolling-back neighbour, never persisting its phantom text', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const originalBody = attributedBody('committed birthday body');
+    raw
+      .prepare("UPDATE messages SET text = '', attributed_body = ? WHERE guid = 'm1'")
+      .run(originalBody);
+    raw
+      .prepare("INSERT INTO kv(key, value) VALUES ('maintenance.searchTextBackfill.v1', 'done')")
+      .run();
+
+    let neighbourDidStart = false;
+    let releaseNeighbour!: () => void;
+    const neighbourRelease = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = observe(
+      withDbTransaction(db, async () => {
+        raw
+          .prepare(
+            "UPDATE messages SET text = 'phantom dirty text', date_edited = 777 WHERE guid = 'm1'",
+          )
+          .run();
+        neighbourDidStart = true;
+        await neighbourRelease;
+        throw new Error('phantom neighbour rollback');
+      }),
+    );
+    let postCalls = 0;
+    let optimisticHits: number | undefined;
+    let edit: ReturnType<typeof observe<{ ok: boolean }>> | undefined;
+    try {
+      try {
+        await waitFor(() => neighbourDidStart, 'phantom neighbour');
+        edit = observe(
+          sendEdit(
+            db,
+            {
+              post: async () => {
+                postCalls += 1;
+                optimisticHits = ftsHits(raw, 'optimistic');
+                return {};
+              },
+            } as unknown as HttpClient,
+            { messageGuid: 'm1', newText: 'optimistic searchable' },
+            5000,
+          ),
+        );
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(edit.settled()).toBe(false);
+        expect(postCalls).toBe(0);
+        expect(
+          one(raw, "SELECT text, date_edited AS edited FROM messages WHERE guid='m1'"),
+        ).toEqual({ text: 'phantom dirty text', edited: 777 });
+      } finally {
+        releaseNeighbour();
+        await Promise.allSettled([neighbour.outcome, ...(edit ? [edit.outcome] : [])]);
+      }
+
+      expect(await neighbour.outcome).toMatchObject({ kind: 'rejected' });
+      expect(await edit?.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(postCalls).toBe(1);
+      expect(optimisticHits).toBe(1);
+      expect(
+        one(
+          raw,
+          "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+        ),
+      ).toEqual({ text: 'committed birthday body', body: originalBody, edited: null });
+      expect(ftsHits(raw, 'birthday')).toBe(1);
+      expect(ftsHits(raw, 'phantom')).toBe(0);
+      expect(ftsHits(raw, 'optimistic')).toBe(0);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('edit: serializes three same-message failures and keeps queue cleanup identity-safe', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const independentDb = await createTestDb();
+    await seed(independentDb.db);
+    const gates = Array.from({ length: 3 }, () => {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { promise, release: () => release() };
+    });
+    const started: number[] = [];
+    const http = {
+      post: async () => {
+        const call = started.length + 1;
+        started.push(call);
+        await gates[call - 1]?.promise;
+        throw new ApiError('no_connection', `offline edit ${call}`, 0);
+      },
+    } as unknown as HttpClient;
+    const outcomes: Promise<unknown>[] = [];
+    let triggerInstalled = false;
+    try {
+      // One unexpected local-driver failure must not poison this message's service tail.
+      raw.exec(`CREATE TRIGGER fail_first_optimistic
+        BEFORE UPDATE OF text ON messages
+        WHEN NEW.date_edited = 4999
+        BEGIN SELECT RAISE(ABORT, 'EDIT_LOCAL_DRIVER_CANARY'); END`);
+      triggerInstalled = true;
+      const unexpected = observe(
+        sendEdit(db, http, { messageGuid: 'm1', newText: 'driver failed' }, 4999),
+      );
+      outcomes.push(unexpected.outcome);
+      const failed = await unexpected.outcome;
+      expect(failed).toMatchObject({ kind: 'rejected' });
+      if (failed.kind === 'rejected') {
+        expect(errorMessages(failed.error)).toContain('EDIT_LOCAL_DRIVER_CANARY');
+      }
+      raw.exec('DROP TRIGGER IF EXISTS fail_first_optimistic');
+      triggerInstalled = false;
+
+      const firstArgs = { messageGuid: 'm1', newText: 'first failed' };
+      const first = observe(sendEdit(db, http, firstArgs, 5001));
+      // Mutating the caller-owned object after synchronous queue admission must not change the
+      // operation's captured key or the exact slot its eventual cleanup addresses.
+      firstArgs.messageGuid = 'caller-mutated-after-admission';
+      const second = observe(
+        sendEdit(db, http, { messageGuid: 'm1', newText: 'second failed' }, 5002),
+      );
+      outcomes.push(first.outcome, second.outcome);
+      let third: ReturnType<typeof observe<{ ok: boolean }>> | undefined;
+      await waitFor(() => started.length === 1, 'first edit HTTP');
+      expect(second.settled()).toBe(false);
+      expect(one(raw, "SELECT text FROM messages WHERE guid='m1'").text).toBe('first failed');
+
+      let independentStarts = 0;
+      const independent = observe(
+        sendEdit(
+          independentDb.db,
+          {
+            post: async () => {
+              independentStarts += 1;
+              return { guid: 'm1' };
+            },
+          } as unknown as HttpClient,
+          { messageGuid: 'm1', newText: 'other database succeeds' },
+          6001,
+        ),
+      );
+      outcomes.push(independent.outcome);
+      await waitFor(() => independentStarts === 1, 'same-guid edit on another database');
+      expect(await independent.outcome).toEqual({ kind: 'fulfilled', value: { ok: true } });
+
+      gates[0]?.release();
+      await waitFor(() => started.length === 2, 'second edit HTTP');
+      third = observe(sendEdit(db, http, { messageGuid: 'm1', newText: 'third failed' }, 5003));
+      outcomes.push(third.outcome);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(started).toEqual([1, 2]);
+      expect(third.settled()).toBe(false);
+      expect(one(raw, "SELECT text FROM messages WHERE guid='m1'").text).toBe('second failed');
+
+      gates[1]?.release();
+      await waitFor(() => started.length === 3, 'third edit HTTP');
+      expect(one(raw, "SELECT text FROM messages WHERE guid='m1'").text).toBe('third failed');
+      gates[2]?.release();
+      await Promise.allSettled(outcomes);
+
+      expect(await first.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(await second.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(await third.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(one(raw, "SELECT text, date_edited AS edited FROM messages WHERE guid='m1'")).toEqual({
+        text: 'original',
+        edited: null,
+      });
+    } finally {
+      for (const gate of gates) gate.release();
+      if (triggerInstalled) raw.exec('DROP TRIGGER IF EXISTS fail_first_optimistic');
+      await Promise.allSettled(outcomes);
+      raw.close();
+      independentDb.raw.close();
+    }
+  });
+
+  it('serializes edit and unsend lifecycles while leaving HTTP outside the DB mutex', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const independent = await createTestDb();
+    await seed(independent.db);
+    const gates = Array.from({ length: 3 }, () => {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { promise, release: () => release() };
+    });
+    const starts: string[] = [];
+    const http = {
+      post: async (path: string) => {
+        const call = starts.length;
+        const kind = path.endsWith('/unsend') ? 'unsend' : 'edit';
+        starts.push(kind);
+        await gates[call]?.promise;
+        if (call === 0) return { unsent: true };
+        if (call === 1) throw new ApiError('no_connection', 'edit failed', 0);
+        return {};
+      },
+    } as unknown as HttpClient;
+    const outcomes: Promise<unknown>[] = [];
+    try {
+      const firstArgs = { messageGuid: 'm1' };
+      const first = observe(sendUnsend(db, http, firstArgs, 7_001));
+      firstArgs.messageGuid = 'caller-mutated-after-admission';
+      const second = observe(
+        sendEdit(db, http, { messageGuid: 'm1', newText: 'failed edit' }, 7_002),
+      );
+      const third = observe(sendUnsend(db, http, { messageGuid: 'm1' }, 7_003));
+      outcomes.push(first.outcome, second.outcome, third.outcome);
+
+      await waitFor(() => starts.length === 1, 'first unsend HTTP');
+      expect(starts).toEqual(['unsend']);
+      expect(second.settled()).toBe(false);
+      expect(third.settled()).toBe(false);
+
+      // HTTP must not hold the process-wide DB mutex: an unrelated transaction can finish while
+      // the first network request is deliberately paused.
+      const successor = observe(
+        withDbTransaction(db, async () => {
+          raw.prepare("INSERT INTO kv(key, value) VALUES ('unsend.successor', 'done')").run();
+        }),
+      );
+      outcomes.push(successor.outcome);
+      expect(await successor.outcome).toMatchObject({ kind: 'fulfilled' });
+
+      let independentStarts = 0;
+      const independentResult = observe(
+        sendUnsend(
+          independent.db,
+          {
+            post: async () => {
+              independentStarts += 1;
+              return { unsent: true };
+            },
+          } as unknown as HttpClient,
+          { messageGuid: 'm1' },
+          8_001,
+        ),
+      );
+      outcomes.push(independentResult.outcome);
+      await waitFor(() => independentStarts === 1, 'same-guid unsend on another database');
+      expect(await independentResult.outcome).toEqual({
+        kind: 'fulfilled',
+        value: { ok: true },
+      });
+
+      gates[0]?.release();
+      await waitFor(() => starts.length === 2, 'queued edit HTTP');
+      expect(starts).toEqual(['unsend', 'edit']);
+      expect(third.settled()).toBe(false);
+      gates[1]?.release();
+
+      await waitFor(() => starts.length === 3, 'final unsend HTTP');
+      expect(starts).toEqual(['unsend', 'edit', 'unsend']);
+      expect(
+        one(
+          raw,
+          "SELECT text, date_edited AS edited, date_retracted AS retracted FROM messages WHERE guid='m1'",
+        ),
+      ).toEqual({ text: 'original', edited: null, retracted: 7_003 });
+      gates[2]?.release();
+      await Promise.allSettled(outcomes);
+
+      expect(await first.outcome).toEqual({ kind: 'fulfilled', value: { ok: true } });
+      expect(await second.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(await third.outcome).toEqual({ kind: 'fulfilled', value: { ok: false } });
+      expect(
+        one(
+          raw,
+          "SELECT text, date_edited AS edited, date_retracted AS retracted FROM messages WHERE guid='m1'",
+        ),
+      ).toEqual({ text: 'original', edited: null, retracted: 7_001 });
+    } finally {
+      for (const gate of gates) gate.release();
+      await Promise.allSettled(outcomes);
+      raw.close();
+      independent.raw.close();
+    }
   });
 
   // THE SOFT FAILURE: the transport succeeded, so nothing throws — the server just didn't confirm.
@@ -111,24 +618,31 @@ describe('sendEdit / sendUnsend', () => {
     expect(row.d).toBeNull(); // no stranded "Edited" marker on a message nobody else sees edited
   });
 
-  it('unsend: clears the local retraction when the POST returns 200 with {unsent:false}', async () => {
-    const { db, raw } = await createTestDb();
-    await seed(db);
-    // Defensive: the server's `unsend-message` route currently hardcodes `{ unsent: true }`, so this
-    // is a contract guard rather than a path seen in the wild — but leaving a message showing as
-    // retracted to its sender while every other participant still sees it is the one failure here
-    // the user cannot detect, so the branch stays and stays pinned.
-    const http = { post: async () => ({ unsent: false }) } as unknown as HttpClient;
-    expect((await sendUnsend(db, http, { messageGuid: 'm1' }, 7000)).ok).toBe(false);
-    expect(
-      (one(raw, "SELECT date_retracted d FROM messages WHERE guid='m1'") as { d: number | null }).d,
-    ).toBeNull();
+  it('unsend: requires exact true and restores the exact prior marker on soft failure', async () => {
+    for (const ack of [{ unsent: false }, { unsent: null }, {}]) {
+      const { db, raw } = await createTestDb();
+      try {
+        await seed(db);
+        raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+        const http = { post: async () => ack } as unknown as HttpClient;
+        expect((await sendUnsend(db, http, { messageGuid: 'm1' }, 7_000)).ok).toBe(false);
+        expect(
+          (
+            one(raw, "SELECT date_retracted d FROM messages WHERE guid='m1'") as {
+              d: number | null;
+            }
+          ).d,
+        ).toBe(4_321);
+      } finally {
+        raw.close();
+      }
+    }
   });
 
   it('unsend: sets dateRetracted on success, clears it when the POST THROWS', async () => {
     const a = await createTestDb();
     await seed(a.db);
-    expect((await sendUnsend(a.db, okHttp, { messageGuid: 'm1' }, 7000)).ok).toBe(true);
+    expect((await sendUnsend(a.db, unsendOkHttp, { messageGuid: 'm1' }, 7000)).ok).toBe(true);
     expect(
       (one(a.raw, "SELECT date_retracted d FROM messages WHERE guid='m1'") as { d: number | null })
         .d,
@@ -149,37 +663,58 @@ describe('sendEdit / sendUnsend', () => {
   // message reads the old wording to you and the new one to everyone else, permanently; for an
   // unsend it puts content the user revoked from everyone back on their own screen.
   it('edit: does NOT revert over an echo that landed while the POST was failing', async () => {
-    const { db, raw } = await createTestDb();
-    await seed(db);
-    const http = {
-      post: async () => {
-        // The server applied the edit and echoed it; the echo wins the race, then our POST throws.
-        await upsertMessages(
-          db,
-          [
-            Message.parse({
-              guid: 'm1',
-              text: 'edited!',
-              isFromMe: true,
-              dateCreated: 100,
-              dateEdited: 9999, // the SERVER's stamp — never equal to our optimistic `now`
-            }),
-          ],
-          () => 1,
-          new Map(),
-        );
-        throw new ApiError('no_connection', 'offline', 0);
+    const scenarios = [
+      {
+        // Same timestamp AND text: only a newer rich body proves the row is no longer locally owned.
+        // A rich server event now refreshes this column. This raw state independently pins the CAS
+        // conjunct without claiming an identical marker/text/NULL-body echo is distinguishable.
+        authoritativeText: 'edited!',
+        authoritativeBody: attributedBody('server authoritative rich body'),
       },
-    } as unknown as HttpClient;
+      {
+        // Same timestamp AND empty rich body: only the different text proves server ownership.
+        authoritativeText: 'server authoritative',
+        authoritativeBody: null,
+      },
+    ] as const;
 
-    const r = await sendEdit(db, http, { messageGuid: 'm1', newText: 'edited!' }, 5000);
-    expect(r.ok).toBe(false);
-    const row = one(raw, "SELECT text, date_edited d FROM messages WHERE guid='m1'") as {
-      text: string;
-      d: number | null;
-    };
-    expect(row.text).toBe('edited!'); // the echo's value survives — NOT reverted to 'original'
-    expect(row.d).toBe(9999);
+    for (const scenario of scenarios) {
+      const { db, raw } = await createTestDb();
+      try {
+        await seed(db);
+        const http = {
+          post: async () => {
+            // The server echo deliberately collides with our millisecond marker. Both optimistic
+            // text and cleared-body ownership must match before a local failure may revert it.
+            await withDbTransaction(db, async () => {
+              raw
+                .prepare(
+                  `UPDATE messages
+                      SET text = ?, attributed_body = ?, date_edited = 5000
+                    WHERE guid = 'm1'`,
+                )
+                .run(scenario.authoritativeText, scenario.authoritativeBody);
+            });
+            throw new ApiError('no_connection', 'offline', 0);
+          },
+        } as unknown as HttpClient;
+
+        const r = await sendEdit(db, http, { messageGuid: 'm1', newText: 'edited!' }, 5000);
+        expect(r.ok).toBe(false);
+        expect(
+          one(
+            raw,
+            "SELECT text, attributed_body AS body, date_edited d FROM messages WHERE guid='m1'",
+          ),
+        ).toEqual({
+          text: scenario.authoritativeText,
+          body: scenario.authoritativeBody,
+          d: 5000,
+        });
+      } finally {
+        raw.close();
+      }
+    }
   });
 
   it('unsend: does NOT clear a retraction the server actually stamped', async () => {

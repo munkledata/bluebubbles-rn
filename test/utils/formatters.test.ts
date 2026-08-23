@@ -65,8 +65,8 @@ describe('buildPreview', () => {
   });
 
   it('prefers a Genmoji description over the generic attachment label', () => {
-    // (The inbox redacts the WHOLE preview via redactPreview at the call site, so this raw
-    // description never leaks under redacted mode — see ConversationTile.)
+    // The natural-language Genmoji description is ordinary preview content and is more useful
+    // than a generic attachment label.
     expect(
       buildPreview({
         ...base,

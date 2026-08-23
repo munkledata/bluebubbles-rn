@@ -29,10 +29,16 @@ import { useUploadStore } from '@state/uploadStore';
 import type { AttachmentRow } from '@db/repositories';
 
 const mockDownload = jest.fn();
+const mockAccountLease = { generation: 41, isCurrent: jest.fn(() => true) };
+const mockNextAccountLease = { generation: 42, isCurrent: jest.fn(() => true) };
+const mockCaptureAccountLease = jest.fn(() => mockAccountLease);
 jest.mock('@/services/download', () => ({
-  download: (att: unknown) => mockDownload(att),
+  download: (...args: unknown[]) => mockDownload(...args),
   setAttachmentFetcher: jest.fn(),
   ensureDownloaded: jest.fn(),
+}));
+jest.mock('@/services/realtime/deliveryCoordinator', () => ({
+  captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),
 }));
 jest.mock('@ui/primitives', () => {
   const RN = require('react-native');
@@ -84,6 +90,10 @@ function makeAtt(over: Partial<AttachmentRow> = {}): AttachmentRow {
 
 beforeEach(() => {
   mockDownload.mockClear();
+  mockCaptureAccountLease
+    .mockReset()
+    .mockReturnValueOnce(mockAccountLease)
+    .mockReturnValue(mockNextAccountLease);
   (safeOpenUrl as jest.Mock).mockClear();
   useDownloadStore.setState({ progress: {}, status: {} });
   useUploadStore.setState({ byGuid: {} });
@@ -206,9 +216,13 @@ describe('FileChip — press dispatch', () => {
 
   it('downloads on tap when the file is not yet local (and opens nothing)', async () => {
     const att = makeAtt({ localPath: null });
-    await renderWithTheme(<FileChip att={att} isFromMe={false} />);
+    const view = await renderWithTheme(<FileChip att={att} isFromMe={false} />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
+    await view.rerender(<FileChip att={{ ...att }} isFromMe={false} />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     fireEvent.press(screen.getByText('report.pdf'));
-    expect(mockDownload).toHaveBeenCalledWith(att);
+    expect(mockDownload).toHaveBeenCalledWith(att, 'manual', mockAccountLease);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
   });
 
@@ -232,7 +246,7 @@ describe('FileChip — press dispatch', () => {
     const att = makeAtt({ localPath: 'file:///data/report.pdf' });
     await renderWithTheme(<FileChip att={att} isFromMe={false} />);
     fireEvent.press(screen.getByText('report.pdf'));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(att));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(att, 'manual', mockAccountLease));
   });
 
   it('toasts when no app on the device can open the file', async () => {

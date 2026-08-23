@@ -4,7 +4,16 @@
 // AttachmentTray uses). See the expo-contacts/legacy note in AGENTS.md.
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { logger } from '@core/secure';
+import { statNativeAttachmentCacheFile } from '@native/boundedDownload';
 import { isLocalFileUri } from '@utils';
+import {
+  attachmentCacheCoordinator,
+  type AttachmentCachePathProtection,
+} from './download/attachmentCacheCoordinator';
+import {
+  isPotentialAttachmentCacheFileUri,
+  parseAttachmentCacheFileUri,
+} from './download/pathSafety';
 
 /** Photos album auto-downloaded images are filed into (when the destination setting is 'album'). */
 export const GATOR_ALBUM = 'Gator';
@@ -19,6 +28,35 @@ export const GATOR_ALBUM = 'Gator';
 /** Outcome of a share attempt. `ok: false` means the OS share sheet never opened. */
 export type ShareAttachmentResult = { ok: true } | { ok: false; reason: 'unavailable' | 'failed' };
 
+function acquirePathProtection(path: string): AttachmentCachePathProtection | null {
+  try {
+    return attachmentCacheCoordinator.protect(path);
+  } catch {
+    // Persisted paths are untrusted. A malformed/overlong value must fail closed, not crash the
+    // action handler before it can report a useful result.
+    return null;
+  }
+}
+
+/** Revalidate the exact source after pinning and before handing it to another native module. */
+async function attachmentPathExists(path: string): Promise<boolean> {
+  try {
+    return (await statNativeAttachmentCacheFile(path)).exists;
+  } catch {
+    // A canonical managed path must pass the fixed native ownership/stat boundary. Its rejection
+    // can mean a symlink, corrupt layout, expired bridge, or unavailable native enforcement — all
+    // fail closed. Only a local file OUTSIDE the managed scanner layout may use Expo's exact-file
+    // stat (for example an outgoing attachment selected from the device).
+    if (parseAttachmentCacheFileUri(path) || isPotentialAttachmentCacheFileUri(path)) return false;
+    try {
+      const { File } = await import('expo-file-system');
+      return new File(path).exists;
+    } catch {
+      return false;
+    }
+  }
+}
+
 /**
  * Open the OS share sheet for a downloaded attachment file.
  *
@@ -32,7 +70,19 @@ export async function shareAttachment(
   localPath: string,
   mimeType?: string | null,
 ): Promise<ShareAttachmentResult> {
+  if (!isLocalFileUri(localPath)) return { ok: false, reason: 'failed' };
+  // `protect()` runs before the function's first await. Retirement therefore cannot claim this
+  // exact source in the gap before expo-sharing opens it.
+  const protection = acquirePathProtection(localPath);
+  if (!protection) {
+    logger.error('[media] share source could not be protected');
+    return { ok: false, reason: 'failed' };
+  }
   try {
+    if (!(await attachmentPathExists(localPath))) {
+      logger.error('[media] share source is no longer available');
+      return { ok: false, reason: 'failed' };
+    }
     // Lazy import: expo-sharing is a native module, kept off the screen-open path. NOTE the
     // import itself can reject (`requireNativeModule` throws when the module isn't linked into
     // the running build), which is why it sits inside the try.
@@ -45,6 +95,8 @@ export async function shareAttachment(
     // otherwise invisible — there is no other signal that the share sheet failed to open.
     logger.error('[media] share failed', e);
     return { ok: false, reason: 'failed' };
+  } finally {
+    protection.release();
   }
 }
 
@@ -63,8 +115,8 @@ export async function shareAttachment(
  * `writeOnly: true` resolves to an EMPTY permission list there — granted, with zero dialogs. On
  * Android 12 and below it asks for WRITE_EXTERNAL_STORAGE, which is what is genuinely required.
  *
- * READING the gallery (the attachment tray's photo picker) still needs the full request — don't
- * "tidy" this into that call site.
+ * READING the gallery (the attachment tray) separately asks only for photo/video access; it must
+ * not use the SDK's no-argument default because that also requests music/audio access.
  */
 async function ensureSavePermission(): Promise<boolean> {
   const perm = await MediaLibrary.requestPermissionsAsync(true);
@@ -85,19 +137,36 @@ export type SaveToPhotosResult =
 export async function saveAttachmentsToPhotos(
   paths: ReadonlyArray<string | null | undefined>,
 ): Promise<SaveToPhotosResult> {
+  const localPaths = paths.filter(isLocalFileUri);
+  if (localPaths.length === 0) return { status: 'none' };
+
+  // Claim every operation pin synchronously, before permission UI or any other await can let the
+  // cache retire a source. A refused path is never handed to MediaLibrary; other safe selections
+  // can still complete.
+  const protectedPaths = localPaths.flatMap((path) => {
+    const protection = acquirePathProtection(path);
+    return protection ? [{ path, protection }] : [];
+  });
+  if (protectedPaths.length === 0) return { status: 'error' };
+
   try {
+    const readablePaths: string[] = [];
+    for (const { path } of protectedPaths) {
+      if (await attachmentPathExists(path)) readablePaths.push(path);
+    }
+    if (readablePaths.length === 0) return { status: 'error' };
     if (!(await ensureSavePermission())) return { status: 'denied' };
     let saved = 0;
-    for (const p of paths) {
-      if (isLocalFileUri(p)) {
-        await MediaLibrary.saveToLibraryAsync(p);
-        saved += 1;
-      }
+    for (const path of readablePaths) {
+      await MediaLibrary.saveToLibraryAsync(path);
+      saved += 1;
     }
-    return saved > 0 ? { status: 'saved', saved } : { status: 'none' };
+    return { status: 'saved', saved };
   } catch (e) {
     logger.warn('[media] save to Photos failed', e);
     return { status: 'error' };
+  } finally {
+    protectedPaths.forEach(({ protection }) => protection.release());
   }
 }
 
@@ -114,7 +183,12 @@ export async function saveImageToLibrary(
   opts: { album?: boolean } = {},
 ): Promise<SaveImageResult> {
   if (!isLocalFileUri(uri)) return 'skipped';
+  // Auto-save can run headlessly, where cache maintenance is also active. Acquire synchronously so
+  // permission/native-library awaits cannot race retirement.
+  const protection = acquirePathProtection(uri);
+  if (!protection) return 'error';
   try {
+    if (!(await attachmentPathExists(uri))) return 'error';
     if (!(await ensureSavePermission())) return 'denied';
     if (!opts.album) {
       await MediaLibrary.saveToLibraryAsync(uri);
@@ -152,5 +226,7 @@ export async function saveImageToLibrary(
   } catch (e) {
     logger.warn('[media] save image to library failed', e);
     return 'error';
+  } finally {
+    protection.release();
   }
 }

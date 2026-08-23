@@ -1,4 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
+import * as Crypto from 'expo-crypto';
 import { useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Share } from 'react-native';
@@ -7,7 +8,12 @@ import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
 import { getDatabase } from '@db/database';
 import { type MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
+import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
 import { scheduleReminder } from '@/services/notifications/remindersService';
+import {
+  captureRealtimeDeliveryLease,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { discardMessage, react, unsend } from '@/services/send';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
@@ -15,6 +21,7 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
 import { isLocalFileUri, type BubbleRect } from '@utils';
 import { devSendFakeReaction, devUnsendFake } from './devSeed';
+import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
 import type { EnrichedMessage } from './useMessages';
 
@@ -24,6 +31,8 @@ export interface MessageActionsArgs {
   messages: EnrichedMessage[];
   /** The chat's display title, for the reminder notification. */
   chatTitle: string;
+  /** Account generation captured when the owning chat screen mounted. */
+  accountLease?: RealtimeDeliveryLease;
   /** Must be the useState setters themselves (stable) — onSwipeReply's identity rides on it. */
   setReplyTo: (preview: MessagePreview | null) => void;
   setEditing: (editing: { guid: string; text: string } | null) => void;
@@ -43,11 +52,13 @@ export function useMessageActions({
   guid,
   messages,
   chatTitle,
+  accountLease,
   setReplyTo,
   setEditing,
 }: MessageActionsArgs) {
   const router = useRouter();
   const isDev = isDevServer;
+  const [screenLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
 
   // Latest messages for the stable long-press callback (thread membership check).
   const messagesRef = useRef(messages);
@@ -181,7 +192,7 @@ export function useMessageActions({
             // whose POST is still in flight, and that one also has to take its retry ladder with
             // it or the queue re-POSTs the message the user just deleted.
             void (async () => {
-              for (const g of set) await discardMessage(g, now);
+              for (const g of set) await discardMessage(g, now, screenLease);
             })();
             setSelectedGuids(null);
           },
@@ -193,6 +204,7 @@ export function useMessageActions({
   // Swipe a bubble right past the threshold → reply to it (stable for the memoized rows).
   const onSwipeReply = useCallback(
     (msg: EnrichedMessage): void => {
+      if (msg.guid.startsWith('temp-')) return;
       setReplyTo({
         guid: msg.guid,
         text: msg.text,
@@ -219,8 +231,8 @@ export function useMessageActions({
         text: 'Unsend',
         style: 'destructive',
         onPress: () => {
-          if (isDev()) void devUnsendFake(g);
-          else void unsend({ messageGuid: g, chatGuid: guid });
+          if (isDev()) void devUnsendFake(g, screenLease);
+          else void unsend({ messageGuid: g, chatGuid: guid }, screenLease);
         },
       },
     ]);
@@ -248,14 +260,14 @@ export function useMessageActions({
           // anything its guarded first step does not own, so the message is removed either way.
           text: sending ? 'Cancel Sending' : 'Remove',
           style: 'destructive',
-          onPress: () => void discardMessage(g),
+          onPress: () => void discardMessage(g, Date.now(), screenLease),
         },
       ],
     );
   };
 
   const onReact = (reaction: string, emoji?: string): void => {
-    if (!selected) return;
+    if (!selected || selected.isTemp) return;
     const args = {
       chatGuid: guid,
       targetGuid: selected.guid,
@@ -263,12 +275,12 @@ export function useMessageActions({
       emoji,
       selectedMessageText: selected.text ?? '',
     };
-    if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction, emoji);
-    else void react(args);
+    if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction, emoji, screenLease);
+    else void react(args, screenLease);
   };
 
   const onReplyToSelected = (): void => {
-    if (!selected) return;
+    if (!selected || selected.isTemp) return;
     setReplyTo({
       guid: selected.guid,
       text: selected.text,
@@ -326,18 +338,27 @@ export function useMessageActions({
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => void discardMessage(g),
+        onPress: () => void discardMessage(g, Date.now(), screenLease),
       },
     ]);
   };
 
   // Forward: open the new-message composer pre-filled with this message's text and/or its
-  // DOWNLOADED attachments (passed as a JSON param; new-chat validates + stages them). An
-  // attachment-only message with nothing downloaded gets the existing-style "download first"
+  // DOWNLOADED attachments (staged behind a one-time nonce; no file path enters the public route).
+  // An attachment-only message with nothing downloaded gets the existing-style "download first"
   // notice — forwarding never triggers a download.
   const onForwardSelected = (): void => {
     if (!selected) return;
-    const plan = buildForwardParams({ text: selected.text, attachments: selected.attachments });
+    const plan = buildForwardParams(
+      { text: selected.text, attachments: selected.attachments },
+      (attachments) =>
+        stageForwardAttachmentHandoff({
+          nonce: Crypto.randomUUID(),
+          attachments,
+          isCurrent: screenLease.isCurrent,
+          protectPath: (path) => attachmentCacheCoordinator.protect(path),
+        }),
+    );
     if (plan.kind === 'notice') showDialog('Forward', plan.message);
     else if (plan.kind === 'navigate') router.push({ pathname: '/new-chat', params: plan.params });
   };
@@ -368,21 +389,28 @@ export function useMessageActions({
     if (!selected) return;
     const msg = selected;
     void (async () => {
-      const when = await pickReminderTime();
-      if (when == null) return;
       try {
-        await scheduleReminder(getDatabase(), {
-          chatGuid: guid,
-          messageGuid: msg.guid,
-          chatTitle,
-          messagePreview: msg.text,
-          senderName: msg.senderName,
-          scheduledFor: when,
-          now: Date.now(),
-        });
-        showDialog('Reminder set', 'You’ll be reminded about this message.');
+        const when = await pickReminderTime();
+        if (when == null || !screenLease.isCurrent()) return;
+        await scheduleReminder(
+          getDatabase(),
+          {
+            chatGuid: guid,
+            messageGuid: msg.guid,
+            chatTitle,
+            messagePreview: msg.text,
+            senderName: msg.senderName,
+            scheduledFor: when,
+            now: Date.now(),
+          },
+          undefined,
+          screenLease,
+        );
+        if (screenLease.isCurrent()) {
+          showDialog('Reminder set', 'You’ll be reminded about this message.');
+        }
       } catch {
-        showDialog('Reminder', 'Couldn’t set the reminder.');
+        if (screenLease.isCurrent()) showDialog('Reminder', 'Couldn’t set the reminder.');
       }
     })();
   };

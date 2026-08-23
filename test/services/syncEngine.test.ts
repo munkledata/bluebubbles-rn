@@ -1,4 +1,5 @@
 import { Chat, Message } from '@core/models';
+import { logger } from '@core/secure';
 import { GuidDeduper, type SyncCursor } from '@core/sync';
 import {
   listChats,
@@ -6,9 +7,18 @@ import {
   listMessages,
   getSyncMarker,
   setSyncMarker,
+  upsertChats,
+  upsertContacts,
+  upsertHandles,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
-import { fullSync, incrementalSync, INCREMENTAL_TX_CHUNK } from '@/services/sync/engine';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
+import {
+  fullSync,
+  incrementalSync,
+  INCREMENTAL_TX_CHUNK,
+  syncAllChats,
+  syncChatMessages,
+} from '@/services/sync/engine';
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
@@ -123,6 +133,140 @@ describe('fullSync', () => {
     const inbox = await listChatsForInbox(db);
     expect(inbox.find((c) => c.guid === 'cRead')?.unreadCount).toBe(1);
   });
+
+  it('honors a per-chat cap smaller than the normal message page', async () => {
+    const { db } = await createTestDb();
+    const requested: number[] = [];
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async (offset) =>
+        offset === 0 ? [Chat.parse({ guid: 'cCapped', participants: [] })] : [],
+      fetchChatMessages: async (_guid, offset, limit) => {
+        requested.push(limit);
+        return Array.from({ length: limit }, (_, index) =>
+          msg(`capped-${offset + index}`, offset + index + 1, 'bounded', 'cCapped'),
+        );
+      },
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+
+    const result = await fullSync(db, api, { maxMessagesPerChat: 25 });
+
+    expect(result).toEqual({ chats: 1, messages: 25 });
+    expect(requested).toEqual([25]);
+  });
+
+  it.each([
+    { label: 'the default', maxMessagesPerChat: undefined, expected: 100, offsets: [0] },
+    { label: 'an explicit zero', maxMessagesPerChat: 0, expected: 125, offsets: [0, 100] },
+  ])(
+    'treats $label as the documented bounded/all mode',
+    async ({ maxMessagesPerChat, expected, offsets: expectedOffsets }) => {
+      const { db } = await createTestDb();
+      const totalAvailable = 125;
+      const offsets: number[] = [];
+      const api: SyncApi = {
+        serverVersion: async () => '1.9.0',
+        fetchChats: async (offset) =>
+          offset === 0 ? [Chat.parse({ guid: 'cAll', participants: [] })] : [],
+        fetchChatMessages: async (_guid, offset, limit) => {
+          offsets.push(offset);
+          const count = Math.max(0, Math.min(limit, totalAvailable - offset));
+          return Array.from({ length: count }, (_, index) =>
+            msg(`all-${offset + index}`, offset + index + 1, 'history', 'cAll'),
+          );
+        },
+        fetchMessagesAfter: async () => [],
+        fetchDeletedAfter: async () => [],
+      };
+
+      const result = await fullSync(db, api, {
+        ...(maxMessagesPerChat == null ? {} : { maxMessagesPerChat }),
+      });
+
+      expect(result).toEqual({ chats: 1, messages: expected });
+      expect(offsets).toEqual(expectedOffsets);
+    },
+  );
+
+  it('stops an all-history sync when a server cycles back to an earlier full page', async () => {
+    const { db } = await createTestDb();
+    const pageA = Array.from({ length: 100 }, (_, index) =>
+      msg(`repeat-a-${index}`, index + 1, 'page A', 'cRepeating'),
+    );
+    const pageB = Array.from({ length: 100 }, (_, index) =>
+      msg(`repeat-b-${index}`, index + 101, 'page B', 'cRepeating'),
+    );
+    let calls = 0;
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async (offset) =>
+        offset === 0 ? [Chat.parse({ guid: 'cRepeating', participants: [] })] : [],
+      fetchChatMessages: async () => {
+        calls += 1;
+        return calls % 2 === 1 ? pageA : pageB;
+      },
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+
+    const result = await fullSync(db, api, { maxMessagesPerChat: 0 });
+
+    expect(result).toEqual({ chats: 1, messages: 200 });
+    expect(calls).toBe(3);
+    expect(warn).toHaveBeenCalledWith(
+      '[sync] full-sync page repeated for chat cRepeating at offset 200 — stopping to avoid refetching it forever',
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('syncAllChats — account-bound page writes', () => {
+  it('rejects a queued old-account chat page before BEGIN', async () => {
+    const { db, raw } = await createTestDb();
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let revoked = false;
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [
+        Chat.parse({ guid: 'old-account-chat', participants: [{ address: 'old@x.com' }] }),
+      ],
+      fetchChatMessages: async () => [],
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+    const syncing = syncAllChats(db, api, 200, () => revoked);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    revoked = true;
+    releaseNeighbour();
+
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(syncing).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(raw.prepare("SELECT guid FROM chats WHERE guid = 'old-account-chat'").get()).toBe(
+      undefined,
+    );
+    expect(raw.prepare("SELECT address FROM handles WHERE address = 'old@x.com'").get()).toBe(
+      undefined,
+    );
+  });
 });
 
 /**
@@ -172,6 +316,7 @@ describe('fullSync — a session that ends mid-run', () => {
   }
 
   it('writes nothing after the wipe when the session it started under is gone', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const { db, raw } = await createTestDb();
     let disconnected = false;
     const api = disconnectingApi(() => {
@@ -186,6 +331,10 @@ describe('fullSync — a session that ends mid-run', () => {
       lastSyncedRowId: null,
       lastSyncedTimestamp: null,
     });
+    expect(warn).toHaveBeenCalledWith(
+      '[sync] the session ended mid-full-sync — skipping the read-watermark re-apply and the marker write',
+    );
+    warn.mockRestore();
   });
 
   /**
@@ -206,6 +355,44 @@ describe('fullSync — a session that ends mid-run', () => {
 });
 
 describe('incrementalSync', () => {
+  it('links committed page handles to device contacts without nesting the page transaction', async () => {
+    const { db, raw } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
+    await upsertContacts(db, [
+      {
+        sourceId: 'sync-contact',
+        displayName: 'Synced Alice',
+        givenName: 'Synced',
+        familyName: 'Alice',
+        phones: [],
+        emails: ['alice@me.com'],
+        avatar: null,
+      },
+    ]);
+    const page = msg('contact-page', 1, 'hello', 'contact-chat');
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
+      fetchMessagesAfter: async (cursor) =>
+        cursor.mode === 'rowid' && cursor.after === 0 ? [page] : [],
+    };
+
+    await incrementalSync(db, api, { serverVersion: '1.9.0' });
+
+    expect(
+      raw
+        .prepare(
+          `SELECT h.display_name AS displayName, c.source_id AS sourceId
+             FROM handles h
+             JOIN contacts c ON c.id = h.contact_id
+            WHERE h.address = 'alice@me.com'`,
+        )
+        .get(),
+    ).toEqual({ displayName: 'Synced Alice', sourceId: 'sync-contact' });
+  });
+
   /**
    * The one gap in "the cursor never outruns the rows", stated so it stays deliberate.
    *
@@ -216,6 +403,7 @@ describe('incrementalSync', () => {
    * correct and the slice logs the count instead. This pins that behaviour rather than the log.
    */
   it('advances past a message with no resolvable chat rather than wedging on it', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const { db } = await createTestDb();
     await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
     const orphan = Message.parse({
@@ -238,6 +426,10 @@ describe('incrementalSync', () => {
 
     expect(await getSyncMarker(db)).toMatchObject({ lastSyncedRowId: 42 });
     expect(await listChats(db)).toEqual([]); // nothing invented to hold it
+    expect(warn).toHaveBeenCalledWith(
+      '[sync] 1 message(s) in this page had no resolvable chat and were skipped',
+    );
+    warn.mockRestore();
   });
 
   it('uses the rowid cursor, paginates, dedups, and advances the marker', async () => {
@@ -318,6 +510,62 @@ describe('incrementalSync', () => {
     expect(result).toEqual({ chats: 2, messages: 4 });
   });
 
+  it('stops at an explicit background page cap without issuing one extra request', async () => {
+    const { db } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
+    let calls = 0;
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
+      fetchMessagesAfter: async (cursor) => {
+        calls += 1;
+        const after = cursor.mode === 'rowid' ? cursor.after : 0;
+        return [
+          msg(`cap-${after + 1}`, after + 1, 'a', 'cCap'),
+          msg(`cap-${after + 2}`, after + 2, 'b', 'cCap'),
+        ];
+      },
+    };
+
+    const result = await incrementalSync(db, api, {
+      serverVersion: '1.9.0',
+      batchSize: 2,
+      maxPages: 2,
+      deduper: new GuidDeduper(),
+    });
+
+    expect(calls).toBe(2);
+    expect(result.messages).toBe(4);
+    expect(await getSyncMarker(db)).toMatchObject({ lastSyncedRowId: 4 });
+  });
+
+  it('drops a fetched page when account ownership is revoked before its first write', async () => {
+    const { db } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
+    let revoked = false;
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
+      fetchMessagesAfter: async () => {
+        revoked = true;
+        return [msg('revoked-page', 1, 'must not land', 'cRevoked')];
+      },
+    };
+
+    const result = await incrementalSync(db, api, {
+      serverVersion: '1.9.0',
+      shouldAbort: () => revoked,
+    });
+
+    expect(result).toEqual({ chats: 0, messages: 0 });
+    expect(await getSyncMarker(db)).toMatchObject({ lastSyncedRowId: 0 });
+    expect(await listChats(db)).toEqual([]);
+  });
+
   it('falls back to a timestamp cursor on older servers', async () => {
     const { db } = await createTestDb();
     await setSyncMarker(db, { lastSyncedRowId: null, lastSyncedTimestamp: 5000 });
@@ -352,6 +600,7 @@ describe('incrementalSync', () => {
    * Without the termination guard this test does not fail — it HANGS until jest times out.
    */
   it('stops instead of refetching forever when a full page does not advance the marker', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const { db } = await createTestDb();
     await setSyncMarker(db, { lastSyncedRowId: null, lastSyncedTimestamp: 5_000 });
 
@@ -395,6 +644,66 @@ describe('incrementalSync', () => {
     expect(calls).toBe(1);
     expect(result.messages).toBe(2); // the page's rows were still ingested before stopping
     expect(await getSyncMarker(db)).toMatchObject({ lastSyncedTimestamp: 5_000 });
+    expect(warn).toHaveBeenCalledWith(
+      '[sync] incremental cursor stalled after a full page (2 rows, marker rowId=none ts=5000) — stopping to avoid refetching it forever',
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('syncChatMessages — account-bound page writes', () => {
+  it('rejects a queued old-account page before BEGIN and leaves the chat unchanged', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'backfill@example.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'backfill-chat', participants: [{ address: 'backfill@example.com' }] })],
+      handles,
+    );
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let revoked = false;
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [
+        Message.parse({
+          guid: 'old-account-backfill',
+          text: 'must not land',
+          dateCreated: 10,
+          handle: { address: 'backfill@example.com' },
+        }),
+      ],
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+    const syncing = syncChatMessages(db, api, 'backfill-chat', {
+      shouldAbort: () => revoked,
+    });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    revoked = true;
+    releaseNeighbour();
+
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(syncing).resolves.toBe(0);
+    expect(
+      raw.prepare("SELECT guid FROM messages WHERE guid = 'old-account-backfill'").get(),
+    ).toBeUndefined();
   });
 });
 
@@ -408,6 +717,187 @@ describe('incrementalSync', () => {
  * with no error anywhere.
  */
 describe('incrementalSync — page write atomicity', () => {
+  it('queues an all-duplicate marker advance behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
+    const deduper = new GuidDeduper();
+    deduper.markIfNew('duplicate-marker');
+
+    let fetchStarted!: () => void;
+    let releaseFetch!: () => void;
+    const startedFetching = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    const fetched = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
+      fetchMessagesAfter: async () => {
+        fetchStarted();
+        await fetched;
+        return [msg('duplicate-marker', 7, 'already seen', 'cDuplicate')];
+      },
+    };
+
+    let syncSettled = false;
+    const syncing = incrementalSync(db, api, {
+      serverVersion: '1.9.0',
+      batchSize: 1,
+      maxPages: 1,
+      deduper,
+    }).finally(() => {
+      syncSettled = true;
+    });
+    await startedFetching;
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbourError = new Error('duplicate-marker neighbour rollback');
+    const neighbour = withDbTransaction(db, async () => {
+      raw
+        .prepare(
+          'UPDATE sync_markers SET last_synced_row_id = ?, last_synced_timestamp = ? WHERE id = 1',
+        )
+        .run(999, 99_900);
+      neighbourStarted();
+      await held;
+      throw neighbourError;
+    }).catch((error: unknown) => error);
+    await started;
+
+    releaseFetch();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const settledWhileHeld = syncSettled;
+    const markerWhileHeld = raw
+      .prepare(
+        'SELECT last_synced_row_id AS rowId, last_synced_timestamp AS timestamp FROM sync_markers WHERE id = 1',
+      )
+      .get();
+
+    releaseNeighbour();
+    const [rolledBack, result] = await Promise.all([neighbour, syncing]);
+
+    expect(settledWhileHeld).toBe(false);
+    expect(markerWhileHeld).toEqual({ rowId: 999, timestamp: 99_900 });
+    expect(rolledBack).toBe(neighbourError);
+    expect(result).toEqual({ chats: 0, messages: 0 });
+    expect(await getSyncMarker(db)).toEqual({
+      lastSyncedRowId: 7,
+      lastSyncedTimestamp: 700,
+    });
+  });
+
+  it('rejects an all-duplicate marker advance retired after it claims the transaction slot', async () => {
+    const { db, raw } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });
+    const deduper = new GuidDeduper();
+    deduper.markIfNew('retired-duplicate-marker');
+
+    let fetchStarted!: () => void;
+    let releaseFetch!: () => void;
+    const startedFetching = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    const fetched = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async () => [],
+      fetchChatMessages: async () => [],
+      fetchDeletedAfter: async () => [],
+      fetchMessagesAfter: async () => {
+        fetchStarted();
+        await fetched;
+        return [msg('retired-duplicate-marker', 8, 'already seen', 'cRetiredDuplicate')];
+      },
+    };
+
+    let revoked = false;
+    let guardChecks = 0;
+    let markRetired!: () => void;
+    const retired = new Promise<void>((resolve) => {
+      markRetired = resolve;
+    });
+    const shouldAbort = (): boolean => {
+      guardChecks += 1;
+      if (guardChecks === 2) {
+        queueMicrotask(() => {
+          revoked = true;
+          markRetired();
+        });
+      }
+      return revoked;
+    };
+    let syncSettled = false;
+    const syncOutcome = incrementalSync(db, api, {
+      serverVersion: '1.9.0',
+      batchSize: 1,
+      maxPages: 1,
+      deduper,
+      shouldAbort,
+    }).then(
+      (value) => {
+        syncSettled = true;
+        return { status: 'resolved' as const, value };
+      },
+      (error: unknown) => {
+        syncSettled = true;
+        return { status: 'rejected' as const, error };
+      },
+    );
+    await startedFetching;
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbourError = new Error('retired-marker neighbour rollback');
+    const neighbour = withDbTransaction(db, async () => {
+      raw
+        .prepare(
+          'UPDATE sync_markers SET last_synced_row_id = ?, last_synced_timestamp = ? WHERE id = 1',
+        )
+        .run(999, 99_900);
+      neighbourStarted();
+      await held;
+      throw neighbourError;
+    }).catch((error: unknown) => error);
+    await started;
+
+    releaseFetch();
+    await retired;
+    const settledWhileHeld = syncSettled;
+
+    releaseNeighbour();
+    const [rolledBack, outcome] = await Promise.all([neighbour, syncOutcome]);
+
+    expect(settledWhileHeld).toBe(false);
+    expect(rolledBack).toBe(neighbourError);
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') throw new Error('expected the retired sync to reject');
+    expect(outcome.error).toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(guardChecks).toBeGreaterThanOrEqual(3);
+    expect(await getSyncMarker(db)).toEqual({
+      lastSyncedRowId: 0,
+      lastSyncedTimestamp: 0,
+    });
+  });
+
   it('a neighbouring rollback cannot erase a page the sync already counted', async () => {
     const { db } = await createTestDb();
     await setSyncMarker(db, { lastSyncedRowId: 0, lastSyncedTimestamp: 0 });

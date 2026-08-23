@@ -2,35 +2,41 @@ import React from 'react';
 import { Image } from 'expo-image';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AttachmentRow, ChatMediaByKind } from '@db/repositories';
-import { useRedactedModeStore } from '@state/redactedModeStore';
-import { safeOpenUrl } from '@utils';
+import { isLocalFileUri, safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
+import { useAttachmentCachePathProtection } from '../attachments/useAttachmentCachePathProtection';
 
 /** A single attachment thumbnail in the shared-media strip (image preview or kind glyph). */
 function MediaThumb({
   att,
   kind,
   glyph,
-  redacted,
   onPress,
 }: {
   att: AttachmentRow;
   kind: 'photo' | 'video';
   glyph: string;
-  redacted: boolean;
   onPress?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  // Redacted mode: never render the actual media (shoulder-surf / screenshot safety) —
-  // show a neutral glyph tile instead. expo-image can't decode a video file, so a video
-  // renders ONLY its blurhash poster (no file source) or the ▶ glyph fallback; feeding
-  // the video uri to <Image source> would just show a blank tile.
-  const showImage = !redacted && kind === 'photo' && !!att.localPath;
-  const videoPoster = !redacted && kind === 'video' && !!att.blurhash;
+  // expo-image can't decode a video file, so a video renders ONLY its blurhash poster (no file
+  // source) or the ▶ glyph fallback; feeding the video uri to <Image source> would show a blank
+  // tile.
+  const wantsImage = kind === 'photo' && !!att.localPath;
+  const videoPoster = kind === 'video' && !!att.blurhash;
+  const hasManagedPath = isLocalFileUri(att.localPath);
+  // A video tile renders only its blurhash, but its local path must survive the tap→viewer
+  // navigation handoff. The details route stays mounted underneath until the viewer cell acquires
+  // its own reader pin. A remote/dev image needs no cache protection and passes through directly.
+  const protectedPath = useAttachmentCachePathProtection(hasManagedPath ? att.localPath : null);
+  const protectionRefused = hasManagedPath && !protectedPath;
+  const imagePath = wantsImage ? (hasManagedPath ? protectedPath : att.localPath) : null;
+  const showImage = !!imagePath;
+  const safeOnPress = protectionRefused ? undefined : onPress;
   return (
     <Pressable
-      onPress={onPress}
-      disabled={!onPress}
+      onPress={safeOnPress}
+      disabled={!safeOnPress}
       // `secondaryBackground`, NOT `groupedBackground`: in 3 of the 5 presets (OLED Dark, Nord,
       // and the default Gator) groupedBackground is byte-identical to `background`, so the tile
       // vanished into the page and a poster-less video rendered as a bare ▶ floating on nothing.
@@ -42,7 +48,7 @@ function MediaThumb({
     >
       {showImage ? (
         <Image
-          source={{ uri: att.localPath! }}
+          source={{ uri: imagePath }}
           placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
           contentFit="cover"
           style={styles.thumbImg}
@@ -76,15 +82,13 @@ function MediaThumb({
 export function MediaSections({
   media,
   onOpenMedia,
+  onOpenLink = safeOpenUrl,
 }: {
   media: ChatMediaByKind | null | undefined;
   onOpenMedia: (attachmentGuid: string) => void;
+  onOpenLink?: (url: string) => unknown;
 }): React.JSX.Element | null {
   const theme = useTheme();
-  // Redacted (privacy) mode: mirror the rest of the app — never surface link URLs or
-  // photo/video previews here. Thumbnails fall back to neutral kind tiles (MediaThumb)
-  // and link URLs are replaced by a placeholder so a screenshot leaks nothing.
-  const redacted = useRedactedModeStore((s) => s.enabled);
   if (!media) return null;
   const { photos, videos, documents, links } = media;
   if (!photos.length && !videos.length && !documents.length && !links.length) return null;
@@ -107,7 +111,6 @@ export function MediaSections({
                 att={a}
                 kind="photo"
                 glyph="🖼"
-                redacted={redacted}
                 onPress={() => onOpenMedia(a.guid)}
               />
             ))}
@@ -126,7 +129,6 @@ export function MediaSections({
                 att={a}
                 kind="video"
                 glyph="▶"
-                redacted={redacted}
                 onPress={() => onOpenMedia(a.guid)}
               />
             ))}
@@ -158,7 +160,7 @@ export function MediaSections({
               {links.slice(0, 5).map((l) => (
                 <Pressable
                   key={l.messageGuid}
-                  onPress={() => void safeOpenUrl(l.url)}
+                  onPress={() => void onOpenLink(l.url)}
                   style={[
                     styles.row,
                     {
@@ -168,7 +170,7 @@ export function MediaSections({
                   ]}
                 >
                   <Text numberOfLines={1} style={[styles.linkText, { color: theme.color.tint }]}>
-                    {redacted ? '[link]' : l.url}
+                    {l.url}
                   </Text>
                 </Pressable>
               ))}

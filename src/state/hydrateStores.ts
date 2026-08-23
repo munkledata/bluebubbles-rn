@@ -1,5 +1,5 @@
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
+import { canCommitHydration, type HydrationOptions } from '@state/hydration';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useThemeStore } from '@state/themeStore';
 
@@ -13,10 +13,20 @@ export const HYDRATED_STORES = [
   useThemeStore,
   useFeatureSettingsStore,
   useSyncSettingsStore,
-  useRedactedModeStore,
 ] as const;
 
+/**
+ * Did every setting that controls data/realtime behavior load successfully?
+ *
+ * Theme is intentionally excluded: its hydrate catches an unavailable pre-DB read and opens the
+ * first-paint gate with the safe dark default so setup can never become a blank screen.
+ */
+export function areCriticalSettingsHydrated(): boolean {
+  return useFeatureSettingsStore.getState().hydrated && useSyncSettingsStore.getState().hydrated;
+}
+
 /** Kick every registered store's guarded hydrate; resolves once all have finished. */
-export async function hydrateAllStores(): Promise<void> {
-  await Promise.all(HYDRATED_STORES.map((store) => store.getState().hydrate()));
+export async function hydrateAllStores(options?: HydrationOptions): Promise<void> {
+  if (!canCommitHydration(options)) return;
+  await Promise.all(HYDRATED_STORES.map((store) => store.getState().hydrate(options)));
 }

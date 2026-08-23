@@ -1,3 +1,4 @@
+/* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
 /**
  * Unit tests for `deleteChat` (`src/services/chatActions.ts`) — the service wrapper the UI's
  * "Delete Conversation" goes through.
@@ -15,9 +16,10 @@
  *     the row when the server refuses.
  *   - A posted TRAY notification is system state keyed by the chat guid: left up it still shows the
  *     deleted conversation's sender and preview, and tapping it routes back into the hidden thread.
- *   - Downloaded attachment FILES are only findable through `attachments.local_path`, which cascades
- *     away with the messages — so they must be collected before the delete and removed after it,
- *     and only where the row really did go.
+ *   - Ledger-managed downloaded files are retired by exact physical path. Pre-ledger GUID
+ *     directories are NEVER recursively removed here: forwarding may give another message a
+ *     different attachment GUID while it still shares a file inside the source GUID's directory.
+ *     Bounded startup discovery adopts or exactly retires those legacy files later.
  *   - None of those may ever cost the user the delete itself.
  *   - The DB is opened with the lazy `ensureDatabase()`.
  *
@@ -26,17 +28,22 @@
  */
 import type Database from 'better-sqlite3';
 import { Chat } from '@core/models';
+import { logger } from '@core/secure';
 import {
   createReminder,
+  getAttachmentCacheEntry,
   getChatIdByGuid,
   insertScheduled,
   listChatsForInbox,
   listReminders,
   listScheduledByChat,
+  recordAttachmentCacheEntry,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { deleteNativeAttachmentCacheFile } from '@native/boundedDownload';
 import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
@@ -44,13 +51,18 @@ let mockDb: AppDatabase;
 const mockCancelReminder = jest.fn<Promise<void>, [string]>();
 const mockCancelForChat = jest.fn<Promise<void>, [string]>();
 const mockDeleteScheduled = jest.fn<Promise<unknown>, [unknown, string]>();
-/** Directories the delete removed, in order — `{documents}/attachments/<attachment guid>`. */
+const mockCancelAttachmentDownloads = jest.fn<void, [Iterable<string>, number | undefined]>();
+/** Broad directories removed by the delete. This must remain empty. */
 const mockDeletedDirs: string[] = [];
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@/services/clients', () => ({ http: { __http: true } }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => mockDb) }));
 jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn(() => null) }));
+jest.mock('@/services/download/downloadService', () => ({
+  cancelAttachmentDownloads: (guids: Iterable<string>, generation?: number) =>
+    mockCancelAttachmentDownloads(guids, generation),
+}));
 jest.mock('@state/featureSettingsStore', () => ({
   useFeatureSettingsStore: {
     getState: () => ({ privateApiEnabled: true, sendReadReceipts: true, hydrated: true }),
@@ -64,8 +76,8 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   cancelReminderNotification: (id: string) => mockCancelReminder(id),
   cancelForChat: (guid: string) => mockCancelForChat(guid),
 }));
-// The filesystem half of the delete. `exists` is true so every candidate directory reaches
-// `delete()` and the assertions are about WHICH ones the service decided to remove.
+// A regression sentinel for the old recursive GUID-directory cleanup. The service should not load
+// or invoke it; if broad cleanup is reintroduced, these tests record the destructive targets.
 jest.mock('expo-file-system', () => ({
   Paths: { document: '/doc' },
   Directory: class {
@@ -81,6 +93,21 @@ jest.mock('expo-file-system', () => ({
 }));
 
 import { deleteChat } from '@/services/chatActions';
+import { ensureDatabase } from '@/services/databaseControl';
+import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 async function seedChat(db: AppDatabase, guid: string): Promise<void> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
@@ -108,6 +135,7 @@ async function seedDownloadedAttachment(
   chatGuid: string,
   messageGuid: string,
   attachmentGuid: string,
+  localPath: string | null = `/doc/attachments/${attachmentGuid}/IMG_0001.jpg`,
 ): Promise<void> {
   const chatId = await getChatIdByGuid(db, chatGuid);
   raw
@@ -120,17 +148,225 @@ async function seedDownloadedAttachment(
   };
   raw
     .prepare('INSERT INTO attachments (guid, message_id, local_path) VALUES (?,?,?)')
-    .run(attachmentGuid, id, `/doc/attachments/${attachmentGuid}/IMG_0001.jpg`);
+    .run(attachmentGuid, id, localPath);
 }
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   mockCancelReminder.mockReset().mockResolvedValue(undefined);
   mockCancelForChat.mockReset().mockResolvedValue(undefined);
   mockDeleteScheduled.mockReset().mockResolvedValue({ removed: true });
+  mockCancelAttachmentDownloads.mockReset();
+  (deleteNativeAttachmentCacheFile as jest.Mock).mockReset().mockResolvedValue({
+    status: 'deleted',
+    bytes: 1,
+  });
   mockDeletedDirs.length = 0;
+  (ensureDatabase as jest.Mock).mockClear();
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 describe('deleteChat', () => {
+  it('passes one account cache scope through both cleanup phases', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    const retire = jest
+      .spyOn(attachmentCacheCoordinator, 'retireInactiveEntries')
+      .mockResolvedValue({
+        status: 'complete',
+        attempted: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 0,
+      });
+    const drain = jest.spyOn(attachmentCacheCoordinator, 'drainDueRetirements').mockResolvedValue({
+      status: 'complete',
+      attempted: 0,
+      confirmed: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    const lease = captureRealtimeDeliveryLease();
+    try {
+      await deleteChat('c1', lease);
+
+      expect(retire).toHaveBeenCalledTimes(2);
+      expect(drain).toHaveBeenCalledTimes(2);
+      const scope = retire.mock.calls[0]?.[1]?.scope;
+      expect(scope).toBeDefined();
+      expect(scope?.generation).toBe(lease.generation);
+      expect(retire.mock.calls[1]?.[1]?.scope).toBe(scope);
+      expect(drain.mock.calls[0]?.[1]?.scope).toBe(scope);
+      expect(drain.mock.calls[1]?.[1]?.scope).toBe(scope);
+    } finally {
+      retire.mockRestore();
+      drain.mockRestore();
+      raw.close();
+    }
+  });
+
+  it('rolls back a queued inactive claim after account revocation and lets a fresh delete retry', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'cache-revoke-a');
+    await seedChat(db, 'cache-revoke-b');
+    await seedChat(db, 'cache-orphan');
+    const inactive = '/doc/attachments/cache-orphan/shared.jpg';
+    await seedDownloadedAttachment(
+      db,
+      raw,
+      'cache-orphan',
+      'cache-orphan-message-a',
+      'cache-orphan-att-a',
+      inactive,
+    );
+    await seedDownloadedAttachment(
+      db,
+      raw,
+      'cache-orphan',
+      'cache-orphan-message-b',
+      'cache-orphan-att-b',
+      inactive,
+    );
+    raw
+      .prepare(
+        `UPDATE messages SET date_deleted = 2
+         WHERE guid IN ('cache-orphan-message-a', 'cache-orphan-message-b')`,
+      )
+      .run();
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: inactive, bytes: 20, lastUsedAt: 1 }),
+    );
+
+    const neighbourStarted = deferred<void>();
+    const releaseNeighbour = deferred<void>();
+    const originalRetire = attachmentCacheCoordinator.retireInactiveEntries.bind(
+      attachmentCacheCoordinator,
+    );
+    let neighbour: Promise<unknown> | undefined;
+    let oldDelete: Promise<void> | undefined;
+    let pause: Promise<void> | undefined;
+    const retire = jest.spyOn(attachmentCacheCoordinator, 'retireInactiveEntries');
+    retire.mockImplementationOnce(async (cacheDb, input) => {
+      neighbour = withDbTransaction(db, async (context) => {
+        raw.prepare("INSERT INTO kv (key, value) VALUES ('cache-revoke-neighbour', 'dirty')").run();
+        neighbourStarted.resolve(undefined);
+        await releaseNeighbour.promise;
+        throw new Error('cache revocation neighbour rollback');
+      }).catch((error: unknown) => error);
+      await neighbourStarted.promise;
+      return originalRetire(cacheDb, input);
+    });
+    (deleteNativeAttachmentCacheFile as jest.Mock).mockImplementation(async (candidate: string) => {
+      expect(candidate).toBe(inactive);
+      expect(raw.inTransaction).toBe(false);
+      expect(await getAttachmentCacheEntry(db, inactive)).toMatchObject({ state: 'retiring' });
+      expect(
+        raw
+          .prepare(
+            `SELECT guid, local_path AS localPath
+             FROM attachments WHERE guid LIKE 'cache-orphan-att-%' ORDER BY guid`,
+          )
+          .all(),
+      ).toEqual([
+        { guid: 'cache-orphan-att-a', localPath: null },
+        { guid: 'cache-orphan-att-b', localPath: null },
+      ]);
+      return { status: 'deleted', bytes: 20 };
+    });
+
+    try {
+      oldDelete = deleteChat('cache-revoke-a', captureRealtimeDeliveryLease());
+      await neighbourStarted.promise;
+
+      let pauseSettled = false;
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseSettled = true;
+      });
+      await Promise.resolve();
+      expect(pauseSettled).toBe(false);
+      resumeRealtimeDeliveries();
+      releaseNeighbour.resolve(undefined);
+
+      await neighbour;
+      await expect(oldDelete).resolves.toBeUndefined();
+      await pause;
+      expect(await getAttachmentCacheEntry(db, inactive)).toMatchObject({ state: 'active' });
+      expect(
+        raw
+          .prepare(
+            `SELECT guid, local_path AS localPath
+             FROM attachments WHERE guid LIKE 'cache-orphan-att-%' ORDER BY guid`,
+          )
+          .all(),
+      ).toEqual([
+        { guid: 'cache-orphan-att-a', localPath: inactive },
+        { guid: 'cache-orphan-att-b', localPath: inactive },
+      ]);
+      expect(deleteNativeAttachmentCacheFile).not.toHaveBeenCalled();
+      expect(
+        raw.prepare("SELECT value FROM kv WHERE key = 'cache-revoke-neighbour'").get(),
+      ).toBeUndefined();
+
+      await deleteChat('cache-revoke-b', captureRealtimeDeliveryLease());
+      expect(deleteNativeAttachmentCacheFile).toHaveBeenCalledTimes(1);
+      expect(await getAttachmentCacheEntry(db, inactive)).toBeNull();
+    } finally {
+      releaseNeighbour.resolve(undefined);
+      await Promise.allSettled(
+        [neighbour, oldDelete, pause].filter(Boolean) as Array<Promise<unknown>>,
+      );
+      retire.mockRestore();
+      raw.close();
+    }
+  });
+
+  it('quietly rejects a delayed confirmation callback carrying an old screen lease', async () => {
+    const accountALease = captureRealtimeDeliveryLease();
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+
+    const accountB = await createTestDb();
+    mockDb = accountB.db;
+    await seedChat(accountB.db, 'same-guid');
+
+    await expect(deleteChat('same-guid', accountALease)).resolves.toBeUndefined();
+
+    expect(ensureDatabase).not.toHaveBeenCalled();
+    expect((await listChatsForInbox(accountB.db)).map((row) => row.guid)).toEqual(['same-guid']);
+  });
+
+  it('does not let an A-account delete parked on DB open tombstone B’s same-guid row', async () => {
+    const accountB = await createTestDb();
+    await seedChat(accountB.db, 'same-guid');
+    const opening = deferred<AppDatabase>();
+    (ensureDatabase as jest.Mock).mockImplementationOnce(() => opening.promise);
+
+    const oldDelete = deleteChat('same-guid');
+    expect(ensureDatabase).toHaveBeenCalledTimes(1);
+    let pauseSettled = false;
+    const pause = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    mockDb = accountB.db;
+    await Promise.resolve();
+    expect(pauseSettled).toBe(false);
+
+    opening.resolve(accountB.db);
+    await expect(oldDelete).resolves.toBeUndefined();
+    await pause;
+    resumeRealtimeDeliveries();
+
+    expect((await listChatsForInbox(accountB.db)).map((row) => row.guid)).toEqual(['same-guid']);
+    expect(mockCancelForChat).not.toHaveBeenCalled();
+    expect(mockCancelReminder).not.toHaveBeenCalled();
+    expect(mockDeleteScheduled).not.toHaveBeenCalled();
+  });
+
   it('cancels only the target chat’s reminder alarms, then deletes its rows', async () => {
     const { db } = await createTestDb();
     mockDb = db;
@@ -231,6 +467,7 @@ describe('deleteChat', () => {
   });
 
   it('KEEPS a server-backed scheduled row the server refused to cancel, and still deletes the chat', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db } = await createTestDb();
     mockDb = db;
     await seedChat(db, 'c1');
@@ -240,13 +477,20 @@ describe('deleteChat', () => {
       scheduledFor: 9_000,
       serverId: 'srv-1',
     });
-    mockDeleteScheduled.mockRejectedValue(new Error('offline'));
+    const failure = new Error('offline');
+    mockDeleteScheduled.mockRejectedValue(failure);
 
     await expect(deleteChat('c1')).resolves.toBeUndefined();
 
     // The Mac will still send it, so the row is the user's only handle to cancel it — the
     // Scheduled screen lists pending rows without joining `chats`, so a hidden chat keeps it usable.
     expect((await listScheduledByChat(db, 'c1')).map((r) => r.serverId)).toEqual(['srv-1']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[chats] server scheduled-message cancel failed; keeping the local row',
+      failure,
+    );
+    warn.mockRestore();
   });
 
   it('deletes locally BEFORE any network round trip — the tile must not wait on a hung server', async () => {
@@ -317,42 +561,85 @@ describe('deleteChat', () => {
   });
 
   it('still deletes the chat when the notification bridge is unreachable', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db } = await createTestDb();
     mockDb = db;
     await seedChat(db, 'c1');
-    mockCancelForChat.mockRejectedValue(new Error('no native module'));
+    const failure = new Error('no native module');
+    mockCancelForChat.mockRejectedValue(failure);
 
     await expect(deleteChat('c1')).resolves.toBeUndefined();
 
     expect(await listChatsForInbox(db)).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[chats] tray notification cancel failed for deleted chat',
+      failure,
+    );
+    warn.mockRestore();
   });
 
-  it('deletes the downloaded attachment files the purge orphaned, and only those', async () => {
+  it('never recursively deletes legacy GUID directories when another chat shares the same file', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     await seedChat(db, 'c1');
     await seedChat(db, 'c2');
-    await seedDownloadedAttachment(db, raw, 'c1', 'm-photo', 'att-1');
+    const sharedPath = '/doc/attachments/att-1/IMG_0001.jpg';
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-photo', 'att-1', sharedPath);
     await seedDownloadedAttachment(db, raw, 'c1', 'm-video', 'att-2');
-    await seedDownloadedAttachment(db, raw, 'c2', 'm-other', 'att-other');
+    // Forwarding creates a new attachment GUID but deliberately reuses the physical source URI.
+    await seedDownloadedAttachment(db, raw, 'c2', 'm-forward', 'att-forward', sharedPath);
 
     await deleteChat('c1');
 
-    // Their rows cascaded away with the messages, so nothing could ever find these files again —
-    // `local_path` was the only record that the download happened.
-    expect(mockDeletedDirs.sort()).toEqual(['/doc/attachments/att-1', '/doc/attachments/att-2']);
-    // Another conversation's photos are untouched.
-    expect(mockDeletedDirs).not.toContain('/doc/attachments/att-other');
+    expect(mockDeletedDirs).toEqual([]);
+    expect(
+      raw.prepare('SELECT local_path AS path FROM attachments WHERE guid = ?').get('att-forward'),
+    ).toEqual({ path: sharedPath });
   });
 
-  it('leaves a file alone when its attachment row SURVIVED the delete', async () => {
+  it('cancels both downloaded and null-path attachment flights before purging the chat', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-downloaded', 'att-downloaded');
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-in-flight', 'att-in-flight', null);
+    const lease = captureRealtimeDeliveryLease();
+
+    await deleteChat('c1', lease);
+
+    expect(mockCancelAttachmentDownloads).toHaveBeenCalledTimes(1);
+    const [guids, generation] = mockCancelAttachmentDownloads.mock.calls[0]!;
+    expect([...guids]).toEqual(['att-downloaded', 'att-in-flight']);
+    expect(generation).toBe(lease.generation);
+  });
+
+  it('deletes a ledger-managed file by exact path and never recursively removes its directory', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    const cachePath =
+      'file:///documents/attachments/media-att-managed/generation-1/media-photo.jpg';
+    await seedDownloadedAttachment(db, raw, 'c1', 'm-managed', 'att-managed', cachePath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: cachePath, bytes: 1234, lastUsedAt: 100 }),
+    );
+
+    await deleteChat('c1');
+
+    expect(deleteNativeAttachmentCacheFile).toHaveBeenCalledWith(cachePath);
+    expect(await getAttachmentCacheEntry(db, cachePath)).toBeNull();
+    expect(mockDeletedDirs).toEqual([]);
+  });
+
+  it('does not broad-delete a legacy file when an attachment row survives the delete', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     await seedChat(db, 'c1');
     await seedDownloadedAttachment(db, raw, 'c1', 'm-photo', 'att-1');
     // The purge is bounded at the tombstone stamp and yields the write lock between chunks, so a
-    // row really can outlive it — and it still renders its image. Simulated by re-inserting the
-    // row the cascade removed, which is the state the file deleter must re-check for.
+    // row really can outlive it — and it still renders its image. Simulate that interleaving to
+    // prove chat deletion never falls back to recursive filesystem cleanup.
     const realPrepare = raw.prepare.bind(raw);
     (raw as unknown as { prepare: (s: string) => unknown }).prepare = (s: string) => {
       if (/DELETE\s+FROM\s+messages\b/i.test(s)) {
@@ -376,11 +663,11 @@ describe('deleteChat', () => {
       (raw as unknown as { prepare: unknown }).prepare = realPrepare;
     }
 
-    // The row really is still there (that is what the re-check has to notice)…
+    // The row really is still there…
     expect(raw.prepare('SELECT COUNT(*) c FROM attachments WHERE guid = ?').get('att-1')).toEqual({
       c: 1,
     });
-    // …so its file stays: deleting it leaves a message rendering a permanently broken image.
+    // …so its file stays: recursive cleanup would leave this row rendering a broken image.
     expect(mockDeletedDirs).toEqual([]);
   });
 

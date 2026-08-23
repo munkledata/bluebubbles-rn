@@ -1,14 +1,20 @@
 import { resolveMessageChatGuid } from '@core/models';
 import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
-import { getChatHeader, getHandleProfile } from '@db/repositories';
+import {
+  getChatGuidByMessageGuid,
+  getChatHeader,
+  getHandleProfile,
+  getMessagePreviewByGuid,
+  isMessageNotificationEligible,
+} from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { stripAttachmentPlaceholder } from '@utils';
 
 /**
  * Pure projection: a normalized event → the notifications to show/clear. Reads
- * the chat header for the title/group info. No native imports, so it is unit-
- * tested in Node against better-sqlite3. Redaction is applied later by the
- * Notifee service, not here.
+ * the chat header for the title/group info. No native imports, so it is unit-tested in Node
+ * against better-sqlite3. Intents carry ordinary detailed presentation; the Notifee service
+ * independently substitutes the fixed generic App Lock notice before native presentation.
  */
 export async function buildMessageIntents(
   db: AppDatabase,
@@ -22,6 +28,13 @@ export async function buildMessageIntents(
       // may carry — without this a chats-less event would build no notification.
       const chatGuid = resolveMessageChatGuid(m);
       if (!chatGuid || !m.guid) return [];
+      // A durable notification retry must honor CURRENT DB truth, not resurrect the old envelope
+      // after the user read/deleted it or the sender retracted it between attempts.
+      if (!(await isMessageNotificationEligible(db, m.guid))) return [];
+      // The row may have been edited while an earlier native presentation attempt backed off.
+      // Project the body from current DB truth, not the stale durable envelope being replayed.
+      const currentPreview = await getMessagePreviewByGuid(db, m.guid);
+      if (!currentPreview) return [];
       const header = await getChatHeader(db, chatGuid);
       // Honor the per-chat mute preference: a muted chat still writes the message to the DB
       // (badge/inbox update via the reactive query) but must NOT raise a notification. The Mute
@@ -43,12 +56,13 @@ export async function buildMessageIntents(
       // FOREVER: nothing about that event can make it findable, and the notification body is
       // usually the bare '📎 Attachment' fallback because a tapback carries no text.
       //
-      // The test is the same one `chatVisible` / `clearSupersededTombstones` apply, evaluated
+      // The test is the same one `chatVisible` /
+      // `clearSupersededTombstonesWithinTransaction` apply, evaluated
       // against THIS message, so the two layers cannot disagree: if the message will un-hide the
       // chat, notify (the alert is truthful — the thread is back); if it cannot, stay silent. It is
-      // checked against the message rather than by re-running the EXISTS because the DB write may
-      // not have landed yet, and because a qualifying message has already NULLed the stamp by the
-      // time it has. An undated message can't out-date the stamp, so it is treated as older.
+      // checked against the message as well as current DB truth because a qualifying DB write has
+      // already NULLed the stamp by this phase. An undated message can't out-date a stamp, so it is
+      // treated as older.
       const deletedAt = header?.deletedAt;
       if (
         deletedAt != null &&
@@ -70,12 +84,10 @@ export async function buildMessageIntents(
         header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
       // Genmoji (macOS 15.1+): a Genmoji attachment carries a natural-language description ("a
       // smiling cat wearing a top hat") — a far better notification body than "📎 Attachment".
-      // Presence-driven, so plain images/other attachments have none. This body is RAW; the Notifee
-      // service redacts it downstream (postNotification masks it to "New message" under hidePreview),
-      // so the description never leaks on a locked/redacted screen.
-      const genmojiDescription = m.attachments
-        ?.find((a) => a.emojiImageShortDescription)
-        ?.emojiImageShortDescription?.trim();
+      // Presence-driven, so plain images/other attachments have none. The intent carries this
+      // ordinary detailed body; the independent App Lock path substitutes a fixed generic notice
+      // before native presentation.
+      const genmojiDescription = currentPreview.attachmentDescription?.trim();
       return [
         {
           kind: 'message',
@@ -83,19 +95,31 @@ export async function buildMessageIntents(
           chatTitle,
           senderName,
           senderHandle: m.handle?.address ?? 'unknown',
-          // The stored contact photo (file:// uri) — without it Android's expanded
-          // MessagingStyle draws a generic person-silhouette placeholder. The Notifee
-          // layer drops it again under redacted mode.
+          // The stored contact photo (file:// uri) — without it Android's expanded MessagingStyle
+          // draws a generic person-silhouette placeholder. The intent carries the ordinary avatar;
+          // the App Lock path publishes only its fixed generic notice before native presentation.
           avatarUri: profile?.avatar ?? undefined,
           // Attachment messages carry U+FFFC placeholder text (renders as an empty box); strip it
           // and fall back to the Genmoji description (if any), else a generic label — so the
           // notification never shows a bare box.
-          body: stripAttachmentPlaceholder(m.text) || genmojiDescription || '📎 Attachment',
+          body:
+            stripAttachmentPlaceholder(currentPreview.text) ||
+            genmojiDescription ||
+            '📎 Attachment',
           messageGuid: m.guid,
           timestamp: m.dateCreated ?? Date.now(),
           isGroup,
         },
       ];
+    }
+    case 'message-deleted': {
+      // The DB tombstone is authoritative, but a notification already posted to Android is
+      // separate OS state. Withdraw it so deleted content cannot remain visible or deep-link to a
+      // hidden message. Notifications are keyed per chat, so this shares the same accepted
+      // whole-chat cancellation limitation as retraction below.
+      const chatGuid =
+        (await getChatGuidByMessageGuid(db, event.payload.guid)) || event.payload.chatGuid;
+      return chatGuid ? [{ kind: 'cancel', chatGuid }] : [];
     }
     case 'chat-read-status-changed':
       // Read elsewhere → clear any pending notification for this chat.
@@ -107,7 +131,9 @@ export async function buildMessageIntents(
       // Guard: any OTHER update (an edit, a delivery/read receipt) must produce NO intent — it
       // neither raises a new notification nor cancels one. Only a retraction acts here.
       if (m.dateRetracted == null) return [];
-      const chatGuid = resolveMessageChatGuid(m);
+      // Real FCM update payloads omit chats/chatGuid. The DB phase has already found the owner by
+      // message guid, so use the same fallback to withdraw a notification after a lean unsend.
+      const chatGuid = resolveMessageChatGuid(m) ?? (await getChatGuidByMessageGuid(db, m.guid));
       if (!chatGuid) return [];
       // KNOWN CONSTRAINT (accepted for v1): notifications are keyed per CHAT — the Notifee id is the
       // chatGuid (see notifeeService.displayNotification / cancelForChat → notifee.cancelNotification
@@ -156,17 +182,18 @@ export async function buildMessageIntents(
     }
     case 'rcs-bridge-down': {
       // Server-fired bridge-down push. Show the server's title/body verbatim as a status notice —
-      // no message content, so no DB lookup and no redaction. Fall back to sane defaults if the
-      // server omitted a field.
+      // it contains no conversation message content, so no contact/content lookup is needed. Fall
+      // back to sane defaults if the server omitted a field.
       const title = event.payload.title ?? 'RCS bridge';
       const body = event.payload.body ?? 'The RCS bridge went down — reconnect on the server.';
       return [{ kind: 'rcs-bridge-down', title, body }];
     }
     case 'test-notification': {
       // The server's push self-test. Always produces a notification — it is a user-initiated
-      // diagnostic, so it deliberately bypasses the message-kind gating (the "Message
-      // Notifications" toggle / unknown-sender filter) applied in realtimeControl. Falls back to
-      // fixed copy if the server omitted a field, so the probe can never render blank.
+      // diagnostic with no conversation message content, so no contact/content lookup is needed.
+      // It deliberately bypasses the message-kind gating (the "Message Notifications" toggle /
+      // unknown-sender filter) applied in realtimeControl. Fixed fallback copy prevents a blank
+      // probe if the server omitted a field.
       const title = event.payload.title ?? 'Gator';
       const body = event.payload.body ?? 'Test notification from your Gator server.';
       return [{ kind: 'test-notification', title, body }];

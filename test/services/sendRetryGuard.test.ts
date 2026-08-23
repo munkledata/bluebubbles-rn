@@ -14,6 +14,7 @@
  */
 import type Database from 'better-sqlite3';
 import { Chat } from '@core/models';
+import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
   insertOutgoingContact,
@@ -41,6 +42,11 @@ import { http } from '@/services/clients';
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { showToast } from '@ui/toast/toastStore';
+// eslint-disable-next-line import/first -- composition-root/native dependencies above must be mocked first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 type JsonBody = Record<string, unknown>;
 /** Every POST the retry made: `{ path, body }` (body = the request's `json` payload). */
@@ -69,6 +75,7 @@ async function seedFailedText(
 }
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.clearAllMocks();
   posts.length = 0;
   (http as unknown as { post: jest.Mock }).post = jest
@@ -77,6 +84,22 @@ beforeEach(() => {
       posts.push({ path, body: opts.json });
       return { guid: 'real-1', dateCreated: 1000, dateDelivered: null };
     });
+});
+
+describe('retry() account handover', () => {
+  it('does not report an old-account failure after Disconnect revokes the retry', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    (getDatabase as jest.Mock).mockImplementationOnce(() => {
+      void pauseRealtimeDeliveries();
+      throw new Error('old database was closed');
+    });
+
+    await expect(retry('temp-old-account')).resolves.toBeUndefined();
+
+    expect(showToast).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
 
 describe('retry() — re-sends the QUEUED send, not the bubble', () => {

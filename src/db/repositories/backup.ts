@@ -1,7 +1,13 @@
 import { eq, sql } from 'drizzle-orm';
 import { chats } from '../schema';
+import {
+  runInTransactionContext,
+  type DbCommitGuard,
+  type DbTransactionContext,
+  withDbTransaction,
+} from '../transaction';
 import type { AppDatabase } from '../types';
-import { kvSet, THEME_CUSTOM_KEY } from './kv';
+import { kvSetWithinTransaction, THEME_CUSTOM_KEY } from './kv';
 
 // ---- Backup / restore reads + writes (settings, themes, chat customizations) ----
 
@@ -39,7 +45,7 @@ export async function getAllKv(db: AppDatabase): Promise<KvPair[]> {
  *
  * `ORDER BY id` matters beyond tidiness: a backup carries no ids, so `restoreThemes` pairs entries
  * with rows positionally within each (name, mode) group. Exporting in id order — the same order
- * the restore snapshot uses — is what keeps two same-named themes from swapping palettes on a
+ * the restore cursor uses — is what keeps two same-named themes from swapping palettes on a
  * restore back onto the device they came from.
  */
 export async function getAllThemes(db: AppDatabase): Promise<ThemeRow[]> {
@@ -68,12 +74,23 @@ export async function getChatCustomizations(db: AppDatabase): Promise<ChatCustom
   `);
 }
 
-export async function restoreKv(db: AppDatabase, items: KvPair[]): Promise<void> {
+export async function restoreKv(
+  db: AppDatabase,
+  items: KvPair[],
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
   for (const it of items) {
     // The active custom-theme id is device-specific — restored themes get fresh ids, so a
     // backed-up pointer would dangle. Skip it; restoreThemes still brings the themes over.
     if (it.key === THEME_CUSTOM_KEY) continue;
-    if (it.value != null) await kvSet(db, it.key, it.value);
+    const value = it.value;
+    if (value != null) {
+      await withDbTransaction(
+        db,
+        (context) => kvSetWithinTransaction(context, it.key, value),
+        commitGuard,
+      );
+    }
   }
 }
 
@@ -93,8 +110,8 @@ function themeIdentity(name: string, mode: string): string {
  * twice — an utterly normal recovery action — then left two indistinguishable copies of every
  * custom theme that no later restore could dedupe.
  *
- * (name, mode) is NOT a key either, and that is why the pairing is done in JS against a snapshot
- * instead of in the WHERE clause. The theme editor seeds every new theme's name to 'My Theme', so
+ * (name, mode) is NOT a key either, and that is why the pairing uses an id cursor rather than a
+ * broad UPDATE by name. The theme editor seeds every new theme's name to 'My Theme', so
  * a user who builds two palettes without renaming them has two rows with identical (name, mode) —
  * the normal case, not an exotic one. A `WHERE name = ? AND mode = ?` UPDATE matches BOTH of them:
  * entry 1 wrote its tokens over both twins and entry 2 overwrote them again, so the palette the
@@ -102,45 +119,81 @@ function themeIdentity(name: string, mode: string): string {
  * primary use of a backup) it was worse: entry 1 inserted, entry 2's UPDATE matched that
  * brand-new row and rewrote it, and only ONE of the two themes survived at all.
  *
- * The id queue fixes both. The snapshot is read ONCE, before the loop, and each entry consumes at
- * most one id from its bucket, so the k-th twin in the backup lands on the k-th twin in the table
- * and rows inserted BY THIS RESTORE are invisible to later entries — which is precisely what stops
- * entry 2 from swallowing entry 1's insert.
+ * The id cursor fixes both without reading the whole themes table into memory. A serialized MAX(id)
+ * captures the original generation, then each backup entry claims at most one matching id after the
+ * previous claim and at or below that cutoff. The k-th twin in the backup therefore lands on the
+ * k-th twin in the table, while rows inserted BY THIS RESTORE are invisible to later entries —
+ * precisely what stops entry 2 from swallowing entry 1's insert.
  *
  * The insert deliberately carries NO `WHERE NOT EXISTS (name, mode)` guard: it would re-introduce
  * the fresh-device loss (entry 2 would find entry 1's just-inserted twin and skip). What that
  * gives up is only the case of a theme created by the editor DURING a restore, which needs the
  * Themes screen open mid-import and costs a duplicate row, not a lost palette.
  *
- * Update-then-insert, never delete-then-insert — every write commits on its own and wakes the
- * reactive readers, so a theme the user is currently rendering never blinks out of existence on
- * its way to being rewritten.
+ * Update-then-insert, never delete-then-insert. Each item gets its own short transaction instead of
+ * holding the process-wide DB mutex across an import of up to 500 themes. A later failure therefore
+ * leaves the successfully restored prefix committed, matching this helper's previous behavior.
  */
-export async function restoreThemes(db: AppDatabase, items: ThemeRow[]): Promise<void> {
-  const existing = await db.all<{ id: number; name: string; mode: string }>(
-    sql`SELECT id, name, mode FROM themes WHERE is_preset = 0 ORDER BY id`,
+export async function restoreThemes(
+  db: AppDatabase,
+  items: ThemeRow[],
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  if (items.length === 0) return;
+
+  // Queue the cutoff read so it cannot observe another transaction's uncommitted generation.
+  const cutoff = await withDbTransaction(
+    db,
+    async () => {
+      const rows = await db.all<{ maxId: number }>(sql`
+        SELECT COALESCE(MAX(id), 0) AS maxId FROM themes
+      `);
+      return rows[0]?.maxId ?? 0;
+    },
+    commitGuard,
   );
-  // (name, mode) → the ids of the rows carrying it, oldest first, each claimable once.
-  const unpaired = new Map<string, number[]>();
-  for (const row of existing) {
-    const key = themeIdentity(row.name, row.mode);
-    const ids = unpaired.get(key);
-    if (ids) ids.push(row.id);
-    else unpaired.set(key, [row.id]);
-  }
+
+  // (name, mode) → the last original row claimed for that identity.
+  const lastClaimed = new Map<string, number>();
 
   for (const t of items) {
-    const id = unpaired.get(themeIdentity(t.name, t.mode))?.shift();
-    if (id != null) {
-      // By id, so exactly one row is touched however many twins share the name. `is_preset = 0`
-      // is redundant against the snapshot but kept: a built-in preset must never be rewritten.
-      await db.run(sql`UPDATE themes SET tokens = ${t.tokens} WHERE id = ${id} AND is_preset = 0`);
-    } else {
-      await db.run(sql`
-        INSERT INTO themes (name, mode, tokens, is_preset)
-        VALUES (${t.name}, ${t.mode}, ${t.tokens}, 0)
-      `);
-    }
+    const key = themeIdentity(t.name, t.mode);
+    const afterId = lastClaimed.get(key) ?? 0;
+    const claimedId = await withDbTransaction(
+      db,
+      async () => {
+        const rows = await db.all<{ id: number }>(sql`
+          SELECT id
+            FROM themes
+           WHERE is_preset = 0
+             AND name = ${t.name}
+             AND mode = ${t.mode}
+             AND id > ${afterId}
+             AND id <= ${cutoff}
+           ORDER BY id
+           LIMIT 1
+        `);
+        const id = rows[0]?.id;
+        if (id != null) {
+          // By id, so exactly one row is touched however many twins share the name. The preset guard
+          // is redundant against the claim query but kept: a built-in preset must never be rewritten.
+          await db.run(
+            sql`UPDATE themes SET tokens = ${t.tokens} WHERE id = ${id} AND is_preset = 0`,
+          );
+          return id;
+        } else {
+          await db.run(sql`
+            INSERT INTO themes (name, mode, tokens, is_preset)
+            VALUES (${t.name}, ${t.mode}, ${t.tokens}, 0)
+          `);
+          return null;
+        }
+      },
+      commitGuard,
+    );
+    // Advance only after COMMIT. A failed transaction throws before this point and cannot consume
+    // an original row from the in-memory cursor.
+    if (claimedId != null) lastClaimed.set(key, claimedId);
   }
 }
 
@@ -151,24 +204,44 @@ export async function restoreThemes(db: AppDatabase, items: ThemeRow[]): Promise
  * `marked_unread_at`, so a restore can neither resurrect a locally-deleted conversation nor hide a
  * live one behind a tombstone copied from another device.
  */
-export async function restoreChatCustomizations(
-  db: AppDatabase,
-  items: ChatCustomizationRow[],
+/** Transaction-context one-row primitive for an owner that already holds the write queue. */
+export async function restoreChatCustomizationWithinTransaction(
+  context: DbTransactionContext,
+  customization: ChatCustomizationRow,
 ): Promise<number> {
-  let applied = 0;
-  for (const c of items) {
+  return runInTransactionContext(context, async (db) => {
     const rows = await db
       .update(chats)
       .set({
-        customName: c.customName,
-        customColor: c.customColor,
-        muteType: c.muteType,
-        isPinned: c.isPinned === 1,
-        isArchived: c.isArchived === 1,
+        customName: customization.customName,
+        customColor: customization.customColor,
+        muteType: customization.muteType,
+        isPinned: customization.isPinned === 1,
+        isArchived: customization.isArchived === 1,
       })
-      .where(eq(chats.guid, c.guid))
+      .where(eq(chats.guid, customization.guid))
       .returning({ id: chats.id });
-    applied += rows.length;
+    return rows.length;
+  });
+}
+
+/**
+ * Public owner: restore at most one chat row per short transaction. The input is backup-controlled
+ * and can contain many chats, so no transaction spans the loop. An optional account commit guard
+ * rejects a queued/late row before BEGIN or COMMIT.
+ */
+export async function restoreChatCustomizations(
+  db: AppDatabase,
+  items: ChatCustomizationRow[],
+  commitGuard?: DbCommitGuard,
+): Promise<number> {
+  let applied = 0;
+  for (const c of items) {
+    applied += await withDbTransaction(
+      db,
+      (context) => restoreChatCustomizationWithinTransaction(context, c),
+      commitGuard,
+    );
   }
   return applied;
 }

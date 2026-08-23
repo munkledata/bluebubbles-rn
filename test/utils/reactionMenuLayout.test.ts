@@ -28,7 +28,9 @@ describe('placeReactionMenu — side alignment', () => {
 
   it('own bubble hugs the RIGHT edge at its distance from the right screen edge', () => {
     // bubble right edge = x(150)+width(220)=370 → 20px from a 390-wide screen.
-    const p = placeReactionMenu(baseInput({ isFromMe: true, bubble: { x: 150, y: 400, width: 220, height: 60 } }));
+    const p = placeReactionMenu(
+      baseInput({ isFromMe: true, bubble: { x: 150, y: 400, width: 220, height: 60 } }),
+    );
     expect(p.align).toBe('right');
     expect(p.edgeOffset).toBe(20);
   });
@@ -83,7 +85,10 @@ describe('placeReactionMenu — bubble near the BOTTOM', () => {
 describe('placeReactionMenu — never returns a negative height', () => {
   it('clamps menuMaxHeight to 0 in a degenerate tiny screen', () => {
     const p = placeReactionMenu(
-      baseInput({ screen: { width: 390, height: 200 }, bubble: { x: 12, y: 150, width: 200, height: 40 } }),
+      baseInput({
+        screen: { width: 390, height: 200 },
+        bubble: { x: 12, y: 150, width: 200, height: 40 },
+      }),
     );
     expect(p.menuMaxHeight).toBeGreaterThanOrEqual(0);
   });

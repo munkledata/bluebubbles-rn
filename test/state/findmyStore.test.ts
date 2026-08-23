@@ -4,6 +4,7 @@
  * dev/prod switch (`isDevServer`) are mocked in-file; the REAL `@core/findmy` normalizers
  * run so the wire→view mapping is exercised end to end.
  */
+import { findMyApi } from '@core/api';
 import { useFindMyStore } from '@state/findmyStore';
 
 const mockIsDevServer = jest.fn();
@@ -11,7 +12,7 @@ jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer() }));
 
 // The store passes the shared `http` instance straight through to the (mocked) endpoint fns,
 // so a bare object is enough — findMyApi never really touches it here.
-jest.mock('@/services', () => ({ http: {} }));
+jest.mock('@/services/clients', () => ({ http: {} }));
 
 jest.mock('@core/api', () => ({
   findMyApi: {
@@ -24,7 +25,6 @@ jest.mock('@core/api', () => ({
   },
 }));
 
-import { findMyApi } from '@core/api';
 const api = findMyApi as unknown as {
   getDevices: jest.Mock;
   getFriends: jest.Mock;
@@ -35,14 +35,7 @@ const api = findMyApi as unknown as {
 };
 
 function resetStore() {
-  useFindMyStore.setState({
-    devices: [],
-    friends: [],
-    items: [],
-    loading: false,
-    refreshing: false,
-    error: null,
-  });
+  useFindMyStore.getState().reset();
 }
 
 beforeEach(() => {

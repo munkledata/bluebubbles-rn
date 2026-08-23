@@ -4,6 +4,7 @@ import { useVideoPlayer, VideoView, type VideoThumbnail } from 'expo-video';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { download } from '@/services/download';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
@@ -25,6 +26,7 @@ interface VideoPlayerProps {
  */
 export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): React.JSX.Element {
   const theme = useTheme();
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   // Present only while this file is being SENT. An entry exists for the duration of one upload
@@ -93,7 +95,7 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
 
   const onPress = (): void => {
     if (!att.localPath) {
-      void download(att);
+      void download(att, 'manual', accountLease);
       return;
     }
     setPlaying(true);

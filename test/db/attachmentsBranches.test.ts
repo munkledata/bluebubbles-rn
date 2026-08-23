@@ -1,26 +1,233 @@
 /**
  * Branch top-ups for src/db/repositories/attachments.ts — the empty-input early returns, the
  * media bucketing (photo/video/document) with the all-buckets-full early break + link dedup,
- * getAttachmentByGuid miss, the temp→real reconcile DELETE branch, and promoteAttachmentGuid's
- * dup vs update branches. Each case asserts observable DB state.
+ * getAttachmentByGuid miss, and the temp→real reconcile DELETE branch. Each case asserts
+ * observable DB state.
  */
+import type Database from 'better-sqlite3';
 import { Attachment, Chat, Message } from '@core/models';
 import {
   getAttachmentByGuid,
   getChatIdByGuid,
   insertOutgoingAttachment,
+  type InsertOutgoingAttachmentArgs,
   listAttachmentsByMessageIds,
   listChatAttachmentsByKind,
   listChatImageAttachmentsByAttachmentGuid,
-  promoteAttachmentGuid,
   updateAttachmentLocalPath,
   upsertAttachments,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { attachments, chats, messages, outgoingQueue } from '@db/schema';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+
+type OutgoingAttachmentArgs = InsertOutgoingAttachmentArgs & { chatId: number };
+
+const nextEventLoopTurn = (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+function errorMessageChain(error: unknown): unknown[] {
+  const messages: unknown[] = [];
+  let current = error;
+  for (let depth = 0; depth < 4 && typeof current === 'object' && current != null; depth += 1) {
+    const record = current as { message?: unknown; cause?: unknown };
+    messages.push(record.message);
+    current = record.cause;
+  }
+  return messages;
+}
+
+function latestMessageDate(raw: Database.Database, chatId: number): number | null {
+  return (
+    raw.prepare('SELECT latest_message_date AS value FROM chats WHERE id = ?').get(chatId) as {
+      value: number | null;
+    }
+  ).value;
+}
+
+function expectNoOutgoingAttachmentRows(
+  raw: Database.Database,
+  args: OutgoingAttachmentArgs,
+): void {
+  expect(raw.prepare('SELECT id FROM messages WHERE guid = ?').get(args.tempGuid)).toBeUndefined();
+  expect(
+    raw.prepare('SELECT id FROM attachments WHERE guid = ?').get(args.attachmentGuid),
+  ).toBeUndefined();
+  expect(
+    raw.prepare('SELECT id FROM outgoing_queue WHERE temp_guid = ?').get(args.tempGuid),
+  ).toBeUndefined();
+}
+
+function expectExactOutgoingAttachmentRows(
+  raw: Database.Database,
+  args: OutgoingAttachmentArgs,
+  expectedLatestMessageDate: number,
+): void {
+  const message = raw
+    .prepare(
+      `SELECT id, guid, chat_id AS chatId, is_from_me AS isFromMe,
+              date_created AS dateCreated, has_attachments AS hasAttachments,
+              send_state AS sendState, error
+         FROM messages WHERE guid = ?`,
+    )
+    .get(args.tempGuid) as {
+    id: number;
+    guid: string;
+    chatId: number;
+    isFromMe: number;
+    dateCreated: number;
+    hasAttachments: number;
+    sendState: string;
+    error: number;
+  };
+  expect(message).toEqual({
+    id: expect.any(Number),
+    guid: args.tempGuid,
+    chatId: args.chatId,
+    isFromMe: 1,
+    dateCreated: args.now,
+    hasAttachments: 1,
+    sendState: 'sending',
+    error: 0,
+  });
+  expect(
+    raw
+      .prepare(
+        `SELECT guid, message_id AS messageId, mime_type AS mimeType,
+                transfer_name AS transferName, total_bytes AS totalBytes,
+                width, height, local_path AS localPath
+           FROM attachments WHERE guid = ?`,
+      )
+      .get(args.attachmentGuid),
+  ).toEqual({
+    guid: args.attachmentGuid,
+    messageId: message.id,
+    mimeType: args.mimeType,
+    transferName: args.transferName,
+    totalBytes: args.totalBytes,
+    width: args.width ?? null,
+    height: args.height ?? null,
+    localPath: args.localPath,
+  });
+  expect(
+    raw
+      .prepare(
+        `SELECT temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload,
+                attempts, next_retry_at AS nextRetryAt
+           FROM outgoing_queue WHERE temp_guid = ?`,
+      )
+      .get(args.tempGuid),
+  ).toEqual({
+    tempGuid: args.tempGuid,
+    chatGuid: args.chatGuid,
+    kind: 'attachment',
+    payload: JSON.stringify({ attachmentGuid: args.attachmentGuid, localPath: args.localPath }),
+    attempts: 0,
+    nextRetryAt: 0,
+  });
+  expect(latestMessageDate(raw, args.chatId)).toBe(expectedLatestMessageDate);
+}
+
+interface DriverGate {
+  didStart: boolean;
+  held: Promise<void>;
+  finished: Promise<void>;
+  release(): void;
+  markFinished(): void;
+}
+
+function driverGate(): DriverGate {
+  let release!: () => void;
+  let markFinished!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const finished = new Promise<void>((resolve) => {
+    markFinished = resolve;
+  });
+  return { didStart: false, held, finished, release, markFinished };
+}
+
+function gateThenable<T extends object>(thenable: T, gate: DriverGate): T {
+  return new Proxy(thenable, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== 'then') {
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return (onFulfilled: unknown, onRejected: unknown) => {
+        gate.didStart = true;
+        return gate.held
+          .then(() =>
+            Reflect.apply(value as (...args: unknown[]) => unknown, target, [
+              onFulfilled,
+              onRejected,
+            ]),
+          )
+          .finally(gate.markFinished);
+      };
+    },
+  });
+}
+
+async function waitForDriverGate(gate: DriverGate, label: string): Promise<void> {
+  for (let turn = 0; turn < 20 && !gate.didStart; turn += 1) {
+    await nextEventLoopTurn();
+  }
+  if (!gate.didStart) throw new Error(`${label} did not start within 20 event-loop turns`);
+}
+
+async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+  release: () => void;
+  failure: Promise<unknown>;
+}> {
+  let markStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const neighbour = withDbTransaction(db, async () => {
+    markStarted();
+    await held;
+    throw new Error('neighbour rollback');
+  });
+  const failure = neighbour.then(
+    () => null,
+    (error: unknown) => error,
+  );
+  await started;
+  return { release, failure };
+}
+
+async function finishAfterQueuedObservation<T>(
+  neighbour: { release: () => void; failure: Promise<unknown> },
+  pending: Promise<T>,
+  observe: () => void | Promise<void>,
+): Promise<T> {
+  let observationError: unknown;
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await observe();
+  } catch (error) {
+    observationError = error;
+  } finally {
+    neighbour.release();
+  }
+  const neighbourError = await neighbour.failure;
+  const result = await pending;
+  if (observationError) throw observationError;
+  expect(String(neighbourError)).toContain('neighbour rollback');
+  return result;
+}
 
 async function seedChat(db: AppDatabase, guid = 'c1'): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
@@ -131,7 +338,391 @@ describe('listChatAttachmentsByKind — bucketing + early break + link dedup', (
   });
 });
 
+describe('insertOutgoingAttachment — transaction owner and async lifetime', () => {
+  it('waits behind a newer committed chat date and never regresses inbox ordering', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'cQueuedImage');
+    const args: OutgoingAttachmentArgs = {
+      tempGuid: 'temp-image-older-than-neighbour',
+      attachmentGuid: 'temp-image-older-than-neighbour-att',
+      chatId,
+      chatGuid: 'cQueuedImage',
+      localPath: 'file:///queued-high-entropy.heic',
+      mimeType: 'image/heic',
+      transferName: 'queued-high-entropy.heic',
+      totalBytes: 4_321_987,
+      height: 720,
+      now: 2_000,
+    };
+    const newerDate = 9_000;
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbourOutcome = withDbTransaction(db, async () => {
+      raw.prepare('UPDATE chats SET latest_message_date = ? WHERE id = ?').run(newerDate, chatId);
+      neighbourStarted();
+      await held;
+    }).then(
+      () => ({ kind: 'resolved' as const }),
+      (error: unknown) => ({ kind: 'rejected' as const, error }),
+    );
+    await started;
+
+    let helperSettled = false;
+    const helperOutcome = insertOutgoingAttachment(db, args)
+      .then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      )
+      .finally(() => {
+        helperSettled = true;
+      });
+    let observationError: unknown;
+    try {
+      await nextEventLoopTurn();
+      expect(helperSettled).toBe(false);
+      expectNoOutgoingAttachmentRows(raw, args);
+      expect(latestMessageDate(raw, chatId)).toBe(newerDate);
+    } catch (error) {
+      observationError = error;
+    } finally {
+      releaseNeighbour();
+    }
+    const [neighbour, helper] = await Promise.all([neighbourOutcome, helperOutcome]);
+    if (observationError) throw observationError;
+
+    expect(neighbour).toEqual({ kind: 'resolved' });
+    expect(helper).toEqual({ kind: 'resolved', value: undefined });
+    expectExactOutgoingAttachmentRows(raw, args, newerDate);
+  });
+
+  it('rolls every insert back when the final chat update fails, then retries exactly', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'cAtomicImage');
+    const args: OutgoingAttachmentArgs = {
+      tempGuid: 'temp-image-final-update-failure',
+      attachmentGuid: 'temp-image-final-update-failure-att',
+      chatId,
+      chatGuid: 'cAtomicImage',
+      localPath: 'file:///atomic-wide.png',
+      mimeType: 'image/png',
+      transferName: 'atomic-wide.png',
+      totalBytes: 98_765,
+      width: 1_920,
+      height: 1_080,
+      now: 10_000,
+    };
+    const canary = 'OUTGOING_ATTACHMENT_CHAT_UPDATE_RAW_CANARY';
+    raw.exec(`
+      CREATE TRIGGER reject_outgoing_attachment_chat_update
+      BEFORE UPDATE OF latest_message_date ON chats
+      WHEN OLD.id = ${chatId} AND NEW.latest_message_date = ${args.now}
+      BEGIN
+        SELECT RAISE(ABORT, '${canary}');
+      END
+    `);
+
+    const failure = await insertOutgoingAttachment(db, args).then(
+      (value) => ({ kind: 'resolved' as const, value }),
+      (error: unknown) => ({ kind: 'rejected' as const, error }),
+    );
+    expect(failure.kind).toBe('rejected');
+    if (failure.kind === 'rejected') {
+      expect(errorMessageChain(failure.error)).toContain(canary);
+    }
+    expectNoOutgoingAttachmentRows(raw, args);
+    expect(latestMessageDate(raw, chatId)).toBeNull();
+
+    raw.exec('DROP TRIGGER reject_outgoing_attachment_chat_update');
+    await expect(insertOutgoingAttachment(db, args)).resolves.toBeUndefined();
+    expectExactOutgoingAttachmentRows(raw, args, args.now);
+  });
+
+  it('awaits message, attachment, queue, and chat driver writes in exact order', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'cDelayedImage');
+    const oldDate = 100;
+    raw.prepare('UPDATE chats SET latest_message_date = ? WHERE id = ?').run(oldDate, chatId);
+    const args: OutgoingAttachmentArgs = {
+      tempGuid: 'temp-image-delayed-writes',
+      attachmentGuid: 'temp-image-delayed-writes-att',
+      chatId,
+      chatGuid: 'cDelayedImage',
+      localPath: 'file:///delayed-portrait.webp',
+      mimeType: 'image/webp',
+      transferName: 'delayed-portrait.webp',
+      totalBytes: 12_345,
+      width: 640,
+      height: 960,
+      now: 500,
+    };
+    const stages = {
+      message: driverGate(),
+      attachment: driverGate(),
+      queue: driverGate(),
+      chat: driverGate(),
+    };
+
+    type Insert = (table: unknown) => { values(values: unknown): object };
+    type Update = (table: unknown) => {
+      set(values: unknown): { where(condition: unknown): object };
+    };
+    const realInsert = db.insert.bind(db) as unknown as Insert;
+    const realUpdate = db.update.bind(db) as unknown as Update;
+    const insertSpy = jest.spyOn(db, 'insert').mockImplementation(((table: unknown) => {
+      const builder = realInsert(table);
+      const gate =
+        table === messages
+          ? stages.message
+          : table === attachments
+            ? stages.attachment
+            : table === outgoingQueue
+              ? stages.queue
+              : undefined;
+      if (!gate) return builder;
+      return new Proxy(builder, {
+        get(target, property) {
+          const value = Reflect.get(target, property, target);
+          if (property !== 'values') {
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (values: unknown) => gateThenable(target.values(values), gate);
+        },
+      });
+    }) as unknown as AppDatabase['insert']);
+    const updateSpy = jest.spyOn(db, 'update').mockImplementation(((table: unknown) => {
+      const builder = realUpdate(table);
+      if (table !== chats) return builder;
+      return new Proxy(builder, {
+        get(target, property) {
+          const value = Reflect.get(target, property, target);
+          if (property !== 'set') {
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return (values: unknown) => {
+            const setBuilder = target.set(values);
+            return new Proxy(setBuilder, {
+              get(setTarget, setProperty) {
+                const setValue = Reflect.get(setTarget, setProperty, setTarget);
+                if (setProperty !== 'where') {
+                  return typeof setValue === 'function' ? setValue.bind(setTarget) : setValue;
+                }
+                return (condition: unknown) =>
+                  gateThenable(setTarget.where(condition), stages.chat);
+              },
+            });
+          };
+        },
+      });
+    }) as unknown as AppDatabase['update']);
+
+    let helperSettled = false;
+    let helperOutcome:
+      Promise<{ kind: 'resolved'; value: void } | { kind: 'rejected'; error: unknown }> | undefined;
+    try {
+      helperOutcome = insertOutgoingAttachment(db, args)
+        .then(
+          (value) => ({ kind: 'resolved' as const, value }),
+          (error: unknown) => ({ kind: 'rejected' as const, error }),
+        )
+        .finally(() => {
+          helperSettled = true;
+        });
+
+      await waitForDriverGate(stages.message, 'outgoing message insert');
+      expect(helperSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expectNoOutgoingAttachmentRows(raw, args);
+      expect(stages.attachment.didStart).toBe(false);
+      expect(stages.queue.didStart).toBe(false);
+      expect(stages.chat.didStart).toBe(false);
+      expect(latestMessageDate(raw, chatId)).toBe(oldDate);
+      stages.message.release();
+      await stages.message.finished;
+
+      await waitForDriverGate(stages.attachment, 'outgoing attachment insert');
+      expect(helperSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(raw.prepare('SELECT guid FROM messages WHERE guid = ?').get(args.tempGuid)).toEqual({
+        guid: args.tempGuid,
+      });
+      expect(
+        raw.prepare('SELECT id FROM attachments WHERE guid = ?').get(args.attachmentGuid),
+      ).toBeUndefined();
+      expect(
+        raw.prepare('SELECT id FROM outgoing_queue WHERE temp_guid = ?').get(args.tempGuid),
+      ).toBeUndefined();
+      expect(stages.queue.didStart).toBe(false);
+      expect(stages.chat.didStart).toBe(false);
+      expect(latestMessageDate(raw, chatId)).toBe(oldDate);
+      stages.attachment.release();
+      await stages.attachment.finished;
+
+      await waitForDriverGate(stages.queue, 'outgoing attachment queue insert');
+      expect(helperSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(raw.prepare('SELECT guid FROM messages WHERE guid = ?').get(args.tempGuid)).toEqual({
+        guid: args.tempGuid,
+      });
+      expect(
+        raw.prepare('SELECT guid FROM attachments WHERE guid = ?').get(args.attachmentGuid),
+      ).toEqual({ guid: args.attachmentGuid });
+      expect(
+        raw.prepare('SELECT id FROM outgoing_queue WHERE temp_guid = ?').get(args.tempGuid),
+      ).toBeUndefined();
+      expect(stages.chat.didStart).toBe(false);
+      expect(latestMessageDate(raw, chatId)).toBe(oldDate);
+      stages.queue.release();
+      await stages.queue.finished;
+
+      await waitForDriverGate(stages.chat, 'outgoing attachment chat update');
+      expect(helperSettled).toBe(false);
+      expect(raw.inTransaction).toBe(true);
+      expect(
+        raw.prepare('SELECT id FROM outgoing_queue WHERE temp_guid = ?').get(args.tempGuid),
+      ).toEqual({ id: expect.any(Number) });
+      expect(latestMessageDate(raw, chatId)).toBe(oldDate);
+
+      stages.chat.release();
+      const [outcome] = await Promise.all([helperOutcome, stages.chat.finished]);
+      expect(outcome).toEqual({ kind: 'resolved', value: undefined });
+      expect(helperSettled).toBe(true);
+      expect(raw.inTransaction).toBe(false);
+      expectExactOutgoingAttachmentRows(raw, args, args.now);
+    } finally {
+      for (const gate of Object.values(stages)) gate.release();
+      try {
+        const drains: Promise<unknown>[] = [];
+        if (helperOutcome) drains.push(helperOutcome);
+        for (const gate of Object.values(stages)) {
+          if (gate.didStart) drains.push(gate.finished);
+        }
+        await Promise.allSettled(drains);
+      } finally {
+        updateSpy.mockRestore();
+        insertSpy.mockRestore();
+      }
+    }
+  });
+});
+
 describe('upsertAttachments — temp→real reconcile DELETE branch', () => {
+  it('queues a public upsert behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db);
+    const messageId = await putMsg(db, chatId, { guid: 'queued-owner', dateCreated: 1 });
+    const neighbour = await holdRollingBackTransaction(db);
+    const pending = upsertAttachments(db, [
+      {
+        att: Attachment.parse({ guid: 'queued-att', mimeType: 'image/jpeg' }),
+        messageId,
+      },
+    ]);
+
+    await finishAfterQueuedObservation(neighbour, pending, () => {
+      expect(
+        raw.prepare("SELECT guid FROM attachments WHERE guid = 'queued-att'").get(),
+      ).toBeUndefined();
+    });
+
+    expect(raw.prepare("SELECT guid FROM attachments WHERE guid = 'queued-att'").get()).toEqual({
+      guid: 'queued-att',
+    });
+  });
+
+  it('restores the temp local-path carrier when the final upsert fails', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db);
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-atomic-message',
+      attachmentGuid: 'temp-atomic-att',
+      chatId,
+      chatGuid: 'c1',
+      localPath: 'file:///keep-me.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'keep-me.jpg',
+      totalBytes: 10,
+      now: 1,
+    });
+    const messageId = (
+      raw.prepare("SELECT id FROM messages WHERE guid = 'temp-atomic-message'").get() as {
+        id: number;
+      }
+    ).id;
+    raw.exec(`
+      CREATE TRIGGER fail_real_attachment_upsert
+      BEFORE INSERT ON attachments
+      WHEN NEW.guid = 'real-atomic-att'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced final attachment failure');
+      END
+    `);
+
+    let failure: unknown;
+    try {
+      await upsertAttachments(db, [
+        {
+          att: Attachment.parse({ guid: 'real-atomic-att', mimeType: 'image/jpeg' }),
+          messageId,
+        },
+      ]);
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(String(failure)).toContain('forced final attachment failure');
+    expect(
+      raw
+        .prepare('SELECT guid, local_path localPath FROM attachments WHERE message_id = ?')
+        .get(messageId),
+    ).toEqual({ guid: 'temp-atomic-att', localPath: 'file:///keep-me.jpg' });
+  });
+
+  it('rolls back attachment ingestion when its account guard is revoked during the write', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db);
+    const messageId = await putMsg(db, chatId, { guid: 'guard-owner', dateCreated: 1 });
+    let current = true;
+    raw.function('revoke_attachment_guard', () => {
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_attachment_guard_after_insert
+      AFTER INSERT ON attachments
+      WHEN NEW.guid = 'guard-revoked-att'
+      BEGIN
+        SELECT revoke_attachment_guard();
+      END
+    `);
+
+    let failure: unknown;
+    try {
+      await upsertAttachments(
+        db,
+        [
+          {
+            att: Attachment.parse({ guid: 'guard-revoked-att', mimeType: 'image/jpeg' }),
+            messageId,
+          },
+        ],
+        () => current,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(String(failure)).toContain('database commit guard rejected');
+    expect(
+      raw.prepare("SELECT guid FROM attachments WHERE guid = 'guard-revoked-att'").get(),
+    ).toBeUndefined();
+  });
+
   it('drops the temp -att row when the real guid already exists on the message', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db);
@@ -161,53 +752,6 @@ describe('upsertAttachments — temp→real reconcile DELETE branch', () => {
 
     const atts = (await listAttachmentsByMessageIds(db, [messageId])).get(messageId)!;
     expect(atts.map((a) => a.guid)).toEqual(['real-att']); // temp-m-att deleted, no duplicate
-  });
-});
-
-describe('promoteAttachmentGuid — dup vs update branches', () => {
-  it('updates the temp row to the server guid + local_path when the server guid is new', async () => {
-    const { db } = await createTestDb();
-    const chatId = await seedChat(db);
-    await insertOutgoingAttachment(db, {
-      tempGuid: 'temp-u',
-      attachmentGuid: 'temp-u-att',
-      chatId,
-      chatGuid: 'c1',
-      localPath: 'file:///a.jpg',
-      mimeType: 'image/jpeg',
-      transferName: 'a.jpg',
-      totalBytes: 10,
-      now: 1,
-    });
-    await promoteAttachmentGuid(db, 'temp-u-att', 'server-u', 'file:///a-final.jpg');
-    const row = await getAttachmentByGuid(db, 'server-u');
-    expect(row?.localPath).toBe('file:///a-final.jpg');
-    expect(await getAttachmentByGuid(db, 'temp-u-att')).toBeNull(); // re-pointed in place
-  });
-
-  it('drops the temp row (no rename) when the server guid already exists', async () => {
-    const { db, raw } = await createTestDb();
-    const chatId = await seedChat(db);
-    await insertOutgoingAttachment(db, {
-      tempGuid: 'temp-d',
-      attachmentGuid: 'temp-d-att',
-      chatId,
-      chatGuid: 'c1',
-      localPath: 'file:///b.jpg',
-      mimeType: 'image/jpeg',
-      transferName: 'b.jpg',
-      totalBytes: 10,
-      now: 1,
-    });
-    const messageId = (
-      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('temp-d') as { id: number }
-    ).id;
-    raw
-      .prepare('INSERT INTO attachments (guid, message_id, mime_type) VALUES (?, ?, ?)')
-      .run('server-d', messageId, 'image/jpeg');
-    await promoteAttachmentGuid(db, 'temp-d-att', 'server-d', 'file:///b.jpg');
-    expect(await getAttachmentByGuid(db, 'temp-d-att')).toBeNull(); // temp dropped, no dup
-    expect(await getAttachmentByGuid(db, 'server-d')).not.toBeNull();
   });
 });
 
@@ -244,7 +788,7 @@ describe('Genmoji fields round-trip via the chat-scoped reads', () => {
 
 describe('updateAttachmentLocalPath', () => {
   it('persists a downloaded file path onto the attachment', async () => {
-    const { db } = await createTestDb();
+    const { db, raw } = await createTestDb();
     const chatId = await seedChat(db);
     const id = await putMsg(db, chatId, {
       guid: 'msg-dl',
@@ -252,9 +796,66 @@ describe('updateAttachmentLocalPath', () => {
       chats: [{ guid: 'c1' }],
       attachments: [{ guid: 'att-dl', mimeType: 'image/jpeg' }],
     });
-    await updateAttachmentLocalPath(db, 'att-dl', 'file:///downloaded.jpg');
+    await expect(updateAttachmentLocalPath(db, 'att-dl', 'file:///downloaded.jpg')).resolves.toBe(
+      true,
+    );
     const atts = (await listAttachmentsByMessageIds(db, [id])).get(id)!;
     expect(atts[0]!.localPath).toBe('file:///downloaded.jpg');
+
+    await expect(updateAttachmentLocalPath(db, 'missing-att', 'file:///orphan.jpg')).resolves.toBe(
+      false,
+    );
+
+    raw.prepare('UPDATE messages SET date_deleted = 2 WHERE guid = ?').run('msg-dl');
+    await expect(updateAttachmentLocalPath(db, 'att-dl', 'file:///after-delete.jpg')).resolves.toBe(
+      false,
+    );
+    expect((await listAttachmentsByMessageIds(db, [id])).get(id)![0]!.localPath).toBe(
+      'file:///downloaded.jpg',
+    );
+  });
+
+  it('queues a standalone path update behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db);
+    await putMsg(db, chatId, {
+      guid: 'msg-queued-download',
+      dateCreated: 1,
+      chats: [{ guid: 'c1' }],
+      attachments: [{ guid: 'att-queued-download', mimeType: 'image/jpeg' }],
+    });
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await held;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const updating = updateAttachmentLocalPath(db, 'att-queued-download', 'file:///queued.jpg');
+    await Promise.resolve();
+    expect(
+      raw
+        .prepare("SELECT local_path AS localPath FROM attachments WHERE guid='att-queued-download'")
+        .get(),
+    ).toEqual({ localPath: null });
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(updating).resolves.toBe(true);
+    expect(
+      raw
+        .prepare("SELECT local_path AS localPath FROM attachments WHERE guid='att-queued-download'")
+        .get(),
+    ).toEqual({ localPath: 'file:///queued.jpg' });
   });
 });
 

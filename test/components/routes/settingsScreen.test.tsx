@@ -24,9 +24,12 @@
  */
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
+import { logger } from '@core/secure';
 
 const mockPush = jest.fn();
 const mockBack = jest.fn();
+const mockAccountADb = { account: 'A', run: jest.fn(async () => undefined) };
+const mockAccountBDb = { account: 'B', run: jest.fn(async () => undefined) };
 
 // The full `@ui` barrel drags in the conversation/attachment tree (expo-video/expo-image/ky —
 // native/ESM modules jest-expo can't load). The screen only needs `Screen` + `useTheme`, so
@@ -41,17 +44,34 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, back: mock
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    nativeAppVersion: '0.1.40',
+    nativeBuildVersion: '53',
+    expoConfig: { version: 'fallback-version', android: { versionCode: 999 } },
+  },
+}));
 jest.mock('@native/biometrics', () => ({ isBiometricAvailable: jest.fn() }));
 jest.mock('@/services', () => ({
-  forget: jest.fn(),
+  disconnectFailureMessage: jest.fn(
+    () =>
+      'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.',
+  ),
+  forget: jest.fn().mockResolvedValue(undefined),
   rotateDatabaseKey: jest.fn(),
   setAppLockEnabled: jest.fn(),
 }));
-jest.mock('@/services/contacts/contactsService', () => ({ syncContacts: jest.fn() }));
+jest.mock('@/services/contacts/contactsService', () => ({
+  syncContacts: jest.fn(),
+  isContactsAccountChangedError: (error: unknown) =>
+    error instanceof Error && error.name === 'ContactsAccountChangedError',
+}));
 // Keep every real repository export; only replace kvSet so we can watch the persist calls.
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
   kvSet: jest.fn(async () => undefined),
+  kvSetWithinTransaction: jest.fn(async () => undefined),
 }));
 
 // eslint-disable-next-line import/first
@@ -63,11 +83,11 @@ import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 // eslint-disable-next-line import/first
 import { syncContacts } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
-import { kvSet } from '@db/repositories';
+import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
-import { useRedactedModeStore } from '@state/redactedModeStore';
+import { kvSet, kvSetWithinTransaction } from '@db/repositories';
 // eslint-disable-next-line import/first
-import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
 // eslint-disable-next-line import/first
 import { useLockStore } from '@state/lockStore';
 // eslint-disable-next-line import/first
@@ -80,18 +100,57 @@ import { useThemeStore } from '@state/themeStore';
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
 import { PRESET_ORDER, PRESETS, DEFAULT_PRESET } from '@ui/theme/tokens';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const mockIsBiometricAvailable = isBiometricAvailable as jest.Mock;
 const mockForget = forget as jest.Mock;
 const mockRotate = rotateDatabaseKey as jest.Mock;
 const mockSetAppLock = setAppLockEnabled as jest.Mock;
 const mockSyncContacts = syncContacts as jest.Mock;
+const mockGetDatabase = getDatabase as jest.Mock;
 const mockKvSet = kvSet as jest.Mock;
+const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
+
+function sqlStatementText(value: unknown): string {
+  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
+  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  return chunks
+    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
+    .filter((part): part is string => typeof part === 'string')
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
+  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
+}
+
+const PRIVATE_SERVER_SESSION = {
+  origin: 'https://settings-private-origin-7f9e.example/tenant',
+  serverInfo: {
+    server_version: 'settings-private-server-build-8c2d',
+    os_version: 'settings-private-macos-build-4a61',
+    private_api: true,
+    supports_icloud_account: true,
+  },
+};
+
+function expectPrivateServerSessionHidden(): void {
+  expect(screen.queryByText(PRIVATE_SERVER_SESSION.origin)).toBeNull();
+  expect(screen.queryByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeNull();
+  expect(screen.queryByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeNull();
+  expect(screen.queryByText('iMessage Account…')).toBeNull();
+}
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   // Reset the kv-backed stores to their defaults BEFORE each test (harness rule: reset in
   // beforeEach, never afterEach — an afterEach setState fires on a still-mounted tree).
-  useRedactedModeStore.setState({ enabled: false, hydrated: true });
   useFeatureSettingsStore.setState({
     privateApiEnabled: true,
     sendTypingIndicators: true,
@@ -102,6 +161,7 @@ beforeEach(() => {
     showDeliveryTimestamps: true,
     compactChatList: false,
     messageNotifications: true,
+    errorReportingEnabled: false,
     maxConcurrentDownloads: 2,
     hydrated: true,
   });
@@ -110,26 +170,21 @@ beforeEach(() => {
   useSessionStore.setState({ origin: null, serverInfo: null });
   useDialogStore.setState({ current: null, queue: [] });
   mockIsBiometricAvailable.mockResolvedValue(true);
+  mockForget.mockResolvedValue(undefined);
   mockSyncContacts.mockResolvedValue({ contacts: 3, matched: 2 });
   mockRotate.mockResolvedValue(undefined);
   mockKvSet.mockResolvedValue(undefined);
+  mockKvSetWithinTransaction.mockResolvedValue(undefined);
+  mockAccountADb.run.mockResolvedValue(undefined);
+  mockAccountBDb.run.mockResolvedValue(undefined);
+  mockGetDatabase.mockReturnValue(mockAccountADb);
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 describe('SettingsScreen — toggles wire to the real stores + persist', () => {
-  it('flips Redacted Mode on and persists it', async () => {
-    await renderWithTheme(<SettingsScreen />);
-    const sw = screen.getByLabelText('Hide message previews, names, and notification contents');
-    await act(async () => {
-      fireEvent(sw, 'valueChange', true);
-    });
-    expect(useRedactedModeStore.getState().enabled).toBe(true);
-    await waitFor(() =>
-      expect(
-        mockKvSet.mock.calls.some((c) => c[1] === 'privacy.redactedMode' && c[2] === '1'),
-      ).toBe(true),
-    );
-  });
-
   it('flips a feature flag (Read Receipts off) via setFlag + persists it', async () => {
     await renderWithTheme(<SettingsScreen />);
     const sw = screen.getByLabelText('Let others see when you have read their messages');
@@ -157,9 +212,244 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     });
     expect(useFeatureSettingsStore.getState().maxConcurrentDownloads).toBe(3);
   });
+
+  it('explains error-report data and requires informed confirmation before opt-in', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText(/Off by default/)).toBeTruthy();
+    expect(screen.getByText(/does not queue or send error reports/)).toBeTruthy();
+
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Allow Gator to send redacted error reports to your connected server',
+        ),
+        'valueChange',
+        true,
+      );
+    });
+
+    expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(false);
+    const consent = useDialogStore.getState().current;
+    expect(consent?.title).toBe('Share error reports?');
+    expect(consent?.message).toContain('finite error code');
+    expect(consent?.message).toContain('does not send the original error message or stack trace');
+    expect(mockKvSetWithinTransaction).not.toHaveBeenCalledWith(
+      expect.anything(),
+      ERROR_REPORTING_CONSENT_KEY,
+      'granted',
+    );
+
+    const allow = consent?.buttons.find((button) => button.text === 'Allow');
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      allow?.onPress?.();
+      // The serialized store tail starts on a later microtask. Settings must already have captured
+      // account A's database before the global pointer can move to B.
+      mockGetDatabase.mockReturnValue(mockAccountBDb);
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(true),
+    );
+    expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      ERROR_REPORTING_CONSENT_KEY,
+      'granted',
+    );
+    expectDbRunSequence(mockAccountADb, ['BEGIN IMMEDIATE', 'DELETE FROM error_reports', 'COMMIT']);
+    expect(mockAccountBDb.run).not.toHaveBeenCalled();
+  });
+
+  it('does not publish an admitted account-A consent write after the account retires', async () => {
+    let finishWrite!: () => void;
+    mockKvSetWithinTransaction.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishWrite = resolve;
+      }),
+    );
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Allow Gator to send redacted error reports to your connected server',
+        ),
+        'valueChange',
+        true,
+      );
+    });
+    const consent = useDialogStore.getState().current;
+    const allow = consent?.buttons.find((button) => button.text === 'Allow');
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      allow?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        ERROR_REPORTING_CONSENT_KEY,
+        'granted',
+      ),
+    );
+    expect(mockAccountADb.run).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+    resumeRealtimeDeliveries();
+    mockGetDatabase.mockReturnValue(mockAccountBDb);
+    await act(async () => {
+      finishWrite();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mockAccountADb.run).toHaveBeenCalledTimes(3));
+    expectDbRunSequence(mockAccountADb, [
+      'BEGIN IMMEDIATE',
+      'DELETE FROM error_reports',
+      'ROLLBACK',
+    ]);
+
+    expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(false);
+    expect(useDialogStore.getState().current).toBeNull();
+    expect(mockAccountBDb.run).not.toHaveBeenCalled();
+  });
+
+  it('restores a current failed denial, shows fixed copy, and retries without another prompt', async () => {
+    useFeatureSettingsStore.setState({ errorReportingEnabled: true, hydrated: true });
+    mockKvSetWithinTransaction.mockRejectedValueOnce(new Error('CONSENT_ROUTE_RAW_CANARY'));
+    await renderWithTheme(<SettingsScreen />);
+
+    let stateImmediatelyAfterRevocation: boolean | undefined;
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Allow Gator to send redacted error reports to your connected server',
+        ),
+        'valueChange',
+        false,
+      );
+      stateImmediatelyAfterRevocation = useFeatureSettingsStore.getState().errorReportingEnabled;
+      await Promise.resolve();
+    });
+
+    expect(stateImmediatelyAfterRevocation).toBe(false);
+    await waitFor(() =>
+      expect(useDialogStore.getState().current).toMatchObject({
+        title: 'Error Reports',
+        message:
+          'Gator could not save that privacy choice. Your previous setting is still active; try again after restarting the app.',
+      }),
+    );
+    expect(useDialogStore.getState().current?.message).not.toContain('CONSENT_ROUTE_RAW_CANARY');
+    expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(true);
+
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Allow Gator to send redacted error reports to your connected server',
+        ),
+        'valueChange',
+        false,
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(false),
+    );
+    expect(useDialogStore.getState().current).toBeNull();
+    expect(mockKvSetWithinTransaction).toHaveBeenLastCalledWith(
+      expect.anything(),
+      ERROR_REPORTING_CONSENT_KEY,
+      'denied',
+    );
+  });
+
+  it('makes an account-A consent callback inert and lets a fresh account opt in', async () => {
+    const oldView = await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Allow Gator to send redacted error reports to your connected server',
+        ),
+        'valueChange',
+        true,
+      );
+    });
+    const oldConsent = useDialogStore.getState().current;
+    const oldAllow = oldConsent?.buttons.find((button) => button.text === 'Allow');
+    useDialogStore.getState().dismiss();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      oldAllow?.onPress?.();
+      await Promise.resolve();
+    });
+
+    expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(false);
+    expect(useDialogStore.getState().current).toBeNull();
+    expect(mockKvSetWithinTransaction).not.toHaveBeenCalledWith(
+      expect.anything(),
+      ERROR_REPORTING_CONSENT_KEY,
+      'granted',
+    );
+
+    await act(async () => {
+      oldView.unmount();
+    });
+    mockGetDatabase.mockReturnValue(mockAccountBDb);
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Allow Gator to send redacted error reports to your connected server',
+        ),
+        'valueChange',
+        true,
+      );
+    });
+    const freshConsent = useDialogStore.getState().current;
+    const freshAllow = freshConsent?.buttons.find((button) => button.text === 'Allow');
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      freshAllow?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(true),
+    );
+    expect(mockKvSetWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      ERROR_REPORTING_CONSENT_KEY,
+      'granted',
+    );
+    expect(mockAccountADb.run).not.toHaveBeenCalled();
+    expectDbRunSequence(mockAccountBDb, ['BEGIN IMMEDIATE', 'DELETE FROM error_reports', 'COMMIT']);
+  });
 });
 
 describe('SettingsScreen — App Lock biometric gate', () => {
+  it('states the storage limits of App Lock next to the toggle', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText(/App Lock blocks the app screen after it locks/)).toBeTruthy();
+    expect(screen.getByText(/does not make the database key biometric-bound/)).toBeTruthy();
+    expect(
+      screen.getByText(/or block screenshots, screen recording, or task-switcher snapshots/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Locked pushes show a generic notice and sync after unlock/),
+    ).toBeTruthy();
+  });
+
   it('blocks enabling and shows a dialog when no biometric is enrolled', async () => {
     mockIsBiometricAvailable.mockResolvedValue(false);
     await renderWithTheme(<SettingsScreen />);
@@ -211,6 +501,7 @@ describe('SettingsScreen — navigation rows', () => {
       ['Reminders', '/reminders'],
       ['Backup', '/backup'],
       ['Find My', '/findmy'],
+      ['Storage & File Privacy…', '/storage-privacy'],
       ['Server Management…', '/server-management'],
       ['Server Health…', '/server-health'],
     ];
@@ -247,6 +538,58 @@ describe('SettingsScreen — destructive/confirm dialogs', () => {
     expect(mockForget).toHaveBeenCalled();
   });
 
+  it('warns when Disconnect cannot confirm complete account cleanup', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockForget.mockRejectedValueOnce(new Error('credential removal unconfirmed'));
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Disconnect from server'));
+    });
+    const confirmDialog = useDialogStore.getState().current;
+    const confirm = confirmDialog!.buttons.find((b) => b.text === 'Disconnect');
+    // AppDialog dismisses before invoking a handler; mirror that ordering while calling the stored
+    // callback directly in this route-level test.
+    useDialogStore.getState().dismiss();
+
+    await act(async () => {
+      confirm!.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current).toMatchObject({
+        title: 'Disconnect incomplete',
+        message:
+          'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.',
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      '[settings] Disconnect cleanup remains incomplete',
+      expect.any(Error),
+    );
+    warn.mockRestore();
+  });
+
+  it('makes an account-A Disconnect confirmation inert after account B opens', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Disconnect from server'));
+    });
+    const dialog = useDialogStore.getState().current;
+    const confirm = dialog!.buttons.find((button) => button.text === 'Disconnect');
+    useDialogStore.getState().dismiss();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+    resumeRealtimeDeliveries();
+    confirm?.onPress?.();
+    await Promise.resolve();
+
+    expect(mockForget).not.toHaveBeenCalled();
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
   it('Rotate encryption key opens a confirm whose action calls rotateDatabaseKey()', async () => {
     await renderWithTheme(<SettingsScreen />);
     await act(async () => {
@@ -259,6 +602,134 @@ describe('SettingsScreen — destructive/confirm dialogs', () => {
       confirm!.onPress?.();
     });
     await waitFor(() => expect(mockRotate).toHaveBeenCalled());
+  });
+
+  it('makes an account-A key-rotation confirmation inert after account B opens', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByText('Rotate encryption key…'));
+    });
+    const dialog = useDialogStore.getState().current;
+    const confirm = dialog!.buttons.find((button) => button.text === 'Rotate');
+    useDialogStore.getState().dismiss();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+    resumeRealtimeDeliveries();
+    confirm?.onPress?.();
+    await Promise.resolve();
+
+    expect(mockRotate).not.toHaveBeenCalled();
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('drains an admitted key rotation but suppresses its account-A result after handoff', async () => {
+    let finishRotation!: () => void;
+    mockRotate.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishRotation = resolve;
+      }),
+    );
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByText('Rotate encryption key…'));
+    });
+    const dialog = useDialogStore.getState().current;
+    const confirm = dialog!.buttons.find((button) => button.text === 'Rotate');
+    useDialogStore.getState().dismiss();
+    confirm?.onPress?.();
+    await waitFor(() => expect(mockRotate).toHaveBeenCalledTimes(1));
+
+    let pauseFinished = false;
+    let pause!: Promise<void>;
+    await act(async () => {
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseFinished = true;
+      });
+      await Promise.resolve();
+    });
+    expect(pauseFinished).toBe(false);
+
+    finishRotation();
+    await pause;
+    resumeRealtimeDeliveries();
+    await Promise.resolve();
+
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+});
+
+describe('SettingsScreen — account-owned server display', () => {
+  it('renders exact installed and connected-server details and opens the exact account route', async () => {
+    useSessionStore.setState(PRIVATE_SERVER_SESSION);
+
+    await renderWithTheme(<SettingsScreen />);
+
+    expect(screen.getByText('App Version')).toBeTruthy();
+    expect(screen.getByRole('text', { name: '0.1.40' })).toBeTruthy();
+    expect(screen.getByText('App Build')).toBeTruthy();
+    expect(screen.getByRole('text', { name: '53' })).toBeTruthy();
+    expect(screen.getByText('Server')).toBeTruthy();
+    expect(screen.getByRole('text', { name: PRIVATE_SERVER_SESSION.origin })).toBeTruthy();
+    expect(screen.getByText('Server Version')).toBeTruthy();
+    expect(
+      screen.getByRole('text', { name: PRIVATE_SERVER_SESSION.serverInfo.server_version }),
+    ).toBeTruthy();
+    expect(screen.getByText('macOS')).toBeTruthy();
+    expect(
+      screen.getByRole('text', { name: PRIVATE_SERVER_SESSION.serverInfo.os_version }),
+    ).toBeTruthy();
+    expect(screen.getByText('Private API')).toBeTruthy();
+    expect(screen.getByRole('text', { name: 'Enabled' })).toBeTruthy();
+    expect(screen.queryByText('fallback-version')).toBeNull();
+    expect(screen.queryByText('999')).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByText('iMessage Account…'));
+    });
+    expect(mockPush).toHaveBeenCalledWith('/account');
+  });
+
+  it('fails closed for an initially stale account and reveals exact details on a fresh mount', async () => {
+    useSessionStore.setState(PRIVATE_SERVER_SESSION);
+    await pauseRealtimeDeliveries();
+
+    const staleView = await renderWithTheme(<SettingsScreen />);
+    expectPrivateServerSessionHidden();
+
+    await act(async () => {
+      staleView.unmount();
+    });
+    resumeRealtimeDeliveries();
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeTruthy();
+    expect(screen.getByText('iMessage Account…')).toBeTruthy();
+  });
+
+  it('automatically hides account-A identity after handoff and lets a fresh account render', async () => {
+    useSessionStore.setState(PRIVATE_SERVER_SESSION);
+    const view = await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeTruthy();
+    expect(screen.getByText('iMessage Account…')).toBeTruthy();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+    expectPrivateServerSessionHidden();
+
+    await act(async () => {
+      view.unmount();
+    });
+    resumeRealtimeDeliveries();
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeTruthy();
+    expect(screen.getByText('iMessage Account…')).toBeTruthy();
   });
 });
 
@@ -283,6 +754,35 @@ describe('SettingsScreen — sync contacts', () => {
       expect(d?.title).toBe('Contacts');
       expect(d?.message).toMatch(/Permission denied/);
     });
+  });
+
+  it("does not show account A's delayed result after account B opens", async () => {
+    let finishSync!: (result: { contacts: number; matched: number }) => void;
+    mockSyncContacts.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishSync = resolve;
+      }),
+    );
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Sync Contacts'));
+    });
+    expect(mockSyncContacts).toHaveBeenCalledWith({
+      force: true,
+      accountLease: expect.objectContaining({ generation: expect.any(Number) }),
+    });
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      finishSync({ contacts: 99, matched: 88 });
+      await Promise.resolve();
+    });
+
+    expect(useDialogStore.getState().current).toBeNull();
   });
 });
 

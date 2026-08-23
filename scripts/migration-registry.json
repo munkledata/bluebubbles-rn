@@ -1,0 +1,95 @@
+{
+  "baselineHead": "0029_chats_deleted_at",
+  "allocations": [
+    {
+      "number": 30,
+      "name": "0030_attachment_cache_entries",
+      "task": "DL-01",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0030_attachment_cache_entries.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 31,
+      "name": "0031_incoming_event_queue",
+      "task": "PUSH-RETRY-01A",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0031_incoming_event_queue.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 32,
+      "name": "0032_theme_restore_lookup_index",
+      "task": "DB-02A",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0032_theme_restore_lookup_index.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "N/A: index only; no persistent rows"
+    },
+    {
+      "number": 33,
+      "name": "0033_message_deletion_ledger",
+      "task": "DELETE-SYNC-01",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0033_message_deletion_ledger.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 34,
+      "name": "0034_purge_legacy_error_reports",
+      "task": "LOG-01",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0034_purge_legacy_error_reports.test.ts",
+      "schemaEvidence": "N/A: one-time row purge; schema unchanged",
+      "cacheWipeEvidence": "N/A: error reports are already included in account cache wipe"
+    },
+    {
+      "number": 35,
+      "name": "0035_retire_legacy_scheduled_sending",
+      "task": "DB-02A",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0035_retire_legacy_scheduled_sending.test.ts",
+      "schemaEvidence": "N/A: one-time scheduled-row state repair; schema unchanged",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 36,
+      "name": "0036_message_guid_aliases",
+      "task": "DB-02A-MSGID",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0036_message_guid_aliases.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 37,
+      "name": "0037_purge_legacy_redacted_mode_setting",
+      "task": "PRIV-03",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0037_purge_legacy_redacted_mode_setting.test.ts",
+      "schemaEvidence": "N/A: one-time kv row purge; schema unchanged",
+      "cacheWipeEvidence": "N/A: retired device preference; this migration permanently deletes the exact key"
+    },
+    {
+      "number": 38,
+      "name": "0038_scrub_reaction_selected_message_text",
+      "task": "DB-02A",
+      "branchPr": "bb2-batch1-defects",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0038_scrub_reaction_selected_message_text.test.ts",
+      "schemaEvidence": "N/A: one-time outgoing-queue payload repair; schema unchanged",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    }
+  ]
+}

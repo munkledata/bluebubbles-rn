@@ -50,7 +50,7 @@ async function seed(db: AppDatabase) {
 
 describe('attachment repositories', () => {
   it('lists attachments grouped by message id (stable order)', async () => {
-    const { db } = await createTestDb();
+    const { db, raw } = await createTestDb();
     const ids = await seed(db);
     const imgId = ids.get('m-img')!;
     const textId = ids.get('m-text')!;
@@ -61,11 +61,28 @@ describe('attachment repositories', () => {
     expect(atts[0]!.blurhash).toBe('LEHV6');
     expect(atts[0]!.mimeType).toBe('image/jpeg');
     expect(byMsg.has(textId)).toBe(false); // no attachments
+
+    const limited = await listAttachmentsByMessageIds(db, [imgId, textId], 1);
+    expect(limited.get(imgId)?.map((a) => a.guid)).toEqual(['att-1']);
+    expect(limited.has(textId)).toBe(false);
+
+    raw.prepare("UPDATE messages SET date_deleted = 300 WHERE guid = 'm-img'").run();
+    // Generic reads retain tombstoned attachments for cleanup/reconciliation.
+    expect((await listAttachmentsByMessageIds(db, [imgId])).get(imgId)).toHaveLength(2);
+    // Network-starting callers can explicitly exclude a hidden owner at query time.
+    expect(
+      (
+        await listAttachmentsByMessageIds(db, [imgId], undefined, {
+          excludeDeletedMessages: true,
+        })
+      ).has(imgId),
+    ).toBe(false);
   });
 
   it('returns an empty map for no ids', async () => {
     const { db } = await createTestDb();
     expect((await listAttachmentsByMessageIds(db, [])).size).toBe(0);
+    expect((await listAttachmentsByMessageIds(db, [1], 0)).size).toBe(0);
   });
 
   it('getAttachmentByGuid resolves hit/miss', async () => {

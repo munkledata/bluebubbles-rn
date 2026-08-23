@@ -12,7 +12,14 @@ export const TypingIndicatorPayload = z
   .loose();
 
 export const ReadStatusPayload = z
-  .object({ chatGuid: z.string(), read: z.boolean().nullish() })
+  // Current sink semantics can only advance the read marker. Stock servers call the flag `status`;
+  // newer bridges may call it `read`. Reject explicit false in either spelling rather than silently
+  // interpreting an unread event as read; old servers that omit both fields remain valid.
+  .object({
+    chatGuid: z.string().min(1),
+    read: z.literal(true).nullish(),
+    status: z.literal(true).nullish(),
+  })
   .loose();
 
 export const GroupChangePayload = z.object({ chats: z.array(z.unknown()).nullish() }).loose();
@@ -66,7 +73,7 @@ export const TestNotificationPayload = z
  */
 export const MessageDeletedPayload = z
   .object({
-    guid: z.string(),
+    guid: z.string().min(1),
     chatGuid: z.string().nullish(),
     dateDeleted: epochMillis, // Unix ms; number | null after coercion
   })
@@ -82,6 +89,44 @@ export const FaceTimeStatusPayload = z
     status_id: z.number().nullish(), // 4 = incoming, 6 = ended
   })
   .loose();
+
+/** One or more of the user's own iMessage addresses were deregistered. */
+export const AliasesRemovedPayload = z.object({ aliases: z.array(z.string()) }).loose();
+
+const OptionalSendErrorId = z.string().min(1).nullish();
+
+const SendErrorMessagePayload = z
+  .object({
+    guid: OptionalSendErrorId,
+    error: z.union([z.number(), z.string()]).nullish(),
+    retryable: z.boolean().nullish(),
+  })
+  .loose();
+
+/**
+ * A server-reported outgoing failure. A usable message identity is load-bearing: without one the
+ * DB sink cannot apply the failure, while accepting an arbitrary object would falsely certify it
+ * as safe to persist in the durable incoming queue.
+ */
+export const MessageSendErrorPayload = z
+  .object({
+    /** Future server-owned identity for one admitted dispatch attempt, shared by every fanout. */
+    attemptGuid: OptionalSendErrorId,
+    guid: OptionalSendErrorId,
+    tempGuid: OptionalSendErrorId,
+    messageGuid: OptionalSendErrorId,
+    error: z.union([z.number(), z.string()]).nullish(),
+    retryable: z.boolean().nullish(),
+    message: SendErrorMessagePayload.nullish(),
+  })
+  .loose()
+  .refine(
+    (payload) =>
+      [payload.guid, payload.tempGuid, payload.messageGuid, payload.message?.guid].some(
+        (value) => typeof value === 'string' && value.length > 0,
+      ),
+    { message: 'message-send-error requires a usable message guid' },
+  );
 
 /** A validated, transport-agnostic event ready for the app to act on. */
 export type NormalizedEvent =
@@ -99,9 +144,9 @@ export type NormalizedEvent =
   | { type: 'participant-left'; payload: z.infer<typeof GroupChangePayload> }
   | { type: 'ft-call-status-changed'; payload: z.infer<typeof FaceTimeStatusPayload> }
   | { type: 'incoming-facetime'; payload: z.infer<typeof FaceTimeStatusPayload> }
-  | { type: 'imessage-aliases-removed'; payload: Record<string, unknown> }
+  | { type: 'imessage-aliases-removed'; payload: z.infer<typeof AliasesRemovedPayload> }
   // The server forwards the helper's outgoing-send failure (Messages.app rejected the send).
-  | { type: 'message-send-error'; payload: Record<string, unknown> }
+  | { type: 'message-send-error'; payload: z.infer<typeof MessageSendErrorPayload> }
   // The server's public URL rotated (e.g. the zrok tunnel) — reconnect to the new origin.
   | { type: 'new-server'; url: string }
   // The Gator RCS bridge relayed a health alert (phone offline / browser inactive / cookies
@@ -117,8 +162,9 @@ export type NormalizedEvent =
 /**
  * Pure, transport-free description of a notification to show (or clear). Emitted
  * by the event pipeline and consumed by the Notifee service — kept free of any
- * native types so `core/` stays React-free and Node-testable. Redaction (hiding
- * the body) is applied by the notification service, not here.
+ * native types so `core/` stays React-free and Node-testable. Message and FaceTime
+ * intents carry ordinary detailed fields; App Lock independently substitutes its
+ * fixed generic notice before native presentation.
  */
 export type NotificationIntent =
   | {
@@ -144,11 +190,11 @@ export type NotificationIntent =
   | { kind: 'facetime-cancel'; uuid: string }
   /** One or more of the user's own iMessage aliases were deregistered server-side (F-6). */
   | { kind: 'alias-removed'; aliases: string[] }
-  /** The RCS bridge dropped / auth expired — a content-less server status notice (no private
-   *  content, so no redaction needed). Title/body are supplied by the server push. */
+  /** The RCS bridge dropped / auth expired — a status notice with no conversation message
+   *  content, so no contact/content lookup is needed. Title/body come from the server push. */
   | { kind: 'rcs-bridge-down'; title: string; body: string }
-  /** The server's push self-test landed. Shown verbatim (server-authored text, no user content,
-   *  so nothing to redact) — seeing it on the lock screen IS the successful test result. */
+  /** The server's push self-test landed. It contains no conversation message content, so no
+   *  contact/content lookup is needed; seeing it on the lock screen is the successful result. */
   | { kind: 'test-notification'; title: string; body: string };
 
 export type { ServerEventName };

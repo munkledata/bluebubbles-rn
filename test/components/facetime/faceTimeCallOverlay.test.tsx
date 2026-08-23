@@ -4,18 +4,10 @@
  * source:
  *   - visibility off the REAL faceTimeStore: nothing renders without an active `call`;
  *   - when a call is active it shows the "FaceTime" title bar + an "End FaceTime call" affordance
- *     (both siblings of the WebView, always present);
+ *     (always present);
  *   - pressing End calls the store's `close`, clearing the call so the overlay disappears;
- *   - the LoadErrorBoundary fallback renders an "Open in browser" action that opens the call's
- *     validated link via Linking.
- *
- * jest limitation (documented, not worked around): the overlay hosts the WebView via
- * `React.lazy(() => import('./FaceTimeWebView'))`. A real dynamic `import()` REJECTS inside the jest
- * VM ("A dynamic import callback was invoked without --experimental-vm-modules"), which the
- * LoadErrorBoundary catches — so the overlay always shows the browser fallback here. That's exactly
- * the fallback contract we assert; the WebView SUCCESS/props path is covered directly in
- * faceTimeWebView.test.tsx. The `<FaceTimeWebView uri={call.link} />` element is still constructed
- * (so its line runs) before the lazy load fails.
+ *   - the release-safe external-browser action opens the call's validated link via Linking;
+ *   - no embedded WebView path is mounted while FACE-01 is open.
  *
  * In-file mock: `react-native-safe-area-context` — the overlay calls useSafeAreaInsets; zero insets.
  */
@@ -66,7 +58,7 @@ describe('FaceTimeCallOverlay — active call chrome', () => {
   });
 });
 
-describe('FaceTimeCallOverlay — WebView-unavailable fallback', () => {
+describe('FaceTimeCallOverlay — external browser handoff', () => {
   it('offers "Open in browser" and opens the validated call link via Linking', async () => {
     const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
     useFaceTimeStore.setState({ call: CALL });

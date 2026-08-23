@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.gator.boundeddownload'
+version = '0.1.0'
+
+// Match React Native 0.86's OkHttp line. ReactAndroid uses it internally, but the Expo local-module
+// compile classpath does not expose those transitive types to this standalone project.
+dependencies {
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+  testImplementation 'junit:junit:4.13.2'
+}
+
+android {
+  namespace "expo.modules.gatorboundeddownload"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}

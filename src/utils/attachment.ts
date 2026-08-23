@@ -101,7 +101,12 @@ export function attachmentFileName(
   return `${guid}${extensionForMime(mimeType)}`;
 }
 
-export const AUTO_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+/**
+ * Automatic transfers are deliberately much smaller than the manual ceiling. The server's
+ * metadata is only a pre-flight hint — the downloader independently enforces the streamed and
+ * final on-disk byte counts against this same limit.
+ */
+export const AUTO_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
 
 /** Images under the cap auto-download; everything else is tap-to-download. */
 export function shouldAutoDownload(att: {
@@ -111,6 +116,10 @@ export function shouldAutoDownload(att: {
 }): boolean {
   if (att.localPath) return false;
   if (!att.mimeType?.startsWith('image/')) return false;
-  if (att.totalBytes == null) return true;
-  return att.totalBytes <= AUTO_IMAGE_MAX_BYTES;
+  // Automatic network work must have a trustworthy, finite pre-flight bound. A missing, negative,
+  // fractional, or otherwise malformed server length remains available through an explicit tap,
+  // where the downloader enforces its larger absolute cap against the ACTUAL bytes.
+  const totalBytes = att.totalBytes;
+  if (totalBytes == null || !Number.isSafeInteger(totalBytes) || totalBytes <= 0) return false;
+  return totalBytes <= AUTO_IMAGE_MAX_BYTES;
 }

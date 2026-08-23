@@ -1,15 +1,32 @@
 import { Chat } from '@core/models';
-import { kvSet, setChatCustomization, upsertChats, upsertHandles } from '@db/repositories';
+import {
+  kvSet,
+  restoreThemes,
+  setChatCustomization,
+  upsertChats,
+  upsertHandles,
+} from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { SecretBox } from '@core/crypto';
 import { fromBase64 } from '@utils/bytes';
 import {
+  BackupInputLimitError,
   buildBackup,
   openBackup,
   parseBackup,
   restoreBackup,
   sealBackup,
 } from '@/services/backup/backup';
-import { isBackupKey, isSecretKey, looksEncrypted } from '@/services/backup/backupSchema';
+import {
+  BACKUP_LIMITS,
+  BackupSchema,
+  getNewBackupPassphraseIssue,
+  isBackupKey,
+  isSecretKey,
+  looksEncrypted,
+  MIN_NEW_BACKUP_PASSPHRASE_LENGTH,
+  type Backup,
+} from '@/services/backup/backupSchema';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
 
@@ -47,9 +64,13 @@ describe('isSecretKey', () => {
 describe('isBackupKey (the export ALLOW-list)', () => {
   it('admits settings and nothing else', () => {
     expect(isBackupKey('theme.preset')).toBe(true);
-    expect(isBackupKey('privacy.redactedMode')).toBe(true);
+    // Retired settings stay rejected so an old backup cannot bring removed behavior back.
+    expect(isBackupKey('privacy.redactedMode')).toBe(false);
     expect(isBackupKey('attachments.autoDownloadDestination')).toBe(true);
     expect(isBackupKey('downloads.maxConcurrent')).toBe(true);
+    // Consent must be granted on this device, not silently restored onto a fresh install.
+    expect(isBackupKey('diagnostics.errorReporting')).toBe(false);
+    expect(isBackupKey('diagnostics.errorReportingConsent.v1')).toBe(false);
     // Unsent message text keyed by the counterparty's address — content, not a setting.
     expect(isBackupKey('draft.iMessage;-;+15555550123')).toBe(false);
     // Device-local bookkeeping: carrying these between installs corrupts the target's state.
@@ -98,7 +119,7 @@ describe('buildBackup', () => {
     expect(b.kv.every((p) => !isSecretKey(p.key))).toBe(true);
   });
 
-  it('NEVER exports composer drafts or device-local sync state (kv allow-list)', async () => {
+  it('NEVER exports retired settings, composer drafts, or device-local sync state', async () => {
     const t = await createTestDb();
     await kvSet(t.db, 'theme.preset', 'nord');
     await kvSet(t.db, 'privacy.redactedMode', '1');
@@ -110,7 +131,7 @@ describe('buildBackup', () => {
     await kvSet(t.db, 'theme.custom', '7');
 
     const keys = (await buildBackup(t.db, { exportedAt: 1 })).kv.map((p) => p.key);
-    expect(keys).toEqual(['privacy.redactedMode', 'theme.preset']); // ORDER BY key
+    expect(keys).toEqual(['theme.preset']);
   });
 });
 
@@ -143,6 +164,183 @@ describe('restoreBackup round-trip', () => {
       custom_name: string;
     };
     expect(chat.custom_name).toBe('Squad');
+  });
+
+  it('queues theme restore behind a rolling-back neighbour instead of joining it', async () => {
+    const t = await createTestDb();
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      t.raw
+        .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
+        .run('Mine', 'dark', '{"phantom":1}');
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const restore = restoreThemes(t.db, [
+      { name: 'Mine', mode: 'dark', tokens: '{"safe":1}', isPreset: 0 },
+    ]);
+    await Promise.resolve();
+    expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").get()).toEqual({
+      tokens: '{"phantom":1}',
+    });
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await restore;
+    expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").get()).toEqual({
+      tokens: '{"safe":1}',
+    });
+  });
+
+  it('ignores retired keys and stops a KV restore at a revoked supported item', async () => {
+    const t = await createTestDb();
+    let current = true;
+    t.raw.function('revoke_backup_during_kv_restore', () => {
+      current = false;
+      return 0;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_backup_on_supported_setting
+      AFTER INSERT ON kv
+      WHEN NEW.key = 'downloads.maxConcurrent'
+      BEGIN
+        SELECT revoke_backup_during_kv_restore();
+      END
+    `);
+
+    await expect(
+      restoreBackup(
+        t.db,
+        {
+          version: 1,
+          exportedAt: 1,
+          kv: [
+            { key: 'theme.preset', value: 'nord' },
+            { key: 'privacy.redactedMode', value: '1' },
+            { key: 'downloads.maxConcurrent', value: '3' },
+          ],
+          themes: [{ name: 'must-not-run', mode: 'dark', tokens: '{}', isPreset: 0 }],
+          chatCustomizations: [],
+        },
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(t.raw.prepare('SELECT key, value FROM kv ORDER BY key').all()).toEqual([
+      { key: 'theme.preset', value: 'nord' },
+    ]);
+    expect(t.raw.prepare('SELECT name FROM themes').all()).toEqual([]);
+  });
+
+  it('stops a theme restore at a revoked later item while keeping earlier phases and rows', async () => {
+    const t = await createTestDb();
+    let current = true;
+    t.raw.function('revoke_backup_during_theme_restore', () => {
+      current = false;
+      return 0;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_backup_on_second_theme
+      AFTER INSERT ON themes
+      WHEN NEW.name = 'revoke-here'
+      BEGIN
+        SELECT revoke_backup_during_theme_restore();
+      END
+    `);
+
+    await expect(
+      restoreBackup(
+        t.db,
+        {
+          version: 1,
+          exportedAt: 1,
+          kv: [{ key: 'theme.preset', value: 'nord' }],
+          themes: [
+            { name: 'committed-prefix', mode: 'dark', tokens: '{"a":1}', isPreset: 0 },
+            { name: 'revoke-here', mode: 'dark', tokens: '{"b":2}', isPreset: 0 },
+            { name: 'must-not-run', mode: 'dark', tokens: '{"c":3}', isPreset: 0 },
+          ],
+          chatCustomizations: [],
+        },
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(t.raw.prepare('SELECT name, tokens FROM themes ORDER BY id').all()).toEqual([
+      { name: 'committed-prefix', tokens: '{"a":1}' },
+    ]);
+    expect(t.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toEqual({
+      value: 'nord',
+    });
+  });
+
+  it('tracks duplicate-theme cursors per name and mode when identities are interleaved', async () => {
+    const t = await createTestDb();
+    const insert = t.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
+    );
+    insert.run('A', 'dark', '{"oldA1":1}');
+    insert.run('B', 'light', '{"oldB":1}');
+    insert.run('A', 'dark', '{"oldA2":1}');
+
+    await restoreThemes(t.db, [
+      { name: 'A', mode: 'dark', tokens: '{"newA1":1}', isPreset: 0 },
+      { name: 'A', mode: 'dark', tokens: '{"newA2":1}', isPreset: 0 },
+      { name: 'B', mode: 'light', tokens: '{"newB":1}', isPreset: 0 },
+    ]);
+
+    expect(t.raw.prepare('SELECT id, tokens FROM themes ORDER BY id').all()).toEqual([
+      { id: 1, tokens: '{"newA1":1}' },
+      { id: 2, tokens: '{"newB":1}' },
+      { id: 3, tokens: '{"newA2":1}' },
+    ]);
+  });
+
+  it('does not claim a same-name theme created after the restore cutoff', async () => {
+    const t = await createTestDb();
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      neighbourStarted();
+      await release;
+    });
+    await started;
+
+    // restoreThemes claims its cutoff queue slot synchronously. This editor write queues after the
+    // cutoff but before the restore's per-item transaction.
+    const restore = restoreThemes(t.db, [
+      { name: 'Mine', mode: 'dark', tokens: '{"backup":1}', isPreset: 0 },
+    ]);
+    const editorInsert = withDbTransaction(t.db, async () => {
+      t.raw
+        .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
+        .run('Mine', 'dark', '{"editor":1}');
+    });
+
+    releaseNeighbour();
+    await neighbour;
+    await editorInsert;
+    await restore;
+    expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine' ORDER BY id").all()).toEqual([
+      { tokens: '{"editor":1}' },
+      { tokens: '{"backup":1}' },
+    ]);
   });
 
   it('restoring the SAME backup twice does not duplicate themes (upsert, not insert)', async () => {
@@ -377,15 +575,174 @@ describe('restoreBackup round-trip', () => {
     });
     expect(res.chatCustomizations).toBe(0);
   });
+
+  it('queues an ordinary customization restore behind a rolling-back neighbour', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'cQueued');
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      t.raw.prepare("UPDATE chats SET custom_name = 'phantom' WHERE guid = 'cQueued'").run();
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const restoring = restoreBackup(t.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [],
+      chatCustomizations: [
+        {
+          guid: 'cQueued',
+          customName: 'restored safely',
+          customColor: null,
+          muteType: null,
+          isPinned: 0,
+          isArchived: 0,
+        },
+      ],
+    });
+    await Promise.resolve();
+    expect(t.raw.prepare("SELECT custom_name FROM chats WHERE guid = 'cQueued'").get()).toEqual({
+      custom_name: 'phantom',
+    });
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(restoring).resolves.toMatchObject({ chatCustomizations: 1 });
+    expect(t.raw.prepare("SELECT custom_name FROM chats WHERE guid = 'cQueued'").get()).toEqual({
+      custom_name: 'restored safely',
+    });
+  });
+
+  it('rolls back a same-GUID customization when account ownership changes during its UPDATE', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'iMessage;-;same-guid');
+    await setChatCustomization(t.db, 'iMessage;-;same-guid', {
+      customName: 'B local name',
+      customColor: '#00bb00',
+    });
+
+    let current = true;
+    t.raw.function('revoke_backup_ownership', () => {
+      current = false;
+      return 0;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_backup_during_chat_update
+      AFTER UPDATE OF custom_name ON chats
+      BEGIN
+        SELECT revoke_backup_ownership();
+      END
+    `);
+
+    await expect(
+      restoreBackup(
+        t.db,
+        {
+          version: 1,
+          exportedAt: 1,
+          kv: [],
+          themes: [],
+          chatCustomizations: [
+            {
+              guid: 'iMessage;-;same-guid',
+              customName: 'A restored name',
+              customColor: '#aa0000',
+              muteType: null,
+              isPinned: 1,
+              isArchived: 0,
+            },
+          ],
+        },
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(
+      t.raw
+        .prepare(
+          `SELECT custom_name AS customName, custom_color AS customColor,
+                  is_pinned AS isPinned
+             FROM chats WHERE guid = ?`,
+        )
+        .get('iMessage;-;same-guid'),
+    ).toEqual({ customName: 'B local name', customColor: '#00bb00', isPinned: 0 });
+  });
 });
 
 describe('parseBackup', () => {
+  const validBackup = (): Backup => ({
+    version: 1,
+    exportedAt: 1,
+    kv: [],
+    themes: [],
+    chatCustomizations: [],
+  });
+
   it('rejects malformed JSON and bad schema', () => {
     expect(() => parseBackup('not json')).toThrow();
     expect(() => parseBackup(JSON.stringify({ version: 2 }))).toThrow();
     expect(() =>
       parseBackup(JSON.stringify({ version: 1, exportedAt: 1, kv: [], themes: [] })),
     ).toThrow(); // missing chatCustomizations
+  });
+
+  it('rejects plaintext over the global cap before JSON.parse', () => {
+    expect(() => parseBackup('x'.repeat(BACKUP_LIMITS.plaintextCharacters + 1))).toThrow(
+      BackupInputLimitError,
+    );
+  });
+
+  it('also applies the plaintext cap in UTF-8 bytes', () => {
+    const multibyte = '界'.repeat(Math.floor(BACKUP_LIMITS.plaintextBytes / 3) + 1);
+    expect(multibyte.length).toBeLessThan(BACKUP_LIMITS.plaintextCharacters);
+    expect(() => parseBackup(multibyte)).toThrow('backup-input-limit:plaintext-too-large');
+  });
+
+  it.each([
+    ['kv', BACKUP_LIMITS.kvEntries, { key: 'theme.preset', value: 'dark' }],
+    ['themes', BACKUP_LIMITS.themes, { name: 'Theme', mode: 'dark', tokens: '{}', isPreset: 0 }],
+    [
+      'chatCustomizations',
+      BACKUP_LIMITS.chatCustomizations,
+      {
+        guid: 'iMessage;-;chat',
+        customName: null,
+        customColor: null,
+        muteType: null,
+        isPinned: 0,
+        isArchived: 0,
+      },
+    ],
+  ] as const)('bounds the %s collection', (field, max, row) => {
+    const backup = validBackup();
+    // Deliberately bypass the inferred tuple type to build hostile runtime JSON.
+    (backup as unknown as Record<string, unknown[]>)[field] = Array.from(
+      { length: max + 1 },
+      () => row,
+    );
+    expect(() => BackupSchema.parse(backup)).toThrow();
+  });
+
+  it('bounds individual strings even when the whole file is below the global cap', () => {
+    const backup = validBackup();
+    backup.themes.push({
+      name: 'x'.repeat(BACKUP_LIMITS.themeNameCharacters + 1),
+      mode: 'dark',
+      tokens: '{}',
+      isPreset: 0,
+    });
+    expect(() => BackupSchema.parse(backup)).toThrow();
   });
 });
 
@@ -423,12 +780,31 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
     await expect(openBackup(box, tampered, 'pp')).rejects.toBeDefined();
   });
 
+  it('rejects an oversized encoded envelope before calling the base64 decoder', async () => {
+    const open = jest.fn();
+    const box = { open } as unknown as SecretBox;
+    await expect(
+      openBackup(box, 'A'.repeat(BACKUP_LIMITS.encodedCharacters + 1), 'old-passphrase'),
+    ).rejects.toThrow('backup-input-limit:encoded-too-large');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized decrypted plaintext before JSON.parse', async () => {
+    const open = jest.fn(async () => 'x'.repeat(BACKUP_LIMITS.plaintextCharacters + 1));
+    const box = { open } as unknown as SecretBox;
+    await expect(openBackup(box, 'small-envelope', 'old-passphrase')).rejects.toThrow(
+      'backup-input-limit:plaintext-too-large',
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
   it('the no-secrets guard survives encrypt → decrypt → restore (import-side filter)', async () => {
     const src = await createTestDb();
     await kvSet(src.db, 'theme.preset', 'nord');
     const backup = await buildBackup(src.db, { exportedAt: 1 });
-    // Forge a malicious backup with a secret kv that buildBackup would have stripped.
+    // Forge an old/hostile backup with kv entries that buildBackup would have stripped.
     backup.kv.push({ key: 'server.password', value: 'hunter2' });
+    backup.kv.push({ key: 'privacy.redactedMode', value: '1' });
     const box = await makeBox();
     const opened = await openBackup(box, await sealBackup(box, backup, 'pp'), 'pp');
 
@@ -437,9 +813,27 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
     expect(
       dst.raw.prepare("SELECT value FROM kv WHERE key='server.password'").get(),
     ).toBeUndefined();
+    expect(
+      dst.raw.prepare("SELECT value FROM kv WHERE key='privacy.redactedMode'").get(),
+    ).toBeUndefined();
     const ok = dst.raw.prepare("SELECT value FROM kv WHERE key='theme.preset'").get() as
       { value: string } | undefined;
     expect(ok?.value).toBe('nord');
+  });
+});
+
+describe('new backup passphrase policy', () => {
+  it('requires 12 characters for new exports', () => {
+    expect(MIN_NEW_BACKUP_PASSPHRASE_LENGTH).toBe(12);
+    expect(getNewBackupPassphraseIssue('elevenchars')).toBe('too-short');
+    expect(getNewBackupPassphraseIssue('🔐'.repeat(6))).toBe('too-short');
+    expect(getNewBackupPassphraseIssue('twelve-chars')).toBeNull();
+  });
+
+  it('rejects common phrases case-insensitively, but accepts a distinct long phrase', () => {
+    expect(getNewBackupPassphraseIssue('  PASSWORD1234  ')).toBe('too-common');
+    expect(getNewBackupPassphraseIssue('            ')).toBe('too-short');
+    expect(getNewBackupPassphraseIssue('river-lantern-orbit-92')).toBeNull();
   });
 });
 

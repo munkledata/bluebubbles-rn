@@ -15,12 +15,14 @@ import {
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { refreshInbox } from '@/services';
-import { publishShareShortcuts } from '@/services/shortcuts/shareShortcuts';
+import {
+  captureRealtimeDeliveryLease,
+  runAccountScopedLocalMutation,
+} from '@/services/realtime/deliveryCoordinator';
 import { useChats } from '@features/conversations/useChats';
 import { getDatabase } from '@db/database';
 import { markAllChatsReadLocal, type InboxRow } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { useTheme } from '../theme';
@@ -43,6 +45,9 @@ export function ConversationListScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // The global confirmation dialog can retain its callback after this inbox/account unmounts.
+  // Keep that callback bound to the account that rendered this screen instance.
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [search, setSearch] = useState('');
   const { data, isLoading, error } = useChats();
   // Memoized so the `data ?? []` fallback isn't a fresh array each render (which would defeat the
@@ -50,18 +55,6 @@ export function ConversationListScreen(): React.JSX.Element {
   const rows = useMemo(() => data ?? [], [data]);
   // Pull-to-refresh: incremental sync. The list sits below the fixed title → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
-
-  // Publish the most-recent conversations as Android Direct Share targets (share sheet's priority
-  // row). No-op on a build without the native module. Running on EVERY reactive tick is deliberate:
-  // `publishShareShortcuts` de-dupes on the serialized payload, so a tick that changes nothing is a
-  // string compare — while a renamed chat or a newly synced contact photo now actually republishes
-  // (the old top-4-guid memo silently ignored both).
-  // Redacted mode publishes NOTHING (and clears what's there): a masked chip is untappable and the
-  // chip count alone still leaks how many conversations exist.
-  const shortcutsRedacted = useRedactedModeStore((s) => s.enabled);
-  useEffect(() => {
-    if (rows.length > 0) publishShareShortcuts(rows, { redacted: shortcutsRedacted });
-  }, [rows, shortcutsRedacted]);
 
   // Only let the KeyboardAvoidingView add padding WHILE the keyboard is up. When it's down the KAV
   // is disabled (contributes 0), so it can't leave the nav-bar-sized residual gap under the bar that
@@ -87,9 +80,15 @@ export function ConversationListScreen(): React.JSX.Element {
   const onMarkAllRead = useCallback((): void => {
     showDialog('Mark All Read', 'Mark every conversation as read?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Mark All Read', onPress: () => void markAllChatsReadLocal(getDatabase()) },
+      {
+        text: 'Mark All Read',
+        onPress: () =>
+          void runAccountScopedLocalMutation(accountLease, () =>
+            markAllChatsReadLocal(getDatabase()),
+          ),
+      },
     ]);
-  }, []);
+  }, [accountLease]);
 
   // Typing in the bottom bar replaces the conversation list with the unified search results.
   const searching = search.trim().length > 0;

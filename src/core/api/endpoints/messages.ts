@@ -167,7 +167,7 @@ export async function queryMessages(http: HttpClient, q: MessageQuery): Promise<
       limit: q.limit ?? 1000,
       after: q.afterTimestamp,
       afterRowId: q.afterRowId,
-      with: ['chats', 'chats.participants', 'handle', 'attachment', 'attributedBody'],
+      with: SYNC_WITH_QUERY.join(','),
       sort: 'ASC',
     },
   });
@@ -179,10 +179,31 @@ export async function queryMessages(http: HttpClient, q: MessageQuery): Promise<
  * realtime `message-deleted` event — `{ guid, chatGuid, dateDeleted }` — so the catch-up sync
  * applies both through the one `markMessageDeleted` path.
  */
-export const DeletedMessageList = z.object({
-  deleted: z.array(MessageDeletedPayload).nullish(),
+export const DELETED_MESSAGE_PAGE_LIMIT = 500;
+
+// Realtime deletion events stay deliberately tolerant, but pagination cannot safely reinterpret a
+// malformed cursor timestamp as `null`. Accept the server's finite number / numeric-string shapes
+// plus a genuinely absent value, and reject everything else at the REST boundary.
+const DeletedMessageTimestamp = z
+  .union([
+    z.number().finite(),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .refine((value) => Number.isFinite(Number(value)), 'Expected a finite numeric timestamp')
+      .transform(Number),
+  ])
+  .nullish()
+  .transform((value) => value ?? null);
+
+export const DeletedMessageResponseRow = MessageDeletedPayload.extend({
+  dateDeleted: DeletedMessageTimestamp,
 });
-export type DeletedMessage = z.infer<typeof MessageDeletedPayload>;
+export const DeletedMessageList = z.object({
+  deleted: z.array(DeletedMessageResponseRow).max(DELETED_MESSAGE_PAGE_LIMIT).nullish(),
+});
+export type DeletedMessage = z.infer<typeof DeletedMessageResponseRow>;
 
 /**
  * GET /api/v1/message/deleted — deletions whose `dateDeleted` is STRICTLY after the Unix-ms

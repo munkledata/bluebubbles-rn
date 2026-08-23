@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
@@ -24,6 +25,7 @@ interface FileChipProps {
 /** Generic (non-image) attachment chip: icon + filename + "TYPE • size", with download state. */
 export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   const theme = useTheme();
+  const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const status = useDownloadStore((s) => s.status[att.guid]);
   // Present only while this file is being SENT — the entry is removed once the attempt settles.
   const upload = useUploadStore((s) => s.byGuid[att.guid]);
@@ -46,7 +48,7 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   const onPress = (): void => {
     const path = att.localPath;
     if (!path) {
-      void download(att);
+      void download(att, 'manual', accountLease);
       return;
     }
     if (opening.current) return;
@@ -58,7 +60,7 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
         // does nothing" shipped. NOTE there is deliberately no toast for 'shared': the share
         // sheet is a system window that appears immediately and IS the feedback, and AppToast
         // is pointerEvents:'none' behind it, so a toast would be invisible and then gone.
-        if (res.status === 'missing') void download(att);
+        if (res.status === 'missing') void download(att, 'manual', accountLease);
         else if (res.status === 'no_handler')
           showToast(`No app on this device can open ${label} files`);
         else if (res.status === 'error') showToast('Couldn’t open this file');

@@ -12,7 +12,17 @@
  * clients / expo uploader / contacts picker); the DB and the reconcile itself are real.
  */
 import { Chat } from '@core/models';
-import { insertScheduled, listAllScheduled, upsertChats, upsertHandles } from '@db/repositories';
+import {
+  getScheduledById,
+  insertScheduled,
+  listAllScheduled,
+  listServerScheduledPruneExposure,
+  reconcileServerScheduled,
+  updateScheduled,
+  upsertChats,
+  upsertHandles,
+} from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -60,6 +70,18 @@ const item = (id: string, text: string) => ({
 const serverIdsOf = async (db: AppDatabase): Promise<(string | null)[]> =>
   (await listAllScheduled(db)).map((r) => r.serverId);
 
+/** Native SQLite errors can belong to a prior Jest VM, so match their text without `instanceof`. */
+async function expectSqliteRejection(promise: Promise<unknown>, message: RegExp): Promise<void> {
+  const outcome = await promise.then(
+    () => ({ kind: 'resolved' as const }),
+    (error: unknown) => ({ kind: 'rejected' as const, message: String(error) }),
+  );
+  expect(outcome).toEqual({
+    kind: 'rejected',
+    message: expect.stringMatching(message),
+  });
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -76,8 +98,8 @@ describe('syncScheduledFromServer — prune exposure is snapshotted before the r
       serverId: 'srv-old',
     });
 
-    // The user taps Edit while the GET is in flight: the old server message is deleted and a new
-    // one created, so the local row is repointed at a server id the response cannot mention.
+    // Another server-backed row appears after the request snapshot. It was never exposed to this
+    // response, so the response cannot be allowed to prune it.
     mockGetScheduled.mockImplementation(async () => {
       await insertScheduled(db, {
         chatGuid: 'c1',
@@ -93,6 +115,66 @@ describe('syncScheduledFromServer — prune exposure is snapshotted before the r
     const ids = await serverIdsOf(db);
     expect(ids).toContain('srv-new'); // survived the prune
     expect(ids).toContain('srv-old');
+  });
+
+  it('does not resurrect a stale server uuid after the same local row is repointed mid-fetch', async () => {
+    const { db } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    await seedChat(db);
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'before edit',
+      scheduledFor: 9_000_000,
+      serverId: 'srv-old',
+    });
+
+    // Model a GET whose old response was already built when Edit deletes/re-creates the server
+    // message and points the SAME local row at the fresh uuid.
+    mockGetScheduled.mockImplementation(async () => {
+      await updateScheduled(db, id, {
+        text: 'edited mid-fetch',
+        scheduledFor: 9_500_000,
+        serverId: 'srv-new',
+      });
+      return [item('srv-old', 'stale response')];
+    });
+
+    await syncScheduledFromServer();
+
+    expect(await serverIdsOf(db)).toEqual(['srv-new']);
+    expect(await getScheduledById(db, id)).toMatchObject({
+      text: 'edited mid-fetch',
+      scheduledFor: 9_500_000,
+    });
+  });
+
+  it('compare-deletes the exposed id and uuid, preserving a row repointed mid-fetch', async () => {
+    const { db } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    await seedChat(db);
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'before edit',
+      scheduledFor: 9_000_000,
+      serverId: 'srv-old',
+    });
+
+    mockGetScheduled.mockImplementation(async () => {
+      await updateScheduled(db, id, {
+        text: 'edited mid-fetch',
+        scheduledFor: 9_500_000,
+        serverId: 'srv-new',
+      });
+      return [item('srv-other', 'another server row')];
+    });
+
+    await syncScheduledFromServer();
+
+    expect(await serverIdsOf(db)).toEqual(expect.arrayContaining(['srv-new', 'srv-other']));
+    expect(await getScheduledById(db, id)).toMatchObject({
+      serverId: 'srv-new',
+      text: 'edited mid-fetch',
+    });
   });
 
   it('still prunes a row the server dropped that WAS exposed before the fetch', async () => {
@@ -157,5 +239,246 @@ describe('syncScheduledFromServer — prune exposure is snapshotted before the r
     await syncScheduledFromServer();
 
     expect(await serverIdsOf(db)).toEqual(expect.arrayContaining([null, 'srv-x']));
+  });
+});
+
+describe('reconcileServerScheduled — serialized bounded writes', () => {
+  it('captures only committed exposure before deciding whether a missing server id is stale', async () => {
+    const { db, raw } = await createTestDb();
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      raw
+        .prepare(
+          `INSERT INTO scheduled_messages
+             (server_id, chat_guid, payload, scheduled_for, status)
+           VALUES ('srv-phantom', 'c1', '{"text":"phantom"}', 1, 'pending')`,
+        )
+        .run();
+      neighbourStarted();
+      await held;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let captureSettled = false;
+    const capture = listServerScheduledPruneExposure(db).then((rows) => {
+      captureSettled = true;
+      return rows;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const settledWhileNeighbourHeld = captureSettled;
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    const exposure = await capture;
+    await reconcileServerScheduled(
+      db,
+      [
+        {
+          serverId: 'srv-phantom',
+          chatGuid: 'c1',
+          text: 'real server row',
+          scheduledFor: 10,
+          status: 'pending',
+        },
+      ],
+      ['srv-phantom'],
+      { pruneExposure: exposure },
+    );
+
+    expect(settledWhileNeighbourHeld).toBe(false);
+    expect(exposure).toEqual([]);
+    expect(await serverIdsOf(db)).toEqual(['srv-phantom']);
+  });
+
+  it('queues update, insert, and prune behind a rolling-back neighbour', async () => {
+    const { db } = await createTestDb();
+    const updateId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'before update',
+      scheduledFor: 1,
+      serverId: 'srv-update',
+    });
+    const staleId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'stale',
+      scheduledFor: 2,
+      serverId: 'srv-stale',
+    });
+    const exposure = await listServerScheduledPruneExposure(db);
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let updateSettled = false;
+    const update = reconcileServerScheduled(
+      db,
+      [
+        {
+          serverId: 'srv-update',
+          chatGuid: 'c1',
+          text: 'after update',
+          scheduledFor: 10,
+          status: 'pending',
+        },
+      ],
+      ['srv-update'],
+      { pruneExposure: exposure.filter((row) => row.id === updateId) },
+    ).finally(() => {
+      updateSettled = true;
+    });
+    let insertSettled = false;
+    const insert = reconcileServerScheduled(
+      db,
+      [
+        {
+          serverId: 'srv-new',
+          chatGuid: 'c1',
+          text: 'new',
+          scheduledFor: 20,
+          status: 'pending',
+        },
+      ],
+      ['srv-new'],
+      { pruneExposure: [] },
+    ).finally(() => {
+      insertSettled = true;
+    });
+    let pruneSettled = false;
+    const prune = reconcileServerScheduled(db, [], ['srv-server-view-not-empty'], {
+      pruneExposure: exposure.filter((row) => row.id === staleId),
+    }).finally(() => {
+      pruneSettled = true;
+    });
+    await Promise.resolve();
+
+    expect({ updateSettled, insertSettled, pruneSettled }).toEqual({
+      updateSettled: false,
+      insertSettled: false,
+      pruneSettled: false,
+    });
+    expect(await getScheduledById(db, updateId)).toMatchObject({
+      text: 'before update',
+      scheduledFor: 1,
+    });
+    expect(await getScheduledById(db, staleId)).not.toBeNull();
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await Promise.all([update, insert, prune]);
+
+    expect(await getScheduledById(db, updateId)).toMatchObject({
+      text: 'after update',
+      scheduledFor: 10,
+    });
+    expect(await getScheduledById(db, staleId)).toBeNull();
+    expect(await serverIdsOf(db)).toEqual(['srv-update', 'srv-new']);
+  });
+
+  it('rejects a queued item transaction when its account commit guard is revoked', async () => {
+    const { db } = await createTestDb();
+    const exposure = await listServerScheduledPruneExposure(db);
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let ownsAccount = true;
+    const reconcile = reconcileServerScheduled(
+      db,
+      [
+        {
+          serverId: 'srv-revoked',
+          chatGuid: 'c1',
+          text: 'must not commit',
+          scheduledFor: 10,
+          status: 'pending',
+        },
+      ],
+      ['srv-revoked'],
+      { pruneExposure: exposure, commitGuard: () => ownsAccount },
+    );
+    await Promise.resolve();
+    ownsAccount = false;
+    releaseNeighbour();
+
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(reconcile).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(await listAllScheduled(db)).toEqual([]);
+  });
+
+  it('commits earlier exact-pair prunes when a later bounded prune fails, then retries', async () => {
+    const { db, raw } = await createTestDb();
+    const insert = raw.prepare(
+      `INSERT INTO scheduled_messages
+         (server_id, chat_guid, payload, scheduled_for, status)
+       VALUES (?, 'c1', ?, 1, 'pending')`,
+    );
+    for (let i = 1; i <= 205; i += 1) {
+      insert.run(`srv-${i}`, JSON.stringify({ text: `row-${i}` }));
+    }
+    const exposure = await listServerScheduledPruneExposure(db);
+    raw.exec(`
+      CREATE TRIGGER fail_scheduled_prune
+      BEFORE DELETE ON scheduled_messages
+      WHEN OLD.server_id = 'srv-101'
+      BEGIN
+        SELECT RAISE(ABORT, 'planned prune failure');
+      END
+    `);
+
+    await expectSqliteRejection(
+      reconcileServerScheduled(db, [], ['srv-server-view-not-empty'], { pruneExposure: exposure }),
+      /planned prune failure/,
+    );
+
+    expect(
+      (raw.prepare('SELECT COUNT(*) AS count FROM scheduled_messages').get() as { count: number })
+        .count,
+    ).toBe(105);
+    expect(
+      raw.prepare("SELECT 1 FROM scheduled_messages WHERE server_id = 'srv-100'").get(),
+    ).toBeUndefined();
+    expect(
+      raw.prepare("SELECT 1 FROM scheduled_messages WHERE server_id = 'srv-101'").get(),
+    ).toBeDefined();
+
+    raw.exec('DROP TRIGGER fail_scheduled_prune');
+    const remainingExposure = await listServerScheduledPruneExposure(db);
+    await reconcileServerScheduled(db, [], ['srv-server-view-not-empty'], {
+      pruneExposure: remainingExposure,
+    });
+    expect(await listAllScheduled(db)).toEqual([]);
   });
 });

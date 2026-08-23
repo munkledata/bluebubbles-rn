@@ -1,8 +1,10 @@
 import React from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import type { AttachmentRow } from '@db/repositories';
+import { isLocalFileUri } from '@utils';
 import { useTheme } from '../theme';
 import { ImageAttachment } from './ImageAttachment';
+import { useAttachmentCachePathProtection } from './useAttachmentCachePathProtection';
 
 const GAP = 3;
 const COLS = 2;
@@ -38,16 +40,29 @@ export function AttachmentGalleryGrid({
       ]}
     >
       {atts.map((att) => (
-        <ImageAttachment
-          key={att.guid}
-          att={att}
-          isFromMe={isFromMe}
-          showTail={false}
-          cellSize={cell}
-        />
+        <ProtectedGalleryCell key={att.guid} att={att} isFromMe={isFromMe} cellSize={cell} />
       ))}
     </View>
   );
+}
+
+/** Each simultaneously mounted grid cell owns its own reader pin. */
+function ProtectedGalleryCell({
+  att,
+  isFromMe,
+  cellSize,
+}: {
+  att: AttachmentRow;
+  isFromMe: boolean;
+  cellSize: number;
+}): React.JSX.Element {
+  const protectedPath = useAttachmentCachePathProtection(att.localPath);
+  if (isLocalFileUri(att.localPath) && protectedPath !== att.localPath) {
+    // Preserve the two-column geometry without mounting ImageAttachment's decoder or its
+    // "undownloaded" auto-fetch effect against a path currently owned by retirement.
+    return <View style={{ width: cellSize, height: cellSize }} />;
+  }
+  return <ImageAttachment att={att} isFromMe={isFromMe} showTail={false} cellSize={cellSize} />;
 }
 
 const styles = StyleSheet.create({

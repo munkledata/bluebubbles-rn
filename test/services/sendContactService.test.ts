@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { Chat } from '@core/models';
+import { logger } from '@core/secure';
 import { upsertChats, upsertHandles } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import {
@@ -35,7 +36,11 @@ function fakeHttp(impl: (path: string, json: unknown) => Promise<unknown>): {
 
 async function seedChat(db: AppDatabase, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'craig@apple.com' }] })], handles);
+  await upsertChats(
+    db,
+    [Chat.parse({ guid, participants: [{ address: 'craig@apple.com' }] })],
+    handles,
+  );
 }
 
 const countMessages = (raw: Database.Database) =>
@@ -43,7 +48,9 @@ const countMessages = (raw: Database.Database) =>
 
 describe('contactDisplayName', () => {
   it('prefers first+last, then org, then phone, then email, then a generic fallback', () => {
-    expect(contactDisplayName({ firstName: 'Craig', lastName: 'Federighi' })).toBe('Craig Federighi');
+    expect(contactDisplayName({ firstName: 'Craig', lastName: 'Federighi' })).toBe(
+      'Craig Federighi',
+    );
     expect(contactDisplayName({ organization: 'Apple' })).toBe('Apple');
     expect(contactDisplayName({ phones: [{ number: '+15551234567' }] })).toBe('+15551234567');
     expect(contactDisplayName({ emails: [{ address: 'a@b.com' }] })).toBe('a@b.com');
@@ -71,7 +78,9 @@ describe('sendContactMessage', () => {
       contact: { firstName: 'Craig', lastName: 'Federighi', phones: [{ number: '+15551234567' }] },
     });
     expect(countMessages(raw)).toBe(1);
-    const row = raw.prepare('SELECT guid, send_state s, is_from_me f, text FROM messages').get() as {
+    const row = raw
+      .prepare('SELECT guid, send_state s, is_from_me f, text FROM messages')
+      .get() as {
       guid: string;
       s: string;
       f: number;
@@ -90,7 +99,12 @@ describe('sendContactMessage', () => {
     const cap = fakeHttp(async () => ({ guid: 'g' }));
     await sendContactMessage(db, cap.http, {
       chatGuid: 'c1',
-      contact: { firstName: 'Tim', organization: 'Apple', phones: [], emails: [{ address: 'tim@apple.com' }] },
+      contact: {
+        firstName: 'Tim',
+        organization: 'Apple',
+        phones: [],
+        emails: [{ address: 'tim@apple.com' }],
+      },
     });
     const sent = cap.last();
     expect(sent?.path).toBe('/message/contact');
@@ -105,6 +119,7 @@ describe('sendContactMessage', () => {
   });
 
   it('marks the bubble errored when the send fails (retryable)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const { http } = fakeHttp(async () => {
@@ -118,15 +133,20 @@ describe('sendContactMessage', () => {
     };
     expect(row.s).toBe('error');
     expect(row.e).toBe(401);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+    );
+    warn.mockRestore();
   });
 
   it('throws (sends nothing) for a content-less contact', async () => {
     const { db } = await createTestDb();
     await seedChat(db, 'c1');
     const { http } = fakeHttp(async () => ({ guid: 'x' }));
-    await expect(
-      sendContactMessage(db, http, { chatGuid: 'c1', contact: {} }),
-    ).rejects.toThrow(/name, organization, phone, or email/);
+    await expect(sendContactMessage(db, http, { chatGuid: 'c1', contact: {} })).rejects.toThrow(
+      /name, organization, phone, or email/,
+    );
   });
 
   it('throws for an unknown chat', async () => {
@@ -182,6 +202,7 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
   }
 
   it('queues the send under kind "contact" carrying the structured fields (not the name as text)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const { http } = fakeHttp(async () => {
@@ -200,9 +221,15 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
     expect(payload.organization).toBe('Apple');
     // The old bug's fingerprint: a text payload whose `message` is the display name.
     expect(payload.message).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+    );
+    warn.mockRestore();
   });
 
   it('retries to /message/contact with the structured fields — NOT /message/text', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { posts, res } = await failThenDrain();
     expect(res).toEqual({ eligible: 1, sent: 1 });
     expect(posts).toHaveLength(1);
@@ -216,14 +243,25 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
     expect(posts[0]!.json.lastName).toBe('Federighi');
     expect(posts[0]!.json.organization).toBe('Apple');
     expect(posts[0]!.json.emails).toEqual([{ address: 'craig@apple.com' }]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+    );
+    warn.mockRestore();
   });
 
   it('reuses the original tempGuid so the server can absorb an ack-lost duplicate', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { raw, posts } = await failThenDrain();
     const msg = raw.prepare('SELECT guid FROM messages').get() as { guid: string };
     // After a successful retry the row is reconciled to the server guid, so compare against
     // what was POSTed: it must be a tempGuid, and the only message row must trace back to it.
     expect(typeof posts[0]!.json.tempGuid).toBe('string');
     expect(msg.guid).toBeTruthy();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+    );
+    warn.mockRestore();
   });
 });

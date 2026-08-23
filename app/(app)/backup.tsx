@@ -2,10 +2,27 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { exportEncryptedBackup, importBackupAuto } from '@/services/backup/backupService';
+import {
+  BackupPassphraseRejectedError,
+  exportEncryptedBackup,
+  importBackupAuto,
+  isBackupAccountChangedError,
+  readPickedBackupCopy,
+} from '@/services/backup/backupService';
+import {
+  BACKUP_LIMITS,
+  getNewBackupPassphraseIssue,
+  MIN_NEW_BACKUP_PASSPHRASE_LENGTH,
+  type NewBackupPassphraseIssue,
+} from '@/services/backup/backupSchema';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
-const MIN_PASS = 6;
+function passphraseIssueMessage(issue: NewBackupPassphraseIssue): string {
+  return issue === 'too-short'
+    ? `Choose a passphrase of at least ${MIN_NEW_BACKUP_PASSPHRASE_LENGTH} characters.`
+    : 'Choose a less common passphrase.';
+}
 
 /** Settings/theme/chat-customization backup: encrypted export (share file) + restore (paste). */
 export default function BackupScreen(): React.JSX.Element {
@@ -16,12 +33,27 @@ export default function BackupScreen(): React.JSX.Element {
   const [pass2, setPass2] = useState('');
   const [paste, setPaste] = useState('');
   const [restorePass, setRestorePass] = useState('');
+  // A retained picker/dialog callback must never adopt credentials from a later connection.
+  const [screenLease] = useState(captureRealtimeDeliveryLease);
 
-  const canExport = !busy && pass.length >= MIN_PASS && pass === pass2;
+  // Passphrases and pasted backup contents are secrets. The route can render once more while its
+  // account is being replaced, so fail closed instead of repainting account-A input in B's tree.
+  if (!screenLease.isCurrent()) {
+    return (
+      <Screen>
+        <ScreenHeader title="Backup" onBack={() => router.back()} />
+      </Screen>
+    );
+  }
+
+  const passphraseIssue = getNewBackupPassphraseIssue(pass);
+  const canExport = !busy && passphraseIssue === null && pass === pass2;
 
   const onExport = async (): Promise<void> => {
-    if (pass.length < MIN_PASS) {
-      showDialog('Backup', `Choose a passphrase of at least ${MIN_PASS} characters.`);
+    if (!screenLease.isCurrent()) return;
+    const issue = getNewBackupPassphraseIssue(pass);
+    if (issue) {
+      showDialog('Backup', passphraseIssueMessage(issue));
       return;
     }
     if (pass !== pass2) {
@@ -30,10 +62,15 @@ export default function BackupScreen(): React.JSX.Element {
     }
     setBusy(true);
     try {
-      await exportEncryptedBackup(pass, Date.now());
+      await exportEncryptedBackup(pass, Date.now(), screenLease);
       setPass('');
       setPass2('');
     } catch (e) {
+      if (isBackupAccountChangedError(e)) return;
+      if (e instanceof BackupPassphraseRejectedError) {
+        showDialog('Backup', passphraseIssueMessage(e.issue));
+        return;
+      }
       showDialog(
         'Backup',
         e instanceof Error && e.message === 'sharing-unavailable'
@@ -49,6 +86,7 @@ export default function BackupScreen(): React.JSX.Element {
   // contents into the restore field — so a user who exported a file can restore it without opening
   // it elsewhere and copy-pasting the whole ciphertext. They then enter the passphrase and Restore.
   const onPickFile = async (): Promise<void> => {
+    if (!screenLease.isCurrent()) return;
     setBusy(true);
     try {
       const DocumentPicker = await import('expo-document-picker');
@@ -58,10 +96,11 @@ export default function BackupScreen(): React.JSX.Element {
         copyToCacheDirectory: true,
       });
       if (res.canceled || !res.assets[0]) return;
-      const { File } = await import('expo-file-system');
-      const content = await new File(res.assets[0].uri).text();
-      setPaste(content.trim());
-    } catch {
+      // copyToCacheDirectory guarantees this is our temporary copy, not the user's source file.
+      // Delete it after reading — including when the picker returns to a retired A screen.
+      setPaste(await readPickedBackupCopy(res.assets[0].uri, screenLease));
+    } catch (e) {
+      if (isBackupAccountChangedError(e)) return;
       showDialog('Restore', 'Couldn’t open the backup file.');
     } finally {
       setBusy(false);
@@ -69,17 +108,19 @@ export default function BackupScreen(): React.JSX.Element {
   };
 
   const onImport = async (): Promise<void> => {
+    if (!screenLease.isCurrent()) return;
     if (!paste.trim()) return;
     setBusy(true);
     try {
-      const r = await importBackupAuto(paste.trim(), restorePass);
+      const r = await importBackupAuto(paste.trim(), restorePass, screenLease);
       setPaste('');
       setRestorePass('');
       showDialog(
         'Restored',
         `Settings: ${r.kv}, themes: ${r.themes}, chats: ${r.chatCustomizations}.`,
       );
-    } catch {
+    } catch (e) {
+      if (isBackupAccountChangedError(e)) return;
       showDialog(
         'Restore',
         'Couldn’t restore — check your passphrase and that the backup is valid.',
@@ -120,7 +161,18 @@ export default function BackupScreen(): React.JSX.Element {
             autoCapitalize="none"
             style={inputStyle}
           />
-          <Pressable onPress={() => void onExport()} disabled={!canExport} style={styles.row}>
+          <Text style={[styles.passphraseHint, { color: theme.color.secondaryLabel }]}>
+            Use at least {MIN_NEW_BACKUP_PASSPHRASE_LENGTH} characters, avoid common phrases, and
+            don’t reuse an important password.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Export encrypted backup"
+            accessibilityState={{ disabled: !canExport }}
+            onPress={() => void onExport()}
+            disabled={!canExport}
+            style={styles.row}
+          >
             <Text
               style={[
                 styles.rowLabel,
@@ -148,6 +200,7 @@ export default function BackupScreen(): React.JSX.Element {
             placeholderTextColor={theme.color.tertiaryLabel}
             multiline
             autoCapitalize="none"
+            maxLength={BACKUP_LIMITS.encodedCharacters}
             style={[styles.paste, { color: theme.color.label }]}
           />
           <TextInput
@@ -189,5 +242,6 @@ const styles = StyleSheet.create({
   row: { paddingHorizontal: 16, paddingVertical: 14 },
   rowLabel: { fontSize: 16 },
   input: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 16 },
+  passphraseHint: { paddingHorizontal: 16, paddingBottom: 8, fontSize: 12, lineHeight: 16 },
   paste: { minHeight: 100, padding: 14, fontSize: 13, textAlignVertical: 'top' },
 });

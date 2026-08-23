@@ -2,6 +2,10 @@ import { InMemoryVault } from '@core/secure';
 import { resolveDbKey, rotateDbKey } from '@db/key';
 import { withDbWriteLock } from '@db/transaction';
 
+const mockOpen = jest.fn();
+
+jest.mock('@op-engineering/op-sqlite', () => ({ open: mockOpen }));
+
 // key.ts imports expo-crypto at top level; mock the CSPRNG (varies per call).
 jest.mock('expo-crypto', () => {
   let n = 0;
@@ -50,31 +54,158 @@ describe('rotateDbKey (crash-safe staging)', () => {
     await vault.set('dbEncryptionKey', 'OLD');
     const sql: string[] = [];
 
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const holder = withDbWriteLock(() => held);
+    const deferred = (): { promise: Promise<void>; release: () => void } => {
+      let resolve!: () => void;
+      let released = false;
+      const promise = new Promise<void>((done) => {
+        resolve = done;
+      });
+      return {
+        promise,
+        release: () => {
+          if (released) return;
+          released = true;
+          resolve();
+        },
+      };
+    };
+    const nextEventLoopTurn = (): Promise<void> =>
+      new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    const waitFor = async (condition: () => boolean, label: string): Promise<void> => {
+      for (let turn = 0; turn < 20 && !condition(); turn += 1) {
+        await nextEventLoopTurn();
+      }
+      if (!condition()) throw new Error(`${label} did not start within 20 event-loop turns`);
+    };
+    type Outcome<T> = { kind: 'resolved'; value: T } | { kind: 'rejected'; error: unknown };
+    const normalize = <T>(promise: Promise<T>): Promise<Outcome<T>> =>
+      promise.then(
+        (value) => ({ kind: 'resolved' as const, value }),
+        (error: unknown) => ({ kind: 'rejected' as const, error }),
+      );
 
-    const rotating = rotateDbKey(vault, { execute: async (s) => void sql.push(s) });
-    await new Promise((r) => setTimeout(r, 0));
+    const holderGate = deferred();
+    const executeGate = deferred();
+    const executeFinished = deferred();
+    let holderDidStart = false;
+    let executeDidStart = false;
+    let rotationSettled = false;
+    let successorDidStart = false;
+    let successorSettled = false;
+    const holderOutcome = normalize(
+      withDbWriteLock(async () => {
+        holderDidStart = true;
+        await holderGate.promise;
+      }),
+    );
+    let rotationOutcome: Promise<Outcome<void>> | undefined;
+    let successorOutcome: Promise<Outcome<void>> | undefined;
 
-    // Staged (that step is vault-only and recoverable), but the re-encryption has NOT been
-    // submitted onto the shared connection.
-    expect(await vault.get('dbEncryptionKeyPending')).toBeTruthy();
-    expect(sql).toEqual([]);
-    expect(await vault.get('dbEncryptionKey')).toBe('OLD'); // and nothing was promoted
+    try {
+      await waitFor(() => holderDidStart, 'predecessor write-lock holder');
+      rotationOutcome = normalize(
+        rotateDbKey(vault, {
+          execute: async (statement) => {
+            sql.push(statement);
+            if (!/^PRAGMA rekey = '[0-9a-f]{64}'$/i.test(statement)) return;
+            executeDidStart = true;
+            try {
+              await executeGate.promise;
+            } finally {
+              executeFinished.release();
+            }
+          },
+        }),
+      ).finally(() => {
+        rotationSettled = true;
+      });
 
-    release();
-    await holder;
-    await rotating;
+      let stagedKey = await vault.get('dbEncryptionKeyPending');
+      for (let turn = 0; turn < 20 && stagedKey === null; turn += 1) {
+        await nextEventLoopTurn();
+        stagedKey = await vault.get('dbEncryptionKeyPending');
+      }
+      if (stagedKey === null) {
+        throw new Error('database key was not staged within 20 event-loop turns');
+      }
 
-    expect(sql.some((s) => /pragma rekey/i.test(s))).toBe(true);
-    expect(await vault.get('dbEncryptionKey')).not.toBe('OLD');
+      // Staging is vault-only and recoverable, but the shared native connection remains untouched
+      // until the predecessor releases its write-lock slot.
+      expect(stagedKey).toMatch(/^[0-9a-f]{64}$/);
+      expect(executeDidStart).toBe(false);
+      expect(sql).toEqual([]);
+      expect(await vault.get('dbEncryptionKey')).toBe('OLD');
+      expect(rotationSettled).toBe(false);
+
+      holderGate.release();
+      expect(await holderOutcome).toEqual({ kind: 'resolved', value: undefined });
+      await waitFor(() => executeDidStart, 'exact SQLCipher rekey');
+
+      successorOutcome = normalize(
+        withDbWriteLock(async () => {
+          successorDidStart = true;
+        }),
+      ).finally(() => {
+        successorSettled = true;
+      });
+      await nextEventLoopTurn();
+
+      // The native rekey promise owns the write-lock lifetime. Neither the vault promotion nor a
+      // synchronously queued successor may outrun it.
+      expect(sql).toEqual([`PRAGMA rekey = '${stagedKey}'`]);
+      expect(await vault.get('dbEncryptionKey')).toBe('OLD');
+      expect(await vault.get('dbEncryptionKeyPending')).toBe(stagedKey);
+      expect(rotationSettled).toBe(false);
+      expect(successorDidStart).toBe(false);
+      expect(successorSettled).toBe(false);
+
+      executeGate.release();
+      await executeFinished.promise;
+      await waitFor(() => successorDidStart, 'successor write-lock holder');
+      expect(await rotationOutcome).toEqual({ kind: 'resolved', value: undefined });
+      expect(await successorOutcome).toEqual({ kind: 'resolved', value: undefined });
+      expect(await vault.get('dbEncryptionKey')).toBe(stagedKey);
+      expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
+    } finally {
+      holderGate.release();
+      executeGate.release();
+      const drains: Promise<unknown>[] = [holderOutcome];
+      if (rotationOutcome) drains.push(rotationOutcome);
+      if (successorOutcome) drains.push(successorOutcome);
+      if (executeDidStart) drains.push(executeFinished.promise);
+      await Promise.allSettled(drains);
+    }
   });
 });
 
+function selfTestHandle(
+  label: string,
+  events: string[],
+  executeImpl: (sql: string) => Promise<{ rows: Array<{ v?: string }> }> = async () => ({
+    rows: [],
+  }),
+) {
+  return {
+    execute: jest.fn(async (sql: string) => {
+      events.push(`${label}:execute:${sql}`);
+      return executeImpl(sql);
+    }),
+    close: jest.fn(() => {
+      events.push(`${label}:close`);
+    }),
+    delete: jest.fn(() => {
+      events.push(`${label}:delete`);
+    }),
+  };
+}
+
 describe('resolveDbKey (boot recovery)', () => {
+  beforeEach(() => {
+    mockOpen.mockReset();
+  });
+
   it('returns the primary when no rotation is staged', async () => {
     const vault = new InMemoryVault();
     await vault.set('dbEncryptionKey', 'K');
@@ -94,8 +225,104 @@ describe('resolveDbKey (boot recovery)', () => {
     const vault = new InMemoryVault();
     await vault.set('dbEncryptionKey', 'OLD');
     await vault.set('dbEncryptionKeyPending', 'NEW');
-    expect(await resolveDbKey(vault, async (k) => k === 'NEW')).toBe('NEW');
+    const probed: string[] = [];
+    expect(
+      await resolveDbKey(vault, async (key) => {
+        probed.push(key);
+        return key === 'NEW';
+      }),
+    ).toBe('NEW');
+    expect(probed).toEqual(['OLD', 'NEW']);
     expect(await vault.get('dbEncryptionKey')).toBe('NEW');
     expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
+  });
+
+  it('preserves both recovery candidates when neither key can be proven', async () => {
+    const vault = new InMemoryVault();
+    await vault.set('dbEncryptionKey', 'OLD');
+    await vault.set('dbEncryptionKeyPending', 'NEW');
+
+    await expect(resolveDbKey(vault, async () => false)).rejects.toThrow(
+      'Neither stored encryption key could open the database',
+    );
+
+    expect(await vault.get('dbEncryptionKey')).toBe('OLD');
+    expect(await vault.get('dbEncryptionKeyPending')).toBe('NEW');
+  });
+
+  it('the default probe closes a readable primary-key handle before returning it', async () => {
+    const vault = new InMemoryVault();
+    await vault.set('dbEncryptionKey', 'OLD');
+    await vault.set('dbEncryptionKeyPending', 'NEW');
+    const handle = selfTestHandle('primary-probe', []);
+    mockOpen.mockReturnValueOnce(handle);
+
+    await expect(resolveDbKey(vault)).resolves.toBe('OLD');
+
+    expect(mockOpen).toHaveBeenCalledWith({ name: 'gator.db', encryptionKey: 'OLD' });
+    expect(handle.execute).toHaveBeenCalledWith('SELECT count(*) FROM sqlite_master');
+    expect(handle.close).toHaveBeenCalledTimes(1);
+    expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
+  });
+
+  it('the default probe closes a wrong-key handle before promoting the staged key', async () => {
+    const vault = new InMemoryVault();
+    await vault.set('dbEncryptionKey', 'OLD');
+    await vault.set('dbEncryptionKeyPending', 'NEW');
+    const primaryHandle = selfTestHandle('wrong-key-probe', [], async () => {
+      throw new Error('file is encrypted or is not a database');
+    });
+    const pendingHandle = selfTestHandle('pending-key-probe', []);
+    mockOpen.mockReturnValueOnce(primaryHandle).mockReturnValueOnce(pendingHandle);
+
+    await expect(resolveDbKey(vault)).resolves.toBe('NEW');
+
+    expect(mockOpen).toHaveBeenNthCalledWith(1, { name: 'gator.db', encryptionKey: 'OLD' });
+    expect(mockOpen).toHaveBeenNthCalledWith(2, { name: 'gator.db', encryptionKey: 'NEW' });
+    expect(primaryHandle.close).toHaveBeenCalledTimes(1);
+    expect(pendingHandle.close).toHaveBeenCalledTimes(1);
+    expect(await vault.get('dbEncryptionKey')).toBe('NEW');
+    expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
+  });
+
+  it('the default probe preserves both keys when neither native read is conclusive', async () => {
+    const vault = new InMemoryVault();
+    await vault.set('dbEncryptionKey', 'OLD');
+    await vault.set('dbEncryptionKeyPending', 'NEW');
+    const primaryHandle = selfTestHandle('primary-probe', [], async () => {
+      throw new Error('database is locked');
+    });
+    const pendingHandle = selfTestHandle('pending-probe', [], async () => {
+      throw new Error('file is encrypted or is not a database');
+    });
+    mockOpen.mockReturnValueOnce(primaryHandle).mockReturnValueOnce(pendingHandle);
+
+    await expect(resolveDbKey(vault)).rejects.toThrow(
+      'Neither stored encryption key could open the database',
+    );
+
+    expect(primaryHandle.close).toHaveBeenCalledTimes(1);
+    expect(pendingHandle.close).toHaveBeenCalledTimes(1);
+    expect(await vault.get('dbEncryptionKey')).toBe('OLD');
+    expect(await vault.get('dbEncryptionKeyPending')).toBe('NEW');
+  });
+
+  it('does not promote the staged key when the wrong-key handle cannot be closed', async () => {
+    const vault = new InMemoryVault();
+    await vault.set('dbEncryptionKey', 'OLD');
+    await vault.set('dbEncryptionKeyPending', 'NEW');
+    const handle = selfTestHandle('unclosable-probe', [], async () => {
+      throw new Error('file is encrypted or is not a database');
+    });
+    handle.close.mockImplementation(() => {
+      throw new Error('close failed');
+    });
+    mockOpen.mockReturnValueOnce(handle);
+
+    await expect(resolveDbKey(vault)).rejects.toThrow('close failed');
+
+    expect(handle.close).toHaveBeenCalledTimes(1);
+    expect(await vault.get('dbEncryptionKey')).toBe('OLD');
+    expect(await vault.get('dbEncryptionKeyPending')).toBe('NEW');
   });
 });

@@ -4,32 +4,33 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { cloneTokens, EDITABLE_COLORS, isValidHex } from './editableTokens';
 import { ThemePreviewCard } from './ThemePreviewCard';
 import { useTheme } from './ThemeProvider';
-import type { ThemeMode, ThemeTokens } from './tokens';
+import { darkThemeOrFallback, type ThemeTokens } from './tokens';
 
 // ---- Draft model (shared by the global manager + the per-chat studio) -------
 
 /** A theme being edited: a base token set + the user's edited hex strings. */
 export interface Draft {
   name: string;
-  mode: ThemeMode;
   base: ThemeTokens;
   hex: Record<string, string>;
 }
 
 /** Seed a draft from a starting token set (and optional name). */
 export function draftFrom(base: ThemeTokens, name: string): Draft {
+  // Do not merely relabel a legacy light palette as dark. Start it from the active dark
+  // fallback, so saving is an explicit conversion to readable dark colors.
+  const darkBase = darkThemeOrFallback(base);
   return {
     name,
-    mode: base.mode,
-    base: cloneTokens(base),
-    hex: Object.fromEntries(EDITABLE_COLORS.map((f) => [f.key, f.read(base)])),
+    base: cloneTokens(darkBase),
+    hex: Object.fromEntries(EDITABLE_COLORS.map((f) => [f.key, f.read(darkBase)])),
   };
 }
 
 /** Build the full token set from a draft's edited hex values (assumes all valid). */
 export function tokensFromDraft(d: Draft): ThemeTokens {
   const out = cloneTokens(d.base);
-  out.mode = d.mode;
+  out.mode = 'dark';
   for (const f of EDITABLE_COLORS) f.write(out, (d.hex[f.key] ?? '').trim());
   return out;
 }
@@ -52,8 +53,8 @@ export interface ThemeStudioProps {
 }
 
 /**
- * Reusable theme editor: a live preview, a name field (optional), a light/dark mode
- * toggle, and the 13 EDITABLE_COLORS hex inputs + swatches with validation. The
+ * Reusable dark-theme editor: a live preview, a name field (optional), and the 13
+ * EDITABLE_COLORS hex inputs + swatches with validation. The
  * global theme manager and the per-chat Chat Theme entry both render this — the only
  * difference is what `onApply` does with the result.
  */
@@ -68,7 +69,7 @@ export function ThemeStudio({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   // Fall back to the active global theme as a starting point when no tokens are passed.
-  const seed = initialTokens ?? theme;
+  const seed = darkThemeOrFallback(initialTokens, theme);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(seed, initialName ?? 'My Theme'));
   // Inline validation / save error. Shown in the editor itself — NOT a dialog: this editor is
   // rendered inside a Modal, and Android reliably shows only one Modal at a time, so a stacked
@@ -139,28 +140,6 @@ export function ThemeStudio({
           />
         ) : null}
 
-        <View style={styles.modeRow}>
-          {(['light', 'dark'] as const).map((m) => (
-            <Pressable
-              key={m}
-              onPress={() => setDraft({ ...draft, mode: m })}
-              style={[
-                styles.modeBtn,
-                {
-                  backgroundColor:
-                    draft.mode === m ? theme.color.tint : theme.color.secondaryBackground,
-                },
-              ]}
-            >
-              <Text
-                style={{ color: draft.mode === m ? '#fff' : theme.color.label, fontWeight: '600' }}
-              >
-                {m === 'light' ? 'Light' : 'Dark'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
         {EDITABLE_COLORS.map((f) => {
           const val = draft.hex[f.key] ?? '';
           const ok = isValidHex(val);
@@ -224,9 +203,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 14,
   },
-  modeRow: { flexDirection: 'row', gap: 10, marginTop: 16, marginBottom: 18 },
-  modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10 },
-  colorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  colorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   colorLabel: { flex: 1, fontSize: 14 },
   swatch: { width: 28, height: 28, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth },
   hexInput: {

@@ -9,6 +9,7 @@ import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen } from '../support/renderWithTheme';
 import { Bubble } from '@ui/primitives/Bubble';
 import { darkTheme } from '@ui/theme/tokens';
+import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
 
 const b = darkTheme.color.bubble;
 
@@ -16,6 +17,11 @@ const b = darkTheme.color.bubble;
 function bubbleStyle(text: string): Record<string, unknown> {
   const view = screen.getByText(text).parent!;
   return StyleSheet.flatten(view.props.style) as Record<string, unknown>;
+}
+
+/** Flattened style of the Text inside the bubble. */
+function textStyle(text: string): Record<string, unknown> {
+  return StyleSheet.flatten(screen.getByText(text).props.style) as Record<string, unknown>;
 }
 
 describe('Bubble', () => {
@@ -36,6 +42,10 @@ describe('Bubble', () => {
   it('from-me SMS bubble is green', async () => {
     await renderWithTheme(<Bubble text="sms" isFromMe service="SMS" />, { preset: 'oled-dark' });
     expect(bubbleStyle('sms').backgroundColor).toBe(b.smsBackground);
+    expect(textStyle('sms').color).toBe(readableTextOn(b.smsBackground));
+    expect(contrastRatio(textStyle('sms').color as string, b.smsBackground)).toBeGreaterThanOrEqual(
+      4.5,
+    );
   });
 
   it('from-me RCS bubble is teal', async () => {

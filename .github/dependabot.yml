@@ -1,0 +1,34 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: America/Denver
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    groups:
+      expo-sdk:
+        patterns:
+          - '@expo/*'
+          - 'expo'
+          - 'expo-*'
+          - 'jest-expo'
+      react-native-runtime:
+        patterns:
+          - '@react-native-*'
+          - 'react'
+          - 'react-native'
+          - 'react-native-*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:15'
+      timezone: America/Denver
+    open-pull-requests-limit: 5

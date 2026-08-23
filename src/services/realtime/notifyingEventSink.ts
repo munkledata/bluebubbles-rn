@@ -1,4 +1,10 @@
-import type { EventSink, EventSource, NormalizedEvent, NotificationIntent } from '@core/realtime';
+import type {
+  EventDeliveryContext,
+  EventSink,
+  EventSource,
+  NormalizedEvent,
+  NotificationIntent,
+} from '@core/realtime';
 import type { AppDatabase } from '@db/types';
 
 /**
@@ -17,12 +23,26 @@ export class NotifyingEventSink implements EventSink {
       db: AppDatabase,
       event: NormalizedEvent,
     ) => Promise<NotificationIntent[]>,
-    private readonly notify: (intent: NotificationIntent) => void,
+    private readonly notify: (
+      intent: NotificationIntent,
+      context?: EventDeliveryContext,
+    ) => void | Promise<void>,
   ) {}
 
-  async onEvent(event: NormalizedEvent, source: EventSource): Promise<void> {
-    await this.inner.onEvent(event, source);
+  async onEvent(
+    event: NormalizedEvent,
+    source: EventSource,
+    context?: EventDeliveryContext,
+  ): Promise<void> {
+    await this.inner.onEvent(event, source, context);
+    if (context && !context.isCurrent()) return;
     const intents = await this.buildIntents(this.db, event);
-    for (const intent of intents) this.notify(intent);
+    // Keep presentation work inside the event's lifetime. Account teardown can then drain either
+    // transport before wiping, rather than a late native post resurrecting private OS state after
+    // cancellation.
+    for (const intent of intents) {
+      if (context && !context.isCurrent()) return;
+      await this.notify(intent, context);
+    }
   }
 }

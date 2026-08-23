@@ -195,8 +195,7 @@ jest.mock('@ui/conversations/ChatActionsSheet', () => {
   const { Text } = require('react-native');
   return {
     // The screen maps rows through the REAL toChatActionTarget; only the sheet is probed.
-    toChatActionTarget: jest.requireActual('@ui/conversations/ChatActionsSheet')
-      .toChatActionTarget,
+    toChatActionTarget: jest.requireActual('@ui/conversations/ChatActionsSheet').toChatActionTarget,
     ChatActionsSheet: (props: { target: { guid: string } | null }) =>
       ReactLib.createElement(
         Text,
@@ -214,11 +213,17 @@ import { useChats } from '@features/conversations/useChats';
 import { markAllChatsReadLocal } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const useChatsMock = useChats as jest.Mock;
 const markAllReadMock = markAllChatsReadLocal as jest.Mock;
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   // The confirm dialog lives in the store (AppDialog is mounted at the app root, not here).
   useDialogStore.setState({ current: null, queue: [] });
   // Reset in beforeEach, never afterEach: an afterEach mutation lands on a still-mounted tree.
@@ -227,6 +232,11 @@ beforeEach(() => {
   mockFocusCallbacks.length = 0;
   mockInsetBottom = 0;
   mockKbVisible = false;
+  markAllReadMock.mockClear();
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
@@ -379,6 +389,24 @@ describe('ConversationListScreen — navigation & actions', () => {
       dlg.buttons.find((b) => b.text === 'Mark All Read')?.onPress?.();
     });
     expect(markAllReadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a delayed Mark All Read callback retained from the previous account', async () => {
+    setChats({ data: [makeRow({ guid: 'same-guid' })] });
+    await renderWithTheme(<ConversationListScreen />);
+    fireEvent.press(screen.getByLabelText('Mark all read'));
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Mark All Read'));
+    const retainedConfirm = useDialogStore
+      .getState()
+      .current?.buttons.find((button) => button.text === 'Mark All Read')?.onPress;
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      retainedConfirm?.();
+    });
+
+    expect(markAllReadMock).not.toHaveBeenCalled();
   });
 
   it('opens a chat (encoded guid) when a tile is tapped', async () => {
@@ -684,6 +712,28 @@ describe('ConversationListScreen — reveal the newest thread', () => {
  * backgrounded, and the arm window closed long before they looked at the list again.
  */
 describe('ConversationListScreen — re-land at the top on return', () => {
+  // Keep the screen's deliberate deferred correction out of awaited act() timing. The RN Jest
+  // preset implements requestAnimationFrame with setTimeout(0), so leaving it real makes an exact
+  // immediate-call assertion depend on whether that timer happens to fire before act() returns.
+  let frames: FrameRequestCallback[] = [];
+  let restoreRaf = (): void => {};
+  beforeEach(() => {
+    frames = [];
+    const spy = jest
+      .spyOn(global, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback): number => frames.push(cb));
+    restoreRaf = (): void => {
+      spy.mockRestore();
+    };
+  });
+  afterEach(() => {
+    restoreRaf();
+  });
+
+  function flushFrames(): void {
+    for (const cb of frames.splice(0, frames.length)) cb(0);
+  }
+
   /** Replay the registered focus callbacks, as navigating back to this screen would. */
   async function emitFocus(): Promise<void> {
     await act(async () => {
@@ -763,13 +813,17 @@ describe('ConversationListScreen — re-land at the top on return', () => {
     await emitFocus();
     expect(mockScrollToTop).toHaveBeenCalledTimes(1);
 
-    // Still armed: a late row measurement re-lands it.
-    (mockListProps.current.onContentSizeChange as () => void)();
+    // The deliberate next-frame correction re-lands after FlashList's own offset correction.
+    flushFrames();
     expect(mockScrollToTop).toHaveBeenCalledTimes(2);
 
+    // A later return arms another correction, but dragging before its frame hands ownership back.
+    await emitFocus();
+    expect(mockScrollToTop).toHaveBeenCalledTimes(3);
     (mockListProps.current.onScrollBeginDrag as () => void)();
+    flushFrames();
     (mockListProps.current.onContentSizeChange as () => void)();
-    expect(mockScrollToTop).toHaveBeenCalledTimes(2);
+    expect(mockScrollToTop).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -1,4 +1,5 @@
 import { timingSafeEqual, toBase64, utf8Encode } from '@utils/bytes';
+import type { CryptoBackend } from '../crypto';
 import type { SecureVault } from './vault';
 
 /**
@@ -30,25 +31,38 @@ const TOKEN_BYTES = 32;
 
 /**
  * Read the per-install automation token, minting + persisting a fresh 256-bit random one
- * on first use. This — NOT the server password — is what an external automation must
+ * on first use. The native composition root injects the CSPRNG so this core module stays
+ * platform-free. This — NOT the server password — is what an external automation must
  * present. Idempotent: returns the same token until it is rotated.
  */
-export async function getOrCreateAutomationToken(vault: SecureVault): Promise<string> {
+export async function getOrCreateAutomationToken(
+  vault: SecureVault,
+  crypto: Pick<CryptoBackend, 'randomBytes'>,
+): Promise<string> {
   const existing = await vault.get('automationToken');
   if (existing) return existing;
-  return mintToken(vault);
+  return mintToken(vault, crypto);
 }
 
 /** Replace the automation token with a fresh one — revokes every existing automation. */
-export async function rotateAutomationToken(vault: SecureVault): Promise<string> {
-  return mintToken(vault);
+export async function rotateAutomationToken(
+  vault: SecureVault,
+  crypto: Pick<CryptoBackend, 'randomBytes'>,
+): Promise<string> {
+  return mintToken(vault, crypto);
 }
 
-async function mintToken(vault: SecureVault): Promise<string> {
-  // Lazy import keeps expo-crypto out of the module graph so `@core/secure` stays
-  // node-importable in core tests; only minting touches the native CSPRNG.
-  const Crypto = await import('expo-crypto');
-  const token = toBase64(Crypto.getRandomBytes(TOKEN_BYTES));
+async function mintToken(
+  vault: SecureVault,
+  crypto: Pick<CryptoBackend, 'randomBytes'>,
+): Promise<string> {
+  const bytes = await crypto.randomBytes(TOKEN_BYTES);
+  if (bytes.length !== TOKEN_BYTES) {
+    throw new Error(
+      `Secure random backend returned ${bytes.length} bytes; expected ${TOKEN_BYTES}.`,
+    );
+  }
+  const token = toBase64(bytes);
   await vault.set('automationToken', token);
   return token;
 }

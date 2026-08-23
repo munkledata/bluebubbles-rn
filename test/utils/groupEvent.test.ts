@@ -76,7 +76,9 @@ describe('buildGroupEventText', () => {
     expect(buildGroupEventText({ itemType: 5, senderName: 'Alice' })).toBe(
       'Alice kept an audio message.',
     );
-    expect(buildGroupEventText({ itemType: 6, senderName: 'Alice' })).toBe('Alice started SharePlay.');
+    expect(buildGroupEventText({ itemType: 6, senderName: 'Alice' })).toBe(
+      'Alice started SharePlay.',
+    );
   });
 
   it('uses "You" for own events and "your" in the location phrasing', () => {

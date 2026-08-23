@@ -413,7 +413,7 @@ export const MIGRATIONS: Migration[] = [
     statements: [`ALTER TABLE scheduled_messages ADD COLUMN recurrence TEXT`],
   },
   {
-    // Error-report capture queue: a durable buffer of already-redacted `error`-level log lines that
+    // Error-report capture queue: a durable buffer of privacy-projected `error`-level log lines that
     // the app batch-uploads to the server (which fingerprints + writes them to disk). Leased +
     // uploaded + deleted like outgoing_queue (attempts cap + next_retry_at backoff/lease). A NEW
     // table (not an ALTER), created transactionally + idempotently by name.
@@ -482,5 +482,224 @@ export const MIGRATIONS: Migration[] = [
     // Additive; applied transactionally + idempotently by name.
     name: '0029_chats_deleted_at',
     statements: [`ALTER TABLE chats ADD COLUMN deleted_at INTEGER`],
+  },
+  {
+    // Durable, encrypted accounting for completed ordinary attachment-cache files. The path is the
+    // identity because multiple attachment rows may reference one physical file. There is
+    // intentionally NO attachment FK. `reserved` charges a final path before native streaming, so
+    // a crash after promotion cannot create an untracked persistent file. A `retiring` row survives
+    // until native deletion is confirmed. Retry metadata makes abandoned work discoverable later.
+    name: '0030_attachment_cache_entries',
+    statements: [
+      `CREATE TABLE attachment_cache_entries (
+        path TEXT PRIMARY KEY NOT NULL
+          CONSTRAINT attachment_cache_entries_path_not_empty CHECK (length(path) > 0),
+        bytes INTEGER NOT NULL
+          CONSTRAINT attachment_cache_entries_bytes_nonnegative CHECK (bytes >= 0),
+        last_used_at INTEGER NOT NULL
+          CONSTRAINT attachment_cache_entries_last_used_at_nonnegative CHECK (last_used_at >= 0),
+        state TEXT NOT NULL DEFAULT 'active'
+          CONSTRAINT attachment_cache_entries_state_valid
+            CHECK (state IN ('active', 'reserved', 'retiring')),
+        attempts INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT attachment_cache_entries_attempts_nonnegative CHECK (attempts >= 0),
+        next_retry_at INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT attachment_cache_entries_next_retry_at_nonnegative CHECK (next_retry_at >= 0)
+      )`,
+      `CREATE INDEX attachment_cache_entries_state_lru_idx
+         ON attachment_cache_entries (state, last_used_at, path)`,
+      `CREATE INDEX attachments_local_path_idx
+         ON attachments (local_path) WHERE local_path IS NOT NULL`,
+      `CREATE TRIGGER attachments_cache_path_insert_guard
+         BEFORE INSERT ON attachments
+         WHEN NEW.local_path IS NOT NULL
+          AND EXISTS (SELECT 1 FROM attachment_cache_entries e
+                       WHERE e.path = NEW.local_path AND e.state != 'active')
+         BEGIN
+           SELECT RAISE(ABORT, 'attachment cache path is not active');
+         END`,
+      `CREATE TRIGGER attachments_cache_path_update_guard
+         BEFORE UPDATE OF local_path ON attachments
+         WHEN NEW.local_path IS NOT NULL
+          AND EXISTS (SELECT 1 FROM attachment_cache_entries e
+                       WHERE e.path = NEW.local_path AND e.state != 'active')
+         BEGIN
+           SELECT RAISE(ABORT, 'attachment cache path is not active');
+         END`,
+    ],
+  },
+  {
+    // Durable intake for validated socket/FCM envelopes. Pending payloads stay encrypted in the
+    // SQLCipher database until one leased worker finishes. Terminal rows scrub the payload but
+    // retain the event key as a bounded receipt, which keeps cross-transport/retry duplicates
+    // suppressed across process death. No existing rows are backfilled: live intake owns identity,
+    // canonicalization, ordering keys, and per-event expiry in PUSH-RETRY-01B.
+    name: '0031_incoming_event_queue',
+    statements: [
+      `CREATE TABLE incoming_event_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT NOT NULL
+          CONSTRAINT incoming_event_queue_event_key_valid
+            CHECK (length(CAST(event_key AS BLOB)) BETWEEN 1 AND 256),
+        payload_digest TEXT NOT NULL
+          CONSTRAINT incoming_event_queue_payload_digest_valid
+            CHECK (length(CAST(payload_digest AS BLOB)) = 64
+                   AND payload_digest NOT GLOB '*[^0-9a-f]*'),
+        ordering_key TEXT NOT NULL
+          CONSTRAINT incoming_event_queue_ordering_key_valid
+            CHECK (length(CAST(ordering_key AS BLOB)) BETWEEN 1 AND 256),
+        schema_version INTEGER NOT NULL DEFAULT 1
+          CONSTRAINT incoming_event_queue_schema_version_valid CHECK (schema_version >= 1),
+        event_name TEXT NOT NULL
+          CONSTRAINT incoming_event_queue_event_name_valid
+            CHECK (length(CAST(event_name AS BLOB)) BETWEEN 1 AND 64),
+        source TEXT NOT NULL
+          CONSTRAINT incoming_event_queue_source_valid
+            CHECK (source IN ('socket', 'fcm', 'dev')),
+        payload TEXT
+          CONSTRAINT incoming_event_queue_payload_bounded
+            CHECK (payload IS NULL OR length(CAST(payload AS BLOB)) BETWEEN 1 AND 1048576),
+        received_at INTEGER NOT NULL
+          CONSTRAINT incoming_event_queue_received_at_nonnegative CHECK (received_at >= 0),
+        expires_at INTEGER NOT NULL
+          CONSTRAINT incoming_event_queue_expires_at_valid
+            CHECK (expires_at > received_at AND (expires_at - received_at) <= 86400000),
+        state TEXT NOT NULL DEFAULT 'pending'
+          CONSTRAINT incoming_event_queue_state_valid
+            CHECK (state IN ('pending', 'completed', 'poisoned')),
+        attempts INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT incoming_event_queue_attempts_valid CHECK (attempts BETWEEN 0 AND 5),
+        claim_version INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT incoming_event_queue_claim_version_nonnegative CHECK (claim_version >= 0),
+        next_attempt_at INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT incoming_event_queue_next_attempt_at_nonnegative CHECK (next_attempt_at >= 0),
+        lease_token TEXT
+          CONSTRAINT incoming_event_queue_lease_token_valid
+            CHECK (lease_token IS NULL OR length(CAST(lease_token AS BLOB)) BETWEEN 1 AND 128),
+        lease_expires_at INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT incoming_event_queue_lease_expires_at_nonnegative
+            CHECK (lease_expires_at >= 0),
+        db_applied_at INTEGER
+          CONSTRAINT incoming_event_queue_db_applied_at_nonnegative
+            CHECK (db_applied_at IS NULL OR db_applied_at >= 0),
+        terminal_at INTEGER
+          CONSTRAINT incoming_event_queue_terminal_at_nonnegative
+            CHECK (terminal_at IS NULL OR terminal_at >= 0),
+        last_error_code TEXT
+          CONSTRAINT incoming_event_queue_last_error_code_valid
+            CHECK (last_error_code IS NULL OR length(CAST(last_error_code AS BLOB)) BETWEEN 1 AND 128),
+        CONSTRAINT incoming_event_queue_state_shape_valid CHECK (
+          (state = 'pending' AND payload IS NOT NULL AND terminal_at IS NULL)
+          OR
+          (state IN ('completed', 'poisoned') AND payload IS NULL AND terminal_at IS NOT NULL
+           AND lease_token IS NULL AND lease_expires_at = 0 AND next_attempt_at = 0)
+        ),
+        CONSTRAINT incoming_event_queue_lease_shape_valid CHECK (
+          (lease_token IS NULL AND lease_expires_at = 0)
+          OR
+          (state = 'pending' AND lease_token IS NOT NULL AND lease_expires_at > 0)
+        )
+      )`,
+      `CREATE UNIQUE INDEX incoming_event_queue_event_key_idx
+         ON incoming_event_queue (event_key)`,
+      `CREATE INDEX incoming_event_queue_claim_idx
+         ON incoming_event_queue
+           (state, next_attempt_at, lease_expires_at, received_at, id)`,
+      `CREATE INDEX incoming_event_queue_ordering_idx
+         ON incoming_event_queue (state, ordering_key, id)`,
+      `CREATE INDEX incoming_event_queue_terminal_idx
+         ON incoming_event_queue (state, terminal_at, id)`,
+    ],
+  },
+  {
+    // Backup restore pairs same-named custom-theme twins one row at a time while holding the
+    // process-wide write lock. Its lookup constrains is_preset/name/mode and walks an id range;
+    // this matching index keeps each transaction bounded instead of rescanning every local theme.
+    name: '0032_theme_restore_lookup_index',
+    statements: [`CREATE INDEX themes_restore_lookup_idx ON themes (is_preset, name, mode, id)`],
+  },
+  {
+    // A deletion event can arrive before its message row or before a later history backfill. Keep
+    // a GUID-keyed ledger independent from messages so every future ingestion starts tombstoned,
+    // even after a chat purge. Existing local tombstones are copied forward during the upgrade.
+    name: '0033_message_deletion_ledger',
+    statements: [
+      `CREATE TABLE message_deletion_ledger (
+        guid TEXT PRIMARY KEY NOT NULL,
+        date_deleted INTEGER NOT NULL
+      )`,
+      `INSERT INTO message_deletion_ledger (guid, date_deleted)
+       SELECT guid, date_deleted
+         FROM messages
+        WHERE date_deleted IS NOT NULL`,
+    ],
+  },
+  {
+    // Rows captured before LOG-01's strict finite diagnostic projector may contain free-form error
+    // prose or raw stacks. They cannot be distinguished reliably from newer safe rows by shape,
+    // and diagnostics are disposable cache, so purge the whole pre-policy queue once on upgrade.
+    // Error reporting initializes only after migrations finish; every later row is projected before
+    // insertion and the table remains available for the current bounded upload queue.
+    name: '0034_purge_legacy_error_reports',
+    statements: [`DELETE FROM error_reports`],
+  },
+  {
+    // Internal release 0.1.40 could commit a local scheduled claim separately from its outgoing
+    // queue handoff. After a process death, status='sending' therefore cannot tell us whether the
+    // message is still unsent or already durably owned by outgoing_queue. Retire every ambiguous
+    // LOCAL claim to visible uncertain history instead of re-arming it and risking a duplicate send.
+    // Server-owned rows are authoritative remote state and are deliberately left untouched.
+    name: '0035_retire_legacy_scheduled_sending',
+    statements: [
+      `UPDATE scheduled_messages
+          SET status = 'uncertain',
+              attempts = 5
+        WHERE status = 'sending'
+          AND server_id IS NULL`,
+    ],
+  },
+  {
+    // A destructive confirmation can retain a temp GUID while the send reconciles to its real
+    // identity. Keep a bounded, account-scoped mapping independent from messages so the target is
+    // still recoverable after a chat purge. No FK by design; clearLocalCache owns account removal.
+    name: '0036_message_guid_aliases',
+    statements: [
+      `CREATE TABLE message_guid_aliases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alias_guid TEXT NOT NULL,
+        canonical_guid TEXT NOT NULL,
+        CONSTRAINT message_guid_aliases_alias_not_canonical
+          CHECK (alias_guid <> canonical_guid),
+        CONSTRAINT message_guid_aliases_alias_valid
+          CHECK (length(alias_guid) BETWEEN 6 AND 128 AND alias_guid GLOB 'temp-*'),
+        CONSTRAINT message_guid_aliases_canonical_valid
+          CHECK (length(canonical_guid) BETWEEN 1 AND 4096 AND canonical_guid NOT GLOB 'temp-*')
+      )`,
+      `CREATE UNIQUE INDEX message_guid_aliases_alias_guid_idx
+         ON message_guid_aliases (alias_guid)`,
+    ],
+  },
+  {
+    // Redacted Mode is permanently retired. Remove only its legacy preference while preserving
+    // every unrelated setting and device-local kv row.
+    name: '0037_purge_legacy_redacted_mode_setting',
+    statements: [`DELETE FROM kv WHERE key = 'privacy.redactedMode'`],
+  },
+  {
+    // Reaction retries need only their target GUID, reaction, and optional emoji. Older queue
+    // payloads also copied the selected message's full text even though no send path reads it.
+    // Scrub only that obsolete field from valid reaction JSON; malformed payloads and every other
+    // queue kind remain byte-for-byte unchanged for their existing recovery/retirement paths.
+    name: '0038_scrub_reaction_selected_message_text',
+    statements: [
+      `UPDATE outgoing_queue
+          SET payload = json_remove(payload, '$.selectedMessageText')
+        WHERE kind = 'reaction'
+          AND CASE
+                WHEN json_valid(payload)
+                  THEN json_type(payload, '$.selectedMessageText') IS NOT NULL
+                ELSE 0
+              END`,
+    ],
   },
 ];

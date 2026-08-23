@@ -36,7 +36,9 @@ jest.mock('@features/search/useChatMatches', () => ({ useChatMatches: jest.fn() 
 // FlashList v2 renders nothing meaningful in jest — replace it with a plain renderer that exercises
 // the same header/item/empty slots the real list drives.
 jest.mock('@shopify/flash-list', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React_ = require('react') as typeof import('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   const asNode = (c: unknown): React.ReactNode =>
     c == null
@@ -73,7 +75,9 @@ jest.mock('@shopify/flash-list', () => {
 // ConversationTile pulls the native `@/services` (markRead) graph; stub it to a tap target that
 // renders its guid so the Chats section is assertable in isolation.
 jest.mock('@ui/conversations/ConversationTile', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React_ = require('react') as typeof import('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Pressable, Text } = require('react-native');
   return {
     ConversationTile: ({ row, onPress }: { row: { guid: string }; onPress: (g: string) => void }) =>
@@ -195,6 +199,33 @@ describe('SearchResultsView — message hits', () => {
     await renderWithTheme(<SearchResultsView query="beach" />);
     fireEvent.press(screen.getByText('Weekend Crew'));
     expect(mockPush).toHaveBeenCalledWith(`/chat/g2?focus=m2`);
+  });
+});
+
+describe('SearchResultsView — exact ordinary content', () => {
+  it('renders a high-entropy title and highlighted snippet while retaining its exact target', async () => {
+    const result = makeResult({
+      guid: 'private-message-guid',
+      chatGuid: 'iMessage;-;private-chat-guid',
+      chatCustomName: 'Private Weekend Crew',
+      chatIdentifier: 'private-address@example.com',
+      chatParticipantNames: 'Private Alice, Private Bob',
+      snippet: 'private beach rendezvous at midnight',
+      text: 'private beach rendezvous at midnight',
+      dateCreated: 42,
+    });
+    mockUseSearch.mockReturnValue({ results: [result], loading: false });
+    await renderWithTheme(<SearchResultsView query="beach" />);
+
+    expect(screen.getByText('Private Weekend Crew')).toBeTruthy();
+    const highlighted = screen.getByText('beach');
+    expect(highlighted.props.style).toMatchObject({ fontWeight: '700' });
+    expect(screen.getByText(/private.*rendezvous.*midnight/)).toBeTruthy();
+    fireEvent.press(screen.getByText('Private Weekend Crew'));
+
+    expect(mockPush).toHaveBeenCalledWith(
+      `/chat/${encodeURIComponent(result.chatGuid)}?focus=${encodeURIComponent(result.guid)}&focusDate=42`,
+    );
   });
 });
 

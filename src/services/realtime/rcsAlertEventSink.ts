@@ -1,4 +1,4 @@
-import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
+import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 
 /**
  * Decorates an inner EventSink: handles the Gator RCS bridge's `rcs-alert` health events by
@@ -13,11 +13,16 @@ export class RcsAlertEventSink implements EventSink {
     private readonly onAlert: (alertType: string | null | undefined) => void,
   ) {}
 
-  async onEvent(event: NormalizedEvent, source: EventSource): Promise<void> {
+  async onEvent(
+    event: NormalizedEvent,
+    source: EventSource,
+    context?: EventDeliveryContext,
+  ): Promise<void> {
+    if (context && !context.isCurrent()) return;
     if (event.type === 'rcs-alert') {
       this.onAlert(event.payload.alertType);
       return;
     }
-    await this.inner.onEvent(event, source);
+    await this.inner.onEvent(event, source, context);
   }
 }

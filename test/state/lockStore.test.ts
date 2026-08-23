@@ -11,7 +11,7 @@ describe('lockStore', () => {
     }),
   );
 
-  it('hydrate(true) starts LOCKED (lock-on-launch) so the DB key stays withheld', () => {
+  it('hydrate(true) starts LOCKED so foreground DB initialization stays deferred', () => {
     useLockStore.getState().hydrate(true);
     expect(useLockStore.getState()).toMatchObject({ enabled: true, hydrated: true, locked: true });
   });
@@ -23,6 +23,11 @@ describe('lockStore', () => {
       hydrated: true,
       locked: false,
     });
+  });
+
+  it('enabling immediately locks the app', () => {
+    useLockStore.getState().setEnabled(true);
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true });
   });
 
   it('disabling clears the gate so the user is never stuck behind it', () => {

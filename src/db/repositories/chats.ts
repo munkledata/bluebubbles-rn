@@ -1,142 +1,166 @@
 import { and, eq, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Chat, ChatSummary } from '@core/models';
 import { chatHandles, chats, kv, outgoingQueue, scheduledMessages } from '../schema';
-import { withDbTransaction } from '../transaction';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbCommitGuard,
+  type DbTransactionContext,
+} from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
-import { handleMapKey, upsertHandles } from './handles';
+import { linkHandlesToContacts } from './contacts';
+import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
 import { DRAFT_KV_PREFIX } from './maintenance';
 
 /**
- * Upsert chats by guid and link participants; returns guid → row id.
+ * Transaction-only chat ingestion. Upserts chats by guid, reconciles participant/read-marker
+ * state, and returns guid → row id.
+ *
  * `handleIdByKey` is the map `upsertHandles` returned for these chats' participants
  * (keyed by `handleMapKey`, i.e. address + service).
  */
+export function upsertChatsWithinTransaction(
+  context: DbTransactionContext,
+  items: Array<Chat | ChatSummary>,
+  handleIdByKey: Map<string, number>,
+): Promise<Map<string, number>> {
+  return runInTransactionContext(context, async (db) => {
+    const map = new Map<string, number>();
+    const deduped = dedupeBy(
+      items.filter((c) => !!c?.guid),
+      (c) => c.guid,
+    );
+    if (deduped.length === 0) return map;
+
+    const rows = await db
+      .insert(chats)
+      .values(
+        deduped.map((c) => ({
+          guid: c.guid,
+          originalRowId: c.originalROWID ?? null,
+          chatIdentifier: c.chatIdentifier ?? null,
+          displayName: c.displayName ?? null,
+          style: c.style ?? null,
+          isArchived: c.isArchived ?? false,
+          isPinned: c.isPinned ?? false,
+          muteType: c.muteType ?? null,
+          // Server-owned (macOS 26 synced background): the current channel GUID, or null when the
+          // chat has no background. Refreshed on every sync (unlike the device-local columns below).
+          syncedBackgroundChannel:
+            ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: chats.guid,
+        set: {
+          displayName: sql`excluded.display_name`,
+          chatIdentifier: sql`excluded.chat_identifier`,
+          style: sql`excluded.style`,
+          // Server-owned → refreshed on re-sync (a changed/removed background propagates).
+          syncedBackgroundChannel: sql`excluded.synced_background_channel`,
+          // is_pinned, is_archived, mute_type, custom_name, custom_color are device-local:
+          // SEEDED on first insert from the server, but NOT overwritten on a re-sync — the
+          // user toggles them locally (pin / archive / mute / customization UI), so they
+          // survive. (Pin/archive have no server round-trip in this client.)
+          // marked_unread_at and deleted_at are device-local for the same reason and are load-
+          // bearing: the server has no concept of either, so listing them here would let the next
+          // sync page silently undo a "Mark as Unread" and RESURRECT a deleted conversation.
+        },
+      })
+      .returning({ id: chats.id, guid: chats.guid });
+
+    for (const r of rows) map.set(r.guid, r.id);
+
+    // Reconcile participant links per chat. When a chat's payload INCLUDES a participants
+    // list, REPLACE its links so a removed member is pruned (not just additively kept — the
+    // old additive insert left removed members in chat_handles forever). A payload WITHOUT
+    // participants leaves the existing links untouched (a partial/list-only sync mustn't wipe).
+    //
+    // ADD-THEN-PRUNE, never delete-then-add. Every write flushes the reactive queries and several
+    // readers are UN-debounced (the chat header on mount, `chatHasKnownSender`'s unknown-sender
+    // gate, `getChatHeader` behind the notification intents), so an intermediate state is genuinely
+    // rendered — and a chat with ZERO participant rows has no `participantNames`, so `resolveTitle`
+    // falls through to `chat_identifier`, i.e. the raw phone number, and the unknown-sender gate
+    // answers "unknown" and drops the notification for good. Resolving the handle ids first (pure
+    // JS, no writes) and inserting BEFORE pruning means the link set is only ever a superset of the
+    // truth, never empty: the worst observable state is one extra, since-removed member.
+    const links: { chatId: number; handleId: number }[] = [];
+    const keepByChat = new Map<number, number[]>();
+    for (const c of deduped) {
+      const chatId = map.get(c.guid);
+      if (chatId == null || c.participants == null) continue;
+      const ids = [
+        ...new Set(
+          c.participants
+            .map((p) => handleIdByKey.get(handleMapKey(p)))
+            .filter((id): id is number => id != null),
+        ),
+      ];
+      // An empty or fully-unresolvable participants list is TREATED AS "no information", not as
+      // "this chat has no members" — the old `== null` check let `participants: []` through to the
+      // delete, leaving a real chat nameless (it falls back to the raw phone number) until an
+      // incoming message re-linked it. What makes the skip non-negotiable is the degraded server
+      // read: the Mac-side participant query hands back an EMPTY map when it can't resolve the
+      // handle columns, and that emits `participants: []` for every chat in the 200-chat page at
+      // once — honoring it would blank the whole inbox in a single sync.
+      //
+      // THE TRADE-OFF, stated plainly: the server also sends `[]` for a chat that genuinely has no
+      // chat_handle_join rows, so a group whose roster really empties (everyone else left) keeps its
+      // departed members here until a payload with real participants arrives. Accepted deliberately —
+      // one stale name on a group nobody remains in is cheaper than an inbox of phone numbers, and
+      // nothing downstream distinguishes the two payloads.
+      if (ids.length === 0) continue;
+      keepByChat.set(chatId, ids);
+      for (const handleId of ids) links.push({ chatId, handleId });
+    }
+    if (links.length > 0) {
+      // chat_handles is PRIMARY KEY (chat_id, handle_id), so re-inserting a link that already
+      // exists is a no-op and onConflictDoNothing needs no target.
+      await db.insert(chatHandles).values(links).onConflictDoNothing();
+      for (const [chatId, ids] of keepByChat) {
+        await db
+          .delete(chatHandles)
+          .where(and(eq(chatHandles.chatId, chatId), notInArray(chatHandles.handleId, ids)));
+      }
+    }
+
+    // Reconcile Mac-side read state (schema gap 7): a full `Chat` (chat query / sync path) may carry
+    // `lastReadMessageTimestamp` (Unix ms) from the macOS `chat.last_read_message_timestamp` column.
+    // Map it into our guid-based read marker — monotonically (see reconcileReadMarkersFromTimestamps).
+    // Presence-driven: absent on `ChatSummary` (live message events + incremental-sync embedded
+    // chats never model it) and on old-macOS rows, so guard with `in` (mirrors the
+    // backgroundChannelGuid access above). This is the single chokepoint for chat ingestion, so
+    // every full-Chat path is reconciled here without per-caller wiring. Collected across the batch
+    // and reconciled in as few queries as possible (not a couple of SELECTs per chat) — see the fn.
+    const readMarkerPairs: { chatId: number; timestampMs: number }[] = [];
+    for (const c of deduped) {
+      const ts = 'lastReadMessageTimestamp' in c ? c.lastReadMessageTimestamp : null;
+      const chatId = map.get(c.guid);
+      if (ts != null && chatId != null) readMarkerPairs.push({ chatId, timestampMs: ts });
+    }
+    await reconcileReadMarkersFromTimestamps(context, readMarkerPairs);
+    // Retire any deletion tombstone this chat has already outlived (see the fn). Chat ingestion is
+    // the one place every path — sync page, live socket/FCM event, `persistServerChat` — passes
+    // through, so putting it here is what turns the un-hide from a re-derived read-time opinion into
+    // a durable one-way write.
+    await clearSupersededTombstonesWithinTransaction(context, [...map.values()]);
+    return map;
+  });
+}
+
+/** Public standalone chat ingestion. Never wrap this helper in another transaction. */
 export async function upsertChats(
   db: AppDatabase,
   items: Array<Chat | ChatSummary>,
   handleIdByKey: Map<string, number>,
+  commitGuard?: DbCommitGuard,
 ): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  const deduped = dedupeBy(
-    items.filter((c) => !!c?.guid),
-    (c) => c.guid,
+  return withDbTransaction(
+    db,
+    (context) => upsertChatsWithinTransaction(context, items, handleIdByKey),
+    commitGuard,
   );
-  if (deduped.length === 0) return map;
-
-  const rows = await db
-    .insert(chats)
-    .values(
-      deduped.map((c) => ({
-        guid: c.guid,
-        originalRowId: c.originalROWID ?? null,
-        chatIdentifier: c.chatIdentifier ?? null,
-        displayName: c.displayName ?? null,
-        style: c.style ?? null,
-        isArchived: c.isArchived ?? false,
-        isPinned: c.isPinned ?? false,
-        muteType: c.muteType ?? null,
-        // Server-owned (macOS 26 synced background): the current channel GUID, or null when the
-        // chat has no background. Refreshed on every sync (unlike the device-local columns below).
-        syncedBackgroundChannel:
-          ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: chats.guid,
-      set: {
-        displayName: sql`excluded.display_name`,
-        chatIdentifier: sql`excluded.chat_identifier`,
-        style: sql`excluded.style`,
-        // Server-owned → refreshed on re-sync (a changed/removed background propagates).
-        syncedBackgroundChannel: sql`excluded.synced_background_channel`,
-        // is_pinned, is_archived, mute_type, custom_name, custom_color are device-local:
-        // SEEDED on first insert from the server, but NOT overwritten on a re-sync — the
-        // user toggles them locally (pin / archive / mute / customization UI), so they
-        // survive. (Pin/archive have no server round-trip in this client.)
-        // marked_unread_at and deleted_at are device-local for the same reason and are load-
-        // bearing: the server has no concept of either, so listing them here would let the next
-        // sync page silently undo a "Mark as Unread" and RESURRECT a deleted conversation.
-      },
-    })
-    .returning({ id: chats.id, guid: chats.guid });
-
-  for (const r of rows) map.set(r.guid, r.id);
-
-  // Reconcile participant links per chat. When a chat's payload INCLUDES a participants
-  // list, REPLACE its links so a removed member is pruned (not just additively kept — the
-  // old additive insert left removed members in chat_handles forever). A payload WITHOUT
-  // participants leaves the existing links untouched (a partial/list-only sync mustn't wipe).
-  //
-  // ADD-THEN-PRUNE, never delete-then-add. Every write flushes the reactive queries and several
-  // readers are UN-debounced (the chat header on mount, `chatHasKnownSender`'s unknown-sender
-  // gate, `getChatHeader` behind the notification intents), so an intermediate state is genuinely
-  // rendered — and a chat with ZERO participant rows has no `participantNames`, so `resolveTitle`
-  // falls through to `chat_identifier`, i.e. the raw phone number, and the unknown-sender gate
-  // answers "unknown" and drops the notification for good. Resolving the handle ids first (pure
-  // JS, no writes) and inserting BEFORE pruning means the link set is only ever a superset of the
-  // truth, never empty: the worst observable state is one extra, since-removed member.
-  const links: { chatId: number; handleId: number }[] = [];
-  const keepByChat = new Map<number, number[]>();
-  for (const c of deduped) {
-    const chatId = map.get(c.guid);
-    if (chatId == null || c.participants == null) continue;
-    const ids = [
-      ...new Set(
-        c.participants
-          .map((p) => handleIdByKey.get(handleMapKey(p)))
-          .filter((id): id is number => id != null),
-      ),
-    ];
-    // An empty or fully-unresolvable participants list is TREATED AS "no information", not as
-    // "this chat has no members" — the old `== null` check let `participants: []` through to the
-    // delete, leaving a real chat nameless (it falls back to the raw phone number) until an
-    // incoming message re-linked it. What makes the skip non-negotiable is the degraded server
-    // read: the Mac-side participant query hands back an EMPTY map when it can't resolve the
-    // handle columns, and that emits `participants: []` for every chat in the 200-chat page at
-    // once — honoring it would blank the whole inbox in a single sync.
-    //
-    // THE TRADE-OFF, stated plainly: the server also sends `[]` for a chat that genuinely has no
-    // chat_handle_join rows, so a group whose roster really empties (everyone else left) keeps its
-    // departed members here until a payload with real participants arrives. Accepted deliberately —
-    // one stale name on a group nobody remains in is cheaper than an inbox of phone numbers, and
-    // nothing downstream distinguishes the two payloads.
-    if (ids.length === 0) continue;
-    keepByChat.set(chatId, ids);
-    for (const handleId of ids) links.push({ chatId, handleId });
-  }
-  if (links.length > 0) {
-    // chat_handles is PRIMARY KEY (chat_id, handle_id), so re-inserting a link that already
-    // exists is a no-op and onConflictDoNothing needs no target.
-    await db.insert(chatHandles).values(links).onConflictDoNothing();
-    for (const [chatId, ids] of keepByChat) {
-      await db
-        .delete(chatHandles)
-        .where(and(eq(chatHandles.chatId, chatId), notInArray(chatHandles.handleId, ids)));
-    }
-  }
-
-  // Reconcile Mac-side read state (schema gap 7): a full `Chat` (chat query / sync path) may carry
-  // `lastReadMessageTimestamp` (Unix ms) from the macOS `chat.last_read_message_timestamp` column.
-  // Map it into our guid-based read marker — monotonically (see reconcileReadMarkersFromTimestamps).
-  // Presence-driven: absent on `ChatSummary` (live message events + incremental-sync embedded
-  // chats never model it) and on old-macOS rows, so guard with `in` (mirrors the
-  // backgroundChannelGuid access above). This is the single chokepoint for chat ingestion, so
-  // every full-Chat path is reconciled here without per-caller wiring. Collected across the batch
-  // and reconciled in as few queries as possible (not a couple of SELECTs per chat) — see the fn.
-  const readMarkerPairs: { chatId: number; timestampMs: number }[] = [];
-  for (const c of deduped) {
-    const ts = 'lastReadMessageTimestamp' in c ? c.lastReadMessageTimestamp : null;
-    const chatId = map.get(c.guid);
-    if (ts != null && chatId != null) readMarkerPairs.push({ chatId, timestampMs: ts });
-  }
-  await reconcileReadMarkersFromTimestamps(db, readMarkerPairs);
-  // Retire any deletion tombstone this chat has already outlived (see the fn). Chat ingestion is
-  // the one place every path — sync page, live socket/FCM event, `persistServerChat` — passes
-  // through, so putting it here is what turns the un-hide from a re-derived read-time opinion into
-  // a durable one-way write.
-  await clearSupersededTombstones(db, [...map.values()]);
-  return map;
 }
 
 /**
@@ -162,58 +186,57 @@ export async function upsertChats(
  * `date_created DESC, id DESC` tie-break, same received/non-deleted eligibility as the per-chat
  * version it replaced — the readReconcile suite pins every branch.
  *
- * THE BASELINE MUST BE READ INSIDE THE STATEMENT, not from the batch SELECT. Every iteration is an
- * `await` — a full round trip that yields the JS event loop — and a 200-chat sync page keeps this
- * loop running for hundreds of milliseconds. Two other writers move the marker in that window
- * (opening a chat → `markRead`, and a `chat-read-status-changed` event, which is triggered by the
- * very action that moves the watermark being reconciled here). A JS constant captured before the
- * loop says "never read" for a chat the user has since read, so `2000 > 0` passes and the marker is
- * dragged BACKWARDS to the Mac's older watermark — the chat you just read goes bold again. The
- * pre-filter keeps the captured copy, which is safe: a stale SKIP can only lose an advance the next
- * sync redoes, while a stale WRITE loses read state the user can see.
+ * THE BASELINE MUST STILL BE READ INSIDE THE STATEMENT, not trusted from the batch SELECT. Chat
+ * ingestion now owns the serialized writer queue, so ordinary public marker writers cannot
+ * interleave. But this body is deliberately composable inside a larger transaction, and its batch
+ * SELECT is only an optimization snapshot—not an authority future transaction-scoped composition
+ * or a trigger may rely on. A stale SKIP can only defer an advance until the next sync; a stale
+ * WRITE can move read state backwards. The UPDATE therefore re-reads the live marker before it
+ * commits, while the pre-filter safely retains the captured copy.
  */
 async function reconcileReadMarkersFromTimestamps(
-  db: AppDatabase,
+  context: DbTransactionContext,
   pairs: { chatId: number; timestampMs: number }[],
 ): Promise<void> {
-  if (pairs.length === 0) return;
+  return runInTransactionContext(context, async (db) => {
+    if (pairs.length === 0) return;
 
-  // One query for every chat's current marker message date — 0 when never read or the marker row
-  // isn't local (mirrors the inbox unread query's COALESCE(..., 0)) — plus the deliberate
-  // mark-as-unread stamp, so both pre-filters cost the same single read.
-  const inList = sql.join(
-    pairs.map((p) => sql`${p.chatId}`),
-    sql`, `,
-  );
-  // Annotate the variable (not the db.all generic) — the loose AppDatabase types db.all's result as
-  // `any`, so `.map` below would otherwise trip noImplicitAny (mirrors upsertMessages' `existing`).
-  const markerRows: Array<{ chatId: number; markerDate: number; markedUnreadAt: number | null }> =
-    await db.all(sql`
+    // One query for every chat's current marker message date — 0 when never read or the marker row
+    // isn't local (mirrors the inbox unread query's COALESCE(..., 0)) — plus the deliberate
+    // mark-as-unread stamp, so both pre-filters cost the same single read.
+    const inList = sql.join(
+      pairs.map((p) => sql`${p.chatId}`),
+      sql`, `,
+    );
+    // Annotate the variable (not the db.all generic) — the loose AppDatabase types db.all's result as
+    // `any`, so `.map` below would otherwise trip noImplicitAny (mirrors upsertMessages' `existing`).
+    const markerRows: Array<{ chatId: number; markerDate: number; markedUnreadAt: number | null }> =
+      await db.all(sql`
     SELECT c.id AS chatId, COALESCE(lm.date_created, 0) AS markerDate,
            c.marked_unread_at AS markedUnreadAt
       FROM chats c LEFT JOIN messages lm ON lm.guid = c.last_read_message_guid
      WHERE c.id IN (${inList})
   `);
-  const state = new Map(markerRows.map((r) => [r.chatId, r]));
+    const state = new Map(markerRows.map((r) => [r.chatId, r]));
 
-  for (const { chatId, timestampMs } of pairs) {
-    const row = state.get(chatId);
-    const current = row?.markerDate ?? 0;
-    // Pre-filter: the candidate (newest received at/before ts) has date_created <= ts, so if ts is
-    // already <= the current marker date it can never be strictly newer — skip the per-chat write.
-    if (timestampMs <= current) continue;
-    // Pre-filter 2: a watermark at/before the moment the user tapped "Mark as Unread" describes a
-    // read that happened BEFORE that tap, so it must not clear the flag they just set.
-    const markedUnreadAt = row?.markedUnreadAt ?? null;
-    if (markedUnreadAt != null && timestampMs <= markedUnreadAt) continue;
-    // One combined statement (db.run — a non-returning UPDATE): point the marker at the newest
-    // received, non-deleted message at/before the watermark, but only when that candidate is strictly
-    // newer than the marker AS IT STANDS NOW (the monotonic guard, re-read from the row rather than
-    // from the pre-loop snapshot) and the user hasn't marked the chat unread since. Advancing the
-    // marker means the chat is read, so the mark-unread flag is cleared in the same write — leaving
-    // it set would keep suppressing later, genuinely newer watermarks. `date_created <= ts` also
-    // drops NULL-dated rows; a chat with no candidate yields NULL from MAX(...) → guard false → no-op.
-    await db.run(sql`
+    for (const { chatId, timestampMs } of pairs) {
+      const row = state.get(chatId);
+      const current = row?.markerDate ?? 0;
+      // Pre-filter: the candidate (newest received at/before ts) has date_created <= ts, so if ts is
+      // already <= the current marker date it can never be strictly newer — skip the per-chat write.
+      if (timestampMs <= current) continue;
+      // Pre-filter 2: a watermark at/before the moment the user tapped "Mark as Unread" describes a
+      // read that happened BEFORE that tap, so it must not clear the flag they just set.
+      const markedUnreadAt = row?.markedUnreadAt ?? null;
+      if (markedUnreadAt != null && timestampMs <= markedUnreadAt) continue;
+      // One combined statement (db.run — a non-returning UPDATE): point the marker at the newest
+      // received, non-deleted message at/before the watermark, but only when that candidate is strictly
+      // newer than the marker AS IT STANDS NOW (the monotonic guard, re-read from the row rather than
+      // from the pre-loop snapshot) and the user hasn't marked the chat unread since. Advancing the
+      // marker means the chat is read, so the mark-unread flag is cleared in the same write — leaving
+      // it set would keep suppressing later, genuinely newer watermarks. `date_created <= ts` also
+      // drops NULL-dated rows; a chat with no candidate yields NULL from MAX(...) → guard false → no-op.
+      await db.run(sql`
       UPDATE chats SET last_read_message_guid = (
         SELECT m.guid FROM messages m
          WHERE m.chat_id = ${chatId} AND m.is_from_me = 0 AND m.date_deleted IS NULL
@@ -227,14 +250,29 @@ async function reconcileReadMarkersFromTimestamps(
                 AND m.date_created <= ${timestampMs})
             > COALESCE((SELECT lm.date_created FROM messages lm
                          WHERE lm.guid = chats.last_read_message_guid), 0)
-    `);
-  }
+      `);
+    }
+  });
 }
 
-/** Persist a server-returned chat (display name + participant links) locally. */
+/** Transaction-context server-chat primitive for callers that already own the DB transaction. */
+export function persistServerChatWithinTransaction(
+  context: DbTransactionContext,
+  chat: Chat,
+): Promise<void> {
+  return runInTransactionContext(context, async () => {
+    const handleIds = await upsertHandlesWithinTransaction(context, chat.participants ?? []);
+    await upsertChatsWithinTransaction(context, [chat], handleIds);
+  });
+}
+
+/** Persist a server-returned chat atomically, then apply presentation-only device-contact names. */
 export async function persistServerChat(db: AppDatabase, chat: Chat): Promise<void> {
-  const handleIds = await upsertHandles(db, chat.participants ?? []);
-  await upsertChats(db, [chat], handleIds);
+  await withDbTransaction(db, (context) => persistServerChatWithinTransaction(context, chat));
+  await linkHandlesToContacts(
+    db,
+    (chat.participants ?? []).map((participant) => participant.address),
+  );
 }
 
 /** Set a chat's local mute preference ('mute' to mute, null to clear). */
@@ -243,7 +281,7 @@ export async function setChatMute(
   guid: string,
   muteType: string | null,
 ): Promise<void> {
-  await db.update(chats).set({ muteType }).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () => db.update(chats).set({ muteType }).where(eq(chats.guid, guid)));
 }
 
 /**
@@ -252,7 +290,9 @@ export async function setChatMute(
  * The inbox sorts pinned chats first (see `listChatsForInbox`).
  */
 export async function setChatPin(db: AppDatabase, guid: string, pinned: boolean): Promise<void> {
-  await db.update(chats).set({ isPinned: pinned }).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () =>
+    db.update(chats).set({ isPinned: pinned }).where(eq(chats.guid, guid)),
+  );
 }
 
 /** Archive / unarchive a chat (client-local). Archived chats drop out of the main inbox. */
@@ -261,7 +301,9 @@ export async function setChatArchive(
   guid: string,
   archived: boolean,
 ): Promise<void> {
-  await db.update(chats).set({ isArchived: archived }).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () =>
+    db.update(chats).set({ isArchived: archived }).where(eq(chats.guid, guid)),
+  );
 }
 
 /**
@@ -269,8 +311,9 @@ export async function setChatArchive(
  * tombstone. `alias` is the name the surrounding query gives the chats table.
  *
  * A tombstoned chat comes BACK on its own the moment genuinely new activity arrives. The predicate
- * is a safety net that answers correctly even before `clearSupersededTombstones` has retired the
- * stamp; that write is what makes the un-hide durable.
+ * is a safety net that answers correctly even before
+ * `clearSupersededTombstonesWithinTransaction` has retired the stamp; that write is what makes the
+ * un-hide durable.
  *
  * "GENUINELY NEW ACTIVITY" MUST MEAN THE SAME THING HERE AS IT DOES IN THE PREVIEW AND THE UNREAD
  * COUNT — hence the three extra filters, which are exactly the ones `listChatsForInbox`'s `last`
@@ -308,25 +351,29 @@ export function chatVisible(alias: string) {
  * never clear a tombstone the read queries would still be honouring: re-synced history, a reaction
  * or an unsent message leave it exactly where it was.
  */
-export async function clearSupersededTombstones(db: AppDatabase, chatIds: number[]): Promise<void> {
-  if (chatIds.length === 0) return;
-  const inList = sql.join(
-    chatIds.map((id) => sql`${id}`),
-    sql`, `,
-  );
-  // One statement for the whole batch (a 200-chat sync page must not cost 200 round trips), and
-  // `deleted_at IS NOT NULL` means the EXISTS is only evaluated for the handful of chats that are
-  // actually tombstoned — normally none.
-  //
-  // HAND THE UNREAD FLOOR OVER BEFORE DROPPING THE STAMP. `deleted_at` does two jobs: it hides the
-  // chat, and it floors the unread count (`listChatsForInbox` counts only `um.date_created >
-  // c.deleted_at`) so a revived conversation badges the ONE new message rather than its whole
-  // re-synced history. Clearing it would silently retire the second job with the first. So the same
-  // statement advances the read marker to the newest received message at or before the boundary —
-  // the mechanism that is actually designed to hold a "read up to here" position, and one that
-  // survives having no tombstone. The candidate is required to be strictly NEWER than whatever the
-  // marker currently resolves to, so this can only ever move it forward.
-  await db.run(sql`
+export function clearSupersededTombstonesWithinTransaction(
+  context: DbTransactionContext,
+  chatIds: number[],
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    if (chatIds.length === 0) return;
+    const inList = sql.join(
+      chatIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    // One statement for the whole batch (a 200-chat sync page must not cost 200 round trips), and
+    // `deleted_at IS NOT NULL` means the EXISTS is only evaluated for the handful of chats that are
+    // actually tombstoned — normally none.
+    //
+    // HAND THE UNREAD FLOOR OVER BEFORE DROPPING THE STAMP. `deleted_at` does two jobs: it hides the
+    // chat, and it floors the unread count (`listChatsForInbox` counts only `um.date_created >
+    // c.deleted_at`) so a revived conversation badges the ONE new message rather than its whole
+    // re-synced history. Clearing it would silently retire the second job with the first. So the same
+    // statement advances the read marker to the newest received message at or before the boundary —
+    // the mechanism that is actually designed to hold a "read up to here" position, and one that
+    // survives having no tombstone. The candidate is required to be strictly NEWER than whatever the
+    // marker currently resolves to, so this can only ever move it forward.
+    await db.run(sql`
     UPDATE chats
        SET last_read_message_guid = COALESCE(
              (SELECT fm.guid FROM messages fm
@@ -345,6 +392,7 @@ export async function clearSupersededTombstones(db: AppDatabase, chatIds: number
                       AND dm.associated_message_type IS NULL AND dm.date_retracted IS NULL
                       AND dm.date_created > chats.deleted_at)
   `);
+  });
 }
 
 /**
@@ -437,23 +485,27 @@ export async function deleteChatLocal(
   guid: string,
   now: number = Date.now(),
 ): Promise<void> {
-  // Resolved OUTSIDE the transaction (a plain SELECT) so the chunked purge below can use it too,
-  // and so an unknown guid costs no BEGIN/COMMIT at all.
-  const chatId = await getChatIdByGuid(db, guid);
-  if (chatId == null) return;
-  const boundary = await withDbTransaction(db, async () => {
-    // MAX(a, b) is SQLite's two-argument SCALAR max; the inner MAX(...) is the aggregate. Runs
-    // BEFORE the messages are dropped — afterwards there is nothing left to floor against, and the
-    // same is true of the marker candidate. Every SET expression reads the PRE-update row, so
-    // `chats.last_read_message_guid` in the sub-selects is the marker as it stands now.
-    // The candidate needs no upper date bound: every message in the chat is about to go, and the
-    // stamp above is floored at the newest of them, so they are all at/before the boundary. Same
-    // eligibility as `clearSupersededTombstones`' handover (received, non-deleted, non-reaction) so
-    // the two can never disagree about what "read up to the deletion" means.
-    // RETURNING, because the purge below needs the resolved stamp as a LITERAL upper bound and it
-    // must be the value this statement computed — re-reading the column later would pick up a NULL
-    // if a message arriving mid-purge has since retired the tombstone.
-    const stamped: Array<{ deletedAt: number }> = await db.all(sql`
+  const deleted = await withDbTransaction(
+    db,
+    async (): Promise<{ chatId: number; boundary: number } | null> => {
+      // Resolve identity only after this owner holds the shared connection. A bare read outside the
+      // owner can observe another transaction's row, whose numeric id SQLite may reuse on rollback.
+      const chatId = await getChatIdByGuid(db, guid);
+      if (chatId == null) return null;
+
+      // MAX(a, b) is SQLite's two-argument SCALAR max; the inner MAX(...) is the aggregate. Runs
+      // BEFORE the messages are dropped — afterwards there is nothing left to floor against, and the
+      // same is true of the marker candidate. Every SET expression reads the PRE-update row, so
+      // `chats.last_read_message_guid` in the sub-selects is the marker as it stands now.
+      // The candidate needs no upper date bound: every message in the chat is about to go, and the
+      // stamp above is floored at the newest of them, so they are all at/before the boundary. Same
+      // eligibility as `clearSupersededTombstonesWithinTransaction`'s handover (received,
+      // non-deleted, non-reaction) so the two can never disagree about what "read up to the deletion"
+      // means.
+      // RETURNING, because the purge below needs the resolved stamp as a LITERAL upper bound and it
+      // must be the value this statement computed — re-reading the column later would pick up a NULL
+      // if a message arriving mid-purge has since retired the tombstone.
+      const stamped: Array<{ chatId: number; boundary: number }> = await db.all(sql`
       UPDATE chats
          SET deleted_at = MAX(${now}, COALESCE(
                (SELECT MAX(m.date_created) FROM messages m WHERE m.chat_id = ${chatId}), 0)),
@@ -467,24 +519,27 @@ export async function deleteChatLocal(
                            WHERE lm.guid = chats.last_read_message_guid), 0)
                  ORDER BY fm.date_created DESC, fm.id DESC LIMIT 1),
                chats.last_read_message_guid)
-       WHERE id = ${chatId}
-      RETURNING deleted_at AS deletedAt
+       WHERE id = ${chatId} AND guid = ${guid}
+      RETURNING id AS chatId, deleted_at AS boundary
     `);
-    await db.delete(outgoingQueue).where(eq(outgoingQueue.chatGuid, guid));
-    await db.delete(scheduledMessages).where(
-      and(
-        eq(scheduledMessages.chatGuid, guid),
-        // Local-only rows (the on-device ticker owns them, so dropping the row IS the cancel)
-        // plus already-settled history. A PENDING server-backed row is left for `deleteChat`.
-        or(isNull(scheduledMessages.serverId), ne(scheduledMessages.status, 'pending')),
-      ),
-    );
-    await db.delete(kv).where(eq(kv.key, `${DRAFT_KV_PREFIX}${guid}`));
-    // `now` is only a fallback for a row that somehow returned nothing; it is the SAFE direction
-    // (it can only leave rows behind for a re-run, never destroy a newer one).
-    return stamped[0]?.deletedAt ?? now;
-  });
-  await purgeChatMessages(db, chatId, boundary);
+      const deletion = stamped[0];
+      if (!deletion) return null;
+
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.chatGuid, guid));
+      await db.delete(scheduledMessages).where(
+        and(
+          eq(scheduledMessages.chatGuid, guid),
+          // Local-only rows (the on-device ticker owns them, so dropping the row IS the cancel)
+          // plus already-settled history. A PENDING server-backed row is left for `deleteChat`.
+          or(isNull(scheduledMessages.serverId), ne(scheduledMessages.status, 'pending')),
+        ),
+      );
+      await db.delete(kv).where(eq(kv.key, `${DRAFT_KV_PREFIX}${guid}`));
+      return deletion;
+    },
+  );
+  if (!deleted) return;
+  await purgeChatMessages(db, deleted.chatId, deleted.boundary);
 }
 
 /**
@@ -540,8 +595,8 @@ async function purgeChatMessages(db: AppDatabase, chatId: number, boundary: numb
  * possibly dozens of long-dead tombstones) costs ONE query and opens no transaction at all. Each
  * re-run uses the chat's STORED stamp, so it deletes exactly what the original pass would have and
  * nothing that arrived since — a chat whose tombstone was retired by a real message
- * (`clearSupersededTombstones`, which every ingestion path runs) is not selected here at all, so a
- * revived conversation's history is never touched. A still-stamped chat is by definition one the
+ * (`clearSupersededTombstonesWithinTransaction`, which every ingestion path runs) is not selected
+ * here at all, so a revived conversation's history is never touched. A still-stamped chat is by definition one the
  * user deleted and that has had no ingested activity since, and everything at or before the stamp is
  * what they asked to destroy.
  *
@@ -566,8 +621,9 @@ export async function resumeChatPurges(db: AppDatabase): Promise<void> {
  *
  * The same predicate the lists read with, NOT a bare `deleted_at IS NOT NULL`: a chat that has been
  * brought back by genuinely new activity is visible from that instant, and only becomes durably
- * un-deleted when the next ingestion retires its stamp (`clearSupersededTombstones`). An optimistic
- * SEND into a deleted thread is exactly that gap — it writes the message row directly and clears no
+ * un-deleted when the next ingestion retires its stamp
+ * (`clearSupersededTombstonesWithinTransaction`). An optimistic SEND into a deleted thread is
+ * exactly that gap — it writes the message row directly and clears no
  * stamp — so the coarser check would report a conversation the user is actively using as deleted.
  *
  * Its caller is the chat screen's on-open history backfill, which must not re-page a purged
@@ -583,13 +639,11 @@ export async function isChatHiddenByDeletion(db: AppDatabase, guid: string): Pro
 }
 
 /**
- * The guids of this chat's DOWNLOADED attachments — the ones with a file on disk.
+ * The guids of every attachment owned by this chat.
  *
- * `attachments.local_path` is the ONLY record that a download ever happened, and it cascades away
- * with the messages, so this has to be read BEFORE the delete or the files become unreachable by any
- * code path (the same argument `forget()`'s `deleteCachedMedia` is built on). `guid` is what names
- * the on-disk directory, so that is what the caller needs; rows with no `local_path` were never
- * fetched and own nothing to delete.
+ * This is read before chat deletion both to cancel in-flight transfers (whose `local_path` is still
+ * null) and to retain the only names of app-owned attachment directories before the message cascade
+ * removes their rows. The post-purge orphan probe keeps surviving/newer rows' files safe.
  */
 export async function listChatAttachmentGuids(
   db: AppDatabase,
@@ -600,9 +654,32 @@ export async function listChatAttachmentGuids(
       FROM attachments a
       JOIN messages m ON m.id = a.message_id
       JOIN chats c ON c.id = m.chat_id
-     WHERE c.guid = ${chatGuid} AND a.local_path IS NOT NULL
+     WHERE c.guid = ${chatGuid}
   `);
   return rows.map((r) => r.guid);
+}
+
+/**
+ * Attachment directories that contain at least one ledger-managed persistent cache file.
+ *
+ * Read before chat purge so the service can retain its legacy whole-guid cleanup only for files
+ * created before the ledger existed. Managed files are always retired by exact path; recursively
+ * deleting their parent could remove a path protected by another visible/outgoing reference.
+ */
+export async function listChatLedgerManagedAttachmentGuids(
+  db: AppDatabase,
+  chatGuid: string,
+): Promise<string[]> {
+  const rows: Array<{ guid: string }> = await db.all(sql`
+    SELECT DISTINCT a.guid AS guid
+    FROM attachments a
+    JOIN attachment_cache_entries e ON e.path = a.local_path
+    JOIN messages m ON m.id = a.message_id
+    JOIN chats c ON c.id = m.chat_id
+    WHERE c.guid = ${chatGuid}
+    ORDER BY a.guid ASC
+  `);
+  return rows.map((row) => row.guid);
 }
 
 /** How many guids one `listOrphanedAttachmentGuids` probe binds (SQLite caps bound parameters). */
@@ -646,7 +723,8 @@ export async function listOrphanedAttachmentGuids(
  * back the SAME guid the user deleted, and without this the new-chat flow would route them into a
  * thread that is still hidden from their inbox. Called from `createNewChat`.
  *
- * NO READ-MARKER HANDOVER HERE, unlike `clearSupersededTombstones` — and that is not an oversight.
+ * NO READ-MARKER HANDOVER HERE, unlike `clearSupersededTombstonesWithinTransaction` — and that is
+ * not an oversight.
  * `deleted_at` also floors the unread count, so dropping it uncovers the whole re-synced history;
  * but the handover cannot be done at THIS point, because `deleteChatLocal` has already destroyed
  * every message that could serve as the marker (routing into the chat is what re-pages them, and
@@ -654,8 +732,18 @@ export async function listOrphanedAttachmentGuids(
  * boundary message still exists — see `deleteChatLocal`. Keep it that way: adding a handover here
  * would be a second copy of the same SQL that provably matches nothing.
  */
+export function clearChatTombstoneWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.update(chats).set({ deletedAt: null }).where(eq(chats.guid, guid));
+  });
+}
+
+/** Standalone un-hide. Existing domain transactions must use the explicitly scoped form above. */
 export async function clearChatTombstone(db: AppDatabase, guid: string): Promise<void> {
-  await db.update(chats).set({ deletedAt: null }).where(eq(chats.guid, guid));
+  await withDbTransaction(db, (context) => clearChatTombstoneWithinTransaction(context, guid));
 }
 
 /**
@@ -679,7 +767,7 @@ export async function setChatCustomization(
     set.customColor = patch.customColor;
   }
   if (Object.keys(set).length === 0) return;
-  await db.update(chats).set(set).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () => db.update(chats).set(set).where(eq(chats.guid, guid)));
 }
 
 /**
@@ -696,7 +784,7 @@ export async function setChatTheme(
   if (patch.themeTokens !== undefined) set.themeTokens = patch.themeTokens;
   if (patch.backgroundUri !== undefined) set.backgroundUri = patch.backgroundUri;
   if (Object.keys(set).length === 0) return;
-  await db.update(chats).set(set).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () => db.update(chats).set(set).where(eq(chats.guid, guid)));
 }
 
 /**
@@ -734,7 +822,9 @@ export async function setBackgroundIsLight(
   guid: string,
   isLight: boolean | null,
 ): Promise<void> {
-  await db.update(chats).set({ backgroundIsLight: isLight }).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () =>
+    db.update(chats).set({ backgroundIsLight: isLight }).where(eq(chats.guid, guid)),
+  );
 }
 
 /**
@@ -759,7 +849,70 @@ export async function setSyncedBackgroundUri(
   guid: string,
   uri: string | null,
 ): Promise<void> {
-  await db.update(chats).set({ syncedBackgroundUri: uri }).where(eq(chats.guid, guid));
+  await withDbTransaction(db, () =>
+    db.update(chats).set({ syncedBackgroundUri: uri }).where(eq(chats.guid, guid)),
+  );
+}
+
+/**
+ * Move the downloaded-background pointer only while BOTH server channel and prior local URI still
+ * match the caller's snapshot. Network/native work stays outside the process-wide DB mutex; only
+ * the final bounded compare-and-swap claims the serialized transaction.
+ */
+export async function setSyncedBackgroundUriIfCurrent(
+  db: AppDatabase,
+  guid: string,
+  expectedChannel: string | null,
+  expectedUri: string | null,
+  nextUri: string | null,
+): Promise<boolean> {
+  return withDbTransaction(db, async () => {
+    const rows = await db
+      .update(chats)
+      .set({ syncedBackgroundUri: nextUri })
+      .where(
+        and(
+          eq(chats.guid, guid),
+          expectedChannel == null
+            ? isNull(chats.syncedBackgroundChannel)
+            : eq(chats.syncedBackgroundChannel, expectedChannel),
+          expectedUri == null
+            ? isNull(chats.syncedBackgroundUri)
+            : eq(chats.syncedBackgroundUri, expectedUri),
+        ),
+      )
+      .returning({ guid: chats.guid });
+    return rows.length > 0;
+  });
+}
+
+/**
+ * Store luminance only for the exact synced file/channel that was measured, and only while no
+ * device-local background has taken precedence. A changed channel, URI replacement, or local pick
+ * makes this a no-op rather than letting a stale image overwrite the active theme's contrast.
+ */
+export async function setSyncedBackgroundLuminanceIfCurrent(
+  db: AppDatabase,
+  guid: string,
+  expectedChannel: string,
+  expectedUri: string,
+  isLight: boolean,
+): Promise<boolean> {
+  return withDbTransaction(db, async () => {
+    const rows = await db
+      .update(chats)
+      .set({ backgroundIsLight: isLight })
+      .where(
+        and(
+          eq(chats.guid, guid),
+          eq(chats.syncedBackgroundChannel, expectedChannel),
+          eq(chats.syncedBackgroundUri, expectedUri),
+          isNull(chats.backgroundUri),
+        ),
+      )
+      .returning({ guid: chats.guid });
+    return rows.length > 0;
+  });
 }
 
 // ---- Queries ---------------------------------------------------------------
@@ -873,7 +1026,7 @@ export async function listChatsForInbox(
            -- A chat the user deleted and that later came back counts only what arrived AFTER the
            -- deletion. Its marker points at a message that went with the delete, so it resolves to
            -- 0 and the whole re-synced history would otherwise land as one enormous unread badge.
-           -- STILL LOAD-BEARING even though clearSupersededTombstones now hands the floor to the
+           -- STILL LOAD-BEARING even though clearSupersededTombstonesWithinTransaction now hands the floor to the
            -- read marker: that handover only runs from message/chat INGESTION, and the optimistic
            -- send path (insertOutgoingText/Attachment) routes through neither. Sending into a
            -- hidden thread therefore makes it visible with its stamp still set — the one state
@@ -906,6 +1059,23 @@ export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise
 }
 
 // ---- Conversation view -----------------------------------------------------
+
+/**
+ * Resolve the required local id for a server chat GUID while an owning transaction is open.
+ *
+ * Optimistic writers must use this transaction-only form instead of carrying an id from a
+ * preliminary read: another transaction can roll that chat row back before the insert, leaving
+ * the caller with an id that never committed. The fixed error copy deliberately omits the GUID.
+ */
+export async function requireChatIdByGuidWithinTransaction(
+  db: AppDatabase,
+  guid: string,
+): Promise<number> {
+  const rows = await db.all<{ id: number }>(sql`SELECT id FROM chats WHERE guid = ${guid} LIMIT 1`);
+  const chatId = rows[0]?.id;
+  if (chatId == null) throw new Error('unknown chat');
+  return chatId;
+}
 
 /** Resolve a chat's local integer id from its server guid. */
 export async function getChatIdByGuid(db: AppDatabase, guid: string): Promise<number | null> {
@@ -1040,6 +1210,24 @@ export async function getChatParticipants(
 }
 
 /**
+ * Transaction-scoped form of {@link setLastReadMessageGuid}. Use only when the caller already owns
+ * the process-wide DB transaction and needs this marker change to commit atomically with other
+ * writes (currently durable realtime delivery).
+ */
+export function setLastReadMessageGuidWithinTransaction(
+  context: DbTransactionContext,
+  chatGuid: string,
+  lastMessageGuid: string,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db
+      .update(chats)
+      .set({ lastReadMessageGuid: lastMessageGuid, markedUnreadAt: null })
+      .where(eq(chats.guid, chatGuid));
+  });
+}
+
+/**
  * Mark a chat read locally (clears the inbox unread badge via listChatsForInbox). Also clears the
  * deliberate mark-as-unread stamp — reading the chat is exactly what retires that flag, and leaving
  * it behind would keep suppressing the Mac's read watermark for this chat forever.
@@ -1049,10 +1237,9 @@ export async function setLastReadMessageGuid(
   chatGuid: string,
   lastMessageGuid: string,
 ): Promise<void> {
-  await db
-    .update(chats)
-    .set({ lastReadMessageGuid: lastMessageGuid, markedUnreadAt: null })
-    .where(eq(chats.guid, chatGuid));
+  await withDbTransaction(db, (context) =>
+    setLastReadMessageGuidWithinTransaction(context, chatGuid, lastMessageGuid),
+  );
 }
 
 /**
@@ -1074,10 +1261,12 @@ export async function setChatUnreadLocal(
   chatGuid: string,
   now: number = Date.now(),
 ): Promise<void> {
-  await db
-    .update(chats)
-    .set({ lastReadMessageGuid: null, markedUnreadAt: now })
-    .where(eq(chats.guid, chatGuid));
+  await withDbTransaction(db, () =>
+    db
+      .update(chats)
+      .set({ lastReadMessageGuid: null, markedUnreadAt: now })
+      .where(eq(chats.guid, chatGuid)),
+  );
 }
 
 /**
@@ -1095,15 +1284,17 @@ export async function setChatUnreadLocal(
  * (which would be the same "everything unread" outcome, arrived at from the other direction).
  */
 export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
-  await db.run(sql`
-    UPDATE chats SET last_read_message_guid = (
-      SELECT m.guid FROM messages m
-       WHERE m.chat_id = chats.id AND m.is_from_me = 0 AND m.date_deleted IS NULL
-       ORDER BY m.date_created DESC, m.id DESC LIMIT 1
-    ), marked_unread_at = NULL
-    WHERE EXISTS (
-      SELECT 1 FROM messages m2
-       WHERE m2.chat_id = chats.id AND m2.is_from_me = 0 AND m2.date_deleted IS NULL
-    )
-  `);
+  await withDbTransaction(db, () =>
+    db.run(sql`
+      UPDATE chats SET last_read_message_guid = (
+        SELECT m.guid FROM messages m
+         WHERE m.chat_id = chats.id AND m.is_from_me = 0 AND m.date_deleted IS NULL
+         ORDER BY m.date_created DESC, m.id DESC LIMIT 1
+      ), marked_unread_at = NULL
+      WHERE EXISTS (
+        SELECT 1 FROM messages m2
+         WHERE m2.chat_id = chats.id AND m2.is_from_me = 0 AND m2.date_deleted IS NULL
+      )
+    `),
+  );
 }

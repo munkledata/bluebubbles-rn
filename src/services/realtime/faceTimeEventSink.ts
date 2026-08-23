@@ -1,4 +1,4 @@
-import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
+import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 
 /**
  * Foreground in-app FaceTime overlay driver. An incoming-facetime / status-4 event rings
@@ -17,7 +17,12 @@ export class FaceTimeEventSink implements EventSink {
     private readonly onEnded: (uuid: string) => void,
   ) {}
 
-  async onEvent(event: NormalizedEvent, source: EventSource): Promise<void> {
+  async onEvent(
+    event: NormalizedEvent,
+    source: EventSource,
+    context?: EventDeliveryContext,
+  ): Promise<void> {
+    if (context && !context.isCurrent()) return;
     if (event.type === 'incoming-facetime') {
       const { uuid, caller, address, is_audio } = event.payload;
       if (uuid) {
@@ -40,6 +45,6 @@ export class FaceTimeEventSink implements EventSink {
       }
     }
     // Always delegate so the DB sink + Notifee notification still run (background ring).
-    await this.inner.onEvent(event, source);
+    await this.inner.onEvent(event, source, context);
   }
 }

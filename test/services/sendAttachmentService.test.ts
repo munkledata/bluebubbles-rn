@@ -3,6 +3,7 @@ import { ApiError } from '@core/api/errors';
 import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
+import { logger } from '@core/secure';
 import {
   reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
@@ -10,8 +11,10 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendAttachmentService';
+import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
 import { createTestDb } from '../support/testDb';
 
 const dummyHttp = {} as unknown as HttpClient;
@@ -82,6 +85,67 @@ async function echoMessageWithAttachment(
 }
 
 describe('sendImageMessage', () => {
+  it('fails before DB/network work when cache retirement already owns the source path', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const protect = jest.spyOn(attachmentCacheCoordinator, 'protect').mockReturnValueOnce(null);
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload),
+    ).rejects.toThrow('Attachment is no longer available for sending.');
+
+    expect(protect).toHaveBeenCalledWith(IMG.uri);
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+    protect.mockRestore();
+  });
+
+  it('keeps the source pinned through the durable outgoing commit, then releases before upload', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const release = jest.fn();
+    const protect = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockReturnValueOnce({ path: IMG.uri, release });
+    const up = fakeUploader(async () => {
+      expect(release).toHaveBeenCalledTimes(1);
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(1);
+      return { guid: 'real-msg', viaPrivateApi: true };
+    });
+
+    await sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload);
+
+    expect(protect.mock.invocationCallOrder[0]).toBeLessThan(release.mock.invocationCallOrder[0]!);
+    expect(release).toHaveBeenCalledTimes(1);
+    protect.mockRestore();
+  });
+
+  it('atomically rejects a path already owned by crash-surviving retirement', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    raw
+      .prepare(
+        "INSERT INTO attachment_cache_entries(path, bytes, last_used_at, state, attempts, next_retry_at) VALUES (?, 1000, 1, 'retiring', 0, 0)",
+      )
+      .run(IMG.uri);
+    const release = jest.fn();
+    const protect = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockReturnValueOnce({ path: IMG.uri, release });
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload),
+    ).rejects.toEqual(expect.objectContaining({ message: 'attachment cache path is not active' }));
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+    expect(one(raw, 'SELECT state FROM attachment_cache_entries').state).toBe('retiring');
+    protect.mockRestore();
+  });
+
   it('promotes the message on the ack; the attachment keeps its local guid+path until the echo', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
@@ -186,7 +250,7 @@ describe('sendImageMessage', () => {
       hasAttachments: true,
       attachments: [{ guid: 'rcs-media-1', mimeType: 'image/jpeg' }],
     });
-    await reconcileEchoByContent(db, echo, chatId);
+    await withDbTransaction(db, (context) => reconcileEchoByContent(context, echo, chatId));
     const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertMessages(db, [echo], () => chatId, handles);
 
@@ -236,6 +300,7 @@ describe('sendImageMessage', () => {
   });
 
   it('RCS sync-first also promotes an ERRORED optimistic picture (client saw 5xx but the upload landed)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     // Same as the sync-first case, but the client-side send FAILED (e.g. Caddy 502 mid-response)
     // while the server actually delivered. The sync materialization must promote the errored temp
     // row in place — keeping the on-disk image and clearing the queue row (no duplicate upload).
@@ -270,6 +335,11 @@ describe('sendImageMessage', () => {
     expect(att.guid).toBe('rcs-media-7');
     expect(att.lp).toBe('file:///photo.jpg');
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-attachment] failed for chat c1 (code 10002, HTTP 502): bad gateway',
+    );
+    warn.mockRestore();
   });
 
   it('sync reconcile does NOT hijack a fresh optimistic send with an OLD identical re-synced picture', async () => {
@@ -303,6 +373,7 @@ describe('sendImageMessage', () => {
   });
 
   it('marks the message errored but keeps the local attachment so it still renders', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const up = fakeUploader(async () => {
@@ -315,9 +386,15 @@ describe('sendImageMessage', () => {
     expect((one(raw, 'SELECT local_path lp FROM attachments') as { lp: string }).lp).toBe(
       'file:///photo.jpg',
     );
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-attachment] failed for chat c1 (code 500, HTTP 500): boom',
+    );
+    warn.mockRestore();
   });
 
   it('multi-select: N picked images → N messages + N attachments + N queue rows', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const fail = fakeUploader(async () => {
@@ -335,5 +412,11 @@ describe('sendImageMessage', () => {
     expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(3);
     expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(3);
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(3);
+    expect(warn.mock.calls).toEqual(
+      Array.from({ length: 3 }, () => [
+        '[send-attachment] failed for chat c1 (code 500, HTTP 500): boom',
+      ]),
+    );
+    warn.mockRestore();
   });
 });

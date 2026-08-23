@@ -115,4 +115,26 @@ describe('ensureDatabase single-flight', () => {
     await expect(ensureDatabase()).resolves.toBe(HANDLE);
     expect(mockResolveDbKey).toHaveBeenCalledTimes(2);
   });
+
+  it('coalesces a failed init for every waiter, then starts one fresh retry', async () => {
+    const ensureDatabase = await loadEnsureDatabase();
+    const { markOpen } = closedThenOpen();
+    const firstFailure = new Error('migration failed');
+    mockResolveDbKey.mockResolvedValue('deadbeef');
+    mockInitDatabase.mockRejectedValueOnce(firstFailure).mockImplementationOnce(async () => {
+      markOpen();
+      return HANDLE;
+    });
+
+    const first = ensureDatabase();
+    const second = ensureDatabase();
+    await expect(first).rejects.toBe(firstFailure);
+    await expect(second).rejects.toBe(firstFailure);
+    expect(mockResolveDbKey).toHaveBeenCalledTimes(1);
+    expect(mockInitDatabase).toHaveBeenCalledTimes(1);
+
+    await expect(ensureDatabase()).resolves.toBe(HANDLE);
+    expect(mockResolveDbKey).toHaveBeenCalledTimes(2);
+    expect(mockInitDatabase).toHaveBeenCalledTimes(2);
+  });
 });

@@ -1,28 +1,72 @@
 import { chatsApi, scheduledApi } from '@core/api';
 import { logger } from '@core/secure';
 import {
-  clearChatTombstone,
+  clearChatTombstoneWithinTransaction,
   deleteChatLocal,
   deleteReminderByNotificationId,
   deleteScheduled,
   getChatIdByGuid,
   getNewestReceivedGuid,
+  linkHandlesToContacts,
   listChatAttachmentGuids,
-  listOrphanedAttachmentGuids,
   listReminders,
   listScheduledByChat,
   resumeChatPurges,
   setChatUnreadLocal,
   setLastReadMessageGuid,
-  upsertChats,
-  upsertHandles,
+  upsertChatsWithinTransaction,
+  upsertHandlesWithinTransaction,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { withDbTransaction } from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
-import { safePathSegment } from './download/pathSafety';
+import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
+import { cancelAttachmentDownloads } from './download/downloadService';
+import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from './realtime/deliveryCoordinator';
 import { getSocket } from './realtimeControl';
+
+/** Private rollback signal for a create-chat mutation whose account was disconnected. */
+const STALE_CREATE_CHAT = Symbol('stale-create-chat');
+/** Private control-flow signal for a chat action whose account is being retired. */
+const STALE_CHAT_ACTION = Symbol('stale-chat-action');
+
+function assertCreateChatLease(lease: RealtimeDeliveryLease): void {
+  if (!lease.isCurrent()) throw STALE_CREATE_CHAT;
+}
+
+function assertChatActionLease(lease: RealtimeDeliveryLease): void {
+  if (!lease.isCurrent()) throw STALE_CHAT_ACTION;
+}
+
+/**
+ * Admit an entire user/chat mutation before its first await and quietly abandon stale work.
+ *
+ * Disconnect invalidates `lease` synchronously and drains the published slot before wiping the
+ * account. That means an operation already inside a short DB write completes and is then wiped,
+ * while one parked on Keystore/network work cannot wake up and touch the next account.
+ */
+async function runChatAction(
+  lease: RealtimeDeliveryLease,
+  action: (lease: RealtimeDeliveryLease) => Promise<void>,
+): Promise<void> {
+  try {
+    await runTrackedRealtimeWork(lease, async (trackedLease) => {
+      assertChatActionLease(trackedLease);
+      await action(trackedLease);
+      assertChatActionLease(trackedLease);
+    });
+  } catch (error) {
+    if (error === STALE_CHAT_ACTION || !lease.isCurrent()) return;
+    throw error;
+  }
+}
 
 /**
  * Create a new chat with the given recipient addresses + an initial message, upsert the
@@ -34,16 +78,65 @@ export async function createNewChat(
   addresses: string[],
   message: string,
   service: 'iMessage' | 'SMS' | 'RCS' = 'iMessage',
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<string> {
-  const db = await ensureDatabase();
-  const chat = await chatsApi.createChat(http, { addresses, message, service });
-  const handleIds = await upsertHandles(db, chat.participants ?? []);
-  await upsertChats(db, [chat], handleIds);
-  // A 1:1 guid is `service;-;address`, so composing with someone whose thread was deleted here
-  // returns the SAME guid — still under its deletion tombstone, i.e. hidden from the inbox we are
-  // about to route into. Deliberately starting the conversation again is an un-delete.
-  await clearChatTombstone(db, chat.guid);
-  return chat.guid;
+  try {
+    // Capture happened in the default argument, before the first await. Re-check after opening the
+    // DB so an A-account call parked on Keystore/database work cannot wake up after reconnect and
+    // send its request with B's live credentials.
+    assertCreateChatLease(accountLease);
+    const db = await ensureDatabase();
+    assertCreateChatLease(accountLease);
+
+    // HttpClient snapshots the origin + credential at request entry. A Disconnect cannot recall a
+    // request the old server already accepted, but its response is disowned below and can never be
+    // reconciled into the next account's database.
+    const chat = await chatsApi.createChat(http, { addresses, message, service });
+    assertCreateChatLease(accountLease);
+
+    // Keep every local consequence atomic. Disconnect either waits for this short commit and then
+    // wipes it, rejects admission before it begins, or invalidates the lease mid-transaction and
+    // the final check rolls the whole handle/chat/tombstone set back.
+    const commit = await runTrackedRealtimeWork(accountLease, () =>
+      withDbTransaction(db, async (context) => {
+        assertCreateChatLease(accountLease);
+        const handleIds = await upsertHandlesWithinTransaction(context, chat.participants ?? []);
+        assertCreateChatLease(accountLease);
+        await upsertChatsWithinTransaction(context, [chat], handleIds);
+        assertCreateChatLease(accountLease);
+        // A 1:1 guid is `service;-;address`, so composing with someone whose thread was deleted here
+        // returns the SAME guid — still under its deletion tombstone, i.e. hidden from the inbox we
+        // are about to route into. Deliberately starting the conversation again is an un-delete.
+        await clearChatTombstoneWithinTransaction(context, chat.guid);
+        assertCreateChatLease(accountLease);
+      }),
+    );
+    if (commit === 'paused') throw STALE_CREATE_CHAT;
+    assertCreateChatLease(accountLease);
+
+    // Device-contact matching reads the whole address book, so it must run only after the short
+    // authoritative handle/chat/tombstone transaction commits. Each actual match owns its own
+    // commit-guarded transaction; a presentation-only failure must not undo a successfully created
+    // conversation.
+    try {
+      await linkHandlesToContacts(
+        db,
+        (chat.participants ?? []).map((participant) => participant.address),
+        undefined,
+        () => accountLease.isCurrent(),
+      );
+    } catch (error) {
+      if (!accountLease.isCurrent()) throw STALE_CREATE_CHAT;
+      logger.debug('[chats] post-create contact linking skipped', error);
+    }
+    assertCreateChatLease(accountLease);
+    return chat.guid;
+  } catch (error) {
+    if (error === STALE_CREATE_CHAT) {
+      throw new Error('Create chat stopped because the account session changed');
+    }
+    throw error;
+  }
 }
 
 /**
@@ -82,24 +175,37 @@ async function hydratedFeatureSettings(): Promise<FeatureSettings> {
  * read receipt ONLY when the "Send Read Receipts" toggle is on — so disabling receipts still
  * clears your own unread badge but doesn't tell the other party you read it.
  */
-export async function markRead(chatGuid: string): Promise<void> {
-  // ensureDatabase, never getDatabase: the tray's "Mark as read" button runs HEADLESS on a
-  // killed-app wake, where no React tree ever mounted, boot() never ran and the eager accessor
-  // throws "Database not initialized". That rejection escaped the whole action handler, so the
-  // notification wasn't even cleared — the button looked completely dead, but only when the app
-  // had been killed, which is exactly when the button is most useful.
-  const db = await ensureDatabase();
-  const chatId = await getChatIdByGuid(db, chatGuid);
-  if (chatId == null) return;
-  const newest = await getNewestReceivedGuid(db, chatId);
-  if (newest) await setLastReadMessageGuid(db, chatGuid, newest);
-  const fs = await hydratedFeatureSettings();
-  if (!fs.privateApiEnabled || !fs.sendReadReceipts) return;
-  try {
-    await chatsApi.markChatRead(http, chatGuid);
-  } catch {
-    // Offline / not connected — the local marker still clears the badge.
-  }
+export function markRead(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    // ensureDatabase, never getDatabase: the tray's "Mark as read" button runs HEADLESS on a
+    // killed-app wake, where no React tree ever mounted, boot() never ran and the eager accessor
+    // throws "Database not initialized". That rejection escaped the whole action handler, so the
+    // notification wasn't even cleared — the button looked completely dead, but only when the app
+    // had been killed, which is exactly when the button is most useful.
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    const chatId = await getChatIdByGuid(db, chatGuid);
+    assertChatActionLease(activeLease);
+    if (chatId == null) return;
+    const newest = await getNewestReceivedGuid(db, chatId);
+    assertChatActionLease(activeLease);
+    if (newest) {
+      await setLastReadMessageGuid(db, chatGuid, newest);
+      assertChatActionLease(activeLease);
+    }
+    const fs = await hydratedFeatureSettings();
+    assertChatActionLease(activeLease);
+    if (!fs.privateApiEnabled || !fs.sendReadReceipts) return;
+    try {
+      await chatsApi.markChatRead(http, chatGuid);
+    } catch {
+      // Offline / not connected — the local marker still clears the badge.
+    }
+    assertChatActionLease(activeLease);
+  });
 }
 
 /**
@@ -109,18 +215,32 @@ export async function markRead(chatGuid: string): Promise<void> {
  * Private-API + iMessage-only, so the call is skipped for `RCS;-;` chats (the RCS sidecar has
  * no unread endpoint) and when the master Private API toggle is off.
  */
-export async function markUnread(chatGuid: string): Promise<void> {
-  // ensureDatabase for the same headless reason as markRead — this shares the notification-action
-  // and background-event code paths.
-  const db = await ensureDatabase();
-  await setChatUnreadLocal(db, chatGuid);
-  if (chatGuid.startsWith('RCS;-;')) return;
-  if (!(await hydratedFeatureSettings()).privateApiEnabled) return;
-  try {
-    await chatsApi.markChatUnread(http, chatGuid);
-  } catch (e) {
-    logger.debug('[chats] mark-unread server sync failed; local flip kept', { error: String(e) });
-  }
+export function markUnread(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    // ensureDatabase for the same headless reason as markRead — this shares the
+    // notification-action and background-event code paths.
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await setChatUnreadLocal(db, chatGuid);
+    assertChatActionLease(activeLease);
+    if (chatGuid.startsWith('RCS;-;')) return;
+    const fs = await hydratedFeatureSettings();
+    assertChatActionLease(activeLease);
+    if (!fs.privateApiEnabled) return;
+    try {
+      await chatsApi.markChatUnread(http, chatGuid);
+    } catch (e) {
+      if (activeLease.isCurrent()) {
+        logger.debug('[chats] mark-unread server sync failed; local flip kept', {
+          error: String(e),
+        });
+      }
+    }
+    assertChatActionLease(activeLease);
+  });
 }
 
 /**
@@ -145,23 +265,59 @@ export async function markUnread(chatGuid: string): Promise<void> {
  * the rows they need. What IS conditional is dropping the rows that track that external state —
  * see the two helpers.
  *
- * THE ONE THING THAT MUST BE READ BEFORE THE DELETE is the list of downloaded attachment files:
- * `attachments.local_path` is the only record that a download ever happened and it cascades away
- * with the messages, so afterwards the photos and videos of that thread are bytes no code path can
- * reach and nothing but "Clear app data" could ever reclaim. It is one indexed local SELECT — no
- * native bridge, no network — so it costs the tile nothing.
+ * THE ONE THING THAT MUST BE READ BEFORE THE DELETE is the list of attachment guids. It names both
+ * completed and in-flight transfers; the message cascade otherwise destroys the only way to cancel
+ * them. Physical files are retired later by exact ledger path, never by recursively deleting these
+ * GUID directories. The lookup is one indexed local SELECT — no native bridge or network.
  */
-export async function deleteChat(chatGuid: string): Promise<void> {
+export function deleteChat(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, (activeLease) => deleteChatForAccount(chatGuid, activeLease));
+}
+
+async function deleteChatForAccount(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
   const db = await ensureDatabase();
+  assertChatActionLease(accountLease);
+  const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
   // Never let this stop the delete: with no candidates the files are simply left behind, which is
   // the state the delete had before this existed.
-  const downloaded = await listChatAttachmentGuids(db, chatGuid).catch((e) => {
-    logger.warn('[chats] could not list downloaded attachments for deleted chat', e);
+  const attachmentGuids = await listChatAttachmentGuids(db, chatGuid).catch((e) => {
+    if (accountLease.isCurrent()) {
+      logger.warn('[chats] could not list downloaded attachments for deleted chat', e);
+    }
     return [] as string[];
   });
+  assertChatActionLease(accountLease);
+
+  let deleteFailed = false;
+  let deleteError: unknown;
   try {
+    // Stop queued/active bytes before the purge removes their ownership rows. The final guarded
+    // path write is still the backstop for a native result that wins this synchronous cancel race.
+    cancelAttachmentDownloads(attachmentGuids, accountLease.generation);
     await deleteChatLocal(db, chatGuid);
-  } finally {
+    assertChatActionLease(accountLease);
+    await attachmentCacheCoordinator
+      .retireInactiveEntries(db, { scope: attachmentCacheScope })
+      .catch((e) => logger.warn('[chats] exact attachment cache cleanup deferred', e));
+    await attachmentCacheCoordinator
+      .drainDueRetirements(db, { scope: attachmentCacheScope })
+      .catch((e) => logger.warn('[chats] attachment cache recovery deferred', e));
+    assertChatActionLease(accountLease);
+  } catch (error) {
+    deleteFailed = true;
+    deleteError = error;
+  }
+
+  // Preserve the original cleanup-on-delete-failure behavior while preventing an invalidated
+  // account from continuing into native/network side effects after teardown has begun.
+  assertChatActionLease(accountLease);
+  try {
     // `finally`, so moving the local delete first cannot cost the external cleanup its run. If the
     // delete fails part-way the chat is already tombstoned, and an uncancelled server-backed
     // scheduled send would fire into that hidden thread and un-hide it; if it failed before the
@@ -172,13 +328,27 @@ export async function deleteChat(chatGuid: string): Promise<void> {
     // call) and user-visible: `cancelServerScheduledForChat` is a sequential per-row HTTP loop that
     // costs a full request timeout per row against a blackholing tunnel, and a notification for the
     // conversation the user just deleted must not survive that.
-    await cancelChatNotification(chatGuid);
-    await cancelServerScheduledForChat(db, chatGuid);
-    await cancelRemindersForChat(db, chatGuid);
-    await deleteDownloadedAttachments(db, downloaded);
+    await cancelChatNotification(chatGuid, accountLease);
+    assertChatActionLease(accountLease);
+    await cancelServerScheduledForChat(db, chatGuid, accountLease);
+    assertChatActionLease(accountLease);
+    await cancelRemindersForChat(db, chatGuid, accountLease);
+    assertChatActionLease(accountLease);
     // Finish any purge that never got to complete — a previous delete killed mid-loop, or this
     // one's own loop if that is what threw. One query when there is nothing to resume (the norm).
-    await resumeChatPurges(db).catch((e) => logger.warn('[chats] purge resume failed', e));
+    await resumeChatPurges(db).catch((e) => {
+      if (accountLease.isCurrent()) logger.warn('[chats] purge resume failed', e);
+    });
+    assertChatActionLease(accountLease);
+    await attachmentCacheCoordinator
+      .retireInactiveEntries(db, { scope: attachmentCacheScope })
+      .catch((e) => logger.warn('[chats] resumed-purge cache cleanup deferred', e));
+    await attachmentCacheCoordinator
+      .drainDueRetirements(db, { scope: attachmentCacheScope })
+      .catch((e) => logger.warn('[chats] resumed-purge exact delete deferred', e));
+    assertChatActionLease(accountLease);
+  } finally {
+    if (deleteFailed) throw deleteError;
   }
 }
 
@@ -190,48 +360,18 @@ export async function deleteChat(chatGuid: string): Promise<void> {
  * the message preview of a conversation the user just deleted, and tapping it routes straight into
  * the hidden thread. Own try/catch + lazy import so the native bridge can never cost the delete.
  */
-async function cancelChatNotification(chatGuid: string): Promise<void> {
+async function cancelChatNotification(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
   try {
     const { cancelForChat } = await import('./notifications/notifeeService');
-    await cancelForChat(chatGuid);
+    assertChatActionLease(accountLease);
+    await cancelForChat(chatGuid, accountLease);
+    assertChatActionLease(accountLease);
   } catch (e) {
+    if (e === STALE_CHAT_ACTION || !accountLease.isCurrent()) throw STALE_CHAT_ACTION;
     logger.warn('[chats] tray notification cancel failed for deleted chat', e);
-  }
-}
-
-/**
- * Delete the on-disk files of the attachments the purge just orphaned.
- *
- * `expoFetcher` writes each download to `{documents}/attachments/<safePathSegment(guid)>/…` —
- * app-private PERSISTENT storage the OS never reclaims — and the rows holding those paths are gone,
- * so without this a photo-heavy thread leaves gigabytes behind that nothing can ever find again.
- * Same lazy import + per-directory try/catch as `forget()`'s `deleteCachedMedia`, because
- * expo-file-system is a native module and a filesystem failure must never surface as a failed
- * delete.
- *
- * IT RE-CHECKS THE ROWS FIRST. The candidates were read before the purge, and the purge is bounded
- * at the tombstone stamp and can be interrupted — a surviving row still renders its image, so its
- * file has to survive too. Only guids the database no longer knows about are deleted, and only the
- * download directory named by the guid: `local_path` itself may point at a user-picked file that is
- * not ours to remove. The directory is addressed with the SAME sanitiser the download used; the raw
- * guid names nothing on disk.
- */
-async function deleteDownloadedAttachments(db: AppDatabase, guids: string[]): Promise<void> {
-  if (guids.length === 0) return;
-  try {
-    const orphaned = await listOrphanedAttachmentGuids(db, guids);
-    if (orphaned.length === 0) return;
-    const { Directory, Paths } = await import('expo-file-system');
-    for (const guid of orphaned) {
-      try {
-        const dir = new Directory(Paths.document, 'attachments', safePathSegment(guid));
-        if (dir.exists) dir.delete();
-      } catch (e) {
-        logger.warn('[chats] could not delete a downloaded attachment of the deleted chat', e);
-      }
-    }
-  } catch (e) {
-    logger.warn('[chats] downloaded attachments left on disk for the deleted chat', e);
   }
 }
 
@@ -249,21 +389,34 @@ async function deleteDownloadedAttachments(db: AppDatabase, guids: string[]): Pr
  *
  * `allSettled`, not `all`: one unreachable trigger must not cost the other reminders their delete.
  */
-async function cancelRemindersForChat(db: AppDatabase, chatGuid: string): Promise<void> {
+async function cancelRemindersForChat(
+  db: AppDatabase,
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
   try {
     const pending = (await listReminders(db)).filter((r) => r.chatGuid === chatGuid);
+    assertChatActionLease(accountLease);
     if (pending.length === 0) return;
     const { cancelReminderNotification } = await import('./notifications/notifeeService');
+    assertChatActionLease(accountLease);
     const settled = await Promise.allSettled(
       pending.map(async (r) => {
+        assertChatActionLease(accountLease);
         await cancelReminderNotification(r.notificationId);
         return r.notificationId;
       }),
     );
+    assertChatActionLease(accountLease);
     for (const s of settled) {
-      if (s.status === 'fulfilled') await deleteReminderByNotificationId(db, s.value);
+      assertChatActionLease(accountLease);
+      if (s.status === 'fulfilled') {
+        await deleteReminderByNotificationId(db, s.value);
+        assertChatActionLease(accountLease);
+      }
     }
   } catch (e) {
+    if (e === STALE_CHAT_ACTION || !accountLease.isCurrent()) throw STALE_CHAT_ACTION;
     // Reaching the notifee module at all failed (or the row read did) — every reminder keeps both
     // its alarm and its row, which is the recoverable state.
     logger.warn('[chats] reminder cancel failed for deleted chat', e);
@@ -287,21 +440,31 @@ async function cancelRemindersForChat(db: AppDatabase, chatGuid: string): Promis
  * pending rows without joining `chats`, so a hidden chat doesn't hide them). Per-row try/catch:
  * one unreachable server call must not skip the rest, nor block the delete.
  */
-async function cancelServerScheduledForChat(db: AppDatabase, chatGuid: string): Promise<void> {
+async function cancelServerScheduledForChat(
+  db: AppDatabase,
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
   let pending: Awaited<ReturnType<typeof listScheduledByChat>>;
   try {
     pending = await listScheduledByChat(db, chatGuid);
+    assertChatActionLease(accountLease);
   } catch (e) {
+    if (e === STALE_CHAT_ACTION || !accountLease.isCurrent()) throw STALE_CHAT_ACTION;
     logger.warn('[chats] could not read scheduled messages for deleted chat', e);
     return;
   }
   for (const row of pending) {
+    assertChatActionLease(accountLease);
     const serverId = row.serverId;
     if (serverId == null) continue; // local-only: deleteChatLocal dropping the row IS the cancel
     try {
       await scheduledApi.deleteScheduled(http, serverId);
+      assertChatActionLease(accountLease);
       await deleteScheduled(db, row.id);
+      assertChatActionLease(accountLease);
     } catch (e) {
+      if (e === STALE_CHAT_ACTION || !accountLease.isCurrent()) throw STALE_CHAT_ACTION;
       logger.warn('[chats] server scheduled-message cancel failed; keeping the local row', e);
     }
   }

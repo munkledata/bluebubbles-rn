@@ -34,13 +34,19 @@ import type { AttachmentRow } from '@db/repositories';
 
 const mockDownload = jest.fn();
 const mockPush = jest.fn();
+const mockAccountLease = { generation: 42, isCurrent: jest.fn(() => true) };
+const mockNextAccountLease = { generation: 43, isCurrent: jest.fn(() => true) };
+const mockCaptureAccountLease = jest.fn(() => mockAccountLease);
 // Mutable network state the expo-network mock reads at call time; tests flip `.type`.
 const mockNet = { type: 'WIFI' as string };
 
 jest.mock('@/services/download', () => ({
-  download: (att: unknown) => mockDownload(att),
+  download: (...args: unknown[]) => mockDownload(...args),
   setAttachmentFetcher: jest.fn(),
   ensureDownloaded: jest.fn(),
+}));
+jest.mock('@/services/realtime/deliveryCoordinator', () => ({
+  captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),
 }));
 jest.mock('expo-image', () => {
   const RN = require('react-native');
@@ -75,7 +81,7 @@ function makeImg(over: Partial<AttachmentRow> = {}): AttachmentRow {
     messageId: 1,
     mimeType: 'image/jpeg',
     transferName: 'photo.jpg',
-    totalBytes: 500_000, // under the 5 MB auto cap
+    totalBytes: 500_000, // under the 5 MiB auto cap
     height: 800,
     width: 600,
     blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
@@ -91,6 +97,10 @@ function makeImg(over: Partial<AttachmentRow> = {}): AttachmentRow {
 /** Reset both real stores + the network type + spies BEFORE each test (never afterEach). */
 beforeEach(() => {
   mockDownload.mockClear();
+  mockCaptureAccountLease
+    .mockReset()
+    .mockReturnValueOnce(mockAccountLease)
+    .mockReturnValue(mockNextAccountLease);
   mockPush.mockClear();
   mockNet.type = 'WIFI';
   useDownloadStore.setState({ progress: {}, status: {} });
@@ -221,9 +231,13 @@ describe('ImageAttachment — tap dispatch', () => {
     // Auto-download OFF so the only download() call is the tap's.
     useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
     const att = makeImg({ localPath: null });
-    await renderWithTheme(<ImageAttachment att={att} isFromMe={false} showTail />);
+    const view = await renderWithTheme(<ImageAttachment att={att} isFromMe={false} showTail />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
+    await view.rerender(<ImageAttachment att={{ ...att }} isFromMe={false} showTail />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     fireEvent.press(screen.getByTestId('expo-image'));
-    expect(mockDownload).toHaveBeenCalledWith(att);
+    expect(mockDownload).toHaveBeenCalledWith(att, 'manual', mockAccountLease);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     expect(mockPush).not.toHaveBeenCalled();
   });
 
@@ -337,6 +351,11 @@ describe('ImageAttachment — auto-download effect', () => {
       <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
     );
     expect(mockDownload).toHaveBeenCalledTimes(1);
+    expect(mockDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ guid: 'img-1' }),
+      'automatic',
+      mockAccountLease,
+    );
   });
 
   it('does NOT auto-download when the autoDownload setting is off', async () => {

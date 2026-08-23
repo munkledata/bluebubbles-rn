@@ -1,4 +1,4 @@
-import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
+import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 
 /**
  * Decorates an inner EventSink: handles ephemeral `typing-indicator` events by
@@ -13,12 +13,17 @@ export class TypingEventSink implements EventSink {
     private readonly onTyping: (chatGuid: string, display: boolean) => void,
   ) {}
 
-  async onEvent(event: NormalizedEvent, source: EventSource): Promise<void> {
+  async onEvent(
+    event: NormalizedEvent,
+    source: EventSource,
+    context?: EventDeliveryContext,
+  ): Promise<void> {
+    if (context && !context.isCurrent()) return;
     if (event.type === 'typing-indicator') {
       const guid = event.payload.chatGuid ?? event.payload.guid;
       if (guid) this.onTyping(guid, event.payload.display);
       return;
     }
-    await this.inner.onEvent(event, source);
+    await this.inner.onEvent(event, source, context);
   }
 }

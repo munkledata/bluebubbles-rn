@@ -15,11 +15,17 @@
  *    and each chain's later plain writes land inside the NEXT one's transaction. The loop must
  *    therefore be sequential: chain i finished before chain i+1 starts.
  *
+ * 3. SERVER-TARGET ACTIONS. A temp message has no server GUID yet, so neither a tapback nor a
+ *    reply may capture that local-only identity. This applies to both long-press handlers and the
+ *    direct swipe-to-reply callback.
+ *
  * The hook is driven directly (renderHook); `showDialog` is captured so the confirm button can be
  * pressed, and every native/service leaf is mocked.
  */
 import { renderHook, act, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+
+const mockIsDevServer = jest.fn(() => false);
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
@@ -33,6 +39,7 @@ jest.mock('@features/conversations/devSeed', () => ({
   devSendFakeReaction: jest.fn(),
   devUnsendFake: jest.fn(),
 }));
+jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer() }));
 jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
 jest.mock('@/services/send', () => ({
   discardMessage: jest.fn(async () => {}),
@@ -55,7 +62,9 @@ jest.mock('@ui/dialog/dialogStore', () => ({
 // eslint-disable-next-line import/first
 import { useMessageActions } from '@features/conversations/useMessageActions';
 // eslint-disable-next-line import/first
-import { discardMessage } from '@/services/send';
+import { discardMessage, react } from '@/services/send';
+// eslint-disable-next-line import/first
+import { devSendFakeReaction } from '@features/conversations/devSeed';
 
 /** Press the destructive button of the last dialog that was shown. */
 function pressDestructive(): void {
@@ -89,21 +98,96 @@ const msg = (guid: string, sendState: string | null): EnrichedMessage =>
 
 const rect = { x: 0, y: 0, width: 10, height: 10 };
 
-function mount(messages: EnrichedMessage[]) {
-  return renderHook(() =>
+async function mount(messages: EnrichedMessage[]) {
+  const setReplyTo = jest.fn();
+  const hook = await renderHook(() =>
     useMessageActions({
       guid: 'iMessage;-;+15550001111',
       messages,
       chatTitle: 'Alice',
-      setReplyTo: jest.fn(),
+      setReplyTo,
       setEditing: jest.fn(),
     }),
   );
+  return { ...hook, setReplyTo };
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockIsDevServer.mockReturnValue(false);
   dialogs.length = 0;
+});
+
+describe('useMessageActions — DEV reaction account scope', () => {
+  it('keeps confirmed reaction and reply actions on their exact message identity', async () => {
+    mockIsDevServer.mockReturnValue(true);
+    const target = msg('message-a', null);
+    const { result, setReplyTo } = await mount([target]);
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+    });
+
+    await act(async () => {
+      result.current.onReact('love');
+    });
+
+    expect(devSendFakeReaction).toHaveBeenCalledWith(
+      'iMessage;-;+15550001111',
+      'message-a',
+      'love',
+      undefined,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+
+    mockIsDevServer.mockReturnValue(false);
+    await act(async () => {
+      result.current.onReact('like');
+      result.current.onReplyToSelected();
+      result.current.onSwipeReply(target);
+    });
+
+    expect(react).toHaveBeenCalledWith(
+      {
+        chatGuid: 'iMessage;-;+15550001111',
+        targetGuid: 'message-a',
+        reaction: 'like',
+        emoji: undefined,
+        selectedMessageText: 'hi',
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    const expectedReply = {
+      guid: 'message-a',
+      text: 'hi',
+      isFromMe: 1,
+      senderName: null,
+      hasAttachments: 0,
+    };
+    expect(setReplyTo).toHaveBeenNthCalledWith(1, expectedReply);
+    expect(setReplyTo).toHaveBeenNthCalledWith(2, expectedReply);
+  });
+
+  it('rejects temp identities from live and DEV reactions, long-press reply, and swipe reply', async () => {
+    const target = msg('temp-message-a', 'sending');
+    const { result, setReplyTo } = await mount([target]);
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+    });
+
+    await act(async () => {
+      result.current.onReact('love');
+      result.current.onReplyToSelected();
+      result.current.onSwipeReply(target);
+    });
+    mockIsDevServer.mockReturnValue(true);
+    await act(async () => {
+      result.current.onReact('love');
+    });
+
+    expect(react).not.toHaveBeenCalled();
+    expect(devSendFakeReaction).not.toHaveBeenCalled();
+    expect(setReplyTo).not.toHaveBeenCalled();
+  });
 });
 
 describe('useMessageActions — "Cancel Sending" / "Remove"', () => {
@@ -125,7 +209,13 @@ describe('useMessageActions — "Cancel Sending" / "Remove"', () => {
     });
 
     // The optimistic-only write would have matched nothing here and reported false to nobody.
-    await waitFor(() => expect(discardMessage).toHaveBeenCalledWith('temp-live'));
+    await waitFor(() =>
+      expect(discardMessage).toHaveBeenCalledWith(
+        'temp-live',
+        expect.any(Number),
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
   });
 
   it('uses the same write for the errored "Remove" wording', async () => {
@@ -143,7 +233,13 @@ describe('useMessageActions — "Cancel Sending" / "Remove"', () => {
     await act(async () => {
       pressDestructive();
     });
-    await waitFor(() => expect(discardMessage).toHaveBeenCalledWith('temp-err'));
+    await waitFor(() =>
+      expect(discardMessage).toHaveBeenCalledWith(
+        'temp-err',
+        expect.any(Number),
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
   });
 });
 

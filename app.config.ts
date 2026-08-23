@@ -14,13 +14,16 @@ const config: ExpoConfig = {
   // EAS account/org that owns the build/project (matches the app package + Firebase
   // project naming; your personal `bluegreengator` account is the alternative).
   owner: 'bluegreengatorapps',
-  // Single source of truth for the user-visible version is package.json; the
-  // release:android[:local] scripts bump it (npm version patch) on every release.
-  // The Play versionCode is separate and managed remotely by EAS (autoIncrement).
+  // Single source of truth for the user-visible version is package.json. Run the explicit
+  // release:prepare:patch step only after choosing the release version; build commands never
+  // mutate it implicitly. The Play versionCode is managed remotely by EAS (autoIncrement).
   version: pkg.version,
   orientation: 'portrait',
   icon: './assets/icon.png',
-  userInterfaceStyle: 'automatic',
+  // THEME-01A: the shipped product is dark-only. Keep native Android surfaces on the
+  // same appearance before React mounts instead of following the phone's light setting.
+  userInterfaceStyle: 'dark',
+  backgroundColor: '#000000',
   // Deep-link / protocol activation scheme (mirrors the Flutter app's imessage:// handling).
   scheme: ['gator', 'imessage'],
   assetBundlePatterns: ['**/*'],
@@ -32,22 +35,36 @@ const config: ExpoConfig = {
     // a file secret for EAS builds. The native build FAILS without this file.
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     predictiveBackGestureEnabled: false,
+    // No adb/device-transfer backups (SEC-6): the SQLCipher key lives in the Android Keystore
+    // and never leaves the device, so a restored DB would be undecryptable anyway. This must be
+    // the top-level Expo android option; expo-build-properties has no allowBackup setting.
+    allowBackup: false,
     // USE_FULL_SCREEN_INTENT (Android 14+): the incoming-FaceTime full-screen-intent
     // notification degrades to heads-up without it.
-    // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS: the in-app FaceTime call WebView needs mic
-    // capture (getUserMedia); CAMERA is already declared by the expo-camera plugin.
-    // REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: lets the Settings "Disable battery optimization"
-    // action show the one-tap OS allow-dialog (via expo-intent-launcher) instead of only the
-    // battery-optimization list — for reliable background FCM/notification delivery under Doze.
+    // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS: the composer records voice messages; CAMERA is
+    // declared by expo-camera for setup QR scanning and composer photo capture.
     // All need a native rebuild to take effect.
     permissions: [
       'android.permission.USE_FULL_SCREEN_INTENT',
-      // notify-kit does NOT auto-merge POST_NOTIFICATIONS (notifee did), so add it
-      // explicitly for the API 33+ runtime notification permission.
+      // Keep the API 33+ runtime notification permission as an explicit product contract even
+      // though the current notify-kit version also merges it transitively.
       'android.permission.POST_NOTIFICATIONS',
       'android.permission.RECORD_AUDIO',
       'android.permission.MODIFY_AUDIO_SETTINGS',
-      'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+    ],
+    // Keep permissions that transitive config plugins may merge out of the final manifest.
+    // Contacts are read-only; the attachment tray browses photos/videos, never the music library.
+    blockedPermissions: [
+      'android.permission.WRITE_CONTACTS',
+      'android.permission.READ_MEDIA_AUDIO',
+      // Dev tooling and notify-kit merge these special permissions transitively. Production
+      // Gator never draws over other apps or requests Do Not Disturb policy access.
+      'android.permission.SYSTEM_ALERT_WINDOW',
+      'android.permission.ACCESS_NOTIFICATION_POLICY',
+      // Gator reminders deliberately use SET_AND_ALLOW_WHILE_IDLE (inexact). The notification
+      // library declares exact-alarm access transitively, but no app flow needs that special grant.
+      'android.permission.SCHEDULE_EXACT_ALARM',
+      'android.permission.USE_EXACT_ALARM',
     ],
     adaptiveIcon: {
       backgroundColor: '#193154',
@@ -81,12 +98,10 @@ const config: ExpoConfig = {
     // Injects the dedicated Android notification status-bar icon (ic_stat_gator) into the
     // regenerated native res/ folders at prebuild. See plugins/withNotificationIcon.js.
     './plugins/withNotificationIcon',
-    // Declares an Android Direct Share target (res/xml/shortcuts.xml + the android.app.shortcuts
-    // meta-data) so Gator can appear in the share sheet's PRIORITIZED row. Declaration only — the
-    // priority row also needs runtime-published dynamic shortcuts (a native follow-up); the generic
-    // app-list share entry from the SEND intent filters below is independent. See
-    // plugins/withShareTargets.js.
-    './plugins/withShareTargets',
+    // Inbound Android sharing is deliberately NOT configured here. `expo-share-intent@8.0.1`
+    // performs provider reads and an unbounded cache copy before JavaScript can enforce file,
+    // aggregate, or time limits. Until an owned bounded native intake replaces it, the release
+    // manifest must contain neither ACTION_SEND filters nor a Direct Share declaration (IPC-01).
     // Build arm64-v8a ONLY. `android/` is regenerated on every build, so the ABI list has to be
     // pinned here rather than in gradle.properties. Cuts the native compile (RN, Hermes,
     // op-sqlite/SQLCipher, libsodium, the local modules) to a quarter of its work and peak memory —
@@ -99,28 +114,18 @@ const config: ExpoConfig = {
     '@react-native-firebase/messaging',
     // react-native-notify-kit is autolinked (no config plugin needed here — the plugin is
     // only for iOS extensions / Android foregroundService, neither of which this app uses;
-    // the native core compiles from source). Unlike notifee it does NOT auto-merge
-    // POST_NOTIFICATIONS, so that permission is declared explicitly in android.permissions
-    // above. No Google Play Services required.
-    // Android share-target: registers SEND / SEND_MULTIPLE intent filters so Gator appears in the
-    // system share sheet for text, images, video, AND any file (*/*, e.g. a PDF from Downloads).
-    // iOS share extension disabled — this is an Android-only app. Needs a native rebuild.
-    [
-      'expo-share-intent',
-      {
-        disableIOS: true,
-        androidIntentFilters: ['text/*', 'image/*', 'video/*', '*/*'],
-        androidMultiIntentFilters: ['image/*', 'video/*', '*/*'],
-      },
-    ],
+    // the native core compiles from source). POST_NOTIFICATIONS is also declared explicitly in
+    // android.permissions above rather than relying only on the library merge. No Google Play
+    // Services required.
     // Background catch-up sync (WorkManager).
     'expo-task-manager',
     'expo-background-task',
     [
       'expo-camera',
       {
-        // QR-code setup scanning only; no microphone.
-        cameraPermission: 'Gator uses the camera to scan your server’s setup QR code.',
+        // Setup QR scanning and composer photo capture; no microphone.
+        cameraPermission:
+          'Gator uses the camera to scan your server’s setup QR code and take photos for conversations.',
         recordAudioAndroid: false,
       },
     ],
@@ -157,12 +162,14 @@ const config: ExpoConfig = {
         photosPermission:
           'Gator needs access to your photos so you can attach them to conversations.',
         isAccessMediaLocationEnabled: false,
+        granularPermissions: ['photo', 'video'],
       },
     ],
     [
       'expo-contacts',
       {
-        // Requested only on an explicit "Sync Contacts" tap; adds READ_CONTACTS.
+        // Requested only by explicit contact actions (Sync Contacts or Send Contact); adds
+        // READ_CONTACTS. Automatic startup sync checks an existing grant without prompting.
         contactsPermission:
           'Gator uses your contacts to show names and photos for your conversations.',
       },
@@ -184,10 +191,6 @@ const config: ExpoConfig = {
           // "Allow insecure connection" toggle (services/index.ts + the manual-setup screen).
           // HTTPS / a tunnel remains the recommended path, especially for remote access.
           usesCleartextTraffic: true,
-          // No adb/device-transfer backups (SEC-6): the SQLCipher key lives in the Android
-          // Keystore and never leaves the device, so a backed-up DB is undecryptable anyway —
-          // but message metadata and the kv table shouldn't ride along in a backup either.
-          allowBackup: false,
           minSdkVersion: 24,
           // react-native-notify-kit needs no extraMavenRepos: since 9.2.0 the native
           // core compiles from source (autolinked), so the old notifee local-AAR maven

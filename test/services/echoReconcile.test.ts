@@ -89,7 +89,9 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       .prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-err11111'")
       .run();
     raw
-      .prepare("UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-err11111'")
+      .prepare(
+        "UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-err11111'",
+      )
       .run();
 
     const echo = Message.parse({

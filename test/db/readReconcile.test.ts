@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
   listChatsForInbox,
@@ -225,12 +226,10 @@ describe('read-state reconciliation from lastReadMessageTimestamp', () => {
   });
 
   it('a marker advanced BETWEEN the batch read and this chat’s UPDATE still wins (no regression)', async () => {
-    // The batched reconcile loads every chat's marker date once, then loops with an `await` per
-    // chat — hundreds of milliseconds on a 200-chat sync page, every one of them a yield to the
-    // event loop. Opening a chat mid-loop (markRead → setLastReadMessageGuid) writes a NEWER
-    // marker, and the pre-loop snapshot doesn't know. Simulated here by writing that marker from
-    // a HOOKED db.run, i.e. from inside the reconcile loop itself, between the snapshot and the
-    // UPDATE for c2 — the guard must be re-read from the row, not from the snapshot.
+    // The public owner now prevents a coordinated marker writer from interleaving. This synthetic
+    // transaction-internal mutation instead pins the lower-level safety property: after the batch
+    // SELECT captures its baseline, a transaction-scoped change makes that snapshot stale before
+    // c2's UPDATE. The UPDATE must still re-read the live row rather than trusting the snapshot.
     const { db, raw } = await createTestDb();
     const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
     const map = await upsertChats(db, [chat('c1'), chat('c2')], handles);
@@ -247,14 +246,25 @@ describe('read-state reconciliation from lastReadMessageTimestamp', () => {
       handles,
     );
 
-    const realRun = db.run.bind(db);
+    const realAll = db.all.bind(db);
     let hooked = false;
-    (db as any).run = async (q: unknown) => {
+    (db as any).all = async (q: unknown) => {
+      // Capture the batch's baseline rows first. Only then move c2's marker, so the returned
+      // snapshot is stale and c2's later UPDATE must protect the live row itself.
+      const rows = await realAll(q as never);
       if (!hooked) {
-        hooked = true; // fires while c1's UPDATE is in flight, i.e. before c2's
-        await setLastReadMessageGuid(db, 'c2', 'b2'); // the user just read c2 to the end
+        hooked = true;
+        // `upsertChats` owns the surrounding transaction, but its opaque context intentionally
+        // never escapes into this patched read seam. Issue the exact marker UPDATE directly on the
+        // already-open connection so the regression still exercises the live-row SQL guard without
+        // forging a context or recursively entering the global mutex.
+        await db.run(sql`
+          UPDATE chats
+             SET last_read_message_guid = ${'b2'}, marked_unread_at = NULL
+           WHERE guid = ${'c2'}
+        `);
       }
-      return realRun(q as never);
+      return rows;
     };
     try {
       await upsertChats(
@@ -266,7 +276,7 @@ describe('read-state reconciliation from lastReadMessageTimestamp', () => {
         handles,
       );
     } finally {
-      (db as any).run = realRun;
+      (db as any).all = realAll;
     }
 
     expect(marker(raw, 'c1')).toBe('a2'); // the ordinary advance still happens

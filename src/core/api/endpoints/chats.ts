@@ -1,7 +1,7 @@
 import { z } from 'zod/v4';
 import { Chat } from '@core/models';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
-import type { HttpClient } from '../http';
+import type { HttpClient, HttpUrlBuilder } from '../http';
 
 export interface ChatQuery {
   limit?: number;
@@ -126,11 +126,11 @@ export function leaveChat(http: HttpClient, guid: string): Promise<unknown> {
 
 /**
  * Authed URL for a chat's synced "transcript background" JPEG (macOS 26). Consumed by the
- * file downloader (`File.createDownloadTask(url, dest, { headers: http.buildHeaders() })`),
- * so auth stays in the header and off the URL — same pattern as the attachment download URL.
+ * file downloader. Build it and its headers from the SAME `http.snapshotTransport()` so an
+ * account transition cannot mix identities — same pattern as the attachment download URL.
  * Returns 404 when the chat has no background (or its asset isn't available yet).
  */
-export function chatBackgroundUrl(http: HttpClient, guid: string): string {
+export function chatBackgroundUrl(http: HttpUrlBuilder, guid: string): string {
   return http.buildUrl(`/chat/${encodeURIComponent(guid)}/background`);
 }
 

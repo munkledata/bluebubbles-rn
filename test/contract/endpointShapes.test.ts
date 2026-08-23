@@ -13,6 +13,7 @@ import {
 import { ChatList, createChat, getChat, queryChats } from '@core/api/endpoints/chats';
 import { answerFaceTime, createFaceTimeLink, leaveFaceTime } from '@core/api/endpoints/facetime';
 import { registerDevice } from '@core/api/endpoints/fcm';
+import { SYNC_WITH_QUERY } from '@core/config/constants';
 
 /**
  * Endpoint-shape contract gate. The entity-level wire contract (wireContract.test.ts)
@@ -55,12 +56,75 @@ describe('endpoint shapes: list wrappers', () => {
     expect(chats[0]?.guid).toBe('iMessage;-;+15551234567');
   });
 
-  it('queryMessages reads the { messages: [...] } wrapper', async () => {
+  it('queryMessages requests the shared sync projection and parses its metadata', async () => {
     const parsed = MessageList.safeParse(fixture('messageList.gator.json'));
     expect(parsed.success).toBe(true);
-    const msgs = await queryMessages(httpReturning(fixture('messageList.gator.json')), {});
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]?.guid).toBe('p:0/AABBCCDD-1122-3344-5566-77889900AABB');
+    const expectedProjection = [
+      'chats',
+      'chats.participants',
+      'handle',
+      'attachments',
+      'attributedBody',
+      'messageSummaryInfo',
+      'payloadData',
+    ] as const;
+    expect(SYNC_WITH_QUERY).toEqual(expectedProjection);
+
+    const response = {
+      messages: [
+        {
+          guid: 'projection-message',
+          text: 'after',
+          messageSummaryInfo: {
+            editedParts: {
+              '0': [
+                { date: 100, text: 'before' },
+                { date: 200, text: 'after' },
+              ],
+            },
+            retractedParts: [1],
+          },
+          payloadData: {
+            urlData: [{ url: 'https://example.com/page', title: 'Projection title' }],
+          },
+        },
+      ],
+    };
+    let request: { path: string; json: unknown } | undefined;
+    const http = {
+      post: async (path: string, schema: z.ZodType, options?: { json?: unknown }) => {
+        request = { path, json: options?.json };
+        return schema.parseAsync(response);
+      },
+    } as unknown as HttpClient;
+
+    const projectionJoin = jest.spyOn(SYNC_WITH_QUERY, 'join');
+    try {
+      const msgs = await queryMessages(http, {
+        limit: 37,
+        afterTimestamp: 1_234,
+        afterRowId: 5_678,
+      });
+
+      expect(projectionJoin).toHaveBeenCalledWith(',');
+      expect(request).toEqual({
+        path: '/message/query',
+        json: {
+          limit: 37,
+          after: 1_234,
+          afterRowId: 5_678,
+          with: expectedProjection.join(','),
+          sort: 'ASC',
+        },
+      });
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]?.guid).toBe('projection-message');
+      expect(msgs[0]?.messageSummaryInfo?.editedParts?.['0']?.[1]?.text).toBe('after');
+      expect(msgs[0]?.messageSummaryInfo?.retractedParts).toEqual([1]);
+      expect(msgs[0]?.payloadData?.urlData?.[0]?.title).toBe('Projection title');
+    } finally {
+      projectionJoin.mockRestore();
+    }
   });
 
   it('list wrappers tolerate an absent/null key (empty list)', () => {

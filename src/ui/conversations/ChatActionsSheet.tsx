@@ -5,6 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import { setChatArchive, setChatMute, setChatPin, type InboxRow } from '@db/repositories';
 import { deleteChat, markRead, markUnread } from '@/services';
+import {
+  captureRealtimeDeliveryLease,
+  runAccountScopedLocalMutation,
+} from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import { useTheme } from '../theme';
 
@@ -42,6 +46,10 @@ interface ChatActionsSheetProps {
 export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  // Bind every callback created by this sheet instance to the account that rendered it. The
+  // global confirmation dialog can outlive this component; its old Delete callback must not
+  // capture the next account merely because the user presses it after reconnecting.
+  const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
 
   const run = (fn: () => Promise<void>): void => {
     void fn().finally(onClose);
@@ -53,13 +61,13 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
     onClose();
     showDialog(
       'Delete Conversation',
-      `Delete “${t.title}”? This removes it from this device (not from the server).`,
+      'Delete this conversation? This removes it from this device (not from the server).',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => void deleteChat(t.guid),
+          onPress: () => void deleteChat(t.guid, accountLease),
         },
       ],
     );
@@ -87,21 +95,35 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() => (target.unread ? markRead(target.guid) : markUnread(target.guid)))
+                  run(() =>
+                    target.unread
+                      ? markRead(target.guid, accountLease)
+                      : markUnread(target.guid, accountLease),
+                  )
                 }
               />
               <Row
                 label={target.isPinned ? 'Unpin' : 'Pin'}
                 color={theme.color.tint}
                 sep={theme.color.separator}
-                onPress={() => run(() => setChatPin(getDatabase(), target.guid, !target.isPinned))}
+                onPress={() =>
+                  run(() =>
+                    runAccountScopedLocalMutation(accountLease, () =>
+                      setChatPin(getDatabase(), target.guid, !target.isPinned),
+                    ),
+                  )
+                }
               />
               <Row
                 label={target.muted ? 'Unmute' : 'Mute'}
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() => setChatMute(getDatabase(), target.guid, target.muted ? null : 'mute'))
+                  run(() =>
+                    runAccountScopedLocalMutation(accountLease, () =>
+                      setChatMute(getDatabase(), target.guid, target.muted ? null : 'mute'),
+                    ),
+                  )
                 }
               />
               <Row
@@ -109,7 +131,11 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() => setChatArchive(getDatabase(), target.guid, !target.isArchived))
+                  run(() =>
+                    runAccountScopedLocalMutation(accountLease, () =>
+                      setChatArchive(getDatabase(), target.guid, !target.isArchived),
+                    ),
+                  )
                 }
               />
               <Row

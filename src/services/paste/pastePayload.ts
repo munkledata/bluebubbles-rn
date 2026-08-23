@@ -7,13 +7,11 @@ import { DEFAULT_MIME, mimeForExtension, safeShareFileName } from '../share/shar
  * long-press Paste menu, a keyboard image/GIF/sticker commit, or a drag-and-drop.
  *
  * WHY THE NATIVE SIDE ALREADY COPIED THE FILES: Android hands a pasted `content://` uri to the
- * receiving view under a TRANSIENT read grant. For a keyboard commit the grant is released the
- * moment the listener returns (androidx's `InputConnectionCompat` wrapper calls
- * `releasePermission()` for us), so a uri forwarded to JS would already be dead by the time an
- * async copy started. The Kotlin listener therefore stream-copies each item into
- * `<cache>/pasted-in/<batchMs>/` synchronously and emits app-private `file://` paths — the same
- * rule the share-intent path learned the hard way (`docs/SHARE_INTENT_RELIABILITY.md`). This
- * module's only job is to validate and normalize what came back.
+ * receiving view under a TRANSIENT read grant. AndroidX requests that grant and includes its
+ * `InputContentInfo` token in the receive-content payload. The Kotlin listener retains the token,
+ * copies the complete batch on one bounded worker, explicitly releases the grant, and only then
+ * emits app-private `file://` paths. No provider URI crosses into JavaScript. This module's only
+ * job is to validate and normalize what came back.
  *
  * Kept PURE (no expo/react-native imports) so the whole decision table is unit-tested in the node
  * jest project.
@@ -104,13 +102,19 @@ function toAttachment(raw: RawPastedFile, index: number, now: number): SharedAtt
  */
 export function parsePasteEvent(value: unknown, opts: { now: number }): ParsedPaste {
   if (typeof value !== 'object' || value === null) return EMPTY;
-  const payload = value as { tag?: unknown; files?: unknown };
+  const payload = value as { tag?: unknown; files?: unknown; dropped?: unknown };
 
   const tag = typeof payload.tag === 'number' && Number.isFinite(payload.tag) ? payload.tag : null;
   const entries = Array.isArray(payload.files) ? payload.files.slice(0, MAX_PASTED_FILES) : [];
+  const nativeDropped =
+    typeof payload.dropped === 'number' &&
+    Number.isSafeInteger(payload.dropped) &&
+    payload.dropped > 0
+      ? payload.dropped
+      : 0;
 
   const files: SharedAttachment[] = [];
-  let dropped = 0;
+  let dropped = nativeDropped;
   entries.forEach((entry, index) => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
       dropped += 1;

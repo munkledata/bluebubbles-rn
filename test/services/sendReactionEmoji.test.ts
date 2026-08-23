@@ -7,6 +7,7 @@
 import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
+import { logger } from '@core/secure';
 import {
   listReactionsByMessageGuids,
   upsertChats,
@@ -105,6 +106,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
   });
 
   it('the queued retry payload carries the glyph (crash-recovery resend stays an emoji tapback)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seed(db);
     // Fail the live send so the queue row survives with attempts>=1.
@@ -117,5 +119,10 @@ describe('sendReactionMessage — emoji tapbacks', () => {
     );
     const q = one(raw, "SELECT payload FROM outgoing_queue WHERE kind = 'reaction'");
     expect(JSON.parse(q.payload as string)).toMatchObject({ reaction: 'emoji', emoji: '🫡' });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-reaction] failed for chat c1 (code 10004): network down',
+    );
+    warn.mockRestore();
   });
 });

@@ -20,10 +20,22 @@ import React from 'react';
 import { renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { AttachmentRow } from '@db/repositories';
 
+const mockLeafProps = jest.fn();
+const mockProtectPath = jest.fn<{ path: string; release: () => void } | null, [string]>((path) => ({
+  path,
+  release: jest.fn(),
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: { protect: (path: string) => mockProtectPath(path) },
+}));
+
 const marker = (kind: string) => {
   const RN = require('react-native');
   const r = require('react');
-  return () => r.createElement(RN.Text, null, 'CHILD:' + kind);
+  return (props: Record<string, unknown>) => {
+    mockLeafProps(kind, props);
+    return r.createElement(RN.Text, null, 'CHILD:' + kind);
+  };
 };
 
 jest.mock('@ui/attachments/ImageAttachment', () => ({ ImageAttachment: marker('image') }));
@@ -35,6 +47,14 @@ jest.mock('@ui/attachments/AudioAttachment', () => ({ AudioAttachment: marker('a
 
 // eslint-disable-next-line import/first
 import { AttachmentView } from '@ui/attachments/AttachmentView';
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+beforeEach(() => {
+  mockProtectPath.mockReset().mockImplementation((path) => ({ path, release: jest.fn() }));
+});
 
 function makeAtt(mimeType: string | null): AttachmentRow {
   return {
@@ -119,10 +139,27 @@ describe('AttachmentView — MIME dispatch (attachmentKind)', () => {
     expect(screen.getByText('CHILD:file')).toBeTruthy();
   });
 
+  it('withholds a local path from the selected leaf when its pin is refused', async () => {
+    mockProtectPath.mockReturnValueOnce(null);
+    const local = { ...makeAtt('image/jpeg'), localPath: 'file:///cache/retiring.jpg' };
+    await renderWithTheme(<AttachmentView att={local} isFromMe={false} showTail />);
+
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/retiring.jpg');
+    expect(screen.queryByText('CHILD:image')).toBeNull();
+    expect(mockLeafProps.mock.calls.some(([kind]) => kind === 'image')).toBe(false);
+  });
+
   it('falls back to the FileChip for an audio/* type (lazy AudioAttachment chunk rejects under jest → LoadErrorBoundary)', async () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
     await renderKind('audio/mp4');
     // Suspense fallback → then the rejected import trips LoadErrorBoundary → FileChip fallback.
     await waitFor(() => expect(screen.getByText('CHILD:file')).toBeTruthy());
     expect(screen.queryByText('CHILD:audio')).toBeNull();
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      'Caught error:',
+      expect.objectContaining({ code: 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING_FLAG' }),
+      expect.objectContaining({ componentStack: expect.stringContaining('LoadErrorBoundary') }),
+    );
   });
 });

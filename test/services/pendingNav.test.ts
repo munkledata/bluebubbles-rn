@@ -7,6 +7,7 @@
  * stashes the tapped chat here, and the connected layout drains it on the next AppState 'active'.
  */
 import {
+  resetPendingNotification,
   stashPendingNotification,
   takePendingNotification,
 } from '@/services/notifications/pendingNav';
@@ -15,7 +16,7 @@ describe('pendingNav', () => {
   // The module holds a single slot of process-global state; empty it before each test so one
   // test's stash can't leak into the next.
   beforeEach(() => {
-    takePendingNotification();
+    resetPendingNotification();
   });
 
   it('returns null when nothing has been stashed', () => {
@@ -37,6 +38,14 @@ describe('pendingNav', () => {
 
   it('ignores an undefined data bag (a content-less press stashes nothing)', () => {
     stashPendingNotification(undefined);
+    expect(takePendingNotification()).toBeNull();
+  });
+
+  it('drops an old-account tap during session reset', () => {
+    stashPendingNotification({ chatGuid: 'same-guid-on-account-a-and-b' });
+
+    resetPendingNotification();
+
     expect(takePendingNotification()).toBeNull();
   });
 });

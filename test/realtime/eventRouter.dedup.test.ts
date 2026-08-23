@@ -65,7 +65,9 @@ describe('EventRouter dedup-by-GUID', () => {
     };
     const router = new EventRouter(sink);
     const msg = { guid: 'boom', dateCreated: 1 };
-    await expect(router.handle('new-message', msg, 'fcm')).rejects.toThrow('transient sink failure');
+    await expect(router.handle('new-message', msg, 'fcm')).rejects.toThrow(
+      'transient sink failure',
+    );
     expect(events).toHaveLength(0); // first attempt failed
     // A redelivery of the SAME guid must now be reprocessed, not deduped away.
     const retry = await router.handle('new-message', msg, 'socket');

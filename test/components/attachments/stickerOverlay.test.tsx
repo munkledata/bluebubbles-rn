@@ -30,12 +30,26 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import type { AttachmentRow, StickerRow } from '@db/repositories';
 
 const mockDownload = jest.fn();
+const mockAccountLease = { generation: 43, isCurrent: jest.fn(() => true) };
+const mockNextAccountLease = { generation: 44, isCurrent: jest.fn(() => true) };
+const mockCaptureAccountLease = jest.fn(() => mockAccountLease);
 const mockNet = { type: 'WIFI' as string };
+const mockReleaseProtection = jest.fn();
+const mockProtectPath = jest.fn<{ path: string; release: () => void } | null, [string]>((path) => ({
+  path,
+  release: mockReleaseProtection,
+}));
 
 jest.mock('@/services/download', () => ({
-  download: (att: unknown) => mockDownload(att),
+  download: (...args: unknown[]) => mockDownload(...args),
   setAttachmentFetcher: jest.fn(),
   ensureDownloaded: jest.fn(),
+}));
+jest.mock('@/services/realtime/deliveryCoordinator', () => ({
+  captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: { protect: (path: string) => mockProtectPath(path) },
 }));
 jest.mock('expo-image', () => {
   const RN = require('react-native');
@@ -92,6 +106,15 @@ beforeEach(() => {
     autoDownloadOnWifiOnly: false,
   });
   mockNet.type = 'WIFI';
+  mockCaptureAccountLease
+    .mockReset()
+    .mockReturnValueOnce(mockAccountLease)
+    .mockReturnValue(mockNextAccountLease);
+  mockReleaseProtection.mockClear();
+  mockProtectPath.mockReset().mockImplementation((path) => ({
+    path,
+    release: mockReleaseProtection,
+  }));
 });
 
 describe('StickerOverlay — rendering', () => {
@@ -104,6 +127,19 @@ describe('StickerOverlay — rendering', () => {
     const st = makeSticker({ attachment: makeAtt({ localPath: 'file:///s/a.png' }) });
     await renderWithTheme(<StickerOverlay stickers={[st]} isFromMe={false} />);
     expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: 'file:///s/a.png' });
+  });
+
+  it('does not mount or reuse a sticker path when its reader pin is refused', async () => {
+    mockProtectPath.mockReturnValueOnce(null);
+    const st = makeSticker({ attachment: makeAtt({ localPath: 'file:///s/retiring.png' }) });
+    await renderWithTheme(<StickerOverlay stickers={[st]} isFromMe={false} />);
+
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///s/retiring.png');
+    expect(screen.queryByTestId('expo-image')).toBeNull();
+    expect(screen.getByLabelText('Sticker unavailable')).toBeTruthy();
+    fireEvent.press(screen.getByRole('button'));
+    expect(mockDownload).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).not.toHaveBeenCalled();
   });
 
   // Store progress alone must NOT swap the image — that would bypass the reactive localPath write.
@@ -183,11 +219,20 @@ describe('StickerOverlay — interaction', () => {
   });
 
   it('tapping an undownloaded sticker downloads it instead of fading', async () => {
-    await renderWithTheme(<StickerOverlay stickers={[makeSticker()]} isFromMe={false} />);
+    const sticker = makeSticker();
+    const view = await renderWithTheme(<StickerOverlay stickers={[sticker]} isFromMe={false} />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
+    await view.rerender(<StickerOverlay stickers={[{ ...sticker }]} isFromMe={false} />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     fireEvent.press(screen.getByRole('button'));
     await waitFor(() =>
-      expect(mockDownload).toHaveBeenCalledWith(expect.objectContaining({ guid: 'st-att-1' })),
+      expect(mockDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ guid: 'st-att-1' }),
+        'manual',
+        mockAccountLease,
+      ),
     );
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -196,7 +241,11 @@ describe('StickerOverlay — auto-download', () => {
     useFeatureSettingsStore.setState({ autoDownloadAttachments: true });
     await renderWithTheme(<StickerOverlay stickers={[makeSticker()]} isFromMe={false} />);
     await waitFor(() =>
-      expect(mockDownload).toHaveBeenCalledWith(expect.objectContaining({ guid: 'st-att-1' })),
+      expect(mockDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ guid: 'st-att-1' }),
+        'automatic',
+        mockAccountLease,
+      ),
     );
   });
 

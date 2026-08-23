@@ -1,0 +1,23 @@
+{
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "gator-native-ci",
+    "storage_bucket": "gator-native-ci.invalid"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+        "android_client_info": {
+          "package_name": "com.bluegreengatorapps.messages"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "CI_FIXTURE_NOT_A_REAL_FIREBASE_KEY"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}

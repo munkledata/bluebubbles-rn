@@ -8,9 +8,14 @@
 import { materializeSharedFiles, pruneShareCache } from '@/services/share/materializeShare';
 import type { ShareFileIO } from '@/services/share/materializeShare';
 import type { ShareSource } from '@/services/share/shareIntentPayload';
+import { logger } from '@core/secure';
 
 const NOW = 1_700_000_000_000;
 const ROOT = 'file:///cache/shared-in/';
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 function source(over: Partial<ShareSource> = {}): ShareSource {
   return {
@@ -77,6 +82,7 @@ describe('materializeSharedFiles', () => {
   });
 
   it('DROPS a file when the copy resolves but nothing landed (the silent SAF no-op)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const io = fakeIo({ copy: jest.fn(async () => {}) }); // resolves, writes nothing
     const res = await materializeSharedFiles({
       sources: [source()],
@@ -86,9 +92,11 @@ describe('materializeSharedFiles', () => {
     });
     expect(res.files).toEqual([]);
     expect(res.failed).toBe(1);
+    expect(warn).toHaveBeenCalledWith('[share] copy produced no file (application/pdf) — dropping');
   });
 
   it('drops a file that copies as zero bytes', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const io = fakeIo();
     io.copy = jest.fn(async (_from: string, to: string) => {
       io.disk.set(to, 0);
@@ -100,9 +108,11 @@ describe('materializeSharedFiles', () => {
       now: NOW,
     });
     expect(res).toEqual({ files: [], failed: 1 });
+    expect(warn).toHaveBeenCalledWith('[share] copy produced no file (application/pdf) — dropping');
   });
 
   it('keeps the rest of the batch when one file fails', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const io = fakeIo();
     io.copy = jest.fn(async (from: string, to: string) => {
       if (from === 'content://bad') throw new Error("Location isn't readable.");
@@ -120,9 +130,13 @@ describe('materializeSharedFiles', () => {
     expect(res.failed).toBe(1);
     expect(res.files).toHaveLength(1);
     expect(res.files[0]?.name).toBe('good.pdf');
+    expect(warn).toHaveBeenCalledWith(
+      "[share] could not materialize a shared file (application/pdf): Location isn't readable.",
+    );
   });
 
   it('never rejects when the IO layer throws', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const io = fakeIo({
       makeDir: jest.fn(async () => {
         throw new Error('boom');
@@ -131,6 +145,9 @@ describe('materializeSharedFiles', () => {
     await expect(
       materializeSharedFiles({ sources: [source()], cacheRoot: ROOT, io, now: NOW }),
     ).resolves.toEqual({ files: [], failed: 1 });
+    expect(warn).toHaveBeenCalledWith(
+      '[share] could not materialize a shared file (application/pdf): boom',
+    );
   });
 
   it('de-duplicates identical filenames within one share', async () => {
@@ -174,6 +191,7 @@ describe('materializeSharedFiles', () => {
   });
 
   it('fails an already-local file that has gone missing', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const io = fakeIo();
     const res = await materializeSharedFiles({
       sources: [source({ sourceUri: 'file:///cache/gone.jpg', alreadyLocal: true })],
@@ -182,6 +200,7 @@ describe('materializeSharedFiles', () => {
       now: NOW,
     });
     expect(res).toEqual({ files: [], failed: 1 });
+    expect(warn).toHaveBeenCalledWith('[share] local source missing or empty (application/pdf)');
   });
 
   it('does nothing for an empty source list', async () => {

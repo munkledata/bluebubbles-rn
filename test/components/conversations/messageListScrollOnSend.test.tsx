@@ -20,7 +20,12 @@ jest.mock('@shopify/flash-list', () => {
   const ReactLib = require('react');
   const { View } = require('react-native');
   const FlashList = ReactLib.forwardRef(function FlashList(
-    props: { data?: unknown[]; renderItem?: (a: { item: unknown; index: number }) => unknown; keyExtractor?: (i: unknown) => string; onLoad?: (info: { elapsedTimeInMs: number }) => void },
+    props: {
+      data?: unknown[];
+      renderItem?: (a: { item: unknown; index: number }) => unknown;
+      keyExtractor?: (i: unknown) => string;
+      onLoad?: (info: { elapsedTimeInMs: number }) => void;
+    },
     ref: unknown,
   ) {
     ReactLib.useImperativeHandle(ref, () => ({
@@ -53,7 +58,10 @@ jest.mock('@shopify/flash-list', () => {
 jest.mock('@ui/conversations/MessageBubble', () => {
   const ReactLib = require('react');
   const { Text } = require('react-native');
-  return { MessageBubble: (p: { msg?: { text?: string } }) => ReactLib.createElement(Text, null, p.msg?.text ?? '') };
+  return {
+    MessageBubble: (p: { msg?: { text?: string } }) =>
+      ReactLib.createElement(Text, null, p.msg?.text ?? ''),
+  };
 });
 jest.mock('@ui/conversations/FailedMessageSheet', () => ({ FailedMessageSheet: () => null }));
 // Also list-owned + uses safe-area insets (no SafeAreaProvider here) — stub like FailedMessageSheet.

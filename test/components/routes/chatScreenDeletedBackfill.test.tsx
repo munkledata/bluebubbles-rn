@@ -18,7 +18,7 @@
  * `routes/chatScreen.test.tsx`), so the assertions are about the ROUTE's decision.
  */
 import React from 'react';
-import { renderWithTheme, waitFor } from '../support/renderWithTheme';
+import { act, renderWithTheme, waitFor } from '../support/renderWithTheme';
 
 const GUID = 'iMessage;-;+15551234567';
 
@@ -35,14 +35,18 @@ jest.mock('expo-media-library', () => ({
   saveToLibraryAsync: jest.fn(),
 }));
 jest.mock('expo-image', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   return { Image: (props: Record<string, unknown>) => R.createElement(View, props) };
 });
 
 // The whole UI tree as inert probes (keeps the native-pulling real barrel out).
 jest.mock('@ui', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   return {
     useTheme: () => ({ color: { background: '#000000' } }),
@@ -96,6 +100,13 @@ jest.mock('@utils/isDev', () => ({
   isDevServer: () => false,
   DEV_SERVER_ORIGIN: 'https://dev.local',
 }));
+jest.mock('@core/secure', () => {
+  const actual = jest.requireActual('@core/secure');
+  return {
+    ...actual,
+    logger: { ...actual.logger, debug: jest.fn() },
+  };
+});
 
 // The repository layer the mount effect reads. `isChatHiddenByDeletion` is the decision under test.
 const mockIsChatHiddenByDeletion = jest.fn<Promise<boolean>, [unknown, string]>();
@@ -142,10 +153,30 @@ jest.mock('@/services/send', () => ({
 import ChatScreen from '../../../app/(app)/chat/[guid]';
 // eslint-disable-next-line import/first
 import { ensureChatSynced, markRead } from '@/services';
+// eslint-disable-next-line import/first
+import { logger } from '@core/secure';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.clearAllMocks();
   mockIsChatHiddenByDeletion.mockResolvedValue(false);
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 describe('ChatScreen — the on-open backfill honours a local delete', () => {
@@ -155,7 +186,12 @@ describe('ChatScreen — the on-open backfill honours a local delete', () => {
     await renderWithTheme(<ChatScreen />);
 
     // The mount effect definitely ran (same effect, one line up)…
-    await waitFor(() => expect(markRead).toHaveBeenCalledWith(GUID));
+    await waitFor(() =>
+      expect(markRead).toHaveBeenCalledWith(
+        GUID,
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
     expect(mockIsChatHiddenByDeletion.mock.calls.map((c) => c[1])).toEqual([GUID]);
     // …and the whole purged history was NOT restored behind the user's back.
     expect(ensureChatSynced).not.toHaveBeenCalled();
@@ -174,5 +210,25 @@ describe('ChatScreen — the on-open backfill honours a local delete', () => {
 
     // A read that throws must not be a silent way to stop syncing every chat's history.
     await waitFor(() => expect(ensureChatSynced).toHaveBeenCalledWith(GUID));
+    expect(logger.debug).toHaveBeenCalledWith('[chat] tombstone check failed; syncing anyway', {
+      error: 'Error: db closed',
+    });
+  });
+
+  it('does not let an account-A tombstone read start account-B history sync', async () => {
+    const hiddenA = deferred<boolean>();
+    mockIsChatHiddenByDeletion.mockReturnValueOnce(hiddenA.promise);
+    await renderWithTheme(<ChatScreen />);
+    await waitFor(() => expect(mockIsChatHiddenByDeletion).toHaveBeenCalledTimes(1));
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      hiddenA.resolve(false);
+      await hiddenA.promise;
+      await Promise.resolve();
+    });
+
+    expect(ensureChatSynced).not.toHaveBeenCalled();
   });
 });

@@ -1,18 +1,27 @@
 import { create } from 'zustand';
 import { getDatabase } from '@db/database';
-import { kvGet, kvSet } from '@db/repositories';
+import {
+  clearErrorReportsWithinTransaction,
+  kvGet,
+  kvSet,
+  kvSetWithinTransaction,
+} from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
+import type { AppDatabase } from '@db/types';
 import {
   DEFAULT_MAX_CONCURRENT_DOWNLOADS,
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
   setMaxConcurrentDownloads as applyMaxConcurrentDownloads,
 } from '@/services/download/downloadService';
+import { canCommitHydration, reportHydrationError, type HydrationOptions } from '@state/hydration';
 
 /**
  * User-configurable behavior toggles that gate features which were previously hardcoded:
  * Private API client behaviors (typing indicators, read receipts) and attachment auto-download.
- * Persisted in `kv`; each defaults to the app's prior always-on behavior, so an un-hydrated read
- * (before launch hydration) behaves exactly as before. Hydrate at app launch + home mount like the
- * other kv stores (see [[redactedModeStore]] / [[syncSettingsStore]]).
+ * Persisted in `kv`; ordinary feature flags default to the app's prior behavior. Error reporting
+ * is the deliberate exception: it is a versioned, explicit consent choice and fails closed until
+ * hydration proves the user opted in. Hydrate at app launch + home mount alongside
+ * `syncSettingsStore` through the shared hydration registry.
  *
  * Beyond the boolean FLAGS this store also owns the typed VALUE_SETTINGS (currently the
  * parallel-download cap) — a value carries a parse/clamp, a serialize, and an `apply` side-effect
@@ -33,8 +42,7 @@ export type FeatureFlag =
   | 'compactChatList'
   | 'messageNotifications'
   | 'sendSubjectLines'
-  | 'filterUnknownSenders'
-  | 'errorReportingEnabled';
+  | 'filterUnknownSenders';
 
 const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   privateApiEnabled: { key: 'privateApi.enabled', def: true },
@@ -48,10 +56,68 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   messageNotifications: { key: 'notifications.messages', def: true },
   sendSubjectLines: { key: 'privateApi.sendSubjectLines', def: false },
   filterUnknownSenders: { key: 'chatList.filterUnknownSenders', def: false },
-  // Capture app errors + upload them to the server (default ON: capture is cheap and is the point;
-  // uploads are additionally gated on the server advertising `supports_error_log_upload`).
-  errorReportingEnabled: { key: 'diagnostics.errorReporting', def: true },
 };
+
+/** Versioned, device-local record of informed error-reporting consent. */
+export const ERROR_REPORTING_CONSENT_KEY = 'diagnostics.errorReportingConsent.v1';
+/** Pre-consent toggle key. A persisted 0/1 is an existing explicit choice and is migrated once. */
+export const LEGACY_ERROR_REPORTING_KEY = 'diagnostics.errorReporting';
+type ErrorReportingConsentValue = 'granted' | 'denied';
+
+export interface ErrorReportingConsentWriteContext extends HydrationOptions {
+  /** Exact account database captured before this choice joins the serialized tail. */
+  readonly db: AppDatabase;
+  /** Required account/run authority; checked before admission, BEGIN, and COMMIT. */
+  readonly shouldCommit: () => boolean;
+}
+
+// Consent writes are serialized so a rapid Allow -> Off cannot finish out of order. Enabling is
+// persist-first (nothing can be captured or sent before durable consent exists); disabling updates
+// memory immediately so the reporting service can abort an in-flight request, then rolls back only
+// if the durable write fails and no newer choice superseded it.
+let errorReportingPersistenceTail: Promise<void> = Promise.resolve();
+let errorReportingChoiceGeneration = 0;
+
+function canCommitErrorReportingConsentWrite(
+  generation: number,
+  context: ErrorReportingConsentWriteContext,
+): boolean {
+  return generation === errorReportingChoiceGeneration && canCommitHydration(context);
+}
+
+function enqueueErrorReportingConsentWrite(
+  value: ErrorReportingConsentValue,
+  generation: number,
+  context: ErrorReportingConsentWriteContext,
+): Promise<boolean> {
+  const persist = errorReportingPersistenceTail.then(async () => {
+    if (!canCommitErrorReportingConsentWrite(generation, context)) return false;
+    try {
+      await withDbTransaction(
+        context.db,
+        async (transactionContext) => {
+          await kvSetWithinTransaction(transactionContext, ERROR_REPORTING_CONSENT_KEY, value);
+          // Every explicit choice starts from an empty diagnostic queue. This makes both directions
+          // safe when a newer choice supersedes an older queued one: Allow can never authorize rows
+          // whose preceding Off was skipped or failed, while Off cannot commit without its purge.
+          await clearErrorReportsWithinTransaction(transactionContext);
+        },
+        () => canCommitErrorReportingConsentWrite(generation, context),
+      );
+      return true;
+    } catch (error) {
+      // A revoked account/run or superseding choice owns neither an error nor a rollback into the
+      // new state. A DB failure that still belongs to the current choice must keep rejecting.
+      if (!canCommitErrorReportingConsentWrite(generation, context)) return false;
+      throw error;
+    }
+  });
+  errorReportingPersistenceTail = persist.then(
+    () => undefined,
+    () => undefined,
+  );
+  return persist;
+}
 
 /** kv key for the parallel-download cap — byte-identical to the pre-merge store (no migration). */
 export const MAX_CONCURRENT_DOWNLOADS_KEY = 'downloads.maxConcurrent';
@@ -117,13 +183,17 @@ interface FeatureSettingsState {
   maxConcurrentDownloads: number;
   autoDownloadDestination: AutoDownloadDestination;
   hydrated: boolean;
-  hydrate: () => Promise<void>;
+  hydrate: (options?: HydrationOptions) => Promise<void>;
   setFlag: (flag: FeatureFlag, value: boolean) => Promise<void>;
+  setErrorReportingConsent: (
+    value: boolean,
+    context: ErrorReportingConsentWriteContext,
+  ) => Promise<void>;
   setMaxConcurrentDownloads: (n: number) => Promise<void>;
   setAutoDownloadDestination: (dest: AutoDownloadDestination) => Promise<void>;
 }
 
-export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
+export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) => ({
   privateApiEnabled: FLAGS.privateApiEnabled.def,
   sendTypingIndicators: FLAGS.sendTypingIndicators.def,
   sendReadReceipts: FLAGS.sendReadReceipts.def,
@@ -135,37 +205,70 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
   messageNotifications: FLAGS.messageNotifications.def,
   sendSubjectLines: FLAGS.sendSubjectLines.def,
   filterUnknownSenders: FLAGS.filterUnknownSenders.def,
-  errorReportingEnabled: FLAGS.errorReportingEnabled.def,
+  errorReportingEnabled: false,
   maxConcurrentDownloads: VALUE_SETTINGS.maxConcurrentDownloads.def,
   autoDownloadDestination: AUTO_DOWNLOAD_DEST_DEFAULT,
   hydrated: false,
-  hydrate: async () => {
+  hydrate: async (options) => {
+    const consentGenerationAtStart = errorReportingChoiceGeneration;
     try {
       const db = getDatabase();
-      const flagEntries = await Promise.all(
-        (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
-          const v = await kvGet(db, FLAGS[f].key);
-          return [f, v == null ? FLAGS[f].def : v === '1'] as const;
-        }),
-      );
-      const valueEntries = await Promise.all(
-        (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
-          const setting = VALUE_SETTINGS[k];
-          const value = setting.parse(await kvGet(db, setting.key));
-          setting.apply(value); // push the hydrated value into its side-effect (download semaphore)
-          return [k, value] as const;
-        }),
-      );
-      const autoDownloadDestination = parseAutoDownloadDestination(
-        await kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
-      );
-      set({
+      const [flagEntries, valueEntries, autoDownloadRaw, consentRaw, legacyConsentRaw] =
+        await Promise.all([
+          Promise.all(
+            (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
+              const v = await kvGet(db, FLAGS[f].key);
+              return [f, v == null ? FLAGS[f].def : v === '1'] as const;
+            }),
+          ),
+          Promise.all(
+            (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
+              const setting = VALUE_SETTINGS[k];
+              const value = setting.parse(await kvGet(db, setting.key));
+              return [k, value] as const;
+            }),
+          ),
+          kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
+          kvGet(db, ERROR_REPORTING_CONSENT_KEY),
+          kvGet(db, LEGACY_ERROR_REPORTING_KEY),
+        ]);
+      if (!canCommitHydration(options)) return;
+
+      // A versioned value is authoritative. Missing/corrupt consent fails closed; the only legacy
+      // value preserved as ON is an explicit persisted `1` from the old toggle.
+      const errorReportingEnabled =
+        consentRaw === 'granted' || (consentRaw == null && legacyConsentRaw === '1');
+
+      // Seal the migration (including the missing-key -> denied case) without making hydration
+      // depend on this best-effort write. The generation + shared tail prevent it from overwriting
+      // an explicit choice made while the reads were in flight.
+      if (consentRaw == null && consentGenerationAtStart === errorReportingChoiceGeneration) {
+        await enqueueErrorReportingConsentWrite(
+          errorReportingEnabled ? 'granted' : 'denied',
+          consentGenerationAtStart,
+          { db, shouldCommit: () => canCommitHydration(options) },
+        ).catch(() => undefined);
+      }
+      if (!canCommitHydration(options)) return;
+
+      const hydratedState: Partial<FeatureSettingsState> = {
         ...Object.fromEntries(flagEntries),
         ...Object.fromEntries(valueEntries),
-        autoDownloadDestination,
+        autoDownloadDestination: parseAutoDownloadDestination(autoDownloadRaw),
         hydrated: true,
-      } as Partial<FeatureSettingsState>);
-    } catch {
+      };
+      // A newer explicit user choice wins over this older hydration snapshot.
+      if (consentGenerationAtStart === errorReportingChoiceGeneration) {
+        hydratedState.errorReportingEnabled = errorReportingEnabled;
+      }
+
+      // Reads and migration are complete. Apply runtime values and publish Zustand state in one
+      // synchronous ownership window so a retired run cannot change the download gate or settings.
+      if (!canCommitHydration(options)) return;
+      for (const [key, value] of valueEntries) VALUE_SETTINGS[key].apply(value);
+      set(hydratedState);
+    } catch (error) {
+      reportHydrationError(options, error);
       // DB not open yet at launch — re-hydrated at home mount. Leave `hydrated` false.
     }
   },
@@ -175,6 +278,30 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
       await kvSet(getDatabase(), FLAGS[flag].key, value ? '1' : '0');
     } catch {
       // best-effort persist; the in-memory toggle still applies this session
+    }
+  },
+  setErrorReportingConsent: async (value, context) => {
+    if (!canCommitHydration(context)) return;
+    const generation = ++errorReportingChoiceGeneration;
+    const previous = {
+      errorReportingEnabled: get().errorReportingEnabled,
+      hydrated: get().hydrated,
+    };
+    // Revocation is immediate so subscribers can abort transport before storage finishes.
+    if (!value) set({ errorReportingEnabled: false, hydrated: true });
+    try {
+      const committed = await enqueueErrorReportingConsentWrite(
+        value ? 'granted' : 'denied',
+        generation,
+        context,
+      );
+      if (committed && canCommitErrorReportingConsentWrite(generation, context)) {
+        set({ errorReportingEnabled: value, hydrated: true });
+      }
+    } catch (error) {
+      if (!canCommitErrorReportingConsentWrite(generation, context)) return;
+      set(previous);
+      throw error;
     }
   },
   setMaxConcurrentDownloads: async (n) => {
@@ -197,3 +324,9 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set) => ({
     }
   },
 }));
+
+/** Runtime gate used by every capture/upload boundary. Unhydrated always means no consent. */
+export function hasErrorReportingConsent(): boolean {
+  const { errorReportingEnabled, hydrated } = useFeatureSettingsStore.getState();
+  return hydrated && errorReportingEnabled;
+}

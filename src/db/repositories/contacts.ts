@@ -1,6 +1,12 @@
-import { eq, lte, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { emailKey, handleKey, phoneKey } from '@utils/contactMatch';
 import { contacts, handles } from '../schema';
+import {
+  type DbCommitGuard,
+  type DbTransactionContext,
+  runInTransactionContext,
+  withDbTransaction,
+} from '../transaction';
 import type { AppDatabase } from '../types';
 import { chunk } from './_shared';
 
@@ -9,6 +15,21 @@ const HANDLE_IN_CHUNK = 500;
 
 /** Contacts per multi-row INSERT — 7 bound values each, so ~700 per statement. */
 const CONTACT_INSERT_CHUNK = 100;
+
+/** Old-generation rows pruned per transaction. */
+const CONTACT_PRUNE_CHUNK = 500;
+
+/**
+ * Optional statement boundary for account-scoped callers.
+ *
+ * Contact sync can touch thousands of rows. Holding the account teardown barrier around that
+ * entire pass would make Disconnect wait on an unbounded address book, so the service supplies a
+ * runner that admits one short DB transaction at a time. Repository-only callers omit the
+ * admission wrapper, but each write/read boundary below still owns the shared DB coordinator.
+ */
+export type ContactDbTaskRunner = <T>(task: () => Promise<T>) => Promise<T>;
+
+const runContactDbTaskDirect: ContactDbTaskRunner = (task) => task();
 
 // ---- Contacts sync ---------------------------------------------------------
 
@@ -38,7 +59,7 @@ export interface DeviceContact {
  * unique index, so `onConflictDoUpdate({ target: contacts.sourceId })` would raise "ON CONFLICT
  * clause does not match any PRIMARY KEY or UNIQUE constraint". Instead we note the highest id
  * BEFORE writing, insert the whole new generation above it in batches, and delete everything at or
- * below the cutoff in ONE statement. `contacts.id` is AUTOINCREMENT, so ids are never reused and
+ * below the cutoff in bounded batches. `contacts.id` is AUTOINCREMENT, so ids are never reused and
  * the cutoff can never match a row this call just wrote. The worst observable state is a brief
  * window where BOTH generations are present — duplicates, which every reader tolerates (the match
  * index is keyed by phone/email so a duplicate collapses; `searchContactAddresses` de-dupes) — and
@@ -48,9 +69,15 @@ export interface DeviceContact {
  * book, not a missing read. Readers that must not act on emptiness guard it themselves (see
  * `matchContactsToHandles`).
  */
-export async function upsertContacts(db: AppDatabase, items: DeviceContact[]): Promise<number> {
-  const before = await db.all<{ cutoff: number | null }>(
-    sql`SELECT MAX(id) AS cutoff FROM contacts`,
+export async function upsertContacts(
+  db: AppDatabase,
+  items: DeviceContact[],
+  runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
+): Promise<number> {
+  const before = await runDbTask<Array<{ cutoff: number | null }>>(() =>
+    withDbTransaction(db, () =>
+      db.all<{ cutoff: number | null }>(sql`SELECT MAX(id) AS cutoff FROM contacts`),
+    ),
   );
   const cutoff = before[0]?.cutoff ?? null;
 
@@ -58,20 +85,44 @@ export async function upsertContacts(db: AppDatabase, items: DeviceContact[]): P
   // sequential round trips on the single shared connection, which is what made the window seconds
   // long rather than milliseconds.
   for (const batch of chunk(items, CONTACT_INSERT_CHUNK)) {
-    await db.insert(contacts).values(
-      batch.map((c) => ({
-        sourceId: c.sourceId,
-        displayName: c.displayName,
-        givenName: c.givenName,
-        familyName: c.familyName,
-        phones: JSON.stringify(c.phones),
-        emails: JSON.stringify(c.emails),
-        avatar: c.avatar,
-      })),
+    await runDbTask(() =>
+      withDbTransaction(db, async () => {
+        await db.insert(contacts).values(
+          batch.map((c) => ({
+            sourceId: c.sourceId,
+            displayName: c.displayName,
+            givenName: c.givenName,
+            familyName: c.familyName,
+            phones: JSON.stringify(c.phones),
+            emails: JSON.stringify(c.emails),
+            avatar: c.avatar,
+          })),
+        );
+      }),
     );
   }
 
-  if (cutoff != null) await db.delete(contacts).where(lte(contacts.id, cutoff));
+  if (cutoff != null) {
+    let deleted = CONTACT_PRUNE_CHUNK;
+    while (deleted === CONTACT_PRUNE_CHUNK) {
+      deleted = await runDbTask(() =>
+        withDbTransaction(db, async () => {
+          const rows = await db.all<{ id: number }>(sql`
+            DELETE FROM contacts
+             WHERE id IN (
+               SELECT id
+                 FROM contacts
+                WHERE id <= ${cutoff}
+                ORDER BY id
+                LIMIT ${CONTACT_PRUNE_CHUNK}
+             )
+            RETURNING id
+          `);
+          return rows.length;
+        }),
+      );
+    }
+  }
   return items.length;
 }
 
@@ -146,14 +197,27 @@ interface ContactMatch {
  * keyed by last-10-digits, emails lowercased). Shared by the full match pass and
  * the opportunistic per-ingestion link.
  */
-async function buildContactIndex(db: AppDatabase): Promise<Map<string, ContactMatch>> {
-  const contactRows = await db.all<{
-    id: number;
-    displayName: string | null;
-    phones: string | null;
-    emails: string | null;
-    avatar: string | null;
-  }>(sql`SELECT id, display_name AS displayName, phones, emails, avatar FROM contacts`);
+async function buildContactIndex(
+  db: AppDatabase,
+  runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
+): Promise<Map<string, ContactMatch>> {
+  const contactRows = await runDbTask<
+    Array<{
+      id: number;
+      displayName: string | null;
+      phones: string | null;
+      emails: string | null;
+      avatar: string | null;
+    }>
+  >(() =>
+    db.all<{
+      id: number;
+      displayName: string | null;
+      phones: string | null;
+      emails: string | null;
+      avatar: string | null;
+    }>(sql`SELECT id, display_name AS displayName, phones, emails, avatar FROM contacts`),
+  );
 
   const index = new Map<string, ContactMatch>();
   for (const c of contactRows) {
@@ -178,49 +242,80 @@ async function buildContactIndex(db: AppDatabase): Promise<Map<string, ContactMa
  * actually has one — otherwise a photo-only contact would blank out the server
  * name (COALESCE then falls back to the raw address). Returns true if it wrote.
  */
-async function applyContactMatch(
-  db: AppDatabase,
+function applyContactMatchWithinTransaction(
+  context: DbTransactionContext,
   handleId: number,
   match: ContactMatch,
+  expectedContactId: number | null,
 ): Promise<boolean> {
-  if (!match.displayName && !match.avatar) return false;
-  const set: { avatar: string | null; contactId: number; displayName?: string } = {
-    avatar: match.avatar,
-    contactId: match.id,
-  };
-  if (match.displayName) set.displayName = match.displayName;
-  await db.update(handles).set(set).where(eq(handles.id, handleId));
-  return true;
+  return runInTransactionContext(context, async (db) => {
+    if (!match.displayName && !match.avatar) return false;
+    const set: { avatar: string | null; contactId: number; displayName?: string } = {
+      avatar: match.avatar,
+      contactId: match.id,
+    };
+    if (match.displayName) set.displayName = match.displayName;
+    const expectedLink =
+      expectedContactId == null
+        ? isNull(handles.contactId)
+        : eq(handles.contactId, expectedContactId);
+    const rows = await db
+      .update(handles)
+      .set(set)
+      .where(
+        and(
+          eq(handles.id, handleId),
+          expectedLink,
+          // Contact generations are immutable: a row is inserted, then eventually pruned. Its
+          // continued existence proves this match was not read from a neighbour that rolled back.
+          sql`EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${match.id})`,
+        ),
+      )
+      .returning({ id: handles.id });
+    return rows.length > 0;
+  });
 }
 
 /**
- * Opportunistically link freshly-ingested handles to already-synced device
- * contacts (no native call) so a contact's name/avatar wins immediately on
- * message/chat ingestion — without waiting for the next full contacts sync.
- * Reuses the contactMatch keys (last-10-digits phone, lowercased email). Only
- * touches the given addresses; never reverts (the full pass owns un-linking).
- * Returns the count linked. No-op when there are no contacts.
+ * Opportunistically link freshly-ingested handles to already-synced device contacts (no native
+ * call). Reads stay outside the mutex; every possible match owns one short, guarded transaction.
+ * `runDbTask` optionally attaches those transactions to an account-lifecycle admission boundary.
  */
-export async function linkHandlesToContacts(db: AppDatabase, addresses: string[]): Promise<number> {
+export async function linkHandlesToContacts(
+  db: AppDatabase,
+  addresses: string[],
+  runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
+  commitGuard?: DbCommitGuard,
+): Promise<number> {
   if (addresses.length === 0) return 0;
   const index = await buildContactIndex(db);
   if (index.size === 0) return 0;
 
-  // Scope the handles scan to exactly the addresses being ingested, and skip rows that
-  // are already linked — in SQL — so this never rebuilds the whole handle index for
-  // unrelated chats. The IN-list is chunked to stay under SQLite's bound-variable limit.
+  // Keep both potentially large reads outside the writer queue. Each actual match below owns one
+  // short transaction and rechecks its optimistic contact/handle facts before updating.
   let linked = 0;
   for (const batch of chunk([...new Set(addresses)], HANDLE_IN_CHUNK)) {
     const inList = sql.join(
-      batch.map((a) => sql`${a}`),
+      batch.map((address) => sql`${address}`),
       sql`, `,
     );
     const handleRows = await db.all<{ id: number; address: string }>(
       sql`SELECT id, address FROM handles WHERE address IN (${inList}) AND contact_id IS NULL`,
     );
-    for (const h of handleRows) {
-      const match = index.get(handleKey(h.address));
-      if (match && (await applyContactMatch(db, h.id, match))) linked += 1;
+    for (const handle of handleRows) {
+      const match = index.get(handleKey(handle.address));
+      if (
+        match &&
+        (await runDbTask(() =>
+          withDbTransaction(
+            db,
+            (context) => applyContactMatchWithinTransaction(context, handle.id, match, null),
+            commitGuard,
+          ),
+        ))
+      ) {
+        linked += 1;
+      }
     }
   }
   return linked;
@@ -232,8 +327,11 @@ export async function linkHandlesToContacts(db: AppDatabase, addresses: string[]
  * contact name then wins everywhere (all titles resolve via h.display_name) and
  * the reactive 'handles' watchers re-render. Returns the count updated.
  */
-export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
-  const index = await buildContactIndex(db);
+export async function matchContactsToHandles(
+  db: AppDatabase,
+  runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
+): Promise<number> {
+  const index = await buildContactIndex(db, runDbTask);
   // An empty contacts read means "we don't know", not "every contact was deleted". Without this
   // the revert branch below walks EVERY linked handle and writes display_name = serverDisplayName
   // — which this server never sends (the wire handle DTO carries only address / country /
@@ -246,28 +344,59 @@ export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
   // blanking every name on the device.
   if (index.size === 0) return 0;
 
-  const handleRows = await db.all<{
-    id: number;
-    address: string;
-    contactId: number | null;
-    serverDisplayName: string | null;
-  }>(
-    sql`SELECT id, address, contact_id AS contactId, server_display_name AS serverDisplayName FROM handles`,
+  const handleRows = await runDbTask<
+    Array<{
+      id: number;
+      address: string;
+      contactId: number | null;
+      serverDisplayName: string | null;
+    }>
+  >(() =>
+    db.all<{
+      id: number;
+      address: string;
+      contactId: number | null;
+      serverDisplayName: string | null;
+    }>(
+      sql`SELECT id, address, contact_id AS contactId, server_display_name AS serverDisplayName FROM handles`,
+    ),
   );
   let updated = 0;
   for (const h of handleRows) {
     const match = index.get(handleKey(h.address));
-    if (match && (await applyContactMatch(db, h.id, match))) {
+    const wroteMatch = match
+      ? await runDbTask(() =>
+          withDbTransaction(db, (context) =>
+            applyContactMatchWithinTransaction(context, h.id, match, h.contactId),
+          ),
+        )
+      : false;
+    if (wroteMatch) {
       updated += 1;
     } else if (h.contactId != null) {
       // No useful match anymore (contact removed, or stripped of name + photo) but
       // the handle is still linked → revert to the server name (or the raw address
       // if the server never sent one) + clear avatar.
-      await db
-        .update(handles)
-        .set({ displayName: h.serverDisplayName, avatar: null, contactId: null })
-        .where(eq(handles.id, h.id));
-      updated += 1;
+      const staleContactId = h.contactId;
+      const reverted = await runDbTask(() =>
+        withDbTransaction(db, async () => {
+          const rows = await db
+            .update(handles)
+            .set({ displayName: h.serverDisplayName, avatar: null, contactId: null })
+            .where(
+              and(
+                eq(handles.id, h.id),
+                eq(handles.contactId, staleContactId),
+                // If this contact reappears after we queue, the missing row came from an
+                // uncommitted delete that rolled back. Preserve the still-valid link.
+                sql`NOT EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${staleContactId})`,
+              ),
+            )
+            .returning({ id: handles.id });
+          return rows.length > 0;
+        }),
+      );
+      if (reverted) updated += 1;
     }
   }
   return updated;
@@ -278,24 +407,38 @@ export async function matchContactsToHandles(db: AppDatabase): Promise<number> {
 /**
  * Handles with NO avatar yet (device sync didn't find a photo) + a non-empty address —
  * candidates for a server-sourced contact avatar. Read-only; never touches device photos.
+ * `rowLimit`, when present, is enforced by SQLite before any handle rows are materialized.
  */
 export async function handlesNeedingAvatar(
   db: AppDatabase,
+  rowLimit?: number,
 ): Promise<{ id: number; address: string }[]> {
+  if (rowLimit !== undefined && (!Number.isSafeInteger(rowLimit) || rowLimit <= 0)) return [];
   return db.all<{ id: number; address: string }>(
-    sql`SELECT id, address FROM handles WHERE avatar IS NULL AND address <> ''`,
+    sql`SELECT id, address FROM handles
+        WHERE avatar IS NULL AND address <> ''
+        ORDER BY id ASC
+        LIMIT ${rowLimit ?? -1}`,
   );
 }
 
 /**
  * Write a server-sourced avatar uri onto a handle (only the photo — not display_name /
  * contact_id, which stay device-contact-owned). Used by the server-avatar backfill for
- * handles a device contact didn't supply a photo for.
+ * handles a device contact didn't supply a photo for. The null guard is checked again in the
+ * write, after the download, so a device-contact photo that arrived meanwhile always wins.
  */
 export async function setHandleServerAvatar(
   db: AppDatabase,
   handleId: number,
   uri: string,
-): Promise<void> {
-  await db.update(handles).set({ avatar: uri }).where(eq(handles.id, handleId));
+): Promise<boolean> {
+  return withDbTransaction(db, async () => {
+    const rows = await db
+      .update(handles)
+      .set({ avatar: uri })
+      .where(and(eq(handles.id, handleId), isNull(handles.avatar)))
+      .returning({ id: handles.id });
+    return rows.length > 0;
+  });
 }

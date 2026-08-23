@@ -1,5 +1,5 @@
 import { SendAck } from './messages';
-import type { HttpClient } from '../http';
+import type { HttpClient, HttpUrlBuilder } from '../http';
 
 /**
  * Authed URL for downloading an attachment's binary (consumed by the file downloader).
@@ -9,7 +9,11 @@ import type { HttpClient } from '../http';
  * branch on the owning chat/message service. The guid is the attachment guid (= the RCS mediaID);
  * everything else (header auth, streaming) is identical.
  */
-export function attachmentDownloadUrl(http: HttpClient, guid: string, service?: string): string {
+export function attachmentDownloadUrl(
+  http: HttpUrlBuilder,
+  guid: string,
+  service?: string,
+): string {
   const enc = encodeURIComponent(guid);
   return http.buildUrl(
     service === 'RCS' ? `/rcs/attachment/${enc}/download` : `/attachment/${enc}/download`,

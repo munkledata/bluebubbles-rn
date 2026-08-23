@@ -46,8 +46,7 @@ function tableChangedCallback(): () => void {
   // `mockReactiveExecute` is declared with no parameter types, so its recorded calls type as an
   // empty tuple — re-type the recorded argument to read the callback back out.
   const call = mockReactiveExecute.mock.calls[0] as unknown as
-    | [{ callback?: () => void }]
-    | undefined;
+    [{ callback?: () => void }] | undefined;
   const arg = call?.[0];
   if (typeof arg?.callback !== 'function') {
     throw new Error('reactiveExecute was never given a callback');

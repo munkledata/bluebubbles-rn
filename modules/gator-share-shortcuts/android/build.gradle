@@ -6,7 +6,7 @@ plugins {
 group = 'com.gator.shareshortcuts'
 version = '0.1.0'
 
-// androidx.core (ShortcutManagerCompat / Person / IconCompat) is on the classpath transitively:
+// androidx.core (ShortcutManagerCompat) is on the classpath transitively:
 // expo-modules-core exposes `api "androidx.core:core-ktx"`, so no explicit dependency is needed.
 android {
   namespace "expo.modules.gatorshareshortcuts"

@@ -363,8 +363,8 @@ export const Composer = React.memo(function Composer({
     : '';
   const replySnippet = replyTo
     ? replyTo.text ||
-      // Genmoji: prefer the natural-language description over the generic label. The reply bar shows
-      // the message the user is actively replying to (already raw, unredacted), so no masking here.
+      // Genmoji: prefer its natural-language description over the generic attachment label. The
+      // reply bar shows the exact text or description from the message the user selected.
       (replyTo.hasAttachments === 1 ? replyTo.attachmentDescription?.trim() || '📎 Attachment' : '')
     : '';
 

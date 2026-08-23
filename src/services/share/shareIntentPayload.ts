@@ -1,8 +1,9 @@
 import { safePathSegment } from '@/services/download/pathSafety';
 
 /**
- * Pure parser for the RAW Android share-intent payload (`ExpoShareIntentModule`'s `onChange`
- * event value), deliberately bypassing the library's own `parseShareIntent`.
+ * Historical, dormant pure parser for the former raw Android share-intent payload. It retains the
+ * provider/path edge-case evidence in node tests, but no installed module or production listener
+ * supplies it while IPC-01 is fail-closed.
  *
  * WHY WE READ THE RAW PAYLOAD: the library's parser collapses each file to
  * `path: file.path || 'file://'+file.filePath || file.contentUri` and then DROPS `contentUri`.
@@ -14,8 +15,7 @@ import { safePathSegment } from '@/services/download/pathSafety';
  * which our own ContentResolver-backed copy can read. Images escaped this only because the
  * library already stream-copies MediaStore uris into its cache.
  *
- * This module is PURE (no expo/react-native imports) so the whole decision table is unit-tested
- * in the node jest project. The copying lives in `materializeShare.ts`.
+ * This module is PURE (no expo/react-native imports) so the old decision table remains testable.
  */
 
 /** One file entry exactly as `ExpoShareIntentModule.getFileInfo` emits it — every field is

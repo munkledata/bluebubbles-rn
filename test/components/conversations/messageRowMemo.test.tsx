@@ -17,16 +17,33 @@
  * import graph out of this test entirely.
  */
 import React, { useCallback } from 'react';
-import { renderWithTheme, act } from '../support/renderWithTheme';
+import { View } from 'react-native';
+import { act, renderWithTheme, screen } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 
 const mockMessageBubbleRender = jest.fn();
+const mockMessageSwipeWrapperRender = jest.fn();
 jest.mock('@ui/conversations/MessageBubble', () => ({
   MessageBubble: () => {
     mockMessageBubbleRender();
     return null;
   },
 }));
+jest.mock('@ui/conversations/MessageSwipeWrapper', () => {
+  const ReactLib = jest.requireActual<typeof import('react')>('react');
+  return {
+    MessageSwipeWrapper: ({
+      children,
+      onReply,
+    }: {
+      children: React.ReactNode;
+      onReply?: () => void;
+    }) => {
+      mockMessageSwipeWrapperRender(onReply);
+      return ReactLib.createElement(ReactLib.Fragment, null, children);
+    },
+  };
+});
 
 // eslint-disable-next-line import/first
 import { MessageRow } from '@ui/conversations/MessageRow';
@@ -68,6 +85,55 @@ function makeMsg(over: Partial<EnrichedMessage> = {}): EnrichedMessage {
 
 const renderCount = (): number => mockMessageBubbleRender.mock.calls.length;
 
+const PRIVATE_SENDER = 'private-row-sender-a31d';
+const PRIVATE_AVATAR = 'file:///private-row-avatar-64e9.jpg';
+const PRIVATE_ACTOR = 'private-event-actor-b80c';
+const PRIVATE_OTHER = 'private-event-member-d197';
+const PRIVATE_GROUP_TITLE = 'private-event-title-993a';
+
+function latestSwipeReply(): (() => void) | undefined {
+  const calls = mockMessageSwipeWrapperRender.mock.calls;
+  return calls.length > 0 ? (calls[calls.length - 1]?.[0] as (() => void) | undefined) : undefined;
+}
+
+function IdentityRows({ onSwipeReply }: { onSwipeReply?: (msg: EnrichedMessage) => void }) {
+  const groupMessage = makeMsg({
+    guid: 'group-message',
+    senderName: PRIVATE_SENDER,
+    senderAddress: 'private-row-address@example.invalid',
+    senderAvatar: PRIVATE_AVATAR,
+  });
+  const addEvent = makeMsg({
+    guid: 'add-event',
+    itemType: 1,
+    groupActionType: 0,
+    senderName: PRIVATE_ACTOR,
+    otherHandleName: PRIVATE_OTHER,
+  });
+  const renameEvent = makeMsg({
+    guid: 'rename-event',
+    itemType: 2,
+    groupActionType: 0,
+    senderName: PRIVATE_ACTOR,
+    groupTitle: PRIVATE_GROUP_TITLE,
+  });
+
+  return (
+    <View>
+      <MessageRow
+        msg={groupMessage}
+        older={null}
+        newer={null}
+        isGroup
+        isLastOutgoing={false}
+        onSwipeReply={onSwipeReply}
+      />
+      <MessageRow msg={addEvent} older={null} newer={null} isGroup isLastOutgoing={false} />
+      <MessageRow msg={renameEvent} older={null} newer={null} isGroup isLastOutgoing={false} />
+    </View>
+  );
+}
+
 /** Parent that passes STABLE (useCallback) handlers — the correct pattern from MessageList. */
 function StableParent({ msg }: { msg: EnrichedMessage }): React.JSX.Element {
   const onRetry = useCallback((_m: EnrichedMessage) => {}, []);
@@ -102,6 +168,11 @@ function UnstableParent({ msg }: { msg: EnrichedMessage }): React.JSX.Element {
 }
 
 describe('MessageRow memo contract', () => {
+  beforeEach(() => {
+    mockMessageBubbleRender.mockClear();
+    mockMessageSwipeWrapperRender.mockClear();
+  });
+
   it('with STABLE callbacks: a same-message parent re-render does NOT re-render the row', async () => {
     const msgA = makeMsg();
     const view = await renderWithTheme(<StableParent msg={msgA} />);
@@ -138,5 +209,58 @@ describe('MessageRow memo contract', () => {
       view.rerender(<UnstableParent msg={msgA} />);
     });
     expect(renderCount()).toBe(2);
+  });
+
+  it('does not expose swipe-to-reply for a normal sent row that still has a temp identity', async () => {
+    const onSwipeReply = jest.fn();
+    const temp = makeMsg({
+      guid: 'temp-guidless-ack',
+      sendState: 'sent',
+      itemType: null,
+      groupActionType: null,
+    });
+
+    await renderWithTheme(
+      <MessageRow
+        msg={temp}
+        older={null}
+        newer={null}
+        isGroup={false}
+        isLastOutgoing={false}
+        onSwipeReply={onSwipeReply}
+      />,
+    );
+
+    expect(mockMessageSwipeWrapperRender).toHaveBeenCalledTimes(1);
+    expect(latestSwipeReply()).toBeUndefined();
+    expect(onSwipeReply).not.toHaveBeenCalled();
+  });
+
+  it('renders exact sender, avatar, group-event identities, and swipe reply target', async () => {
+    const onSwipeReply = jest.fn();
+    const view = await renderWithTheme(<IdentityRows onSwipeReply={onSwipeReply} />);
+    const tree = JSON.stringify(view.toJSON());
+
+    for (const canary of [
+      PRIVATE_SENDER,
+      PRIVATE_AVATAR,
+      PRIVATE_ACTOR,
+      PRIVATE_OTHER,
+      PRIVATE_GROUP_TITLE,
+    ]) {
+      expect(tree).toContain(canary);
+    }
+    expect(
+      screen.getByText(`${PRIVATE_ACTOR} added ${PRIVATE_OTHER} to the conversation.`),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(`${PRIVATE_ACTOR} named the conversation \"${PRIVATE_GROUP_TITLE}\".`),
+    ).toBeTruthy();
+    const swipeReply = latestSwipeReply();
+    expect(swipeReply).toEqual(expect.any(Function));
+    swipeReply?.();
+    expect(onSwipeReply).toHaveBeenCalledWith(
+      expect.objectContaining({ guid: 'group-message', senderName: PRIVATE_SENDER }),
+    );
   });
 });

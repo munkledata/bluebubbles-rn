@@ -13,6 +13,7 @@
  * synthetic events. On-device layout/timing is covered by the manual checklist.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 
 // `mock`-prefixed so jest's hoisted factory may reference them (temporal-dead-zone rule).
 const mockScrollToEnd = jest.fn();
@@ -74,6 +75,10 @@ import { MessageList } from '@ui/conversations/MessageList';
 import { act, fireEvent, renderWithTheme, waitFor } from '../support/renderWithTheme';
 // eslint-disable-next-line import/first
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+// eslint-disable-next-line import/first
+import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
+// eslint-disable-next-line import/first
+import { darkTheme } from '@ui/theme/tokens';
 
 function make(over: Partial<EnrichedMessage> = {}): EnrichedMessage {
   return {
@@ -138,7 +143,9 @@ const drive = async (name: string, ...args: unknown[]): Promise<void> => {
 async function mountAtBottom(
   msgs: EnrichedMessage[],
 ): Promise<Awaited<ReturnType<typeof renderWithTheme>>> {
-  const result = await renderWithTheme(<MessageList chatGuid={GUID} isGroup={false} messages={msgs} />);
+  const result = await renderWithTheme(
+    <MessageList chatGuid={GUID} isGroup={false} messages={msgs} />,
+  );
   await waitFor(() => expect(mockScrollToEnd).toHaveBeenCalled());
   mockScrollToEnd.mockClear();
   return result;
@@ -242,7 +249,10 @@ describe('MessageList — pinned-to-bottom convergence', () => {
     await act(async () => {
       rerender(<MessageList chatGuid={GUID} isGroup={false} messages={[in2, in1, ...msgs]} />);
     });
-    expect(await findByText('2')).toBeTruthy();
+    const badgeText = await findByText('2');
+    const badgeStyle = StyleSheet.flatten(badgeText.props.style);
+    expect(badgeStyle.color).toBe(readableTextOn(darkTheme.color.tint));
+    expect(contrastRatio(badgeStyle.color, darkTheme.color.tint)).toBeGreaterThanOrEqual(4.5);
     expect(mockScrollToEnd).not.toHaveBeenCalled(); // never yanked the reader
 
     await drive('onScroll', scrollEvent(0)); // back at the bottom

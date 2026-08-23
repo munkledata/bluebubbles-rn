@@ -99,9 +99,9 @@ describe('parseRawShareEvent — source selection', () => {
   });
 
   it('drops an entry with neither a contentUri nor a filePath', () => {
-    expect(parse({ files: [{ fileName: 'ghost.pdf', mimeType: 'application/pdf' }] }).files).toEqual(
-      [],
-    );
+    expect(
+      parse({ files: [{ fileName: 'ghost.pdf', mimeType: 'application/pdf' }] }).files,
+    ).toEqual([]);
   });
 });
 
@@ -197,12 +197,8 @@ describe('safeShareFileName', () => {
   });
 
   it('strips control characters but keeps ordinary spaces', () => {
-    expect(safeShareFileName('ok\u0007name.pdf', 'content://x/1', 'x', 0, NOW)).toBe(
-      'okname.pdf',
-    );
-    expect(safeShareFileName('my report.pdf', 'content://x/1', 'x', 0, NOW)).toBe(
-      'my report.pdf',
-    );
+    expect(safeShareFileName('ok\u0007name.pdf', 'content://x/1', 'x', 0, NOW)).toBe('okname.pdf');
+    expect(safeShareFileName('my report.pdf', 'content://x/1', 'x', 0, NOW)).toBe('my report.pdf');
   });
 });
 
@@ -229,9 +225,7 @@ describe('mime <-> extension', () => {
 
 describe('text sharing', () => {
   it('prefers an embedded URL over the surrounding text', () => {
-    expect(parse({ text: 'look at https://example.com/x now' }).text).toBe(
-      'https://example.com/x',
-    );
+    expect(parse({ text: 'look at https://example.com/x now' }).text).toBe('https://example.com/x');
   });
 
   it('keeps plain text when there is no URL', () => {

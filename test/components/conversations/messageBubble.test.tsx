@@ -16,42 +16,110 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen, fireEvent, act } from '../support/renderWithTheme';
-import type { AttachmentRow, MessageRow, MessagePreview, ReactionRow } from '@db/repositories';
+import type {
+  AttachmentRow,
+  MessageRow,
+  MessagePreview,
+  ReactionRow,
+  StickerRow,
+} from '@db/repositories';
 import { reactionMeta } from '@core/reactions/reactionType';
 
 // AttachmentView pulls in the download/API services (and transitively `ky`, an ESM module the
-// component-project transform doesn't process). These tests render text bubbles only — no
-// attachments — so stub it to a no-op to keep the module graph off the native/ESM services.
+// component-project transform doesn't process). Observable probe stubs keep that native graph out
+// while positively proving the exact attachment/sticker rows reach their mounted children.
 jest.mock('@ui/attachments', () => {
   const React = require('react');
   const { Text } = require('react-native');
   return {
     // Distinguishable markers so the stack-vs-gallery routing is assertable.
-    AttachmentView: () => React.createElement(Text, null, 'ATT'),
-    AttachmentGalleryGrid: () => React.createElement(Text, null, 'GRID'),
+    AttachmentView: jest.fn(({ att }: { att: Record<string, unknown> }) =>
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(Text, null, 'ATT'),
+        React.createElement(
+          Text,
+          { accessibilityLabel: 'Attachment probe ' + attachmentCanary(att) },
+          'ATT-PROBE:' + attachmentCanary(att),
+        ),
+      ),
+    ),
+    AttachmentGalleryGrid: jest.fn(({ atts }: { atts: Record<string, unknown>[] }) =>
+      React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(Text, null, 'GRID'),
+        React.createElement(
+          Text,
+          { accessibilityLabel: 'Gallery probe ' + atts.map(attachmentCanary).join('|') },
+          'GRID-PROBE:' + atts.map(attachmentCanary).join('|'),
+        ),
+      ),
+    ),
     // A marker carrying the COUNT so wiring is assertable without rendering the real overlay
     // (which pulls @/services/download -> ky, ESM and untransformed in this project).
-    StickerOverlay: ({ stickers }: { stickers: unknown[] }) =>
-      React.createElement(Text, null, 'STICKER:' + stickers.length),
+    StickerOverlay: jest.fn(({ stickers }: { stickers: Array<Record<string, unknown>> }) => {
+      const canary = stickers
+        .map((sticker) => {
+          const attachment = (sticker.attachment ?? {}) as Record<string, unknown>;
+          return `${String(sticker.stickerMessageGuid ?? '')}|${attachmentCanary(attachment)}`;
+        })
+        .join('|');
+      return React.createElement(
+        React.Fragment,
+        null,
+        React.createElement(Text, null, 'STICKER:' + stickers.length),
+        React.createElement(
+          Text,
+          { accessibilityLabel: 'Sticker probe ' + canary },
+          'STICKER-PROBE:' + canary,
+        ),
+      );
+    }),
   };
+
+  function attachmentCanary(att: Record<string, unknown>): string {
+    return [att.guid, att.transferName, att.localPath, att.blurhash]
+      .filter((value) => value != null)
+      .map(String)
+      .join('|');
+  }
 });
+
+// Keep the URL-preview hook observable without opening the native DB from this rendered component
+// suite.
+jest.mock('@features/conversations/useUrlPreview', () => ({
+  useUrlPreview: jest.fn(() => null),
+}));
 
 // eslint-disable-next-line import/first
 import { MessageBubble } from '@ui/conversations/MessageBubble';
 // eslint-disable-next-line import/first
-import { darkTheme } from '@ui/theme/tokens';
+import { darkTheme, gatorTheme } from '@ui/theme/tokens';
 // eslint-disable-next-line import/first
-import { useRedactedModeStore } from '@state/redactedModeStore';
+import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
+// eslint-disable-next-line import/first
+import { useUrlPreview } from '@features/conversations/useUrlPreview';
 
-// Redacted mode is module-global (zustand) — reset OFF before each test so the redaction test below
-// can't leak into the others (AGENTS.md: reset stores in beforeEach, never afterEach).
+const attachmentModuleMocks = jest.requireMock('@ui/attachments') as {
+  AttachmentView: jest.Mock;
+  AttachmentGalleryGrid: jest.Mock;
+  StickerOverlay: jest.Mock;
+};
+const mockUseUrlPreview = useUrlPreview as jest.MockedFunction<typeof useUrlPreview>;
+
 beforeEach(() => {
-  useRedactedModeStore.setState({ enabled: false, hydrated: false });
+  attachmentModuleMocks.AttachmentView.mockClear();
+  attachmentModuleMocks.AttachmentGalleryGrid.mockClear();
+  attachmentModuleMocks.StickerOverlay.mockClear();
+  mockUseUrlPreview.mockClear();
 });
 
 type BubbleMsg = MessageRow & {
-  attachments?: never[];
+  attachments?: AttachmentRow[];
   reactions?: ReactionRow[];
+  stickers?: StickerRow[];
   replyPreview?: MessagePreview | null;
 };
 
@@ -99,13 +167,329 @@ function mentionBody(full: string, start: number, length: number): string {
   ]);
 }
 
+const PRIVATE_PLAIN = 'private-plain-body-a19f';
+const PRIVATE_ATTRIBUTED_TEXT = 'private-attributed-body-b27e';
+const PRIVATE_ATTRIBUTED_LINK = 'https://private-link-b27e.example.com/story';
+const PRIVATE_ATTRIBUTED = `${PRIVATE_ATTRIBUTED_TEXT} ${PRIVATE_ATTRIBUTED_LINK}`;
+const PRIVATE_SUBJECT = 'private-subject-c35a';
+const PRIVATE_TOMBSTONE_SENDER = 'private-tombstone-sender-d48c';
+const PRIVATE_REPLY_SENDER = 'private-reply-sender-e51b';
+const PRIVATE_REPLY_TEXT = 'private-reply-text-f63d';
+const PRIVATE_REPLY_ATTACHMENT = 'private-reply-attachment-g74e';
+const PRIVATE_PAYLOAD_TITLE = 'private-payload-title-h86f';
+const PRIVATE_PAYLOAD_SUMMARY = 'private-payload-summary-j97a';
+const PRIVATE_PAYLOAD_SITE = 'private-payload-site-k08b.example.com';
+const PRIVATE_ATTACHMENT_GUID = 'private-attachment-guid-m29d';
+const PRIVATE_ATTACHMENT_NAME = 'private-attachment-name-n31e.pdf';
+const PRIVATE_ATTACHMENT_URI = 'file:///private-attachment-path-p42f.pdf';
+const PRIVATE_ATTACHMENT_BLURHASH = 'private-attachment-blurhash-q53a';
+const PRIVATE_GALLERY_GUID_ONE = 'private-gallery-guid-one-r54b';
+const PRIVATE_GALLERY_URI_ONE = 'file:///private-gallery-path-one-s65c.jpg';
+const PRIVATE_GALLERY_BLURHASH_ONE = 'private-gallery-blurhash-one-t76d';
+const PRIVATE_GALLERY_GUID_TWO = 'private-gallery-guid-two-u87e';
+const PRIVATE_GALLERY_URI_TWO = 'file:///private-gallery-path-two-v98f.jpg';
+const PRIVATE_GALLERY_BLURHASH_TWO = 'private-gallery-blurhash-two-w09a';
+const PRIVATE_STICKER_GUID = 'private-sticker-guid-r64b';
+const PRIVATE_STICKER_ATTACHMENT_GUID = 'private-sticker-attachment-guid-s75c';
+const PRIVATE_STICKER_URI = 'file:///private-sticker-path-t86d.png';
+const PRIVATE_STICKER_BLURHASH = 'private-sticker-blurhash-u97e';
+const PRIVATE_REACTION_EMOJI = '🧬🦄';
+const PRIVATE_BIG_EMOJI = '🫥🩼';
+
+const PRIVATE_PAYLOAD = JSON.stringify({
+  urlData: [
+    {
+      url: 'https://private-payload-v08f.example.com/story',
+      originalUrl: 'https://private-payload-v08f.example.com/story',
+      title: PRIVATE_PAYLOAD_TITLE,
+      summary: PRIVATE_PAYLOAD_SUMMARY,
+      siteName: PRIVATE_PAYLOAD_SITE,
+    },
+  ],
+});
+
+const PRIVATE_ATTACHMENT = {
+  guid: PRIVATE_ATTACHMENT_GUID,
+  mimeType: 'application/pdf',
+  transferName: PRIVATE_ATTACHMENT_NAME,
+  localPath: PRIVATE_ATTACHMENT_URI,
+  blurhash: PRIVATE_ATTACHMENT_BLURHASH,
+} as AttachmentRow;
+
+const PRIVATE_GALLERY_ATTACHMENTS = [
+  {
+    guid: PRIVATE_GALLERY_GUID_ONE,
+    mimeType: 'image/jpeg',
+    localPath: PRIVATE_GALLERY_URI_ONE,
+    blurhash: PRIVATE_GALLERY_BLURHASH_ONE,
+  } as AttachmentRow,
+  {
+    guid: PRIVATE_GALLERY_GUID_TWO,
+    mimeType: 'image/png',
+    localPath: PRIVATE_GALLERY_URI_TWO,
+    blurhash: PRIVATE_GALLERY_BLURHASH_TWO,
+  } as AttachmentRow,
+];
+
+const PRIVATE_STICKER = {
+  stickerMessageGuid: PRIVATE_STICKER_GUID,
+  stickerMessageId: 901,
+  targetGuid: 'privacy-sticker-target',
+  isFromMe: 0,
+  dateCreated: 1_000,
+  attachment: {
+    guid: PRIVATE_STICKER_ATTACHMENT_GUID,
+    mimeType: 'image/png',
+    localPath: PRIVATE_STICKER_URI,
+    blurhash: PRIVATE_STICKER_BLURHASH,
+  } as AttachmentRow,
+} satisfies StickerRow;
+
+const PRIVATE_REACTION = {
+  targetGuid: 'privacy-plain',
+  baseType: 'emoji',
+  emoji: PRIVATE_REACTION_EMOJI,
+  isFromMe: 0,
+  senderName: 'private-reaction-sender',
+  dateCreated: 1_000,
+} satisfies ReactionRow;
+
+const PRIVATE_CANARIES = [
+  PRIVATE_PLAIN,
+  PRIVATE_ATTRIBUTED_TEXT,
+  PRIVATE_ATTRIBUTED_LINK,
+  PRIVATE_SUBJECT,
+  PRIVATE_TOMBSTONE_SENDER,
+  PRIVATE_REPLY_SENDER,
+  PRIVATE_REPLY_TEXT,
+  PRIVATE_REPLY_ATTACHMENT,
+  PRIVATE_PAYLOAD_TITLE,
+  PRIVATE_PAYLOAD_SUMMARY,
+  PRIVATE_PAYLOAD_SITE,
+  PRIVATE_ATTACHMENT_GUID,
+  PRIVATE_ATTACHMENT_NAME,
+  PRIVATE_ATTACHMENT_URI,
+  PRIVATE_ATTACHMENT_BLURHASH,
+  PRIVATE_GALLERY_GUID_ONE,
+  PRIVATE_GALLERY_URI_ONE,
+  PRIVATE_GALLERY_BLURHASH_ONE,
+  PRIVATE_GALLERY_GUID_TWO,
+  PRIVATE_GALLERY_URI_TWO,
+  PRIVATE_GALLERY_BLURHASH_TWO,
+  PRIVATE_STICKER_GUID,
+  PRIVATE_STICKER_ATTACHMENT_GUID,
+  PRIVATE_STICKER_URI,
+  PRIVATE_STICKER_BLURHASH,
+  PRIVATE_REACTION_EMOJI,
+  PRIVATE_BIG_EMOJI,
+] as const;
+
+interface PressabilityConfig {
+  onLongPress?: (event: object) => void;
+}
+
+interface TestNode {
+  parent: TestNode | null;
+  props: Record<string, unknown>;
+}
+
+function configuredLongPress(node: TestNode): PressabilityConfig['onLongPress'] {
+  let current: TestNode | null = node;
+  while (current) {
+    const responder = current.props.onStartShouldSetResponder;
+    if (typeof responder === 'function') {
+      const readConfig = (
+        responder as typeof responder & {
+          testOnly_pressabilityConfig?: () => PressabilityConfig;
+        }
+      ).testOnly_pressabilityConfig;
+      if (typeof readConfig === 'function') return readConfig().onLongPress;
+    }
+    current = current.parent;
+  }
+  throw new Error('Expected a React Native Pressability configuration');
+}
+
+function expectContentCanariesPresent(tree: unknown): void {
+  const json = JSON.stringify(tree);
+  for (const canary of PRIVATE_CANARIES) expect(json).toContain(canary);
+}
+
+function ContentCanaryBubbles({
+  onJumpToReply,
+  onLongPress,
+  onShowReactions,
+}: {
+  onJumpToReply: jest.Mock;
+  onLongPress: jest.Mock;
+  onShowReactions: jest.Mock;
+}): React.JSX.Element {
+  return (
+    <>
+      <MessageBubble
+        msg={makeMsg({
+          id: 101,
+          guid: 'privacy-plain',
+          text: PRIVATE_PLAIN,
+          reactions: [PRIVATE_REACTION],
+        })}
+        showTail
+        onLongPress={onLongPress}
+        onShowReactions={onShowReactions}
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 110,
+          guid: 'privacy-gallery',
+          text: '',
+          hasAttachments: 1,
+          attachments: PRIVATE_GALLERY_ATTACHMENTS,
+        })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({ id: 111, guid: 'privacy-big-emoji', text: PRIVATE_BIG_EMOJI })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 102,
+          guid: 'privacy-attributed',
+          text: '',
+          attributedBody: JSON.stringify([{ string: PRIVATE_ATTRIBUTED, runs: [] }]),
+        })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 103,
+          guid: 'privacy-subject',
+          text: '',
+          subject: PRIVATE_SUBJECT,
+        })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 104,
+          guid: 'privacy-tombstone',
+          senderName: PRIVATE_TOMBSTONE_SENDER,
+          dateRetracted: 2_000,
+        })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 105,
+          guid: 'privacy-reply-text',
+          text: '',
+          threadOriginatorGuid: 'privacy-reply-origin-text',
+          replyPreview: {
+            guid: 'privacy-reply-origin-text',
+            text: PRIVATE_REPLY_TEXT,
+            senderName: PRIVATE_REPLY_SENDER,
+            isFromMe: 0,
+            hasAttachments: 0,
+          },
+        })}
+        showTail
+        onJumpToReply={onJumpToReply}
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 106,
+          guid: 'privacy-reply-attachment',
+          text: '',
+          threadOriginatorGuid: 'privacy-reply-origin-attachment',
+          replyPreview: {
+            guid: 'privacy-reply-origin-attachment',
+            text: null,
+            senderName: 'private-reply-attachment-sender',
+            isFromMe: 0,
+            hasAttachments: 1,
+            attachmentDescription: PRIVATE_REPLY_ATTACHMENT,
+          },
+        })}
+        showTail
+        onJumpToReply={onJumpToReply}
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 107,
+          guid: 'privacy-payload',
+          text: '',
+          payloadData: PRIVATE_PAYLOAD,
+        })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 108,
+          guid: 'privacy-attachment',
+          text: '',
+          hasAttachments: 1,
+          attachments: [PRIVATE_ATTACHMENT],
+        })}
+        showTail
+      />
+      <MessageBubble
+        msg={makeMsg({
+          id: 109,
+          guid: 'privacy-sticker',
+          text: '',
+          stickers: [PRIVATE_STICKER],
+        })}
+        showTail
+      />
+    </>
+  );
+}
+
+describe('MessageBubble content paths', () => {
+  it('renders every content path and forwards its nested actions', async () => {
+    const onJumpToReply = jest.fn();
+    const onLongPress = jest.fn();
+    const onShowReactions = jest.fn();
+    const view = await renderWithTheme(
+      <ContentCanaryBubbles
+        onJumpToReply={onJumpToReply}
+        onLongPress={onLongPress}
+        onShowReactions={onShowReactions}
+      />,
+    );
+
+    expectContentCanariesPresent(view.toJSON());
+    expect(screen.getByText(`${PRIVATE_TOMBSTONE_SENDER} unsent a message`)).toBeTruthy();
+    expect(
+      screen.getByLabelText(`Reply to ${PRIVATE_REPLY_SENDER}. Tap to jump to the original.`),
+    ).toBeTruthy();
+    expect(screen.getByText('ATT')).toBeTruthy();
+    expect(screen.getByText('GRID')).toBeTruthy();
+    expect(screen.getByText('STICKER:1')).toBeTruthy();
+    expect(screen.getByText(PRIVATE_REACTION_EMOJI)).toBeTruthy();
+    expect(attachmentModuleMocks.AttachmentView).toHaveBeenCalledTimes(1);
+    expect(attachmentModuleMocks.AttachmentGalleryGrid).toHaveBeenCalledTimes(1);
+    expect(attachmentModuleMocks.StickerOverlay).toHaveBeenCalledTimes(1);
+    expect(mockUseUrlPreview).toHaveBeenCalledWith(PRIVATE_ATTRIBUTED_LINK);
+    expect(configuredLongPress(screen.getByText(PRIVATE_PLAIN))).toEqual(expect.any(Function));
+    expect(onLongPress).not.toHaveBeenCalled();
+
+    await fireEvent.press(
+      screen.getByLabelText(`Reply to ${PRIVATE_REPLY_SENDER}. Tap to jump to the original.`),
+    );
+    await fireEvent.press(screen.getByLabelText('View who reacted'));
+    expect(onJumpToReply).toHaveBeenCalledTimes(1);
+    expect(onShowReactions).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('MessageBubble text rendering', () => {
   it('renders a plain received text message', async () => {
     await renderWithTheme(<MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail />);
     expect(screen.getByText('Hello there')).toBeTruthy();
   });
 
-  it('renders a confirmed @mention in the accent color and semibold', async () => {
+  it('renders a received @mention in a readable accent color and semibold', async () => {
     // "Hi @Alice!" → runs: "Hi " (gap), "@Alice" (mention), "!" (trailing)
     const body = mentionBody('Hi @Alice!', 3, 6);
     await renderWithTheme(
@@ -115,9 +499,48 @@ describe('MessageBubble text rendering', () => {
     const mention = screen.getByText('@Alice');
     const style = StyleSheet.flatten(mention.props.style);
     expect(style.color).toBe(darkTheme.color.tint);
+    expect(
+      contrastRatio(style.color, darkTheme.color.bubble.receivedBackgroundBottom),
+    ).toBeGreaterThanOrEqual(4.5);
     expect(style.fontWeight).toBe('600');
     // The surrounding plain runs are still present (no text dropped by the gap-filling parser).
     expect(screen.getByText('Hi ', { exact: false })).toBeTruthy();
+  });
+
+  it('uses the readable sent-bubble foreground for a sent @mention, not the theme tint', async () => {
+    const body = mentionBody('Hi @Alice!', 3, 6);
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({ text: '', attributedBody: body, isFromMe: 1 })}
+        showTail
+        chatService="iMessage"
+      />,
+      { preset: 'gator' },
+    );
+
+    const mention = screen.getByText('@Alice');
+    const style = StyleSheet.flatten(mention.props.style);
+    const background = gatorTheme.color.bubble.senderBackground;
+    expect(style.color).toBe(readableTextOn(background));
+    expect(style.color).not.toBe(gatorTheme.color.tint);
+    expect(contrastRatio(style.color, background)).toBeGreaterThanOrEqual(4.5);
+    expect(style.fontWeight).toBe('600');
+  });
+
+  it('uses readable text on the actual outgoing SMS background', async () => {
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({ text: 'Carrier text', isFromMe: 1 })}
+        showTail
+        chatService="SMS"
+      />,
+    );
+
+    const text = screen.getByText('Carrier text');
+    const style = StyleSheet.flatten(text.props.style);
+    const background = darkTheme.color.bubble.smsBackground;
+    expect(style.color).toBe(readableTextOn(background));
+    expect(contrastRatio(style.color, background)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('renders EDITED text sourced from attributedBody when the text column is empty', async () => {
@@ -238,16 +661,6 @@ describe('MessageBubble Genmoji attachment', () => {
     // description is alt text INSIDE that view — never a bubble Text node here.
     expect(screen.getByText('ATT')).toBeTruthy();
     expect(screen.queryByText('GRID')).toBeNull();
-    expect(screen.queryByText('a smiling cat wearing a top hat')).toBeNull();
-  });
-
-  it('redacted mode masks the Genmoji to the generic placeholder and leaks no description', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    await renderWithTheme(<MessageBubble msg={genmojiMsg()} showTail />);
-    // The redacted placeholder replaces the attachment entirely (AttachmentView never mounts), so the
-    // Genmoji image AND its description stay off-screen.
-    expect(screen.getByText('Attachment')).toBeTruthy();
-    expect(screen.queryByText('ATT')).toBeNull();
     expect(screen.queryByText('a smiling cat wearing a top hat')).toBeNull();
   });
 });
@@ -392,8 +805,8 @@ describe('MessageBubble bubble-effect cleanup on unmount (FlashList recycling)',
       // small, stable residual timer count (a RN/jest-expo singleton, NOT a per-render leak — it
       // is identical across renders). The effect case must drain back to exactly this.
       const plain = await renderWithTheme(<MessageBubble msg={makeMsg()} showTail />);
-      plain.unmount();
-      act(() => {
+      await plain.unmount();
+      await act(() => {
         jest.advanceTimersByTime(5_000);
       });
       const baseline = jest.getTimerCount();
@@ -411,10 +824,10 @@ describe('MessageBubble bubble-effect cleanup on unmount (FlashList recycling)',
       expect(activeCount).toBeGreaterThan(baseline);
 
       // Unmount mid-animation — the BubbleEffectView effect-cleanup must call anim.stop().
-      unmount();
+      await unmount();
 
       // Advance well past the animation duration; nothing should re-schedule work.
-      act(() => {
+      await act(() => {
         jest.advanceTimersByTime(5_000);
       });
 

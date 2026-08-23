@@ -4,7 +4,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChatHeaderRow } from '@db/repositories';
 import { useFaceTime } from '@features/facetime/useFaceTime';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   addressMatchesTitle,
   avatarSeed,
@@ -14,7 +13,6 @@ import {
   participantAvatars,
   participantList,
   primaryChatAddress,
-  redactTitle,
   resolveChatService,
   resolveTitle,
 } from '@utils';
@@ -39,8 +37,7 @@ export function ConversationHeader({
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { startCall } = useFaceTime();
-  const redacted = useRedactedModeStore((s) => s.enabled);
-  const title = redactTitle(data ? resolveTitle(data) : '', redacted);
+  const title = data ? resolveTitle(data) : '';
   const group = data ? isGroupRow(data) : false;
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
   const chip = withAlpha(theme.color.background, 0.62);
@@ -64,20 +61,15 @@ export function ConversationHeader({
   /**
    * The contact's phone number / email, shown under their name — the app's only place to see it.
    *
-   * Four deliberate suppressions, each for its own reason:
+   * Three deliberate suppressions, each for its own reason:
    *  - GROUPS: several people, no single number to show (and their identifier is a raw chat guid).
-   *  - REDACTED MODE: a number identifies a person exactly as much as their name does, so a header
-   *    masked to "Contact" must not print it underneath. Suppressed outright rather than masked to
-   *    a placeholder — there is nothing useful to say in its place.
    *  - AN UNSAVED CONTACT: the title already IS the number (participantNames falls back to the
    *    address), so a subtitle would just repeat the line above it.
    *  - NO ADDRESS YET: the header row resolves async and pre-sync chats have no handles.
    */
   const rawAddress = data && !group ? primaryChatAddress(data) : '';
   const subtitle =
-    rawAddress && !redacted && !addressMatchesTitle(rawAddress, title)
-      ? formatHandleAddress(rawAddress)
-      : '';
+    rawAddress && !addressMatchesTitle(rawAddress, title) ? formatHandleAddress(rawAddress) : '';
   const detailsLabel = title
     ? `${title}${subtitle ? `, ${subtitle}` : ''}, chat details`
     : 'Chat details';

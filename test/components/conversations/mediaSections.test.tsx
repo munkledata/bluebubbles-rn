@@ -3,11 +3,10 @@
  * media browser (moved out of app/(app)/chat-settings/[guid].tsx). Locked in:
  *   - renders NOTHING (null) when media is absent or every bucket is empty;
  *   - Photos/Videos strips with counted labels; tapping a thumb fires onOpenMedia(guid);
- *   - Documents/Links count rows; tapping a link row opens it via safeOpenUrl;
- *   - redacted mode masks link URLs to "[link]" (privacy);
+ *   - Documents/Links count rows; the exact URL is shown and tapping it opens via safeOpenUrl;
  *   - MediaThumb's showImage / videoPoster guards: a DOWNLOADED photo (non-null localPath) renders
  *     the real <Image source={{uri}}>, a video renders a blurhash POSTER with no source (expo-image
- *     can't decode a video file), and redacted mode renders NEITHER — just the neutral glyph tile.
+ *     can't decode a video file), while cache-protection refusal falls back to the neutral glyph.
  *
  * `expo-image` is mocked to a marker View that forwards `source`/`placeholder`, so which branch
  * rendered — and whether the on-disk path leaked — is observable (same pattern as
@@ -15,6 +14,15 @@
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
+
+const mockReleaseProtection = jest.fn();
+const mockProtectPath = jest.fn<{ path: string; release: () => void } | null, [string]>((path) => ({
+  path,
+  release: mockReleaseProtection,
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: { protect: (path: string) => mockProtectPath(path) },
+}));
 
 jest.mock('expo-image', () => {
   const RN = require('react-native');
@@ -39,8 +47,6 @@ import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWi
 import { MediaSections } from '@ui/conversations/MediaSections';
 
 import { PRESET_ORDER, PRESETS } from '@ui/theme';
-// eslint-disable-next-line import/first
-import { useRedactedModeStore } from '@state/redactedModeStore';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
 // eslint-disable-next-line import/first
@@ -72,7 +78,10 @@ function media(overrides: Partial<ChatMediaByKind> = {}): ChatMediaByKind {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  useRedactedModeStore.setState({ enabled: false, hydrated: false });
+  mockProtectPath.mockReset().mockImplementation((path) => ({
+    path,
+    release: mockReleaseProtection,
+  }));
 });
 
 describe('MediaSections', () => {
@@ -121,7 +130,32 @@ describe('MediaSections', () => {
     expect(screen.getByText('Documents')).toBeTruthy();
     expect(screen.getByText('Links')).toBeTruthy();
     fireEvent.press(screen.getByText('https://example.com/a'));
-    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledWith('https://example.com/a'));
+    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+    expect(safeOpenUrl).toHaveBeenCalledWith('https://example.com/a');
+  });
+
+  it('delegates a tapped link to an explicit owner instead of the default native opener', async () => {
+    const onOpenLink = jest.fn();
+    await renderWithTheme(
+      <MediaSections
+        media={media({
+          links: [
+            {
+              url: 'https://override.example.invalid/private-path',
+              messageGuid: 'm-override',
+              dateCreated: 456,
+            },
+          ],
+        })}
+        onOpenMedia={() => {}}
+        onOpenLink={onOpenLink}
+      />,
+    );
+
+    fireEvent.press(screen.getByText('https://override.example.invalid/private-path'));
+    await waitFor(() => expect(onOpenLink).toHaveBeenCalledTimes(1));
+    expect(onOpenLink).toHaveBeenCalledWith('https://override.example.invalid/private-path');
+    expect(safeOpenUrl).not.toHaveBeenCalled();
   });
 
   // The strips above use the shared fixture (localPath/blurhash null), which only ever exercises
@@ -141,7 +175,9 @@ describe('MediaSections', () => {
     });
 
   it('renders the real image for a downloaded photo and a source-less blurhash poster for a video', async () => {
-    await renderWithTheme(<MediaSections media={downloaded()} onOpenMedia={() => {}} />);
+    const view = await renderWithTheme(
+      <MediaSections media={downloaded()} onOpenMedia={() => {}} />,
+    );
     const images = screen.getAllByTestId('expo-image');
     expect(images).toHaveLength(2);
     // Photo: the actual file is the source, blurhash is only the placeholder.
@@ -152,30 +188,65 @@ describe('MediaSections', () => {
     expect(images[1]!.props.placeholder).toEqual({ blurhash: 'LEHV6n' });
     // The glyph fallback tile is NOT used when the real thumbnail renders.
     expect(screen.queryByText('🖼')).toBeNull();
+
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/p-1.jpg');
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/v-1.mp4');
+    await view.unmount();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(2);
   });
 
-  it('redacted mode renders NO media for a downloaded photo/video — only the glyph tiles', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    await renderWithTheme(<MediaSections media={downloaded()} onOpenMedia={() => {}} />);
-    // Neither the photo's file uri nor the video's blurhash poster may reach the screen.
-    expect(screen.queryAllByTestId('expo-image')).toHaveLength(0);
-    expect(screen.getByText('🖼')).toBeTruthy();
-    // Both tiles still render (tap targets are unchanged) — they're just neutral.
-    expect(screen.getAllByRole('image')).toHaveLength(2);
+  it('renders an exact remote photo source without allocating local-cache protection', async () => {
+    const remoteUri = 'https://dev.example.test/media/private-photo-73cb.jpg';
+    await renderWithTheme(
+      <MediaSections
+        media={media({ photos: [att({ localPath: remoteUri, blurhash: 'LRemote' })] })}
+        onOpenMedia={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: remoteUri });
+    expect(mockProtectPath).not.toHaveBeenCalled();
   });
 
-  it('masks link URLs to "[link]" in redacted mode', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
+  it('shows the neutral tile instead of decoding a photo whose pin is refused', async () => {
+    mockProtectPath.mockReturnValueOnce(null);
     await renderWithTheme(
       <MediaSections
         media={media({
-          links: [{ url: 'https://example.com/secret', messageGuid: 'm-1', dateCreated: 123 }],
+          photos: [att({ localPath: 'file:///cache/retiring.jpg', blurhash: 'LKO2?U' })],
         })}
         onOpenMedia={() => {}}
       />,
     );
-    expect(screen.getByText('[link]')).toBeTruthy();
-    expect(screen.queryByText('https://example.com/secret')).toBeNull();
+
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/retiring.jpg');
+    expect(screen.queryByTestId('expo-image')).toBeNull();
+    expect(screen.getByText('🖼')).toBeTruthy();
+  });
+
+  it('pins a blurhash-only video for viewer handoff and blocks navigation when refused', async () => {
+    const onOpenMedia = jest.fn();
+    mockProtectPath.mockReturnValueOnce(null);
+    await renderWithTheme(
+      <MediaSections
+        media={media({
+          videos: [
+            att({
+              guid: 'v-1',
+              mimeType: 'video/mp4',
+              localPath: 'file:///cache/retiring.mp4',
+              blurhash: 'LEHV6n',
+            }),
+          ],
+        })}
+        onOpenMedia={onOpenMedia}
+      />,
+    );
+
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/retiring.mp4');
+    const tile = screen.getByRole('image');
+    fireEvent.press(tile);
+    expect(onOpenMedia).not.toHaveBeenCalled();
   });
 });
 

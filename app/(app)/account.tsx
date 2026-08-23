@@ -6,6 +6,10 @@ import * as icloudApi from '@core/api/endpoints/icloud';
 import type { AccountInfo } from '@core/api/endpoints/icloud';
 import { ApiError, isUnimplementedEndpoint } from '@core/api/errors';
 import { http } from '@/services';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+} from '@/services/realtime/deliveryCoordinator';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { CheckRow, InfoRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
@@ -19,17 +23,37 @@ export default function AccountScreen(): React.JSX.Element {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState<string | null>(null);
+  // The screen and every callback it creates belong to the account that mounted it. Including the
+  // generation in the cache key prevents a late response from the old screen becoming initial data
+  // (or an initial error) for the next account's screen.
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountQueryKey = ['server', 'icloud-account', accountLease.generation] as const;
 
   const accountQuery = useQuery({
-    queryKey: ['server', 'icloud-account'],
-    queryFn: () => icloudApi.getAccountInfo(http),
+    queryKey: accountQueryKey,
+    queryFn: async (): Promise<AccountInfo | null> => {
+      if (!accountLease.isCurrent()) return null;
+      try {
+        const account = await icloudApi.getAccountInfo(http);
+        // A GET owns no durable mutation, so it deliberately does not hold Disconnect open. Its
+        // generation-specific key isolates TanStack Query's later cache commit, and this check
+        // discards the old response itself.
+        return accountLease.isCurrent() ? account : null;
+      } catch (error) {
+        // An old server's error is no more relevant to the new account than its data.
+        if (!accountLease.isCurrent()) return null;
+        throw error;
+      }
+    },
   });
   const info = accountQuery.data ?? null;
   // 'unsupported' = the server doesn't implement /icloud/account (a 404, remapped to
   // UnimplementedEndpointError) — a distinct, non-alarming state vs a real load 'error'.
   // 'loading' covers both the first fetch and the "Try again" refetch after an error.
   const status: 'loading' | 'ready' | 'error' | 'unsupported' =
-    accountQuery.isPending || (accountQuery.isError && accountQuery.isFetching)
+    !accountLease.isCurrent() ||
+    accountQuery.isPending ||
+    (accountQuery.isError && accountQuery.isFetching)
       ? 'loading'
       : accountQuery.isError
         ? isUnimplementedEndpoint(accountQuery.error)
@@ -49,21 +73,35 @@ export default function AccountScreen(): React.JSX.Element {
   const canPick = (a: string): boolean => vetted == null || vetted.includes(a);
 
   const onPick = (alias: string): void => {
-    if (!info || alias === info.activeAlias || saving || !canPick(alias)) return;
+    if (
+      !accountLease.isCurrent() ||
+      !info ||
+      alias === info.activeAlias ||
+      saving ||
+      !canPick(alias)
+    )
+      return;
     setSaving(alias);
     void (async () => {
       try {
-        await icloudApi.setActiveAlias(http, alias);
-        queryClient.setQueryData<AccountInfo>(['server', 'icloud-account'], (prev) =>
-          prev ? { ...prev, activeAlias: alias } : prev,
-        );
+        await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+          await icloudApi.setActiveAlias(http, alias);
+          if (!activeLease.isCurrent()) return;
+          // setQueryData is synchronous, so the current-account check and cache commit cannot be
+          // interleaved by Disconnect. The tracked slot also makes teardown wait for the POST.
+          queryClient.setQueryData<AccountInfo | null>(accountQueryKey, (prev) =>
+            prev ? { ...prev, activeAlias: alias } : prev,
+          );
+        });
       } catch {
-        showDialog(
-          'Account',
-          'Couldn’t change the active alias — make sure it’s enabled for iMessage on your Mac.',
-        );
+        if (accountLease.isCurrent()) {
+          showDialog(
+            'Account',
+            'Couldn’t change the active alias — make sure it’s enabled for iMessage on your Mac.',
+          );
+        }
       } finally {
-        setSaving(null);
+        if (accountLease.isCurrent()) setSaving(null);
       }
     })();
   };

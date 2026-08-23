@@ -11,9 +11,14 @@
 import { createShareCapture } from '@/services/share/captureShare';
 import type { ShareFileIO } from '@/services/share/materializeShare';
 import type { SharedAttachment } from '@state/shareIntentStore';
+import { logger } from '@core/secure';
 
 const NOW = 1_700_000_000_000;
 const ROOT = 'file:///cache/shared-in/';
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 function harness(over: { io?: Partial<ShareFileIO>; cacheRoot?: string } = {}) {
   const calls: string[] = [];
@@ -88,15 +93,22 @@ describe('createShareCapture', () => {
   });
 
   it('toasts and stages NOTHING when every file is unreadable', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => {});
     const h = harness({ io: { copy: jest.fn(async () => {}) } }); // resolves, writes nothing
     await h.capture(pdfEvent);
 
     expect(h.stage).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledTimes(1);
     expect(h.clearNativeIntent).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[share] copy produced no file (application/pdf) — dropping');
+    expect(errorLog).toHaveBeenCalledWith('[share] all shared files were unreadable', {
+      affectedCount: 1,
+    });
   });
 
   it('stages the survivors and warns when only some files fail', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const h = harness();
     h.io.copy = jest.fn(async (from: string, to: string) => {
       if (from === 'content://bad') throw new Error("Location isn't readable.");
@@ -114,39 +126,56 @@ describe('createShareCapture', () => {
       files: [expect.objectContaining({ name: 'good.pdf' })],
     });
     expect(h.toast).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenNthCalledWith(
+      1,
+      "[share] could not materialize a shared file (application/pdf): Location isn't readable.",
+    );
+    expect(warn).toHaveBeenNthCalledWith(2, '[share] 1 shared file(s) could not be read');
   });
 
   it('clears the native intent without staging for an empty payload', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const h = harness();
     await h.capture({});
     expect(h.stage).not.toHaveBeenCalled();
     expect(h.clearNativeIntent).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[share] received a share with no usable text or files');
   });
 
   it('handles a payload with no usable file (the bogus /document path, no contentUri)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const h = harness();
     await h.capture({
       files: [{ filePath: '/document/acc=1;doc=9', mimeType: 'application/pdf' }],
     });
     expect(h.stage).not.toHaveBeenCalled();
     expect(h.clearNativeIntent).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[share] received a share with no usable text or files');
   });
 
   it('bails with a toast when there is no cache directory', async () => {
+    const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => {});
     const h = harness({ cacheRoot: '' });
     await h.capture(pdfEvent);
     expect(h.stage).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledTimes(1);
+    expect(errorLog).toHaveBeenCalledWith(
+      '[share] no cache directory available — cannot accept shared files',
+    );
   });
 
   it('never rejects, even when staging itself throws', async () => {
+    const error = new Error('store exploded');
+    const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => {});
     const h = harness();
     h.stage.mockImplementation(() => {
-      throw new Error('store exploded');
+      throw error;
     });
     await expect(h.capture(pdfEvent)).resolves.toBeUndefined();
     // The native intent is still dropped so the app can't get stuck re-firing it.
     expect(h.clearNativeIntent).toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledWith('[share] capture failed', error);
   });
 
   it('prunes old cache batches after a successful capture', async () => {

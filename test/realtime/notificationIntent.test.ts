@@ -1,4 +1,9 @@
-import { EventRouter, type NotificationIntent } from '@core/realtime';
+import {
+  EventRouter,
+  type EventDeliveryContext,
+  type EventSink,
+  type NotificationIntent,
+} from '@core/realtime';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
@@ -8,13 +13,80 @@ import { createTestDb } from '../support/testDb';
 
 function wire(db: AppDatabase) {
   const intents: NotificationIntent[] = [];
-  const sink = new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, (i) =>
-    intents.push(i),
-  );
+  const sink = new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, (i) => {
+    intents.push(i);
+  });
   return { intents, router: new EventRouter(sink) };
 }
 
 describe('NotifyingEventSink + buildMessageIntents', () => {
+  it('does not present an intent when Disconnect invalidates the generation during derivation', async () => {
+    let current = true;
+    const context: EventDeliveryContext = { generation: 9, isCurrent: () => current };
+    const inner: EventSink = { onEvent: jest.fn(async () => undefined) };
+    const build = jest.fn(async () => {
+      current = false;
+      return [{ kind: 'test' } as unknown as NotificationIntent];
+    });
+    const notify = jest.fn(async () => undefined);
+    const sink = new NotifyingEventSink(inner, {} as AppDatabase, build, notify);
+
+    await sink.onEvent(
+      { type: 'imessage-aliases-removed', payload: { aliases: [] } },
+      'socket',
+      context,
+    );
+
+    expect(inner.onEvent).toHaveBeenCalledWith(
+      { type: 'imessage-aliases-removed', payload: { aliases: [] } },
+      'socket',
+      context,
+    );
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('keeps the event in flight until asynchronous notification presentation settles', async () => {
+    const { db } = await createTestDb();
+    let release!: () => void;
+    const presentation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notify = jest.fn(() => presentation);
+    const sink = new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, notify);
+    const router = new EventRouter(sink);
+    const context: EventDeliveryContext = { generation: 3, isCurrent: () => true };
+    let finished = false;
+
+    const handled = router
+      .handle(
+        'new-message',
+        {
+          guid: 'tracked-notification',
+          text: 'wait for native presentation',
+          dateCreated: 1,
+          handle: { address: 'a@b.com' },
+          chats: [{ guid: 'cTracked', participants: [{ address: 'a@b.com' }] }],
+        },
+        'fcm',
+        context,
+      )
+      .then(() => {
+        finished = true;
+      });
+    for (let i = 0; i < 20 && notify.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.any(Object), context);
+    expect(finished).toBe(false);
+
+    release();
+    await handled;
+    expect(finished).toBe(true);
+  });
+
   it('emits a message intent for an inbound message (title/sender from data)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
@@ -38,6 +110,81 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       expect(i.senderName).toBe('Bob');
       expect(i.isGroup).toBe(false);
     }
+  });
+
+  it('does not resurrect a notification after the message was read before presentation retry', async () => {
+    const { db } = await createTestDb();
+    const { router } = wire(db);
+    const event = await router.handle(
+      'new-message',
+      {
+        guid: 'read-before-retry',
+        text: 'already seen',
+        dateCreated: 100,
+        handle: { address: 'reader@x.com' },
+        chats: [{ guid: 'cReadRetry', participants: [{ address: 'reader@x.com' }] }],
+      },
+      'socket',
+    );
+    await router.handle(
+      'chat-read-status-changed',
+      { chatGuid: 'cReadRetry', read: true },
+      'socket',
+    );
+
+    expect(await buildMessageIntents(db, event!)).toEqual([]);
+  });
+
+  it('does not resurrect a notification after the message was deleted before presentation retry', async () => {
+    const { db } = await createTestDb();
+    const { router } = wire(db);
+    const event = await router.handle(
+      'new-message',
+      {
+        guid: 'deleted-before-retry',
+        text: 'gone now',
+        dateCreated: 200,
+        handle: { address: 'deleter@x.com' },
+        chats: [{ guid: 'cDeleteRetry', participants: [{ address: 'deleter@x.com' }] }],
+      },
+      'socket',
+    );
+    await router.handle(
+      'message-deleted',
+      { guid: 'deleted-before-retry', chatGuid: 'cDeleteRetry', dateDeleted: 300 },
+      'socket',
+    );
+
+    expect(await buildMessageIntents(db, event!)).toEqual([]);
+  });
+
+  it.each([
+    ['payload chat guid', { guid: 'delete-cancel-with-chat', chatGuid: 'cDeleteCancel' }],
+    ['row-resolved chat guid', { guid: 'delete-cancel-without-chat' }],
+    [
+      'row owner instead of stale payload metadata',
+      { guid: 'delete-cancel-stale-chat', chatGuid: 'cWrong' },
+    ],
+  ])('withdraws an existing notification after deletion using the %s', async (_label, deletion) => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: deletion.guid,
+        text: 'remove this notification',
+        dateCreated: 250,
+        handle: { address: 'delete@x.com' },
+        chats: [{ guid: 'cDeleteCancel', participants: [{ address: 'delete@x.com' }] }],
+      },
+      'socket',
+    );
+    expect(intents.at(-1)?.kind).toBe('message');
+    intents.length = 0;
+
+    await router.handle('message-deleted', { ...deletion, dateDeleted: 300 }, 'socket');
+
+    expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cDeleteCancel' }]);
   });
 
   it('shows an attachment label (not a U+FFFC box) for an attachment-only message', async () => {
@@ -87,8 +234,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     );
     const i = intents[0]!;
     expect(i.kind).toBe('message');
-    // A far better lock-screen body than "📎 Attachment". It's RAW here; the Notifee layer masks it
-    // to "New message" under hidePreview (asserted in notifeeService.test), so it never leaks.
+    // Ordinary unlocked notifications use this detailed Genmoji body. App Lock presentation is a
+    // separate policy covered in notifeeService.test, which asserts the fixed generic notice.
     if (i.kind === 'message') expect(i.body).toBe('a smiling cat wearing a top hat');
   });
 
@@ -268,8 +415,9 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       'socket',
     );
     intents.length = 0;
-    // The sender unsends it → the server fires updated-message carrying dateRetracted (Unix ms).
-    // The (per-chat) notification is withdrawn via a cancel intent.
+    // The sender unsends it → real FCM carries a LEAN updated-message with no chats/chatGuid.
+    // The sink + intent builder recover the owner from the existing message row and withdraw the
+    // per-chat notification.
     await router.handle(
       'updated-message',
       {
@@ -277,10 +425,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
         text: null,
         dateRetracted: 1700000000000,
         dateCreated: 1,
-        handle: { address: 'a@b.com' },
-        chats: [{ guid: 'cU', participants: [{ address: 'a@b.com' }] }],
       },
-      'socket',
+      'fcm',
     );
     expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cU' }]);
   });

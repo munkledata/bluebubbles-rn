@@ -23,40 +23,75 @@
 export const DEFAULT_MAX_CONCURRENT_UPLOADS = 2;
 
 export interface ConcurrencyGate {
-  /** Run `fn` once a slot is free, always releasing the slot afterwards. */
-  run<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * Run `fn` once a slot is free, always releasing the slot afterwards. Aborting while queued
+   * removes that waiter; once active, `fn` still owns cancellation and keeps its slot until it
+   * settles so the concurrency cap can never be exceeded.
+   */
+  run<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T>;
   /** Slots currently in use — for tests and diagnostics. */
   readonly active: number;
   /** Callers parked waiting for a slot — for tests and diagnostics. */
   readonly waiting: number;
 }
 
+export class UploadGateCancelledError extends Error {
+  constructor() {
+    super('upload gate wait was cancelled');
+    this.name = 'UploadGateCancelledError';
+  }
+}
+
 export function createConcurrencyGate(max: number): ConcurrencyGate {
   const limit = Math.max(1, Math.floor(max));
   let active = 0;
-  const waiters: Array<() => void> = [];
+  const waiters: Array<{ start(): void }> = [];
 
-  const acquire = (): Promise<void> => {
+  const acquire = (signal?: AbortSignal): Promise<void> => {
+    if (signal?.aborted) return Promise.reject(new UploadGateCancelledError());
     if (active < limit) {
       active += 1;
       return Promise.resolve();
     }
-    return new Promise<void>((resolve) => {
-      waiters.push(() => {
-        active += 1;
-        resolve();
-      });
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const waiter = {
+        start: () => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener('abort', onAbort);
+          active += 1;
+          resolve();
+        },
+      };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        const index = waiters.indexOf(waiter);
+        if (index >= 0) waiters.splice(index, 1);
+        signal?.removeEventListener('abort', onAbort);
+        reject(new UploadGateCancelledError());
+      };
+
+      waiters.push(waiter);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      // Close the tiny check→listener race for non-standard/injected AbortSignal implementations.
+      if (signal?.aborted) onAbort();
     });
   };
 
   const release = (): void => {
     active -= 1;
-    waiters.shift()?.();
+    const waiter = waiters.shift();
+    if (waiter) {
+      waiter.start();
+    }
   };
 
   return {
-    async run<T>(fn: () => Promise<T>): Promise<T> {
-      await acquire();
+    async run<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+      await acquire(signal);
       try {
         return await fn();
       } finally {
@@ -87,35 +122,67 @@ export interface UploadRegistry {
   add(key: string, handle: CancellableUpload): () => void;
   /** Stop the upload registered under `key`. Returns false when there is nothing in flight. */
   cancel(key: string): boolean;
+  /**
+   * Stop every registered upload during an account transition.
+   *
+   * The registry is cleared before invoking user/native handles so one throwing cancellation
+   * cannot leave the remaining uploads reachable, and a stale release cannot remove a later
+   * account's handle under the same temp guid.
+   */
+  cancelAll(): number;
   /** In-flight count — for tests and diagnostics. */
   readonly size: number;
 }
 
 export function createUploadRegistry(): UploadRegistry {
-  const byKey = new Map<string, CancellableUpload>();
+  // More than one attempt can briefly share a temp guid (the live UI send can run past the retry
+  // grace window while the retry drain starts another attempt). Keep EVERY handle: replacing by key
+  // made both per-message cancel and account-wide teardown miss the older native upload.
+  const byKey = new Map<string, Set<CancellableUpload>>();
   return {
     add(key, handle) {
-      byKey.set(key, handle);
+      const handles = byKey.get(key) ?? new Set<CancellableUpload>();
+      handles.add(handle);
+      byKey.set(key, handles);
       return () => {
-        // Identity-checked: a retry re-registers the SAME temp guid with a NEW handle, and a
-        // late release from the previous attempt must not unregister the live one — that would
-        // silently make the running upload uncancellable.
-        if (byKey.get(key) === handle) byKey.delete(key);
+        // Identity-checked within the key's set: a retry can register the SAME temp guid with a NEW
+        // handle, and a late release from the previous attempt must not unregister the live one.
+        const current = byKey.get(key);
+        current?.delete(handle);
+        if (current?.size === 0) byKey.delete(key);
       };
     },
     cancel(key) {
-      const handle = byKey.get(key);
-      if (!handle) return false;
+      const handles = byKey.get(key);
+      if (!handles) return false;
       byKey.delete(key);
-      try {
-        handle.cancel();
-      } catch {
-        // Racing its own completion — the upload is finishing anyway.
+      for (const handle of handles) {
+        try {
+          handle.cancel();
+        } catch {
+          // Racing its own completion — keep cancelling any sibling attempts under this key.
+        }
       }
       return true;
     },
+    cancelAll() {
+      const handles = [...byKey.values()].flatMap((set) => [...set]);
+      // Clear first. Besides making teardown synchronous from the caller's perspective, this keeps
+      // a cancellation callback/release racing below from observing half-retired account state.
+      byKey.clear();
+      for (const handle of handles) {
+        try {
+          handle.cancel();
+        } catch {
+          // One native task may already have completed. Keep cancelling every sibling regardless.
+        }
+      }
+      return handles.length;
+    },
     get size() {
-      return byKey.size;
+      let count = 0;
+      for (const handles of byKey.values()) count += handles.size;
+      return count;
     },
   };
 }

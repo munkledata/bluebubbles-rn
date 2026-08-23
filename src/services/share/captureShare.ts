@@ -4,11 +4,10 @@ import { materializeSharedFiles, pruneShareCache, type ShareFileIO } from './mat
 import { parseRawShareEvent } from './shareIntentPayload';
 
 /**
- * Orchestrates one incoming share: parse the raw native payload → copy the files somewhere we can
- * actually read → stage them for the composer → clear the native intent.
- *
- * Pure + fully injected so the whole sequence (including the ORDER of staging vs clearing) is
- * asserted in the node jest project. The production binding lives in `index.ts`.
+ * Historical, dormant JS orchestration retained as test evidence for ordering and error handling.
+ * There is intentionally NO production binding: this interface cannot enforce actual byte/time
+ * limits while a provider stream is being read, so it is not a safe IPC-01 intake. A future owned
+ * native implementation must finish its bounded, re-statted batch before it calls any store stage.
  */
 
 export interface ShareCaptureDeps {
@@ -67,8 +66,8 @@ export function createShareCapture(deps: ShareCaptureDeps): (rawValue: unknown) 
       });
 
       if (files.length === 0) {
-        // Staging nothing keeps ShareIntentNavigator from routing to an empty composer.
-        logger.error(`[share] all ${failed} shared file(s) were unreadable`);
+        // Staging nothing keeps a future bounded-share consumer from routing to an empty composer.
+        logger.error('[share] all shared files were unreadable', { affectedCount: failed });
         deps.toast("Couldn't read that file. Try sharing it again.");
         deps.clearNativeIntent();
         return;
@@ -88,10 +87,7 @@ export function createShareCapture(deps: ShareCaptureDeps): (rawValue: unknown) 
       void pruneShareCache({ cacheRoot: deps.cacheRoot, io: deps.io, now }).catch(() => {});
     } catch (err) {
       // Belt and braces: a throw here would be the silent failure all over again.
-      logger.error(
-        `[share] capture failed: ${err instanceof Error ? err.message : String(err)}`,
-        err,
-      );
+      logger.error('[share] capture failed', err);
       try {
         deps.clearNativeIntent();
       } catch {

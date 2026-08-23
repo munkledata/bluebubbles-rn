@@ -8,25 +8,103 @@ import {
   deleteScheduled,
   discardOutgoingMessage,
   getScheduledById,
-  listAllScheduled,
+  listServerScheduledPruneExposure,
   reconcileServerScheduled,
-  resetStuckScheduled,
   updateScheduled,
 } from '@db/repositories';
 import { http } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
 import { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
 import { sendEdit, sendUnsend } from './sendEditService';
-import { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
+import {
+  ensureScheduledRecovery,
+  runDueScheduled,
+  scheduleTextMessage,
+  ScheduledSessionChangedError,
+  type ScheduleArgs,
+} from './scheduleService';
 import { sendImageMessage, type PickedImage } from './sendAttachmentService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
 import { pickContact } from '../contacts/contactsService';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from '../realtime/deliveryCoordinator';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
 import { uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 import { showToast } from '@ui/toast/toastStore';
+import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
+import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
 
+export { isContactsPermissionDeniedError } from '../contacts/contactsService';
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
+
+function assertScheduledLease(lease: RealtimeDeliveryLease): void {
+  if (!lease.isCurrent()) throw new ScheduledSessionChangedError();
+}
+
+/**
+ * Publish one whole scheduled-message action to Disconnect's drain while retaining its real return
+ * value. The coordinator intentionally returns only delivered/paused, so this tiny adapter keeps
+ * the result in the admitted callback and converts a rejected admission into the same clear error
+ * used by mid-flight ownership checks.
+ */
+async function runScheduledAccountOperation<T>(
+  lease: RealtimeDeliveryLease,
+  task: () => Promise<T>,
+): Promise<T> {
+  let completed = false;
+  let result!: T;
+  const status = await runTrackedRealtimeWork(lease, async () => {
+    assertScheduledLease(lease);
+    try {
+      result = await task();
+      assertScheduledLease(lease);
+      completed = true;
+    } catch (error) {
+      // Prefer the ownership error when the underlying await failed because Disconnect reset its
+      // HTTP/native/DB dependency. Otherwise callers would report a misleading offline failure.
+      assertScheduledLease(lease);
+      throw error;
+    }
+  });
+  if (status === 'paused' || !completed || !lease.isCurrent()) {
+    throw new ScheduledSessionChangedError();
+  }
+  return result;
+}
+
+/**
+ * Keep one user-initiated send/mutation visible to Disconnect from before its first await until
+ * its last DB/native/network continuation settles. A stale screen callback is deliberately a
+ * quiet `null`: it belongs to the retired account, so it must neither act with the next account's
+ * dependencies nor surface an old-account error in the new UI.
+ *
+ * Unlike scheduled actions, ordinary composer/menu callbacks are fire-and-forget and have no
+ * useful error UI for an account switch. Current-account failures still reject unchanged.
+ */
+async function runUiAccountOperation<T>(
+  lease: RealtimeDeliveryLease,
+  task: () => Promise<T>,
+): Promise<T | null> {
+  let completed = false;
+  let result!: T;
+  try {
+    const status = await runTrackedRealtimeWork(lease, async () => {
+      if (!lease.isCurrent()) return;
+      result = await task();
+      if (!lease.isCurrent()) return;
+      completed = true;
+    });
+    if (status === 'paused' || !completed || !lease.isCurrent()) return null;
+    return result;
+  } catch (error) {
+    if (!lease.isCurrent()) return null;
+    throw error;
+  }
+}
 
 /** The production attachment I/O for the outgoing queue (expo uploader + on-disk check). */
 export const outgoingQueueIO: OutgoingQueueIO = {
@@ -47,97 +125,168 @@ export { sendEdit, sendUnsend, type SendEditArgs } from './sendEditService';
 export { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 
 /** UI-facing image send: bound to the composition-root DB + HttpClient. */
-export function sendImage(args: {
-  chatGuid: string;
-  image: PickedImage;
-}): Promise<{ tempGuid: string }> {
-  return sendImageMessage(getDatabase(), http, args, expoAttachmentUploader);
-}
-
-/** UI-facing multi-image send: one optimistic message + attachment per picked asset. */
-export function sendImages(args: {
-  chatGuid: string;
-  images: PickedImage[];
-}): Promise<{ tempGuid: string }[]> {
-  return Promise.all(
-    args.images.map((image) =>
-      sendImageMessage(
-        getDatabase(),
-        http,
-        { chatGuid: args.chatGuid, image },
-        expoAttachmentUploader,
-      ),
-    ),
+export function sendImage(
+  args: {
+    chatGuid: string;
+    image: PickedImage;
+  },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{
+  tempGuid: string;
+} | null> {
+  return runUiAccountOperation(accountLease, () =>
+    sendImageMessage(getDatabase(), http, args, expoAttachmentUploader),
   );
 }
 
+/** UI-facing multi-image send: one optimistic message + attachment per picked asset. */
+export function sendImages(
+  args: {
+    chatGuid: string;
+    images: PickedImage[];
+  },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ tempGuid: string }[] | null> {
+  return runUiAccountOperation(accountLease, async () => {
+    const settled = await Promise.allSettled(
+      args.images.map((image) =>
+        sendImageMessage(
+          getDatabase(),
+          http,
+          { chatGuid: args.chatGuid, image },
+          expoAttachmentUploader,
+        ),
+      ),
+    );
+    // Promise.all rejects as soon as ONE item fails and would release the account drain while the
+    // other native uploads keep running. Wait for every operation we started, then preserve the
+    // original current-account failure behavior.
+    const sent: { tempGuid: string }[] = [];
+    for (const outcome of settled) {
+      if (outcome.status === 'rejected') throw outcome.reason;
+      sent.push(outcome.value);
+    }
+    return sent;
+  });
+}
+
 /** UI-facing send: bound to the composition-root DB + HttpClient. */
-export function send(args: SendTextArgs): Promise<{ tempGuid: string }> {
-  return sendTextMessage(getDatabase(), http, args);
+export function send(
+  args: SendTextArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ tempGuid: string } | null> {
+  return runUiAccountOperation(accountLease, () => sendTextMessage(getDatabase(), http, args));
 }
 
 /** UI-facing contact-card send: bound to the composition-root DB + HttpClient. */
-export function sendContactCard(args: {
-  chatGuid: string;
-  contact: ContactCard;
-  replyToGuid?: string;
-}): Promise<{ tempGuid: string }> {
-  return sendContactMessage(getDatabase(), http, {
-    chatGuid: args.chatGuid,
-    contact: args.contact,
-    selectedMessageGuid: args.replyToGuid,
-  });
+export function sendContactCard(
+  args: {
+    chatGuid: string;
+    contact: ContactCard;
+    replyToGuid?: string;
+  },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{
+  tempGuid: string;
+} | null> {
+  return runUiAccountOperation(accountLease, () =>
+    sendContactMessage(getDatabase(), http, {
+      chatGuid: args.chatGuid,
+      contact: args.contact,
+      selectedMessageGuid: args.replyToGuid,
+    }),
+  );
 }
 
 /**
  * UI-facing "share a contact" flow: open the native picker, then send the chosen contact as a
- * card. Returns null when the user cancels/denies the picker or the contact has no usable field.
+ * card. Returns null when the user cancels the picker or the contact has no usable field. A denied
+ * Contacts grant rejects with `ContactsPermissionDeniedError` so the screen can explain recovery.
  * Kept here (not in the chat screen) so the screen depends only on the send barrel — and so the
  * expo-contacts native import stays out of the screen's module graph.
  */
-export async function pickAndSendContact(chatGuid: string): Promise<{ tempGuid: string } | null> {
-  const contact = await pickContact();
-  if (!contact || !hasContactContent(contact)) return null;
-  return sendContactCard({ chatGuid, contact });
+export async function pickAndSendContact(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ tempGuid: string } | null> {
+  if (!accountLease.isCurrent()) return null;
+  // The native picker may sit open for minutes, but has not touched account data yet. Keep it
+  // outside the Disconnect drain, then validate the screen's PRE-picker lease before admitting the
+  // actual DB/send operation. This avoids either failure mode: blocking account cleanup on an OS
+  // sheet, or letting that old sheet return and capture B.
+  let contact: Awaited<ReturnType<typeof pickContact>>;
+  try {
+    contact = await pickContact();
+  } catch (error) {
+    if (!accountLease.isCurrent()) return null;
+    throw error;
+  }
+  if (!accountLease.isCurrent() || !contact || !hasContactContent(contact)) return null;
+  return runUiAccountOperation(accountLease, () =>
+    sendContactMessage(getDatabase(), http, { chatGuid, contact }),
+  );
 }
 
 /** UI-facing tapback send (toggle: pass '-love' to remove). */
-export function react(args: SendReactionArgs): Promise<{ tempGuid: string }> {
-  return sendReactionMessage(getDatabase(), http, args);
+export function react(
+  args: SendReactionArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ tempGuid: string } | null> {
+  return runUiAccountOperation(accountLease, () => sendReactionMessage(getDatabase(), http, args));
 }
 
 /** UI-facing threaded reply: a text send whose reply target is `replyToGuid`. */
-export function reply(args: {
-  chatGuid: string;
-  text: string;
-  replyToGuid: string;
-  effectId?: string;
-}): Promise<{ tempGuid: string }> {
-  return sendTextMessage(getDatabase(), http, {
-    chatGuid: args.chatGuid,
-    text: args.text,
-    selectedMessageGuid: args.replyToGuid,
-    effectId: args.effectId,
-  });
+export function reply(
+  args: {
+    chatGuid: string;
+    text: string;
+    replyToGuid: string;
+    effectId?: string;
+  },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{
+  tempGuid: string;
+} | null> {
+  return runUiAccountOperation(accountLease, () =>
+    sendTextMessage(getDatabase(), http, {
+      chatGuid: args.chatGuid,
+      text: args.text,
+      selectedMessageGuid: args.replyToGuid,
+      effectId: args.effectId,
+    }),
+  );
 }
 
 /** UI-facing edit of a sent message's text (optimistic + revert on failure). */
-export function editText(args: {
-  messageGuid: string;
-  newText: string;
-  chatGuid?: string;
-}): Promise<{ ok: boolean }> {
-  return sendEdit(getDatabase(), http, args);
+export function editText(
+  args: {
+    messageGuid: string;
+    newText: string;
+    chatGuid?: string;
+  },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{
+  ok: boolean;
+} | null> {
+  return runUiAccountOperation(accountLease, () => sendEdit(getDatabase(), http, args));
 }
 
 /** UI-facing unsend/retract of a sent message. */
-export function unsend(args: { messageGuid: string; chatGuid?: string }): Promise<{ ok: boolean }> {
-  return sendUnsend(getDatabase(), http, args);
+export function unsend(
+  args: { messageGuid: string; chatGuid?: string },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ ok: boolean } | null> {
+  return runUiAccountOperation(accountLease, () => sendUnsend(getDatabase(), http, args));
 }
 
 /** UI-facing: store a message to send later (server-side when possible). */
-export function schedule(args: ScheduleArgs): Promise<{ id: number; serverId: string | null }> {
-  return scheduleTextMessage(getDatabase(), http, args);
+export function schedule(
+  args: ScheduleArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ id: number; serverId: string | null }> {
+  return runScheduledAccountOperation(accountLease, () =>
+    scheduleTextMessage(getDatabase(), http, args, accountLease),
+  );
 }
 
 /**
@@ -145,11 +294,20 @@ export function schedule(args: ScheduleArgs): Promise<{ id: number; serverId: st
  * if it fails we keep the local row and rethrow (the message is still scheduled server-side,
  * so the user must be able to retry the cancel rather than lose the only handle to it).
  */
-export async function cancelScheduled(row: { id: number; serverId: string | null }): Promise<void> {
-  if (row.serverId != null) {
-    await scheduledApi.deleteScheduled(http, row.serverId); // throws → local kept, UI alerts
-  }
-  await deleteScheduled(getDatabase(), row.id);
+export async function cancelScheduled(
+  row: { id: number; serverId: string | null },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  await runScheduledAccountOperation(accountLease, async () => {
+    const db = getDatabase();
+    assertScheduledLease(accountLease);
+    if (row.serverId != null) {
+      await scheduledApi.deleteScheduled(http, row.serverId); // throws → local kept, UI alerts
+      assertScheduledLease(accountLease);
+    }
+    await deleteScheduled(db, row.id);
+    assertScheduledLease(accountLease);
+  });
 }
 
 /**
@@ -163,39 +321,52 @@ export async function cancelScheduled(row: { id: number; serverId: string | null
 export async function editScheduled(
   id: number,
   patch: { text: string; scheduledFor?: number; recurrence?: string | null },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const db = getDatabase();
-  const row = await getScheduledById(db, id);
-  if (row?.serverId != null) {
-    // No PUT on Gator: delete the old server-side message, then create a replacement.
-    await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
-    if (patch.recurrence) {
-      // Now recurring → keep it local-only so the ticker (which skips server-backed rows)
-      // fires and re-arms it. The server row is already gone; just drop the serverId.
-      await updateScheduled(db, id, { ...patch, serverId: null });
+  await runScheduledAccountOperation(accountLease, async () => {
+    const db = getDatabase();
+    assertScheduledLease(accountLease);
+    const row = await getScheduledById(db, id);
+    assertScheduledLease(accountLease);
+    if (row?.serverId != null) {
+      // No PUT on Gator: delete the old server-side message, then create a replacement.
+      await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
+      assertScheduledLease(accountLease);
+      if (patch.recurrence) {
+        // Now recurring → keep it local-only so the ticker (which skips server-backed rows)
+        // fires and re-arms it. The server row is already gone; just drop the serverId.
+        await updateScheduled(db, id, { ...patch, serverId: null });
+        assertScheduledLease(accountLease);
+        return;
+      }
+      let newServerId: string | null;
+      try {
+        const created = await scheduledApi.createScheduled(http, {
+          chatGuid: row.chatGuid,
+          message: patch.text,
+          scheduledFor: patch.scheduledFor ?? row.scheduledFor,
+        });
+        assertScheduledLease(accountLease);
+        newServerId = created?.id ?? null;
+      } catch (e) {
+        // A revoked A request must not turn into a B-local fallback row.
+        assertScheduledLease(accountLease);
+        // DELETE succeeded but the re-create failed: the old server message is gone. DROP the
+        // serverId so the on-device worker fires the edited message as a fallback (rather than
+        // orphaning it — a non-null serverId would make the local worker skip it forever), apply
+        // the edit locally, then surface the failure.
+        await updateScheduled(db, id, { ...patch, serverId: null });
+        assertScheduledLease(accountLease);
+        throw e;
+      }
+      // Repoint the local row at the fresh uuid alongside the text/time change.
+      await updateScheduled(db, id, { ...patch, serverId: newServerId });
+      assertScheduledLease(accountLease);
       return;
     }
-    let newServerId: string | null;
-    try {
-      const created = await scheduledApi.createScheduled(http, {
-        chatGuid: row.chatGuid,
-        message: patch.text,
-        scheduledFor: patch.scheduledFor ?? row.scheduledFor,
-      });
-      newServerId = created?.id ?? null;
-    } catch (e) {
-      // DELETE succeeded but the re-create failed: the old server message is gone. DROP the
-      // serverId so the on-device worker fires the edited message as a fallback (rather than
-      // orphaning it — a non-null serverId would make the local worker skip it forever), apply
-      // the edit locally, then surface the failure.
-      await updateScheduled(db, id, { ...patch, serverId: null });
-      throw e;
-    }
-    // Repoint the local row at the fresh uuid alongside the text/time change.
-    await updateScheduled(db, id, { ...patch, serverId: newServerId });
-    return;
-  }
-  await updateScheduled(db, id, patch);
+    await updateScheduled(db, id, patch);
+    assertScheduledLease(accountLease);
+  });
 }
 
 /** Gator scheduled status (pending|sent|failed) → local {pending,sent,error} so pending rows stay visible. */
@@ -206,61 +377,84 @@ function normalizeSchedStatus(s: string | null | undefined): string {
   return 'pending'; // pending / scheduled → keep visible + cancellable
 }
 
-/** Server ids of the local server-backed rows still pending — the prune-exposure snapshot. */
-async function pendingServerIds(): Promise<Set<string>> {
-  const rows = await listAllScheduled(getDatabase());
-  return new Set(rows.map((r) => r.serverId).filter((id): id is string => id != null));
-}
-
 /** Pull the server's scheduled list into the local DB (keeps server-backed rows accurate). */
-export async function syncScheduledFromServer(): Promise<void> {
-  // Snapshot which rows this reconcile is ALLOWED to prune BEFORE the round trip. The server's
-  // answer describes the instant it was built, and the Scheduled screen's Edit re-creates a
-  // server-side message (delete + POST) — a row created while the GET was in flight is missing
-  // from that answer through no fault of its own, and pruning it deletes the local handle to a
-  // message the server will still fire.
-  const before = await pendingServerIds();
-  let items: Awaited<ReturnType<typeof scheduledApi.getScheduled>>;
+export async function syncScheduledFromServer(
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
   try {
-    items = await scheduledApi.getScheduled(http);
-  } catch {
-    return; // older/offline server — keep local rows as-is
+    await runScheduledAccountOperation(accountLease, async () => {
+      const db = getDatabase();
+      // Snapshot which rows this reconcile is ALLOWED to prune BEFORE the round trip. The server's
+      // answer describes the instant it was built, and the Scheduled screen's Edit re-creates a
+      // server-side message (delete + POST) — a row created while the GET was in flight is missing
+      // from that answer through no fault of its own, and pruning it deletes the local handle to a
+      // message the server will still fire.
+      const pruneExposure = await listServerScheduledPruneExposure(db, () =>
+        accountLease.isCurrent(),
+      );
+      assertScheduledLease(accountLease);
+      let items: Awaited<ReturnType<typeof scheduledApi.getScheduled>>;
+      try {
+        items = await scheduledApi.getScheduled(http);
+      } catch {
+        assertScheduledLease(accountLease);
+        return; // older/offline server — keep local rows as-is
+      }
+      assertScheduledLease(accountLease);
+      // EVERY id the server reported (even malformed items) — the prune set, so a row dropped by
+      // the well-formed filter below is kept rather than pruned.
+      const serverIds = items.map((it) => it.id);
+      const mapped = items
+        .map((it) => {
+          if (!Number.isFinite(it.scheduledFor)) return null;
+          return {
+            serverId: it.id,
+            chatGuid: it.chatGuid,
+            text: it.text,
+            scheduledFor: it.scheduledFor,
+            status: normalizeSchedStatus(it.status),
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x != null);
+      assertScheduledLease(accountLease);
+      await reconcileServerScheduled(db, mapped, serverIds, {
+        pruneExposure,
+        commitGuard: () => accountLease.isCurrent(),
+      });
+      assertScheduledLease(accountLease);
+    });
+  } catch (error) {
+    // This is called fire-and-forget on screen mount. A deliberate Disconnect is a quiet no-op,
+    // not an unhandled rejection in the newly connected UI.
+    if (error instanceof ScheduledSessionChangedError) return;
+    throw error;
   }
-  // EVERY id the server reported (even malformed items) — the prune set, so a row dropped by
-  // the well-formed filter below is kept rather than pruned.
-  const serverIds = items.map((it) => it.id);
-  // Rows that appeared locally during the round trip are added to the keep set. Only when the
-  // server actually reported something: an empty answer must still skip pruning entirely
-  // (reconcileServerScheduled's own guard against a transient empty view wiping live rows), so
-  // never let these turn an empty set into a non-empty one.
-  if (serverIds.length > 0) {
-    for (const id of await pendingServerIds()) {
-      if (!before.has(id)) serverIds.push(id);
-    }
-  }
-  const mapped = items
-    .map((it) => {
-      if (!Number.isFinite(it.scheduledFor)) return null;
-      return {
-        serverId: it.id,
-        chatGuid: it.chatGuid,
-        text: it.text,
-        scheduledFor: it.scheduledFor,
-        status: normalizeSchedStatus(it.status),
-      };
-    })
-    .filter((x): x is NonNullable<typeof x> => x != null);
-  await reconcileServerScheduled(getDatabase(), mapped, serverIds);
 }
 
 /** Fire any scheduled messages now due (real send path). */
-export function fireDueScheduled(now = Date.now()): Promise<number> {
-  return runDueScheduled(getDatabase(), http, now);
+export async function fireDueScheduled(now = Date.now()): Promise<number> {
+  const accountLease = captureRealtimeDeliveryLease();
+  try {
+    return await runScheduledAccountOperation(accountLease, () =>
+      runDueScheduled(getDatabase(), http, now, undefined, accountLease),
+    );
+  } catch (error) {
+    if (error instanceof ScheduledSessionChangedError) return 0;
+    throw error;
+  }
 }
 
-/** Recover rows interrupted mid-send (left 'sending'). Run once at app launch. */
-export function recoverStuckScheduled(): Promise<number> {
-  return resetStuckScheduled(getDatabase());
+/** Join the once-per-account recovery barrier for rows interrupted mid-send. */
+export async function recoverStuckScheduled(): Promise<number> {
+  const accountLease = captureRealtimeDeliveryLease();
+  try {
+    return await runScheduledAccountOperation(accountLease, () =>
+      ensureScheduledRecovery(getDatabase(), accountLease),
+    );
+  } catch (error) {
+    if (error instanceof ScheduledSessionChangedError) return 0;
+    throw error;
+  }
 }
 
 /**
@@ -293,10 +487,14 @@ async function reportQueueHealthOnce(): Promise<void> {
 export async function recoverOutgoing(
   now = Date.now(),
 ): Promise<{ eligible: number; sent: number }> {
+  // Capture before the health-check await. An old recovery callback must never turn into a B-account
+  // drain merely because Disconnect + reconnect completed while that read was in flight.
+  const accountLease = captureRealtimeDeliveryLease();
+  if (!accountLease.isCurrent()) return { eligible: 0, sent: 0 };
   // Before the drain, so the counts describe what the last session left behind rather than what
   // this one just repaired. Gated to the first call, which is the boot drain.
   await reportQueueHealthOnce();
-  return runOutgoingQueue(getDatabase(), http, outgoingQueueIO, now);
+  return runOutgoingQueue(getDatabase(), http, outgoingQueueIO, now, accountLease);
 }
 
 /**
@@ -314,34 +512,54 @@ export async function recoverOutgoing(
  *
  * The claim is guarded because this button races the automatic retry the app runs every 20 s: that
  * drain leases the same row, flips the bubble to 'sending' and starts a POST that can run for
- * seconds (an attachment upload has no timeout at all), while the sheet the user is tapping opened
+ * seconds (a foreground attachment upload has no timeout), while the sheet the user is tapping opened
  * before any of that. Only an 'error' row with a live ladder is ours; anything else says so and
  * re-sends nothing.
  */
-export async function retry(tempGuid: string): Promise<void> {
+export async function retry(
+  tempGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  if (!accountLease.isCurrent()) return;
   // NEVER rejects. The only call site is a `void retry(...)` in a press handler, so a rejection
   // here is an unhandled promise: no toast, no log, a tap that visibly did nothing. The bubble and
   // its ladder survive any failure now, so there is nothing to repair — only something to report.
   try {
-    const db = getDatabase();
-    const { claim, row } = await claimFailedOutgoingForRetry(db, tempGuid);
-    if (claim !== 'claimed' || !row) {
-      showToast(
-        claim === 'sending'
-          ? 'Already trying to send this message'
-          : claim === 'settled'
-            ? 'Message was already sent'
-            : 'This message can’t be sent again',
+    await runUiAccountOperation(accountLease, async () => {
+      const db = getDatabase();
+      const { claim, row } = await claimFailedOutgoingForRetry(db, tempGuid, Date.now, () =>
+        accountLease.isCurrent(),
       );
-      return;
-    }
-    // The same attempt the drain would make — same payload, same temp guid, same reconcile.
-    const outcome = await resendOutgoingRow(db, http, outgoingQueueIO, row, () => Date.now());
-    // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
-    // bubble keeps its error badge (Delete on the sheet still works) — say why rather than leave
-    // the tap looking like it did nothing.
-    if (outcome === 'unsendable') showToast('Original file is no longer available');
+      if (!accountLease.isCurrent()) return;
+      if (claim !== 'claimed' || !row) {
+        showToast(
+          claim === 'sending'
+            ? 'Already trying to send this message'
+            : claim === 'settled'
+              ? 'Message was already sent'
+              : 'This message can’t be sent again',
+        );
+        return;
+      }
+      // The same attempt the drain would make — same payload, same temp guid, same reconcile.
+      const outcome = await resendOutgoingRow(
+        db,
+        http,
+        outgoingQueueIO,
+        row,
+        () => Date.now(),
+        accountLease,
+      );
+      if (!accountLease.isCurrent()) return;
+      // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
+      // bubble keeps its error badge (Delete on the sheet still works) — say why rather than leave
+      // the tap looking like it did nothing.
+      if (outcome === 'unsendable') showToast('Original file is no longer available');
+    });
   } catch (e) {
+    // Disconnect may have revoked this retry while a DB/native await was in flight. An A-account
+    // failure must not surface as a toast in B's newly connected UI (or as a misleading warning).
+    if (!accountLease.isCurrent()) return;
     // A DB/driver failure in the claim itself. The automatic ladder still owns the row.
     logger.warn('[send] manual retry failed', e);
     showToast('Couldn’t retry — try again in a moment');
@@ -365,16 +583,42 @@ export async function retry(tempGuid: string): Promise<void> {
  * The step-1 helper returning "I cleaned something up" instead of "I own this message" is what
  * made a Delete silently do nothing, so it now reports ownership only.
  */
-export async function discardMessage(guid: string, now: number = Date.now()): Promise<void> {
-  // STOP THE BYTES FIRST, before either tombstone. "Cancel Sending" used to be a pure DB write:
-  // the bubble vanished while the phone carried on streaming the entire file to the server — on a
-  // large video, for minutes, over the user's data. The upload simply had no cancel handle to
-  // reach for. Cancelling is safe for every other message kind too: nothing is registered under a
-  // text/reaction/contact temp guid, so this is a no-op for them.
-  uploadRegistry.cancel(guid);
-  const db = getDatabase();
-  if (await discardOutgoingMessage(db, guid, now)) return;
-  await deleteMessageLocal(db, guid, now);
+export async function discardMessage(
+  guid: string,
+  now: number = Date.now(),
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  await runUiAccountOperation(accountLease, async () => {
+    // STOP THE BYTES FIRST, before either tombstone. "Cancel Sending" used to be a pure DB write:
+    // the bubble vanished while the phone carried on streaming the entire file to the server — on a
+    // large video, for minutes, over the user's data. The upload simply had no cancel handle to
+    // reach for. Cancelling is safe for every other message kind too: nothing is registered under a
+    // text/reaction/contact temp guid, so this is a no-op for them.
+    uploadRegistry.cancel(guid);
+    const db = getDatabase();
+    const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
+    const outgoingOwned = await discardOutgoingMessage(db, guid, now);
+    if (!outgoingOwned) {
+      if (!accountLease.isCurrent()) return;
+      const result = await deleteMessageLocal(db, guid, now);
+      if (!accountLease.isCurrent()) return;
+      if (result === 'unresolved-temp') {
+        // The fixed-size alias ledger may have retired an extremely old mapping. Never claim the
+        // destructive action succeeded against an identity we cannot prove; the reactive list now
+        // carries the real GUID, so selecting the message again gives the user a safe retry.
+        showToast('Message changed—select it again');
+      }
+    }
+    if (!accountLease.isCurrent()) return;
+    // Tombstone + ledger/ref changes committed above. Exact native deletion stays outside their DB
+    // transaction and inside this account-scoped operation, so Disconnect drains it before wipe.
+    await attachmentCacheCoordinator
+      .retireInactiveEntries(db, { scope: attachmentCacheScope })
+      .catch((error) => logger.debug('[send] deleted-message cache retirement deferred', error));
+    await attachmentCacheCoordinator
+      .drainDueRetirements(db, { scope: attachmentCacheScope })
+      .catch((error) => logger.debug('[send] deleted-message cache cleanup deferred', error));
+  });
 }
 
 /*

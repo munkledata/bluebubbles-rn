@@ -5,7 +5,7 @@
  * all: every chat-thread query filtered `associated_message_type IS NULL`, which correctly hid
  * reactions and silently swallowed stickers — so the sender saw a sticker on your photo and you saw
  * nothing. This suite pins the bubble half of the fix: that the overlay is reached from EVERY kind
- * of target bubble, and that redacted mode suppresses it.
+ * of target bubble.
  *
  * Deliberately a SEPARATE file from messageBubble.test.tsx. That suite has pre-existing act
  * pollution (its later tests render empty), and appending here would have made these tests fail for
@@ -15,7 +15,6 @@
  */
 import React from 'react';
 import { renderWithTheme, screen } from '../support/renderWithTheme';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import type { AttachmentRow, MessageRow, StickerRow } from '@db/repositories';
 
 // The real overlay pulls @/services/download -> ky (ESM, untransformed in this project). The marker
@@ -87,10 +86,6 @@ function mkSticker(over: Partial<StickerRow> = {}): StickerRow {
 const img = (guid: string): AttachmentRow =>
   ({ guid, mimeType: 'image/jpeg', localPath: `/${guid}.jpg` }) as AttachmentRow;
 
-beforeEach(() => {
-  useRedactedModeStore.setState({ enabled: false, hydrated: true });
-});
-
 describe('MessageBubble — sticker overlay wiring', () => {
   it('renders the overlay on an ordinary text bubble', async () => {
     await renderWithTheme(<MessageBubble msg={makeMsg({ stickers: [mkSticker()] })} showTail />);
@@ -141,22 +136,5 @@ describe('MessageBubble — sticker overlay wiring', () => {
     const msg = makeMsg({ text: '', subject: 'Subject line', stickers: [mkSticker()] });
     await renderWithTheme(<MessageBubble msg={msg} showTail />);
     expect(screen.getByText('STICKER:1')).toBeTruthy();
-  });
-});
-
-describe('MessageBubble — stickers under redacted mode', () => {
-  // Redacted mode exists so a screenshot is safe; a sticker is arbitrary sender-supplied imagery,
-  // so it is suppressed exactly like the attachment placeholder.
-  it('renders NO sticker imagery when redacted', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    await renderWithTheme(<MessageBubble msg={makeMsg({ stickers: [mkSticker()] })} showTail />);
-    expect(screen.queryByText(/^STICKER:/)).toBeNull();
-  });
-
-  it('suppresses the overlay on an attachment message too', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    const msg = makeMsg({ text: '', stickers: [mkSticker()], attachments: [img('a1')] });
-    await renderWithTheme(<MessageBubble msg={msg} showTail />);
-    expect(screen.queryByText(/^STICKER:/)).toBeNull();
   });
 });

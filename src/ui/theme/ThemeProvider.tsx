@@ -1,9 +1,7 @@
 import React, { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { useThemeStore } from '@state/themeStore';
-import { lightTheme, resolvePreset, type ThemeMode, type ThemeTokens } from './tokens';
-
-export type ThemePreference = ThemeMode | 'system';
+import { darkTheme, darkThemeOrFallback, resolvePreset, type ThemeTokens } from './tokens';
 
 export interface ThemeContextValue {
   theme: ThemeTokens;
@@ -14,30 +12,36 @@ export interface ThemeContextValue {
  * theme for a subtree. Consumers should keep using `useTheme()` rather than this
  * directly.
  */
-export const ThemeContext = createContext<ThemeContextValue>({ theme: lightTheme });
+export const ThemeContext = createContext<ThemeContextValue>({ theme: darkTheme });
 
 interface ThemeProviderProps {
   children: ReactNode;
+  /** Root boot/lock shells may render with the safe dark fallback before DB hydration. */
+  renderWithFallbackTheme?: boolean;
 }
 
 /**
  * Provides iOS design tokens to the tree, resolved from the persisted theme
  * preset (themeStore). Changing the preset recolors every `useTheme()` consumer.
  */
-export function ThemeProvider({ children }: ThemeProviderProps): React.JSX.Element {
+export function ThemeProvider({
+  children,
+  renderWithFallbackTheme = false,
+}: ThemeProviderProps): React.JSX.Element {
   const preset = useThemeStore((s) => s.preset);
   const customTokens = useThemeStore((s) => s.customTokens);
   const hydrated = useThemeStore((s) => s.hydrated);
-  // A custom theme (if active) overrides the built-in preset.
+  // A dark custom theme (if active) overrides the built-in preset. Legacy light custom
+  // tokens stay stored for THEME-01B but cannot make this dark-only tree render light.
   const value = useMemo<ThemeContextValue>(
-    () => ({ theme: customTokens ?? resolvePreset(preset) }),
+    () => ({ theme: darkThemeOrFallback(customTokens, resolvePreset(preset)) }),
     [preset, customTokens],
   );
   // Hold the first paint until the persisted theme has loaded, so a custom-theme user
   // doesn't see a flash of the default preset before hydration recolors the tree.
   return (
     <ThemeContext.Provider value={value}>
-      {hydrated ? (
+      {hydrated || renderWithFallbackTheme ? (
         children
       ) : (
         <View style={{ flex: 1, backgroundColor: value.theme.color.background }} />

@@ -1,16 +1,26 @@
 import { io, type Socket } from 'socket.io-client';
 import { SERVER_EVENTS } from '@core/config';
-import { EventRouter, type EventSink } from '@core/realtime';
+import {
+  type EventDeliveryContext,
+  type EventOccurrenceMetadata,
+  type EventSource,
+} from '@core/realtime';
 import { logger } from '@core/secure';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from './deliveryCoordinator';
 
 export interface SocketAuthOptions {
   /** Auth header(s) for the handshake (mirrors the REST client's headers). */
-  headers?: Record<string, string>;
+  headers?: Readonly<Record<string, string>>;
   /**
    * When true, send the password as a `?guid=` handshake query (what a stock/old
    * server reads — `socket.handshake.query.guid`) instead of the secure
-   * `auth` payload. Drive this from `HttpClient.usesHeaderAuth()` so REST and socket
-   * stay in the same mode. Legacy mode puts the password in the (WSS-encrypted) URL,
+   * `auth` payload. Drive this from one `HttpClient.snapshotTransport()` so REST and socket
+   * stay in the same mode and account identity. Legacy mode puts the password in the
+   * (WSS-encrypted) URL,
    * so use it only against servers that don't support `handshake.auth`.
    */
   legacyQueryAuth?: boolean;
@@ -26,6 +36,42 @@ export interface SocketAuthOptions {
    * down when it arrived. Omitting the hook is a clean no-op (same-origin retry).
    */
   refreshUrl?: (currentUrl: string) => Promise<string | null>;
+}
+
+/** Explicit raw-event handoff accepted by the socket transport. */
+export type RawRealtimeEventHandler = (
+  eventName: string,
+  rawData: unknown,
+  source: EventSource,
+  context?: EventDeliveryContext,
+  occurrence?: EventOccurrenceMetadata,
+) => Promise<unknown>;
+
+export type SocketOccurrenceNamespaceFactory = () => string;
+
+let processSocketOpenSequence = 0;
+
+function makeProcessSocketOccurrenceNonce(): string {
+  try {
+    const uuid = globalThis.crypto?.randomUUID?.();
+    if (uuid) return uuid;
+  } catch {
+    // Some React Native runtimes expose a partial crypto global. This identifier is a dedup
+    // namespace, not a secret or authorization token, so a high-entropy non-crypto fallback is
+    // sufficient; the process-local sequence below still guarantees uniqueness within one runtime.
+  }
+  const random = Math.floor(Math.random() * 0x1_0000_0000)
+    .toString(36)
+    .padStart(7, '0');
+  return `${Date.now().toString(36)}-${random}`;
+}
+
+const processSocketOccurrenceNonce = makeProcessSocketOccurrenceNonce();
+
+/** Process-scoped nonce plus a monotonic open sequence; IDs never repeat in one runtime. */
+function makeSocketOccurrenceNamespace(): string {
+  processSocketOpenSequence += 1;
+  return `socket:${processSocketOccurrenceNonce}:${processSocketOpenSequence}`;
 }
 
 // ── Reconnect escalation (Phase 1.1) ──────────────────────────────────────────
@@ -106,7 +152,7 @@ export function shouldLogSocketError(
  * Socket.IO connection for live updates while the app is open. By default auth
  * travels in the handshake `auth` payload (not the URL query — the security fix);
  * legacy mode falls back to a `?guid=` query for servers that only read it. Every
- * server event is funneled through the EventRouter into the injected sink (DB sink).
+ * server event is funneled through the required injected raw-event handler.
  *
  * On Android, FCM is the primary delivery path (Phase 6); this covers the
  * foreground/open window.
@@ -117,7 +163,7 @@ export function shouldLogSocketError(
  */
 export class SocketService {
   private socket: Socket | null = null;
-  private readonly router: EventRouter;
+  private readonly handleRawEvent: RawRealtimeEventHandler;
 
   // Escalation state.
   private origin = '';
@@ -127,38 +173,54 @@ export class SocketService {
   private escalationTimer: ReturnType<typeof setTimeout> | null = null;
   private escalationInProgress = false;
   private stopped = false;
+  /** Invalidates native callbacks / async escalation work from every prior connect lifecycle. */
+  private lifecycleGeneration = 0;
+  /** Account generation this socket opened under; native callbacks never recapture a newer one. */
+  private accountLease: RealtimeDeliveryLease | null = null;
 
   // Error-log throttling state: signature key → last-logged epoch ms.
   private readonly lastErrorLoggedAt = new Map<string, number>();
 
   /**
-   * Pass a shared {@link EventRouter} to dedup across transports (socket + FCM): both must use
-   * the SAME router so its `seen` set sees both deliveries of one message (separate routers
-   * have separate sets → the cross-transport dedup is a no-op). Falls back to a private router
-   * built from `sink` when none is supplied (tests, single-transport use).
+   * The callback is required: production socket intake must never silently fall back around the
+   * durable queue. Transport-only tests inject a harmless callback explicitly.
    */
-  constructor(sink: EventSink, router?: EventRouter) {
-    this.router = router ?? new EventRouter(sink);
+  constructor(
+    handler: RawRealtimeEventHandler,
+    private readonly makeOccurrenceNamespace: SocketOccurrenceNamespaceFactory = makeSocketOccurrenceNamespace,
+  ) {
+    this.handleRawEvent = handler;
   }
 
   connect(origin: string, password: string, opts: SocketAuthOptions = {}): void {
-    this.disconnect();
+    this.lifecycleGeneration += 1;
+    this.retireCurrentConnection();
     this.stopped = false;
     this.origin = origin;
     this.password = password;
-    this.opts = opts;
+    this.accountLease = captureRealtimeDeliveryLease();
+    // Do not retain a caller-owned mutable header object across Socket.IO's reconnect ladder.
+    this.opts = { ...opts, headers: opts.headers ? { ...opts.headers } : undefined };
     this.openSocket();
   }
 
   /** (Re)open the underlying socket against the current origin/password/opts. */
   private openSocket(): void {
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const accountLease = this.accountLease;
+    // This namespace belongs to exactly one underlying Socket.IO open. A later explicit open or
+    // escalation receives a fresh value. Socket.IO's built-in reconnect reuses this object, so its
+    // second `connect` event rotates the namespace and resets the per-connection sequence below.
+    let occurrenceNamespace = this.makeOccurrenceNamespace();
+    let eventSequence = 0;
+    let hasConnected = false;
     this.socket = io(this.origin, {
       transports: ['websocket'],
       // Secure default: auth payload. Legacy: `guid` query for stock servers.
       ...(this.opts.legacyQueryAuth
         ? { query: { guid: this.password } }
         : { auth: { password: this.password } }),
-      extraHeaders: this.opts.headers ?? {},
+      extraHeaders: { ...(this.opts.headers ?? {}) },
       reconnection: true,
       // Cap socket.io's built-in retries (its default is Infinity) so it surrenders to
       // our app-level escalation ladder: after this many failed attempts the Manager
@@ -168,25 +230,62 @@ export class SocketService {
     });
     for (const event of SERVER_EVENTS) {
       this.socket.on(event, (data: unknown) => {
+        if (
+          this.stopped ||
+          lifecycleGeneration !== this.lifecycleGeneration ||
+          !accountLease?.isCurrent()
+        ) {
+          return;
+        }
+        // Reserve the occurrence synchronously, before runTrackedRealtimeWork invokes any async
+        // digest/DB work. Back-to-back native callbacks therefore retain their transport order.
+        eventSequence += 1;
+        const occurrence: EventOccurrenceMetadata = {
+          transportOccurrenceId: `${occurrenceNamespace}:${eventSequence}`,
+        };
+        let deliveryLease: RealtimeDeliveryLease | null = null;
         // Fire-and-forget by design (socket.io handlers are sync), but a bare `void` swallows
         // every handler rejection — a failed DB write for an incoming message then disappears
         // with no trace anywhere. The router already released its dedup claim; at least say so.
         //
         // ERROR, not warn, and that level is load-bearing: `ErrorReportSink` captures ONLY
-        // `error` lines into the uploadable `error_reports` queue (a warn is a local App-Logs
-        // line nobody will ever read), and handling the rejection here means the global
+        // `error` lines into the uploadable `error_reports` queue (a warn is development-only and
+        // absent from release reporting), and handling the rejection here means the global
         // unhandled-rejection tracker no longer sees it. Dropping to warn would take a lost
-        // incoming message off the crash-report pipeline entirely. The `[socket]` prefix is the
-        // tag the server fingerprints on. No feedback loop: the sink's `busy` guard drops errors
-        // logged during its own enqueue/drain and the upload path only ever logs at warn.
-        void this.router.handle(event, data, 'socket').catch((err: unknown) => {
-          logger.error('[socket] event handling failed', { event, error: err });
-        });
+        // incoming message off the crash-report pipeline entirely. The strict projector converts
+        // this event plus its finite server-event name into the server's grouping message/tag. No
+        // feedback loop: the sink's `busy` guard drops errors logged during its own enqueue/drain
+        // and the upload path only ever logs at warn.
+        void runTrackedRealtimeWork(accountLease, (lease) => {
+          deliveryLease = lease;
+          return this.handleRawEvent(event, data, 'socket', lease, occurrence);
+        })
+          .then((result) => {
+            if (result === 'paused') {
+              logger.debug('[socket] event delivery paused during account transition', { event });
+            }
+          })
+          .catch((err: unknown) => {
+            if (deliveryLease && !deliveryLease.isCurrent()) {
+              // The failure belongs to the account Disconnect just retired. It is expected teardown
+              // noise now, not a diagnostic the next account's server is allowed to receive.
+              logger.debug('[socket] event failure retired during account transition', { event });
+              return;
+            }
+            logger.error('[socket] event handling failed', { event, error: err });
+          });
       });
     }
 
     // A clean (re)connect resets the escalation ladder and the suppression window.
     this.socket.on('connect', () => {
+      if (lifecycleGeneration !== this.lifecycleGeneration) return;
+      if (hasConnected) {
+        occurrenceNamespace = this.makeOccurrenceNamespace();
+        eventSequence = 0;
+      } else {
+        hasConnected = true;
+      }
       this.escalationAttempt = 0;
       this.cancelEscalation();
       this.lastErrorLoggedAt.clear();
@@ -194,7 +293,7 @@ export class SocketService {
 
     // Per-attempt connect failures: throttled logging only (socket.io keeps retrying).
     this.socket.on('connect_error', (err: unknown) => {
-      this.logSocketError(err);
+      this.logSocketError(err, lifecycleGeneration);
     });
 
     // socket.io exhausted its built-in retries → take over with URL-refresh escalation.
@@ -202,10 +301,12 @@ export class SocketService {
     // may not expose it. Fall back to the socket-level `error` event otherwise.
     const manager = (this.socket as { io?: { on?: (e: string, cb: () => void) => void } }).io;
     if (manager?.on) {
-      manager.on('reconnect_failed', () => this.scheduleEscalation());
+      manager.on('reconnect_failed', () => {
+        if (lifecycleGeneration === this.lifecycleGeneration) this.scheduleEscalation();
+      });
     }
     this.socket.on('error', (err: unknown) => {
-      this.logSocketError(err);
+      this.logSocketError(err, lifecycleGeneration);
     });
   }
 
@@ -233,12 +334,17 @@ export class SocketService {
   }
 
   /** Log a socket error through the redacting logger, throttled by signature (60s window). */
-  private logSocketError(err: unknown): void {
+  private logSocketError(err: unknown, lifecycleGeneration = this.lifecycleGeneration): void {
+    // Native callbacks and a rejected refreshUrl can settle after disconnect(). Those errors belong
+    // to the retired socket/account and must not enter the next session's uploadable diagnostics.
+    if (this.stopped || lifecycleGeneration !== this.lifecycleGeneration) return;
     const sig = this.errorSignature(err);
     const now = Date.now();
     if (!shouldLogSocketError(sig, now, this.lastErrorLoggedAt)) return;
     this.lastErrorLoggedAt.set(socketErrorKey(sig), now);
-    logger.error(`[socket] error connecting to ${sig.host}: ${sig.message || 'unknown error'}`);
+    // Keep host/message only in the in-memory throttle signature. Retained sinks receive the
+    // static event plus the projector's finite Error name/code/status classification.
+    logger.error('[socket] connection failed', err);
   }
 
   /**
@@ -262,22 +368,28 @@ export class SocketService {
   /** Refresh the server URL (if a hook is provided) and restart the socket. */
   private async runEscalation(): Promise<void> {
     if (this.stopped || this.socket?.connected) return;
+    let lifecycleGeneration = this.lifecycleGeneration;
     this.escalationInProgress = true;
     try {
       if (this.opts.refreshUrl) {
         const fresh = await this.opts.refreshUrl(this.origin);
+        if (this.stopped || lifecycleGeneration !== this.lifecycleGeneration) return;
         if (fresh && fresh !== this.origin) {
           logger.info('[socket] server URL changed — reconnecting to the new origin');
           this.origin = fresh;
         }
       }
-      // Restart against the (possibly new) origin.
+      // Retire every native closure owned by the old Socket.IO instance before disconnecting it.
+      // The replacement keeps the same account lease, but owns a new socket lifecycle.
+      this.lifecycleGeneration += 1;
+      lifecycleGeneration = this.lifecycleGeneration;
       this.teardownSocket();
       if (!this.stopped) this.openSocket();
     } catch (e) {
-      this.logSocketError(e);
+      this.logSocketError(e, lifecycleGeneration);
     } finally {
-      this.escalationInProgress = false;
+      // A newer connect owns this flag now. An old promise must not clear B's in-progress run.
+      if (lifecycleGeneration === this.lifecycleGeneration) this.escalationInProgress = false;
     }
   }
 
@@ -300,11 +412,17 @@ export class SocketService {
   }
 
   disconnect(): void {
+    this.lifecycleGeneration += 1;
+    this.retireCurrentConnection();
+  }
+
+  private retireCurrentConnection(): void {
     this.stopped = true;
     this.cancelEscalation();
     this.escalationAttempt = 0;
     this.escalationInProgress = false;
     this.lastErrorLoggedAt.clear();
+    this.accountLease = null;
     this.teardownSocket();
   }
 

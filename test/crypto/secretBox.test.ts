@@ -47,4 +47,18 @@ describe('SecretBox (XChaCha20-Poly1305 + Argon2id)', () => {
     expect(raw[1]).toBe(0x42); // 'B'
     expect(raw[2]).toBe(ENVELOPE_VERSION);
   });
+
+  it('uses application-owned Argon2 costs; the envelope cannot supply attacker costs', async () => {
+    const backend = await createLibsodiumBackend();
+    const deriveKey = jest.spyOn(backend, 'deriveKey');
+    const box = new SecretBox(backend, cheapArgon);
+    const sealed = await box.seal('bounded payload', 'passphrase');
+    await box.open(sealed, 'passphrase');
+
+    expect(Object.keys(decodeEnvelope(sealed)).sort()).toEqual(['body', 'nonce', 'salt']);
+    expect(deriveKey).toHaveBeenCalledTimes(2);
+    for (const [params] of deriveKey.mock.calls) {
+      expect(params).toEqual(expect.objectContaining(cheapArgon));
+    }
+  });
 });

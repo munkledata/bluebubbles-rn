@@ -7,6 +7,7 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import { getScheduledById } from '@db/repositories';
 import { editScheduled } from '@/services/send';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
@@ -18,6 +19,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const schedId = Number(id);
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [text, setText] = useState('');
   const [when, setWhen] = useState<number | null>(null);
   const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
@@ -28,34 +30,54 @@ export default function ScheduledEditScreen(): React.JSX.Element {
     void (async () => {
       try {
         const row = await getScheduledById(getDatabase(), schedId);
+        if (!accountLease.isCurrent()) return;
         if (row) {
           setText(row.text);
           setWhen(row.scheduledFor);
           setRecurrence(asRecurrence(row.recurrence));
         }
       } catch (e) {
+        if (!accountLease.isCurrent()) return;
         // A failed read must not leave the screen permanently blank (loaded stuck false).
         logger.warn('[scheduled-edit] could not load scheduled message', e);
         setLoadError('Couldn’t load this scheduled message.');
       } finally {
-        setLoaded(true);
+        if (accountLease.isCurrent()) setLoaded(true);
       }
     })();
-  }, [schedId]);
+  }, [accountLease, schedId]);
 
   const reschedule = async (): Promise<void> => {
-    const picked = await pickFutureDateTime();
-    if (picked != null) setWhen(picked);
+    if (!accountLease.isCurrent()) return;
+    try {
+      const picked = await pickFutureDateTime();
+      if (picked != null && accountLease.isCurrent()) setWhen(picked);
+    } catch {
+      if (accountLease.isCurrent()) {
+        showDialog('Scheduled', 'Couldn’t open the date picker.');
+      }
+    }
   };
 
   const save = (): void => {
+    if (!accountLease.isCurrent()) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     // editScheduled mirrors the change to the server first (for server-backed rows); a failed
     // server update rethrows so we surface it instead of silently diverging.
-    void editScheduled(schedId, { text: trimmed, scheduledFor: when ?? undefined, recurrence })
-      .then(() => router.back())
-      .catch(() => showDialog('Scheduled', 'Couldn’t update — the server is unreachable.'));
+    void editScheduled(
+      schedId,
+      { text: trimmed, scheduledFor: when ?? undefined, recurrence },
+      accountLease,
+    )
+      .then(() => {
+        if (accountLease.isCurrent()) router.back();
+      })
+      .catch(() => {
+        if (accountLease.isCurrent()) {
+          showDialog('Scheduled', 'Couldn’t update — the server is unreachable.');
+        }
+      });
   };
 
   return (

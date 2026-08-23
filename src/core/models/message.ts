@@ -81,6 +81,12 @@ export const Message = z.object({
   originalROWID: z.number().nullish(),
   guid: z.string(),
   text: z.string().nullish(),
+  /**
+   * Gator's FCM payload cap marks a long message whose text was shortened for push delivery.
+   * Keep that transport fact through validation so durable intake can request normal sync for the
+   * complete body. It is presentation/recovery metadata only and is never written to `messages`.
+   */
+  textTruncated: z.boolean().nullish(),
   subject: z.string().nullish(),
   /** Apple typedstream rich-text payload, base64; parsed lazily off-thread. */
   attributedBody: z.array(z.unknown()).nullish(),

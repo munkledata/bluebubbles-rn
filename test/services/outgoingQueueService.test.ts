@@ -3,6 +3,7 @@ import { ApiError } from '@core/api/errors';
 import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
 import { Chat } from '@core/models';
+import { logger } from '@core/secure';
 import {
   applyServerSendError,
   claimFailedOutgoingForRetry,
@@ -13,11 +14,18 @@ import {
   listRetryableOutgoing,
   outgoingBackoffMs,
   OUTGOING_MAX_ATTEMPTS,
+  type RetryableOutgoing,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
+import {
+  resendOutgoingRow,
+  runOutgoingQueue,
+  type OutgoingQueueIO,
+} from '@/services/send/outgoingQueueService';
+import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
@@ -74,12 +82,79 @@ const queueCount = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM outgoing_queue').get() as { c: number }).c;
 const stateOf = (raw: Database.Database, guid: string): string | undefined =>
   (raw.prepare('SELECT send_state s FROM messages WHERE guid = ?').get(guid) as { s: string })?.s;
+const errorOf = (raw: Database.Database, guid: string): number | undefined =>
+  (raw.prepare('SELECT error e FROM messages WHERE guid = ?').get(guid) as { e: number })?.e;
 const attemptsOf = (raw: Database.Database, tempGuid: string): number | undefined =>
   (
     raw.prepare('SELECT attempts a FROM outgoing_queue WHERE temp_guid = ?').get(tempGuid) as {
       a: number;
     }
   )?.a;
+
+interface RevocableLeaseHarness {
+  lease: RealtimeDeliveryLease;
+  revoke(): void;
+  waitForChecks(count: number): Promise<void>;
+}
+
+/** Observe the exact point where runTrackedRealtimeWork admitted a commit before revoking it. */
+function revocableLease(): RevocableLeaseHarness {
+  let current = true;
+  let checks = 0;
+  const waiters: { count: number; resolve: () => void }[] = [];
+  const resolveSatisfiedWaiters = (): void => {
+    for (const waiter of [...waiters]) {
+      if (checks < waiter.count) continue;
+      waiters.splice(waiters.indexOf(waiter), 1);
+      waiter.resolve();
+    }
+  };
+  return {
+    lease: {
+      generation: 7,
+      isCurrent: () => {
+        checks += 1;
+        resolveSatisfiedWaiters();
+        return current;
+      },
+    },
+    revoke: () => {
+      current = false;
+    },
+    waitForChecks: async (count) => {
+      if (checks >= count) return;
+      await new Promise<void>((resolve) => waiters.push({ count, resolve }));
+    },
+  };
+}
+
+/** Hold the real process-wide mutex so an account-scoped commit is forced to wait behind it. */
+async function holdDbTransaction(db: AppDatabase): Promise<{
+  release(): void;
+  finished: Promise<void>;
+}> {
+  let release!: () => void;
+  let entered!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const finished = withDbTransaction(db, async () => {
+    entered();
+    await blocked;
+  });
+  await started;
+  return { release, finished };
+}
+
+async function retryableRow(db: AppDatabase, now: number): Promise<RetryableOutgoing> {
+  const rows = await listRetryableOutgoing(db, now);
+  const row = rows[0];
+  if (!row) throw new Error('expected a retryable outgoing row');
+  return row;
+}
 
 /** Insert an outgoing text whose created_at is forced old, so it's a stranded (eligible) row. */
 async function strandedText(
@@ -130,6 +205,19 @@ describe('outgoingBackoffMs', () => {
 });
 
 describe('runOutgoingQueue', () => {
+  it('applies an explicit oldest-first cap to a background drain', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-third', 300);
+    await strandedText(db, raw, 'c1', 'temp-first', 100);
+    await strandedText(db, raw, 'c1', 'temp-second', 200);
+
+    const rows = await listRetryableOutgoing(db, 1_000_000, 2);
+
+    expect(rows.map((row) => row.tempGuid)).toEqual(['temp-first', 'temp-second']);
+    expect(await listRetryableOutgoing(db, 1_000_000, 0)).toEqual([]);
+  });
+
   it('retries a stranded send to success and clears the queue row', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
@@ -189,6 +277,7 @@ describe('runOutgoingQueue', () => {
   });
 
   it('schedules a backoff retry on failure, then succeeds once it elapses', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const t = 10_000_000;
@@ -209,9 +298,13 @@ describe('runOutgoingQueue', () => {
     const res = await runOutgoingQueue(db, okHttp(t + 31_000), noAttachmentIo, t + 31_000);
     expect(res.sent).toBe(1);
     expect(queueCount(raw)).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[queue] failed for chat c1 (code 500, HTTP 500): boom');
+    warn.mockRestore();
   });
 
   it('retires a permanently-failing row after the attempt cap (no infinite retry)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     let t = 10_000_000;
@@ -225,6 +318,10 @@ describe('runOutgoingQueue', () => {
     // Capped: no longer eligible, message stays errored, row retired (still present).
     expect((await listRetryableOutgoing(db, t)).length).toBe(0);
     expect(stateOf(raw, 'temp-c')).toBe('error');
+    expect(warn.mock.calls).toEqual(
+      Array.from({ length: 5 }, () => ['[queue] failed for chat c1 (code 500, HTTP 500): boom']),
+    );
+    warn.mockRestore();
   });
 
   it('REGRESSION: a retry SUCCESS on the RCS tempGuid-echo ack flips error→sent and clears the queue (no duplicate re-sends)', async () => {
@@ -251,6 +348,39 @@ describe('runOutgoingQueue', () => {
 });
 
 describe('runOutgoingQueue — attachment resend', () => {
+  it('does not turn an A file-check into a B upload after Disconnect + reconnect', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-account-race');
+
+    let account = 'A';
+    let current = true;
+    const lease: RealtimeDeliveryLease = { generation: 7, isCurrent: () => current };
+    const uploadedAccounts: string[] = [];
+    const io = fakeIo({
+      fileExists: async () => {
+        // Exact production race: A's native stat is outstanding, Forget retires A, then B connects
+        // before the promise resumes. Without the post-await lease check, upload snapshots B.
+        current = false;
+        account = 'B';
+        return true;
+      },
+      upload: async () => {
+        uploadedAccounts.push(account);
+        return { guid: 'should-not-send' };
+      },
+    });
+
+    await expect(runOutgoingQueue(db, {} as HttpClient, io.io, 2_000_000, lease)).resolves.toEqual({
+      eligible: 1,
+      sent: 0,
+    });
+    expect(uploadedAccounts).toEqual([]);
+    expect(io.captured).toBeUndefined();
+    // No B-account failure/reconcile write ran after revocation. Forget owns the eventual wipe.
+    expect(stateOf(raw, 'temp-account-race')).toBe('sending');
+  });
+
   it('re-uploads a failed picture with the SAME tempGuid, name+mime from the attachment row, and reconciles the RCS echo ack', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
@@ -270,6 +400,7 @@ describe('runOutgoingQueue — attachment resend', () => {
       uri: 'file:///pic.jpg',
       mimeType: 'image/jpeg',
     });
+    expect(up.captured?.timeoutMs).toBeUndefined(); // foreground/ordinary drains stay unbounded
     // error → sent (the swallow fix), queue cleared, local image retained for rendering.
     expect(stateOf(raw, 'temp-pic')).toBe('sent');
     expect(queueCount(raw)).toBe(0);
@@ -278,7 +409,80 @@ describe('runOutgoingQueue — attachment resend', () => {
     );
   });
 
+  it('passes the remainder of one shared attachment deadline through to the uploader', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-deadline');
+    jest.useFakeTimers();
+    jest.setSystemTime(2_000_000);
+    try {
+      const up = fakeIo({
+        fileExists: async () => {
+          jest.advanceTimersByTime(250);
+          // A manual/NTP wall-clock jump must not restore spent deadline budget.
+          jest.setSystemTime(1_000_000);
+          return true;
+        },
+        upload: async (args) => {
+          jest.setSystemTime(2_000_250);
+          return { guid: args.tempGuid, viaPrivateApi: false };
+        },
+      });
+
+      await expect(
+        runOutgoingQueue(db, {} as HttpClient, up.io, 2_000_000, undefined, 1, 60_000),
+      ).resolves.toEqual({ eligible: 1, sent: 1 });
+      expect(up.captured?.timeoutMs).toBe(59_750);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('times out the queue-level native file check and bumps one retry backoff', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-stat-timeout');
+    let finishFileCheck: (exists: boolean) => void = () => undefined;
+    let enteredFileCheck!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enteredFileCheck = resolve;
+    });
+    const up = fakeIo({
+      fileExists: () => {
+        enteredFileCheck();
+        return new Promise<boolean>((resolve) => {
+          finishFileCheck = resolve;
+        });
+      },
+      upload: async () => ({ guid: 'must-not-upload' }),
+    });
+
+    jest.useFakeTimers();
+    jest.setSystemTime(2_000_000);
+    try {
+      const run = runOutgoingQueue(db, {} as HttpClient, up.io, 2_000_000, undefined, 1, 60_000);
+      await entered;
+      jest.advanceTimersByTime(60_000);
+
+      await expect(run).resolves.toEqual({ eligible: 1, sent: 0 });
+      expect(up.captured).toBeUndefined();
+      expect(stateOf(raw, 'temp-stat-timeout')).toBe('error');
+      expect(errorOf(raw, 'temp-stat-timeout')).toBe(10003);
+      expect(attemptsOf(raw, 'temp-stat-timeout')).toBe(2);
+      expect(warn).toHaveBeenCalledWith(
+        '[queue] failed for chat c1 (code 10003): Attachment retry timed out',
+      );
+    } finally {
+      finishFileCheck(true);
+      await Promise.resolve();
+      jest.useRealTimers();
+      warn.mockRestore();
+    }
+  });
+
   it('a failed re-upload bumps attempts + reschedules backoff (bubble stays errored)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await seedFailedAttachment(db, raw, 'temp-pic2');
@@ -293,9 +497,15 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect(stateOf(raw, 'temp-pic2')).toBe('error');
     expect(attemptsOf(raw, 'temp-pic2')).toBe(2);
     expect(queueCount(raw)).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[queue] failed for chat c1 (code 10002, HTTP 502): bridge down',
+    );
+    warn.mockRestore();
   });
 
   it('retires immediately when the local file is GONE (no attempt burn; bubble keeps its error badge)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await seedFailedAttachment(db, raw, 'temp-gone');
@@ -309,9 +519,13 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect((await listRetryableOutgoing(db, 9_999_999_999)).length).toBe(0);
     expect(stateOf(raw, 'temp-gone')).toBe('error');
     expect(queueCount(raw)).toBe(1); // row kept (cancellable / visible to diagnostics)
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[queue] attachment retry has no local file — retiring');
+    warn.mockRestore();
   });
 
   it('retires an UNKNOWN kind instead of claiming-and-skipping it forever (the old zombie)', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await strandedText(db, raw, 'c1', 'temp-z', 1000);
@@ -326,6 +540,219 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect(res).toEqual({ eligible: 1, sent: 0 });
     expect(attemptsOf(raw, 'temp-z')).toBe(OUTGOING_MAX_ATTEMPTS);
     expect((await listRetryableOutgoing(db, 9_999_999_999)).length).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[queue] unknown outgoing kind 'wormhole' — retiring");
+    warn.mockRestore();
+  });
+});
+
+describe('outgoing queue — account revocation while a DB commit waits', () => {
+  it('does not claim a queued row after Disconnect revokes its admitted account lease', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-guard-claim', 1_000);
+    raw
+      .prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-guard-claim'")
+      .run();
+    raw
+      .prepare(
+        "UPDATE outgoing_queue SET attempts=1, next_retry_at=0 WHERE temp_guid='temp-guard-claim'",
+      )
+      .run();
+
+    const held = await holdDbTransaction(db);
+    const account = revocableLease();
+    let posts = 0;
+    const pending = runOutgoingQueue(
+      db,
+      fakeHttp(async () => {
+        posts += 1;
+        return { guid: 'real-guard-claim' };
+      }),
+      noAttachmentIo,
+      2_000_000,
+      account.lease,
+    );
+    // Four checks means the tracked claim was admitted and synchronously took its place behind the
+    // held mutex. This reproduces the callback that survives teardown's bounded drain.
+    await account.waitForChecks(4);
+    account.revoke();
+    held.release();
+    await held.finished;
+
+    await expect(pending).resolves.toEqual({ eligible: 1, sent: 0 });
+    expect(posts).toBe(0);
+    expect(stateOf(raw, 'temp-guard-claim')).toBe('error');
+    expect(attemptsOf(raw, 'temp-guard-claim')).toBe(1);
+  });
+
+  it('does not reconcile a real-guid success after Disconnect while its commit is queued', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-guard-guid', 1_000);
+    const row = await retryableRow(db, 2_000_000);
+
+    const held = await holdDbTransaction(db);
+    const account = revocableLease();
+    const pending = resendOutgoingRow(
+      db,
+      okHttp(2_000_000),
+      noAttachmentIo,
+      row,
+      () => 2_000_000,
+      account.lease,
+    );
+    await account.waitForChecks(4);
+    account.revoke();
+    held.release();
+    await held.finished;
+
+    await expect(pending).resolves.toBe('paused');
+    expect(stateOf(raw, 'temp-guard-guid')).toBe('sending');
+    expect(queueCount(raw)).toBe(1);
+    expect(stateOf(raw, 'real-1')).toBeUndefined();
+  });
+
+  it('does not reconcile a no-guid success after Disconnect while its commit is queued', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-guard-no-guid', 1_000);
+    const row = await retryableRow(db, 2_000_000);
+
+    const held = await holdDbTransaction(db);
+    const account = revocableLease();
+    const pending = resendOutgoingRow(
+      db,
+      fakeHttp(async () => ({})),
+      noAttachmentIo,
+      row,
+      () => 2_000_000,
+      account.lease,
+    );
+    await account.waitForChecks(4);
+    account.revoke();
+    held.release();
+    await held.finished;
+
+    await expect(pending).resolves.toBe('paused');
+    expect(stateOf(raw, 'temp-guard-no-guid')).toBe('sending');
+    expect(queueCount(raw)).toBe(1);
+  });
+
+  it('does not reconcile a failed POST after Disconnect while its commit is queued', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-guard-failure', 1_000);
+    const row = await retryableRow(db, 2_000_000);
+
+    const held = await holdDbTransaction(db);
+    const account = revocableLease();
+    const pending = resendOutgoingRow(
+      db,
+      failHttp(),
+      noAttachmentIo,
+      row,
+      () => 2_000_000,
+      account.lease,
+    );
+    await account.waitForChecks(4);
+    account.revoke();
+    held.release();
+    await held.finished;
+
+    await expect(pending).resolves.toBe('paused');
+    expect(stateOf(raw, 'temp-guard-failure')).toBe('sending');
+    expect(attemptsOf(raw, 'temp-guard-failure')).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1); // the network failure was logged before the guarded DB tail
+    warn.mockRestore();
+  });
+
+  it('does not retire a missing attachment after Disconnect while its commit is queued', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-guard-missing');
+    const row = await retryableRow(db, 2_000_000);
+
+    const held = await holdDbTransaction(db);
+    const account = revocableLease();
+    const pending = resendOutgoingRow(
+      db,
+      {} as HttpClient,
+      fakeIo({ fileExists: async () => false }).io,
+      row,
+      () => 2_000_000,
+      account.lease,
+    );
+    await account.waitForChecks(4);
+    account.revoke();
+    held.release();
+    await held.finished;
+
+    await expect(pending).resolves.toBe('paused');
+    expect(stateOf(raw, 'temp-guard-missing')).toBe('error');
+    expect(attemptsOf(raw, 'temp-guard-missing')).toBe(1);
+    warn.mockRestore();
+  });
+
+  it('does not retire an unknown kind after Disconnect while its commit is queued', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-guard-unknown', 1_000);
+    raw
+      .prepare(
+        "UPDATE outgoing_queue SET kind='wormhole', attempts=1, next_retry_at=0 WHERE temp_guid='temp-guard-unknown'",
+      )
+      .run();
+    const row = await retryableRow(db, 2_000_000);
+
+    const held = await holdDbTransaction(db);
+    const account = revocableLease();
+    const pending = resendOutgoingRow(
+      db,
+      {} as HttpClient,
+      noAttachmentIo,
+      row,
+      () => 2_000_000,
+      account.lease,
+    );
+    await account.waitForChecks(2);
+    account.revoke();
+    held.release();
+    await held.finished;
+
+    await expect(pending).resolves.toBe('paused');
+    expect(stateOf(raw, 'temp-guard-unknown')).toBe('sending');
+    expect(attemptsOf(raw, 'temp-guard-unknown')).toBe(1);
+    warn.mockRestore();
+  });
+
+  it('rolls back real SQLite writes when revocation lands mid-transaction', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-guard-rollback', 1_000);
+    const row = await retryableRow(db, 2_000_000);
+    let checks = 0;
+    const lease: RealtimeDeliveryLease = {
+      generation: 7,
+      // Checks 1-4 admit the outcome; 5-6 permit lock acquisition + BEGIN. Check 7 is the final
+      // pre-COMMIT guard, after the repository updated the guid and deleted the queue row.
+      isCurrent: () => {
+        checks += 1;
+        return checks < 7;
+      },
+    };
+
+    await expect(
+      resendOutgoingRow(db, okHttp(2_000_000), noAttachmentIo, row, () => 2_000_000, lease),
+    ).resolves.toBe('paused');
+
+    expect(checks).toBe(7);
+    expect(stateOf(raw, 'temp-guard-rollback')).toBe('sending');
+    expect(stateOf(raw, 'real-1')).toBeUndefined();
+    expect(queueCount(raw)).toBe(1);
   });
 });
 
@@ -460,6 +887,12 @@ describe('applyServerSendError', () => {
     await applyServerSendError(db, 'temp-loop', 502, 7_000_000, true);
     expect(queueCount(raw)).toBe(0); // cap spent: bubble-only, manual retry from here
     expect(stateOf(raw, 'temp-loop')).toBe('error');
+
+    // The cap belongs to one account generation. A late, rolled-back old-account event may still
+    // consume its in-memory counter, but it must not penalize a later account that happens to reuse
+    // the same temp guid.
+    await applyServerSendError(db, 'temp-loop', 502, 8_000_000, true, 'next-account');
+    expect(queueCount(raw)).toBe(1);
   });
 
   it('never re-enqueues a REACTION row (reactions are not flagged retryable by the server)', async () => {

@@ -16,20 +16,29 @@
 import { SecretBox } from '@core/crypto';
 import { kvGet, kvSet } from '@db/repositories';
 import { getDatabase } from '@db/database';
+import type { AppDatabase } from '@db/types';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
+import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
 
 // ---- in-file mocks ---------------------------------------------------------
 
 /** One fake cache file per (dir, name); records writes + lifecycle for assertions. */
 class MockFile {
   static instances: MockFile[] = [];
+  static textImpl: ((file: MockFile) => Promise<string>) | null = null;
+  static deleteError: Error | null = null;
+  static nextSize: number | null = 1_024;
+  static textCalls = 0;
   exists = false;
   content: string | null = null;
   deletes = 0;
+  readonly size: number | null;
   readonly uri: string;
-  constructor(_dir: string, name: string) {
-    this.uri = `file:///cache/${name}`;
+  constructor(dirOrUri: string, name?: string) {
+    this.uri = name === undefined ? dirOrUri : `file:///cache/${name}`;
+    this.size = MockFile.nextSize;
+    if (name === undefined) this.exists = true;
     MockFile.instances.push(this);
   }
   create(): void {
@@ -38,7 +47,13 @@ class MockFile {
   write(text: string): void {
     this.content = text;
   }
+  async text(): Promise<string> {
+    MockFile.textCalls += 1;
+    if (MockFile.textImpl) return MockFile.textImpl(this);
+    return this.content ?? '';
+  }
   delete(): void {
+    if (MockFile.deleteError) throw MockFile.deleteError;
     this.exists = false;
     this.deletes += 1;
   }
@@ -65,10 +80,19 @@ jest.mock('@/services/clients', () => ({ getSecretBox: () => mockGetSecretBox() 
 import * as Sharing from 'expo-sharing';
 // eslint-disable-next-line import/first
 import {
+  BackupAccountChangedError,
+  BackupPassphraseRejectedError,
   exportBackup,
   exportEncryptedBackup,
   importBackupAuto,
+  readPickedBackupCopy,
 } from '@/services/backup/backupService';
+// eslint-disable-next-line import/first
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const mockShare = Sharing.shareAsync as jest.Mock;
 const mockAvailable = Sharing.isAvailableAsync as jest.Mock;
@@ -77,6 +101,27 @@ const mockGetDatabase = getDatabase as jest.Mock;
 /** A composer draft: the key embeds the counterparty's number, the value is unsent text. */
 const DRAFT_KEY = 'draft.iMessage;-;+15555550123';
 const DRAFT_TEXT = 'half-typed and never sent';
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 30; i += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error('deferred backup operation did not reach its test seam');
+}
 
 async function seedDb() {
   const t = await createTestDb();
@@ -92,8 +137,21 @@ async function seedDb() {
 
 beforeEach(() => {
   MockFile.instances = [];
-  mockAvailable.mockResolvedValue(true);
-  mockShare.mockResolvedValue(undefined);
+  MockFile.textImpl = null;
+  MockFile.deleteError = null;
+  MockFile.nextSize = 1_024;
+  MockFile.textCalls = 0;
+  mockAvailable.mockReset().mockResolvedValue(true);
+  mockShare.mockReset().mockResolvedValue(undefined);
+  mockGetDatabase.mockReset();
+  mockGetSecretBox
+    .mockReset()
+    .mockImplementation(async () => new SecretBox(await createLibsodiumBackend(), cheapArgon));
+  resumeRealtimeDeliveries();
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 const theFile = (): MockFile => {
@@ -136,17 +194,120 @@ describe('exportBackup', () => {
     await seedDb();
     mockAvailable.mockResolvedValueOnce(false);
     await expect(exportBackup(1_000)).rejects.toThrow('sharing-unavailable');
-    expect(theFile().exists).toBe(false);
+    // Availability is checked before writing, so there is no generated file to clean up.
+    expect(MockFile.instances).toHaveLength(0);
     expect(mockShare).not.toHaveBeenCalled();
+  });
+
+  it('does not let a delayed A build open an export after Disconnect', async () => {
+    const realDb = await seedDb();
+    const readStarted = deferred<void>();
+    const releaseReads = deferred<void>();
+    const runAll = realDb.all.bind(realDb) as unknown as (query: unknown) => Promise<unknown[]>;
+    const delayedDb = {
+      all: jest.fn(async (query: unknown) => {
+        readStarted.resolve();
+        await releaseReads.promise;
+        return runAll(query);
+      }),
+    } as unknown as AppDatabase;
+    mockGetDatabase.mockReturnValue(delayedDb);
+    const oldScreenLease = captureRealtimeDeliveryLease();
+
+    const pending = exportEncryptedBackup('old account passphrase', 3_000, oldScreenLease);
+    await readStarted.promise;
+
+    let drained = false;
+    const drain = pauseRealtimeDeliveries().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false); // the short account DB read is visible to teardown
+
+    releaseReads.resolve();
+    await drain;
+    resumeRealtimeDeliveries();
+
+    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
+    expect(mockGetSecretBox).not.toHaveBeenCalled();
+    expect(mockShare).not.toHaveBeenCalled();
+    expect(MockFile.instances).toHaveLength(0);
+  });
+
+  it('deletes a late picker cache copy without holding the Disconnect drain', async () => {
+    const readFinished = deferred<string>();
+    MockFile.textImpl = () => readFinished.promise;
+    const oldScreenLease = captureRealtimeDeliveryLease();
+
+    const pending = readPickedBackupCopy('file:///cache/picked.gatorbackup', oldScreenLease);
+    await waitUntil(() => MockFile.instances.length === 1);
+
+    // Reading a user-selected file is not a DB/native account mutation, so teardown stays free.
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+    readFinished.resolve('  encrypted old-account backup  ');
+
+    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
+    expect(theFile().exists).toBe(false);
+    expect(theFile().deletes).toBe(1);
+  });
+
+  it('keeps account-change cancellation authoritative when picker-cache deletion fails', async () => {
+    const readFinished = deferred<string>();
+    MockFile.textImpl = () => readFinished.promise;
+    const oldScreenLease = captureRealtimeDeliveryLease();
+
+    const pending = readPickedBackupCopy('file:///cache/picked.gatorbackup', oldScreenLease);
+    await waitUntil(() => MockFile.instances.length === 1);
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    MockFile.deleteError = new Error('cache entry was already reclaimed');
+    readFinished.resolve('encrypted old-account backup');
+
+    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
+  });
+
+  it('rejects an oversized picked file before reading it and deletes the private copy', async () => {
+    MockFile.nextSize = BACKUP_LIMITS.fileBytes + 1;
+
+    await expect(readPickedBackupCopy('file:///cache/hostile.gatorbackup')).rejects.toThrow(
+      'backup-input-limit:file-too-large',
+    );
+    expect(MockFile.textCalls).toBe(0);
+    expect(theFile().exists).toBe(false);
+    expect(theFile().deletes).toBe(1);
   });
 });
 
 // ---- encrypted export + import round-trip ----------------------------------
 
 describe('exportEncryptedBackup / importBackupAuto', () => {
+  it.each([
+    ['short', 'only-short'],
+    ['common', 'password1234'],
+  ])('rejects a %s passphrase before reading account data', async (_case, passphrase) => {
+    await expect(exportEncryptedBackup(passphrase, 2_000)).rejects.toBeInstanceOf(
+      BackupPassphraseRejectedError,
+    );
+    expect(mockGetDatabase).not.toHaveBeenCalled();
+    expect(mockGetSecretBox).not.toHaveBeenCalled();
+    expect(mockShare).not.toHaveBeenCalled();
+  });
+
+  it('keeps account retirement authoritative over a weak-passphrase error', async () => {
+    const retiredLease = captureRealtimeDeliveryLease();
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+
+    await expect(exportEncryptedBackup('short', 2_000, retiredLease)).rejects.toBeInstanceOf(
+      BackupAccountChangedError,
+    );
+    expect(mockGetDatabase).not.toHaveBeenCalled();
+  });
+
   it('writes the SEALED envelope (never plaintext) and deletes it after sharing', async () => {
     await seedDb();
-    await exportEncryptedBackup('correct horse battery staple', 2_000);
+    await exportEncryptedBackup('river-lantern-orbit-92', 2_000);
 
     const f = theFile();
     expect(f.uri).toContain('.gatorbackup');
@@ -160,19 +321,42 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
   it('deletes the encrypted cache file even when sharing throws', async () => {
     await seedDb();
     mockShare.mockRejectedValueOnce(new Error('boom'));
-    await expect(exportEncryptedBackup('pw', 2_000)).rejects.toThrow('boom');
+    await expect(exportEncryptedBackup('river-lantern-orbit-92', 2_000)).rejects.toThrow('boom');
+    expect(theFile().exists).toBe(false);
+  });
+
+  it('does not hold Disconnect behind an already-open OS share sheet', async () => {
+    await seedDb();
+    const sheetClosed = deferred<void>();
+    mockShare.mockReturnValueOnce(sheetClosed.promise);
+    const oldScreenLease = captureRealtimeDeliveryLease();
+
+    let settled = false;
+    const pending = exportEncryptedBackup('river-lantern-orbit-92', 2_001, oldScreenLease).finally(
+      () => {
+        settled = true;
+      },
+    );
+    await waitUntil(() => mockShare.mock.calls.length === 1);
+
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    expect(settled).toBe(false); // the OS sheet is still open, but teardown is free to continue
+    resumeRealtimeDeliveries();
+
+    sheetClosed.resolve();
+    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
     expect(theFile().exists).toBe(false);
   });
 
   it('round-trips: the sealed export restores settings into a fresh DB under the right passphrase', async () => {
     await seedDb();
-    await exportEncryptedBackup('correct horse battery staple', 2_000);
+    await exportEncryptedBackup('river-lantern-orbit-92', 2_000);
     const sealed = theFile().content!;
 
     // Fresh device: new DB, then import the sealed text (auto-detects encrypted).
     const fresh = await createTestDb();
     mockGetDatabase.mockReturnValue(fresh.db);
-    const res = await importBackupAuto(sealed, 'correct horse battery staple');
+    const res = await importBackupAuto(sealed, 'river-lantern-orbit-92');
     expect(res.kv).toBeGreaterThanOrEqual(1);
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
     // The secret never round-trips — it was filtered out at build time.
@@ -204,5 +388,77 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
     const res = await importBackupAuto(json, '');
     expect(res.kv).toBeGreaterThanOrEqual(1);
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
+  });
+
+  it('continues to import an existing encrypted backup with a short passphrase', async () => {
+    const box = new SecretBox(await createLibsodiumBackend(), cheapArgon);
+    const sealed = await box.seal(
+      JSON.stringify({
+        version: 1,
+        exportedAt: 1,
+        kv: [{ key: 'theme.preset', value: 'nord' }],
+        themes: [],
+        chatCustomizations: [],
+      }),
+      'old',
+    );
+    mockGetSecretBox.mockResolvedValueOnce(box);
+    const fresh = await createTestDb();
+    mockGetDatabase.mockReturnValue(fresh.db);
+
+    await expect(importBackupAuto(sealed, 'old')).resolves.toEqual({
+      kv: 1,
+      themes: 0,
+      chatCustomizations: 0,
+    });
+    expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
+  });
+
+  it("drops a decrypted A restore after reconnect instead of customizing B's same GUID", async () => {
+    const opened = deferred<string>();
+    const open = jest.fn(() => opened.promise);
+    mockGetSecretBox.mockResolvedValueOnce({ open } as unknown as SecretBox);
+    const oldScreenLease = captureRealtimeDeliveryLease();
+
+    const pending = importBackupAuto('encrypted-old-account-envelope', 'pw', oldScreenLease);
+    await waitUntil(() => open.mock.calls.length === 1);
+
+    // Decryption is pure CPU/crypto work and must not make Disconnect wait.
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+
+    const next = await createTestDb();
+    next.raw
+      .prepare(`INSERT INTO chats (guid, custom_name) VALUES (?, ?)`)
+      .run('iMessage;-;same-guid', 'B local name');
+    mockGetDatabase.mockReturnValue(next.db);
+
+    opened.resolve(
+      JSON.stringify({
+        version: 1,
+        exportedAt: 4_000,
+        kv: [],
+        themes: [],
+        chatCustomizations: [
+          {
+            guid: 'iMessage;-;same-guid',
+            customName: 'A restored name',
+            customColor: '#aa0000',
+            muteType: null,
+            isPinned: 1,
+            isArchived: 0,
+          },
+        ],
+      }),
+    );
+
+    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
+    expect(mockGetDatabase).not.toHaveBeenCalled();
+    expect(
+      next.raw
+        .prepare(`SELECT custom_name AS customName, custom_color AS customColor FROM chats`)
+        .get(),
+    ).toEqual({ customName: 'B local name', customColor: null });
+    next.raw.close();
   });
 });

@@ -33,6 +33,8 @@ interface UploadState {
   start: (key: string, info: UploadStartInfo) => void;
   progress: (key: string, sent: number, total: number) => void;
   settle: (key: string) => void;
+  /** Account teardown: remove every presentation-only entry synchronously. */
+  reset: () => void;
 }
 
 export const useUploadStore = create<UploadState>((set) => ({
@@ -81,6 +83,8 @@ export const useUploadStore = create<UploadState>((set) => ({
       delete next[key];
       return { byGuid: next };
     }),
+
+  reset: () => set({ byGuid: {} }),
 }));
 
 /**

@@ -3,7 +3,8 @@ import * as LocalAuthentication from 'expo-local-authentication';
 /**
  * Biometric / device-credential gate (expo-local-authentication).
  *
- * Used for the optional app lock and to guard release of the DB encryption key.
+ * Used for the optional foreground App Lock gate. It does not make the DB key
+ * user-auth-bound in Android Keystore; see `secureVault.ts`.
  */
 export async function isBiometricAvailable(): Promise<boolean> {
   const [hasHardware, isEnrolled] = await Promise.all([

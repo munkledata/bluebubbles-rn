@@ -20,6 +20,8 @@ interface ToastState {
   enqueue: (req: Omit<ToastRequest, 'id' | 'createdAt'>) => void;
   /** Dismiss the current toast and promote the next queued one (if any). */
   dismiss: () => void;
+  /** Account teardown: discard status copy that belongs to the previous server. */
+  reset: () => void;
 }
 
 let nextId = 1;
@@ -42,6 +44,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
       const [next, ...rest] = s.queue;
       return { current: next ?? null, queue: rest };
     }),
+  reset: () => set({ current: null, queue: [] }),
 }));
 
 const DEFAULT_DURATION_MS = 2500;

@@ -1,18 +1,16 @@
 /**
  * UrlPreviewCard (src/ui/conversations/UrlPreviewCard.tsx): a compact Open Graph link card
- * rendered under a message bubble from an already-fetched `UrlPreviewRow` (the card takes the
- * row as a prop; it does no fetching itself).
+ * rendered under a message bubble from an already-cached/server-supplied `UrlPreviewRow` (the
+ * card takes the row as a prop; it does no fetching itself).
  *
  * The load-bearing security property (AGENTS.md: "URL-preview fetch hits an attacker-controlled
  * URL … render as plain `<Text>`, no HTML interpretation") is asserted directly: a title/site
  * name containing markup renders as literal text, never interpreted markup. Also covers the
  * loading / negative-cache / no-metadata "render nothing" branches and the domain fallback.
  *
- * The TAP is the other half of that hardening: the card's `url` is fully server/attacker-controlled,
- * and the source opens it through `safeOpenUrl` (the http(s)-scheme allowlist) rather than
- * Linking.openURL directly. safeOpenUrl's real impl lazy-imports react-native via a dynamic
- * `import()`, which throws under the jest-expo VM, so the contract is asserted at the `@utils`
- * boundary — the same mock shape contactCard/locationCard use.
+ * NET-00 adds two containment properties: even a row containing a remote image URL never mounts
+ * a React Native Image (which would fetch automatically), and taps leave the app through
+ * `safeOpenUrl` rather than invoking the old metadata pipeline.
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
@@ -150,7 +148,7 @@ describe('UrlPreviewCard', () => {
     expect(toJSON()).toBeNull();
   });
 
-  it('renders the image when the row has an imageUrl', async () => {
+  it('never mounts a remote preview image, while preserving cached text', async () => {
     await renderWithTheme(
       <UrlPreviewCard
         url="https://www.example.com/article"
@@ -158,11 +156,11 @@ describe('UrlPreviewCard', () => {
         isFromMe={false}
       />,
     );
-    expect(screen.getByTestId('url-preview-image')).toBeTruthy();
+    expect(screen.queryByTestId('url-preview-image')).toBeNull();
+    expect(screen.getByText('A Title')).toBeTruthy();
   });
 
-  it('collapses the image but keeps the card when the OG image fails to load', async () => {
-    // The blank-box bug: a failed OG image used to leave an empty 140px box. onError collapses it.
+  it('does not expose an image loading/error path for remote artwork', async () => {
     await renderWithTheme(
       <UrlPreviewCard
         url="https://www.example.com/article"
@@ -170,11 +168,7 @@ describe('UrlPreviewCard', () => {
         isFromMe={false}
       />,
     );
-    fireEvent(screen.getByTestId('url-preview-image'), 'error', {
-      nativeEvent: { error: 'load failed' },
-    });
-    await waitFor(() => expect(screen.queryByTestId('url-preview-image')).toBeNull());
-    // Title still shows → the card degrades to text-only rather than a blank box.
+    expect(screen.queryByTestId('url-preview-image')).toBeNull();
     expect(screen.getByText('A Title')).toBeTruthy();
   });
 
@@ -192,9 +186,8 @@ describe('UrlPreviewCard', () => {
         isFromMe={false}
       />,
     );
-    const img = screen.getByTestId('url-preview-image');
-    const card = img.parent;
-    const style = StyleSheet.flatten(card?.props.style);
+    const card = screen.getByTestId('url-preview-card');
+    const style = StyleSheet.flatten(card.props.style);
     expect(style.width).toBeDefined();
     expect(style.width).not.toBe('auto');
   });
@@ -230,7 +223,7 @@ describe('UrlPreviewCard', () => {
     expect(safeOpenUrl).toHaveBeenCalledWith('https://good.example.com/page');
   });
 
-  it('renders nothing when an image-only card (no title) has a failing image', async () => {
+  it('degrades image-only metadata to a text-only external-link card', async () => {
     await renderWithTheme(
       <UrlPreviewCard
         url="https://www.example.com/article"
@@ -238,11 +231,7 @@ describe('UrlPreviewCard', () => {
         isFromMe={false}
       />,
     );
-    fireEvent(screen.getByTestId('url-preview-image'), 'error', {
-      nativeEvent: { error: 'load failed' },
-    });
-    // No title + no loadable image → the whole card disappears.
-    await waitFor(() => expect(screen.queryByTestId('url-preview-image')).toBeNull());
-    await waitFor(() => expect(screen.queryByText('example.com')).toBeNull());
+    expect(screen.queryByTestId('url-preview-image')).toBeNull();
+    expect(screen.getAllByText('example.com').length).toBeGreaterThan(0);
   });
 });

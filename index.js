@@ -28,11 +28,19 @@
  *   • Anything added here runs on EVERY cold start, so keep it to cheap side-effect registrations.
  */
 
+// Release-only native exception + console projection. MUST be the first side effect: even the
+// headless registration modules below can fail while evaluating.
+import './src/services/errors/registerReactNativeExceptionPrivacy';
+// Attach the persistent ERROR sink before any killed-process task can execute.
+import './src/services/logging/registerPersistentLogs';
+
 // Headless notify-kit background events (notification taps/actions while killed).
 import './src/services/notifications/backgroundEvents';
 // TaskManager.defineTask('gator-bg-sync') — the background sync/outgoing-queue drain.
 import './src/services/background/backgroundSync';
 // setBackgroundMessageHandler(...) — killed-app FCM push delivery.
 import './src/services/notifications/fcmMessaging';
+// Constant-work cleanup for at most eight abandoned native download partials after process death.
+import './src/services/download/boundedNativeDownload';
 
 import 'expo-router/entry';

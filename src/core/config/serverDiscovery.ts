@@ -38,6 +38,29 @@ export function isCleartext(origin: string): boolean {
   return /^http:\/\//i.test(origin);
 }
 
+/**
+ * Parse an already-formed server ORIGIN without repairing it.
+ *
+ * This is deliberately stricter than {@link sanitizeServerAddress}, which is friendly to text the
+ * user typed during setup. Realtime rotation data is untrusted and must not smuggle credentials,
+ * a path, query, fragment, control character, or URL-parser backslash into an authenticated target.
+ */
+export function strictServerOrigin(input: string | null | undefined): string | null {
+  if (!input || input !== input.trim()) return null;
+  if (/[\\\u0000-\u001f\u007f]/.test(input)) return null;
+  // Accept exactly an http(s) authority and an optional single trailing slash. Checking the raw
+  // form first also rejects empty `?` / `#` delimiters that URL.search/hash normalize away.
+  if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;
+  try {
+    const url = new URL(input);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.username || url.password || !url.hostname) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export interface ServerUrlResolverDeps {
   /** Returns the current stored origin, if any. */
   getStoredOrigin: () => string | null;

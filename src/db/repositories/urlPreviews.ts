@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { urlPreviews } from '../schema';
+import { withDbTransaction } from '../transaction';
 import type { AppDatabase } from '../types';
 
 // ---- URL preview cache ----
@@ -33,26 +34,28 @@ export async function setUrlPreview(
   },
   now: number,
 ): Promise<void> {
-  await db
-    .insert(urlPreviews)
-    .values({
-      url,
-      title: data.title ?? null,
-      description: data.description ?? null,
-      imageUrl: data.imageUrl ?? null,
-      siteName: data.siteName ?? null,
-      fetchedAt: now,
-      error: data.error ? 1 : 0,
-    })
-    .onConflictDoUpdate({
-      target: urlPreviews.url,
-      set: {
-        title: sql`excluded.title`,
-        description: sql`excluded.description`,
-        imageUrl: sql`excluded.image_url`,
-        siteName: sql`excluded.site_name`,
-        fetchedAt: sql`excluded.fetched_at`,
-        error: sql`excluded.error`,
-      },
-    });
+  await withDbTransaction(db, () =>
+    db
+      .insert(urlPreviews)
+      .values({
+        url,
+        title: data.title ?? null,
+        description: data.description ?? null,
+        imageUrl: data.imageUrl ?? null,
+        siteName: data.siteName ?? null,
+        fetchedAt: now,
+        error: data.error ? 1 : 0,
+      })
+      .onConflictDoUpdate({
+        target: urlPreviews.url,
+        set: {
+          title: sql`excluded.title`,
+          description: sql`excluded.description`,
+          imageUrl: sql`excluded.image_url`,
+          siteName: sql`excluded.site_name`,
+          fetchedAt: sql`excluded.fetched_at`,
+          error: sql`excluded.error`,
+        },
+      }),
+  );
 }

@@ -1,8 +1,9 @@
 import notifee, { EventType } from 'react-native-notify-kit';
-import { Stack } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { useCallback, useEffect } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
+import { logger } from '@core/secure';
 import {
   handleNotificationAction,
   handleNotificationPress,
@@ -14,13 +15,23 @@ import {
 import { takePendingNotification } from '@/services/notifications/pendingNav';
 import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
 import { recoverOutgoing } from '@/services/send';
-import { refreshShareShortcuts } from '@/services/shortcuts/shareShortcuts';
 import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
+import { useSessionStore } from '@state/sessionStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
-import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
 import { useChatNavigator } from '@ui/useChatNavigator';
+
+/** Catch every intentionally fire-and-forget notification task without logging payload content. */
+function runNotificationTask(label: string, task: () => Promise<unknown>): void {
+  void Promise.resolve()
+    .then(task)
+    .catch((error: unknown) => {
+      logger.warn('[notif] foreground notification task failed', {
+        task: label,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    });
+}
 
 /**
  * Layout for the connected app. Drives the resume re-lock (the gate itself is
@@ -28,40 +39,61 @@ import { useChatNavigator } from '@ui/useChatNavigator';
  * actions (reply / mark-read).
  */
 export default function AppLayout(): React.JSX.Element {
+  const status = useSessionStore((s) => s.status);
+  const hasSession = useSessionStore((s) => !!(s.origin && s.password));
+
+  // A killed-app notification/deep link can mount this route before boot has read SecureStore.
+  // Keep the route inert while that decision is pending; redirecting now would strand a valid
+  // saved session on the setup screen just because the vault read had not finished yet.
+  if (status === 'loading') return <></>;
+
+  // Disconnect resets the session before its first asynchronous cleanup step. Keep the connected
+  // route group equally synchronous: screens already on the stack must stop rendering and must not
+  // run their resume/retry effects while the residual wipe continues behind the setup screen.
+  if (!hasSession) return <Redirect href="/welcome" />;
+
+  return <ConnectedAppLayout />;
+}
+
+function ConnectedAppLayout(): React.JSX.Element {
   // Opens a chat WITHOUT stacking one thread on another: a notification tapped while a thread is
   // already open swaps it (replace) instead of pushing, so Back from any thread → Messages.
   const openChat = useChatNavigator();
 
-  // App-lock: record background time; lock on foreground once the timeout passes.
+  // Coordinate App Lock and realtime in ONE listener. Two separate listeners introduced a race:
+  // the first locked the UI after a long background interval, then the second immediately
+  // reconnected the socket and posted full-content notifications underneath the lock overlay.
+  // Here the lock decision is made before any resume work, and unlock explicitly resumes later.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
-      const s = useLockStore.getState();
-      if (!s.enabled) return;
+      const lock = useLockStore.getState();
       if (state === 'background' || state === 'inactive') {
-        s.noteBackgrounded(Date.now());
-      } else if (state === 'active' && isLockExpired(s.lastBackgrounded, Date.now(), s.timeoutMs)) {
-        s.lock();
+        if (lock.enabled) lock.noteBackgrounded(Date.now());
+        pauseRealtime();
+        void flushErrorReports();
+        return;
       }
-    });
-    return () => sub.remove();
-  }, []);
-
-  // Keep realtime warm across the app/background boundary. Android freezes the socket in the
-  // background, so on resume we reconnect it and pull anything missed over HTTP — otherwise
-  // Delivered/new-message updates arrive only via slow FCM. Kept SEPARATE from the app-lock
-  // effect above (which early-returns when lock is disabled, the default).
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
-        void resumeRealtime();
+        if (
+          lock.enabled &&
+          (lock.locked || isLockExpired(lock.lastBackgrounded, Date.now(), lock.timeoutMs))
+        ) {
+          lock.lock();
+          pauseRealtime();
+          return;
+        }
+        void resumeRealtime().catch((error: unknown) => {
+          logger.warn('[realtime] foreground resume failed', error);
+        });
         void flushErrorReports();
         // Drain the outgoing retry queue on resume — a send that failed mid-session otherwise
         // waits for the next home mount / 15-min background tick. Backoff + claims gate the
         // actual re-sends, so this is one cheap SELECT when nothing is pending.
-        if (!isDevServer()) void recoverOutgoing();
-      } else if (state === 'background') {
-        pauseRealtime();
-        void flushErrorReports();
+        if (!isDevServer()) {
+          void recoverOutgoing().catch((error: unknown) => {
+            logger.warn('[send] foreground recovery failed', error);
+          });
+        }
       }
     });
     return () => sub.remove();
@@ -74,23 +106,16 @@ export default function AppLayout(): React.JSX.Element {
     void flushErrorReports();
   }, []);
 
-  // Keep the system's Direct Share chips (the share sheet's priority row) current. The inbox screen
-  // publishes while it's mounted, but opening straight into a chat from a notification tap never
-  // mounts it — so publish once here too. Re-runs when redacted mode flips: turning it ON must
-  // actively CLEAR the chips, since they carry real names and photos into system UI.
-  const redacted = useRedactedModeStore((s) => s.enabled);
-  useEffect(() => {
-    void refreshShareShortcuts();
-  }, [redacted]);
-
   // Drain a pending notification tap and open its chat. Reads BOTH the notify-kit launch event
   // (getInitialNotification) and the pendingNav stash a background-alive tap leaves behind, once.
   const consumeNotificationTap = useCallback(() => {
-    void drainNotificationTap(
-      () => notifee.getInitialNotification(),
-      takePendingNotification,
-      handleNotificationPress,
-      openChat,
+    runNotificationTask('tap-drain', () =>
+      drainNotificationTap(
+        () => notifee.getInitialNotification(),
+        takePendingNotification,
+        handleNotificationPress,
+        openChat,
+      ),
     );
   }, [openChat]);
 
@@ -102,10 +127,12 @@ export default function AppLayout(): React.JSX.Element {
     () =>
       notifee.onForegroundEvent(({ type, detail }) => {
         if (type === EventType.ACTION_PRESS) {
-          void handleNotificationAction(detail);
+          runNotificationTask('action', () => handleNotificationAction(detail));
         } else if (type === EventType.PRESS) {
-          void handleNotificationPress(detail);
-          openFromNotification(detail.notification?.data, openChat);
+          runNotificationTask('press-side-effect', () => handleNotificationPress(detail));
+          runNotificationTask('press-navigation', () =>
+            openFromNotification(detail.notification?.data, openChat),
+          );
         }
       }),
     [openChat],
@@ -132,11 +159,8 @@ export default function AppLayout(): React.JSX.Element {
   return (
     <>
       <Stack screenOptions={{ headerShown: false }} />
-      {/* Opens the new-chat creator for a share captured at the root (ShareIntentCapture) once the
-          connected app is mounted and the navigator is ready. */}
-      <ShareIntentNavigator />
-      {/* App-wide so an incoming call rings on any screen; the in-call WebView overlay
-          takes over once answered (and is also opened by outgoing calls from the chat). */}
+      {/* App-wide so an incoming call rings on any screen; the safe external-browser handoff
+          takes over once answered (and is also used by dev call flows). */}
       <IncomingFaceTimeOverlay />
       <FaceTimeCallOverlay />
     </>

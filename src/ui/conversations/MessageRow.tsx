@@ -2,13 +2,11 @@ import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   buildGroupEventText,
   formatSeparatorDate,
   formatTime,
   isGroupEvent,
-  redactTitle,
   sameSender,
   showDateSeparator,
   showSenderHeader,
@@ -78,7 +76,6 @@ export const MessageRow = React.memo(function MessageRow({
   onToggleSelect,
 }: MessageRowProps): React.JSX.Element {
   const theme = useTheme();
-  const redacted = useRedactedModeStore((s) => s.enabled);
   const showTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
   // A group/chat event (someone added/left, a rename, …) renders as its own centered line, so it
   // must not merge into a neighbour's same-sender bubble run — treat an adjacent event as absent
@@ -120,19 +117,14 @@ export const MessageRow = React.memo(function MessageRow({
   const handleSwipeReply = useCallback(() => onSwipeReply?.(msg), [onSwipeReply, msg]);
   const handleShowReactions = useCallback(() => onShowReactions?.(msg), [onShowReactions, msg]);
 
-  // Group / chat-event system message → a centered event line instead of a bubble. Every name in
-  // the line (the actor, the affected participant, and a renamed-to title) can leak identity, so
-  // each is masked under redacted mode.
+  // Group / chat-event system message → a centered event line instead of a bubble.
   if (isGroupEvent(msg)) {
     const eventText = buildGroupEventText({
       itemType: msg.itemType,
       groupActionType: msg.groupActionType,
-      groupTitle: redacted && msg.groupTitle != null ? '…' : msg.groupTitle,
-      otherHandleName:
-        redacted && msg.otherHandleName
-          ? redactTitle(msg.otherHandleName, true)
-          : msg.otherHandleName,
-      senderName: redacted ? redactTitle(msg.senderName ?? '', true) : msg.senderName,
+      groupTitle: msg.groupTitle,
+      otherHandleName: msg.otherHandleName,
+      senderName: msg.senderName,
       isFromMe: msg.isFromMe,
     });
     return (
@@ -157,7 +149,7 @@ export const MessageRow = React.memo(function MessageRow({
 
   const headerNode = header ? (
     <Text style={[styles.sender, overlay, pill ? [styles.senderPill, pill] : null]}>
-      {redacted ? redactTitle(msg.senderName ?? '', true) : msg.senderName}
+      {msg.senderName}
     </Text>
   ) : null;
   const bubbleNode = (
@@ -201,7 +193,7 @@ export const MessageRow = React.memo(function MessageRow({
           right past the threshold sets it as the reply target. The separator + status stay put. */}
       <MessageSwipeWrapper
         timestamp={formatTime(msg.dateCreated ?? 0)}
-        onReply={onSwipeReply ? handleSwipeReply : undefined}
+        onReply={onSwipeReply && !msg.guid.startsWith('temp-') ? handleSwipeReply : undefined}
       >
         {showAvatar ? (
           <>
@@ -210,8 +202,7 @@ export const MessageRow = React.memo(function MessageRow({
                 {tail ? (
                   <Avatar
                     name={msg.senderName ?? msg.senderAddress ?? '?'}
-                    uri={redacted ? null : msg.senderAvatar}
-                    seed={redacted ? (msg.senderAddress ?? msg.senderName ?? '?') : undefined}
+                    uri={msg.senderAvatar}
                     size={26}
                   />
                 ) : null}

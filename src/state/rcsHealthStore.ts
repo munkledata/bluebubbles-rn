@@ -17,10 +17,13 @@ interface RcsHealthState {
   lastAlertAt: number | null;
   /** Apply an incoming `rcs-alert`. */
   setAlert: (alertType: string | null | undefined) => void;
+  /** Account teardown: discard the previous server's bridge-health signal. */
+  reset: () => void;
 }
 
 export const useRcsHealthStore = create<RcsHealthState>((set) => ({
   lastAlertType: null,
   lastAlertAt: null,
   setAlert: (alertType) => set({ lastAlertType: alertType ?? null, lastAlertAt: Date.now() }),
+  reset: () => set({ lastAlertType: null, lastAlertAt: null }),
 }));

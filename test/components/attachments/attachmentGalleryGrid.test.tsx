@@ -10,10 +10,18 @@
  */
 import React from 'react';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
-import { renderWithTheme, screen } from '../support/renderWithTheme';
+import { renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { AttachmentRow } from '@db/repositories';
 
 const mockCell = jest.fn();
+const mockReleaseProtection = jest.fn();
+const mockProtectPath = jest.fn<{ path: string; release: () => void } | null, [string]>((path) => ({
+  path,
+  release: mockReleaseProtection,
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: { protect: (path: string) => mockProtectPath(path) },
+}));
 jest.mock('@ui/attachments/ImageAttachment', () => {
   const RN = require('react-native');
   const r = require('react');
@@ -28,7 +36,7 @@ jest.mock('@ui/attachments/ImageAttachment', () => {
 // eslint-disable-next-line import/first
 import { AttachmentGalleryGrid } from '@ui/attachments/AttachmentGalleryGrid';
 
-function att(guid: string): AttachmentRow {
+function att(guid: string, localPath: string | null = null): AttachmentRow {
   return {
     id: 1,
     guid,
@@ -42,7 +50,7 @@ function att(guid: string): AttachmentRow {
     hasLivePhoto: 0,
     isSticker: 0,
     hideAttachment: 0,
-    localPath: null,
+    localPath,
     service: null,
   };
 }
@@ -50,6 +58,11 @@ function att(guid: string): AttachmentRow {
 describe('AttachmentGalleryGrid', () => {
   beforeEach(() => {
     mockCell.mockClear();
+    mockReleaseProtection.mockClear();
+    mockProtectPath.mockReset().mockImplementation((path) => ({
+      path,
+      release: mockReleaseProtection,
+    }));
   });
 
   it('renders one cell per attachment with a shared cellSize and no tail', async () => {
@@ -78,5 +91,34 @@ describe('AttachmentGalleryGrid', () => {
     );
     const root = view.toJSON() as unknown as { props: { style: StyleProp<ViewStyle> } };
     expect(StyleSheet.flatten(root.props.style).alignSelf).toBe('flex-start');
+  });
+
+  it('gives every mounted cell its own pin and withholds a path whose pin is refused', async () => {
+    mockProtectPath.mockImplementation((path) =>
+      path.endsWith('/b.jpg') ? null : { path, release: mockReleaseProtection },
+    );
+    const view = await renderWithTheme(
+      <AttachmentGalleryGrid
+        atts={[att('a', 'file:///cache/a.jpg'), att('b', 'file:///cache/b.jpg')]}
+        isFromMe={false}
+      />,
+    );
+
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/a.jpg');
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/b.jpg');
+    await waitFor(() => {
+      const latestA = [...mockCell.mock.calls]
+        .reverse()
+        .find(([props]) => props.att.guid === 'a')?.[0];
+      const latestB = [...mockCell.mock.calls]
+        .reverse()
+        .find(([props]) => props.att.guid === 'b')?.[0];
+      expect(latestA?.att.localPath).toBe('file:///cache/a.jpg');
+      expect(latestB).toBeUndefined();
+    });
+    expect(screen.queryByText('CELL:b')).toBeNull();
+
+    await view.unmount();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
   });
 });

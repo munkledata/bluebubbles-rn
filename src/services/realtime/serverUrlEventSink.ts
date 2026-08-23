@@ -1,4 +1,4 @@
-import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
+import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 
 /**
  * Decorates an inner EventSink: handles the server's `new-server` event (its public URL rotated,
@@ -9,14 +9,19 @@ import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 export class ServerUrlEventSink implements EventSink {
   constructor(
     private readonly inner: EventSink,
-    private readonly onNewUrl: (url: string) => void,
+    private readonly onNewUrl: (url: string) => void | Promise<void>,
   ) {}
 
-  async onEvent(event: NormalizedEvent, source: EventSource): Promise<void> {
+  async onEvent(
+    event: NormalizedEvent,
+    source: EventSource,
+    context?: EventDeliveryContext,
+  ): Promise<void> {
+    if (context && !context.isCurrent()) return;
     if (event.type === 'new-server') {
-      this.onNewUrl(event.url);
+      await this.onNewUrl(event.url);
       return;
     }
-    await this.inner.onEvent(event, source);
+    await this.inner.onEvent(event, source, context);
   }
 }

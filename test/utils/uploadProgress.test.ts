@@ -96,7 +96,9 @@ describe('uploadBarLabels', () => {
   });
 
   it('falls back to a generic name when the file has none', () => {
-    expect(uploadBarLabels([{ name: '   ', sent: 0, total: 10 }])?.title).toBe('Sending attachment');
+    expect(uploadBarLabels([{ name: '   ', sent: 0, total: 10 }])?.title).toBe(
+      'Sending attachment',
+    );
   });
 
   it('returns null for an empty set — the signal to render no bar at all', () => {

@@ -144,6 +144,8 @@ export function MessageActionsOverlay({
   const anim = useRef(new Animated.Value(0)).current;
   // Fresh input state + a replayed pop each time the menu opens for a (different) message.
   useEffect(() => {
+    // The same mounted overlay can switch messages; drafts must never leak to the next message.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEmojiDraft('');
     setShowEmojiInput(false);
     if (!selected?.anchorRect) return;
@@ -153,6 +155,7 @@ export function MessageActionsOverlay({
 
   const hasText = !!selected?.text && selected.text.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
+  const canTargetServerMessage = !!selected && !selected.isTemp;
 
   const canEditUnsend =
     !!selected &&
@@ -160,6 +163,8 @@ export function MessageActionsOverlay({
     !selected.isRetracted &&
     !selected.isTemp &&
     selected.dateCreated != null &&
+    // The action menu is explicitly time-sensitive; this snapshot gates a 15-minute server rule.
+    // eslint-disable-next-line react-hooks/purity
     Date.now() - selected.dateCreated <= EDIT_WINDOW_MS;
 
   // A still-optimistic own message (queued/sending or errored, not yet confirmed)
@@ -233,25 +238,28 @@ export function MessageActionsOverlay({
     </>
   );
 
-  const emojiInputNode = showEmojiInput ? (
-    <TextInput
-      value={emojiDraft}
-      onChangeText={setEmojiDraft}
-      onSubmitEditing={submitEmojiDraft}
-      placeholder="Type an emoji…"
-      placeholderTextColor={theme.color.secondaryLabel}
-      autoFocus
-      returnKeyType="send"
-      accessibilityLabel="Emoji reaction input"
-      style={[
-        styles.emojiInput,
-        { backgroundColor: theme.color.secondaryBackground, color: theme.color.label },
-      ]}
-    />
-  ) : null;
+  const emojiInputNode =
+    canTargetServerMessage && showEmojiInput ? (
+      <TextInput
+        value={emojiDraft}
+        onChangeText={setEmojiDraft}
+        onSubmitEditing={submitEmojiDraft}
+        placeholder="Type an emoji…"
+        placeholderTextColor={theme.color.secondaryLabel}
+        autoFocus
+        returnKeyType="send"
+        accessibilityLabel="Emoji reaction input"
+        style={[
+          styles.emojiInput,
+          { backgroundColor: theme.color.secondaryBackground, color: theme.color.label },
+        ]}
+      />
+    ) : null;
 
-  // Assemble the action list once (same gating as before) — order preserved.
-  const actions: ActionDef[] = [{ key: 'reply', label: 'Reply', onPress: onReply }];
+  // Assemble the action list once. Server-target actions require a confirmed message; the
+  // remaining action gates and order stay unchanged.
+  const actions: ActionDef[] = [];
+  if (canTargetServerMessage) actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
   if (hasText || hasAttachments)
     actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
@@ -320,7 +328,7 @@ export function MessageActionsOverlay({
       screen: { width: win.width, height: win.height },
       insets: { top: insets.top, bottom: insets.bottom },
       isFromMe: selected.isFromMe,
-      barHeight: BAR_HEIGHT,
+      barHeight: canTargetServerMessage ? BAR_HEIGHT : 0,
       gap: GAP,
       sideInset: SIDE_INSET,
     });
@@ -356,14 +364,16 @@ export function MessageActionsOverlay({
           />
         </Animated.View>
         {/* Floating tapback bar, hugging the bubble's near top corner. */}
-        <Animated.View
-          style={[styles.floatBar, sideStyle, { top: place.barTop, maxWidth }, popStyle]}
-        >
-          <View style={[styles.barPill, { backgroundColor: theme.color.secondaryBackground }]}>
-            {pickerButtons}
-          </View>
-          {emojiInputNode}
-        </Animated.View>
+        {canTargetServerMessage ? (
+          <Animated.View
+            style={[styles.floatBar, sideStyle, { top: place.barTop, maxWidth }, popStyle]}
+          >
+            <View style={[styles.barPill, { backgroundColor: theme.color.secondaryBackground }]}>
+              {pickerButtons}
+            </View>
+            {emojiInputNode}
+          </Animated.View>
+        ) : null}
         {/* Floating action menu card. */}
         <Animated.View
           style={[styles.floatMenu, sideStyle, menuVerticalStyle, { maxWidth }, popStyle]}
@@ -381,10 +391,14 @@ export function MessageActionsOverlay({
     body = (
       <Pressable style={styles.backdrop} onPress={onClose}>
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-          <View style={[styles.picker, { backgroundColor: theme.color.secondaryBackground }]}>
-            {pickerButtons}
-          </View>
-          {emojiInputNode}
+          {canTargetServerMessage ? (
+            <>
+              <View style={[styles.picker, { backgroundColor: theme.color.secondaryBackground }]}>
+                {pickerButtons}
+              </View>
+              {emojiInputNode}
+            </>
+          ) : null}
           <View style={[styles.menuCard, { backgroundColor: theme.color.secondaryBackground }]}>
             {actions.map(renderAction)}
           </View>

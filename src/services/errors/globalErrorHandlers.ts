@@ -1,3 +1,4 @@
+import { projectCapturedErrorDiagnostic } from '@core/secure';
 import { captureError } from './errorReportSink';
 
 /**
@@ -10,10 +11,15 @@ import { captureError } from './errorReportSink';
  *    this under `__DEV__`, so production needs us to enable it to catch swallowed async failures.
  *
  * Idempotent + fully guarded: both globals are `undefined` under Jest and in a non-Hermes/headless
- * context, so this is a safe no-op there. Installation errors are swallowed — capturing errors must
- * never break boot.
+ * context, so this is a safe no-op there. A present hook that throws gets one deferred retry;
+ * installation errors are otherwise swallowed because capturing errors must never break boot.
  */
-let installed = false;
+let errorUtilsInstalled = false;
+let rejectionTrackerInstalled = false;
+let errorUtilsRetryScheduled = false;
+let rejectionTrackerRetryScheduled = false;
+
+const INSTALL_RETRY_DELAY_MS = 0;
 
 interface ErrorUtilsShape {
   getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
@@ -27,30 +33,92 @@ interface HermesInternalShape {
   }) => void;
 }
 
-export function installGlobalErrorHandlers(): void {
-  if (installed) return;
-  installed = true;
+/** Rebuild the Error passed to RN's native/redbox handler so that path cannot print raw prose. */
+export function privacySafeGlobalError(error: unknown, isFatal?: boolean): Error {
+  const diagnostic = projectCapturedErrorDiagnostic(
+    isFatal ? '[fatal] runtime error' : '[uncaught] runtime error',
+    error,
+  );
+  const safe = new Error(diagnostic.message);
+  safe.name = diagnostic.meta.errorName ?? 'GatorDiagnostic';
+  safe.stack = diagnostic.stack;
+  return safe;
+}
+
+interface ErrorHandlerGlobals {
+  ErrorUtils?: ErrorUtilsShape;
+  HermesInternal?: HermesInternalShape;
+}
+
+/** Returns true only when a present hook threw and is eligible for the one bounded retry. */
+function installErrorUtils(): boolean {
+  const errorUtils = (globalThis as unknown as ErrorHandlerGlobals).ErrorUtils;
+  if (errorUtilsInstalled || !errorUtils?.setGlobalHandler) return false;
   try {
-    const g = globalThis as unknown as {
-      ErrorUtils?: ErrorUtilsShape;
-      HermesInternal?: HermesInternalShape;
-    };
+    const prev = errorUtils.getGlobalHandler?.();
+    errorUtils.setGlobalHandler((error, isFatal) => {
+      captureError(error, isFatal ? 'fatal' : 'uncaught', { fatal: isFatal });
+      // Preserve RN redbox/native fatal reporting without handing that separate native/logcat
+      // path the original message, stack, cause, or custom fields.
+      prev?.(privacySafeGlobalError(error, isFatal), isFatal);
+    });
+    errorUtilsInstalled = true;
+    return false;
+  } catch {
+    return true;
+  }
+}
 
-    const errorUtils = g.ErrorUtils;
-    if (errorUtils?.setGlobalHandler) {
-      const prev = errorUtils.getGlobalHandler?.();
-      errorUtils.setGlobalHandler((error, isFatal) => {
-        captureError(error, isFatal ? 'fatal' : 'uncaught', { fatal: isFatal });
-        prev?.(error, isFatal); // preserve RN redbox / native fatal reporting
-      });
-    }
-
-    g.HermesInternal?.enablePromiseRejectionTracker?.({
+/** Returns true only when a present hook threw and is eligible for the one bounded retry. */
+function installRejectionTracker(): boolean {
+  const hermes = (globalThis as unknown as ErrorHandlerGlobals).HermesInternal;
+  if (rejectionTrackerInstalled || !hermes?.enablePromiseRejectionTracker) return false;
+  try {
+    hermes.enablePromiseRejectionTracker({
       allRejections: true,
       onUnhandled: (_id, error) => captureError(error, 'unhandledRejection'),
       onHandled: () => {},
     });
+    rejectionTrackerInstalled = true;
+    return false;
   } catch {
-    // never let error-handler installation break boot
+    return true;
   }
+}
+
+function scheduleErrorUtilsRetry(): void {
+  if (errorUtilsRetryScheduled) return;
+  errorUtilsRetryScheduled = true;
+  try {
+    setTimeout(() => {
+      installErrorUtils();
+    }, INSTALL_RETRY_DELAY_MS);
+  } catch {
+    // A diagnostic hook and its retry must never break boot.
+  }
+}
+
+function scheduleRejectionTrackerRetry(): void {
+  if (rejectionTrackerRetryScheduled) return;
+  rejectionTrackerRetryScheduled = true;
+  try {
+    setTimeout(() => {
+      installRejectionTracker();
+    }, INSTALL_RETRY_DELAY_MS);
+  } catch {
+    // A diagnostic hook and its retry must never break boot.
+  }
+}
+
+function installGlobalErrorHandlersAttempt(): void {
+  // Keep these attempts separate: a broken ErrorUtils hook must not suppress Hermes reporting, or
+  // vice versa.
+  const errorUtilsFailed = installErrorUtils();
+  const rejectionTrackerFailed = installRejectionTracker();
+  if (errorUtilsFailed) scheduleErrorUtilsRetry();
+  if (rejectionTrackerFailed) scheduleRejectionTrackerRetry();
+}
+
+export function installGlobalErrorHandlers(): void {
+  installGlobalErrorHandlersAttempt();
 }

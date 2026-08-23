@@ -1,22 +1,61 @@
-import { RedactingLogger, type LogLevel, type LogSink } from './redact';
+import {
+  isVerboseLocalLoggingEnabled,
+  RedactingLogger,
+  type LogLevel,
+  type LogSink,
+} from './redact';
+import {
+  projectCapturedErrorDiagnostic,
+  projectErrorReportTimestamp,
+  projectStoredErrorReport,
+} from './errorDiagnostic';
+
+function capturedErrorSinkValue(
+  message: string,
+  meta?: unknown,
+): { message: string; meta: unknown } {
+  const diagnostic = projectCapturedErrorDiagnostic(message, meta);
+  return {
+    message: diagnostic.message,
+    meta: {
+      ...diagnostic.meta,
+      ...(diagnostic.stack === undefined ? {} : { stack: diagnostic.stack }),
+    },
+  };
+}
+
+function storedErrorSinkValue(entry: LogEntry): LogEntry | undefined {
+  const timestamp = projectErrorReportTimestamp(entry.timestamp);
+  if (timestamp === 0) return undefined;
+  const report = projectStoredErrorReport({ message: entry.message, meta: entry.meta });
+  const meta = {
+    ...(JSON.parse(report.meta) as Record<string, unknown>),
+    ...(report.stack === undefined ? {} : { stack: report.stack }),
+  };
+  return {
+    level: 'error',
+    message: report.message,
+    meta: boundedLogMeta(meta),
+    timestamp,
+  };
+}
 
 /**
- * Console sink for the app-wide logger. Redaction already happened upstream in
- * {@link RedactingLogger}, so this just routes to the right console method.
- * `debug` is suppressed in production builds (kept quiet, never to a release log).
+ * Console sink for the app-wide logger. Privacy projection/redaction already happened upstream in
+ * {@link RedactingLogger}, so this just routes to the right console method. Free-form
+ * debug/info/warn lines are development-only until they have finite schemas.
  */
 export class ConsoleSink implements LogSink {
   write(level: LogLevel, message: string, meta?: unknown): void {
-    // `__DEV__` is a RN runtime global; guard `typeof` since it's undefined under Jest.
-    const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
-    if (level === 'debug' && !isDev) return;
+    if (level !== 'error' && !isVerboseLocalLoggingEnabled()) return;
+    const safe = level === 'error' ? capturedErrorSinkValue(message, meta) : { message, meta };
     const out = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
-    if (meta === undefined) out(message);
-    else out(message, meta);
+    if (safe.meta === undefined) out(safe.message);
+    else out(safe.message, safe.meta);
   }
 }
 
-/** One captured log line (already redacted upstream). */
+/** One captured log line (already privacy-projected/redacted upstream). */
 export interface LogEntry {
   level: LogLevel;
   message: string;
@@ -26,26 +65,47 @@ export interface LogEntry {
 }
 
 const MEMORY_LOG_CAPACITY = 500;
+export const MAX_LOG_MESSAGE_CHARS = 4_000;
+export const MAX_LOG_META_CHARS = 500;
+
+/** Bound retained diagnostics even when an upstream/native error contains an enormous payload. */
+export function boundedLogMessage(message: string): string {
+  return message.slice(0, MAX_LOG_MESSAGE_CHARS);
+}
+
+/** Serialize and bound optional metadata before either memory or disk retains it. */
+export function boundedLogMeta(meta: unknown): string | undefined {
+  try {
+    const serialized = typeof meta === 'string' ? meta : JSON.stringify(meta);
+    return serialized?.slice(0, MAX_LOG_META_CHARS);
+  } catch {
+    try {
+      return String(meta).slice(0, MAX_LOG_META_CHARS);
+    } catch {
+      return undefined;
+    }
+  }
+}
 
 /**
  * In-memory ring buffer of the last {@link MEMORY_LOG_CAPACITY} log lines, powering the in-app
- * log viewer (Settings → App Logs). Entries arrive ALREADY redacted (this sink sits behind
- * RedactingLogger), so showing/sharing them can't leak guids/tokens. Debug lines are kept here
- * even in prod (unlike the console sink) — they're often exactly what a bug report needs.
+ * log viewer (Settings → App Logs). ERROR entries arrive as finite structured diagnostics.
+ * Free-form debug/info/warn entries are retained in development only.
  */
 export class MemorySink implements LogSink {
   private buf: LogEntry[] = [];
 
   write(level: LogLevel, message: string, meta?: unknown): void {
-    let metaStr: string | undefined;
-    if (meta !== undefined) {
-      try {
-        metaStr = typeof meta === 'string' ? meta : JSON.stringify(meta)?.slice(0, 500);
-      } catch {
-        metaStr = String(meta);
-      }
-    }
-    this.buf.push({ level, message, meta: metaStr, timestamp: Date.now() });
+    if (level !== 'error' && !isVerboseLocalLoggingEnabled()) return;
+    const safe = level === 'error' ? capturedErrorSinkValue(message, meta) : { message, meta };
+    const metaStr = safe.meta === undefined ? undefined : boundedLogMeta(safe.meta);
+    const now = Date.now();
+    this.buf.push({
+      level,
+      message: boundedLogMessage(safe.message),
+      ...(metaStr === undefined ? {} : { meta: metaStr }),
+      timestamp: level === 'error' ? projectErrorReportTimestamp(now) : now,
+    });
     if (this.buf.length > MEMORY_LOG_CAPACITY)
       this.buf.splice(0, this.buf.length - MEMORY_LOG_CAPACITY);
   }
@@ -62,7 +122,13 @@ export class MemorySink implements LogSink {
    */
   hydrate(entries: LogEntry[]): void {
     if (entries.length === 0) return;
-    this.buf = [...entries, ...this.buf];
+    // Persisted non-error rows came from the old free-form policy. Never restore them into the
+    // viewer/share surface, even in a development build.
+    const boundedEntries = entries
+      .filter((entry) => entry.level === 'error')
+      .map(storedErrorSinkValue)
+      .filter((entry): entry is LogEntry => entry !== undefined);
+    this.buf = [...boundedEntries, ...this.buf];
     if (this.buf.length > MEMORY_LOG_CAPACITY)
       this.buf.splice(0, this.buf.length - MEMORY_LOG_CAPACITY);
   }
@@ -80,10 +146,14 @@ export class TeeSink implements LogSink {
   }
   /** Attach a sink after construction (e.g. the persistent file sink, wired up at boot). */
   add(sink: LogSink): void {
-    this.sinks.push(sink);
+    if (!this.sinks.includes(sink)) this.sinks.push(sink);
   }
   write(level: LogLevel, message: string, meta?: unknown): void {
-    for (const s of this.sinks) s.write(level, message, meta);
+    if (level !== 'error' && !isVerboseLocalLoggingEnabled()) return;
+    // Defend future/injected sinks even when a caller somehow bypasses RedactingLogger and reaches
+    // the tee singleton directly. Built-in sinks reproject again, so this remains idempotent.
+    const safe = level === 'error' ? capturedErrorSinkValue(message, meta) : { message, meta };
+    for (const s of this.sinks) s.write(level, safe.message, safe.meta);
   }
 }
 
@@ -91,13 +161,12 @@ export class TeeSink implements LogSink {
 export const memoryLogSink = new MemorySink();
 
 /**
- * The app-wide logger. EVERY message + meta object is scrubbed (guid / password /
- * token / fcmtoken / authorization keys, and `?guid=`-style URL params) before it
- * reaches any sink. Use this instead of `console.*` everywhere so nothing sensitive
- * can leak to logcat / a release log / a future Sentry breadcrumb.
+ * The app-wide logger. ERROR calls are rebuilt as finite structured diagnostics. Free-form
+ * debug/info/warn calls remain visible in development but are dropped before every release sink;
+ * LOG-01 tracks replacing selected high-value lines with finite event schemas.
  *
  * To add Sentry later: wrap this sink (or add a second one) that forwards the
- * already-redacted message as a breadcrumb — see RELEASE_CHECKLIST §9.2.
+ * already-projected/redacted message as a breadcrumb — see RELEASE_CHECKLIST §9.2.
  */
 export const logSinks = new TeeSink(new ConsoleSink(), memoryLogSink);
 export const logger = new RedactingLogger(logSinks);

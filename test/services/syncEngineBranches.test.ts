@@ -14,7 +14,6 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
 import { syncAllChats, syncChatMessages } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
@@ -104,6 +103,40 @@ describe('syncChatMessages — on-demand backfill', () => {
   it('returns 0 when the chat is not synced yet (nothing to attach to)', async () => {
     const { db } = await createTestDb();
     expect(await syncChatMessages(db, api({}), 'unknown-chat')).toBe(0);
+  });
+
+  it('drops a fetched account-A page when its session is revoked before the DB write', async () => {
+    const { db } = await createTestDb();
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cAbort', participants: [{ address: 'a@x.com' }] })],
+      hm,
+    );
+    const chatId = (await getChatIdByGuid(db, 'cAbort'))!;
+    let revoked = false;
+
+    const total = await syncChatMessages(
+      db,
+      api({
+        fetchChatMessages: async () => {
+          revoked = true;
+          return [
+            Message.parse({
+              guid: 'old-account-message',
+              text: 'must not cross accounts',
+              dateCreated: 1,
+              handle: { address: 'old@example.com' },
+            }),
+          ];
+        },
+      }),
+      'cAbort',
+      { shouldAbort: () => revoked },
+    );
+
+    expect(total).toBe(0);
+    expect(await listMessages(db, chatId)).toHaveLength(0);
   });
 
   it('pages a synced chat’s messages and stops at the cap', async () => {

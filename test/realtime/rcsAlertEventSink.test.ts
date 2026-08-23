@@ -29,7 +29,7 @@ describe('RcsAlertEventSink', () => {
     const onAlert = jest.fn();
     const event = ev({ type: 'typing-indicator', payload: { chatGuid: 'c1', display: true } });
     await new RcsAlertEventSink(inner, onAlert).onEvent(event, 'fcm');
-    expect(inner.onEvent).toHaveBeenCalledWith(event, 'fcm');
+    expect(inner.onEvent).toHaveBeenCalledWith(event, 'fcm', undefined);
     expect(onAlert).not.toHaveBeenCalled();
   });
 });

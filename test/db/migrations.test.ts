@@ -14,12 +14,16 @@ describe('migrations', () => {
       .map((r) => (r as { name: string }).name);
 
     for (const t of [
+      'attachment_cache_entries',
       'attachments',
       'chats',
       'chat_handles',
       'contacts',
       'error_reports',
       'handles',
+      'incoming_event_queue',
+      'message_deletion_ledger',
+      'message_guid_aliases',
       'messages',
       'messages_fts',
       'outgoing_queue',

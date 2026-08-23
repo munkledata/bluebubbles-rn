@@ -13,7 +13,7 @@ export interface ActiveFaceTimeCall {
 export interface IncomingFaceTimeCall {
   /** Call identity from the server event — keys the ring + the answer op. */
   uuid: string;
-  /** Display name (number/email/contact); masked to a generic label in redacted mode. */
+  /** Display name (number/email/contact) used by the incoming-call overlay. */
   callerName: string;
   /** Audio-only call (presentation hint for the overlay copy). */
   isAudio: boolean;
@@ -22,28 +22,41 @@ export interface IncomingFaceTimeCall {
 }
 
 interface FaceTimeState {
+  /** Monotonic account boundary used to disown call work already in flight at teardown. */
+  generation: number;
   call: ActiveFaceTimeCall | null;
   incoming: IncomingFaceTimeCall | null;
   open: (call: ActiveFaceTimeCall) => void;
+  /** Open only if the async caller still belongs to the captured account generation. */
+  openIfCurrent: (call: ActiveFaceTimeCall, generation: number) => boolean;
   close: () => void;
   /** Ring an incoming call (replaces any prior — one call at a time). */
   ring: (incoming: IncomingFaceTimeCall) => void;
   /** Stop ringing for `uuid`; no-op if a different (or no) call is ringing. */
   dismissIncoming: (uuid: string) => void;
+  /** Account teardown: discard every caller/call identity from the previous server. */
+  reset: () => void;
 }
 
 /**
- * FaceTime overlay state. `call` drives the in-call WebView overlay (`FaceTimeCallOverlay`);
+ * FaceTime overlay state. `call` drives the safe external-browser handoff (`FaceTimeCallOverlay`);
  * `incoming` drives the ring overlay (`IncomingFaceTimeOverlay`). The outgoing start
  * orchestration lives in `useFaceTime`, the incoming answer/decline in `useIncomingFaceTime`
  * — this store is just the UI state. One call at a time.
  */
 export const useFaceTimeStore = create<FaceTimeState>((set) => ({
+  generation: 0,
   call: null,
   incoming: null,
   open: (call) => set({ call }),
+  openIfCurrent: (call, generation) => {
+    if (useFaceTimeStore.getState().generation !== generation) return false;
+    set({ call });
+    return true;
+  },
   close: () => set({ call: null }),
   ring: (incoming) => set({ incoming }),
   // uuid-guarded so a late `ended` for an OLD call can't clear a newer ring.
   dismissIncoming: (uuid) => set((s) => (s.incoming?.uuid === uuid ? { incoming: null } : s)),
+  reset: () => set((s) => ({ generation: s.generation + 1, call: null, incoming: null })),
 }));

@@ -1,6 +1,6 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,6 +15,12 @@ import { isUnimplementedEndpoint } from '@core/api/errors';
 import type { RcsStatus, ServerAlert } from '@core/api/endpoints/server';
 import { deriveRcsHealth, deriveRcsHealthFromStatus, type RcsSeverity } from '@core/realtime';
 import { http } from '@/services';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { useSessionStore } from '@state/sessionStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { showToast } from '@ui/toast';
@@ -23,6 +29,21 @@ import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useThe
 const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Yes' : 'No');
 const okBad = (v: boolean | null | undefined): string =>
   v == null ? '—' : v ? 'Connected' : 'Not connected';
+
+/** See ServerManagementScreen: reads use an isolated cache key and discard late old-account data. */
+async function readForAccount<T>(
+  lease: RealtimeDeliveryLease,
+  read: () => Promise<T>,
+): Promise<T | null> {
+  if (!lease.isCurrent()) return null;
+  try {
+    const value = await read();
+    return lease.isCurrent() ? value : null;
+  } catch (error) {
+    if (!lease.isCurrent()) return null;
+    throw error;
+  }
+}
 
 function formatUptime(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return '—';
@@ -41,11 +62,28 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
+  const healthQueryPrefix = ['server', 'health', accountLease.generation] as const;
+  const alertsQueryKey = [...healthQueryPrefix, 'alerts'] as const;
+  const [clearingAlerts, setClearingAlerts] = useState(false);
+
+  // Lease currentness revokes callbacks immediately but is not reactive. Commit a monotonic retired
+  // state so an old mounted route removes all account-owned diagnostics and actions without waiting
+  // for a session-store or query update to happen to rerender it.
+  useLayoutEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+        setAccountRetired(true);
+      }),
+    [accountLease],
+  );
+  const accountCurrent = !accountRetired && accountLease.isCurrent();
   // RCS bridge (Google Messages): the capability boolean gates the section (absent on older
   // servers → hidden). The rich, accurate health block comes from the NON-admin `get-rcs-status`
   // channel (fetched below); the live `rcs-alert` socket event is kept as an immediacy override so
   // a fresh alert updates the card between refetches.
-  const rcsCapability = serverInfo?.rcs;
+  const rcsCapability = accountCurrent ? serverInfo?.rcs : undefined;
   const rcsLastAlert = useRcsHealthStore((s) => s.lastAlertType);
   const rcsLastAlertAt = useRcsHealthStore((s) => s.lastAlertAt);
 
@@ -56,79 +94,110 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const healthQueries = useQueries({
     queries: [
       {
-        queryKey: ['server', 'health', 'private-api'],
-        queryFn: async () => (await serverApi.privateApiStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'private-api'],
+        queryFn: () =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.privateApiStatus(http)) ?? null,
+          ),
       },
       {
-        queryKey: ['server', 'health', 'env'],
-        queryFn: async () => (await serverApi.serverEnv(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'env'],
+        queryFn: () =>
+          readForAccount(accountLease, async () => (await serverApi.serverEnv(http)) ?? null),
       },
       {
-        queryKey: ['server', 'health', 'findmy-keys'],
-        queryFn: async () => (await serverApi.findMyKeysStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'findmy-keys'],
+        queryFn: () =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.findMyKeysStatus(http)) ?? null,
+          ),
       },
       {
-        queryKey: ['server', 'health', 'fcm'],
-        queryFn: async () => (await serverApi.fcmStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'fcm'],
+        queryFn: () =>
+          readForAccount(accountLease, async () => (await serverApi.fcmStatus(http)) ?? null),
       },
       {
-        queryKey: ['server', 'health', 'zrok'],
-        queryFn: async () => (await serverApi.zrokStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'zrok'],
+        queryFn: () =>
+          readForAccount(accountLease, async () => (await serverApi.zrokStatus(http)) ?? null),
       },
       {
-        queryKey: ['server', 'health', 'public-ip'],
-        queryFn: () => serverApi.publicIp(http),
+        queryKey: [...healthQueryPrefix, 'public-ip'],
+        queryFn: () => readForAccount(accountLease, () => serverApi.publicIp(http)),
       },
       {
-        queryKey: ['server', 'health', 'tls'],
-        queryFn: async () => (await serverApi.tlsStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'tls'],
+        queryFn: () =>
+          readForAccount(accountLease, async () => (await serverApi.tlsStatus(http)) ?? null),
       },
       {
-        queryKey: ['server', 'health', 'admin'],
-        queryFn: async () => (await serverApi.adminStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'admin'],
+        queryFn: () =>
+          readForAccount(accountLease, async () => (await serverApi.adminStatus(http)) ?? null),
       },
       {
-        queryKey: ['server', 'health', 'alerts'],
-        queryFn: () => serverApi.serverAlerts(http),
+        queryKey: alertsQueryKey,
+        queryFn: () => readForAccount(accountLease, () => serverApi.serverAlerts(http)),
       },
       // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
       // the query stays errored so the RCS row degrades to the capability-only signal.
       {
-        queryKey: ['server', 'health', 'rcs'],
-        queryFn: async () => (await serverApi.rcsStatus(http)) ?? null,
+        queryKey: [...healthQueryPrefix, 'rcs'],
+        queryFn: () =>
+          readForAccount(accountLease, async () => (await serverApi.rcsStatus(http)) ?? null),
       },
     ],
   });
   const [paQ, envQ, keysQ, fcmQ, zrokQ, ipQ, tlsQ, adminQ, alertsQ, rcsQ] = healthQueries;
-  const pa = paQ.data;
-  const env = envQ.data;
-  const keys = keysQ.data;
-  const fcm = fcmQ.data;
-  const zrok = zrokQ.data;
-  const ip = ipQ.data ?? null;
-  const tls = tlsQ.data;
-  const admin = adminQ.data;
-  const alerts = alertsQ.data ?? [];
+  const visibleServerInfo = accountCurrent ? serverInfo : null;
+  const pa = accountCurrent ? paQ.data : null;
+  const env = accountCurrent ? envQ.data : null;
+  const keys = accountCurrent ? keysQ.data : null;
+  const fcm = accountCurrent ? fcmQ.data : null;
+  const zrok = accountCurrent ? zrokQ.data : null;
+  const ip = accountCurrent ? (ipQ.data ?? null) : null;
+  const tls = accountCurrent ? tlsQ.data : null;
+  const admin = accountCurrent ? adminQ.data : null;
+  const alerts = accountCurrent ? (alertsQ.data ?? []) : [];
   // The live `get-rcs-status` block + when it last resolved (to decide whether a socket alert is
   // fresher than the fetch). No data = channel unavailable (older server) → capability-only.
-  const rcs = rcsQ.data ?? null;
-  const rcsFetchedAt = rcsQ.dataUpdatedAt > 0 ? rcsQ.dataUpdatedAt : null;
-  const refreshing = healthQueries.some((q) => q.isFetching);
+  const rcs = accountCurrent ? (rcsQ.data ?? null) : null;
+  const rcsFetchedAt = accountCurrent && rcsQ.dataUpdatedAt > 0 ? rcsQ.dataUpdatedAt : null;
+  const refreshing = accountCurrent && healthQueries.some((q) => q.isFetching);
   // True when EVERY read failed → the server isn't answering the health channels at all (offline
   // or too old). Shown as a banner so an empty screen reads as a server issue, not an app bug.
-  const allFailed = healthQueries.every((q) => q.isError);
+  const allFailed = accountCurrent && healthQueries.every((q) => q.isError);
   // Every failure was a dispatcher 404 (remapped to Unimplemented): the server predates the admin
   // dispatcher, or a reverse proxy blocks /admin/* — a config problem, not connectivity.
   const allUnsupported = allFailed && healthQueries.every((q) => isUnimplementedEndpoint(q.error));
 
   const load = useCallback((): void => {
-    void queryClient.invalidateQueries({ queryKey: ['server', 'health'] });
-  }, [queryClient]);
+    if (!accountLease.isCurrent()) return;
+    void queryClient.invalidateQueries({
+      queryKey: ['server', 'health', accountLease.generation],
+    });
+  }, [accountLease, queryClient]);
 
   const onClearAlerts = (): void => {
-    void serverApi
-      .clearServerAlerts(http)
-      .finally(() => queryClient.setQueryData<ServerAlert[]>(['server', 'health', 'alerts'], []));
+    if (clearingAlerts || !accountLease.isCurrent()) return;
+    setClearingAlerts(true);
+    void (async () => {
+      try {
+        await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+          if (!activeLease.isCurrent()) return;
+          await serverApi.clearServerAlerts(http);
+          if (!activeLease.isCurrent()) return;
+          queryClient.setQueryData<ServerAlert[]>(alertsQueryKey, []);
+        });
+      } catch {
+        if (accountLease.isCurrent()) showToast('Could not clear server alerts.');
+      } finally {
+        if (accountLease.isCurrent()) setClearingAlerts(false);
+      }
+    })();
   };
 
   const tlsMode = tls
@@ -142,107 +211,127 @@ export default function ServerHealthScreen(): React.JSX.Element {
         title="Server Health"
         onBack={() => router.back()}
         right={
-          <Pressable onPress={load} hitSlop={8} disabled={refreshing}>
-            <Text style={[styles.action, { color: theme.color.tint }]} numberOfLines={1}>
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </Text>
-          </Pressable>
+          accountCurrent ? (
+            <Pressable onPress={load} hitSlop={8} disabled={refreshing} accessibilityRole="button">
+              <Text style={[styles.action, { color: theme.color.tint }]} numberOfLines={1}>
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </Text>
+            </Pressable>
+          ) : null
         }
       />
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.color.tint} />
-        }
-      >
-        {allFailed ? (
-          <View style={[styles.banner, { backgroundColor: theme.color.secondaryBackground }]}>
-            <Text style={[styles.hint, { color: theme.color.destructive }]}>
-              {allUnsupported
-                ? 'This server doesn’t expose health reporting. It may be an older version, or a proxy may be blocking its admin endpoints.'
-                : 'The server isn’t responding to health checks. It may be offline, or running an older version that doesn’t report these details.'}
-            </Text>
-          </View>
-        ) : null}
-        <SettingsSection label="PRIVATE API">
-          <InfoRow
-            label="Messages helper"
-            value={pa?.enabled === false ? 'Disabled' : okBad(pa?.connected)}
-          />
-          <InfoRow
-            label="FaceTime helper"
-            value={pa?.ft_enabled === false ? 'Disabled' : okBad(pa?.ft_connected)}
-          />
-        </SettingsSection>
-
-        <SettingsSection label="FIND MY KEYS" style={styles.gap}>
-          <InfoRow label="LocalStorage (friends)" value={keyState(keys?.LocalStorage)} />
-          <InfoRow label="FMIP (devices)" value={keyState(keys?.FMIP)} />
-          <InfoRow label="FMF (people cache)" value={keyState(keys?.FMF)} />
-          {env?.findmyNeedsKeys ? (
-            <NoteRow text="macOS 14.4+ encrypts the Find My caches — import keys on the server console if a key above is missing, or Find My tabs stay empty." />
+      {!accountCurrent ? (
+        <View style={styles.accountChanged}>
+          <Text
+            accessibilityRole="text"
+            accessibilityLabel="Server account changed. Go back and reopen Server Health."
+            style={[styles.accountChangedText, { color: theme.color.secondaryLabel }]}
+          >
+            Server account changed. Go back and reopen Server Health.
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.color.tint} />
+          }
+        >
+          {allFailed ? (
+            <View style={[styles.banner, { backgroundColor: theme.color.secondaryBackground }]}>
+              <Text style={[styles.hint, { color: theme.color.destructive }]}>
+                {allUnsupported
+                  ? 'This server doesn’t expose health reporting. It may be an older version, or a proxy may be blocking its admin endpoints.'
+                  : 'The server isn’t responding to health checks. It may be offline, or running an older version that doesn’t report these details.'}
+              </Text>
+            </View>
           ) : null}
-        </SettingsSection>
+          <SettingsSection label="PRIVATE API">
+            <InfoRow
+              label="Messages helper"
+              value={pa?.enabled === false ? 'Disabled' : okBad(pa?.connected)}
+            />
+            <InfoRow
+              label="FaceTime helper"
+              value={pa?.ft_enabled === false ? 'Disabled' : okBad(pa?.ft_connected)}
+            />
+          </SettingsSection>
 
-        <SettingsSection label="PUSH (FCM)" style={styles.gap}>
-          <InfoRow label="Configured" value={yesNo(fcm?.configured)} />
-          {fcm?.projectId ? <InfoRow label="Project" value={fcm.projectId} /> : null}
-        </SettingsSection>
+          <SettingsSection label="FIND MY KEYS" style={styles.gap}>
+            <InfoRow label="LocalStorage (friends)" value={keyState(keys?.LocalStorage)} />
+            <InfoRow label="FMIP (devices)" value={keyState(keys?.FMIP)} />
+            <InfoRow label="FMF (people cache)" value={keyState(keys?.FMF)} />
+            {env?.findmyNeedsKeys ? (
+              <NoteRow text="macOS 14.4+ encrypts the Find My caches — import keys on the server console if a key above is missing, or Find My tabs stay empty." />
+            ) : null}
+          </SettingsSection>
 
-        <SettingsSection label="ENVIRONMENT" style={styles.gap}>
-          <InfoRow
-            label="Server version"
-            value={env?.version ?? serverInfo?.server_version ?? 'Unknown'}
-          />
-          <InfoRow label="macOS" value={serverInfo?.os_version ?? 'Unknown'} />
-          <InfoRow label="Node" value={env?.node ?? 'Unknown'} />
-          <InfoRow label="Uptime" value={formatUptime(admin?.uptimeMs)} />
-        </SettingsSection>
+          <SettingsSection label="PUSH (FCM)" style={styles.gap}>
+            <InfoRow label="Configured" value={yesNo(fcm?.configured)} />
+            {fcm?.projectId ? <InfoRow label="Project" value={fcm.projectId} /> : null}
+          </SettingsSection>
 
-        <SettingsSection label="CONNECTION" style={styles.gap}>
-          <InfoRow
-            label="Tunnel (zrok)"
-            value={zrok?.running ? 'Running' : zrok?.available ? 'Available' : 'Off'}
-          />
-          {zrok?.url ? <InfoRow label="Tunnel URL" value={zrok.url} /> : null}
-          <InfoRow label="Public IP" value={ip ?? '—'} />
-          <InfoRow
-            label="TLS"
-            value={`${tlsMode ?? '—'}${
-              typeof tlsDomain === 'string' && tlsDomain ? ` · ${tlsDomain}` : ''
-            }`}
-          />
-        </SettingsSection>
+          <SettingsSection label="ENVIRONMENT" style={styles.gap}>
+            <InfoRow
+              label="Server version"
+              value={env?.version ?? visibleServerInfo?.server_version ?? 'Unknown'}
+            />
+            <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
+            <InfoRow label="Node" value={env?.node ?? 'Unknown'} />
+            <InfoRow label="Uptime" value={formatUptime(admin?.uptimeMs)} />
+          </SettingsSection>
 
-        {rcsCapability == null ? null : (
-          <RcsBridgeSection
-            capability={rcsCapability}
-            status={rcs}
-            statusFetchedAt={rcsFetchedAt}
-            lastAlertType={rcsLastAlert}
-            lastAlertAt={rcsLastAlertAt}
-            onReauthed={load}
-          />
-        )}
+          <SettingsSection label="CONNECTION" style={styles.gap}>
+            <InfoRow
+              label="Tunnel (zrok)"
+              value={zrok?.running ? 'Running' : zrok?.available ? 'Available' : 'Off'}
+            />
+            {zrok?.url ? <InfoRow label="Tunnel URL" value={zrok.url} /> : null}
+            <InfoRow label="Public IP" value={ip ?? '—'} />
+            <InfoRow
+              label="TLS"
+              value={`${tlsMode ?? '—'}${
+                typeof tlsDomain === 'string' && tlsDomain ? ` · ${tlsDomain}` : ''
+              }`}
+            />
+          </SettingsSection>
 
-        <SettingsSection label="ALERTS" style={styles.gap}>
-          {alerts.length === 0 ? (
-            <InfoRow label="Server alerts" value="None" />
-          ) : (
-            alerts.map((a) => (
-              <View key={a.id} style={styles.row}>
-                <Text style={[styles.alertText, { color: theme.color.label }]} numberOfLines={3}>
-                  {a.value ?? a.type ?? 'Alert'}
-                </Text>
-              </View>
-            ))
+          {rcsCapability == null ? null : (
+            <RcsBridgeSection
+              capability={rcsCapability}
+              status={rcs}
+              statusFetchedAt={rcsFetchedAt}
+              lastAlertType={rcsLastAlert}
+              lastAlertAt={rcsLastAlertAt}
+              onReauthed={load}
+              accountLease={accountLease}
+            />
           )}
-          {alerts.length > 0 ? (
-            <NavRow label="Clear Alerts" chevron={false} onPress={onClearAlerts} />
-          ) : null}
-        </SettingsSection>
-      </ScrollView>
+
+          <SettingsSection label="ALERTS" style={styles.gap}>
+            {alerts.length === 0 ? (
+              <InfoRow label="Server alerts" value="None" />
+            ) : (
+              alerts.map((a) => (
+                <View key={a.id} style={styles.row}>
+                  <Text style={[styles.alertText, { color: theme.color.label }]} numberOfLines={3}>
+                    {a.value ?? a.type ?? 'Alert'}
+                  </Text>
+                </View>
+              ))
+            )}
+            {alerts.length > 0 ? (
+              <NavRow
+                label={clearingAlerts ? 'Clearing Alerts…' : 'Clear Alerts'}
+                chevron={false}
+                disabled={clearingAlerts}
+                onPress={onClearAlerts}
+              />
+            ) : null}
+          </SettingsSection>
+        </ScrollView>
+      )}
     </Screen>
   );
 }
@@ -285,6 +374,7 @@ function RcsBridgeSection({
   lastAlertType,
   lastAlertAt,
   onReauthed,
+  accountLease,
 }: {
   capability: boolean;
   status: RcsStatus;
@@ -292,6 +382,7 @@ function RcsBridgeSection({
   lastAlertType: string | null;
   lastAlertAt: number | null;
   onReauthed: () => void;
+  accountLease: RealtimeDeliveryLease;
 }): React.JSX.Element {
   const theme = useTheme();
   // A socket alert is an immediacy override only when it arrived AFTER the block was fetched —
@@ -323,7 +414,7 @@ function RcsBridgeSection({
       </View>
       {phoneID ? <InfoRow label="Phone" value={phoneID} /> : null}
       {health.detail ? <NoteRow text={health.detail} /> : null}
-      {capability ? <RcsReconnectRow onDone={onReauthed} /> : null}
+      {capability ? <RcsReconnectRow onDone={onReauthed} accountLease={accountLease} /> : null}
     </SettingsSection>
   );
 }
@@ -336,30 +427,40 @@ function RcsBridgeSection({
  * Google credentials onto the device (they never leave the Mac); it is to let the phone ask the
  * server to do locally what the dashboard button already does.
  */
-function RcsReconnectRow({ onDone }: { onDone: () => void }): React.JSX.Element {
+function RcsReconnectRow({
+  onDone,
+  accountLease,
+}: {
+  onDone: () => void;
+  accountLease: RealtimeDeliveryLease;
+}): React.JSX.Element {
   const theme = useTheme();
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(async () => {
-    if (busy) return;
+    if (busy || !accountLease.isCurrent()) return;
     setBusy(true);
     try {
-      const res = await serverApi.rcsReauthNow(http);
-      // Be honest about the three distinct outcomes — "staged" is NOT a success yet.
-      showToast(
-        res.staged
-          ? 'Bridge is down — fresh cookies saved, they will apply when it restarts.'
-          : res.connected
-            ? 'RCS bridge reconnected.'
-            : 'Cookies applied — the bridge is still connecting.',
-      );
-      onDone();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Could not reconnect the RCS bridge.');
+      await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+        if (!activeLease.isCurrent()) return;
+        const res = await serverApi.rcsReauthNow(http);
+        if (!activeLease.isCurrent()) return;
+        // Be honest about the three distinct outcomes — "staged" is NOT a success yet.
+        showToast(
+          res.staged
+            ? 'Bridge is down — fresh cookies saved, they will apply when it restarts.'
+            : res.connected
+              ? 'RCS bridge reconnected.'
+              : 'Cookies applied — the bridge is still connecting.',
+        );
+        onDone();
+      });
+    } catch {
+      if (accountLease.isCurrent()) showToast('Could not reconnect the RCS bridge.');
     } finally {
-      setBusy(false);
+      if (accountLease.isCurrent()) setBusy(false);
     }
-  }, [busy, onDone]);
+  }, [accountLease, busy, onDone]);
 
   return (
     <Pressable onPress={run} disabled={busy} style={styles.row} accessibilityRole="button">
@@ -376,6 +477,13 @@ function RcsReconnectRow({ onDone }: { onDone: () => void }): React.JSX.Element 
 const styles = StyleSheet.create({
   action: { fontSize: 15, textAlign: 'right' },
   content: { padding: 16, paddingBottom: 40 },
+  accountChanged: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  accountChangedText: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
   gap: { marginTop: 24 },
   row: {
     flexDirection: 'row',

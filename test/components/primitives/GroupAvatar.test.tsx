@@ -6,21 +6,63 @@
  * first two entries it's given.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen } from '../support/renderWithTheme';
 import { GroupAvatar } from '@ui/primitives/GroupAvatar';
+import { darkTheme } from '@ui/theme/tokens';
 import { dedupeParticipants } from '@utils/chat';
 
 describe('GroupAvatar', () => {
   it('draws the first two participants (back + front)', async () => {
-    await renderWithTheme(<GroupAvatar names={['Alice', 'Bob', 'Carol']} />);
+    const view = await renderWithTheme(<GroupAvatar names={['Alice', 'Bob', 'Carol']} />);
     expect(screen.getByText('A')).toBeTruthy(); // Alice → back
     expect(screen.getByText('B')).toBeTruthy(); // Bob → front
     expect(screen.queryByText('C')).toBeNull(); // Carol is not drawn
+
+    await view.rerender(
+      <GroupAvatar
+        names={['Alice', 'Bob', 'Carol']}
+        uris={['file:///alice.jpg', 'file:///bob.jpg', 'file:///carol.jpg']}
+        size={72}
+      />,
+    );
+    const images = view.root!.queryAll((node) => node.type === 'Image');
+    expect(images).toHaveLength(2);
+    expect(StyleSheet.flatten(view.root!.props.style)).toMatchObject({ width: 72, height: 72 });
+    expect(images.map((image) => image.props.source)).toEqual([
+      { uri: 'file:///alice.jpg' },
+      { uri: 'file:///bob.jpg' },
+    ]);
+    for (const image of images) {
+      expect(StyleSheet.flatten(image.props.style)).toMatchObject({
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+      });
+    }
+    expect(StyleSheet.flatten(images[0]!.parent!.props.style)).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      left: 0,
+    });
+    expect(StyleSheet.flatten(images[1]!.parent!.props.style)).toMatchObject({
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      borderWidth: 2,
+      borderRadius: 26,
+      borderColor: darkTheme.color.background,
+    });
   });
 
   it('reuses the sole name for both tiles when only one participant is given', async () => {
-    await renderWithTheme(<GroupAvatar names={['Solo']} />);
+    const view = await renderWithTheme(<GroupAvatar names={['Solo']} />);
     expect(screen.getAllByText('S')).toHaveLength(2); // back AND front fall back to names[0]
+
+    await view.rerender(<GroupAvatar names={['Solo']} uris={['file:///solo.jpg']} />);
+    expect(
+      view.root!.queryAll((node) => node.type === 'Image').map((image) => image.props.source),
+    ).toEqual([{ uri: 'file:///solo.jpg' }, { uri: 'file:///solo.jpg' }]);
   });
 
   it('falls back to "?" for both tiles with an empty participant list', async () => {
@@ -36,13 +78,5 @@ describe('GroupAvatar', () => {
     await renderWithTheme(<GroupAvatar names={names} />);
     expect(screen.getByText('A')).toBeTruthy();
     expect(screen.getByText('B')).toBeTruthy();
-  });
-
-  it('redacted seeds override names with deterministic tiles', async () => {
-    // Deterministic (same 31-hash the source uses): 'seed-A' -> '5A', 'seed-B' -> '4A'.
-    await renderWithTheme(<GroupAvatar names={['Alice', 'Bob']} seeds={['seed-A', 'seed-B']} />);
-    expect(screen.getByText('5A')).toBeTruthy();
-    expect(screen.getByText('4A')).toBeTruthy();
-    expect(screen.queryByText('A')).toBeNull(); // real initials never leak
   });
 });

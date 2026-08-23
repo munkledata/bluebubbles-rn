@@ -50,9 +50,8 @@ export function buildPreview(row: PreviewInput): string {
 
   let body = stripAttachmentPlaceholder(row.lastText ?? row.lastSubject);
   if (!body && row.lastHasAttachments) {
-    // Genmoji: prefer the natural-language description ("a smiling cat wearing a top hat") over the
-    // generic label. The whole preview is redacted by the caller (redactPreview → "Message"), so
-    // this raw description never leaks under redacted mode.
+    // Genmoji: prefer the natural-language description ("a smiling cat wearing a top hat") over
+    // the generic attachment label so the ordinary conversation preview explains what was shared.
     body = row.lastAttachmentDescription?.trim() || '📎 Attachment';
   }
   if (!body) return '';

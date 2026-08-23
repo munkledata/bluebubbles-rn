@@ -62,6 +62,9 @@ function releaseProgressSubscription(task: FileSystem.UploadTask): void {
   }
 }
 
+const MAX_TIMER_MS = 2_147_483_647;
+type UploadStopReason = 'cancelled' | 'timeout';
+
 export const expoAttachmentUploader: AttachmentUploader = async ({
   http,
   chatGuid,
@@ -71,42 +74,100 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   uri,
   mimeType,
   totalBytes,
+  timeoutMs,
 }) => {
-  const url = http.buildUrl('/message/attachment/upload');
-
-  // Pre-flight: a missing local file is NOT a network problem, and saying so up front keeps the
-  // failed bubble from reading "Connection Refused" for a file the user can plainly see is gone.
-  if (!(await expoFileExists(uri))) {
-    logger.warn('[upload] attachment file is missing before upload');
-    showToast("Couldn't read that file — try attaching it again.");
-    throw new ApiError('local_file', 'Attachment file is no longer available');
+  if (
+    timeoutMs !== undefined &&
+    (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_MS)
+  ) {
+    throw new RangeError(
+      `timeoutMs must be a positive safe integer no greater than ${MAX_TIMER_MS}`,
+    );
   }
 
+  // Capture BEFORE the file pre-flight and concurrency wait. A queued upload may not open its
+  // native request for minutes; reading live headers there could pair this old URL with a newly
+  // connected account's password.
+  const transport = http.snapshotTransport();
+  const url = transport.buildUrl('/message/attachment/upload');
+
+  let task: FileSystem.UploadTask | null = null;
+  const nativeTransfer: {
+    current?: Promise<FileSystem.FileSystemUploadResult | null | undefined>;
+  } = {};
+  let stopReason: UploadStopReason | null = null;
   let result: FileSystem.FileSystemUploadResult | null | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const stopController = new AbortController();
+  const timeoutError = new ApiError('timeout', 'Attachment upload timed out');
+  const cancelledError = new ApiError('cancelled', 'Attachment upload was cancelled');
+  let rejectStopped!: (error: ApiError) => void;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    rejectStopped = reject;
+  });
+  const stoppedError = (): ApiError => (stopReason === 'timeout' ? timeoutError : cancelledError);
+  const stopAttempt = (reason: UploadStopReason): void => {
+    // First reason wins: a user/Disconnect cancellation at 59.9 s must never be relabelled as a
+    // timeout when the native null settlement happens to lose the race with the 60 s timer.
+    const firstStop = stopReason === null;
+    if (firstStop) {
+      stopReason = reason;
+      stopController.abort();
+      if (reason === 'cancelled' && timeout !== undefined) {
+        clearTimeout(timeout);
+        timeout = undefined;
+      }
+    }
+    // Keep retrying the exact handle when a later account sweep reaches a native task that ignored
+    // its first cancellation. Classification remains the first reason above.
+    if (task) void task.cancelAsync().catch(() => undefined);
+    if (firstStop) rejectStopped(reason === 'timeout' ? timeoutError : cancelledError);
+  };
+  const withinAttempt = <T>(operation: Promise<T>): Promise<T> =>
+    Promise.race([operation, stopped]);
+
+  // Register BEFORE the very first await, including the file pre-flight. Disconnect calls
+  // `cancelAll()` synchronously; registering later let an old-account operation appear after the
+  // sweep and start a native upload that teardown could no longer see.
+  const releaseCancelHandle = uploadRegistry.add(tempGuid, {
+    cancel: () => stopAttempt('cancelled'),
+  });
+  let handleReleased = false;
+  const releaseHandleOnce = (): void => {
+    if (handleReleased) return;
+    handleReleased = true;
+    releaseCancelHandle();
+  };
+  if (timeoutMs !== undefined) {
+    // Starts before the first native stat and covers the uploader's own preflight, FIFO gate wait,
+    // transfer, and response. The queue passes only the remainder of its wider attempt deadline.
+    timeout = setTimeout(() => stopAttempt('timeout'), timeoutMs);
+  }
+
   try {
-    // The tracked wrapper publishes byte progress under the ATTACHMENT guid (what the bubble
-    // renders under) and guarantees the entry is cleared however this attempt ends.
-    result = await runTrackedUpload(
-      uploadStoreSink,
-      attachmentGuid,
-      { chatGuid, name, total: totalBytes ?? 0 },
-      async (onProgress) => {
-        let task: FileSystem.UploadTask | null = null;
-        let cancelled = false;
-        // Registered BEFORE the gate, not after: with a queue of files only two are transferring,
-        // so a cancel handle that existed only for a running task would leave every waiting file
-        // uncancellable — the exact case (a big batch) where the user most wants out.
-        const releaseCancelHandle = uploadRegistry.add(tempGuid, {
-          cancel: () => {
-            cancelled = true;
-            if (task) void task.cancelAsync();
-          },
-        });
-        try {
-          return await uploadGate.run(async () => {
-            // Cancelled while queued — never open a socket at all. `runTrackedUpload` still
-            // settles the progress entry, and the null flows to the cancelled branch below.
-            if (cancelled) return null;
+    // Pre-flight: a missing local file is NOT a network problem, and saying so up front keeps the
+    // failed bubble from reading "Connection Refused" for a file the user can plainly see is gone.
+    const fileExists = await withinAttempt(expoFileExists(uri));
+    if (stopReason !== null) throw stoppedError();
+    if (!fileExists) {
+      logger.warn('[upload] attachment file is missing before upload');
+      showToast("Couldn't read that file — try attaching it again.");
+      throw new ApiError('local_file', 'Attachment file is no longer available');
+    }
+
+    try {
+      // The tracked wrapper publishes byte progress under the ATTACHMENT guid (what the bubble
+      // renders under) and guarantees the entry is cleared however this attempt ends. The control
+      // race belongs INSIDE its callback so a timeout settles the UI immediately, while the
+      // underlying active native transfer retains its gate slot until cancelAsync actually settles.
+      result = await runTrackedUpload(
+        uploadStoreSink,
+        attachmentGuid,
+        { chatGuid, name, total: totalBytes ?? 0 },
+        async (onProgress) => {
+          const transfer = uploadGate.run(async () => {
+            // Cancelled during pre-flight or while queued — never open a socket at all.
+            if (stopReason !== null) return null;
             const started = FileSystem.createUploadTask(
               url,
               uri,
@@ -116,7 +177,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                 fieldName: 'attachment',
                 mimeType,
                 parameters: { chatGuid, tempGuid, name, method: 'private-api' },
-                headers: http.buildHeaders(),
+                headers: { ...transport.headers },
               },
               ({ totalBytesSent, totalBytesExpectedToSend }) =>
                 onProgress(totalBytesSent, totalBytesExpectedToSend),
@@ -127,36 +188,53 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
             } finally {
               releaseProgressSubscription(started);
             }
-          });
-        } finally {
-          releaseCancelHandle();
-        }
-      },
-    );
-  } catch (err) {
-    logger.warn(
-      `[upload] streaming upload failed err=${err instanceof Error ? err.message : String(err)}`,
-    );
-    // The native uploader throws a plain IOException for both an unreadable local file and a
-    // dead network — classify so the bubble names the right problem.
-    if (isLocalFileFailure(err)) {
-      showToast("Couldn't read that file — try attaching it again.");
-      throw new ApiError('local_file', 'Attachment file could not be read', undefined, err);
+          }, stopController.signal);
+          nativeTransfer.current = transfer;
+          return withinAttempt(transfer);
+        },
+      );
+    } catch (err) {
+      logger.warn(
+        `[upload] streaming upload failed err=${err instanceof Error ? err.message : String(err)}`,
+      );
+      if (stopReason !== null) throw stoppedError();
+      if (err instanceof ApiError && (err.kind === 'timeout' || err.kind === 'cancelled')) {
+        throw err;
+      }
+      // The native uploader throws a plain IOException for both an unreadable local file and a
+      // dead network — classify so the bubble names the right problem.
+      if (isLocalFileFailure(err)) {
+        showToast("Couldn't read that file — try attaching it again.");
+        throw new ApiError('local_file', 'Attachment file could not be read', undefined, err);
+      }
+      throw new ApiError('no_connection', 'Upload request failed', undefined, err);
     }
-    throw new ApiError('no_connection', 'Upload request failed', undefined, err);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+    // A timed-out active native task still owns a real socket and a gate slot until Expo settles
+    // it. Keep the exact cancellation handle registered for that lifetime so a later account sweep
+    // can retry cancellation; queued waits abort immediately and release on the next microtask.
+    const pendingTransfer = nativeTransfer.current;
+    if (pendingTransfer && stopReason !== null) {
+      void pendingTransfer.finally(releaseHandleOnce).catch(() => undefined);
+    } else {
+      // Identity-checked by the registry, so a late old release cannot remove a new-account handle.
+      releaseHandleOnce();
+    }
   }
 
+  if (stopReason !== null) throw stoppedError();
   // A cancelled task resolves with NO response object rather than rejecting (the native side
   // resolves null once okhttp reports the call cancelled). Reaching the status check with that
   // would throw on a null deref, so name it — `handleSendFailure` maps this kind to "Manually
   // Canceled" instead of blaming the network.
   if (!result) {
-    throw new ApiError('cancelled', 'Attachment upload was cancelled');
+    throw cancelledError;
   }
 
   if (result.status < 200 || result.status >= 300) {
-    // Log the server's exact status + error body (the daemon's own log is too buffered to read
-    // live). This surfaces e.g. "helper not connected" (iMessage) vs an RCS bridge error.
+    // Development-only diagnosis: distinguish helper/bridge failures while working locally.
+    // Release builds drop this free-form status/body line before every sink.
     logger.warn(
       `[upload] server rejected status=${result.status} body=${(result.body ?? '').slice(0, 300)}`,
     );

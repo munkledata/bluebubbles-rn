@@ -15,17 +15,40 @@ describe('parsePasteEvent', () => {
     expect(parse({ tag: 7, files: 'x' })).toEqual({ tag: 7, files: [], dropped: 0 });
   });
 
+  it('preserves a native all-or-nothing batch rejection count', () => {
+    expect(parse({ tag: 7, files: [], dropped: 4 })).toEqual({
+      tag: 7,
+      files: [],
+      dropped: 4,
+    });
+    expect(parse({ tag: 7, files: [], dropped: 'many' })).toEqual({
+      tag: 7,
+      files: [],
+      dropped: 0,
+    });
+  });
+
   it('maps a pasted image to a staged attachment', () => {
     const result = parse({
       tag: 21,
       files: [
-        { uri: 'file:///data/cache/pasted-in/1/shot.png', name: 'shot.png', mimeType: 'image/png', size: 4096 },
+        {
+          uri: 'file:///data/cache/pasted-in/1/shot.png',
+          name: 'shot.png',
+          mimeType: 'image/png',
+          size: 4096,
+        },
       ],
     });
     expect(result.tag).toBe(21);
     expect(result.dropped).toBe(0);
     expect(result.files).toEqual([
-      { uri: 'file:///data/cache/pasted-in/1/shot.png', name: 'shot.png', mimeType: 'image/png', size: 4096 },
+      {
+        uri: 'file:///data/cache/pasted-in/1/shot.png',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: 4096,
+      },
     ]);
   });
 
@@ -51,7 +74,12 @@ describe('parsePasteEvent', () => {
     // re-reads localPath after a restart.
     const result = parse({
       files: [
-        { uri: 'content://media/external/images/media/1234', name: 'a.png', mimeType: 'image/png', size: 10 },
+        {
+          uri: 'content://media/external/images/media/1234',
+          name: 'a.png',
+          mimeType: 'image/png',
+          size: 10,
+        },
         { uri: '/data/cache/pasted-in/1/b.png', name: 'b.png', mimeType: 'image/png', size: 10 },
         { uri: '', name: 'c.png', mimeType: 'image/png', size: 10 },
       ],

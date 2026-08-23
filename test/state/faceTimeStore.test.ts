@@ -1,7 +1,7 @@
 import { useFaceTimeStore } from '@state/faceTimeStore';
 
 describe('faceTimeStore', () => {
-  beforeEach(() => useFaceTimeStore.setState({ call: null, incoming: null }));
+  beforeEach(() => useFaceTimeStore.getState().reset());
 
   it('starts with no active call', () => {
     expect(useFaceTimeStore.getState().call).toBeNull();
@@ -44,5 +44,31 @@ describe('faceTimeStore', () => {
     // ring is not auto-cleared by open(); the overlay hides on activeCall, not the store.
     expect(useFaceTimeStore.getState().incoming?.uuid).toBe('a');
     expect(useFaceTimeStore.getState().call?.link).toBe('facetime://a');
+  });
+
+  it('rejects an async open captured before account reset', () => {
+    const staleGeneration = useFaceTimeStore.getState().generation;
+    useFaceTimeStore.getState().reset();
+
+    expect(
+      useFaceTimeStore
+        .getState()
+        .openIfCurrent(
+          { link: 'facetime://old', chatGuid: 'old-account-chat', video: true },
+          staleGeneration,
+        ),
+    ).toBe(false);
+    expect(useFaceTimeStore.getState().call).toBeNull();
+
+    const currentGeneration = useFaceTimeStore.getState().generation;
+    expect(
+      useFaceTimeStore
+        .getState()
+        .openIfCurrent(
+          { link: 'facetime://new', chatGuid: 'new-account-chat', video: false },
+          currentGeneration,
+        ),
+    ).toBe(true);
+    expect(useFaceTimeStore.getState().call?.chatGuid).toBe('new-account-chat');
   });
 });

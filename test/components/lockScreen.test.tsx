@@ -9,19 +9,19 @@
  */
 import React from 'react';
 import { runInThisContext } from 'node:vm';
+import { AppState, type AppStateStatus } from 'react-native';
+import { act } from '@testing-library/react-native';
 import { renderWithTheme, fireEvent, waitFor, screen } from './support/renderWithTheme';
 import { LockScreen } from '@features/lock/LockScreen';
 import { useLockStore } from '@state/lockStore';
 import { authenticate } from '@native/biometrics';
+import { logger } from '@core/secure';
 
 jest.mock('@native/biometrics', () => ({ authenticate: jest.fn() }));
 const mockAuthenticate = authenticate as jest.Mock;
-
-// LockScreen only needs `useTheme`, but it imports it from the big `@ui` barrel, which
-// re-exports the whole UI tree (ConversationTile, VideoPlayer, …) and so drags in `ky` (ESM)
-// and native modules (expo-video) that don't load under jest. Collapse `@ui` to the real theme
-// module — same ThemeProvider context `renderWithTheme` uses, so the provider still drives useTheme.
-jest.mock('@ui', () => jest.requireActual('@ui/theme'));
+const originalCurrentStateDescriptor = Object.getOwnPropertyDescriptor(AppState, 'currentState');
+const appStateListeners = new Set<(state: AppStateStatus) => void>();
+let currentAppState: AppStateStatus | null = 'active';
 
 // No SafeAreaProvider is mounted by renderWithTheme, so stub the inset hook.
 jest.mock('react-native-safe-area-context', () => ({
@@ -30,6 +30,18 @@ jest.mock('react-native-safe-area-context', () => ({
 
 beforeEach(() => {
   mockAuthenticate.mockReset();
+  currentAppState = 'active';
+  appStateListeners.clear();
+  Object.defineProperty(AppState, 'currentState', {
+    configurable: true,
+    get: () => currentAppState,
+  });
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+    appStateListeners.add(listener);
+    return {
+      remove: () => appStateListeners.delete(listener),
+    };
+  });
   useLockStore.setState({
     enabled: true,
     locked: true,
@@ -38,6 +50,35 @@ beforeEach(() => {
     timeoutMs: 30_000,
   });
 });
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  if (originalCurrentStateDescriptor) {
+    Object.defineProperty(AppState, 'currentState', originalCurrentStateDescriptor);
+  }
+});
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+async function emitAppState(state: AppStateStatus): Promise<void> {
+  currentAppState = state;
+  await act(async () => {
+    for (const listener of [...appStateListeners]) listener(state);
+    await Promise.resolve();
+  });
+}
 
 /**
  * Run `body` while OWNING Node's `unhandledRejection` event, and hand back everything that
@@ -128,6 +169,119 @@ describe('LockScreen', () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
+  it('retires a backgrounded prompt and requires a fresh foreground tap', async () => {
+    const firstPrompt = deferred<boolean>();
+    const secondPrompt = deferred<boolean>();
+    mockAuthenticate
+      .mockReturnValueOnce(firstPrompt.promise)
+      .mockReturnValueOnce(secondPrompt.promise);
+    const onUnlock = jest.fn(async () => undefined);
+    await renderWithTheme(<LockScreen onUnlock={onUnlock} />);
+    await waitFor(() => expect(mockAuthenticate).toHaveBeenCalledTimes(1));
+
+    await emitAppState('background');
+    await emitAppState('active');
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+
+    await fireEvent.press(screen.getByText('Unlock'));
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      firstPrompt.resolve(true);
+      await firstPrompt.promise;
+    });
+    expect(onUnlock).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByText('Unlock'));
+    expect(mockAuthenticate).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      secondPrompt.resolve(true);
+      await secondPrompt.promise;
+    });
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not prompt while mounted in the background or auto-prompt on resume', async () => {
+    currentAppState = 'background';
+    mockAuthenticate.mockResolvedValue(true);
+    const onUnlock = jest.fn(async () => undefined);
+    await renderWithTheme(<LockScreen onUnlock={onUnlock} />);
+
+    expect(mockAuthenticate).not.toHaveBeenCalled();
+    await emitAppState('active');
+    expect(mockAuthenticate).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByText('Unlock'));
+    await waitFor(() => expect(onUnlock).toHaveBeenCalledTimes(1));
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, 'unknown'] as const)(
+    'waits for explicit active authority when initial AppState is %p',
+    async (initialState) => {
+      currentAppState = initialState;
+      mockAuthenticate.mockResolvedValue(true);
+      const onUnlock = jest.fn(async () => undefined);
+      await renderWithTheme(<LockScreen onUnlock={onUnlock} />);
+
+      expect(mockAuthenticate).not.toHaveBeenCalled();
+      expect(onUnlock).not.toHaveBeenCalled();
+
+      await emitAppState('active');
+      await waitFor(() => expect(onUnlock).toHaveBeenCalledTimes(1));
+      expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('ignores a successful prompt that settles after unmount', async () => {
+    const prompt = deferred<boolean>();
+    mockAuthenticate.mockReturnValue(prompt.promise);
+    const onUnlock = jest.fn(async () => undefined);
+    const view = await renderWithTheme(<LockScreen onUnlock={onUnlock} />);
+    await waitFor(() => expect(mockAuthenticate).toHaveBeenCalledTimes(1));
+
+    await view.unmount();
+    await act(async () => {
+      prompt.resolve(true);
+      await prompt.promise;
+    });
+
+    expect(onUnlock).not.toHaveBeenCalled();
+  });
+
+  it('contains a rejected prompt that settles after unmount', async () => {
+    const prompt = deferred<boolean>();
+    mockAuthenticate.mockReturnValue(prompt.promise);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const view = await renderWithTheme(<LockScreen />);
+    await waitFor(() => expect(mockAuthenticate).toHaveBeenCalledTimes(1));
+
+    await view.unmount();
+    await act(async () => {
+      prompt.reject(new Error('late native rejection'));
+      await expect(prompt.promise).rejects.toThrow('late native rejection');
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('coalesces rapid presses behind the one active biometric attempt', async () => {
+    const prompt = deferred<boolean>();
+    mockAuthenticate.mockReturnValue(prompt.promise);
+    const onUnlock = jest.fn(async () => undefined);
+    await renderWithTheme(<LockScreen onUnlock={onUnlock} />);
+    await waitFor(() => expect(mockAuthenticate).toHaveBeenCalledTimes(1));
+
+    await fireEvent.press(screen.getByText('Unlock'));
+    await fireEvent.press(screen.getByText('Unlock'));
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      prompt.resolve(true);
+      await prompt.promise;
+    });
+    expect(onUnlock).toHaveBeenCalledTimes(1);
+  });
+
   /**
    * FIXED (was a source bug): `tryUnlock` awaited `authenticate(...)` bare, so a REJECTION (the
    * native biometric bridge throwing — expo-local-authentication erroring after an enrolment
@@ -140,6 +294,7 @@ describe('LockScreen', () => {
    */
   it('a REJECTING authenticate() shows "Try again" and does not escape as an unhandled rejection', async () => {
     mockAuthenticate.mockRejectedValue(new Error('biometric bridge unavailable'));
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     const escaped = await collectingUnhandledRejections(async () => {
       await renderWithTheme(<LockScreen />);
@@ -153,6 +308,10 @@ describe('LockScreen', () => {
 
     // The catch swallowed it — nothing escapes to the process any more.
     expect(escaped).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[lock] biometric prompt threw: biometric bridge unavailable',
+    );
   });
 
   /**
@@ -169,6 +328,7 @@ describe('LockScreen', () => {
   it('a REJECTING onUnlock (cold-boot DB open) shows a distinct error, not "Try again"', async () => {
     mockAuthenticate.mockResolvedValue(true);
     const onUnlock = jest.fn().mockRejectedValue(new Error('Database not initialized'));
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
 
     const escaped = await collectingUnhandledRejections(async () => {
       await renderWithTheme(<LockScreen onUnlock={onUnlock} />);
@@ -182,5 +342,10 @@ describe('LockScreen', () => {
     });
 
     expect(escaped).toEqual([]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(
+      '[lock] unlock failed after successful auth',
+      expect.any(Error),
+    );
   });
 });

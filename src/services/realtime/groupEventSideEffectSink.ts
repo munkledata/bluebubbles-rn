@@ -1,5 +1,5 @@
 import { resolveMessageChatGuid } from '@core/models';
-import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
+import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 import { logger } from '@core/secure';
 import { isChatBackgroundChangeEvent } from '@utils';
 
@@ -30,19 +30,37 @@ export class GroupEventSideEffectSink implements EventSink {
     private readonly refetchBackground: (chatGuid: string) => void | Promise<void>,
   ) {}
 
-  async onEvent(event: NormalizedEvent, source: EventSource): Promise<void> {
+  async onEvent(
+    event: NormalizedEvent,
+    source: EventSource,
+    context?: EventDeliveryContext,
+  ): Promise<void> {
     // DB first (source of truth) so the group-event system line is persisted before the network hit.
-    await this.inner.onEvent(event, source);
+    await this.inner.onEvent(event, source, context);
+    if (context && !context.isCurrent()) return;
 
     if (event.type !== 'new-message' && event.type !== 'updated-message') return;
     if (!isChatBackgroundChangeEvent(event.message)) return;
     const chatGuid = resolveMessageChatGuid(event.message);
     if (!chatGuid) return;
 
-    try {
-      await this.refetchBackground(chatGuid);
-    } catch (e) {
-      logger.warn('[groupEvent] chat-background refetch failed', e);
+    if (!context) {
+      // Direct/dev callers have no account-drain context; preserve the ordinary awaitable contract.
+      try {
+        await this.refetchBackground(chatGuid);
+      } catch (e) {
+        logger.warn('[groupEvent] chat-background refetch failed', e);
+      }
+      return;
     }
+
+    // Do not make Disconnect wait for a full wallpaper transfer. This detached work must capture a
+    // fresh account-generation guard in the injected implementation: the shorter-lived delivery
+    // context is revoked as soon as durable event settlement finishes.
+    void Promise.resolve()
+      .then(() => this.refetchBackground(chatGuid))
+      .catch((e: unknown) => {
+        logger.warn('[groupEvent] chat-background refetch failed', e);
+      });
   }
 }

@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -133,9 +134,9 @@ export const messages = sqliteTable(
      * next sync RE-INSERT it. Every render/count query instead filters `date_deleted IS NULL`, so a
      * deleted message VANISHES from the UI (contrast `dateRetracted`, which keeps a tombstone bubble)
      * while the row survives the re-sync. There is deliberately NO wire model field for this — a
-     * `MessageV1` never carries it (only the event does), so it is written ONLY by `markMessageDeleted`,
-     * never by `upsertMessages` (which is why it is absent from upsertMessages' insert + conflict set).
-     * NULL on non-deleted rows.
+     * `MessageV1` never carries it (only the event does). `markMessageDeleted` records the event in
+     * `message_deletion_ledger`; `upsertMessages` may then source this column from that LOCAL ledger
+     * so an event-before-row backfill starts hidden. NULL on non-deleted rows.
      */
     dateDeleted: integer('date_deleted'),
     hasAttachments: integer('has_attachments', { mode: 'boolean' }).default(false),
@@ -190,6 +191,50 @@ export const messages = sqliteTable(
   }),
 );
 
+/**
+ * Durable server-deletion knowledge, independent from message rows by design.
+ *
+ * A deletion may arrive before history ingestion, and an ordinary chat purge may later remove the
+ * tombstoned message row. Retaining this GUID marker makes every future re-ingestion start hidden.
+ * It is account-scoped and is therefore explicitly cleared by `clearLocalCache`.
+ */
+export const messageDeletionLedger = sqliteTable('message_deletion_ledger', {
+  guid: text('guid').primaryKey(),
+  dateDeleted: integer('date_deleted').notNull(),
+});
+
+/**
+ * Bounded, account-scoped identity handoffs for optimistic outgoing messages.
+ *
+ * This deliberately has no FK to `messages`: a stale destructive confirmation may arrive after
+ * the temp row was promoted and the real row was later purged. Keeping the learned temp → real
+ * mapping lets that confirmation write the deletion ledger under the canonical GUID so a future
+ * server re-ingest is born hidden. The repository retains only a fixed number of newest mappings.
+ */
+export const messageGuidAliases = sqliteTable(
+  'message_guid_aliases',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    aliasGuid: text('alias_guid').notNull(),
+    canonicalGuid: text('canonical_guid').notNull(),
+  },
+  (t) => ({
+    aliasGuidIdx: uniqueIndex('message_guid_aliases_alias_guid_idx').on(t.aliasGuid),
+    aliasNotCanonical: check(
+      'message_guid_aliases_alias_not_canonical',
+      sql`${t.aliasGuid} <> ${t.canonicalGuid}`,
+    ),
+    aliasValid: check(
+      'message_guid_aliases_alias_valid',
+      sql`length(${t.aliasGuid}) BETWEEN 6 AND 128 AND ${t.aliasGuid} GLOB 'temp-*'`,
+    ),
+    canonicalValid: check(
+      'message_guid_aliases_canonical_valid',
+      sql`length(${t.canonicalGuid}) BETWEEN 1 AND 4096 AND ${t.canonicalGuid} NOT GLOB 'temp-*'`,
+    ),
+  }),
+);
+
 export const attachments = sqliteTable(
   'attachments',
   {
@@ -217,6 +262,54 @@ export const attachments = sqliteTable(
   (t) => ({
     guidIdx: uniqueIndex('attachments_guid_idx').on(t.guid),
     messageIdx: index('attachments_message_idx').on(t.messageId),
+    // Retirement clears every duplicate reference to one physical path. Keep NULL-heavy rows out
+    // of the index; outgoing/user-owned paths are classified by the coordinator before deletion.
+    localPathIdx: index('attachments_local_path_idx')
+      .on(t.localPath)
+      .where(sql`${t.localPath} IS NOT NULL`),
+  }),
+);
+
+/**
+ * Durable accounting for completed files in the ordinary attachment cache.
+ *
+ * This is deliberately path-centric and has no attachment foreign key: more than one attachment
+ * row can reference one physical file. A `reserved` row charges a not-yet-committed native write
+ * across process death; a `retiring` row survives after references are cleared until exact native
+ * deletion is confirmed. The whole table lives in the SQLCipher database.
+ */
+export const attachmentCacheEntries = sqliteTable(
+  'attachment_cache_entries',
+  {
+    path: text('path').primaryKey(),
+    bytes: integer('bytes').notNull(),
+    lastUsedAt: integer('last_used_at').notNull(),
+    state: text('state', { enum: ['active', 'reserved', 'retiring'] })
+      .notNull()
+      .default('active'),
+    attempts: integer('attempts').notNull().default(0),
+    nextRetryAt: integer('next_retry_at').notNull().default(0),
+  },
+  (t) => ({
+    pathNotEmpty: check('attachment_cache_entries_path_not_empty', sql`length(${t.path}) > 0`),
+    bytesNonnegative: check('attachment_cache_entries_bytes_nonnegative', sql`${t.bytes} >= 0`),
+    lastUsedAtNonnegative: check(
+      'attachment_cache_entries_last_used_at_nonnegative',
+      sql`${t.lastUsedAt} >= 0`,
+    ),
+    stateValid: check(
+      'attachment_cache_entries_state_valid',
+      sql`${t.state} IN ('active', 'reserved', 'retiring')`,
+    ),
+    attemptsNonnegative: check(
+      'attachment_cache_entries_attempts_nonnegative',
+      sql`${t.attempts} >= 0`,
+    ),
+    nextRetryAtNonnegative: check(
+      'attachment_cache_entries_next_retry_at_nonnegative',
+      sql`${t.nextRetryAt} >= 0`,
+    ),
+    stateLruIdx: index('attachment_cache_entries_state_lru_idx').on(t.state, t.lastUsedAt, t.path),
   }),
 );
 
@@ -243,7 +336,8 @@ export const scheduledMessages = sqliteTable('scheduled_messages', {
   schedule: text('schedule'),
   /** NULL = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send (local-only). */
   recurrence: text('recurrence'),
-  // pending → (claimed) sending → sent | error. attempts caps prod retries.
+  // pending → (claimed) sending → sent | error. `uncertain` is reserved for the one-time 0035
+  // repair of pre-atomic local claims whose outgoing ownership cannot be reconstructed.
   status: text('status').default('pending'),
   attempts: integer('attempts').notNull().default(0),
 });
@@ -263,22 +357,178 @@ export const outgoingQueue = sqliteTable('outgoing_queue', {
 });
 
 /**
+ * Durable intake for validated realtime envelopes.
+ *
+ * Pending rows keep the canonical payload until one leased worker finishes. Successful and poison
+ * rows scrub that payload but retain bounded encrypted identity/ordering metadata as a receipt, so
+ * a socket/FCM redelivery remains suppressed across process death without retaining message text.
+ */
+export const incomingEventQueue = sqliteTable(
+  'incoming_event_queue',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** Intake-derived stable identity. The repository deliberately does not guess event identity. */
+    eventKey: text('event_key').notNull(),
+    /** SHA-256 hex of the canonical payload, retained to detect an event-key collision. */
+    payloadDigest: text('payload_digest').notNull(),
+    /** Events sharing this key are processed in insertion order (for example, message updates). */
+    orderingKey: text('ordering_key').notNull(),
+    /** Version of the persisted canonical envelope format, independent from app/database versions. */
+    schemaVersion: integer('schema_version').notNull().default(1),
+    eventName: text('event_name').notNull(),
+    source: text('source', { enum: ['socket', 'fcm', 'dev'] }).notNull(),
+    /** Canonical validated JSON while pending; scrubbed on every terminal outcome. */
+    payload: text('payload'),
+    receivedAt: integer('received_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    state: text('state', { enum: ['pending', 'completed', 'poisoned'] })
+      .notNull()
+      .default('pending'),
+    /** Incremented when a worker CLAIMS, so process death still consumes an attempt. */
+    attempts: integer('attempts').notNull().default(0),
+    /** Monotonic lease fence; a reclaimed row rejects results from an older worker. */
+    claimVersion: integer('claim_version').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull().default(0),
+    leaseToken: text('lease_token'),
+    leaseExpiresAt: integer('lease_expires_at').notNull().default(0),
+    /**
+     * Set in the SAME transaction as the event's authoritative DB writes. A crash after that
+     * commit can then resume post-commit presentation without applying non-idempotent DB effects
+     * (for example, incrementing an outgoing failure attempt) a second time.
+     */
+    dbAppliedAt: integer('db_applied_at'),
+    terminalAt: integer('terminal_at'),
+    /** Bounded machine code only; never persist a raw exception or payload excerpt here. */
+    lastErrorCode: text('last_error_code'),
+  },
+  (t) => ({
+    eventKeyIdx: uniqueIndex('incoming_event_queue_event_key_idx').on(t.eventKey),
+    claimIdx: index('incoming_event_queue_claim_idx').on(
+      t.state,
+      t.nextAttemptAt,
+      t.leaseExpiresAt,
+      t.receivedAt,
+      t.id,
+    ),
+    orderingIdx: index('incoming_event_queue_ordering_idx').on(t.state, t.orderingKey, t.id),
+    terminalIdx: index('incoming_event_queue_terminal_idx').on(t.state, t.terminalAt, t.id),
+    eventKeyValid: check(
+      'incoming_event_queue_event_key_valid',
+      sql`length(CAST(${t.eventKey} AS BLOB)) BETWEEN 1 AND 256`,
+    ),
+    payloadDigestValid: check(
+      'incoming_event_queue_payload_digest_valid',
+      sql`length(CAST(${t.payloadDigest} AS BLOB)) = 64
+          AND ${t.payloadDigest} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    orderingKeyValid: check(
+      'incoming_event_queue_ordering_key_valid',
+      sql`length(CAST(${t.orderingKey} AS BLOB)) BETWEEN 1 AND 256`,
+    ),
+    schemaVersionValid: check(
+      'incoming_event_queue_schema_version_valid',
+      sql`${t.schemaVersion} >= 1`,
+    ),
+    eventNameValid: check(
+      'incoming_event_queue_event_name_valid',
+      sql`length(CAST(${t.eventName} AS BLOB)) BETWEEN 1 AND 64`,
+    ),
+    sourceValid: check(
+      'incoming_event_queue_source_valid',
+      sql`${t.source} IN ('socket', 'fcm', 'dev')`,
+    ),
+    payloadBounded: check(
+      'incoming_event_queue_payload_bounded',
+      sql`${t.payload} IS NULL OR length(CAST(${t.payload} AS BLOB)) BETWEEN 1 AND 1048576`,
+    ),
+    receivedAtNonnegative: check(
+      'incoming_event_queue_received_at_nonnegative',
+      sql`${t.receivedAt} >= 0`,
+    ),
+    expiresAtValid: check(
+      'incoming_event_queue_expires_at_valid',
+      sql`${t.expiresAt} > ${t.receivedAt}
+          AND (${t.expiresAt} - ${t.receivedAt}) <= 86400000`,
+    ),
+    stateValid: check(
+      'incoming_event_queue_state_valid',
+      sql`${t.state} IN ('pending', 'completed', 'poisoned')`,
+    ),
+    attemptsValid: check('incoming_event_queue_attempts_valid', sql`${t.attempts} BETWEEN 0 AND 5`),
+    claimVersionNonnegative: check(
+      'incoming_event_queue_claim_version_nonnegative',
+      sql`${t.claimVersion} >= 0`,
+    ),
+    nextAttemptAtNonnegative: check(
+      'incoming_event_queue_next_attempt_at_nonnegative',
+      sql`${t.nextAttemptAt} >= 0`,
+    ),
+    leaseTokenValid: check(
+      'incoming_event_queue_lease_token_valid',
+      sql`${t.leaseToken} IS NULL OR length(CAST(${t.leaseToken} AS BLOB)) BETWEEN 1 AND 128`,
+    ),
+    leaseExpiresAtNonnegative: check(
+      'incoming_event_queue_lease_expires_at_nonnegative',
+      sql`${t.leaseExpiresAt} >= 0`,
+    ),
+    dbAppliedAtNonnegative: check(
+      'incoming_event_queue_db_applied_at_nonnegative',
+      sql`${t.dbAppliedAt} IS NULL OR ${t.dbAppliedAt} >= 0`,
+    ),
+    terminalAtNonnegative: check(
+      'incoming_event_queue_terminal_at_nonnegative',
+      sql`${t.terminalAt} IS NULL OR ${t.terminalAt} >= 0`,
+    ),
+    lastErrorCodeValid: check(
+      'incoming_event_queue_last_error_code_valid',
+      sql`${t.lastErrorCode} IS NULL OR length(CAST(${t.lastErrorCode} AS BLOB)) BETWEEN 1 AND 128`,
+    ),
+    stateShapeValid: check(
+      'incoming_event_queue_state_shape_valid',
+      sql`(
+        ${t.state} = 'pending'
+        AND ${t.payload} IS NOT NULL
+        AND ${t.terminalAt} IS NULL
+      ) OR (
+        ${t.state} IN ('completed', 'poisoned')
+        AND ${t.payload} IS NULL
+        AND ${t.terminalAt} IS NOT NULL
+        AND ${t.leaseToken} IS NULL
+        AND ${t.leaseExpiresAt} = 0
+        AND ${t.nextAttemptAt} = 0
+      )`,
+    ),
+    leaseShapeValid: check(
+      'incoming_event_queue_lease_shape_valid',
+      sql`(
+        ${t.leaseToken} IS NULL AND ${t.leaseExpiresAt} = 0
+      ) OR (
+        ${t.state} = 'pending'
+        AND ${t.leaseToken} IS NOT NULL
+        AND ${t.leaseExpiresAt} > 0
+      )`,
+    ),
+  }),
+);
+
+/**
  * Durable buffer of captured error reports awaiting upload to the server (a lightweight
- * self-hosted crash reporter). The capture sink inserts already-redacted `error`-level lines; the
- * upload queue leases + uploads + deletes them (backoff + attempt cap), mirroring outgoing_queue.
+ * self-hosted crash reporter). The capture sink inserts a strict structured projection of
+ * `error`-level lines; the upload queue validates it again before leasing + uploading + deleting
+ * rows (backoff + attempt cap), mirroring outgoing_queue.
  */
 export const errorReports = sqliteTable(
   'error_reports',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     level: text('level').notNull(),
-    /** Already-redacted log message, e.g. `[uncaught] TypeError: …`. */
+    /** Finite event code plus allowlisted classifier, e.g. `runtime.uncaught [TypeError]`. */
     message: text('message').notNull(),
-    /** Redacted stack trace, extracted from the log meta (null when none). */
+    /** Synthetic event-owned grouping frame; never a raw Error stack. */
     stack: text('stack'),
-    /** The `[tag]` category parsed from the message (server fingerprints on it). */
+    /** Finite event category (server fingerprints on it). */
     tag: text('tag'),
-    /** Redacted, stringified log meta (extra context). */
+    /** Versioned JSON containing only event-owned typed fields. */
     meta: text('meta'),
     /** Capture time (epoch ms). */
     createdAt: integer('created_at')
@@ -300,14 +550,22 @@ export const syncMarkers = sqliteTable('sync_markers', {
   lastSyncedTimestamp: integer('last_synced_timestamp'),
 });
 
-export const themes = sqliteTable('themes', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  mode: text('mode').notNull(), // 'light' | 'dark'
-  /** JSON token blob. */
-  tokens: text('tokens').notNull(),
-  isPreset: integer('is_preset', { mode: 'boolean' }).default(false),
-});
+export const themes = sqliteTable(
+  'themes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    mode: text('mode').notNull(), // 'light' | 'dark'
+    /** JSON token blob. */
+    tokens: text('tokens').notNull(),
+    isPreset: integer('is_preset', { mode: 'boolean' }).default(false),
+  },
+  (t) => ({
+    // Backup restore claims one original twin at a time by this exact equality-prefix + id range.
+    // Without the index, each short global-lock transaction can scan the whole themes table.
+    restoreLookupIdx: index('themes_restore_lookup_idx').on(t.isPreset, t.name, t.mode, t.id),
+  }),
+);
 
 /** Generic non-secret key-value prefs (secrets live in the SecureVault). */
 export const kv = sqliteTable('kv', {
@@ -351,10 +609,14 @@ export const schema = {
   chats,
   chatHandles,
   messages,
+  messageDeletionLedger,
+  messageGuidAliases,
   attachments,
+  attachmentCacheEntries,
   contacts,
   scheduledMessages,
   outgoingQueue,
+  incomingEventQueue,
   errorReports,
   syncMarkers,
   themes,

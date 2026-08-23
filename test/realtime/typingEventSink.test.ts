@@ -29,7 +29,7 @@ describe('TypingEventSink', () => {
     const onTyping = jest.fn();
     const event = ev({ type: 'new-message', payload: {} });
     await new TypingEventSink(inner, onTyping).onEvent(event, 'fcm');
-    expect(inner.onEvent).toHaveBeenCalledWith(event, 'fcm');
+    expect(inner.onEvent).toHaveBeenCalledWith(event, 'fcm', undefined);
     expect(onTyping).not.toHaveBeenCalled();
   });
 });

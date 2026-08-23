@@ -17,6 +17,8 @@
 const moduleNameMapper = {
   // Native module: swap for a runtime stub (types still resolve to the real .d.ts).
   '^react-native-notify-kit$': '<rootDir>/test/__mocks__/notifee.ts',
+  '^expo-crypto$': '<rootDir>/test/__mocks__/expoCrypto.ts',
+  '^@native/boundedDownload$': '<rootDir>/test/__mocks__/boundedNativeDownload.ts',
   '^@core$': '<rootDir>/src/core/index.ts',
   '^@db$': '<rootDir>/src/db/schema.ts',
   '^@ui$': '<rootDir>/src/ui/index.ts',

@@ -7,10 +7,13 @@ import {
   maxMessageMarker,
   searchMessages,
   setSyncMarker,
+  setSyncMarkerWithinTransaction,
   upsertChats,
   upsertHandles,
+  upsertHandlesWithinTransaction,
   upsertMessages,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 
 function chat(guid: string, extra: Record<string, unknown> = {}) {
@@ -40,6 +43,27 @@ describe('repositories', () => {
     ]);
     expect(map.size).toBe(2);
     expect(map.get(handleMapKey({ address: 'a@x.com' }))).toBeGreaterThan(0);
+  });
+
+  it('rolls back context-only handle and sync-marker writes with their owner', async () => {
+    const { db, raw } = await createTestDb();
+
+    await expect(
+      withDbTransaction(db, async (context) => {
+        await upsertHandlesWithinTransaction(context, [{ address: 'rollback@x.com' }]);
+        await setSyncMarkerWithinTransaction(context, {
+          lastSyncedRowId: 42,
+          lastSyncedTimestamp: 1234,
+        });
+        throw new Error('rollback context writes');
+      }),
+    ).rejects.toThrow('rollback context writes');
+
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM handles').get()).toEqual({ count: 0 });
+    expect(await getSyncMarker(db)).toEqual({
+      lastSyncedRowId: null,
+      lastSyncedTimestamp: null,
+    });
   });
 
   it('upserts chats, links participants, and is idempotent on guid', async () => {

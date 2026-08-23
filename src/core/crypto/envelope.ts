@@ -8,7 +8,9 @@ import { CRYPTO_SIZES } from './types';
  *   magic(2) | version(1) | salt(16) | nonce(24) | body(ciphertext+tag)
  *
  * `salt` feeds Argon2id; `nonce` feeds XChaCha20-Poly1305. The version byte lets
- * us rotate algorithms later without ambiguity.
+ * us rotate algorithms later without ambiguity. Argon2 costs are deliberately NOT stored here:
+ * `SecretBox` selects fixed application-owned costs, so an attacker cannot put a memory/time bomb
+ * in an envelope header. A future cost change requires a new version with an app-defined profile.
  */
 export const ENVELOPE_MAGIC = Uint8Array.from([0x42, 0x42]); // "BB"
 export const ENVELOPE_VERSION = 0x01;

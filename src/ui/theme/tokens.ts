@@ -109,6 +109,23 @@ export const darkTheme: ThemeTokens = {
 
 export const themes: Record<ThemeMode, ThemeTokens> = { light: lightTheme, dark: darkTheme };
 
+/** True only for a token set that the current dark-only product may render. */
+export function isDarkThemeTokens(tokens: ThemeTokens | null | undefined): tokens is ThemeTokens {
+  return tokens?.mode === 'dark';
+}
+
+/**
+ * Contain a stored/legacy light token set without deleting it. The second choice is normally
+ * the active dark preset; the final OLED fallback also protects callers from a light fallback.
+ */
+export function darkThemeOrFallback(
+  candidate: ThemeTokens | null | undefined,
+  fallback: ThemeTokens = darkTheme,
+): ThemeTokens {
+  if (isDarkThemeTokens(candidate)) return candidate;
+  return isDarkThemeTokens(fallback) ? fallback : darkTheme;
+}
+
 /**
  * A hex colour (`#RGB` / `#RRGGBB`) at a given alpha, as an `rgba()` string. Pure — used to make
  * the chat header/composer translucent over a wallpaper so it shows through instead of framing it
@@ -243,14 +260,20 @@ export const PRESETS: Record<PresetKey, ThemePreset> = {
 
 /**
  * The presets ACTUALLY offered to the user (Settings reads this) and honored by
- * {@link resolvePreset}. Currently only OLED Dark is enabled; the other definitions stay in
- * {@link PRESETS} so you can re-enable any of them by adding its key back to this array, e.g.
- * `['oled-dark', 'nord']`.
+ * {@link resolvePreset}. THEME-01A intentionally enables only dark presets. The light catalog
+ * entries remain dormant groundwork for THEME-01B; re-enabling them also requires implementing
+ * and testing the full light/system appearance axis, not just adding a key here.
  */
 export const PRESET_ORDER: PresetKey[] = ['oled-dark', 'gator'];
 export const DEFAULT_PRESET: PresetKey = 'oled-dark';
 
 const ACTIVE_PRESETS = new Set<string>(PRESET_ORDER);
+
+/** Normalize unknown or disabled persisted keys to the enabled dark default. */
+export function resolvePresetKey(key: string | null | undefined): PresetKey {
+  const usable = !!key && ACTIVE_PRESETS.has(key) && key in PRESETS;
+  return usable ? (key as PresetKey) : DEFAULT_PRESET;
+}
 
 /**
  * Pure: preset key → tokens. Only keys in {@link PRESET_ORDER} are honored; any other (an
@@ -258,8 +281,7 @@ const ACTIVE_PRESETS = new Set<string>(PRESET_ORDER);
  * always-present {@link DEFAULT_PRESET}.
  */
 export function resolvePreset(key: string | null | undefined): ThemeTokens {
-  const usable = !!key && ACTIVE_PRESETS.has(key) && key in PRESETS;
-  return (usable ? PRESETS[key as PresetKey] : PRESETS[DEFAULT_PRESET]).tokens;
+  return PRESETS[resolvePresetKey(key)].tokens;
 }
 
 /**

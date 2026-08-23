@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { readableTextOn } from './adaptiveFromImage';
 import type { ThemeTokens } from './tokens';
 
 interface ThemePreviewCardProps {
@@ -29,7 +30,9 @@ export function ThemePreviewCard({ tokens }: ThemePreviewCardProps): React.JSX.E
       </View>
       <View style={[styles.row, styles.rowEnd]}>
         <View style={[styles.bubble, styles.sent, { backgroundColor: b.senderBackground }]}>
-          <Text style={[styles.bubbleText, { color: b.senderText }]}>Looks great 🎨</Text>
+          <Text style={[styles.bubbleText, { color: readableTextOn(b.senderBackground) }]}>
+            Looks great 🎨
+          </Text>
         </View>
       </View>
       <View style={styles.tintRow}>

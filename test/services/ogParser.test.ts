@@ -45,7 +45,7 @@ describe('parseOgMetadata — HTML entity decoding', () => {
   });
 
   it('decodes hex entities case-insensitively', () => {
-    expect(parseOgMetadata(html('a&#X27;b &#x2014; c'), 'https://x.com').title).toBe('a\'b — c');
+    expect(parseOgMetadata(html('a&#X27;b &#x2014; c'), 'https://x.com').title).toBe("a'b — c");
   });
 
   it('decodes DECIMAL numeric entities', () => {

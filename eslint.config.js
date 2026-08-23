@@ -1,4 +1,4 @@
-// Flat ESLint config (ESLint 9) for the Expo SDK 56 app.
+// Flat ESLint config (ESLint 9) for the Expo SDK 57 app.
 // https://docs.expo.dev/guides/using-eslint/
 const expoConfig = require('eslint-config-expo/flat');
 const eslintConfigPrettier = require('eslint-config-prettier');

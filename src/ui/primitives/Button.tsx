@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 
 type Variant = 'filled' | 'tinted' | 'plain';
 
@@ -34,7 +34,7 @@ export function Button({
     opacity: isDisabled ? 0.5 : 1,
     borderRadius: theme.radius.card,
   };
-  const textColor = variant === 'filled' ? '#FFFFFF' : accent;
+  const textColor = variant === 'filled' ? readableTextOn(accent) : accent;
 
   return (
     <Pressable

@@ -2,10 +2,11 @@
  * MessageActionsOverlay (src/ui/conversations/MessageActionsOverlay.tsx): the long-press
  * tapback + action sheet for a single message. This suite locks in the USER-OBSERVABLE
  * behavior derived from the source:
- *   - the reaction picker renders the 6 base types in PICKER_ORDER (accessibilityLabel from
- *     reactionMeta) and a tap fires onReact with the RIGHT wire type — the base ('love') when
- *     the user hasn't applied it, the removal ('-love') when they have (toggle) — then onClose;
- *   - Reply / Remind Me Later are ALWAYS present and fire their callback + onClose;
+ *   - for a confirmed message, the reaction picker renders the 6 base types in PICKER_ORDER
+ *     (accessibilityLabel from reactionMeta) and a tap fires onReact with the RIGHT wire type —
+ *     the base ('love') when the user hasn't applied it, the removal ('-love') when they have
+ *     (toggle) — then onClose;
+ *   - Reply requires a confirmed server identity; Remind Me Later remains available locally;
  *   - Copy + Forward appear only when there's trimmed text (hasText);
  *   - Save to Photos appears only when the message has attachments;
  *   - Edit + Unsend appear only for the user's OWN recent, non-retracted, non-temp message
@@ -119,9 +120,84 @@ describe('MessageActionsOverlay — reaction picker', () => {
     expect(screen.getByLabelText('Like').props.accessibilityState).toEqual({ selected: true });
     expect(screen.getByLabelText('Heart').props.accessibilityState).toEqual({ selected: false });
   });
+
+  const TEMP_LAYOUTS: Array<[string, SelectedMessage['anchorRect']]> = [
+    ['fallback', undefined],
+    ['anchored', { x: 24, y: 180, width: 140, height: 44 }],
+  ];
+
+  it.each(TEMP_LAYOUTS)(
+    'hides every server-target control for a temp message in the %s layout',
+    async (_layout, anchorRect) => {
+      await renderOverlay(
+        makeSelected({
+          isFromMe: true,
+          isTemp: true,
+          sendState: 'sending',
+          text: 'still sending',
+          myEmojis: ['🔥'],
+          anchorRect,
+        }),
+      );
+
+      for (const [, label] of CASES) expect(screen.queryByLabelText(label)).toBeNull();
+      expect(screen.queryByLabelText('Remove 🔥 reaction')).toBeNull();
+      expect(screen.queryByLabelText('React with any emoji')).toBeNull();
+      expect(screen.queryByLabelText('Emoji reaction input')).toBeNull();
+      expect(screen.queryByText('Reply')).toBeNull();
+
+      // Local actions remain usable; the overlay itself was not hidden as a shortcut.
+      expect(screen.getByText('Cancel Sending')).toBeTruthy();
+      expect(screen.getByText('Copy')).toBeTruthy();
+    },
+  );
+
+  it('drops an open anchored emoji input immediately when the same selection becomes temp', async () => {
+    const h = handlers();
+    const anchorRect = { x: 24, y: 180, width: 140, height: 44 };
+    const view = await renderWithTheme(
+      <MessageActionsOverlay selected={makeSelected({ guid: 'm-confirmed', anchorRect })} {...h} />,
+    );
+
+    fireEvent.press(screen.getByLabelText('React with any emoji'));
+    const input = await screen.findByLabelText('Emoji reaction input');
+    fireEvent.changeText(input, '🔥');
+    await waitFor(() =>
+      expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥'),
+    );
+
+    await view.rerender(
+      <MessageActionsOverlay
+        selected={makeSelected({
+          guid: 'm-confirmed',
+          isFromMe: true,
+          isTemp: true,
+          sendState: 'sending',
+          anchorRect,
+        })}
+        {...h}
+      />,
+    );
+    expect(screen.queryByLabelText('Emoji reaction input')).toBeNull();
+    expect(screen.queryByLabelText('React with any emoji')).toBeNull();
+    expect(screen.queryByLabelText('Heart')).toBeNull();
+    expect(screen.queryByText('Reply')).toBeNull();
+    expect(screen.getByText('Cancel Sending')).toBeTruthy();
+
+    await view.rerender(
+      <MessageActionsOverlay
+        selected={makeSelected({ guid: 'm-fresh-confirmed', anchorRect })}
+        {...h}
+      />,
+    );
+    expect(screen.getByLabelText('Heart')).toBeTruthy();
+    expect(screen.getByLabelText('React with any emoji')).toBeTruthy();
+    expect(screen.getByText('Reply')).toBeTruthy();
+    expect(screen.queryByLabelText('Emoji reaction input')).toBeNull();
+  });
 });
 
-describe('MessageActionsOverlay — always-present actions', () => {
+describe('MessageActionsOverlay — confirmed Reply + local actions', () => {
   it('Reply fires onReply + onClose', async () => {
     const h = await renderOverlay(makeSelected());
     await pressAndFlush(screen.getByText('Reply'), () => {

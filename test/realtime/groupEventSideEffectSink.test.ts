@@ -1,5 +1,5 @@
 import { GroupEventSideEffectSink } from '@/services/realtime/groupEventSideEffectSink';
-import type { EventSink, EventSource, NormalizedEvent } from '@core/realtime';
+import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 import { logger } from '@core/secure';
 
 const SOURCE = 'socket' as EventSource;
@@ -105,6 +105,40 @@ describe('GroupEventSideEffectSink', () => {
     expect(refetch).toHaveBeenCalledWith('chat-1');
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('lets detached wallpaper work finish after its delivery attempt is retired', async () => {
+    const inner: EventSink = { onEvent: jest.fn() };
+    let attemptCurrent = true;
+    const context: EventDeliveryContext = {
+      generation: 7,
+      isCurrent: () => attemptCurrent,
+    };
+    let releaseRefetch!: () => void;
+    const refetchGate = new Promise<void>((resolve) => {
+      releaseRefetch = resolve;
+    });
+    let refetchFinished = false;
+    const refetch = jest.fn(async () => {
+      await refetchGate;
+      refetchFinished = true;
+    });
+
+    await new GroupEventSideEffectSink(inner, refetch).onEvent(
+      ev({ type: 'new-message', message: { itemType: 3, groupActionType: 4, chatGuid: 'chat-1' } }),
+      SOURCE,
+      context,
+    );
+    await Promise.resolve();
+    expect(refetch).toHaveBeenCalledWith('chat-1');
+
+    attemptCurrent = false;
+    releaseRefetch();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(context.isCurrent()).toBe(false);
+    expect(refetchFinished).toBe(true);
   });
 
   it('propagates an inner-sink failure and does not attempt the refetch', async () => {

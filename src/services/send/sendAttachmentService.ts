@@ -1,7 +1,8 @@
 import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { getChatIdByGuid, insertOutgoingAttachment } from '@db/repositories';
+import { insertOutgoingAttachment } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 
@@ -35,6 +36,12 @@ export type AttachmentUploader = (args: {
   mimeType: string;
   /** Size if the caller knows it, else 0/undefined — the uploader learns the real one natively. */
   totalBytes?: number;
+  /**
+   * Optional absolute limit for this invocation, covering its own native preflight, gate wait,
+   * transfer, and response. Foreground sends deliberately omit it; bounded headless retries pass
+   * the remainder of their attachment-attempt deadline.
+   */
+  timeoutMs?: number;
 }) => Promise<SendAck>;
 
 /**
@@ -50,24 +57,45 @@ export async function sendImageMessage(
   upload: AttachmentUploader,
   now: number = Date.now(),
 ): Promise<{ tempGuid: string }> {
-  const chatId = await getChatIdByGuid(db, args.chatGuid);
-  if (chatId == null) throw new Error(`unknown chat ${args.chatGuid}`);
+  // A forwarded download can share this exact cache file with its source message. Pin it before
+  // the first DB await so a concurrent tombstone/quota pass cannot claim and unlink it between the
+  // user's Start tap and the durable outgoing attachment+queue commit. Non-cache picked files are
+  // harmlessly pinned in memory for this short handoff too; the DB trigger is the final atomic gate
+  // if a crash-surviving `reserved`/`retiring` ledger row already owns the path.
+  let sourceProtection: ReturnType<typeof attachmentCacheCoordinator.protect> | undefined;
+  try {
+    sourceProtection = attachmentCacheCoordinator.protect(args.image.uri);
+  } catch {
+    // Content-provider and future non-file URIs may be outside the cache coordinator's path shape.
+    // They have no attachment-cache ledger row, so ordinary upload validation remains authoritative.
+    sourceProtection = undefined;
+  }
+  if (sourceProtection === null) {
+    throw new Error('Attachment is no longer available for sending.');
+  }
 
-  const tempGuid = generateTempGuid();
-  const attachmentGuid = `${tempGuid}-att`;
-  await insertOutgoingAttachment(db, {
-    tempGuid,
-    attachmentGuid,
-    chatId,
-    chatGuid: args.chatGuid,
-    localPath: args.image.uri,
-    mimeType: args.image.mimeType,
-    transferName: args.image.name,
-    totalBytes: args.image.size,
-    width: args.image.width,
-    height: args.image.height,
-    now,
-  });
+  let tempGuid: string;
+  let attachmentGuid: string;
+  try {
+    tempGuid = generateTempGuid();
+    attachmentGuid = `${tempGuid}-att`;
+    await insertOutgoingAttachment(db, {
+      tempGuid,
+      attachmentGuid,
+      chatGuid: args.chatGuid,
+      localPath: args.image.uri,
+      mimeType: args.image.mimeType,
+      transferName: args.image.name,
+      totalBytes: args.image.size,
+      width: args.image.width,
+      height: args.image.height,
+      now,
+    });
+  } finally {
+    // The queue row plus attachment local_path now provide durable ownership. Releasing earlier
+    // would reopen the deletion race; retaining it through the network upload would pin needlessly.
+    sourceProtection?.release();
+  }
 
   try {
     // Stream the file to the server (native upload — never buffered in JS memory).

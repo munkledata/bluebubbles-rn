@@ -1,7 +1,7 @@
 /**
  * ServerManagementScreen route (app/(app)/server-management.tsx): the STATUS/STATISTICS
- * sections are now TanStack Query-backed (ping → ['server','ping'], stats → ['server','stats'],
- * server info → ['server','info']).
+ * sections are now TanStack Query-backed with the captured account generation appended to every
+ * key (ping → ['server','ping',generation], and likewise for stats/info).
  *
  * Locks in the query wiring:
  *   - a resolved ping renders "Reachable · N ms"; a rejected one renders "Unreachable";
@@ -23,6 +23,7 @@
  * Each test gets a FRESH QueryClient (retry off; gcTime Infinity so no GC timers linger).
  */
 import React from 'react';
+import { Share } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 
@@ -30,6 +31,7 @@ const mockPush = jest.fn();
 const mockBack = jest.fn();
 // `mock*` prefix so the jest.mock factory below may close over it (hoisting rule).
 const mockHttpPost = jest.fn();
+const mockQrCode = jest.fn();
 
 // The full `@ui` barrel drags in the conversation/attachment tree (expo-video/expo-image/ky —
 // native/ESM modules jest-expo can't load). The screen only needs `Screen` + `useTheme`.
@@ -37,10 +39,27 @@ jest.mock('@ui', () => ({
   ...jest.requireActual('@ui/theme'),
   ...jest.requireActual('@ui/primitives'),
 }));
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, back: mockBack }) }));
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: mockPush, back: mockBack }),
+  useFocusEffect: jest.fn(),
+}));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+jest.mock('@ui/primitives/QrCode', () => {
+  const ReactModule = jest.requireActual<typeof import('react')>('react');
+  const RN = jest.requireActual<typeof import('react-native')>('react-native');
+  return {
+    QrCode: (props: { value: string; size?: number; testID?: string }) => {
+      mockQrCode(props);
+      return ReactModule.createElement(RN.View, {
+        testID: props.testID,
+        accessible: true,
+        accessibilityLabel: 'QR code',
+      });
+    },
+  };
+});
 // `post` forwards LAZILY: the factory runs while the screen's (hoisted) import graph loads, which
 // is before `const mockHttpPost` is initialised — capturing it directly yields `undefined`.
 jest.mock('@/services', () => ({
@@ -65,15 +84,25 @@ import { serverApi } from '@core/api';
 // eslint-disable-next-line import/first
 import { ApiError, UnimplementedEndpointError } from '@core/api/errors';
 // eslint-disable-next-line import/first
+import { buildSetupQr } from '@features/setup/qr';
+// eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useSyncStore } from '@state/syncStore';
 // eslint-disable-next-line import/first
+import { startSync } from '@/services';
+// eslint-disable-next-line import/first
 import { useDialogStore, type DialogRequest } from '@ui/dialog/dialogStore';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const mockPing = serverApi.ping as jest.Mock;
 const mockStats = serverApi.serverStatTotals as jest.Mock;
 const mockInfo = serverApi.serverInfo as jest.Mock;
+const mockStartSync = startSync as jest.MockedFunction<typeof startSync>;
 
 // All below 1,000 so `toLocaleString()` output is locale-proof.
 const TOTALS = {
@@ -86,18 +115,124 @@ const TOTALS = {
   locations: 1,
 };
 
-async function renderScreen(): Promise<void> {
-  const client = new QueryClient({
+const PRIVATE_ORIGIN = 'https://management-private-origin-73ad.example/tenant';
+const PRIVATE_PASSWORD = 'management-private-password-1b8e';
+const PRIVATE_INFO = {
+  server_version: 'management-private-server-build-642f',
+  os_version: 'management-private-macos-build-98c1',
+  private_api: true,
+  proxy_service: 'management-private-proxy-5d70',
+};
+const PRIVATE_TOTALS = {
+  messages: 987_654_321,
+  chats: 876_543_210,
+  handles: 765_432_109,
+  attachments: 654_321_098,
+  images: 543_210_987,
+  videos: 432_109_876,
+  locations: 321_098_765,
+};
+const PRIVATE_LOG = 'management-private-log-canary-29bf';
+const SECOND_ORIGIN = 'https://management-second-origin-2f91.example/tenant';
+const SECOND_PASSWORD = 'management-second-password-83c4';
+const SECOND_INFO = {
+  server_version: 'management-second-server-build-9a32',
+  os_version: 'management-second-macos-build-4e17',
+  private_api: false,
+  proxy_service: 'management-second-proxy-b604',
+};
+const SECOND_TOTALS = {
+  messages: 246_813_579,
+  chats: 135_792_468,
+  handles: 112_358_132,
+  attachments: 314_159_265,
+  images: 271_828_182,
+  videos: 161_803_398,
+  locations: 141_421_356,
+};
+const SECOND_LOG = 'management-second-log-canary-7c15';
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
+  const responder = node.props.onStartShouldSetResponder;
+  if (typeof responder !== 'function') {
+    throw new Error('Expected an accessible Pressable responder callback');
+  }
+  const readConfig = (
+    responder as typeof responder & {
+      testOnly_pressabilityConfig?: () => { onPress?: (event: object) => void };
+    }
+  ).testOnly_pressabilityConfig;
+  if (typeof readConfig !== 'function') {
+    throw new Error('Expected React Native test-only Pressability configuration');
+  }
+  const onPress = readConfig().onPress;
+  if (typeof onPress !== 'function') throw new Error('Expected configured Pressable onPress');
+  return () => {
+    onPress({ nativeEvent: {} });
+  };
+}
+
+async function invokeConfiguredPress(press: () => void): Promise<void> {
+  await act(async () => {
+    press();
+    await Promise.resolve();
+  });
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function makeQueryClient(): QueryClient {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
-  await renderWithTheme(
+}
+
+async function renderScreen(client = makeQueryClient()) {
+  const view = await renderWithTheme(
     <QueryClientProvider client={client}>
       <ServerManagementScreen />
     </QueryClientProvider>,
   );
+  return { client, view };
+}
+
+function arrangePrivateServer(): void {
+  useSessionStore.setState({
+    origin: PRIVATE_ORIGIN,
+    password: PRIVATE_PASSWORD,
+    serverInfo: null,
+  });
+  mockInfo.mockResolvedValue(PRIVATE_INFO);
+  mockStats.mockResolvedValue(PRIVATE_TOTALS);
+}
+
+function arrangeSecondServer(): void {
+  useSessionStore.setState({
+    origin: SECOND_ORIGIN,
+    password: SECOND_PASSWORD,
+    serverInfo: null,
+  });
+  mockInfo.mockResolvedValue(SECOND_INFO);
+  mockStats.mockResolvedValue(SECOND_TOTALS);
+  mockPing.mockResolvedValue({ pong: true });
 }
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.clearAllMocks();
   useSessionStore.setState({ origin: 'https://gator.example', serverInfo: null });
   useSyncStore.setState({ status: 'idle', chats: 0, messages: 0, error: null });
@@ -111,6 +246,11 @@ beforeEach(() => {
     private_api: true,
     proxy_service: 'zrok',
   });
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  resumeRealtimeDeliveries();
 });
 
 describe('ServerManagementScreen — status queries', () => {
@@ -133,6 +273,273 @@ describe('ServerManagementScreen — status queries', () => {
     await waitFor(() =>
       expect(useSessionStore.getState().serverInfo?.server_version).toBe('9.9.9'),
     );
+  });
+
+  it.each(['success', 'rejection'] as const)(
+    'isolates all three query keys and drops delayed old-account %s publication',
+    async (outcome) => {
+      const oldPing = deferred<{ pong: boolean }>();
+      const oldStats = deferred<typeof PRIVATE_TOTALS>();
+      const oldInfo = deferred<typeof PRIVATE_INFO>();
+      arrangePrivateServer();
+      mockPing.mockReset().mockReturnValueOnce(oldPing.promise);
+      mockStats.mockReset().mockReturnValueOnce(oldStats.promise);
+      mockInfo.mockReset().mockReturnValueOnce(oldInfo.promise);
+
+      const client = makeQueryClient();
+      const { view } = await renderScreen(client);
+      await waitFor(() => {
+        expect(mockPing).toHaveBeenCalledTimes(1);
+        expect(mockStats).toHaveBeenCalledTimes(1);
+        expect(mockInfo).toHaveBeenCalledTimes(1);
+      });
+
+      const firstGenerations = ['ping', 'stats', 'info'].map((kind) => {
+        const query = client.getQueryCache().findAll({ queryKey: ['server', kind] })[0];
+        expect(query?.queryKey).toEqual(['server', kind, expect.any(Number)]);
+        return query?.queryKey[2];
+      });
+      expect(new Set(firstGenerations).size).toBe(1);
+      const firstGeneration = firstGenerations[0];
+
+      await act(async () => {
+        await pauseRealtimeDeliveries();
+      });
+
+      const staleError = new Error(`management-old-query-${outcome}-error-70d4`);
+      await act(async () => {
+        if (outcome === 'success') {
+          oldPing.resolve({ pong: true });
+          oldStats.resolve(PRIVATE_TOTALS);
+          oldInfo.resolve(PRIVATE_INFO);
+        } else {
+          oldPing.reject(staleError);
+          oldStats.reject(staleError);
+          oldInfo.reject(staleError);
+        }
+        await Promise.allSettled([oldPing.promise, oldStats.promise, oldInfo.promise]);
+      });
+
+      await waitFor(() => {
+        for (const kind of ['ping', 'stats', 'info']) {
+          const query = client
+            .getQueryCache()
+            .find({ queryKey: ['server', kind, firstGeneration], exact: true });
+          expect(query?.state.status).toBe('success');
+          expect(query?.state.data).toBeNull();
+        }
+      });
+      const retiredTree = JSON.stringify(view.toJSON());
+      expect(retiredTree).not.toContain(PRIVATE_INFO.server_version);
+      expect(retiredTree).not.toContain(PRIVATE_TOTALS.messages.toLocaleString());
+      expect(retiredTree).not.toContain(staleError.message);
+
+      await view.unmount();
+      resumeRealtimeDeliveries();
+      arrangeSecondServer();
+      await renderScreen(client);
+      expect(await screen.findByText(SECOND_INFO.server_version)).toBeTruthy();
+      expect(await screen.findByText(SECOND_TOTALS.messages.toLocaleString())).toBeTruthy();
+      expect(await screen.findByText(/Reachable/)).toBeTruthy();
+
+      for (const kind of ['ping', 'stats', 'info']) {
+        const queries = client.getQueryCache().findAll({ queryKey: ['server', kind] });
+        expect(queries).toHaveLength(2);
+        const generations = queries.map((query) => query.queryKey[2]);
+        expect(new Set(generations).size).toBe(2);
+        expect(generations).toContain(firstGeneration);
+      }
+      expect(useSessionStore.getState().serverInfo?.server_version).toBe(
+        SECOND_INFO.server_version,
+      );
+    },
+  );
+});
+
+describe('ServerManagementScreen — ordinary sensitive presentation and account ownership', () => {
+  it('renders exact sensitive host/a11y data and preserves Share, Health, Sync, and QR actions', async () => {
+    arrangePrivateServer();
+    useSyncStore.setState({ status: 'done', chats: 23, messages: 456, error: null });
+    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+    const payload = buildSetupQr(PRIVATE_ORIGIN, PRIVATE_PASSWORD);
+    const { view } = await renderScreen();
+
+    expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
+    expect(await screen.findByText(PRIVATE_TOTALS.messages.toLocaleString())).toBeTruthy();
+    expect(screen.getByText(PRIVATE_ORIGIN)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_INFO.os_version)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_INFO.proxy_service)).toBeTruthy();
+    expect(screen.getByText('Up to date (456 msgs)')).toBeTruthy();
+    const shareButton = screen.getByRole('button', {
+      name: `Share server URL ${PRIVATE_ORIGIN}`,
+    });
+    expect(shareButton.props.accessibilityLabel).toBe(`Share server URL ${PRIVATE_ORIGIN}`);
+
+    await invokeConfiguredPress(retainConfiguredPress(shareButton));
+    expect(share).toHaveBeenCalledTimes(1);
+    expect(share).toHaveBeenCalledWith({ message: PRIVATE_ORIGIN });
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Server Health' })),
+    );
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith('/server-health');
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Sync Now' })),
+    );
+    expect(mockStartSync).toHaveBeenCalledTimes(1);
+    expect(mockStartSync).toHaveBeenCalledWith();
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Show Pairing QR' })),
+    );
+    expect(await screen.findByRole('button', { name: 'Reveal QR Code' })).toBeTruthy();
+    expect(screen.queryByTestId('pairing-qr-code')).toBeNull();
+    expect(mockQrCode).not.toHaveBeenCalled();
+    const preRevealTree = JSON.stringify(view.toJSON());
+    expect(preRevealTree).not.toContain(PRIVATE_PASSWORD);
+    expect(preRevealTree).not.toContain(payload);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Reveal QR Code' }));
+    expect(await screen.findByTestId('pairing-qr-code')).toBeTruthy();
+    expect(mockQrCode).toHaveBeenLastCalledWith({
+      value: payload,
+      size: 260,
+      testID: 'pairing-qr-code',
+    });
+  });
+
+  it('automatically closes retired QR/log hosts, revokes retained A actions, and binds fresh B actions', async () => {
+    arrangePrivateServer();
+    const firstSyncCopy = 'Up to date (864209753 msgs)';
+    useSyncStore.setState({
+      status: 'done',
+      chats: 753_190_246,
+      messages: 864_209_753,
+      error: null,
+    });
+    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+    mockHttpPost.mockResolvedValueOnce({ logs: PRIVATE_LOG });
+    const { view } = await renderScreen();
+    expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
+    expect(await screen.findByText(PRIVATE_TOTALS.messages.toLocaleString())).toBeTruthy();
+    expect(screen.getByText(PRIVATE_ORIGIN)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_INFO.os_version)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_INFO.proxy_service)).toBeTruthy();
+    expect(screen.getByText(firstSyncCopy)).toBeTruthy();
+
+    const oldShare = retainConfiguredPress(
+      screen.getByRole('button', { name: `Share server URL ${PRIVATE_ORIGIN}` }),
+    );
+    const oldSync = retainConfiguredPress(screen.getByRole('button', { name: 'Sync Now' }));
+    const oldHealth = retainConfiguredPress(screen.getByRole('button', { name: 'Server Health' }));
+    const oldPairing = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Show Pairing QR' }),
+    );
+    const oldLogs = retainConfiguredPress(screen.getByRole('button', { name: 'View Server Logs' }));
+
+    await invokeConfiguredPress(oldPairing);
+    await fireEvent.press(await screen.findByRole('button', { name: 'Reveal QR Code' }));
+    expect(await screen.findByTestId('pairing-qr-code')).toBeTruthy();
+    await invokeConfiguredPress(oldLogs);
+    expect(await screen.findByText(PRIVATE_LOG)).toBeTruthy();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('pairing-qr-code')).toBeNull();
+      expect(screen.queryByLabelText('Close pairing QR')).toBeNull();
+      expect(screen.queryByText(PRIVATE_LOG)).toBeNull();
+      expect(screen.queryByLabelText('Close server logs')).toBeNull();
+    });
+    const retiredTree = JSON.stringify(view.toJSON());
+    expect(retiredTree).not.toContain(PRIVATE_ORIGIN);
+    expect(retiredTree).not.toContain(PRIVATE_INFO.server_version);
+    expect(retiredTree).not.toContain(PRIVATE_INFO.os_version);
+    expect(retiredTree).not.toContain(PRIVATE_INFO.proxy_service);
+    expect(retiredTree).not.toContain(PRIVATE_TOTALS.messages.toLocaleString());
+    expect(retiredTree).not.toContain(PRIVATE_TOTALS.chats.toLocaleString());
+    expect(retiredTree).not.toContain(firstSyncCopy);
+    expect(retiredTree).not.toContain(PRIVATE_PASSWORD);
+    expect(retiredTree).not.toContain(buildSetupQr(PRIVATE_ORIGIN, PRIVATE_PASSWORD));
+    expect(retiredTree).not.toContain(PRIVATE_LOG);
+    expect(screen.getByRole('button', { name: 'Share server URL Unknown' })).toBeTruthy();
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText('Idle')).toBeTruthy();
+
+    share.mockClear();
+    mockStartSync.mockClear();
+    mockPush.mockClear();
+    mockHttpPost.mockClear();
+    mockQrCode.mockClear();
+    await invokeConfiguredPress(oldShare);
+    await invokeConfiguredPress(oldSync);
+    await invokeConfiguredPress(oldHealth);
+    await invokeConfiguredPress(oldPairing);
+    await invokeConfiguredPress(oldLogs);
+    expect(share).not.toHaveBeenCalled();
+    expect(mockStartSync).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockHttpPost).not.toHaveBeenCalled();
+    expect(mockQrCode).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Close pairing QR')).toBeNull();
+    expect(screen.queryByLabelText('Close server logs')).toBeNull();
+
+    await view.unmount();
+    resumeRealtimeDeliveries();
+    arrangeSecondServer();
+    useSyncStore.setState({
+      status: 'done',
+      chats: 147_258_369,
+      messages: 258_369_147,
+      error: null,
+    });
+    mockHttpPost.mockResolvedValueOnce({ logs: SECOND_LOG });
+    const { view: secondView } = await renderScreen();
+    expect(await screen.findByText(SECOND_INFO.server_version)).toBeTruthy();
+    expect(await screen.findByText(SECOND_TOTALS.messages.toLocaleString())).toBeTruthy();
+    expect(screen.getByText('Up to date (258369147 msgs)')).toBeTruthy();
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(
+        screen.getByRole('button', { name: `Share server URL ${SECOND_ORIGIN}` }),
+      ),
+    );
+    expect(share).toHaveBeenCalledWith({ message: SECOND_ORIGIN });
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Sync Now' })),
+    );
+    expect(mockStartSync).toHaveBeenCalledTimes(1);
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Server Health' })),
+    );
+    expect(mockPush).toHaveBeenCalledWith('/server-health');
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Show Pairing QR' })),
+    );
+    const secondPayload = buildSetupQr(SECOND_ORIGIN, SECOND_PASSWORD);
+    const secondPreRevealTree = JSON.stringify(secondView.toJSON());
+    expect(secondPreRevealTree).not.toContain(SECOND_PASSWORD);
+    expect(secondPreRevealTree).not.toContain(secondPayload);
+    await fireEvent.press(await screen.findByRole('button', { name: 'Reveal QR Code' }));
+    expect(mockQrCode).toHaveBeenLastCalledWith({
+      value: secondPayload,
+      size: 260,
+      testID: 'pairing-qr-code',
+    });
+    await fireEvent.press(screen.getByLabelText('Close pairing QR'));
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'View Server Logs' })),
+    );
+    expect(await screen.findByText(SECOND_LOG)).toBeTruthy();
+    expect(mockHttpPost).toHaveBeenLastCalledWith('/admin/command', expect.anything(), {
+      json: { channel: 'get-logs', data: { count: 500 } },
+    });
   });
 });
 
@@ -309,6 +716,51 @@ describe('ServerManagementScreen — destructive restart actions', () => {
       'Restart Services isn’t supported on this server.',
     );
   });
+
+  it('does not run a confirm callback retained from the previous account', async () => {
+    await renderSettledScreen();
+    const dlg = await pressRowAndGetConfirm('Restart Server');
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    await pressDialogButton(dlg, 'Restart Server');
+
+    expect(mockHttpPost).not.toHaveBeenCalled();
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it.each(['success', 'rejection'] as const)(
+    'holds Disconnect for an admitted restart %s and suppresses its old-account dialog',
+    async (outcome) => {
+      const response = deferred<unknown>();
+      const rawError = `management-old-restart-${outcome}-error-a7c2`;
+      mockHttpPost.mockReturnValueOnce(response.promise);
+      await renderSettledScreen();
+      const dlg = await pressRowAndGetConfirm('Restart Server');
+      await pressDialogButton(dlg, 'Restart Server');
+      await waitFor(() => expect(mockHttpPost).toHaveBeenCalledTimes(1));
+
+      let drained = false;
+      let drain!: Promise<void>;
+      await act(async () => {
+        drain = pauseRealtimeDeliveries().then(() => {
+          drained = true;
+        });
+        await Promise.resolve();
+      });
+      expect(drained).toBe(false);
+
+      await act(async () => {
+        if (outcome === 'success') response.resolve({});
+        else response.reject(new Error(rawError));
+        await response.promise.catch(() => undefined);
+        await drain;
+      });
+      expect(useDialogStore.getState().current).toBeNull();
+      expect(JSON.stringify(useDialogStore.getState())).not.toContain(rawError);
+      resumeRealtimeDeliveries();
+    },
+  );
 });
 
 describe('ServerManagementScreen — View Server Logs', () => {
@@ -331,8 +783,11 @@ describe('ServerManagementScreen — View Server Logs', () => {
     expect(useDialogStore.getState().current).toBeNull();
   });
 
-  it('surfaces a log-fetch failure as a dialog and opens no modal', async () => {
-    mockHttpPost.mockRejectedValue(new Error('boom'));
+  it('uses fixed log-rejection copy and releases busy so a current retry succeeds', async () => {
+    const rawError = 'management-current-log-error-61f8';
+    mockHttpPost
+      .mockRejectedValueOnce(new Error(rawError))
+      .mockResolvedValueOnce({ logs: SECOND_LOG });
     await renderSettledScreen();
     const row = await screen.findByText('View Server Logs');
     // act-wrapped: the fetch settles in a microtask and flips `logs`/`busy` state.
@@ -344,9 +799,57 @@ describe('ServerManagementScreen — View Server Logs', () => {
     expect(useDialogStore.getState().current?.message).toBe(
       'Couldn’t fetch logs. Check your connection.',
     );
+    expect(JSON.stringify(useDialogStore.getState().current)).not.toContain(rawError);
     // The modal stays closed — its Done button is the only thing rendered exclusively inside it.
     await expect(
       screen.findByLabelText('Close server logs', {}, { timeout: 400 }),
     ).rejects.toBeTruthy();
+
+    await act(async () => {
+      useDialogStore.getState().dismiss();
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'View Server Logs' }).props.accessibilityState?.disabled,
+      ).not.toBe(true),
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'View Server Logs' }));
+    expect(await screen.findByText(SECOND_LOG)).toBeTruthy();
+    expect(mockHttpPost).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['success', 'rejection'] as const)(
+    'drains an admitted old-account log %s without publishing its result',
+    async (outcome) => {
+      const response = deferred<{ logs: string }>();
+      const rawError = `management-old-log-${outcome}-error-18d3`;
+      mockHttpPost.mockReturnValueOnce(response.promise);
+      await renderSettledScreen();
+      fireEvent.press(await screen.findByText('View Server Logs'));
+      await waitFor(() => expect(mockHttpPost).toHaveBeenCalledTimes(1));
+
+      let drained = false;
+      let drain!: Promise<void>;
+      await act(async () => {
+        drain = pauseRealtimeDeliveries().then(() => {
+          drained = true;
+        });
+        await Promise.resolve();
+      });
+      expect(drained).toBe(false);
+
+      await act(async () => {
+        if (outcome === 'success') response.resolve({ logs: PRIVATE_LOG });
+        else response.reject(new Error(rawError));
+        await response.promise.catch(() => undefined);
+        await drain;
+      });
+      expect(screen.queryByText(PRIVATE_LOG)).toBeNull();
+      expect(screen.queryByText(rawError)).toBeNull();
+      expect(screen.queryByLabelText('Close server logs')).toBeNull();
+      expect(JSON.stringify(useDialogStore.getState().current)).not.toContain(rawError);
+      expect(useDialogStore.getState().current).toBeNull();
+      resumeRealtimeDeliveries();
+    },
+  );
 });

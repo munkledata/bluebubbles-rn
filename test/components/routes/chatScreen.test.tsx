@@ -15,7 +15,7 @@
  *   - the data hooks (`useMessages`, `useChatHeader`, `useNewScreenEffect`) + `useChatBackgroundUri`
  *     → controllable jest.fns.
  *   - `@/services` + `@/services/send` → jest.fn spies (the send/react/reply/edit/schedule wiring).
- *   - `@utils/isDev` (`isDevServer`) → forced FALSE so the screen takes the REAL service path
+ *   - `@utils/isDev` (`isDevServer`) → false by default so the screen takes the REAL service path
  *     (`react`/`reply`/`send`/`editText`/`fireDueScheduled`), not the `devSeed` fixtures — this is
  *     the path shipped to users and gives the cleaner assertions (see the ticker + react tests).
  *   - `expo-router` (fixed guid + a push spy), `expo-clipboard`/`expo-image`/`expo-media-library`,
@@ -25,20 +25,40 @@
  * The REAL `useTypingStore` (zustand) is driven via setState to exercise the typing-bubble branch.
  */
 import React from 'react';
-import { renderWithTheme, screen, act, waitFor } from '../support/renderWithTheme';
+import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 
 const GUID = 'iMessage;-;+15551234567';
+const PRIVATE_WALLPAPER_URI = 'file:///private/chat-wallpaper-r-canary-9f31d7.jpg';
+const SECOND_WALLPAPER_URI = 'file:///private/chat-wallpaper-second-74c02a.jpg';
 const mockPush = jest.fn();
+const mockIsDevServer = jest.fn(() => false);
 // Mutable so a test can hand the SAME mounted screen a new guid (reused-instance path).
 let mockGuid = GUID;
 
 /** Latest props each probe was rendered with — tests read/invoke these. */
 const mockCaptured: {
+  header?: Record<string, any>;
   list?: Record<string, any>;
   overlay?: Record<string, any>;
+  upload?: Record<string, any>;
   composer?: Record<string, any>;
 } = {};
+let mockVoiceRecorderProps: Record<string, any> | undefined;
+
+// This Jest config cannot execute the route's native-facing dynamic import. Replace React.lazy
+// with a prop-capturing component so the route test still exercises the real recording state and
+// the exact callbacks it passes to VoiceRecorder; VoiceRecorder's own suite covers its internals.
+jest.mock('react', () => {
+  const actual = jest.requireActual('react');
+  return {
+    ...actual,
+    lazy: () => (props: Record<string, any>) => {
+      mockVoiceRecorderProps = props;
+      return null;
+    },
+  };
+});
 
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ guid: mockGuid }),
@@ -65,6 +85,7 @@ let mockKavProps: Record<string, unknown> = {};
 // stand-in renders a Fragment: under jest the real KAV's padding is always 0 (no soft keyboard),
 // so it contributes nothing to the tree the other tests read.
 jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
   return {
     __esModule: true,
@@ -81,23 +102,29 @@ jest.mock('expo-media-library', () => ({
   saveToLibraryAsync: jest.fn(),
 }));
 jest.mock('expo-image', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   return { Image: (props: Record<string, unknown>) => R.createElement(View, props) };
 });
 
 // The whole UI tree as prop-capturing probes (keeps the native-pulling real barrel out).
 jest.mock('@ui', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View, Text } = require('react-native');
-  const capture = (key: 'list' | 'overlay' | 'composer') => (props: any) => {
-    mockCaptured[key] = props;
-    return null;
-  };
+  const capture = (key: 'header' | 'list' | 'overlay' | 'upload' | 'composer') =>
+    function CapturedProbe(props: any) {
+      const instance = R.useRef(Symbol(key));
+      mockCaptured[key] = { ...props, __instance: instance.current };
+      return null;
+    };
   return {
     useTheme: () => ({ color: { background: '#000000' } }),
     Screen: ({ children }: { children: React.ReactNode }) => R.createElement(View, null, children),
-    ConversationHeader: () => null,
+    ConversationHeader: capture('header'),
     EdgeFade: () => null,
     ScreenEffectOverlay: () => null,
     TypingBubble: () => R.createElement(Text, null, 'typing…'),
@@ -105,7 +132,7 @@ jest.mock('@ui', () => {
     // the real one subscribes to the upload store + runs a stall interval this screen test has no
     // reason to drive. It must still be PRESENT — a missing export renders as `undefined` and
     // takes the whole screen down.
-    UploadStatusBar: () => null,
+    UploadStatusBar: capture('upload'),
     MessageList: capture('list'),
     MessageActionsOverlay: capture('overlay'),
     Composer: capture('composer'),
@@ -124,7 +151,6 @@ jest.mock('@ui/conversations/pickDateTime', () => ({ pickFutureDateTime: jest.fn
 jest.mock('@ui/LoadErrorBoundary', () => ({
   LoadErrorBoundary: ({ children }: { children: React.ReactNode }) => children,
 }));
-
 jest.mock('@features/conversations/useMessages', () => ({ useMessages: jest.fn() }));
 jest.mock('@features/conversations/useChatHeader', () => ({ useChatHeader: jest.fn() }));
 jest.mock('@features/conversations/useNewScreenEffect', () => ({ useNewScreenEffect: jest.fn() }));
@@ -139,12 +165,24 @@ jest.mock('@features/conversations/devSeed', () => ({
 
 // Force the REAL (non-dev) service path so the send/react/reply/edit spies below are what fires.
 jest.mock('@utils/isDev', () => ({
-  isDevServer: () => false,
+  isDevServer: () => mockIsDevServer(),
   DEV_SERVER_ORIGIN: 'https://dev.local',
 }));
 
+// Keep route-level tests out of the real repository layer. In particular, the open-time deletion
+// check needs an explicit normal-chat fixture; otherwise it receives the undefined test database,
+// takes the intentional failure fallback, and prints one misleading debug line per render.
+jest.mock('@db/repositories', () => ({
+  getChatIdByGuid: jest.fn(async () => null),
+  getChatParticipants: jest.fn(async () => []),
+  getFirstUnreadInChat: jest.fn(async () => null),
+  isChatHiddenByDeletion: jest.fn(async () => false),
+  kvGet: jest.fn(async () => null),
+  kvSet: jest.fn(async () => undefined),
+}));
+
 jest.mock('@/services', () => ({
-  dispatchRealtimeEvent: jest.fn(),
+  dispatchRealtimeEvent: jest.fn(async () => undefined),
   ensureChatSynced: jest.fn(),
   ensureSyncedBackground: jest.fn(),
   http: {},
@@ -161,12 +199,15 @@ jest.mock('@/services/send', () => ({
   cancelOutgoing: jest.fn(),
   editText: jest.fn(),
   fireDueScheduled: jest.fn(),
+  isContactsPermissionDeniedError: jest.fn(
+    (error: unknown) => error instanceof Error && error.name === 'ContactsPermissionDeniedError',
+  ),
   pickAndSendContact: jest.fn(),
   react: jest.fn(),
   recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
   reply: jest.fn(),
   runDueScheduled: jest.fn(),
-  schedule: jest.fn(),
+  schedule: jest.fn().mockResolvedValue(undefined),
   send: jest.fn(),
   sendImage: jest.fn(),
   sendImages: jest.fn(),
@@ -174,7 +215,7 @@ jest.mock('@/services/send', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import ChatScreen from '../../../app/(app)/chat/[guid]';
+import ChatScreen, { pickDocumentFilesForLease } from '../../../app/(app)/chat/[guid]';
 // eslint-disable-next-line import/first
 import { useMessages } from '@features/conversations/useMessages';
 // eslint-disable-next-line import/first
@@ -184,15 +225,36 @@ import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 // eslint-disable-next-line import/first
 import { useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 // eslint-disable-next-line import/first
-import { ensureChatSynced, markRead } from '@/services';
+import { dispatchRealtimeEvent, ensureChatSynced, markRead, sendTyping } from '@/services';
 // eslint-disable-next-line import/first
-import { editText, fireDueScheduled, react, reply, send } from '@/services/send';
+import {
+  editText,
+  fireDueScheduled,
+  pickAndSendContact,
+  react,
+  reply,
+  runDueScheduled,
+  schedule,
+  send,
+} from '@/services/send';
+// eslint-disable-next-line import/first
+import { devSendFake, devSendFakeReply } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 // eslint-disable-next-line import/first
 import { showDialog } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
+// eslint-disable-next-line import/first
 import { useTypingStore } from '@state/typingStore';
+// eslint-disable-next-line import/first
+import { isChatHiddenByDeletion, kvSet } from '@db/repositories';
+// eslint-disable-next-line import/first
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const useMessagesMock = useMessages as jest.Mock;
 const useChatHeaderMock = useChatHeader as jest.Mock;
@@ -230,10 +292,14 @@ function reactionRow(over: Record<string, unknown>): any {
 }
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.clearAllMocks();
+  mockIsDevServer.mockReturnValue(false);
   mockGuid = GUID;
   mockInsetBottom = 0;
   mockKbVisible = false;
+  mockVoiceRecorderProps = undefined;
+  useSessionStore.setState({ serverInfo: null });
   useTypingStore.setState({ typing: {} });
   useMessagesMock.mockReturnValue({ data: [], error: null });
   useChatHeaderMock.mockReturnValue({
@@ -251,17 +317,101 @@ async function run(fn: () => void): Promise<void> {
   });
 }
 
+interface HostJsonNode {
+  type?: unknown;
+  props?: Record<string, unknown>;
+  children?: unknown;
+}
+
+function visitHostTree(tree: unknown, visit: (node: HostJsonNode) => void): void {
+  if (tree == null) return;
+  if (Array.isArray(tree)) {
+    tree.forEach((node) => visitHostTree(node, visit));
+    return;
+  }
+  if (typeof tree !== 'object') return;
+  const node = tree as HostJsonNode;
+  visit(node);
+  visitHostTree(node.children, visit);
+}
+
+function flattenTestStyle(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return value.reduce<Record<string, unknown>>(
+      (result, part) => Object.assign(result, flattenTestStyle(part)),
+      {},
+    );
+  }
+  return value != null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function wallpaperSourceUris(tree: unknown): string[] {
+  const uris: string[] = [];
+  visitHostTree(tree, (node) => {
+    const source = node.props?.source;
+    if (source == null || typeof source !== 'object') return;
+    const uri = (source as Record<string, unknown>).uri;
+    if (typeof uri === 'string') uris.push(uri);
+  });
+  return uris;
+}
+
+function overlayStyleCounts(tree: unknown): { top: number; bottom: number } {
+  let top = 0;
+  let bottom = 0;
+  visitHostTree(tree, (node) => {
+    if (node.type !== 'View') return;
+    const style = flattenTestStyle(node.props?.style);
+    if (
+      style.position !== 'absolute' ||
+      style.left !== 0 ||
+      style.right !== 0 ||
+      style.zIndex !== 2
+    ) {
+      return;
+    }
+    if (style.top === 0) top += 1;
+    if (style.bottom === 0) bottom += 1;
+  });
+  return { top, bottom };
+}
+
+function expectWallpaperPresentation(tree: unknown, uri: string | null): void {
+  expect(wallpaperSourceUris(tree)).toEqual(uri == null ? [] : [uri]);
+  expect(mockCaptured.header?.translucent).toBe(uri != null);
+  expect(mockCaptured.upload?.translucent).toBe(uri != null);
+  expect(mockCaptured.composer?.translucent).toBe(uri != null);
+  expect(mockCaptured.list?.hasBackground).toBe(uri != null);
+  if (uri == null) {
+    expect(mockCaptured.list?.topInset).toBe(0);
+    expect(mockCaptured.list?.bottomInset).toBe(0);
+    expect(overlayStyleCounts(tree)).toEqual({ top: 0, bottom: 0 });
+  } else {
+    expect(mockCaptured.list?.topInset).toBeGreaterThan(0);
+    expect(mockCaptured.list?.bottomInset).toBeGreaterThan(0);
+    expect(overlayStyleCounts(tree)).toEqual({ top: 1, bottom: 1 });
+  }
+}
+
 describe('ChatScreen — mount side effects', () => {
   it('marks the chat read and backfills history on open', async () => {
     await renderWithTheme(<ChatScreen />);
-    expect(markRead).toHaveBeenCalledWith(GUID);
+    expect(markRead).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
     expect(ensureChatSynced).toHaveBeenCalledWith(GUID);
   });
 
   it('re-marks read and re-syncs when a reused screen instance gets a NEW guid', async () => {
     const GUID2 = 'iMessage;-;+15559990000';
     const view = await renderWithTheme(<ChatScreen />);
-    await waitFor(() => expect(markRead).toHaveBeenCalledWith(GUID));
+    await waitFor(() =>
+      expect(markRead).toHaveBeenCalledWith(
+        GUID,
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
 
     // Same mounted instance, new route param — the [guid]-keyed mount effect must run again
     // (a once-only ref here would leave the second chat unread/unsynced).
@@ -269,7 +419,12 @@ describe('ChatScreen — mount side effects', () => {
     await act(async () => {
       view.rerender(<ChatScreen />);
     });
-    await waitFor(() => expect(markRead).toHaveBeenCalledWith(GUID2));
+    await waitFor(() =>
+      expect(markRead).toHaveBeenCalledWith(
+        GUID2,
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
     expect(ensureChatSynced).toHaveBeenCalledWith(GUID2);
   });
 
@@ -285,6 +440,21 @@ describe('ChatScreen — mount side effects', () => {
     useMessagesMock.mockReturnValue({ data: undefined, error: new Error('db down') });
     await renderWithTheme(<ChatScreen />);
     expect(screen.getByText(/Couldn.t load messages/)).toBeTruthy();
+  });
+
+  it('does not let a retained account-A pull-to-refresh start account-B backfill', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await waitFor(() => expect(isChatHiddenByDeletion).toHaveBeenCalledTimes(1));
+    const refreshFromA = mockCaptured.list!.onRefresh as () => Promise<void>;
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    (isChatHiddenByDeletion as jest.Mock).mockClear();
+    (ensureChatSynced as jest.Mock).mockClear();
+    await refreshFromA();
+
+    expect(isChatHiddenByDeletion).not.toHaveBeenCalled();
+    expect(ensureChatSynced).not.toHaveBeenCalled();
   });
 });
 
@@ -322,7 +492,14 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
 
   it('flags an edited message and parses its messageSummaryInfo JSON onto the selection', async () => {
     await renderWithTheme(<ChatScreen />);
-    const info = { editedParts: { '0': [{ date: 1, text: 'a' }, { date: 2, text: 'b' }] } };
+    const info = {
+      editedParts: {
+        '0': [
+          { date: 1, text: 'a' },
+          { date: 2, text: 'b' },
+        ],
+      },
+    };
     await run(() =>
       mockCaptured.list!.onLongPressMessage(
         makeMsg({ guid: 'm9', dateEdited: 2, messageSummaryInfo: JSON.stringify(info) }),
@@ -355,6 +532,7 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
         emoji: undefined,
         selectedMessageText: 'hey',
       }),
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
   });
 
@@ -364,6 +542,7 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
     await run(() => mockCaptured.overlay!.onReact('emoji', '🎉'));
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: 'm1' }),
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
   });
 });
@@ -372,7 +551,10 @@ describe('ChatScreen — send routing', () => {
   it('routes plain composer text to send() with no effect', async () => {
     await renderWithTheme(<ChatScreen />);
     await run(() => mockCaptured.composer!.onSend('hello'));
-    expect(send).toHaveBeenCalledWith({ chatGuid: GUID, text: 'hello', effectId: undefined });
+    expect(send).toHaveBeenCalledWith(
+      { chatGuid: GUID, text: 'hello', effectId: undefined },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
     expect(reply).not.toHaveBeenCalled();
   });
 
@@ -381,13 +563,86 @@ describe('ChatScreen — send routing', () => {
     await run(() =>
       mockCaptured.composer!.onSend('party', 'com.apple.MobileSMS.expressivesend.impact'),
     );
-    expect(send).toHaveBeenCalledWith({
-      chatGuid: GUID,
-      text: 'party',
-      effectId: 'com.apple.MobileSMS.expressivesend.impact',
-    });
+    expect(send).toHaveBeenCalledWith(
+      {
+        chatGuid: GUID,
+        text: 'party',
+        effectId: 'com.apple.MobileSMS.expressivesend.impact',
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
+  it('threads the mounted account lease through DEV text and reply sends', async () => {
+    mockIsDevServer.mockReturnValue(true);
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.composer!.onSend('plain-dev'));
+    const accountLease = (devSendFake as jest.Mock).mock.calls[0]![3];
+    expect(devSendFake).toHaveBeenCalledWith(GUID, 'plain-dev', undefined, accountLease);
+
+    await run(() =>
+      mockCaptured.list!.onLongPressMessage(
+        makeMsg({ guid: 'reply-target', text: 'question', senderName: 'Alice' }),
+      ),
+    );
+    await run(() => mockCaptured.overlay!.onReply());
+    await run(() => mockCaptured.composer!.onSend('reply-dev'));
+    expect(devSendFakeReply).toHaveBeenCalledWith(
+      GUID,
+      'reply-dev',
+      'reply-target',
+      undefined,
+      accountLease,
+    );
+    expect(accountLease).toEqual(expect.objectContaining({ isCurrent: expect.any(Function) }));
+  });
+
+  it('shows recovery guidance when Send Contact permission is denied', async () => {
+    useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
+    const denied = Object.assign(new Error('contacts-permission-denied'), {
+      name: 'ContactsPermissionDeniedError',
+    });
+    (pickAndSendContact as jest.Mock).mockRejectedValueOnce(denied);
+    await renderWithTheme(<ChatScreen />);
+
+    await run(() => mockCaptured.composer!.onPickContact());
+
+    await waitFor(() =>
+      expect(showDialog).toHaveBeenCalledWith(
+        'Contacts',
+        'Permission denied. Enable Contacts access in system settings to send a contact.',
+      ),
+    );
+  });
+
+  it('keeps a canceled Send Contact picker silent', async () => {
+    useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
+    (pickAndSendContact as jest.Mock).mockResolvedValueOnce(null);
+    await renderWithTheme(<ChatScreen />);
+
+    await run(() => mockCaptured.composer!.onPickContact());
+    await waitFor(() => expect(pickAndSendContact).toHaveBeenCalledTimes(1));
+
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('wires microphone denial and native-request errors to recovery dialogs', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.composer!.onStartVoice());
+    await waitFor(() => expect(mockVoiceRecorderProps).toBeDefined());
+
+    mockVoiceRecorderProps!.onPermissionDenied();
+    expect(showDialog).toHaveBeenLastCalledWith(
+      'Microphone',
+      'Microphone access was denied. Enable it in system settings to record voice messages.',
+    );
+
+    mockVoiceRecorderProps!.onPermissionError();
+    expect(showDialog).toHaveBeenLastCalledWith(
+      'Microphone',
+      'Microphone access is unavailable. Try again or enable it in system settings.',
+    );
+  });
 });
 
 describe('ChatScreen — reply flow', () => {
@@ -405,12 +660,15 @@ describe('ChatScreen — reply flow', () => {
     );
 
     await run(() => mockCaptured.composer!.onSend('sure'));
-    expect(reply).toHaveBeenCalledWith({
-      chatGuid: GUID,
-      text: 'sure',
-      replyToGuid: 'm1',
-      effectId: undefined,
-    });
+    expect(reply).toHaveBeenCalledWith(
+      {
+        chatGuid: GUID,
+        text: 'sure',
+        replyToGuid: 'm1',
+        effectId: undefined,
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
     expect(send).not.toHaveBeenCalled();
     // replyTo is cleared after the reply is sent.
     expect(mockCaptured.composer!.replyTo).toBeNull();
@@ -427,11 +685,14 @@ describe('ChatScreen — edit flow', () => {
     expect(mockCaptured.composer!.editingText).toBe('original');
 
     await run(() => mockCaptured.composer!.onSend('edited body'));
-    expect(editText).toHaveBeenCalledWith({
-      messageGuid: 'm1',
-      newText: 'edited body',
-      chatGuid: GUID,
-    });
+    expect(editText).toHaveBeenCalledWith(
+      {
+        messageGuid: 'm1',
+        newText: 'edited body',
+        chatGuid: GUID,
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
     expect(send).not.toHaveBeenCalled();
   });
 });
@@ -447,22 +708,100 @@ describe('ChatScreen — typing indicator', () => {
     await renderWithTheme(<ChatScreen />);
     expect(screen.queryByText('typing…')).toBeNull();
   });
+
+  it('binds the DEV typing injection to the mounted account lease', async () => {
+    mockIsDevServer.mockReturnValue(true);
+    await renderWithTheme(<ChatScreen />);
+
+    await fireEvent.press(screen.getByText('⌨️'));
+
+    expect(dispatchRealtimeEvent).toHaveBeenCalledWith(
+      'typing-indicator',
+      { chatGuid: GUID, display: true },
+      'dev',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+  });
+
+  it('does not dispatch DEV typing outside the local fixture session', async () => {
+    await renderWithTheme(<ChatScreen />);
+
+    await fireEvent.press(screen.getByText('⌨️'));
+
+    expect(dispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
+
+  it('drops a retained account-A DEV typing button after account B is admitted', async () => {
+    mockIsDevServer.mockReturnValue(true);
+    await renderWithTheme(<ChatScreen />);
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    (dispatchRealtimeEvent as jest.Mock).mockClear();
+
+    await fireEvent.press(screen.getByText('⌨️'));
+
+    expect(dispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe('ChatScreen — wallpaper chrome flip', () => {
   it('with no wallpaper, the list gets no insets and hasBackground=false', async () => {
-    await renderWithTheme(<ChatScreen />);
-    expect(mockCaptured.list!.hasBackground).toBe(false);
-    expect(mockCaptured.list!.topInset).toBe(0);
-    expect(mockCaptured.list!.bottomInset).toBe(0);
+    const view = await renderWithTheme(<ChatScreen />);
+    expectWallpaperPresentation(view.toJSON(), null);
   });
 
-  it('with a wallpaper uri, the list becomes full-bleed with positive bar insets', async () => {
-    useChatBackgroundUriMock.mockReturnValue('file://wall.jpg');
-    await renderWithTheme(<ChatScreen />);
-    expect(mockCaptured.list!.hasBackground).toBe(true);
-    expect(mockCaptured.list!.topInset).toBeGreaterThan(0);
-    expect(mockCaptured.list!.bottomInset).toBeGreaterThan(0);
+  it('with a wallpaper uri, mounts it and gives every chrome surface wallpaper props', async () => {
+    useChatBackgroundUriMock.mockReturnValue(PRIVATE_WALLPAPER_URI);
+    const view = await renderWithTheme(<ChatScreen />);
+
+    expectWallpaperPresentation(view.toJSON(), PRIVATE_WALLPAPER_URI);
+  });
+
+  it('reacts to URI → null → new URI without remounting the list or composer', async () => {
+    useChatBackgroundUriMock.mockReturnValue(PRIVATE_WALLPAPER_URI);
+    const view = await renderWithTheme(<ChatScreen />);
+    const firstListInstance = mockCaptured.list!.__instance;
+    const firstComposerInstance = mockCaptured.composer!.__instance;
+    const firstLongPress = mockCaptured.list!.onLongPressMessage;
+    const firstSend = mockCaptured.composer!.onSend;
+
+    expectWallpaperPresentation(view.toJSON(), PRIVATE_WALLPAPER_URI);
+    useChatBackgroundUriMock.mockReturnValue(null);
+    await act(async () => {
+      view.rerender(<ChatScreen />);
+    });
+
+    expectWallpaperPresentation(view.toJSON(), null);
+    expect(mockCaptured.list!.__instance).toBe(firstListInstance);
+    expect(mockCaptured.composer!.__instance).toBe(firstComposerInstance);
+    expect(mockCaptured.list!.onLongPressMessage).toBe(firstLongPress);
+    expect(mockCaptured.composer!.onSend).toBe(firstSend);
+
+    useChatBackgroundUriMock.mockReturnValue(SECOND_WALLPAPER_URI);
+    await act(async () => {
+      view.rerender(<ChatScreen />);
+    });
+
+    expectWallpaperPresentation(view.toJSON(), SECOND_WALLPAPER_URI);
+    expect(JSON.stringify(view.toJSON())).not.toContain(PRIVATE_WALLPAPER_URI);
+    expect(mockCaptured.list!.__instance).toBe(firstListInstance);
+    expect(mockCaptured.composer!.__instance).toBe(firstComposerInstance);
+    expect(mockCaptured.list!.onLongPressMessage).toBe(firstLongPress);
+    expect(mockCaptured.composer!.onSend).toBe(firstSend);
+  });
+
+  it('removes the wallpaper on the next render after the mounted account lease is revoked', async () => {
+    useChatBackgroundUriMock.mockReturnValue(PRIVATE_WALLPAPER_URI);
+    const view = await renderWithTheme(<ChatScreen />);
+    expectWallpaperPresentation(view.toJSON(), PRIVATE_WALLPAPER_URI);
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      view.rerender(<ChatScreen />);
+    });
+
+    expectWallpaperPresentation(view.toJSON(), null);
   });
 });
 
@@ -548,6 +887,80 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     expect(mockCaptured.composer!.onTyping).toBe(first.typing);
     expect(mockCaptured.composer!.onStartVoice).toBe(first.voice);
   });
+
+  it('drops a native file-picker result after the screen account that opened it retires', async () => {
+    let finishPicker!: (value: {
+      canceled: false;
+      assets: Array<{ uri: string; name: string; mimeType: string; size: number }>;
+    }) => void;
+    const getDocumentAsync = jest.fn().mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishPicker = resolve;
+      }),
+    );
+    const pickerLease = captureRealtimeDeliveryLease();
+    const picked = pickDocumentFilesForLease(pickerLease, async () => ({ getDocumentAsync }));
+    await waitFor(() => expect(getDocumentAsync).toHaveBeenCalledTimes(1));
+
+    // The open OS picker owns no account data, so it does not hold the Disconnect barrier.
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+
+    finishPicker({
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///cache/a-secret.pdf',
+          name: 'a-secret.pdf',
+          mimeType: 'application/pdf',
+          size: 123,
+        },
+      ],
+    });
+
+    await expect(picked).resolves.toEqual([]);
+  });
+
+  it('drops draft-flush and typing callbacks after their screen account retires', async () => {
+    await renderWithTheme(<ChatScreen />);
+    const flushDraft = mockCaptured.composer!.onDraftChange as (text: string) => void;
+    const emitTyping = mockCaptured.composer!.onTyping as (active: boolean) => void;
+    (kvSet as jest.Mock).mockClear();
+    (sendTyping as jest.Mock).mockClear();
+
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+    // These are exactly the debounce/unmount callbacks that can run after the old screen has
+    // disappeared. Neither may persist or emit through the newly connected account.
+    flushDraft('A-only draft');
+    emitTyping(false);
+
+    expect(kvSet).not.toHaveBeenCalled();
+    expect(sendTyping).not.toHaveBeenCalled();
+  });
+
+  it('handles a stale scheduled-send rejection quietly instead of leaking an unhandled promise', async () => {
+    await renderWithTheme(<ChatScreen />);
+    const scheduleFromOldScreen = mockCaptured.composer!.onSchedule as (
+      text: string,
+      scheduledFor: number,
+    ) => void;
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    (schedule as jest.Mock).mockRejectedValueOnce(new Error('account session changed'));
+    (showDialog as jest.Mock).mockClear();
+
+    await act(async () => {
+      scheduleFromOldScreen('A-only scheduled text', Date.now() + 60_000);
+      await Promise.resolve();
+    });
+
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'A-only scheduled text' }),
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    expect(showDialog).not.toHaveBeenCalled();
+  });
 });
 
 describe('ChatScreen — attachment share/save routing (via @/services/media)', () => {
@@ -609,6 +1022,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
   // asked to share the picture, and an OS share sheet carrying only the text reads as success.
   it('does not silently fall back to sharing the caption when the file share fails', async () => {
     const rnShare = jest
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       .spyOn(require('react-native').Share, 'share')
       .mockResolvedValue({ action: 'dismissedAction' });
     (shareAttachment as jest.Mock).mockResolvedValue({ ok: false, reason: 'failed' });
@@ -642,6 +1056,57 @@ describe('ChatScreen — scheduled-message ticker', () => {
       });
       // Interval was cleared on unmount — no further ticks.
       expect(fireDueScheduled).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('threads one screen lease through the DEV ticker and its fake senders', async () => {
+    mockIsDevServer.mockReturnValue(true);
+    (runDueScheduled as jest.Mock).mockImplementationOnce(
+      async (
+        _db: unknown,
+        _http: unknown,
+        _now: number,
+        sender: (
+          chatGuid: string,
+          text: string,
+          selectedMessageGuid: string | undefined,
+        ) => Promise<void>,
+      ) => {
+        await sender('plain-chat', 'plain', undefined);
+        await sender('reply-chat', 'reply', 'reply-target');
+        return 2;
+      },
+    );
+
+    await renderWithTheme(<ChatScreen />);
+    await waitFor(() => expect(runDueScheduled).toHaveBeenCalledTimes(1));
+    const accountLease = (runDueScheduled as jest.Mock).mock.calls[0]![4];
+    expect(devSendFake).toHaveBeenCalledWith('plain-chat', 'plain', undefined, accountLease);
+    expect(devSendFakeReply).toHaveBeenCalledWith(
+      'reply-chat',
+      'reply',
+      'reply-target',
+      undefined,
+      accountLease,
+    );
+  });
+
+  it('does not let a retained account-A DEV interval start work in account B', async () => {
+    jest.useFakeTimers();
+    try {
+      mockIsDevServer.mockReturnValue(true);
+      await renderWithTheme(<ChatScreen />);
+      expect(runDueScheduled).toHaveBeenCalledTimes(1);
+
+      await pauseRealtimeDeliveries();
+      resumeRealtimeDeliveries();
+      await act(async () => {
+        jest.advanceTimersByTime(20_000);
+      });
+
+      expect(runDueScheduled).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

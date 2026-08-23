@@ -4,10 +4,19 @@ import {
   getCustomThemeById,
   kvGet,
   kvSet,
+  kvSetWithinTransaction,
   THEME_CUSTOM_KEY,
   THEME_PREF_KEY,
 } from '@db/repositories';
-import { DEFAULT_PRESET, type PresetKey, type ThemeTokens } from '@ui/theme/tokens';
+import { withDbTransaction } from '@db/transaction';
+import {
+  DEFAULT_PRESET,
+  isDarkThemeTokens,
+  resolvePresetKey,
+  type PresetKey,
+  type ThemeTokens,
+} from '@ui/theme/tokens';
+import { canCommitHydration, reportHydrationError, type HydrationOptions } from '@state/hydration';
 
 interface ThemeState {
   preset: PresetKey;
@@ -16,7 +25,7 @@ interface ThemeState {
   /** Parsed tokens of the active custom theme (overrides the preset when set). */
   customTokens: ThemeTokens | null;
   hydrated: boolean;
-  hydrate: () => Promise<void>;
+  hydrate: (options?: HydrationOptions) => Promise<void>;
   /** Select a built-in preset (also clears any active custom theme). */
   setPreset: (key: PresetKey) => Promise<void>;
   /** Make a custom theme active (overrides the preset). */
@@ -46,37 +55,49 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   customThemeId: null,
   customTokens: null,
   hydrated: false,
-  hydrate: async () => {
+  hydrate: async (options) => {
     try {
       const db = getDatabase();
       const presetVal = await kvGet(db, THEME_PREF_KEY);
-      const preset = (presetVal as PresetKey) ?? DEFAULT_PRESET;
+      if (!canCommitHydration(options)) return;
+      const preset = resolvePresetKey(presetVal);
       const customRaw = await kvGet(db, THEME_CUSTOM_KEY);
+      if (!canCommitHydration(options)) return;
       const customId = customRaw ? Number(customRaw) : NaN;
       if (Number.isFinite(customId)) {
         const row = await getCustomThemeById(db, customId);
+        if (!canCommitHydration(options)) return;
         const tokens = row ? parseTokens(row.tokens) : null;
-        if (tokens) {
+        if (isDarkThemeTokens(tokens)) {
           set({ preset, customThemeId: customId, customTokens: tokens, hydrated: true });
           return;
         }
       }
       set({ preset, customThemeId: null, customTokens: null, hydrated: true });
-    } catch {
-      set({ hydrated: true });
+    } catch (error) {
+      reportHydrationError(options, error);
+      // An unguarded pre-DB launch still opens ThemeProvider with the safe dark default. A retired
+      // guarded run, however, must not repaint a newer boot or release its first-paint gate.
+      if (canCommitHydration(options)) set({ hydrated: true });
     }
   },
   setPreset: async (key) => {
-    set({ preset: key, customThemeId: null, customTokens: null }); // optimistic → instant recolor
+    const preset = resolvePresetKey(key);
+    set({ preset, customThemeId: null, customTokens: null }); // optimistic → instant recolor
     try {
       const db = getDatabase();
-      await kvSet(db, THEME_PREF_KEY, key);
-      await kvSet(db, THEME_CUSTOM_KEY, '');
+      await withDbTransaction(db, async (context) => {
+        await kvSetWithinTransaction(context, THEME_PREF_KEY, preset);
+        await kvSetWithinTransaction(context, THEME_CUSTOM_KEY, '');
+      });
     } catch {
       // best-effort persist; the in-memory selection still applies this session
     }
   },
   setCustomTheme: async (id, tokens) => {
+    if (!isDarkThemeTokens(tokens)) {
+      throw new Error('Light themes are unavailable while Gator is dark-only.');
+    }
     set({ customThemeId: id, customTokens: tokens }); // optimistic
     try {
       await kvSet(getDatabase(), THEME_CUSTOM_KEY, String(id));
@@ -90,8 +111,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     try {
       const row = await getCustomThemeById(getDatabase(), id);
       const tokens = row ? parseTokens(row.tokens) : null;
-      if (tokens) set({ customTokens: tokens });
-      else set({ customThemeId: null, customTokens: null }); // theme was deleted
+      if (isDarkThemeTokens(tokens)) set({ customTokens: tokens });
+      else set({ customThemeId: null, customTokens: null }); // missing, corrupt, or unavailable light
     } catch {
       // keep the current tokens on a transient read error
     }

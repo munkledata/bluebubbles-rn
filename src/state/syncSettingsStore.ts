@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { getDatabase } from '@db/database';
-import { kvGet, kvSet } from '@db/repositories';
+import { kvGet, kvSetWithinTransaction } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
+import { canCommitHydration, reportHydrationError, type HydrationOptions } from '@state/hydration';
 
 export const SYNC_MESSAGES_PER_CHAT_KEY = 'sync.messagesPerChat';
 
@@ -12,7 +14,7 @@ interface SyncSettingsState {
    *  always backfills on demand when a chat is opened, so a cap just speeds first sync. */
   messagesPerChat: number;
   hydrated: boolean;
-  hydrate: () => Promise<void>;
+  hydrate: (options?: HydrationOptions) => Promise<void>;
   setMessagesPerChat: (value: number) => Promise<void>;
 }
 
@@ -23,19 +25,24 @@ interface SyncSettingsState {
 export const useSyncSettingsStore = create<SyncSettingsState>((set) => ({
   messagesPerChat: 0,
   hydrated: false,
-  hydrate: async () => {
+  hydrate: async (options) => {
     try {
       const v = await kvGet(getDatabase(), SYNC_MESSAGES_PER_CHAT_KEY);
+      if (!canCommitHydration(options)) return;
       const n = v == null ? 0 : Number(v);
       set({ messagesPerChat: Number.isFinite(n) && n >= 0 ? n : 0, hydrated: true });
-    } catch {
+    } catch (error) {
+      reportHydrationError(options, error);
       // DB not open yet at launch — re-hydrated at home mount. Leave `hydrated` false.
     }
   },
   setMessagesPerChat: async (value) => {
     set({ messagesPerChat: value }); // optimistic
     try {
-      await kvSet(getDatabase(), SYNC_MESSAGES_PER_CHAT_KEY, String(value));
+      const db = getDatabase();
+      await withDbTransaction(db, (context) =>
+        kvSetWithinTransaction(context, SYNC_MESSAGES_PER_CHAT_KEY, String(value)),
+      );
     } catch {
       // best-effort persist; the in-memory value still applies this session
     }

@@ -30,8 +30,9 @@ export async function getItems(http: HttpClient): Promise<unknown[]> {
   // devices and friends that loaded fine — behind "check your server connection".
   //
   // But a 401/500/parse failure is NOT the same as "old server", and silently returning [] made
-  // the two indistinguishable: the Items tab just sat empty forever with no error and no log.
-  // Anything that isn't the expected 404 is now logged at warn so it is diagnosable.
+  // the two indistinguishable during development: the Items tab just sat empty forever with no
+  // local clue. Anything that isn't the expected 404 emits a development-only warning; release
+  // builds intentionally drop this free-form diagnostic.
   try {
     return (await http.get('/findmy/items', ItemsResponse)).items ?? [];
   } catch (e) {

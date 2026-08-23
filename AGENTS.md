@@ -1,907 +1,208 @@
-# Gator RN — agent orientation
+# Gator RN — concise agent instructions
 
-A React Native (Expo) + TypeScript rebuild of the Flutter iMessage client.
-Android-only, iOS-styled. See `README.md` for the full picture and `docs/` for the spikes
-and per-phase dependency plan. The authoritative open-items tracker is
-`docs/WORK_PLAN_2026-07-17.md` (the old `~/.claude/plans/` rebuild plan no longer exists).
+Gator RN is an Android-only React Native/Expo rebuild of the Flutter iMessage client. Start with
+`README.md`. The authoritative open-work tracker is `docs/WORK_PLAN_2026-08-03.md`; older plans and
+`docs/DB_WRITE_SAFETY_AUDIT_2026-07-25.md` are historical context, not current status.
 
-## Expo HAS CHANGED
-This project targets **Expo SDK 57** (React Native 0.86, React 19). Read the exact
-versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing native/config code.
-- **`expo-contacts` root API throws in SDK 57.** The imperative `getContactsAsync` (and
-  friends) from the package root are deprecated and now *throw* (the error message is the
-  deprecation/migration text, so it surfaces as a runtime failure, not a warning). Import from
-  `expo-contacts/legacy` to keep the imperative API, or move to the new class-based API. The
-  `Contacts.Fields` enum + `requestPermissionsAsync` are still fine. See
-  `src/services/contacts/contactsService.ts`.
+This file is deliberately short because it is loaded into every agent turn. Keep only stable,
+actionable rules here. Put incident histories, detailed reasoning, and subsystem-specific procedures
+in the relevant document under `docs/`, then link to it here if future agents must discover it.
 
-## Conventions
-- **`src/core/` is React-free.** No `react`/`react-native` imports there — it must run in
-  Node (tests) and the headless FCM handler. Native primitives are injected via interfaces
-  (e.g. `CryptoBackend`, `SecureVault`) implemented in `src/native/`.
-- **DB is the source of truth.** Network/FCM write into the encrypted DB; UI observes it.
-- **One auth-injection point:** `HttpClient` puts the password in a header — never the URL.
-- **One realtime entry point:** `EventRouter` normalizes both socket and FCM events. To add a
-  server event: add the name to `SERVER_EVENTS` (constants.ts), a `NormalizedEvent` variant +
-  `normalize()` case (eventRouter.ts), and handle it in a sink (DB write → `DbEventSink`;
-  connection/UI side-effect → a thin injected sink like `ServerUrlEventSink`/`TypingEventSink`).
-  `message-send-error` (→ `markMessageSendError`) and `new-server` (→ `applyNewServerUrl`, reconnect
-  to the rotated tunnel URL) are wired this way. App↔server API/feature parity — including the
-  intentional non-alignments (`imessage-aliases-removed` app-ready but no server source;
-  server-side `scheduled-message-update` vs the app's LOCAL scheduling; participant-collage group
-  avatars vs `group-icon-*`) — is tracked in `docs/APP_SERVER_PARITY.md`.
-- Path aliases: `@core`, `@db`, `@ui`, `@utils`, and `@core/*` etc. (tsconfig + jest mapped;
-  Expo Metro resolves tsconfig paths automatically).
-- Strict TS (`noUncheckedIndexedAccess` on). Prefer `charAt`/explicit guards over `!` where
-  reasonable.
+## Lean working mode
 
-## op-sqlite gotchas (learned the hard way — don't rediscover)
-- **FTS5 must be opted in.** op-sqlite only compiles FTS5 when `"op-sqlite": { "fts5": true }`
-  is set in package.json (alongside `"sqlcipher": true`). Without it, the `messages_fts`
-  migration throws `no such module: fts5` **only on device** (better-sqlite3 has FTS5, so
-  Node tests pass — a real test-vs-device divergence). Changing these flags needs a clean
-  native rebuild (`rm -rf android && expo run:android`).
-- **drizzle ↔ op-sqlite v17 mismatch.** No drizzle-orm version targets op-sqlite v17's API
-  (drizzle calls `executeAsync`/`executeRawAsync` + `rows._array`; v17 has async `execute`,
-  `executeSync`, `executeRaw` with `rawRows`, and `rows` as a plain array). `src/db/database.ts`
-  wraps the raw handle in a `drizzleAdapter` Proxy that presents the legacy interface. Keep it.
-- **Reactive queries need a flush.** `reactiveExecute` callbacks don't fire until
-  `flushPendingReactiveQueries()` runs; the adapter calls it after every write so the live
-  conversation list updates. `getRawDatabase()` (migrations, reactiveExecute) uses the
-  UN-adapted handle.
-- **Migrations are transactional** (`src/db/migrate.ts`) so a partial failure rolls back
-  instead of leaving "table already exists" on retry.
-- **`withDbTransaction` (`src/db/transaction.ts`) is a process-wide MUTEX over ONE shared
-  connection — and a nested call wedges the app permanently.** It exists because op-sqlite gives us
-  a single connection, so only one BEGIN may be open at a time (a second one throws "cannot start a
-  transaction within a transaction" and kills that handler outright — a dropped live message), and
-  socket/FCM events are dispatched fire-and-forget, so two really do land on BEGIN at once. Callers
-  therefore queue. Consequences, all of them load-bearing:
-  - **Never call it from inside it, directly or transitively.** The inner call waits on a lock its
-    own caller holds, and because the queue is process-wide that stalls EVERY later DB write for the
-    life of the process — no send, no sync slice, no incoming message, nothing thrown, no crash. It
-    cannot be detected from inside (Hermes has no async-context propagation, and a module-level "in a
-    transaction" flag would be true for a legitimate concurrent caller too), so the only clue is the
-    watchdog's `[db] no write-lock holder released…` line.
-  - **THE TRAP: many repository helpers now transact INTERNALLY**, and read at the call site like
-    ordinary single writes — `insertOutgoingText`/`Contact`/`Reaction`/`Attachment`,
-    `discardOutgoingMessage`, `claimFailedOutgoingForRetry`, `reconcileOutgoingSuccess`,
-    `markOutgoingSentNoGuid`, `deleteMessageLocal`, `deleteChatLocal` (+ its `purgeChatMessages`),
-    `clearLocalCache`. Composing two of them, or calling one from inside another's callback, is all
-    it takes. Check before you compose. (`reconcileOutgoingSuccess` calls `markOutgoingSentNoGuid`
-    BEFORE opening its own transaction, deliberately — don't "tidy" it inside.)
-  - **A write issued OUTSIDE a transaction while one is open silently JOINS it** and is erased by
-    that transaction's rollback, while the caller still holds the ids it read back. So every write an
-    event depends on belongs inside the ONE callback (see `DbEventSink.onEvent`, which pulls its
-    handle/chat upserts and chat-id lookup in with the message write). The converse bystander hazard
-    is why the scope must stay small.
-  - **Keep every callback short, DB-only and BOUNDED** — a couple of statements, no network or
-    native calls, and nothing whose row count is unbounded (`deleteChatLocal` tombstones inside the
-    transaction and purges its messages OUTSIDE it, in chunks, for exactly this reason).
-  - The queue slot is claimed **synchronously**, so N unawaited calls to a transacting helper claim
-    all N slots in call order — a loop must `await` each one (see `useMessageActions` onBulkDelete).
-    `withDbWriteLock` (SQLCipher's `PRAGMA rekey`, via `rotateDbKey`) shares the same queue and the
-    same rules.
-- **Drizzle + op-sqlite v17 reactive lists:** use raw `db.all(sql\`…\`)` for read queries
-  (works on both drivers); reactive hooks (`useReactiveQuery`) subscribe to table names and
-  re-run the query — the write→flush is automatic via the adapter.
-- **`db.run(sql\`…\`)` DOES work on op-sqlite v17** (corrected — the earlier note claiming it
-  throws on device was wrong). Drizzle's query-builder `.run()` routes through `executeAsync`,
-  which the `drizzleAdapter` Proxy DOES override (alongside `execute`/`executeRawAsync`), so a
-  non-returning raw write (`db.run(sql\`UPDATE …\`)`) commits on device. Two production sites rely
-  on this: `reconcileOutgoingSuccess` (outgoing.ts) and `reconcileServerScheduled` (scheduled.ts) —
-  both use `db.run` precisely because `db.all` on a non-returning UPDATE throws "use run()" under
-  better-sqlite3 (Node tests). Use `db.run` for a non-returning raw write, `db.all(sql\`… RETURNING\`)`
-  when you need rows back, or a builder (`db.delete(t).where(…)`, `db.update(t).set({…})`,
-  `db.insert(t).values({…}).returning({…})`).
-- **A local deletion is a TOMBSTONE, never a row removal — and un-hiding is a WRITE, not a derived
-  read.** The deletion never leaves the device, so the server keeps returning the row: a hard delete is
-  undone by the next sync (`ensureChatSynced` re-pages up to 500 messages on EVERY chat open). Hence
-  `messages.date_deleted` and `chats.deleted_at`, both deliberately absent from the upsert conflict
-  sets so they survive re-paging while every render/count/search query filters them out. Rules that go
-  with them:
-  - **What un-hides a chat is `chatVisible`**: a surviving message that is not deleted, not a reaction
-    and not retracted, with `date_created > deleted_at`. That predicate MUST stay identical in the read
-    (`chatVisible`) and in the write that retires the stamp (`clearSupersededTombstones`), and must
-    match the preview/unread filters — with a looser one, a heart tapped on an old message resurrected
-    a whole deleted thread showing its ORIGINAL pre-deletion preview and a 0 badge.
-  - **The un-hide is RECORDED, not just derived.** Derived visibility is revocable: a chat the user
-    deleted, got a message in, and has used for days would VANISH again the moment that one message
-    stops qualifying (someone unsends it, or the user deletes it). `clearSupersededTombstones` makes it
-    a one-way transition, like `date_deleted` on a message.
-  - **`deleted_at` does TWO jobs — it hides the chat AND floors the unread count**
-    (`listChatsForInbox` counts only `um.date_created > c.deleted_at`). So whoever drops the stamp must
-    HAND THE FLOOR TO THE READ MARKER in the same statement (`last_read_message_guid` ← newest received
-    message at/before the boundary, strictly-newer guard so it only moves forward), and `deleteChatLocal`
-    must pin that marker at delete time — after its purge there is no candidate row left to pin. The
-    floor itself stays load-bearing even with the handover in place: `insertOutgoing*` never routes
-    through `clearSupersededTombstones`, so a user replying into a still-tombstoned chat un-hides it via
-    `chatVisible` with the stamp still set, and the floor is the only thing holding the badge at 0.
-  - The stamp is floored at the chat's newest stored `date_created` (server-derived, vs `now` from the
-    device clock) — unfloored, a Mac even seconds ahead made the next sync's re-inserted last message
-    satisfy `date_created > deleted_at` and the conversation came back on every sync, forever.
-  - Tombstones survive promotion: the echo reconcilers rewrite guid/send_state/error and nothing else,
-    so `date_deleted` rides from a cancelled `temp-` row onto its real identity.
-- **ADD-THEN-PRUNE is the standing rule for any "replace a set of rows" write** (`upsertChats`'
-  participant links, `upsertContacts`). Never truncate-then-refill: each statement commits on its own
-  and flushes the reactive queries, and several readers are UN-debounced, so the empty intermediate
-  state is genuinely rendered AND acted on — a chat momentarily holding zero participant rows titles
-  itself with the raw phone number and answers "unknown" to the unknown-sender gate, which DROPS the
-  notification for good (a one-shot decision with no retry), and an emptied `contacts` table did the
-  same to every notification name and blanked the recipient picker for seconds. Resolve the new set
-  first (pure JS), insert it, then delete only what is genuinely gone: the worst observable state is a
-  superset — a duplicate, or one since-removed member — which readers already tolerate. With no unique
-  index to upsert on (`contacts.source_id`), note `MAX(id)` BEFORE inserting the new generation and
-  delete `<= cutoff` after (ids are AUTOINCREMENT, so the cutoff can never match a row you just wrote).
-  Decide explicitly what an EMPTY input means: for `upsertChats` participants it is "no information"
-  and is SKIPPED (a degraded server read emits `participants: []` for a whole 200-chat page, which
-  would blank the inbox); for `upsertContacts` it is the device honestly reporting an empty address
-  book, so it clears — and readers that must not act on emptiness guard it themselves
-  (`matchContactsToHandles`).
+- Work in verified milestones. A homogeneous proof-only batch may cover roughly 40–60 audit records;
+  keep concurrency, native-effect, crypto, migration, or lifecycle changes closer to 20–30. Split
+  implementation into focused steps, but update inventory/docs and run the full Jest gate once at
+  the milestone end.
+- Use focused tests, typecheck, and the relevant scanner/guard while iterating. Run broad architecture,
+  migration, and full functional gates once after the candidate is frozen.
+- Format every touched source/test file before the final scanner pass or inventory edit. Never freeze
+  callback-fingerprint ids and then run a formatter that can rekey them.
+- Run `npm run check:db-writes:fast` for ordinary DB-write milestones. Run
+  `npm run check:db-writes:full` whenever scanner algorithms or certificate implementations change,
+  when the incoming-ingress proof changes, and when closing parent `DB-02A`; the full command includes
+  the intentionally slow adversarial ingress matrix. A reviewed path/ID data-only addition uses the
+  fast scanner plus an exact-set test and does not require the unrelated ingress mutation sweep.
+- Use one implementer by default. Add one independent reviewer only for concurrency, scanner,
+  migration, crypto, native, or other high-risk changes.
+- Do not produce per-file hash manifests, repeated historical narratives, or full raw command output
+  unless reconciliation or a failure investigation requires them.
+- Preserve the dirty worktree and unrelated user changes. Use `apply_patch` for edits.
+- On a real failure, show the exact error and explain it before correcting it. After two failed
+  correction attempts, stop and rethink the diagnosis.
+- Before claiming completion, reread the diff skeptically and show concrete verification output.
 
-## UI gotchas
-- **Android edge-to-edge keyboard:** Expo SDK 57 / RN 0.86 enable edge-to-edge by default, so
-  legacy `windowSoftInputMode=adjustResize` does NOT push content up — a bottom composer hides
-  behind the keyboard. Wrap chat-style screens in `<KeyboardAvoidingView behavior="padding">`
-  (not `undefined`/`height`) to consume the keyboard inset. See `app/(app)/chat/[guid].tsx`.
-  **AND: a bottom bar inside that KAV must take the UNION (max) of the keyboard and the nav bar,
-  never their SUM** — `paddingBottom: (kbVisible ? 0 : insets.bottom) + gap`, with
-  `keyboardVerticalOffset` left at 0. `useSafeAreaInsets().bottom` is the NAVIGATION-BAR inset
-  (safe-area-context asks for `statusBars|displayCutout|navigationBars|captionBar`, never `ime()`),
-  so it does NOT shrink when the keyboard opens — but the keyboard COVERS the nav bar: Android's IME
-  inset is measured from the window bottom and already spans that strip (RN's own
-  `ReactRootView.checkForKeyboardEvents` subtracts `barInsets.bottom` back out of `imeInsets`).
-  Reserving it a second time is a double count and shows up as an empty band between the bar and the
-  keyboard, one nav bar tall (~32dp gesture, ~56dp 3-button). The trap that produced it: the two
-  screens used to CANCEL that reservation with `keyboardVerticalOffset={-insets.bottom}` on the KAV.
-  That balances ONLY while the KAV is doing the lifting — RN clamps the KAV's padding at
-  `Math.max(…, 0)` (`KeyboardAvoidingView.js`) and the bar's own padding is NOT clamped, so the
-  instant the KAV contributes 0 (the window itself resizing for the IME) the cancellation vanishes
-  and the full band appears, while the offset is invisible in Jest (no soft keyboard, zero insets).
-  Union-plus-no-offset is correct in BOTH regimes. The two halves must move together — re-adding the
-  offset now pushes the composer BEHIND the keyboard. Applied to `Composer`, the chat selection bar,
-  and the inbox search bar; guarded by `composerKeyboardInset.test.tsx` (padding arithmetic against a
-  non-zero inset) + a KAV-props assertion in `routes/chatScreen.test.tsx`. Related: the attachment
-  tray and the keyboard are mutually exclusive (the tray sits BELOW the input row at a fixed 104dp),
-  but Android's Back closes the IME WITHOUT blurring the input, so tapping the still-focused field
-  reopens the keyboard and fires NO `onFocus` — the Composer closes the tray on the keyboard-visible
-  transition to cover that path.
-- **FlashList v2 has no `inverted` prop.** For chat (newest at bottom), render chronological
-  (oldest→newest) data with `maintainVisibleContentPosition={{ startRenderingFromBottom: true }}`.
-- **expo-video: calling a method on a released player crashes** ("Cannot use shared object that
-  was already released" — surfaces only on-device, not in tsc/jest). `useVideoPlayer` auto-
-  releases on unmount, so a `useFocusEffect` cleanup that calls `player.pause()` can hit an
-  already-released player when the row unmounts. Wrap such calls in `try/catch`. See
-  `src/ui/attachments/VideoPlayer.tsx`.
-- **Download progress is presentation-only.** Byte progress flows expo-file-system
-  `createDownloadTask({onProgress})` → `downloadStore` (zustand) → ring/spinner. The actual
-  image/video swap MUST stay driven by the reactive `localPath` DB write (`updateAttachmentLocalPath`),
-  never the store — rendering from store state bypasses the op-sqlite reactive flush.
-- **UPLOAD progress needs `createUploadTask`, NOT `uploadAsync` — and the LEGACY module, not SDK 57's
-  `File` API.** `uploadAsync` and `createUploadTask` build the IDENTICAL request (both go through the
-  native `createUploadRequest`); the only difference is that `uploadAsync` passes a no-op body decorator
-  while the task form wraps the body in a counting one — so the task is the ONLY variant that emits byte
-  progress, and the only one with a cancel handle. On Android the counting decorator wraps just the FILE
-  part (`FileSystemLegacyModule.createRequestBody`), so the reported total is the file's exact length,
-  not the multipart envelope; native throttles events to one per 100 ms. Do NOT "modernize" this to
-  SDK 57's `File.createUploadTask`: it round-trips the source uri through `new URL()` (the same
-  non-special-scheme mangling documented for shared-in `content://` uris) and its own docs warn its
-  multipart byte counts may include framing overhead. A CANCELLED task resolves `null` instead of
-  rejecting — deref that and you crash; it maps to `ApiErrorKind 'cancelled'` → `ClientErrorCode.userCanceled`,
-  because without a name it reported as "Connection Refused". `UploadTask.uploadAsync()` also unsubscribes
-  from the native progress event ONLY on success, so a rejected upload leaks a listener unless you release
-  it yourself. Progress is keyed by ATTACHMENT guid (what the bubble renders under), never the message temp
-  guid. `uploadStore` SETTLES BY REMOVING the entry (unlike `downloadStore`, which parks at `idle`): the
-  entry set IS "is anything uploading" for the composer bar, and a retained entry leaves a stale 100% ring
-  on a recycled FlashList row — and a late native event must never resurrect a settled entry. Cancel is
-  registered BEFORE the concurrency gate, or every file still queued behind the 2-slot cap is
-  uncancellable — exactly the big-batch case where the user wants out. Full design + the device-only
-  checks: `docs/UPLOAD_PROGRESS.md`.
-- **A plain `View` carrying `accessibilityRole`/`accessibilityLabel` announces NOTHING without
-  `accessible`.** RN only makes Text/touchables accessibility elements implicitly; on a bare View the role
-  and value are dropped and TalkBack reads the children as separate unlabelled nodes. Caught by
-  `getByRole` failing in `uploadStatusBar.test.tsx` — a lesson worth generalizing: query by ROLE, not
-  testID, for anything with an a11y contract, since `getByTestId` passes happily on a tree no screen
-  reader can use.
-- **Notifications use `react-native-notify-kit`** (the Invertase-recommended, TurboModules-only drop-in
-  fork of the archived `@notifee/react-native`; the named exports + API are 100% identical, so imports
-  are just `from 'react-native-notify-kit'`). It's autolinked and, since 9.2.0, its native core COMPILES
-  FROM SOURCE — so there is NO local `app.notifee:core` AAR and NO `extraMavenRepos` workaround (the old
-  notifee note here was obsolete and is deleted). Its Expo config plugin is NOT needed either — the plugin
-  only covers iOS extensions / an Android foregroundService, neither of which this app uses. GOTCHA: unlike
-  notifee it does NOT auto-merge `POST_NOTIFICATIONS`, so that permission is declared EXPLICITLY in
-  `app.config` `android.permissions` (API 33+ runtime notification permission). Needs no Google Play Services.
-- **RN/Metro can't do dynamic `import(variable)`** — a `const x='lit'; import(x)` is constant-folded
-  and resolved (fails for uninstalled pkgs), and a runtime-built specifier throws "Invalid call".
-  For a deferred/optional native module (e.g. the gated FCM transport), don't import it at all —
-  inject the dependency (pass the module instance into a constructor) so the bundle never references it.
-- **notify-kit `AndroidStyle.MESSAGING` person.icon must be a string when present.** Passing
-  `icon: undefined` throws at displayNotification; spread it conditionally. EventType values differ
-  from some docs — always compare against the `EventType.ACTION_PRESS` constant, never a literal.
-- **Every headless registration must be imported from `index.js` (the bundle entry) — NOT from
-  `app/_layout.tsx`.** This is the corrected form of an earlier note that said `_layout` was enough; it
-  is NOT, and that mistake silently broke killed-app push. `setBackgroundMessageHandler` (RNFB),
-  `notifee.onBackgroundEvent`, and `TaskManager.defineTask` all register a named headless task that
-  Android looks up the instant it wakes the app — with NO render. But `app/_layout.tsx` is a ROUTE
-  module: expo-router loads it lazily through its `require.context` at RENDER time, so a headless wake
-  never evaluates it and the task is never registered. Symptom (logcat, release build):
-  `D/RNFirebaseMsgReceiver: broadcast received for message` immediately followed by
-  `W/ReactNativeJS: No task registered for key ReactNativeFirebaseMessagingHeadlessTask` — the push is
-  dropped with no app-side log at all. It masquerades as FLAKY push, because delivery keeps working
-  while the process happens to still be alive from the last time the user opened the app, and dies
-  the moment Android reclaims it. So `package.json` `main` is `index.js`, which imports the three
-  side-effect modules and THEN `expo-router/entry` (last — it registers the root component).
-  VERIFY WITH `adb shell am kill <pkg>`, NEVER `am force-stop`: force-stop puts the app in Android's
-  "stopped" state where the OS cancels ALL broadcasts until a manual launch (logcat shows
-  `broadcast intent callback: result=CANCELLED`), so the bug looks unreproducible. `am kill` mimics
-  real memory reclamation and still delivers pushes. Server-side proof that delivery itself is fine:
-  the `send-test-notification` admin channel returns `{sent, failed}` per device.
-- **A notification tap only reaches `onForegroundEvent` when the Activity is RESUMED.** notify-kit routes a
-  PRESS to the foreground emitter ONLY if the app is truly on-screen; a tap while the app is
-  alive-but-backgrounded (the COMMON case) is delivered to the headless `onBackgroundEvent`, which has no
-  router and cannot deep-link. So navigating to the chat must happen at foreground time, not in the press
-  handler: `onBackgroundEvent` stashes the tapped chat via `stashPendingNotification` (`pendingNav.ts`), and
-  `app/(app)/_layout.tsx` DRAINS it on every AppState `active` (plus `getInitialNotification()` for the
-  killed-app cold-start) through `drainNotificationTap`, which reads both sources and opens the chat exactly
-  once. Reading `getInitialNotification()` only once on mount is NOT enough — it never re-fires for a
-  background-alive resume, so the thread never opens. Keep `drainNotificationTap` idempotent (no-op when
-  nothing is pending; single navigation when both sources describe the same press).
-- **A free-text "To:" field must treat the TYPED-BUT-UNCOMMITTED text as a recipient, and its commit handler
-  must resolve from the INCOMING text — not from state.** Two separate device-found bugs in `new-chat.tsx`,
-  both silent:
-  (1) `canStart` required `recipients.length > 0`, and the only things that committed a chip were a trailing
-  comma and `onSubmitEditing`. So typing a number that isn't a saved contact and tapping **Start** did
-  NOTHING — no chat, no dialog, not even a log line. Fix = derive a `pendingRecipient` from the raw query and
-  include it in an `effectiveRecipients` used by BOTH `canStart` and the create call. Gate it on a loose
-  `looksLikeAddress` (email needs `@` with text either side; phone needs ≥7 digits) so a half-typed contact
-  NAME like "Aar" can never start a garbage chat — the server stays the real validator.
-  (2) The comma branch called a `commitRaw()` that read the PREVIOUS `query` and never called `setQuery(t)`,
-  so a **paste** of `"+1555…,"` — one change event carrying address AND comma — committed nothing and silently
-  ERASED the field. Typing char-by-char masked it because `query` was already populated by then. Resolve from
-  the event's text; when it isn't addressable keep it visible minus the comma instead of dropping it.
-  TEST TRAP: every pre-existing test fired `submitEditing` first, which is exactly why the suite was green
-  while Start was dead — cover the uncommitted path explicitly (`newChatScreen.test.tsx`).
-- **Send-contact posts STRUCTURED fields; the SERVER builds the vCard.** The `send-contact` endpoint
-  (`POST /api/v1/message/contact`) takes `{ firstName, lastName, organization, phones[], emails[] }` and
-  the server assembles the vCard 3.0 + sends it as an attachment (client builds no file). Gate the UI on
-  `serverInfo.supports_send_contact` (`useSendContactSupported`) — the tray's "Contact" button is only
-  passed a handler when true. The optimistic bubble is a TEXT placeholder (the contact's display name)
-  until the live `new-message` echo swaps in the rendered `.vcf` card; that brief text-then-card is
-  expected. See `sendContactService.ts` + `pickContact` (`contactsService.ts`).
-- **Share-INTO-Gator capture must live at the ROOT, above the lock/auth gate — split from navigation.**
-  A picture shared from another app arrives as an Android `SEND` intent (`expo-share-intent`, autolinked;
-  the plugin adds the `SEND`/`SEND_MULTIPLE` filters — confirm a shipped build has them by grepping the
-  `.aab` manifest, not by trusting `app.config.ts`, since `android/` is gitignored and EAS re-prebuilds).
-  The killer bug: capturing via a single `useShareIntent()` mounted DEEP inside `(app)` drops the intent
-  when the share KILLED-or-LOCKED-launches the app — `(app)` (hence the handler) hasn't mounted yet, and
-  pushing a route from there races the not-yet-ready navigator. Fix = the library's canonical pattern:
-  `<ShareIntentProvider>` at the app root (`app/_layout.tsx`) with a `ShareIntentCapture`
-  (`useShareIntentContext`) that ONLY stashes into `shareIntentStore`; a separate `ShareIntentNavigator`
-  in `(app)/_layout.tsx` drains the store → `/new-chat` once the connected app is mounted. Pass
-  `resetOnBackground:false` (we clear the native intent ourselves after capture) so the app-switch flicker
-  doesn't wipe the pending share. Don't wrap the capture in a silent `fallback={null}` boundary — log via
-  `onError`. Device-only: jest has no native half. See `src/ui/ShareIntentHandler.tsx`.
-- **NEVER trust `expo-share-intent`'s PARSED file `path` — read the RAW `onChange` payload and copy the
-  `content://` uri yourself.** (v8.0.1, the latest published — there is no upstream fix to wait for.) This is
-  why sharing a PDF appeared to do NOTHING. Four separate traps, only the first fixable from JS:
-  (A) native `getAbsolutePath` returns a RAW `/storage/emulated/0/…` path for the Files app (unreadable:
-  no `READ_EXTERNAL_STORAGE` above API 32 + scoped storage) and a BOGUS `/document/acc=1;doc=…` for any
-  DocumentProvider it doesn't special-case (Drive/Dropbox/carrier apps). It only stream-copies into cacheDir
-  for MediaStore uris — which is exactly why IMAGES work and documents don't. Worse, `parseShareIntent`
-  prefers that bad value (`path: file.path || 'file://'+filePath || contentUri`) and then DROPS `contentUri`,
-  the one source that always works. (B) `getFileInfo` uses `!!` on `resolver.query`/`resolver.getType` and
-  reads a possibly `-1` column index → the native side THROWS before JS hears anything. (C) a file delivered
-  via `ClipData` instead of `EXTRA_STREAM` only reports `"empty uri for file sharing"` on `onError`.
-  (D) the `!activity.isTaskRoot` re-broadcast (lines 115-123) loses the transient uri read grant.
-  FIX: subscribe to the RAW module (`ShareIntentModule.addListener('onChange'|'onError')` — it IS exported,
-  and Expo emitters allow multiple listeners, so `<ShareIntentProvider>` can stay mounted for its cold-start
-  pumping while nothing reads its parsed state). `src/services/share/` then prefers `contentUri`, rejects
-  SAF-junk paths, and copies into `<cache>/shared-in/<batchMs>/` via **legacy** `expo-file-system`
-  `copyAsync` (it passes the source string to native untouched; the modern `File` API round-trips it through
-  `new URL()` and mangles a non-special scheme). THREE non-obvious rules: copy at CAPTURE time, not send time
-  (the read grant is task-scoped and `sendAttachmentService` persists the path into `attachments.localPath`
-  for the retry queue to re-read after a restart); ALWAYS re-stat after copying (the SAF branch resolves
-  without writing when the provider reports no display name); and skip non-object entries in `files` (an
-  upstream bracket bug at `ExpoShareIntentModule.kt:145` injects a junk array into every single-file SEND).
-  ALWAYS subscribe to `onError` — not doing so is what made every one of these failures perfectly silent.
-  Full analysis, the four traps, and the device decision-tree: `docs/SHARE_INTENT_RELIABILITY.md`.
-- **An unreadable local file is NOT a network error.** `attachmentUpload.ts` used to wrap every
-  `uploadAsync` throw in `ApiError('no_connection')`, so a missing/ungranted file rendered as a red bubble
-  labelled "Connection Refused" (code 10004) and sent the user chasing their server. There is now a
-  `local_file` `ApiErrorKind` → `ClientErrorCode.attachmentUnreadable` (10009, "Attachment Unavailable"),
-  chosen by a pre-flight `expoFileExists` plus the pure `isLocalFileFailure` classifier
-  (`src/services/send/uploadErrors.ts` — kept separate so it's node-testable).
-- **Share-sheet PROMINENCE (top "Direct Share" row) = declaration + runtime shortcuts, split across two layers.**
-  Declaring `SEND` intent filters only puts the app in the sheet's lower all-apps list. Two pieces get it into
-  the priority row: (1) `plugins/withShareTargets.js` writes the `<share-target>` (`res/xml/shortcuts.xml`) +
-  `android.app.shortcuts` meta-data on MainActivity — the DECLARATION; (2) the LOCAL native module
-  `modules/gator-share-shortcuts` (autolinked, Android-only) PUBLISHES long-lived dynamic `ShortcutInfoCompat`s
-  (one per recent chat, tagged with the SAME `…category.SHARE_TARGET` category + a `Person`) via
-  `ShortcutManagerCompat`. Both category strings MUST match or Android surfaces nothing. THE `<share-target>`
-  MIME LIST IS A HARD FILTER: it declares `*/*` because listing only `image/*`/`video/*`/`text/*` meant a shared
-  PDF matched no share-target and the priority row came back EMPTY even though the shortcuts published fine
-  (it must stay a subset of the SEND filters in `app.config.ts`, which are `*/*`). Icons MUST be decoded through
-  `contentResolver.openInputStream` — expo-contacts stores the address book's `content://com.android.contacts/…`
-  `PHOTO_THUMBNAIL_URI`, which `BitmapFactory.decodeFile` cannot open, so every chip fell back to the launcher
-  icon; `IconCompat.createWithContentUri` is NOT a substitute (the system process has no READ_CONTACTS grant).
-  Don't hardcode the count — `getMaxShortcutCountPerActivity()` (devices allow ~10-15) then clamp, because
-  `setDynamicShortcuts` THROWS when the list exceeds it. `publishShareShortcuts(rows, {redacted})` de-dupes on
-  the SERIALIZED payload, not the guids: a guid-keyed memo silently ignored a renamed chat or a contact-photo
-  backfill. Redacted mode publishes NOTHING and must actively CLEAR — dynamic shortcuts are persistent system
-  state that outlives the process, so "we haven't published this session" is not a reason to skip clearing.
-  `refreshShareShortcuts()` (lazily imports `@db/database`/the redacted store, which would otherwise drag
-  op-sqlite into this module's node-test import graph) covers the paths where the inbox never mounts.
-  Notifications CANNOT carry a matching `shortcutId` — `react-native-notify-kit` strips the field — so
-  `reportShortcutUsed` (from `useChatNavigator`) is the only affinity signal. `forget()` clears them.
-  Delivery: a Direct Share tap delivers the SEND intent to MainActivity with
-  `EXTRA_SHORTCUT_ID` (the chat guid) — expo-share-intent does NOT surface it, so the module captures it
-  (OnNewIntent for the running app; a `ReactActivityLifecycleListener` for cold start, mirroring
-  expo-share-intent's singleton) and exposes `getLaunchShortcutId()`. `ShareIntentNavigator` reads it → routes
-  to `/chat/<guid>?share=1` (the chat consumes the staged share into the Composer via `initialAttachments`)
-  instead of `/new-chat`. All JS→native calls go through `requireOptionalNativeModule` + try/catch, so a
-  pre-rebuild bundle / Jest just no-ops. Native (Kotlin) can't be jest-tested, but it CAN be type-checked
-  cheaply without a full APK build:
-  `cd android && ./gradlew :gator-share-shortcuts:compileDebugKotlin --no-daemon` (~20s on a warm cache).
-  Verify autolinking with `npx expo-modules-autolinking search -p android` and the manifest via `expo prebuild`.
-  GOTCHA: an `AsyncFunction` block must not END on `runCatching {…}` — the bridge has no converter for a
-  Kotlin `Result`; finish on a statement (e.g. an `if` without `else`) so the block's value is `Unit`.
-- **Pasting pictures/files into the composer needs a native listener — RN's TextInput can NEVER do it.**
-  `ReactEditText` (RN 0.86) never calls `EditorInfoCompat.setContentMimeTypes`, so Gboard refuses image/GIF/
-  sticker insertion ("this app doesn't support image insertion here"); worse,
-  `ReactEditText.onTextContextMenuItem` (`ReactEditText.kt:366-369`) rewrites EVERY `android.R.id.paste` into
-  `pasteAsPlainText`, so the system long-press Paste `coerceToText`s an image and drops a raw `content://…`
-  STRING into the input. Grepping the whole `react-native` package for `setContentMimeTypes|
-  OnReceiveContentListener|InputConnectionCompat` returns ZERO files, and there is no JS paste event at all.
-  THE FIX IS ONE CALL ON THE VIEW RN ALREADY BUILT — no fork, no subclass, no custom ViewManager:
-  `ReactEditText` extends androidx `AppCompatEditText`, which ALREADY contains the whole receive-content
-  implementation (the `setContentMimeTypes` + `InputConnectionCompat` wiring for API ≤30, and
-  `AppCompatReceiveContentHelper`, which intercepts BOTH `paste` and `pasteAsPlainText` — so RN's rewrite
-  still routes through it); API 31+ gets it from the framework `TextView`. It is simply DORMANT until a
-  listener is registered. `modules/gator-paste-input` (local Expo module, autolinked, Android-only) resolves
-  the input via `appContext.findView<EditText>(tag)` and calls `ViewCompat.setOnReceiveContentListener(view,
-  ACCEPTED_MIME_TYPES, …)` — which lights up long-press Paste, keyboard image/GIF/sticker commits AND
-  drag-and-drop at once, for ANY mime type including PDFs. THE MIME LIST MUST NOT BE `"*/*"` (device-only
-  failure, found by logcat: `W GatorPasteInput: attach failed: A MIME type set here must not start with *`)
-  — AOSP `View.setOnReceiveContentListener` hard-rejects any entry starting with `*`, so the whole attach
-  throws and paste stays silently broken; a wildcard is legal in the SUBTYPE only, so enumerate the IANA
-  top-level types (`image/*`, `video/*`, `application/*`, …). NOTE this is the EXACT OPPOSITE of the
-  manifest `<share-target>` above, which does take a literal `*/*` — unrelated APIs, opposite rules.
-  FOUR further non-obvious rules: (1) pass
-  `findNodeHandle(ref)` as a plain **Int**, never the ref object — Expo's ref converter reads `nativeTag`
-  while RN 0.86 Fabric exposes `__nativeTag`; (2) attach from the TextInput's **`onLayout`**, not a mount
-  effect — `findView` goes through the UIManager's mounting layer and finds nothing before the Fabric mount
-  lands (and it's `@UiThread`, so the AsyncFunction needs `.runOnQueue(Queues.MAIN)`); (3) call
-  `InputMethodManager.restartInput` after attaching — `contentMimeTypes` is only read when the input
-  connection is CREATED, so an already-focused field keeps advertising text-only; (4) COPY THE URI TO CACHE
-  **synchronously inside the listener** — for a keyboard commit androidx calls `releasePermission()` the
-  moment the listener returns, so a uri forwarded to JS is already dead (same transient-grant lesson as
-  `docs/SHARE_INTENT_RELIABILITY.md`). Because that copy is on the UI thread it is byte-bounded (`MAX_BYTES`)
-  so a huge pasted file can't ANR. Return the non-uri REMAINDER from the listener or ordinary text paste
-  breaks. JS half: `src/services/paste/` (`pastePayload.ts` is pure/node-tested; `pasteInput.ts` uses
-  `requireOptionalNativeModule` so a pre-rebuild bundle and Jest no-op). NOTE `findNodeHandle` returns NULL
-  under react-test-renderer — a component test must mock
-  `react-native/Libraries/ReactNative/RendererProxy`.
-- **Additive migrations are appended to `MIGRATIONS` by name** (`src/db/migrations.ts`); `runMigrations`
-  skips already-applied names and wraps each in BEGIN/COMMIT. Use `ALTER TABLE ADD COLUMN` (no
-  `IF NOT EXISTS` — SQLite lacks it; the name-guard is the idempotency). Never edit an applied migration.
-  Mirror new columns into schema.ts + the zod model + `upsertMessages` (value + conflict set) +
-  `listMessagesWithSenders` + the `MessageRow` interface — and any test helper that builds a `MessageRow`
-  literal (tsc passes but ts-jest fails on the missing required field).
-- **Theme is preset-driven, not OS-scheme:** `useThemeStore` (preset key persisted in `kv`) → `ThemeProvider`
-  → `resolvePreset(key)` tokens. Every component reads `useTheme().color.*`, so switching the preset recolors
-  the whole tree with no per-component edits. Hydrate the store in the root mount effect.
-- **`groupedBackground` IS `background` in BOTH shipped presets — never use it to make a surface stand out.**
-  OLED Dark `#000000` and Gator `#0B1A2B` define the two byte-identical; only `secondaryBackground`
-  (`#1C1C1E` / `#16293E`) is distinct from `background` in every preset. A shared-media tile styled
-  `groupedBackground` therefore vanished into the page, so a poster-less video rendered as a bare ▶ floating on
-  nothing ("Videos · 12" showed naked play arrows beside a healthy "Photos · 60"). Two rules fall out: pick the
-  token by CONTRAST against its parent, not by name; and assert it across `PRESET_ORDER` rather than the
-  default preset alone, or a preset-specific collision stays invisible (`mediaSections.test.tsx` loops).
-- **An unstyled `<Text>` is near-BLACK on Android, so a glyph on a dark surface needs an explicit themed
-  colour.** `styles.thumbGlyph` set only `fontSize`, which was masked for as long as its tile was invisible —
-  fixing the token above immediately surfaced a black ▶ on a dark tile. Sibling styles that hardcode `#FFF`
-  (e.g. an overlay drawn over a poster) are NOT evidence the fallback branch is covered; they're different
-  branches. Anything drawn on a themed surface reads its colour from `useTheme().color.*`.
-- **Never give a text container a fixed `height` — system font scaling multiplies the text but cannot shrink
-  the box.** Use `minHeight` + vertical padding. The inbox search field pinned `height: 38` with `fontSize: 16`,
-  so at Android's larger accessibility sizes the placeholder was clipped top AND bottom (verified at
-  `font_scale 1.5`; restore the user's original value afterwards — theirs is `0.85`, not `1.0`). The composer
-  scaled fine because it already sized this way, which is the pattern to copy. Header, bubbles and tiles were
-  all clean, so audit by SETTING the scale rather than reasoning about it: `adb shell settings put system
-  font_scale 1.5`. Guard: `conversationListScreen.test.tsx` asserts no fixed `height`.
-- **An OG-metadata decoder MUST handle HEX numeric entities (`&#x27;`), not just decimal + named.** The hex
-  form is what Jinja2/Django/Rails emit by DEFAULT, so a named-only decoder leaves a literal `&#x27;` sitting
-  in real preview titles (found on a live card reading `Tyler&#x27;s Barbeque`; that page's `og:site_name`
-  carried it too). Order matters: decode `&amp;` LAST, or an escaped entity (`&amp;#x27;`) double-decodes into
-  an apostrophe instead of the literal text. Clamp out-of-range code points rather than letting
-  `String.fromCodePoint` throw. NOTE previews are cached in `url_previews` for **7 days**, so a decoder fix
-  does NOT repair rows already stored — to re-check on device, change the cache key (add a query param) rather
-  than concluding the fix failed. See `ogParser.test.ts`.
-- **URL-preview fetch hits an attacker-controlled URL** — guard it: http(s)-only, `content-type: text/html`,
-  size + AbortController-timeout caps, render as plain `<Text>` (no HTML interpretation), and do NOT route it
-  through `HttpClient` (keeps the server auth header off third-party sites). RN `fetch` is not CORS-limited.
-- **notify-kit `TimestampTrigger.timestamp` must be STRICTLY in the future** — it throws
-  `'trigger.timestamp' date must be in the future` otherwise (device-only; the jest mock can't catch
-  it). A minute-granularity picker that floors to `:00` yields a past timestamp once seconds elapse,
-  so clamp the picked time to `max(picked, now + 60s)` before scheduling (see `pickFutureDateTime`).
-  Use `alarmManager: { type: AlarmType.SET_AND_ALLOW_WHILE_IDLE }` for an INEXACT doze-friendly alarm
-  that needs NO `SCHEDULE_EXACT_ALARM` permission (exact alarms throw a SecurityException on API 31+).
-- **kv-hydrated zustand stores must guard `getDatabase()`** — it throws if the DB isn't open yet, and
-  the root `_layout` effect runs the hydrate before connect. Wrap hydrate/persist in try/catch (leave
-  `hydrated` false on failure) and re-hydrate once the DB is open (home mount). See `themeStore`/
-  `syncSettingsStore`. Forgetting the guard crashes the app with a LogBox "Database not initialized" overlay.
-- **attributedBody runs may not tile the whole string** — iMessage often emits a single mention run
-  inside a longer message, leaving gaps. A parser that only emits each run's range silently DROPS the
-  uncovered text. Track a cursor and emit `[cursor, run.start)` + the trailing remainder as plain runs
-  (see `parseAttributedRuns`). The upstream format carries NO bold/italic/underline attributes (grep the
-  Flutter `lib/` for `kIMText*` → zero hits), so rich text is mentions + links only.
-- **A reaction's `associatedMessageGuid` arrives PART-PREFIXED — strip it or incoming reactions never
-  link.** The wire carries the linkage as `p:0/<guid>` (text part) or `bp:0/<guid>` (attachment part),
-  while the target message's OWN `guid` is bare. Left raw, the reaction row stores fine but its
-  `WHERE associated_message_guid IN (<bare guids>)` join never matches, so OTHER people's reactions
-  attach to nothing and stay invisible (your own show because the optimistic insert + guid-keyed
-  echo-reconcile use the bare target guid). Normalized ONCE at the schema boundary — the `Message`
-  zod field runs `stripAssociatedGuidPrefix` (`@core/reactions/reactionType`, everything after the last
-  `/`) so EVERY ingestion path (live socket/FCM `Message.safeParse` + sync `MessageList`) + the
-  echo-match in `reconcileEchoByContent` get the bare guid for free. Mirrors the Flutter reference
-  (`message.dart`: `.replaceAll("bp:", "").split("/").last`); `threadOriginatorGuid` (replies) is NOT
-  prefixed, so this is reaction-specific. Migration `0026_strip_associated_guid_prefix` backfills rows
-  stored raw before the fix. Tapping a bubble's reaction badges opens `ReactionDetailsSheet` (who
-  reacted, honoring redacted mode); the sheet is list-owned like `FailedMessageSheet`, so a test
-  rendering `MessageList` without a `SafeAreaProvider` must mock it out (it calls `useSafeAreaInsets`).
-- **The long-press reaction/action menu is ANCHORED to the pressed bubble's measured rect (iMessage-
-  style), not a bottom sheet.** `MessageBubble` `measureInWindow`s itself on long-press and passes the
-  `BubbleRect` up (`onLongPress(rect)` → `MessageRow.handleLongPress(rect)` →
-  `MessageList.onLongPressMessage(msg, rect)` → `useMessageActions` stashes it as `selected.anchorRect`).
-  `MessageActionsOverlay` then floats the tapback bar ABOVE the bubble + the action menu (a scrolling
-  card) BELOW it, over a dim scrim that PUNCHES OUT the bubble's rect (4 rects around a hole) so the
-  pressed bubble stays bright ("lifts") — the real bubble showing through the transparent `Modal`, no
-  snapshot. WHERE each piece goes is pure, node-tested math in `@utils`/`reactionMenuLayout.ts`
-  (`placeReactionMenu`): the bar flips BELOW when the bubble hugs the top, the menu stacks ABOVE the bar
-  when it hugs the bottom, the menu scrolls past `menuMaxHeight`, and both hug the bubble's near side
-  (own→right, received→left). The overlay keeps a NO-RECT FALLBACK sheet — used when measure fails AND
-  by the component tests, which build `SelectedMessage` without `anchorRect` — so `anchorRect` MUST stay
-  OPTIONAL and every control must render in both branches (the picker buttons + action list are built
-  once and shared). Reaction/action BEHAVIOR (labels, toggle-to-remove, +-emoji, action gating) is
-  unchanged and still locked by `messageActionsOverlay.test.tsx`/`emojiReactions.test.tsx`; only the
-  layout moved. DEVICE-ONLY caveat: `measureInWindow` returns WINDOW coords and Android edge-to-edge can
-  offset them by the status-bar height vs the `Modal`'s origin — clamped with safe-area insets, but
-  pixel alignment is verify-on-device (`reactionMenuLayout.test.ts` covers the math; native
-  touches/`measureInWindow` can't run under jest). Pure JS change → no native rebuild.
-- **Backups must filter secret-looking kv keys + delete the cache export file.** The export reads only
-  `kv`/`themes`/whitelisted `chats` columns (never SecureVault/messages/handles) and drops any key
-  matching `/password|token|secret|credential|auth|key/i`; the plaintext file written to `Paths.cache`
-  is deleted in a `finally` after the share sheet so it doesn't linger. See `src/services/backup/`.
-- **iMessage send-effects ship JS-only via RN `Animated` (no Reanimated/Skia).** Bubble effects
-  (slam/loud/gentle) animate `scale`/`opacity` once on mount; invisible-ink hides text behind a
-  tap-to-reveal `Pressable`. Full-screen effects (confetti/balloons/…) are JS particles driven by ONE
-  native-driver `Animated.Value` interpolated per-particle (cheap). Always `return () => anim.stop()`
-  from the `useEffect` — `MessageBubble` lives in a recycling FlashList, so an uncleaned animation
-  bleeds transform state onto a recycled row. The overlay must be `pointerEvents="none"` (it floats
-  over the chat and auto-dismisses; a touch-catching `Pressable` would freeze scrolling for ~2.6s).
-  Map effects from `expressiveSendStyleId` (the 12 exact ids in `src/core/effects/effectsMapper.ts`).
-- **A server-supplied URL opened via `Linking.openURL` MUST be scheme-validated.** The FaceTime answer
-  endpoint returns a `link` (zod `z.string()`); a compromised server could return `intent://`/`tel:`/a
-  deep link. Whitelist (`facetime:` / `https://facetime.apple.com/`) before `openURL`. Same principle as
-  the URL-preview hardening — never trust server/3rd-party content blindly.
-- **Every notification body must honor the `hidePreview` toggle.** When adding a new notify-kit path
-  (FaceTime caller name, etc.), redact under `hidePreview` like `postNotification`/the reminder path do —
-  it's easy to leak identity on the lock screen by forgetting it. Android full-screen-intent call
-  notifications (`fullScreenAction`, `AndroidCategory.CALL`) need `USE_FULL_SCREEN_INTENT` in
-  `app.config` `android.permissions` on API 34+, else they degrade to heads-up (and that needs a rebuild).
-- **Deferred native transports/modules are dependency-INJECTED so Metro never bundles the uninstalled
-  package** and the build stays green. `FcmPushTransport` takes the `@react-native-firebase/messaging`
-  instance via its constructor; `pushTransport.ts` imports none of it (enabling FCM means installing the
-  package + `google-services.json`, then wiring it from a new module — see the file's doc).
-- **Timer-driven deferred work needs a DB-level claim, not just a `useRef` guard.** The scheduled-message
-  ticker fires from BOTH `home.tsx` (mount) and every open `chat/[guid].tsx` (mount + 20s interval), and a
-  send can outlast the 20s interval — so two runs can read the same `pending` row before either marks it sent.
-  The fix is an atomic claim (`UPDATE scheduled_messages SET status='sending' WHERE id=? AND status='pending'
-  RETURNING id`): exactly one caller gets the row back, the rest skip — this is the real lock (a component
-  `useRef` only de-dupes within one screen). Pair it with an `attempts` cap → `status='error'` so a row whose
-  send always throws (deleted chat) stops retrying, and a startup `sending → pending` reset to recover crashes.
-  See `runDueScheduled` (`src/services/send/scheduleService.ts`) + `claimScheduled`/`markScheduledFailed`/`resetStuckScheduled` (`src/db/repositories/scheduled.ts`).
-- **`React.memo` on a list row is INERT unless the list passes STABLE callbacks.** Memoizing `MessageRow`/
-  `MessageBubble`/`ConversationTile` does nothing if `renderItem` hands them a fresh `() => …` closure each
-  render (the new function fails the shallow prop compare). Pattern: wrap the parent handler in `useCallback`
-  AND make it take the item (`onRetry?: (msg) => void`), then bind the item INSIDE the memoized row
-  (`onRetry={onRetry ? () => onRetry(msg) : undefined}`) — that binding closure is created on the row's own
-  render, which the memo gates. The payoff is decoupling: rows then re-render only on a real message change,
-  not on every composer/reply/selection state change in the chat screen. See `MessageList` + `MessageRow`.
-- **The item-taking callback's param type must match the ACTUAL type passed (contravariance), not a wider
-  local alias.** `MessageRow` originally typed its rows as a local `EnrichedRow` (reactions optional); the list
-  passes `EnrichedMessage` (reactions required). A handler `(m: EnrichedMessage) => void` is NOT assignable to
-  `(m: EnrichedRow) => void` (the target may call it with the wider type). Fix: type the row's `msg` + callbacks
-  with the same `EnrichedMessage` the list actually feeds — don't invent a wider local alias.
-- **A class `ErrorBoundary` needs `override` on `state`/`componentDidCatch`/`render`** (tsconfig
-  `noImplicitOverride`), else tsc errors TS4114. Mount it ABOVE the providers (it must catch a `ThemeProvider`
-  throw too), so its fallback uses literal colors, not theme tokens. See `src/ui/ErrorBoundary.tsx`.
-- **FlashList v2 auto-sizes — do NOT add `estimatedItemSize`** (removed/ignored in v2; it was a v1 prop).
-- **A `width:'100%'` image inside a content-sized card resolves to WIDTH 0 — the image "loads"
-  (`onLoad` fires) but is invisible, with no error, forever.** The origin of the long-lived
-  blank-preview-image bug: `UrlPreviewCard` was `alignSelf` + `maxWidth:'78%'` only, so the card's width
-  came from its CHILDREN — and the image's `width:'100%'` referenced that same parent. Yoga resolves the
-  cycle to 0×140: every layer looks healthy (network 200, decode OK, onLoad fires, `onError` never —
-  nothing failed), so it perfectly impersonates a network/image-library bug. It reproduced identically
-  under expo-image AND RN Image, debug AND release — the tell that it was neither library. Root-caused
-  with a standalone probe app (sideloaded, live Metro) after on-device `[preview]` lifecycle logs proved
-  decode-success-yet-blank. FIX: the card uses `width:'78%'` (constant-width, iMessage-like). RULE: a
-  percentage-sized child must have an ancestor with DETERMINED width — never `%`-size a child of an
-  `alignSelf`'d/auto-width container. (Two earlier wrong diagnoses shipped along the way — "expo-image
-  broken", "fade leaves alpha 0" — both reverted; RN `Image` + `key={imageUrl}` remains, which is fine.)
-- **A per-row horizontal swipe inside a FlashList MUST harden its `PanResponder` or the scroll STEALS the
-  gesture on some OEMs.** A `PanResponder` that only sets a mostly-horizontal `onMoveShouldSetPanResponder`
-  works on a Pixel but drops **~50% of swipes on a Galaxy S25 Ultra** (One UI): the vertical scroll wins the
-  touch-arbitration race about half the time and the swipe silently does nothing ("it just scrolls a bit").
-  Whether the scroll wins is timing-sensitive, so it looks like "works on one phone, flaky on another." Three
-  guards fix it: (1) **`onPanResponderTerminationRequest: () => false`** — once claimed, never surrender the
-  gesture back to the scroll mid-drag (THE key one — its default is `true`); (2)
-  **`onMoveShouldSetPanResponderCapture`** mirroring the move predicate — claim in the capture phase, a beat
-  before the scroll engages; (3) **`onShouldBlockNativeResponder: () => true`** (Android — block the native
-  scroll once granted; RN default, set explicitly). Shared claim predicate = `isHorizontalSwipe(dx, dy)`
-  (`@utils`/`swipeGesture.ts`, node-tested). Applied to BOTH `MessageSwipeWrapper` (swipe-to-reply) and
-  `SwipeableRow` (conversation-list actions) — both had the identical gap. Device-only to verify (jest can't
-  drive native touches); a config-level regression guard lives in
-  `test/components/conversations/messageSwipeWrapper.test.tsx` (spies `PanResponder.create`, asserts the guards).
-- **A scrollable whose children own gestures MUST set `keyboardShouldPersistTaps="handled"` — the RN default
-  is `"never"`, which EATS the touch.** Under `"never"`, while the keyboard is up ANY touch on the list is
-  consumed to dismiss it and the children never receive that touch at all. On `MessageList` this silently
-  killed swipe-to-reply whenever the composer had focus — i.e. mid-conversation, the common case. It reads as
-  the OEM gesture flakiness above but is NOT: measured identically on two vendors, which is the tell —
-  Pixel 10 Pro XL / Android 17 and Galaxy S25 Ultra / Android 16 both scored **keyboard CLOSED 4/4 and 12/12
-  replies, keyboard OPEN 0/6**. A PanResponder can't fix it (the touch never arrives), and it is list-wide,
-  not per-bubble, so probing a single Pressable proves nothing — discriminate by swiping an EMPTY area vs a
-  bubble. Every other scrollable in the app already set `"handled"`; MessageList was the outlier. Verified
-  6/6 with the keyboard confirmed up (`dumpsys input_method | grep mInputShown`). Config guard:
-  `test/components/conversations/messageListPinned.test.tsx`.
-- **Mark avatars `accessible={false}`** — they sit next to a label that already announces the name (tile title,
-  chat header), so a labeled avatar double-announces under TalkBack. Decorative-by-default is correct here.
-- **Every media bubble needs its own `accessibilityLabel` — a Pressable with none is an ANONYMOUS button.**
-  Audit method (cheap, no TalkBack needed): `uiautomator dump` and count nodes with `focusable="true"` but no
-  `text`/`content-desc`. The inbox scored 75/75 labeled with zero focusable images (avatars correctly opted
-  out per the rule above); a chat screen had SIX unlabeled focusable nodes, and their bounds identified them
-  as exactly the photo + video bubbles. `AudioAttachment`/`ContactCard`/`LocationCard` already labeled
-  themselves; `ImageAttachment` passed `emojiImageShortDescription ?? undefined` (so `undefined` for every
-  ordinary photo) and `VideoPlayer` passed nothing. Labels must state the TAP OUTCOME, not just the kind,
-  because one tap does three different things — an undownloaded item downloads, an errored one retries, a
-  local one opens/plays — a distinction sighted users read off the progress ring. See
-  `videoPlayerLabel.test.tsx` (4 branches) + `imageAttachment.test.tsx`.
-- **Never call `console.*` directly — use `logger` from `@core/secure`** (the redacting logger over a
-  `ConsoleSink`). It scrubs guid/password/token/authorization keys + `?guid=` URL params before any sink, and
-  CI fails on a raw `console.*` outside `logger.ts`. `__DEV__`-only noise → `logger.debug` (the sink drops it
-  in prod). GOTCHA: `__DEV__` is a RN runtime global that is **undefined under Jest** — never write a bare
-  `!__DEV__` (it throws `ReferenceError` in tests, surfacing only when a test exercises that path); guard with
-  `typeof __DEV__ !== 'undefined' && __DEV__` (see `ConsoleSink`).
-- **App-lock cold-boot DB-key gating: the lock-enabled flag lives in the VAULT, not the encrypted DB/kv.**
-  Chicken-and-egg — to withhold the SQLCipher key until biometric auth, you must read the setting BEFORE
-  opening the DB, so it can't live in the encrypted kv table. `boot()` (`src/services/bootstrap.ts`, re-exported
-  from the `src/services/index.ts` barrel) reads it from the vault first and only calls `hydrateSession()` (which opens the DB via `getOrCreateDbKey`) when NOT
-  locked; `completeUnlock()` opens the DB + routes after a successful auth. The lock gate is a **root-layout
-  overlay** (`app/_layout.tsx`), not the `(app)` layout — it must cover the pre-DB boot, where `(app)` hasn't
-  mounted. Enabling app-lock requires `isBiometricAvailable()` (else a user with no enrolled biometric locks
-  themselves out — and the bare emulator has none, so never enable it there).
-- **The outgoing-queue retry processor leases rows via `next_retry_at`, and skips FRESH rows via a grace
-  window.** `runOutgoingQueue` (the crash-recovery for optimistic sends) must NOT re-send a row whose UI send
-  is still in flight. Two guards: (1) `claimOutgoing` atomically pushes `next_retry_at` into the future
-  (`UPDATE … WHERE id=? AND next_retry_at<=now RETURNING id` — one runner wins, like `claimScheduled`), and
-  (2) `listRetryableOutgoing` only returns rows that are already-failed (`attempts>=1`) OR older than
-  `OUTGOING_GRACE_MS` (a just-inserted row is assumed owned by the live UI send). Backoff via
-  `outgoingBackoffMs`; retire at `OUTGOING_MAX_ATTEMPTS`. Drained from boot (home), the background task, the
-  chat screen's 20s ticker, and AppState `active` (`recoverOutgoing`) — the backoff/claims make frequent
-  drains cheap+safe; still NOT per-send. Uses `db.all(sql\`… RETURNING\`)` for the claim because it must read
-  back the claimed row (`db.run` works too but returns no rows; use it only for non-returning writes).
-  ATTACHMENTS RESEND TOO: `runOutgoingQueue` takes an injected `OutgoingQueueIO`
-  ({expo uploader, fileExists} — `outgoingQueueIO` in prod; fakes in Node tests) and re-streams the file at
-  the attachment row's `localPath` under the SAME tempGuid (server idempotency absorbs ack-lost dups);
-  file-gone/unknown-kind rows are RETIRED via `retireOutgoing` (attempts→cap), never claimed-and-skipped
-  forever. THE SWALLOW GUARD — OWNED BY THE CLAIMER, NOT THE SENDER: `resendOutgoingRow` never flips the
-  row; it must ALREADY be 'sending'. `runOutgoingQueue` does `claimOutgoing` + `markOutgoingSending` in ONE
-  `withDbTransaction` (the lease and the visible state must flip together, or a "Try Again" tap landing
-  between them re-sends under a NEW temp guid alongside the drain's attempt — two idempotency keys, one
-  message delivered twice), and `claimFailedOutgoingForRetry` does the same compare-and-set inline for the
-  manual button. ANY NEW CALLER OF `resendOutgoingRow` MUST CLAIM FIRST —
-  without that the RCS tempGuid-echo/AppleScript ack path hits `markOutgoingSentNoGuid`'s sticky-error guard,
-  the retry's SUCCESS is swallowed, and the queue re-sends the same message every drain (duplicates). The
-  content-reconcilers (`reconcileEchoByContent` + `reconcileOutgoingAttachmentByContent`) also match 'error'
-  rows so a client-side-failed-but-actually-delivered send is promoted by its echo instead of duplicated;
-  server-pushed `message-send-error` routes through `applyServerSendError` (bumps attempts when a queue row
-  still exists; when the row is gone — the RCS immediate-ack consumed it — a `retryable: true` flag on the
-  event re-enqueues a fresh ladder via `reEnqueueOutgoingFromMessage`, capped at 2 automatic cycles per
-  tempGuid per session because each ack resets all durable state; absent/false → bubble-only as before).
-  The server only flags SEND-PHASE bridge failures retryable (nothing reached Google — a re-send can't
-  duplicate); delivery-phase `failed` frames stay non-retryable. Full chain design:
-  `docs/RCS_SEND_RELIABILITY.md`.
-- **Wallpaper-chat chrome: RN 0.86 has BUILT-IN CSS gradients** (`experimental_backgroundImage`,
-  new-arch) — no expo-linear-gradient/masked-view needed. Over a chat background the header/composer
-  go transparent (frosted chips), the message list runs UNDER them (absolute-overlay layout in
-  `chat/[guid].tsx`, bar heights measured via onLayout), and `EdgeFade` veils dissolve rows into
-  the bar zones. The veil's transparent end must be the SAME colour at alpha 0 — `transparent` is
-  black@0 and interpolates a smoky fringe on light themes. Non-bubble labels (sender/date/status/
-  "Edited"/tombstone) get frosted pills (`overlayPillStyle`, theme bg @ 62%) — a text halo/shadow
-  alone does NOT survive busy photos. GOTCHA 1: the wallpaper flag arrives ASYNC (reactive query,
-  null on first render; a participant-set background can land mid-chat) — keep ONE structural tree
-  and flip only STYLES + zIndex. Branching element types (View vs Fragment) on the flag remounts
-  the whole subtree, wiping the composer draft/staged attachments/scroll position. GOTCHA 2:
-  macOS's case-insensitive FS makes tsc reject sibling files differing only in case
-  (`EdgeFade.tsx` + `edgeFadeStops.ts` → TS1261).
-- **Native security modules are dependency-deferred + advisory, so the build stays green pre-rebuild.**
-  `react-native-libsodium` (crypto), `jail-monkey` (`deviceIntegrity`), `react-native-ssl-public-key-pinning`
-  (`certPinning`) are all installed but only touched via a lazy `import()` inside a `try/catch` (root check)
-  or behind a "no config → no-op" guard (pinning skips the native call when no pins are stored). So a JS
-  bundle on a build that hasn't linked them doesn't crash — they activate after the next native rebuild. When
-  adding such a module, never top-level `import` it from a startup path.
-- **`expo-media-library` SDK 57: the ROOT imperative API THROWS.** Like `expo-contacts`, SDK 57 moved
-  media-library to a class-based API and turned the root `saveToLibraryAsync`/`createAssetAsync`/… into
-  throwing deprecation stubs — so importing `expo-media-library` (root) silently broke Save-to-Photos on
-  device (caught → `{status:'error'}`, invisible in jest since the module is mocked). Import from
-  `expo-media-library/legacy` (as `AttachmentTray` does). `src/services/media.ts` uses it for both the
-  gallery save AND the "Gator" album path.
-- **NEVER `addAssetsToAlbumAsync(…, copy=false)` — a MOVE is a SYSTEM CONSENT DIALOG per image.** The
-  Kotlin module calls `requestMediaLibraryActionPermission` before the move, which on Android 11+ launches
-  `MediaStore.createWriteRequest` → "Allow Gator to modify this photo?". `checkUriPermission` is DENIED for
-  a MediaStore row even when the app created it (the own-your-own-media exemption lives inside MediaProvider,
-  not in the uri-grant table), so the prompt fires EVERY time, and each new picture is a new uri the last
-  grant doesn't cover. Worse, `writeLauncher.launch` needs a foreground Activity, so pictures auto-downloaded
-  while the app was backgrounded QUEUE their prompts and land in a stack on the next resume, naming chats the
-  user never opened — it reads as a random permission bug, not as auto-download. Instead write the asset
-  straight into the album: `createAssetAsync(uri, album)` (2nd arg is an `Album`/id) sets the MediaStore
-  `RELATIVE_PATH` at INSERT time — no modify, so nothing to consent to, and no camera-roll duplicate to
-  clean up. Android still can't create an EMPTY album, so seed a missing one from the local FILE via
-  `createAlbumAsync(name, undefined, false, uri)` — passing an ASSET there is the same move-with-consent
-  path in disguise. Only `addAssetsToAlbumAsync`/`removeAssetsFromAlbumAsync`/`deleteAssetsAsync` request
-  consent; the `createAsset*` family never does. Device-only symptom (jest mocks the whole module) — locked
-  by `test/services/media.test.ts`.
-- **Save-to-Photos asks for WRITE-ONLY permission, and every media action REPORTS ITS OUTCOME.** Two halves of
-  the same "the buttons in the fullscreen viewer don't work" report. (1) `requestPermissionsAsync()` with NO
-  argument asks for READ access to photos + video + **audio** as one all-or-nothing bundle (the granular
-  default is all three), so declining the separate "Music and audio" dialog — the obvious move when you're
-  saving a picture — makes the whole request come back not-granted, and Android stops asking after the second
-  decline, killing saving for good. Use `requestPermissionsAsync(true)` (`ensureSavePermission` in
-  `src/services/media.ts`): on API 33+ that resolves to an EMPTY permission set — granted, zero dialogs — and
-  the native save needs no runtime permission there anyway (`MediaLibraryModule.hasWritePermissions()` returns
-  "nothing missing" on TIRAMISU+); below 33 it correctly asks for `WRITE_EXTERNAL_STORAGE`. READING the gallery
-  (`AttachmentTray`'s picker) still needs the full request — don't unify them. (2) `app/(app)/media/[guid].tsx`
-  used to `await` both helpers and DISCARD the result: `saveAttachmentsToPhotos` returns saved|none|denied|error
-  and `shareAttachment` reports whether the sheet opened, and all of it — including complete success — rendered
-  as nothing, so a working save was pixel-identical to a dead button. `shareAttachment` compounded it by
-  swallowing every native throw into a `logger.warn` and then `return true`ing anyway; it now returns
-  `{ok:false, reason}` and logs at **error** (only error-level lines reach `ErrorReportSink`, so a warn never
-  gets uploaded). Rule: a helper returning a rich result must have its result consumed at the call site —
-  toast the happy path, dialog anything the user must act on. Locked by `test/components/routes/mediaViewer.test.tsx`.
-- **A downloaded attachment's file name must carry an EXTENSION.** `attachmentFileName` (`@utils/attachment`)
-  falls back to `<guid><ext-from-mime>`, never the bare guid: expo-media-library derives the MediaStore type
-  from the file name and rejects a dotless one outright ("Could not get the file's extension"), so such a file
-  could never be saved to the gallery — as a generic error with nothing pointing at the name. iMessage always
-  sends a `transferName`; RCS-bridged media can arrive with none.
-- **In-app toast: `AppToast` is a non-Modal host mounted once at the app root.** `showToast(msg)` (zero-React,
-  callable from services) enqueues into `useToastStore` (FIFO, mirrors `dialogStore`); `AppToast`
-  (`src/ui/toast/`) is an absolutely-positioned, `pointerEvents="none"`, auto-dismiss pill — NOT a `Modal`
-  (a Modal would capture touches). Mount it after `<AppDialog/>` in `app/_layout.tsx` (inside
-  ThemeProvider+SafeAreaProvider). Headless FCM has no React host, so `showToast` just enqueues and nothing
-  renders — harmless. **Because it is NOT a Modal it gets no free native window, so the HOST must declare its
-  own stacking — `elevation` (Android) AND `zIndex` — not rely on being a later JSX sibling.** Only the inner
-  pill had `elevation`, and on Android elevation (not sibling order) decides what draws on top: the toast lost
-  to elevated surfaces and never appeared at all — 0 sightings on device across 3 attempts, while `AppDialog`
-  showed 3/3 precisely because a Modal brings its own window. Guard: `appToast.test.tsx`.
-- **Auto-download attachments runs on the INGESTION path via an injected callback.** `DbEventSink` takes an
-  optional `onMessageStored?(messageId)` (2nd ctor arg) — undefined in unit tests so their Node import graph
-  never pulls natives; the app wires it from `realtimeControl.ts` to `autoDownloadMessageAttachments`
-  (`src/services/download/autoDownloadAttachments.ts`). That fn LAZILY `import()`s the fetcher / `expo-network`
-  (Wi-Fi gate) / `expo-media-library` only AFTER its early returns, so importing it stays Node-safe. Gated by
-  `shouldAutoDownload` (image/* ≤5MB) + the `autoDownloadAttachments`/`autoDownloadOnWifiOnly` flags; the
-  `autoDownloadDestination` enum ('app'|'gallery'|'album', default 'album') decides the extra saved copy; a
-  single toast is BATCHED per burst (module-level debounce), never one-per-image. Hydrates the feature store
-  once if headless (defaults otherwise ignore the user's Wi-Fi-only/destination choice).
-- **In-app App Logs persist across restarts via an INJECTED file sink.** `MemorySink` (heap-only) is wiped on
-  app close; `FileLogSink` (`src/services/logging/fileLogSink.ts`, OUTSIDE `core` so it can use
-  expo-file-system — lazily) is attached to the logger's `TeeSink` at `boot()` via `logSinks.add(...)`, after
-  `memoryLogSink.hydrate(...)` seeds the viewer from `Paths.document/app-logs.json`. `write()` stays sync
-  (buffers + debounced flush); capped at 500 lines; the viewer's Clear wipes the file too. Lines are
-  already-redacted before any sink, so the file holds no secrets. `core/` must never import expo-file-system.
-- **App-wide error reporting = a capture sink + a durable upload queue (a self-hosted crash reporter).**
-  `ErrorReportSink` (`src/services/errors/`, OUTSIDE `core`) is `logSinks.add(...)`-attached at `boot()`
-  (via `initErrorReporting`) and captures ONLY `error`-level lines (already redacted). Global uncaught-JS
-  (`ErrorUtils.setGlobalHandler`, chained) + unhandled-rejection (`HermesInternal.enablePromiseRejectionTracker`,
-  which RN only enables in `__DEV__`) handlers funnel through one `captureError(err, origin)`. Reports buffer
-  in memory (sync `write`) then debounced-drain to the `error_reports` table (migration `0025`), which is a
-  lease/backoff/attempt-cap retry queue CLONED from `outgoing_queue` — `runErrorReportQueue` (node-testable,
-  no RN) batches → `POST /api/v1/error-reports` (`retry:false`; the queue owns retries) → deletes on success.
-  `flushErrorReports` gates on creds + `serverInfo.supports_error_log_upload` + the `errorReportingEnabled`
-  flag (default ON), and runs on AppState active/background, connected mount, and the bg task. FEEDBACK-LOOP
-  SAFETY: the sink captures only `error`, hard-skips `[errorReport]`-tagged messages, and a `busy` flag drops
-  any error logged during its own enqueue/drain — and the upload path logs failures at `warn` (never `error`).
-  STACK PRESERVATION: `redact()` is now `Error`-aware (flattens `Error`→`{name,message,stack}`) — before this,
-  Object.entries dropped the non-enumerable stack and an Error meta serialized to `{}`. Server side
-  (`packages/bbd`): `errorLogIngestionEnabled` config (default OFF) gates ingestion + drives the capability
-  flag; `ErrorReportStore` fingerprints (deterministic sha1 over normalized message + top stack frame + tag +
-  level, `errors/fingerprint.ts`) and appends `error-reports/categories/<fp>.jsonl` + an atomic `index.json`.
-- **Chat lands/stays at the newest message via TWO mechanisms: a keyed per-chat remount + a pinned-follow
-  convergence loop** (`chat/[guid].tsx` + `MessageList` + `@utils` `scrollPin`). (1) THE REMOUNT: the chat
-  screen is reused on a `router.replace` thread switch (every notification tap while a chat is open) and
-  `useReactiveQuery` KEEPS the previous deps' data until the new query resolves — so without a remount the
-  `messagesLoading` spinner-gate never engaged and the list mounted with the WRONG chat's rows, one-shot
-  scrolled against them, and stranded the new thread mid-history (the original "opens in the wrong spot" bug).
-  `ChatScreen` keys the subtree with `screenKey` (guid|focus|focusDate|share), which also resets per-chat
-  leaks (pagination `limit`, `jump` anchor, reply/edit targets) and re-runs the share-intent initializers.
-  The gate matters because FlashList v2's `startRenderingFromBottom` anchors ONLY on the INITIAL render —
-  the list must mount WITH data; `onLoad` (post-measure, once per instance) then does the first `scrollToEnd`.
-  (2) THE PIN LOOP: `pinned` state (pure transitions in `src/utils/scrollPin.ts`, node-tested) makes landing
-  CONVERGENT instead of one-shot — while pinned, every `onContentSizeChange` re-issues `scrollToEnd` (native
-  recomputes from the CURRENT height), which self-heals late row-height changes (async URL-preview cards,
-  image boxes) AND FlashList's own `autoscrollToBottomThreshold` miss (verified in 2.0.2 source: an incoming
-  message taller than ~20% of the viewport defeats its near-bottom check even parked at the bottom). Only a
-  user DRAG can unpin (`onScrollBeginDrag` — the one signal programmatic scrolls never emit; Android fires
-  momentum for animated programmatic scrolls, so momentum may re-pin but never unpins); reaching the bottom
-  re-pins; sending re-pins from anywhere. VIEWPORT resizes (keyboard open/close via the KAV, the typing
-  bubble or the selection bar appearing) re-land via the wrapper View's `onLayout` while pinned —
-  onLayout fires AFTER the resize is committed, so metrics are fresh; the old `keyboardDidShow` + one-frame
-  rAF raced the KAV layout and left the newest text behind the keyboard with no recovery. Unpinned shows the
-  "jump to newest" FAB (badge = incoming missed while unpinned); in an anchored (search-hit/unread-jump)
-  session the pin machine is FROZEN (the window bottom ≠ newest) and the FAB becomes `onExitAnchor` — the
-  screen clears jump + focus params, and the remount/convergence loop lands the live window. GOTCHA: anchored
-  mode deliberately has NO keyboard-follow/re-pin, so only genuinely-old targets may enter it — a MESSAGE
-  notification tap opens the chat PLAIN (`chatDeepLink`, notificationOpen.ts); ONLY a reminder
-  (`reminder:'1'` in the data bag) deep-links with `?focus=…` (taps used to anchor on every notification,
-  which froze bottom-follow in normal conversation). Decisions are jest-tested
-  (`messageListPinned.test.tsx`, `scrollPin.test.ts`, `notificationOpen.test.ts`); layout timing is device-only.
-- **The INBOX re-lands at the top on a message it saw arrive AND on every RETURN — the second is not
-  redundant.** `ConversationListScreen` runs a smaller cousin of the chat's convergence loop: a rise in
-  `newestDate` (max over visible rows, pinned included) arms a 1s window that re-issues
-  `scrollToTop({animated:false})` on every content-size change plus one deferred frame, until a drag disarms
-  it. But it only ever fires for a message the screen WATCHED land — and the common complaint ("I come back
-  and it's not scrolled up") is exactly the case it can't see: the texts arrive while the user is inside a
-  chat or the app is backgrounded, the arm window opens and closes unobserved, and the list is left holding
-  a stale offset with nothing left to re-issue. So the re-land is ALSO hung off the return event itself, via
-  TWO triggers that don't imply each other: `useFocusEffect` (back from a chat/settings — the inbox stayed
-  MOUNTED and kept its offset) and AppState `'active'` (the app was backgrounded with the inbox already on
-  screen, so focus was never lost and the focus effect does not re-fire at all). Both route through the same
-  `requestScrollToTop`, so they inherit the convergence + drag-disarm behavior; while searching the FlashList
-  isn't rendered and `listRef.current` is null, so both no-op. The MOUNT focus is skipped by a ref — it isn't
-  a return, and arming over the first data burst only fights the initial load. TEST-HARNESS TRAP: `mockRestore()`
-  does NOT give jest-expo's `AppState.addEventListener` its behavior back (the restored fn returns `undefined`,
-  so the effect cleanup's `sub.remove()` throws on the next unmount) — install the spy for the whole block and
-  never restore it, as `chatScreenReadMarker.test.tsx` does.
-- **Open a chat ONLY via `useChatNavigator` (`src/ui/useChatNavigator.ts`) — never a raw `router.push` to
-  `/chat/…`.** The app keeps ONE stack with the Messages list at its base; pushing a thread on top of an
-  already-open thread (notification taps did this) left Back returning to the PREVIOUS thread, not the inbox
-  (the "threads stacking" bug). `useChatNavigator` REPLACES when the current route is already a *different*
-  `/chat/…` (so Back → Messages), PUSHES from a non-chat screen, and does NOTHING when the target IS the
-  thread already on screen — a `replace` to the same route remounts the screen (spinner, re-scroll, lost
-  draft), so tapping a notification for the chat you're already in used to reload it. The push/replace/none
-  decision is the pure, node-tested `resolveChatNavigation` (`@utils`/`chatNavigation.ts`); a reminder anchor
-  (`?focus=`) or Direct Share (`?share=1`) target always (re)navigates even into the open chat (jump / re-stage).
-  Every entry point (inbox, search, archived/unknown lists, notification foreground-press + resume-drain,
-  Direct Share) routes through it. It reads `usePathname()`, so a component test mocking `expo-router` must
-  provide `usePathname` (a non-`/chat/` path → `push`) alongside `useRouter`.
-- **"Disable Battery Optimization" opens the settings SCREEN, not the one-shot request.**
-  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` only shows its dialog when NOT already exempt and silently no-ops
-  forever after (looks broken on repeat presses; there's no exemption-state query without a native module).
-  `src/services/battery.ts` fires `IGNORE_BATTERY_OPTIMIZATION_SETTINGS` (fallback `APPLICATION_DETAILS_SETTINGS`)
-  so it always opens something.
-- **A Gator-server route the client doesn't back → `UnimplementedEndpointError`, not a scary error.** Pattern:
-  `getAccountInfo` remaps a **404** to `UnimplementedEndpointError` so `account.tsx` shows a neutral "not
-  supported on this server yet" state instead of blaming the Private API (same as `/server/update/check`).
-- **iMessage Account (`icloud/account`) IS implemented server-side now** (2026-07-18, `packages/bbd`
-  `icloudOperations.ts`) — the Settings row is gated on `serverInfo.supports_icloud_account`
-  (`useIcloudAccountSupported`), emitted by the server as `enablePrivateApi` (the endpoints need the helper).
-  Two things to know: (1) the **snake→camel normalization is done SERVER-side** (helper returns
-  `apple_id`/`account_name`/`active_alias`/`vetted_aliases:[{Alias}]`; the bbd route maps to the app's
-  camelCase `AccountInfo` — a raw passthrough parses as 200-but-all-null since the app schema is loose +
-  nullish). (2) Keep the 404 fallback in `account.tsx` as defense-in-depth: the flag hides the *entrance*,
-  but the screen is still reachable via deep link or a stale/null `serverInfo`, and Private-API-off servers
-   404. Helper-off (flag on, helper crashed) surfaces as a generic 500, not 404 — acceptable. See
-  `docs/IMESSAGE_ACCOUNT_PLAN.md` + `docs/APP_SERVER_PARITY.md`.
+## Read the relevant reference before editing
 
-## FCM gotchas (verified against the Flutter/Kotlin reference)
-- **Envelope shape:** the server's FCM *data* message is `{ type: '<event>', data: '<JSON body>',
-  encrypted?, partial?, encoding?, subtype?, encryptionType? }`. The event name is under `type`;
-  the body is under **`data`** (a JSON string), with metadata as siblings — there is NO top-level
-  `payload` key. Mirrors Flutter `ServerPayload.fromJson` (`json['data'] ?? json`). Parsing lives in
-  the firebase-free, unit-tested `src/services/notifications/fcmPayload.ts`. `EventRouter.coerceData`
-  JSON-parses the string body; do NOT double-parse.
-- **Headless wake has NO React tree.** A killed-app FCM push re-evaluates the JS entry (top-level
-  side-effect imports run) but RootLayout's component/`useEffect` do NOT. So anything seeded only by
-  a boot effect is at its module default headlessly. Consequences already handled: the notification
-  hide-preview (redacted) flag is re-synced from the persisted setting inside `dispatchRealtimeEvent`;
-  the DB is opened with `ensureDatabase()` (lazy, headless-safe) — never `getDatabase()` (throws if
-  never inited). Use `ensureDatabase()` in any background/notification-action handler.
-- **Encrypted FCM payloads** (`encrypted: 'true'`) ARE decrypted now, via the shared `AEAD_GCM_V1`
-  scheme (`encryptionType: 'AEAD_GCM_V1'`): AES-256-GCM, key = SHA-256(salt‖password), frame =
-  `ver(1)‖salt(16)‖iv(12)‖tag(16)‖ciphertext` base64. `src/services/notifications/fcmDecrypt.ts` uses
-  expo-crypto's NATIVE AES (`AESSealedData.fromParts` + `aesDecryptAsync`) — so it runs on-device only
-  (not jest); the server's round-trip test proves the frame. Do NOT use libsodium AES here (react-native-
-  libsodium's native layer is XChaCha-only) or CBC/CryptoJS (unavailable in RN). Any OTHER
-  `encryptionType` is logged + skipped (the message still arrives on the next sync). The server side is
-  `packages/bbd/src/notifications/fcm/fcmPayloadCrypto.ts`, gated by the `encryptComs` setting.
-- **App-lock is a UI gate, not key custody:** a headless push decrypts the DB + posts (content gated
-  only by redacted/locked mode) even while app-locked. Acceptable for delivery, but the lock does NOT
-  withhold the key from the push path — don't claim otherwise. NOTE: `keychainAccessible: WHEN_UNLOCKED`
-  on the secure-store options is iOS-only and INERT on Android (the Android Keystore applies no
-  "accessible only when unlocked" attribute here), so it is NOT an at-rest key-custody guarantee on
-  Android. `requireAuthentication` is intentionally OFF so the headless-while-locked decrypt works
-  (see `src/native/secureVault.ts`).
-- **Register the FCM token on EVERY (re)connect, not once.** `registerFcmToken` runs from every
-  `startRealtime()` (NOT gated by `realtimeOneTimeSetupDone` — only the permission prompt is, to avoid
-  the GrantPermissionsActivity loop). The server de-dupes by token, so re-registering is idempotent, and
-  it is the only thing that recovers push when a one-shot registration silently broke: a transient failure
-  at first boot (server briefly unreachable → server has NO token → zero pushes all session), a reconnect
-  to a DIFFERENT server after `forget()`, or an FCM token rotation that landed while disconnected.
-- **EventRouter dedup: CLAIM the guid before the sink, RELEASE it if the sink throws.** `new-message` is
-  deduped by guid (socket + FCM deliver the same message). The claim is recorded synchronously BEFORE
-  `await sink.onEvent` (so a concurrent redelivery is still deduped mid-flight) but removed in a `catch`
-  if the sink throws — otherwise a delivery that failed on a transient DB error burned the guid forever
-  and every redelivery was silently deduped away, so the notification was never posted (the DB-write path
-  from a later full sync does NOT run through the notify layer). See `hasSeen`/`recordSeen`/`unrecordSeen`.
-- **Hydrate the redacted/feature stores at most ONCE per JS context on the push path.**
-  `dispatchRealtimeEvent` gates `hydrate()` on each store's `hydrated` flag (`if (!store.getState().hydrated)
-  …`) — a killed-app wake must hydrate once (no UI boot effect ran), but re-reading kv on every event
-  (incl. the frequent silent `updated-message` receipts) was pure redundant work; the in-memory store is
-  authoritative after the first hydrate and its setters keep it current. Likewise `ensureDatabase()`
-  returns the cached handle via `getDatabase()` before ever calling `resolveDbKey` (two Keystore reads).
+| Area                                 | Current references                                              |
+| ------------------------------------ | --------------------------------------------------------------- |
+| Active DB-02A handoff                | `docs/DB_02A_CURRENT.md`                                        |
+| Authoritative plan and audit history | `docs/WORK_PLAN_2026-08-03.md`, `AUDIT_REPORT.md`               |
+| Phase/release dependencies           | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`            |
+| App/server event and API parity      | `docs/APP_SERVER_PARITY.md`                                     |
+| Device-only verification             | `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md`       |
+| Push/headless delivery               | `docs/PUSH_DELIVERY.md`                                         |
+| Upload behavior                      | `docs/UPLOAD_PROGRESS.md`                                       |
+| Attachment cache                     | `docs/CACHE_ARCHITECTURE.md`                                    |
+| Share intake                         | `docs/SHARE_INTENT_RELIABILITY.md`                              |
+| UI coverage/testing                  | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md` |
 
-## Crypto gotchas (react-native-libsodium, verified on-device)
-- **AAD must be a `string`.** The NATIVE binding throws `crypto_aead_xchacha20poly1305_ietf_encrypt:
-  input type not yet implemented` if `additional_data` is `null` or a `Uint8Array` — only a string is
-  accepted (and ciphertext for decrypt must be a Uint8Array, never a string). The Jest backend
-  (`libsodium-wrappers`) is lenient and accepts `null`, so this ONLY surfaces on device. We pass `''`
-  when there's no AAD (`src/native/crypto.ts`). Lesson: a green Jest crypto test does NOT prove the
-  native backend — run `runCryptoSelfTest()` on device (it logs at dev boot from `boot()`).
-- **Expected dev-boot proof:** `[crypto] self-test { ok: true, detail: 'round-trip + tamper-reject OK' }`.
-- **op-sqlite SQLCipher `PRAGMA rekey` works on-device** (proven 2026-06-20): rekey re-encrypts in
-  place, the new key opens it, the old key is rejected. Dev boot logs `[db] rekey self-test { ok: true }`
-  (a THROWAWAY db, never the real one — `runDbRekeySelfTest` in `src/db/key.ts`). The rekey passphrase
-  format must match the open `encryptionKey` (both the plain 64-char hex string). Crash-safe full key
-  rotation can be built on this; jest can't test rekey (better-sqlite3 has no codec).
+## Architecture contracts
 
-## Verify before claiming done
-```bash
-npm run typecheck   # tsc --noEmit
-npm test            # jest — runs BOTH projects (node + components)
+- Expo SDK 57, React Native 0.86, React 19, strict TypeScript with
+  `noUncheckedIndexedAccess`.
+- `src/core/` is platform-free: no React, React Native, Expo, Zustand, native DB, feature, state,
+  or UI imports. `npm run check:architecture` enforces this.
+- The encrypted DB is the source of truth. UI observes it; network and eligible realtime events write
+  through it. A locked FCM wake is the deliberate no-DB generic-notice exception.
+- `HttpClient` is the only credential-injection boundary. Do not create another password transport.
+- `EventRouter` is the only realtime normalization entry point. New server events require the
+  constant, normalized variant, normalization case, and the appropriate injected sink.
+- Path aliases are `@core`, `@db`, `@ui`, `@utils`, and their subpaths.
+
+## Expo SDK 57 and native-module traps
+
+- Use the exact SDK 57 docs: <https://docs.expo.dev/versions/v57.0.0/>.
+- Root imperative APIs in `expo-contacts` and `expo-media-library` throw in SDK 57. Use their
+  `/legacy` entry points where the app still uses imperative APIs.
+- Metro cannot bundle `import(variable)`. Optional native modules must be dependency-injected so
+  the bundle contains no reference until the native dependency exists.
+- Native/config flag changes require a clean native rebuild. In particular, op-sqlite needs both
+  `sqlcipher` and `fts5` enabled in `package.json`.
+- Headless registrations must be imported by `index.js`, before `expo-router/entry`. Route modules
+  such as `app/_layout.tsx` are not evaluated for a killed-app headless wake.
+
+## Database safety
+
+### One shared connection and one global writer queue
+
+- `withDbTransaction` and `withDbWriteLock` share a process-wide mutex over one connection.
+  Never call either one from inside itself or the other, directly or transitively. A nested call
+  waits forever and blocks every later write.
+- Many public repository helpers open their own transaction. Inspect the implementation before
+  composing writers; do not infer safety from a harmless-looking call name.
+- Run `node scripts/check-db-writes.mjs --report`. Every `nested-coordinator` finding is a defect,
+  never an allowlist candidate.
+- A write issued outside an owner while any transaction is open can silently join the other
+  transaction. Put every dependent DB write inside the same short owner callback.
+- Transaction callbacks must be DB-only and bounded. Do not hold the mutex across network, native
+  filesystem, media, UI, timers, or unbounded row work.
+
+### Transaction-only helpers
+
+- A transaction-only helper accepts `DbTransactionContext`, not a raw database handle as proof.
+  It must immediately return or await exactly one inline
+  `runInTransactionContext(context, async (db) => { ... })`.
+- The context is an opaque, runtime-checked token from the current `withDbTransaction` callback.
+  Never cast/forge it, retain it, store it, return it, pass it to unrelated code, or capture the
+  callback's raw `db` for later use.
+- Join registration is synchronous. The owner closes joins when its callback settles, waits for all
+  registered tasks, and rolls back on task failure or a late-join attempt.
+- The scanner recognizes only the exact imported, inline, awaited/returned join. Named callbacks,
+  dynamic dispatch, lookalikes, and unadopted promises fail closed.
+
+### op-sqlite/Drizzle behavior
+
+- Keep the `drizzleAdapter` Proxy in `src/db/database.ts`; Drizzle does not natively match
+  op-sqlite v17's method/result shapes.
+- Reactive queries need `flushPendingReactiveQueries()` after writes; the adapter owns this.
+- Migrations are additive and transactional. Append named migrations to `MIGRATIONS`; never edit an
+  applied migration.
+- Use `db.all(sql\`...\`)`for reads.`db.run(sql\`...\`)`works for non-returning writes
+but its affected-row count is not portable. Use`RETURNING` or a builder when ownership/counts
+  matter.
+
+### Durable data rules
+
+- `incoming_event_queue` is the durable-before-effect path for socket, eligible unlocked FCM, and
+  DEV events. Claims are bounded/fenced; the DB-applied marker joins the exact domain transaction.
+- Local message/chat deletion uses tombstones, not hard row deletion. Preserve deletion ledgers,
+  read-floor handoff, alias promotion, and the shared visibility predicate.
+- Replacing sets is add-then-prune, never truncate-then-refill. Readers may observe same-connection
+  intermediate writes even inside a transaction.
+
+## Realtime, notifications, and lifecycle
+
+- Use `react-native-notify-kit`; its API matches Notifee. Conditionally omit
+  `AndroidStyle.MESSAGING` person icons instead of passing `undefined`.
+- A notification tap while backgrounded arrives through the headless handler. Stash it there and
+  drain it when the app becomes active; do not attempt router navigation from headless code.
+- Test killed-process push with `adb shell am kill <package>`, not `am force-stop`; force-stop
+  disables broadcasts until manual launch.
+- Account-scoped async work must register cancellation/tracking before its first await and must not
+  publish results after lease/generation revocation.
+- Timer-driven work needs a DB claim/fence, not just an in-memory `useRef` guard.
+
+## Files, uploads, cache, and sharing
+
+- Download progress is presentation-only. The DB `localPath` write remains authoritative.
+- Upload progress uses the legacy filesystem `createUploadTask`, not `uploadAsync` or the SDK 57
+  `File` API. Cancellation can resolve `null`; release listeners/registry entries on every
+  terminal path. See `docs/UPLOAD_PROGRESS.md`.
+- Native stat/download/delete work stays outside DB transactions. Attachment-cache claims and
+  settlement use short guarded owners; recovery and reference scans retain their documented bounds.
+- Public ACTION_SEND/Direct Share intake is intentionally disabled. Do not reactivate historical
+  `expo-share-intent` or custom native intake paths without a new approved design. See
+  `docs/SHARE_INTENT_RELIABILITY.md`.
+- Validate server/user-controlled URLs and file paths before native access. URL previews are
+  attacker-controlled HTTP input and require scheme, redirect, size, timeout, and content-type
+  limits.
+
+## UI contracts worth keeping always visible
+
+- Android edge-to-edge chat/input screens use
+  `KeyboardAvoidingView behavior="padding"`. Bottom padding is the maximum/union of keyboard and
+  navigation-bar insets, not their sum; leave `keyboardVerticalOffset` at zero.
+- FlashList v2 has no `inverted` or `estimatedItemSize` prop. Render chat chronologically and use
+  `maintainVisibleContentPosition={{ startRenderingFromBottom: true }}`.
+- Guard calls on an auto-released `expo-video` player during focus/unmount cleanup.
+- A plain `View` with an accessibility role/label also needs `accessible`. Test accessibility
+  contracts by role, not only by test ID.
+- Never give text containers fixed heights; support Android font scaling.
+- Use themed colors explicitly. Bare React Native `Text` defaults can be unreadable on dark
+  surfaces.
+- Open chats through `useChatNavigator`, not raw route pushes.
+
+## Privacy and security
+
+- Never call `console.*` directly; use the secure logger. Do not log message bodies, credentials,
+  raw push payloads, private file paths, or encryption material.
+- App Lock is a UI/policy gate, not encryption-key custody. Locked notifications must remain generic.
+- Backups exclude secret-looking keys and delete temporary export files in `finally`.
+- Server-controlled URLs opened with `Linking.openURL` must pass an explicit scheme allowlist.
+- Crypto/native behavior needs device evidence; host mocks do not prove SQLCipher, filesystem,
+  process-kill, or native bridge behavior.
+
+## Verification
+
+During a focused step, run the smallest relevant test suite plus:
+
+```sh
+npm run typecheck
+node scripts/check-db-writes.mjs --report
 ```
-On-device behavior (DB, FCM, screens) is verified via the spikes in `docs/SPIKES.md` once
-the Android toolchain / EAS is available.
 
-### Component tests (jest-expo + React Native Testing Library)
-- `npm test` now runs TWO jest projects: `node` (ts-jest, `.test.ts`, the React-free core/db/services
-  layer) and `components` (jest-expo, `test/components/**/*.test.tsx`, the RN/RNTL world). The
-  **file extension is the router** — `.test.ts` → node, `.test.tsx` → components.
-- **`renderWithTheme(ui, { preset? })` is the entry point** (`test/components/support/renderWithTheme.tsx`):
-  it wraps RNTL `render()` in a hydrated `ThemeProvider` and re-exports every RNTL helper, so a test
-  imports from that ONE module. The shared setup (`support/setup.ts`) mocks `@db/database` and resets
-  the theme store after each test.
-- **`__DEV__` IS defined here** (unlike the ts-jest `node` project where it's undefined) — jest-expo
-  provides it. Don't "fix" a `typeof __DEV__ !== 'undefined'` guard on the components side.
-- **RNTL 14 under React 19 is ASYNC — always `await`:** `render()` (via `renderWithTheme`) returns a
-  Promise; `cleanup()` and unmount-effect flushes are async too. After a `fireEvent`, assert via
-  `findBy*`/`waitFor`.
-- **Store mutations that re-render a MOUNTED tree need `await act(async () => …)`** (a bare sync `act()`
-  drops the "not wrapped in act" warning on the floor). **Reset stores in `beforeEach`, not `afterEach`**
-  — an afterEach setState fires on the still-mounted tree and trips an act warning.
-- **NEVER assert `jest.getTimerCount() === 0`.** The jest-expo `Animated` mock leaves residual
-  frame-loop timers regardless of mounting. Either measure a baseline in-situ and drain back TO it
-  (see `messageBubble.test.tsx`) or assert the cleanup contract via start/stop spies
-  (see `typingBubble.test.tsx` / `bubbleEffectCleanup.test.tsx`).
-- **Regression guards for the UI gotchas above** live in `test/components/`: memo-with-stable-callbacks
-  (`conversations/messageRowMemo.test.tsx`), effect cleanup on FlashList recycle
-  (`conversations/bubbleEffectCleanup.test.tsx`), and redacted-mode masking (`redaction.test.tsx`).
-- **UI coverage floor: `npm run coverage:ui` must stay ≥ 70%** (statements over `src/ui/**`, barrel
-  `index.ts` files excluded; both jest projects count — see `docs/UI_COVERAGE_70_PLAN.md`, met at
-  ~74% in 2026-07). Files intentionally below the line are native-mock territory (VoiceRecorder,
-  VideoPlayer, AudioAttachment, ThemeStudio, FindMyMap) — don't chase them with mock-testing-a-mock
-  tests; on-device verification covers them.
-- **A bare `act(async () => {})` used as a "flush" corrupts every LATER test in the file** — same
-  overlapping-act failure mode as the un-awaited `fireEvent` below, and it looks innocent. Interleaved
-  with RNTL's own act-wrapped calls (`render`, `waitFor`), it trips React 19's detection and later
-  tests then fail to render AT ALL (`Unable to find an element with testID: …` on a tree that renders
-  fine in isolation — run the one test with `-t` to confirm it's pollution, not a real failure). If the
-  handler under test touches only refs/zustand stores and no component state, flush with a plain
-  `new Promise(r => setTimeout(r, 0))` instead; keep `act` for genuine state mutations. Also settle
-  EVERY deferred promise a test creates before it ends — one left pending at teardown poisons the rest
-  of the file the same way. See the `deferred`/`flush` helpers in `routes/mediaViewer.test.tsx`.
-- **An un-awaited `fireEvent` can corrupt every LATER test in the file** (React 19 "overlapping
-  act()"), especially for components rendering inside a RN `Modal` — the failures appear only in
-  full-file runs, never in isolation. `await waitFor(...)`/`findBy*` after EVERY state-mutating
-  fireEvent. Related VM limits: `React.lazy`/dynamic `import()` REJECTS under jest (test the lazy
-  child directly; the boundary fallback is the only reachable branch), and helpers doing
-  `await import('react-native')` (e.g. `safeOpenUrl`) are unobservable — mock at the helper
-  boundary via `jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }))`.
+At a milestone freeze, run the relevant lint/format checks, then:
+
+```sh
+npm run check:architecture
+npm run check:migrations
+npm test -- --runInBand
+```
+
+For inventory work, also require:
+
+```sh
+node scripts/check-db-writes.mjs --reconcile
+```
+
+The final report must state the actual suite/test results and any remaining device-only or unresolved
+evidence. Do not claim host tests prove native behavior.
+
+### Component tests
+
+- `npm test` runs separate Node and component projects. Use `--selectProjects` when focusing.
+- React Native Testing Library under React 19 is async: await render and user interactions.
+- Mounted-store mutations that rerender must be wrapped in awaited `act`.
+- Do not assert the global timer count is zero; Expo animation mocks retain timers.
+- Keep UI coverage at or above the configured 70% floor with `npm run coverage:ui`.

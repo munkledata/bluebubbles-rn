@@ -355,7 +355,10 @@ describe('MessageList — failed-message flow', () => {
     // send from what this component could see — which delivered a failed contact card as a plain
     // message reading the contact's name, and dropped a reply target / effect / subject / mentions
     // that only the queue payload carries.
-    expect(retry).toHaveBeenCalledWith('x');
+    expect(retry).toHaveBeenCalledWith(
+      'x',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
   it('a failed PHOTO retries as an attachment, rebuilt from the downloaded row', async () => {
@@ -397,7 +400,10 @@ describe('MessageList — failed-message flow', () => {
     // Still just the guid: the queue row already knows this is an attachment send and holds the
     // on-disk path, so the re-upload streams the same file under the same temp guid. The downloaded
     // attachment is only used HERE to word the sheet ("re-upload the picture").
-    expect(retry).toHaveBeenCalledWith('x');
+    expect(retry).toHaveBeenCalledWith(
+      'x',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
   it('an attachment whose local file is gone is NOT re-sent as a fabricated image', async () => {
@@ -422,7 +428,10 @@ describe('MessageList — failed-message flow', () => {
     fireEvent.press(screen.getByTestId('sheet-retry'));
     // No downloaded file to describe, so the sheet reads as a plain message — but the retry itself
     // is unchanged: the service re-POSTs whatever the queue row says was sent.
-    expect(retry).toHaveBeenCalledWith('x');
+    expect(retry).toHaveBeenCalledWith(
+      'x',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
   it('Delete discards the failed message via @/services/send', async () => {
@@ -433,7 +442,11 @@ describe('MessageList — failed-message flow', () => {
     fireEvent.press(screen.getByTestId('retry-x'));
     await screen.findByTestId('sheet');
     fireEvent.press(screen.getByTestId('sheet-delete'));
-    expect(discardMessage).toHaveBeenCalledWith('x');
+    expect(discardMessage).toHaveBeenCalledWith(
+      'x',
+      expect.any(Number),
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
   });
 
   /**

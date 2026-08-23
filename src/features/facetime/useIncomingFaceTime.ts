@@ -15,21 +15,23 @@ export function useIncomingFaceTime(): {
   answer: (c: IncomingFaceTimeCall) => Promise<void>;
   decline: (uuid: string) => void;
 } {
-  const open = useFaceTimeStore((s) => s.open);
+  const openIfCurrent = useFaceTimeStore((s) => s.openIfCurrent);
   const dismissIncoming = useFaceTimeStore((s) => s.dismissIncoming);
 
   const answer = useCallback(
     async (c: IncomingFaceTimeCall): Promise<void> => {
+      const generation = useFaceTimeStore.getState().generation;
       dismissIncoming(c.uuid); // stop the ring immediately (optimistic)
       try {
         const link = await resolveFaceTimeAnswerLink(http, c.uuid);
         // chatGuid is unknown for an incoming call; the in-call overlay only uses `link`.
-        open({ link, chatGuid: '', video: !c.isAudio });
+        openIfCurrent({ link, chatGuid: '', video: !c.isAudio }, generation);
       } catch (err) {
+        if (useFaceTimeStore.getState().generation !== generation) return;
         logger.warn('[facetime] failed to answer incoming call', err);
       }
     },
-    [open, dismissIncoming],
+    [openIfCurrent, dismissIncoming],
   );
 
   const decline = useCallback(

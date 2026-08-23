@@ -9,7 +9,13 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
-import { withDbTransaction, withDbWriteLock } from '@db/transaction';
+import {
+  type DbTransactionContext,
+  DbTransactionContextRejectedError,
+  runInTransactionContext,
+  withDbTransaction,
+  withDbWriteLock,
+} from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -28,6 +34,41 @@ function count(raw: Database.Database, table: string, where: string, ...args: un
   return (
     raw.prepare(`SELECT COUNT(*) c FROM ${table} WHERE ${where}`).get(...args) as { c: number }
   ).c;
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+async function settled<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  try {
+    return { status: 'fulfilled', value: await promise };
+  } catch (reason) {
+    return { status: 'rejected', reason };
+  }
+}
+
+function orderedDatabase(order: string[]): AppDatabase {
+  return {
+    run: jest.fn(async (statement: unknown) => {
+      const chunks = (statement as { queryChunks?: Array<{ value?: string[] }> }).queryChunks;
+      const command = chunks
+        ?.flatMap((chunk) => chunk.value ?? [])
+        .join('')
+        .trim();
+      if (!command || !['BEGIN IMMEDIATE', 'COMMIT', 'ROLLBACK'].includes(command)) {
+        throw new Error(`unexpected transaction SQL: ${String(command)}`);
+      }
+      order.push(command === 'BEGIN IMMEDIATE' ? 'BEGIN' : command);
+    }),
+  } as unknown as AppDatabase;
 }
 
 /**
@@ -63,9 +104,9 @@ describe('withDbTransaction', () => {
       now: 1000,
     });
 
-    const result = await withDbTransaction(db, async () => {
+    const result = await withDbTransaction(db, async (transactionContext) => {
       await reconcileEchoByContent(
-        db,
+        transactionContext,
         { guid: 'real-tx1', isFromMe: true, text: 'hello', dateCreated: 1000 },
         chatId,
       );
@@ -91,9 +132,9 @@ describe('withDbTransaction', () => {
     });
 
     await expect(
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (transactionContext) => {
         await reconcileEchoByContent(
-          db,
+          transactionContext,
           { guid: 'real-tx2', isFromMe: true, text: 'hello', dateCreated: 1000 },
           chatId,
         );
@@ -127,6 +168,175 @@ describe('withDbTransaction', () => {
       now: 2000,
     });
     expect(count(raw, 'messages', 'guid = ?', 'temp-tx3')).toBe(1);
+  });
+});
+
+describe('DbTransactionContext', () => {
+  it('is frozen, supplies the exact owner database, and rejects forged or committed contexts', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    let stale!: DbTransactionContext;
+
+    const result = await withDbTransaction(db, async (context) => {
+      stale = context;
+      expect(Object.isFrozen(context)).toBe(true);
+      return runInTransactionContext(context, async (transactionDb) => {
+        expect(transactionDb).toBe(db);
+        order.push('task');
+        return 'joined';
+      });
+    });
+
+    expect(result).toBe('joined');
+    expect(order).toEqual(['BEGIN', 'task', 'COMMIT']);
+
+    for (const context of [stale, Object.freeze({}) as DbTransactionContext]) {
+      const callback = jest.fn(async () => undefined);
+      await expect(runInTransactionContext(context, callback)).rejects.toBeInstanceOf(
+        DbTransactionContextRejectedError,
+      );
+      expect(callback).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rejects an escaped context after rollback before invoking its callback', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    const ownerFailure = new Error('owner failed');
+    let stale!: DbTransactionContext;
+
+    await expect(
+      withDbTransaction(db, async (context) => {
+        stale = context;
+        throw ownerFailure;
+      }),
+    ).rejects.toBe(ownerFailure);
+
+    const callback = jest.fn(async () => undefined);
+    await expect(runInTransactionContext(stale, callback)).rejects.toBeInstanceOf(
+      DbTransactionContextRejectedError,
+    );
+    expect(callback).not.toHaveBeenCalled();
+    expect(order).toEqual(['BEGIN', 'ROLLBACK']);
+  });
+
+  it('waits for an ignored registered task before committing', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    const started = deferred<void>();
+    const finish = deferred<void>();
+
+    const transaction = withDbTransaction(db, async (context) => {
+      void runInTransactionContext(context, async () => {
+        order.push('task:start');
+        started.resolve();
+        await finish.promise;
+        order.push('task:end');
+      });
+      order.push('owner:end');
+    });
+
+    let orderBeforeRelease: string[] = [];
+    let statementsBeforeRelease = -1;
+    let transactionOutcome!: PromiseSettledResult<void>;
+    try {
+      await started.promise;
+      orderBeforeRelease = [...order];
+      statementsBeforeRelease = (db.run as jest.Mock).mock.calls.length;
+    } finally {
+      finish.resolve();
+      transactionOutcome = await settled(transaction);
+    }
+    expect(transactionOutcome).toEqual({ status: 'fulfilled', value: undefined });
+    expect(orderBeforeRelease).toEqual(['BEGIN', 'task:start', 'owner:end']);
+    expect(statementsBeforeRelease).toBe(1);
+    expect(order).toEqual(['BEGIN', 'task:start', 'owner:end', 'task:end', 'COMMIT']);
+  });
+
+  it('observes an ignored task rejection, waits for its peers, and rolls back', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    const taskFailure = new Error('registered task failed');
+    const slowStarted = deferred<void>();
+    const slowTask = deferred<void>();
+
+    const transaction = withDbTransaction(db, async (context) => {
+      void runInTransactionContext(context, async () => {
+        order.push('rejecting');
+        throw taskFailure;
+      });
+      void runInTransactionContext(context, async () => {
+        order.push('slow:start');
+        slowStarted.resolve();
+        await slowTask.promise;
+        order.push('slow:end');
+      });
+    });
+
+    let statementsBeforeRelease = -1;
+    let transactionOutcome!: PromiseSettledResult<void>;
+    try {
+      await slowStarted.promise;
+      statementsBeforeRelease = (db.run as jest.Mock).mock.calls.length;
+    } finally {
+      slowTask.resolve();
+      transactionOutcome = await settled(transaction);
+    }
+    expect(transactionOutcome).toEqual({ status: 'rejected', reason: taskFailure });
+    expect(statementsBeforeRelease).toBe(1);
+    expect(order).toEqual(['BEGIN', 'rejecting', 'slow:start', 'slow:end', 'ROLLBACK']);
+  });
+
+  it('drains registered work before rolling back an owner failure', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    const ownerFailure = new Error('owner failed first');
+    const started = deferred<void>();
+    const finish = deferred<void>();
+
+    const transaction = withDbTransaction(db, async (context) => {
+      void runInTransactionContext(context, async () => {
+        order.push('task:start');
+        started.resolve();
+        await finish.promise;
+        order.push('task:end');
+      });
+      throw ownerFailure;
+    });
+
+    let statementsBeforeRelease = -1;
+    let transactionOutcome!: PromiseSettledResult<void>;
+    try {
+      await started.promise;
+      statementsBeforeRelease = (db.run as jest.Mock).mock.calls.length;
+    } finally {
+      finish.resolve();
+      transactionOutcome = await settled(transaction);
+    }
+    expect(transactionOutcome).toEqual({ status: 'rejected', reason: ownerFailure });
+    expect(statementsBeforeRelease).toBe(1);
+    expect(order).toEqual(['BEGIN', 'task:start', 'task:end', 'ROLLBACK']);
+  });
+
+  it('rejects and latches a registration attempted after the owner settles', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    const lateCallback = jest.fn(async () => {
+      order.push('late:ran');
+    });
+
+    const transaction = withDbTransaction(db, async (context) => {
+      void runInTransactionContext(context, async () => {
+        // A timer runs after the owner's promise continuation has synchronously closed admission.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        await runInTransactionContext(context, lateCallback).catch(() => undefined);
+        order.push('late:rejected');
+      });
+    });
+
+    await expect(transaction).rejects.toBeInstanceOf(DbTransactionContextRejectedError);
+    expect(lateCallback).not.toHaveBeenCalled();
+    expect(order).toEqual(['BEGIN', 'late:rejected', 'ROLLBACK']);
   });
 });
 

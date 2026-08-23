@@ -2,6 +2,7 @@ import {
   createConcurrencyGate,
   createUploadRegistry,
   DEFAULT_MAX_CONCURRENT_UPLOADS,
+  UploadGateCancelledError,
 } from '@/services/send/uploadControl';
 
 /** A promise plus its resolver, so a test can hold an upload open and release it deliberately. */
@@ -77,6 +78,53 @@ describe('createConcurrencyGate', () => {
     first.resolve();
     await Promise.all(runs);
     expect(started).toEqual(['1', '2', '3']);
+  });
+
+  it('removes an aborted queued waiter without consuming a slot', async () => {
+    const gate = createConcurrencyGate(1);
+    const blocker = deferred();
+    const first = gate.run(() => blocker.promise);
+    await flush();
+
+    const controller = new AbortController();
+    const nativeStart = jest.fn(async () => undefined);
+    const queued = gate.run(nativeStart, controller.signal);
+    await flush();
+    expect(gate.active).toBe(1);
+    expect(gate.waiting).toBe(1);
+
+    controller.abort();
+    await expect(queued).rejects.toBeInstanceOf(UploadGateCancelledError);
+    expect(gate.active).toBe(1);
+    expect(gate.waiting).toBe(0);
+    expect(nativeStart).not.toHaveBeenCalled();
+
+    blocker.resolve();
+    await first;
+    expect(gate.active).toBe(0);
+  });
+
+  it('keeps an aborted active task in its slot until the task itself settles', async () => {
+    const gate = createConcurrencyGate(1);
+    const activeTask = deferred();
+    const controller = new AbortController();
+    const first = gate.run(() => activeTask.promise, controller.signal);
+    await flush();
+
+    const nextStart = jest.fn(async () => undefined);
+    const next = gate.run(nextStart);
+    await flush();
+    controller.abort();
+    await flush();
+
+    expect(gate.active).toBe(1);
+    expect(gate.waiting).toBe(1);
+    expect(nextStart).not.toHaveBeenCalled();
+
+    activeTask.resolve();
+    await Promise.all([first, next]);
+    expect(nextStart).toHaveBeenCalledTimes(1);
+    expect(gate.active).toBe(0);
   });
 
   it('releases the slot when the task THROWS', async () => {
@@ -172,6 +220,20 @@ describe('createUploadRegistry', () => {
     expect(staleCancel).not.toHaveBeenCalled();
   });
 
+  it('cancels every overlapping attempt registered under the same temp guid', () => {
+    const registry = createUploadRegistry();
+    const first = jest.fn();
+    const retry = jest.fn();
+    registry.add('temp-1', { cancel: first });
+    registry.add('temp-1', { cancel: retry });
+
+    expect(registry.cancel('temp-1')).toBe(true);
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(registry.size).toBe(0);
+  });
+
   it('tracks concurrent uploads under separate keys', () => {
     const registry = createUploadRegistry();
     const one = jest.fn();
@@ -184,5 +246,56 @@ describe('createUploadRegistry', () => {
     expect(one).toHaveBeenCalledTimes(1);
     expect(two).not.toHaveBeenCalled();
     expect(registry.size).toBe(1);
+  });
+
+  it('cancels every upload even when one cancellation throws', () => {
+    const registry = createUploadRegistry();
+    const first = jest.fn(() => {
+      throw new Error('native task already released');
+    });
+    const second = jest.fn();
+    registry.add('temp-1', { cancel: first });
+    registry.add('temp-2', { cancel: second });
+
+    expect(registry.cancelAll()).toBe(2);
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(registry.size).toBe(0);
+  });
+
+  it('prevents a registered queued upload from starting after account teardown', async () => {
+    const gate = createConcurrencyGate(1);
+    const registry = createUploadRegistry();
+    const blocker = deferred();
+    const first = gate.run(() => blocker.promise);
+    await flush();
+
+    let cancelled = false;
+    const nativeStart = jest.fn();
+    const release = registry.add('temp-queued', {
+      cancel: () => {
+        cancelled = true;
+      },
+    });
+    const queued = gate.run(async () => {
+      // This is the same pre-native-task guard used by attachmentUpload after its gate wait.
+      if (cancelled) return null;
+      nativeStart();
+      return 'started';
+    });
+    await flush();
+    expect(gate.waiting).toBe(1);
+
+    registry.cancelAll();
+    blocker.resolve();
+
+    await expect(first).resolves.toBeUndefined();
+    await expect(queued).resolves.toBeNull();
+    expect(nativeStart).not.toHaveBeenCalled();
+    expect(registry.size).toBe(0);
+    // The upload's ordinary finally may still release after cancelAll; identity checking makes it
+    // harmless and, importantly, cannot remove a newer account's replacement handle.
+    expect(release).not.toThrow();
   });
 });

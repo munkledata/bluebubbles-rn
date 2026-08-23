@@ -1,10 +1,3 @@
-import { ShareIntentModule } from 'expo-share-intent';
-import { logger } from '@core/secure';
-import { useShareIntentStore } from '@state/shareIntentStore';
-import { showToast } from '@ui/toast/toastStore';
-import { createShareCapture } from './captureShare';
-import { appPrivateRoots, expoShareFileIO, shareCacheRoot } from './shareFileIo';
-
 export type { ShareFileIO } from './materializeShare';
 export { materializeSharedFiles, pruneShareCache } from './materializeShare';
 export { parseRawShareEvent } from './shareIntentPayload';
@@ -12,28 +5,9 @@ export type { ParsedShare, RawShareFile, ShareSource } from './shareIntentPayloa
 export { createShareCapture } from './captureShare';
 
 /**
- * The production share-capture handler, wired to expo + the app stores.
- *
- * Subscribed to `ExpoShareIntentModule`'s raw `onChange` event by `ShareIntentCapture`
- * (`src/ui/ShareIntentHandler.tsx`).
+ * IPC-01 containment: this barrel intentionally exports only injected, testable building blocks.
+ * There is no production native binding. `expo-share-intent@8.0.1` performs unbounded provider I/O
+ * before its JavaScript event, so app config and the root layout keep all inbound sharing disabled
+ * until an owned native module can enforce count, byte, aggregate, cancellation, and time limits
+ * while it streams.
  */
-export const captureShareIntent = createShareCapture({
-  io: expoShareFileIO,
-  cacheRoot: shareCacheRoot(),
-  privateRoots: appPrivateRoots(),
-  clearNativeIntent: () => {
-    try {
-      // The key argument is ignored on Android; it just nulls the pending-intent singleton.
-      ShareIntentModule?.clearShareIntent('');
-    } catch (err) {
-      logger.warn(
-        `[share] could not clear the native intent: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  },
-  stage: (payload) => useShareIntentStore.getState().set(payload),
-  toast: showToast,
-  now: () => Date.now(),
-});

@@ -17,8 +17,9 @@ interface LockState {
 
 /**
  * App-lock state. The gate is rendered at the ROOT layout (above the DB-opening
- * boot step) so a cold launch can withhold the SQLCipher key until the user
- * authenticates. Resume re-locking uses `isLockExpired`.
+ * boot step) so a foreground cold launch defers opening/rendering stored messages until the user
+ * authenticates. It does not make the SecureStore-held key biometric-bound. Resume re-locking
+ * uses `isLockExpired`.
  */
 export const useLockStore = create<LockState>((set) => ({
   enabled: false,
@@ -28,7 +29,7 @@ export const useLockStore = create<LockState>((set) => ({
   timeoutMs: 30_000,
   hydrate: (enabled) => set({ enabled, hydrated: true, locked: enabled }),
   // Enabling locks immediately; disabling clears the gate so the user isn't stuck.
-  setEnabled: (v) => set(v ? { enabled: true } : { enabled: false, locked: false }),
+  setEnabled: (v) => set(v ? { enabled: true, locked: true } : { enabled: false, locked: false }),
   setTimeoutMs: (ms) => set({ timeoutMs: ms }),
   noteBackgrounded: (now) => set({ lastBackgrounded: now }),
   lock: () => set({ locked: true }),

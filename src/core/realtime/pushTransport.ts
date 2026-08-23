@@ -1,5 +1,12 @@
+import type { EventDeliveryContext, EventOccurrenceMetadata } from './eventRouter';
+
 /** Delivers raw realtime events (push / socket) into the app's event pipeline. */
-export type EventDispatch = (eventName: string, rawData: unknown) => Promise<void> | void;
+export type EventDispatch = (
+  eventName: string,
+  rawData: unknown,
+  context?: EventDeliveryContext,
+  occurrence?: EventOccurrenceMetadata,
+) => Promise<void> | void;
 
 export interface PushTransport {
   start(dispatch: EventDispatch): Promise<void> | void;
@@ -19,8 +26,13 @@ export class DevPushTransport implements PushTransport {
   stop(): void {
     this.dispatch = null;
   }
-  async inject(eventName: string, rawData: unknown): Promise<void> {
-    await this.dispatch?.(eventName, rawData);
+  async inject(
+    eventName: string,
+    rawData: unknown,
+    context?: EventDeliveryContext,
+    occurrence?: EventOccurrenceMetadata,
+  ): Promise<void> {
+    await this.dispatch?.(eventName, rawData, context, occurrence);
   }
 }
 

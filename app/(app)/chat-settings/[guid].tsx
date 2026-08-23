@@ -1,8 +1,9 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import {
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -13,13 +14,11 @@ import {
   View,
 } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { chatsApi } from '@core/api';
 import { getDatabase } from '@db/database';
 import {
   getChatParticipants,
   getChatTheme,
   listChatAttachmentsByKind,
-  persistServerChat,
   setBackgroundIsLight,
   setChatCustomization,
   setChatMute,
@@ -27,11 +26,23 @@ import {
   type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { computeBackgroundIsLight, deleteChat, http } from '@/services';
+import { computeBackgroundIsLight } from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
-import { removeGroupIcon, uploadGroupIcon } from '@/services/chat/groupIcon';
+import {
+  clearGroupPhoto,
+  leaveGroupChat,
+  renameGroupChat,
+  setGroupPhoto,
+  updateGroupParticipant,
+} from '@/services/chat/groupManagement';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { useChatHeader } from '@features/conversations/useChatHeader';
-import { isGroupRow, resolveTitle } from '@utils';
+import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
 import {
   NavRow,
   Screen,
@@ -42,11 +53,32 @@ import {
   useTheme,
 } from '@ui';
 import { MediaSections } from '@ui/conversations/MediaSections';
+import { requestPhotoLibraryAccess } from '@ui/permissions/photoLibraryPermission';
 import { adaptiveTokensFromImage } from '@ui/theme/adaptiveFromImage';
-import { safeParseTokens, type ThemeTokens } from '@ui/theme/tokens';
+import {
+  darkThemeOrFallback,
+  isDarkThemeTokens,
+  safeParseTokens,
+  type ThemeTokens,
+} from '@ui/theme/tokens';
 
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
 const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'];
+
+type ChatSettingsLifetime = object;
+type PickerOperationToken = object;
+
+interface ChatSettingsGrant {
+  chatGuid: string;
+  lifetime: ChatSettingsLifetime;
+  accountLease: RealtimeDeliveryLease;
+}
+
+interface PickerOwner {
+  acquire(): PickerOperationToken | null;
+  isCurrent(token: PickerOperationToken): boolean;
+  release(token: PickerOperationToken): void;
+}
 
 /**
  * Copy a picked image into a STABLE app directory before we persist its path.
@@ -75,12 +107,147 @@ async function persistBackground(guid: string, srcUri: string): Promise<string> 
   }
 }
 
-/** Per-chat customization: custom name, accent color, mute. */
-export default function ChatSettingsScreen(): React.JSX.Element {
+/**
+ * Route/account owner. The account lease is intentionally captured outside the keyed content so a
+ * GUID replacement cannot accidentally adopt a newer account. The single picker owner also spans
+ * keyed A -> B -> A replacements: only one of the three native photo flows can be live at once,
+ * and an old operation can release only its own opaque token.
+ */
+export default function ChatSettingsRoute(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const { guid } = useLocalSearchParams<{ guid: string }>();
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const ownerMountedRef = useRef(true);
+  const accountRetiredRef = useRef(!accountLease.isCurrent());
+  const [accountRetired, setAccountRetired] = useState(accountRetiredRef.current);
+  const activePickerRef = useRef<PickerOperationToken | null>(null);
+  const [pickerOwner] = useState<PickerOwner>(() => ({
+    acquire: () => {
+      if (
+        !ownerMountedRef.current ||
+        accountRetiredRef.current ||
+        !accountLease.isCurrent() ||
+        activePickerRef.current
+      ) {
+        return null;
+      }
+      const token = {};
+      activePickerRef.current = token;
+      return token;
+    },
+    isCurrent: (token) =>
+      ownerMountedRef.current &&
+      !accountRetiredRef.current &&
+      accountLease.isCurrent() &&
+      activePickerRef.current === token,
+    release: (token) => {
+      if (activePickerRef.current === token) activePickerRef.current = null;
+    },
+  }));
+
+  useLayoutEffect(() => {
+    ownerMountedRef.current = true;
+    const unsubscribe = subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+      accountRetiredRef.current = true;
+      Keyboard.dismiss();
+      setAccountRetired(true);
+    });
+    return () => {
+      ownerMountedRef.current = false;
+      Keyboard.dismiss();
+      unsubscribe();
+    };
+  }, [accountLease]);
+
+  const accountUnavailable = accountRetired || !accountLease.isCurrent();
+
+  return (
+    <Screen>
+      <ScreenHeader title="Details" onBack={() => router.back()} />
+      {accountUnavailable ? (
+        <View style={styles.accountChanged}>
+          <Text
+            accessibilityRole="text"
+            accessibilityLabel="Conversation account changed. Go back and reopen Details."
+            style={[styles.accountChangedText, { color: theme.color.secondaryLabel }]}
+          >
+            Conversation account changed. Go back and reopen Details.
+          </Text>
+        </View>
+      ) : (
+        <ChatSettingsScreen
+          key={guid}
+          guid={guid}
+          accountLease={accountLease}
+          pickerOwner={pickerOwner}
+        />
+      )}
+    </Screen>
+  );
+}
+
+/** Per-chat customization: custom name, accent color, mute. Keyed by the outer route owner. */
+function ChatSettingsScreen({
+  guid,
+  accountLease,
+  pickerOwner,
+}: {
+  guid: string;
+  accountLease: RealtimeDeliveryLease;
+  pickerOwner: PickerOwner;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const router = useRouter();
   const { data } = useChatHeader(guid);
+  const mountAliveRef = useRef(true);
+  const [lifetime] = useState<ChatSettingsLifetime>(() => ({}));
+  const activeLifetimeRef = useRef<ChatSettingsLifetime | null>(lifetime);
+  const renderGrant: ChatSettingsGrant = { chatGuid: guid, lifetime, accountLease };
+  const grantIsCurrent = (grant: ChatSettingsGrant): boolean =>
+    mountAliveRef.current &&
+    activeLifetimeRef.current === grant.lifetime &&
+    grant.chatGuid === guid &&
+    grant.accountLease === accountLease &&
+    grant.accountLease.isCurrent();
+
+  useLayoutEffect(() => {
+    mountAliveRef.current = true;
+    activeLifetimeRef.current = lifetime;
+    return () => {
+      mountAliveRef.current = false;
+      activeLifetimeRef.current = null;
+      Keyboard.dismiss();
+    };
+  }, [lifetime]);
+
+  const runScreenAccountTask = async (
+    grant: ChatSettingsGrant,
+    task: () => Promise<void>,
+  ): Promise<boolean> => {
+    if (!grantIsCurrent(grant)) return false;
+    let completed = false;
+    try {
+      const status = await runTrackedRealtimeWork(accountLease, async (lease) => {
+        if (!lease.isCurrent()) return;
+        await task();
+        if (!lease.isCurrent()) return;
+        completed = true;
+      });
+      return status === 'delivered' && completed && accountLease.isCurrent();
+    } catch (error) {
+      // A revoked screen should not surface its write error in the replacement account.
+      if (!accountLease.isCurrent()) return false;
+      throw error;
+    }
+  };
+  const queueScreenAccountTask = (grant: ChatSettingsGrant, task: () => Promise<void>): void => {
+    if (!grantIsCurrent(grant)) return;
+    void runScreenAccountTask(grant, task).catch(() => {
+      // These local preference writes have always been best-effort; account ownership is the
+      // important invariant. A later reactive read continues to show the durable value.
+    });
+  };
 
   // Local input state seeded once from the row; writes persist immediately.
   const [name, setName] = useState<string | null>(null);
@@ -94,22 +261,27 @@ export default function ChatSettingsScreen(): React.JSX.Element {
 
   // SERVER-GATED (private API): leave on the server, then drop the chat locally.
   const leaveGroup = (): void => {
+    const dialogGrant = renderGrant;
+    if (!grantIsCurrent(dialogGrant)) return;
     showDialog('Leave Group', 'Leave this conversation on the server and remove it here?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Leave',
         style: 'destructive',
         onPress: () => {
+          if (!grantIsCurrent(dialogGrant)) return;
           void (async () => {
             try {
-              await chatsApi.leaveChat(http, guid);
-              await deleteChat(guid);
-              router.back();
+              if ((await leaveGroupChat(guid, accountLease)) && grantIsCurrent(dialogGrant)) {
+                router.back();
+              }
             } catch {
-              showDialog(
-                'Leave Group',
-                'Couldn’t leave — the server needs the private API enabled.',
-              );
+              if (grantIsCurrent(dialogGrant)) {
+                showDialog(
+                  'Leave Group',
+                  'Couldn’t leave — the server needs the private API enabled.',
+                );
+              }
             }
           })();
         },
@@ -133,7 +305,10 @@ export default function ChatSettingsScreen(): React.JSX.Element {
     ['chats'],
     [guid],
   );
-  const hasChatTheme = !!chatThemeData?.themeTokens;
+  const storedChatTheme = safeParseTokens(chatThemeData?.themeTokens);
+  const hasStoredChatTheme = !!chatThemeData?.themeTokens;
+  const hasChatTheme = isDarkThemeTokens(storedChatTheme);
+  const hasUnavailableLightTheme = storedChatTheme?.mode === 'light';
   const hasBackground = !!chatThemeData?.backgroundUri;
   const [studioOpen, setStudioOpen] = useState(false);
 
@@ -145,25 +320,60 @@ export default function ChatSettingsScreen(): React.JSX.Element {
     [guid],
   );
 
-  // The studio opens with the chat's stored theme, falling back to the active global theme.
-  const studioTokens = (): ThemeTokens => safeParseTokens(chatThemeData?.themeTokens) ?? theme;
+  // The studio opens with a stored dark theme. A legacy light theme stays in the DB but
+  // starts from the active dark colors if the user chooses to convert it by applying edits.
+  const studioTokens = (): ThemeTokens => darkThemeOrFallback(storedChatTheme, theme);
 
   const applyChatTheme = (tokens: ThemeTokens): void => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
     setStudioOpen(false);
-    void setChatTheme(getDatabase(), guid, { themeTokens: JSON.stringify(tokens) });
+    queueScreenAccountTask(operationGrant, () =>
+      setChatTheme(getDatabase(), guid, { themeTokens: JSON.stringify(tokens) }),
+    );
   };
 
   const pickBackground = (): void => {
     void (async () => {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return;
-      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-      if (res.canceled || res.assets.length === 0) return;
-      // Copy out of the purgeable ImagePicker cache into a stable app dir before storing.
-      const stableUri = await persistBackground(guid, res.assets[0]!.uri);
-      await setChatTheme(getDatabase(), guid, { backgroundUri: stableUri });
-      // Record the wallpaper's luminance so overlay text stays legible on it.
-      await setBackgroundIsLight(getDatabase(), guid, await computeBackgroundIsLight(stableUri));
+      const pickerGrant = renderGrant;
+      if (!grantIsCurrent(pickerGrant)) return;
+      const pickerToken = pickerOwner.acquire();
+      if (!pickerToken) return;
+      const pickerIsCurrent = (): boolean =>
+        pickerOwner.isCurrent(pickerToken) && grantIsCurrent(pickerGrant);
+      try {
+        if (!(await requestPhotoLibraryAccess(pickerIsCurrent)) || !pickerIsCurrent()) return;
+        const res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+        }).catch(() => {
+          if (pickerIsCurrent()) showDialog('Photos', 'Couldn’t open the photo picker.');
+          return null;
+        });
+        if (!res || res.canceled || res.assets.length === 0 || !pickerIsCurrent()) return;
+        try {
+          await runScreenAccountTask(pickerGrant, async () => {
+            // Copy out of the purgeable ImagePicker cache into a stable app dir before storing.
+            // The tracked task drains for its exact chat once admitted; only later UI publication
+            // is revoked if this keyed screen is replaced.
+            const stableUri = await persistBackground(guid, res.assets[0]!.uri);
+            if (!accountLease.isCurrent()) return;
+            await setChatTheme(getDatabase(), guid, { backgroundUri: stableUri });
+            // Record the wallpaper's luminance so overlay text stays legible on it.
+            await setBackgroundIsLight(
+              getDatabase(),
+              guid,
+              await computeBackgroundIsLight(stableUri),
+            );
+          });
+        } catch {
+          if (pickerIsCurrent()) {
+            showDialog('Background', 'Couldn’t finish updating this conversation’s background.');
+          }
+        }
+      } finally {
+        pickerOwner.release(pickerToken);
+      }
     })();
   };
 
@@ -172,43 +382,71 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   // extractor isn't linked yet (returns null), just set the background and explain.
   const generateThemeFromBackground = (): void => {
     void (async () => {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return;
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        quality: 1,
-      });
-      if (res.canceled || res.assets.length === 0) return;
-      const pickedUri = res.assets[0]!.uri;
-      // Extract the seed colour from the picked asset, THEN copy it into a stable dir
-      // (the ImagePicker cache path is purgeable) and persist that path.
-      const tokens = await adaptiveTokensFromImage(pickedUri, theme.mode);
-      const uri = await persistBackground(guid, pickedUri);
-      if (tokens) {
-        await setChatTheme(getDatabase(), guid, {
-          themeTokens: JSON.stringify(tokens),
-          backgroundUri: uri,
+      const pickerGrant = renderGrant;
+      if (!grantIsCurrent(pickerGrant)) return;
+      const pickerToken = pickerOwner.acquire();
+      if (!pickerToken) return;
+      const pickerIsCurrent = (): boolean =>
+        pickerOwner.isCurrent(pickerToken) && grantIsCurrent(pickerGrant);
+      try {
+        if (!(await requestPhotoLibraryAccess(pickerIsCurrent)) || !pickerIsCurrent()) return;
+        const res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: true,
+          quality: 1,
+        }).catch(() => {
+          if (pickerIsCurrent()) showDialog('Photos', 'Couldn’t open the photo picker.');
+          return null;
         });
-      } else {
-        await setChatTheme(getDatabase(), guid, { backgroundUri: uri });
-        showDialog(
-          'Background set',
-          'Adaptive theming needs an app update before it can colour-match this image. The background was applied.',
-        );
+        if (!res || res.canceled || res.assets.length === 0 || !pickerIsCurrent()) return;
+        const pickedUri = res.assets[0]!.uri;
+        let generated = false;
+        try {
+          const completed = await runScreenAccountTask(pickerGrant, async () => {
+            // Extract the seed colour from the picked asset, THEN copy it into a stable dir
+            // (the ImagePicker cache path is purgeable) and persist that path.
+            const tokens = await adaptiveTokensFromImage(pickedUri, 'dark');
+            if (!accountLease.isCurrent()) return;
+            const uri = await persistBackground(guid, pickedUri);
+            if (!accountLease.isCurrent()) return;
+            generated = tokens != null;
+            if (tokens) {
+              await setChatTheme(getDatabase(), guid, {
+                themeTokens: JSON.stringify(tokens),
+                backgroundUri: uri,
+              });
+            } else {
+              await setChatTheme(getDatabase(), guid, { backgroundUri: uri });
+            }
+            // Record the wallpaper's luminance so overlay text stays legible on it.
+            await setBackgroundIsLight(getDatabase(), guid, await computeBackgroundIsLight(uri));
+          });
+          if (completed && !generated && pickerIsCurrent()) {
+            showDialog(
+              'Background set',
+              'Adaptive theming needs an app update before it can colour-match this image. The background was applied.',
+            );
+          }
+        } catch {
+          if (pickerIsCurrent()) {
+            showDialog('Chat Theme', 'Couldn’t finish generating a theme from this background.');
+          }
+        }
+      } finally {
+        pickerOwner.release(pickerToken);
       }
-      // Record the wallpaper's luminance so overlay text stays legible on it.
-      await setBackgroundIsLight(getDatabase(), guid, await computeBackgroundIsLight(uri));
     })();
   };
 
   const clearChatTheme = (): void => {
-    void (async () => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
+    queueScreenAccountTask(operationGrant, async () => {
       await setChatTheme(getDatabase(), guid, { themeTokens: null, backgroundUri: null });
       // Cleared the local override → drop its luminance; the synced background (if any) recomputes
       // its own on the next chat open (ensureSyncedBackground).
       await setBackgroundIsLight(getDatabase(), guid, null);
-    })();
+    });
   };
 
   const [renaming, setRenaming] = useState(false);
@@ -217,109 +455,223 @@ export default function ChatSettingsScreen(): React.JSX.Element {
   const [addAddress, setAddAddress] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const groupError = (): void =>
-    showDialog('Group', 'Couldn’t update — the server needs the Private API enabled.');
+  const showGroupError = (grant: ChatSettingsGrant): void => {
+    if (grantIsCurrent(grant)) {
+      showDialog('Group', 'Couldn’t update — the server needs the Private API enabled.');
+    }
+  };
 
   const doRename = (): void => {
-    if (!groupName.trim() || busy) return;
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant) || !groupName.trim() || busy) return;
     setBusy(true);
-    void chatsApi
-      .renameChat(http, guid, groupName.trim())
-      .then((chat) => persistServerChat(getDatabase(), chat)) // write the new name locally
-      .then(() => {
+    void renameGroupChat(guid, groupName.trim(), accountLease)
+      .then((completed) => {
+        if (!completed || !grantIsCurrent(operationGrant)) return;
         setRenaming(false);
         setGroupName('');
       })
-      .catch(groupError)
-      .finally(() => setBusy(false));
+      .catch(() => {
+        showGroupError(operationGrant);
+      })
+      .finally(() => {
+        if (grantIsCurrent(operationGrant)) setBusy(false);
+      });
   };
   const doAdd = (): void => {
-    if (!addAddress.trim() || busy) return;
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant) || !addAddress.trim() || busy) return;
     setBusy(true);
-    void chatsApi
-      .updateParticipant(http, guid, 'add', addAddress.trim())
-      .then((chat) => persistServerChat(getDatabase(), chat)) // reflect the new member locally
-      .then(() => {
+    void updateGroupParticipant(guid, 'add', addAddress.trim(), accountLease)
+      .then((completed) => {
+        if (!completed || !grantIsCurrent(operationGrant)) return;
         setAdding(false);
         setAddAddress('');
       })
-      .catch(groupError)
-      .finally(() => setBusy(false));
+      .catch(() => {
+        showGroupError(operationGrant);
+      })
+      .finally(() => {
+        if (grantIsCurrent(operationGrant)) setBusy(false);
+      });
   };
-  const doRemove = (address: string, who: string): void => {
-    showDialog('Remove', `Remove ${who} from the group?`, [
+  const doRemove = (address: string): void => {
+    const dialogGrant = renderGrant;
+    if (!grantIsCurrent(dialogGrant)) return;
+    showDialog('Remove', 'Remove this person from the group?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
         onPress: () => {
+          if (!grantIsCurrent(dialogGrant)) return;
           setBusy(true);
-          void chatsApi
-            .updateParticipant(http, guid, 'remove', address)
-            .then((chat) => persistServerChat(getDatabase(), chat)) // prune the member locally
-            .catch(groupError)
-            .finally(() => setBusy(false));
+          void updateGroupParticipant(guid, 'remove', address, accountLease)
+            .catch(() => {
+              showGroupError(dialogGrant);
+            })
+            .finally(() => {
+              if (grantIsCurrent(dialogGrant)) setBusy(false);
+            });
         },
       },
     ]);
   };
 
   const saveName = (text: string): void => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
     setName(text);
-    void setChatCustomization(getDatabase(), guid, { customName: text });
+    queueScreenAccountTask(operationGrant, () =>
+      setChatCustomization(getDatabase(), guid, { customName: text }),
+    );
   };
   const pickColor = (color: string | null): void => {
-    void setChatCustomization(getDatabase(), guid, { customColor: color });
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
+    queueScreenAccountTask(operationGrant, () =>
+      setChatCustomization(getDatabase(), guid, { customColor: color }),
+    );
   };
   const toggleMute = (on: boolean): void => {
-    void setChatMute(getDatabase(), guid, on ? 'mute' : null);
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
+    queueScreenAccountTask(operationGrant, () =>
+      setChatMute(getDatabase(), guid, on ? 'mute' : null),
+    );
   };
   // Pick a new group photo and upload it to the server (Private API sends it to everyone).
   const onChangeGroupPhoto = (): void => {
     void (async () => {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (perm.status !== 'granted') return;
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 0.9,
-      });
-      if (res.canceled || !res.assets[0]) return;
-      const a = res.assets[0];
+      const pickerGrant = renderGrant;
+      if (!grantIsCurrent(pickerGrant)) return;
+      const pickerToken = pickerOwner.acquire();
+      if (!pickerToken) return;
+      const pickerIsCurrent = (): boolean =>
+        pickerOwner.isCurrent(pickerToken) && grantIsCurrent(pickerGrant);
       try {
-        await uploadGroupIcon(http, guid, {
-          uri: a.uri,
-          name: a.fileName ?? 'group-icon.jpg',
-          mimeType: a.mimeType ?? 'image/jpeg',
+        if (!(await requestPhotoLibraryAccess(pickerIsCurrent)) || !pickerIsCurrent()) return;
+        const res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 0.9,
+        }).catch(() => {
+          if (pickerIsCurrent()) showDialog('Photos', 'Couldn’t open the photo picker.');
+          return null;
         });
-        showDialog('Group Photo', 'Photo updated — it may take a moment to sync to everyone.');
-      } catch {
-        showDialog('Group Photo', 'Couldn’t update the group photo.');
+        if (!res || res.canceled || !res.assets[0] || !pickerIsCurrent()) return;
+        const a = res.assets[0];
+        try {
+          const completed = await setGroupPhoto(
+            guid,
+            {
+              uri: a.uri,
+              name: a.fileName ?? 'group-icon.jpg',
+              mimeType: a.mimeType ?? 'image/jpeg',
+            },
+            accountLease,
+          );
+          if (completed && pickerIsCurrent()) {
+            showDialog('Group Photo', 'Photo updated — it may take a moment to sync to everyone.');
+          }
+        } catch {
+          if (pickerIsCurrent()) {
+            showDialog('Group Photo', 'Couldn’t update the group photo.');
+          }
+        }
+      } finally {
+        pickerOwner.release(pickerToken);
       }
     })();
   };
   const onRemoveGroupPhoto = (): void => {
+    const dialogGrant = renderGrant;
+    if (!grantIsCurrent(dialogGrant)) return;
     showDialog('Remove Photo', 'Remove this group’s photo?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
-        onPress: () =>
-          void removeGroupIcon(http, guid)
-            .then(() => showDialog('Group Photo', 'Photo removed.'))
-            .catch(() => showDialog('Group Photo', 'Couldn’t remove the group photo.')),
+        onPress: () => {
+          if (!grantIsCurrent(dialogGrant)) return;
+          void clearGroupPhoto(guid, accountLease)
+            .then((completed) => {
+              if (completed && grantIsCurrent(dialogGrant)) {
+                showDialog('Group Photo', 'Photo removed.');
+              }
+            })
+            .catch(() => {
+              if (grantIsCurrent(dialogGrant)) {
+                showDialog('Group Photo', 'Couldn’t remove the group photo.');
+              }
+            });
+        },
       },
     ]);
   };
   const resetAll = (): void => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
     setName('');
-    void setChatCustomization(getDatabase(), guid, { customName: null, customColor: null });
-    void setChatMute(getDatabase(), guid, null);
+    queueScreenAccountTask(operationGrant, async () => {
+      await setChatCustomization(getDatabase(), guid, { customName: null, customColor: null });
+      await setChatMute(getDatabase(), guid, null);
+    });
+  };
+
+  const openStudio = (): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    setStudioOpen(true);
+  };
+  const closeStudio = (): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    setStudioOpen(false);
+  };
+  const openMedia = (messageGuid: string): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    router.push(`/media/${encodeURIComponent(messageGuid)}`);
+  };
+  const openLink = (url: string): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    void safeOpenUrl(url);
+  };
+  const openNotificationSettings = (): void => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
+    const sourceAccountContext = {
+      generation: accountLease.generation,
+      isCurrent: (): boolean => grantIsCurrent(operationGrant),
+    };
+    void openChatNotificationSettings(
+      guid,
+      data ? resolveTitle(data) : 'Conversation',
+      sourceAccountContext,
+    ).catch(() => {
+      if (!grantIsCurrent(operationGrant)) return;
+      showDialog(
+        'Notification Settings',
+        'Android notification settings could not be opened for this conversation.',
+      );
+    });
+  };
+  const openAddPerson = (): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    setAdding(true);
+  };
+  const changeAddAddress = (text: string): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    setAddAddress(text);
+  };
+  const openRename = (): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    setRenaming(true);
+  };
+  const changeGroupName = (text: string): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    setGroupName(text);
   };
 
   return (
-    <Screen>
-      <ScreenHeader title="Details" onBack={() => router.back()} />
-
+    <>
       <ScrollView contentContainerStyle={styles.content}>
         <SettingsSection label="NAME">
           <TextInput
@@ -355,10 +707,10 @@ export default function ChatSettingsScreen(): React.JSX.Element {
         </SettingsSection>
 
         <SettingsSection label="CHAT THEME" style={styles.gap}>
-          <Pressable onPress={() => setStudioOpen(true)} style={styles.row}>
+          <Pressable onPress={openStudio} style={styles.row}>
             <Text style={[styles.rowLabel, { color: theme.color.label }]}>Chat Theme…</Text>
             <Text style={[styles.rowValue, { color: theme.color.tertiaryLabel }]}>
-              {hasChatTheme ? 'Custom' : 'Default'}
+              {hasChatTheme ? 'Custom' : hasUnavailableLightTheme ? 'Light unavailable' : 'Default'}
             </Text>
           </Pressable>
           <Pressable onPress={pickBackground} style={styles.row}>
@@ -373,7 +725,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
             chevron={false}
             onPress={generateThemeFromBackground}
           />
-          {hasChatTheme || hasBackground ? (
+          {hasStoredChatTheme || hasBackground ? (
             <NavRow
               label="Clear chat theme / background"
               color="destructive"
@@ -383,10 +735,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           ) : null}
         </SettingsSection>
 
-        <MediaSections
-          media={mediaData}
-          onOpenMedia={(g) => router.push(`/media/${encodeURIComponent(g)}`)}
-        />
+        <MediaSections media={mediaData} onOpenMedia={openMedia} onOpenLink={openLink} />
 
         <SettingsSection label="NOTIFICATIONS" style={styles.gap}>
           <SwitchRow
@@ -398,9 +747,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
           {Platform.OS === 'android' ? (
             <NavRow
               label="Notification Settings…"
-              onPress={() =>
-                void openChatNotificationSettings(guid, data ? resolveTitle(data) : 'Conversation')
-              }
+              onPress={openNotificationSettings}
               accessibilityLabel="Open system notification settings for this conversation"
             />
           ) : null}
@@ -429,7 +776,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
                     {m.name}
                   </Text>
                   <Pressable
-                    onPress={() => doRemove(m.address, m.name)}
+                    onPress={() => doRemove(m.address)}
                     disabled={busy}
                     hitSlop={8}
                     accessibilityRole="button"
@@ -444,7 +791,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
                 <View style={styles.row}>
                   <TextInput
                     value={addAddress}
-                    onChangeText={setAddAddress}
+                    onChangeText={changeAddAddress}
                     placeholder="Phone or email"
                     placeholderTextColor={theme.color.tertiaryLabel}
                     autoCapitalize="none"
@@ -464,14 +811,14 @@ export default function ChatSettingsScreen(): React.JSX.Element {
                   </Pressable>
                 </View>
               ) : (
-                <NavRow label="Add Person…" chevron={false} onPress={() => setAdding(true)} />
+                <NavRow label="Add Person…" chevron={false} onPress={openAddPerson} />
               )}
 
               {renaming ? (
                 <View style={styles.row}>
                   <TextInput
                     value={groupName}
-                    onChangeText={setGroupName}
+                    onChangeText={changeGroupName}
                     placeholder="New group name"
                     placeholderTextColor={theme.color.tertiaryLabel}
                     autoFocus
@@ -489,7 +836,7 @@ export default function ChatSettingsScreen(): React.JSX.Element {
                   </Pressable>
                 </View>
               ) : (
-                <NavRow label="Rename Group…" chevron={false} onPress={() => setRenaming(true)} />
+                <NavRow label="Rename Group…" chevron={false} onPress={openRename} />
               )}
 
               <NavRow
@@ -511,27 +858,24 @@ export default function ChatSettingsScreen(): React.JSX.Element {
       </ScrollView>
 
       {studioOpen ? (
-        <Modal
-          visible
-          transparent
-          animationType="slide"
-          onRequestClose={() => setStudioOpen(false)}
-        >
+        <Modal visible transparent animationType="slide" onRequestClose={closeStudio}>
           <ThemeStudio
             title="Chat Theme"
             initialTokens={studioTokens()}
             showName={false}
             onApply={(tokens) => applyChatTheme(tokens)}
-            onCancel={() => setStudioOpen(false)}
+            onCancel={closeStudio}
           />
         </Modal>
       ) : null}
-    </Screen>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   content: { padding: 16 },
+  accountChanged: { paddingHorizontal: 24, paddingTop: 40 },
+  accountChangedText: { textAlign: 'center', fontSize: 15 },
   gap: { marginTop: 24 },
   input: { paddingHorizontal: 16, paddingVertical: 14, fontSize: 16 },
   swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, padding: 16 },

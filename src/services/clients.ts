@@ -1,5 +1,6 @@
 import { HttpClient } from '@core/api';
 import { SecretBox } from '@core/crypto';
+import { ExpoAccountRevocationMarker } from '@native/accountRevocationMarker';
 import { ExpoSecureVault } from '@native/secureVault';
 import { sessionAccessors } from '@state/sessionStore';
 
@@ -8,11 +9,13 @@ import { sessionAccessors } from '@state/sessionStore';
  *
  * Instantiates the app's services once and wires them together explicitly
  * (replacing GetX's global service locator). The store-bound HttpClient reads
- * the active origin/password synchronously from the session store, so its auth
- * header is always current — and never appears in a URL.
+ * the active origin/password synchronously from the session store, then binds each
+ * request/native transfer to one coherent snapshot for its whole lifetime.
  */
 
 export const vault = new ExpoSecureVault();
+/** Non-secret, filesystem-backed disconnect gate independent of Android Keystore/SecureStore. */
+export const accountRevocationMarker = new ExpoAccountRevocationMarker();
 
 /** The primary client, bound to the connected session. */
 export const http = new HttpClient({

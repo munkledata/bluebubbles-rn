@@ -1,9 +1,13 @@
-import React, { createContext, useContext, useMemo, type ReactNode } from 'react';
+import React, { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import { getDatabase } from '@db/database';
 import { getChatTheme } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
+import {
+  captureRealtimeDeliveryLease,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { ThemeContext, useTheme } from './ThemeProvider';
-import { safeParseTokens, type ThemeTokens } from './tokens';
+import { darkThemeOrFallback, safeParseTokens, type ThemeTokens } from './tokens';
 
 interface ChatThemeProviderProps {
   guid: string;
@@ -23,19 +27,39 @@ const ChatBackgroundContext = createContext<ChatBackgroundValue>({
 });
 
 /** Reactive raw per-chat theme row (theme tokens JSON + local & synced background uris + luminance). */
-function useChatTheme(guid: string): {
+function useChatTheme(
+  guid: string,
+  accountLease: RealtimeDeliveryLease,
+): {
   themeTokens: string | null;
   backgroundUri: string | null;
   syncedBackgroundUri: string | null;
   backgroundIsLight: boolean | null;
 } {
-  const { data } = useReactiveQuery(() => getChatTheme(getDatabase(), guid), ['chats'], [guid]);
+  const { data } = useReactiveQuery(
+    async () => {
+      // Reactive callbacks can outlive account teardown briefly. Check on both sides of the read:
+      // a query admitted for A may settle only after B has opened the shared DB handle, and its row
+      // must never become the old provider's UI state.
+      if (!accountLease.isCurrent()) return null;
+      const row = await getChatTheme(getDatabase(), guid);
+      return accountLease.isCurrent() ? row : null;
+    },
+    ['chats'],
+    [guid, accountLease.generation],
+    { enabled: accountLease.isCurrent() },
+  );
+  // `isCurrent()` is deliberately checked again during render. Account teardown normally unmounts
+  // the route, but any unrelated render in that short handoff window must immediately stop using
+  // an already-resolved A row too.
+  const ownedData = accountLease.isCurrent() ? data : null;
   return {
-    themeTokens: data?.themeTokens ?? null,
-    backgroundUri: data?.backgroundUri ?? null,
-    syncedBackgroundUri: data?.syncedBackgroundUri ?? null,
+    themeTokens: ownedData?.themeTokens ?? null,
+    backgroundUri: ownedData?.backgroundUri ?? null,
+    syncedBackgroundUri: ownedData?.syncedBackgroundUri ?? null,
     // Raw column is 0/1/null (getChatTheme uses raw SQL, bypassing drizzle's boolean coercion).
-    backgroundIsLight: data?.backgroundIsLight == null ? null : data.backgroundIsLight === 1,
+    backgroundIsLight:
+      ownedData?.backgroundIsLight == null ? null : ownedData.backgroundIsLight === 1,
   };
 }
 
@@ -64,15 +88,23 @@ export function useChatBackgroundIsLight(_guid: string): boolean | null {
 
 /**
  * Overrides the active theme for one conversation. If the chat has a valid stored
- * theme-tokens blob, a nested ThemeContext.Provider makes `useTheme()` inside the
+ * dark theme-tokens blob, a nested ThemeContext.Provider makes `useTheme()` inside the
  * conversation return it; otherwise children inherit the global theme unchanged.
- * Corrupt tokens fall back to the global theme (never crash).
+ * Corrupt or legacy light tokens fall back to the global theme (never crash or switch
+ * the currently dark-only product to a light surface).
  */
 export function ChatThemeProvider({ guid, children }: ChatThemeProviderProps): React.JSX.Element {
   const globalTheme = useTheme();
-  const { themeTokens, backgroundUri, syncedBackgroundUri, backgroundIsLight } = useChatTheme(guid);
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const { themeTokens, backgroundUri, syncedBackgroundUri, backgroundIsLight } = useChatTheme(
+    guid,
+    accountLease,
+  );
   const chatTokens = useMemo<ThemeTokens | null>(() => safeParseTokens(themeTokens), [themeTokens]);
-  const value = useMemo(() => ({ theme: chatTokens ?? globalTheme }), [chatTokens, globalTheme]);
+  const value = useMemo(
+    () => ({ theme: darkThemeOrFallback(chatTokens, globalTheme) }),
+    [chatTokens, globalTheme],
+  );
   const background = useMemo<ChatBackgroundValue>(
     () => ({ backgroundUri: backgroundUri ?? syncedBackgroundUri, backgroundIsLight }),
     [backgroundUri, syncedBackgroundUri, backgroundIsLight],

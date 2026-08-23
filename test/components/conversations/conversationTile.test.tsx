@@ -4,35 +4,99 @@
  *   - the chat TITLE via resolveTitle semantics (src/utils/chat.ts),
  *   - the UNREAD affordances (a11y "Unread." prefix + bolder title weight),
  *   - the SERVICE badge label via resolveChatService (guid prefix, with the SMS-handle override),
- *   - REDACTED-mode masking driven by useRedactedModeStore (title→"Contact", preview→"Message",
- *     real name/text absent from the tree),
+ *   - exact title, preview, accessibility copy, and 1:1/group avatar photos,
+ *   - the always-generic Delete dialog without changing the exact guid/account callback,
  *   - press / long-press callbacks wired to the row guid + row.
  *
- * Expected values come from the SOURCE (chat.ts / privacy.ts / message.ts), never from guesses.
+ * Expected values come from the SOURCE (chat.ts / message.ts), never from guesses.
  *
  * NOTE (reported, not tested): the tile does NOT render anything for row.isPinned — pinning is a
  * LIST concern (ConversationListScreen splits pinned rows into PinnedGrid). So there is no
  * pinned-state affordance in the tile to assert; the "isPinned is inert here" contract is pinned
  * by a test below.
  *
- * Mocks declared in-file: `@/services` — ConversationTile imports `markRead` from it, and that
- * barrel's module graph pulls native modules (libsodium / cert-pinning) at import time, which
- * have no native half under jest. Only `markRead` is referenced (in a swipe callback), so a
- * jest.fn stub is sufficient. `@db/database` is already stubbed by the shared setup.
+ * Mocks declared in-file: `@/services` — ConversationTile imports `markRead` from the full app
+ * composition barrel. Only `markRead` is referenced (in a swipe callback), so a jest.fn stub is
+ * sufficient. `@db/database` is already stubbed by the shared setup.
  */
 import React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
 import { ConversationTile } from '@ui/conversations/ConversationTile';
-import { useRedactedModeStore } from '@state/redactedModeStore';
-import type { InboxRow } from '@db/repositories';
+import { setChatArchive, setChatMute, type InboxRow } from '@db/repositories';
+import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
+import { darkTheme } from '@ui/theme/tokens';
+import { deleteChat, markRead, markUnread } from '@/services';
+import { showDialog } from '@ui/dialog/dialogStore';
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
-// markRead's barrel loads native modules at import; only the fn identity matters here.
-jest.mock('@/services', () => ({ markRead: jest.fn() }));
+// Keep the full service composition graph out of this row test; only the function identity matters.
+jest.mock('@/services', () => ({
+  markRead: jest.fn(),
+  markUnread: jest.fn(),
+  deleteChat: jest.fn(),
+}));
+jest.mock('@db/repositories', () => ({
+  setChatMute: jest.fn(() => Promise.resolve()),
+  setChatArchive: jest.fn(() => Promise.resolve()),
+}));
+jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+
+const mockMarkRead = markRead as jest.Mock;
+const mockMarkUnread = markUnread as jest.Mock;
+const mockDeleteChat = deleteChat as jest.Mock;
+const mockShowDialog = showDialog as jest.Mock;
+const mockSetChatMute = setChatMute as jest.Mock;
+const mockSetChatArchive = setChatArchive as jest.Mock;
 
 // The ServiceBadge marks its label accessibilityElementsHidden (decorative), so RNTL's default
 // query excludes it — opt hidden elements in when asserting the badge text.
 const HIDDEN = { includeHiddenElements: true } as const;
+const PRIVATE_TITLE = 'private-tile-title-7c91@example.test';
+const PRIVATE_PREVIEW = 'private-tile-preview-4f22-+15559876543';
+const PRIVATE_PARTICIPANT = 'private-avatar-person-a31d@example.test';
+const PRIVATE_AVATAR_URI = 'file:///private-avatar-64e9-contact-photo.jpg';
+const SECOND_PRIVATE_PARTICIPANT = 'private-avatar-person-b80c-+15557654321';
+const SECOND_PRIVATE_AVATAR_URI = 'file:///private-avatar-993a-second-photo.jpg';
+const GENERIC_DELETE_MESSAGE =
+  'Delete this conversation? This removes it from this device (not from the server).';
+
+interface DialogButton {
+  style?: 'default' | 'cancel' | 'destructive';
+  onPress?: () => void;
+}
+
+function dialogButtons(callIndex: number): DialogButton[] {
+  return (mockShowDialog.mock.calls[callIndex]?.[2] ?? []) as DialogButton[];
+}
+
+function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
+  const responder = node.props.onStartShouldSetResponder;
+  if (typeof responder !== 'function') {
+    throw new Error('Expected an accessible Pressable responder callback');
+  }
+  const readConfig = (
+    responder as typeof responder & {
+      testOnly_pressabilityConfig?: () => { onPress?: (event: object) => void };
+    }
+  ).testOnly_pressabilityConfig;
+  if (typeof readConfig !== 'function') {
+    throw new Error('Expected React Native test-only Pressability configuration');
+  }
+  const onPress = readConfig().onPress;
+  if (typeof onPress !== 'function') throw new Error('Expected configured Pressable onPress');
+  return () => onPress({ nativeEvent: {} });
+}
+
+async function invokeConfiguredPress(press: () => void): Promise<void> {
+  await act(async () => {
+    press();
+    await Promise.resolve();
+  });
+}
 
 /** A fully-populated InboxRow: a read 1:1 iMessage chat with a plain incoming preview. */
 function makeRow(overrides: Partial<InboxRow> = {}): InboxRow {
@@ -73,9 +137,18 @@ function titleWeight(title: string): TextStyle['fontWeight'] {
   return (StyleSheet.flatten(node.props.style) as TextStyle).fontWeight;
 }
 
+beforeEach(() => {
+  resumeRealtimeDeliveries();
+  mockMarkRead.mockClear();
+  mockMarkUnread.mockClear();
+  mockDeleteChat.mockClear();
+  mockShowDialog.mockClear();
+  mockSetChatMute.mockClear();
+  mockSetChatArchive.mockClear();
+});
+
 afterEach(() => {
-  // The shared setup resets only the theme store; redacted mode is this suite's to clean up.
-  useRedactedModeStore.setState({ enabled: false, hydrated: false });
+  resumeRealtimeDeliveries();
 });
 
 describe('ConversationTile — title (resolveTitle semantics)', () => {
@@ -136,7 +209,10 @@ describe('ConversationTile — unread state', () => {
       <ConversationTile row={makeRow({ unreadCount: 3 })} onPress={() => {}} />,
     );
     expect(screen.getByLabelText('Alice. 3 unread. hey there')).toBeTruthy();
-    expect(screen.getByText('3')).toBeTruthy(); // the numeric count badge
+    const badgeText = screen.getByText('3'); // the numeric count badge
+    const badgeStyle = StyleSheet.flatten(badgeText.props.style);
+    expect(badgeStyle.color).toBe(readableTextOn(darkTheme.color.tint));
+    expect(contrastRatio(badgeStyle.color, darkTheme.color.tint)).toBeGreaterThanOrEqual(4.5);
     expect(titleWeight('Alice')).toBe('600');
   });
 
@@ -183,28 +259,48 @@ describe('ConversationTile — service badge (resolveChatService)', () => {
   });
 });
 
-describe('ConversationTile — redacted (privacy) mode', () => {
-  it('masks the title to "Contact" and the preview to "Message", hiding the real name/text', async () => {
-    useRedactedModeStore.setState({ enabled: true, hydrated: true });
-    await renderWithTheme(
+describe('ConversationTile — exact content and avatars', () => {
+  it('renders exact 1:1 title, preview, accessibility label, and avatar URI', async () => {
+    const view = await renderWithTheme(
       <ConversationTile
-        row={makeRow({ participantNames: 'Alice', lastText: 'hey there' })}
+        row={makeRow({
+          customName: PRIVATE_TITLE,
+          participantNames: PRIVATE_PARTICIPANT,
+          participantAvatars: PRIVATE_AVATAR_URI,
+          lastText: PRIVATE_PREVIEW,
+        })}
         onPress={() => {}}
       />,
     );
-    expect(screen.getByText('Contact')).toBeTruthy();
-    expect(screen.getByText('Message')).toBeTruthy();
-    expect(screen.queryByText('Alice')).toBeNull();
-    expect(screen.queryByText('hey there')).toBeNull();
-    // The a11y label is redacted too (no identity leak to a screen reader).
-    expect(screen.getByLabelText('Contact. Message')).toBeTruthy();
+
+    expect(screen.getByText(PRIVATE_TITLE)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_PREVIEW)).toBeTruthy();
+    expect(screen.getByLabelText(`${PRIVATE_TITLE}. ${PRIVATE_PREVIEW}`)).toBeTruthy();
+    expect(screen.getByText('11/14/23')).toBeTruthy();
+    expect(JSON.stringify(view.toJSON())).toContain(PRIVATE_AVATAR_URI);
   });
 
-  it('shows the real title/preview when redacted mode is off (default)', async () => {
-    await renderWithTheme(<ConversationTile row={makeRow()} onPress={() => {}} />);
-    expect(screen.getByText('Alice')).toBeTruthy();
-    expect(screen.getByText('hey there')).toBeTruthy();
-    expect(screen.queryByText('Contact')).toBeNull();
+  it('deduplicates group participants while rendering exact content and both avatar URIs', async () => {
+    const groupTitle = `${PRIVATE_PARTICIPANT}, ${PRIVATE_PARTICIPANT}, ${SECOND_PRIVATE_PARTICIPANT}`;
+    const view = await renderWithTheme(
+      <ConversationTile
+        row={makeRow({
+          style: 43,
+          participantCount: 3,
+          participantNames: groupTitle,
+          participantAvatars: `${PRIVATE_AVATAR_URI}|||${PRIVATE_AVATAR_URI}|||${SECOND_PRIVATE_AVATAR_URI}`,
+          lastText: PRIVATE_PREVIEW,
+        })}
+        onPress={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(groupTitle)).toBeTruthy();
+    expect(screen.getByText(PRIVATE_PREVIEW)).toBeTruthy();
+    expect(screen.getByLabelText(`${groupTitle}. ${PRIVATE_PREVIEW}`)).toBeTruthy();
+    const tree = JSON.stringify(view.toJSON());
+    expect(tree).toContain(PRIVATE_AVATAR_URI);
+    expect(tree).toContain(SECOND_PRIVATE_AVATAR_URI);
   });
 });
 
@@ -214,7 +310,7 @@ describe('ConversationTile — press callbacks', () => {
     await renderWithTheme(
       <ConversationTile row={makeRow({ guid: 'iMessage;-;+15551230000' })} onPress={onPress} />,
     );
-    fireEvent.press(screen.getByLabelText('Alice. hey there'));
+    await fireEvent.press(screen.getByLabelText('Alice. hey there'));
     expect(onPress).toHaveBeenCalledWith('iMessage;-;+15551230000');
   });
 
@@ -224,12 +320,160 @@ describe('ConversationTile — press callbacks', () => {
     await renderWithTheme(
       <ConversationTile row={row} onPress={() => {}} onLongPress={onLongPress} />,
     );
-    fireEvent(screen.getByLabelText('Alice. hey there'), 'longPress');
+    await fireEvent(screen.getByLabelText('Alice. hey there'), 'longPress');
     expect(onLongPress).toHaveBeenCalledWith(row);
   });
 });
 
+describe('ConversationTile — account-bound swipe callbacks', () => {
+  it('passes the row-instance lease to its read action', async () => {
+    await renderWithTheme(
+      <ConversationTile row={makeRow({ guid: 'same-guid', unreadCount: 2 })} onPress={() => {}} />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('Read'));
+
+    expect(mockMarkRead).toHaveBeenCalledWith(
+      'same-guid',
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
+    expect(mockMarkUnread).not.toHaveBeenCalled();
+  });
+
+  it('passes the exact row guid and original lease to the read-row Mark Unread action', async () => {
+    await renderWithTheme(
+      <ConversationTile
+        row={makeRow({ guid: 'read-row-guid', unreadCount: 0 })}
+        onPress={() => {}}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('Unread'));
+
+    const originalLease = mockMarkUnread.mock.calls[0]?.[1] as { isCurrent(): boolean };
+    expect(mockMarkUnread).toHaveBeenCalledWith('read-row-guid', originalLease);
+    expect(originalLease).toEqual(
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
+    expect(originalLease.isCurrent()).toBe(true);
+    expect(mockMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("keeps a delayed delete dialog callback on the row's original account", async () => {
+    await renderWithTheme(
+      <ConversationTile row={makeRow({ guid: 'same-guid' })} onPress={() => {}} />,
+    );
+    await fireEvent.press(screen.getByLabelText('Delete'));
+    const buttons = (mockShowDialog.mock.calls[0]?.[2] ?? []) as Array<{
+      style?: string;
+      onPress?: () => void;
+    }>;
+    const destructive = buttons.find((button) => button.style === 'destructive');
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    destructive?.onPress?.();
+
+    const lease = mockDeleteChat.mock.calls[0]?.[1] as { isCurrent(): boolean };
+    expect(mockDeleteChat).toHaveBeenCalledWith('same-guid', lease);
+    expect(lease.isCurrent()).toBe(false);
+  });
+
+  it('drops retained A-account Mute and Archive callbacks while fresh B controls stay exact', async () => {
+    const guid = 'same-guid';
+    const first = await renderWithTheme(
+      <ConversationTile row={makeRow({ guid })} onPress={() => {}} />,
+    );
+    const staleMute = retainConfiguredPress(screen.getByRole('button', { name: 'Mute' }));
+    const staleArchive = retainConfiguredPress(screen.getByRole('button', { name: 'Archive' }));
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+
+    await invokeConfiguredPress(staleMute);
+    await invokeConfiguredPress(staleArchive);
+
+    expect(mockSetChatMute).not.toHaveBeenCalled();
+    expect(mockSetChatArchive).not.toHaveBeenCalled();
+
+    await first.unmount();
+    await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
+    const freshMute = retainConfiguredPress(screen.getByRole('button', { name: 'Mute' }));
+    const freshArchive = retainConfiguredPress(screen.getByRole('button', { name: 'Archive' }));
+    await invokeConfiguredPress(freshMute);
+    await invokeConfiguredPress(freshArchive);
+
+    expect(mockSetChatMute).toHaveBeenCalledWith(undefined, guid, 'mute');
+    expect(mockSetChatArchive).toHaveBeenCalledWith(undefined, guid, true);
+  });
+
+  it('keeps visible Mute and Archive actions on the exact row guid', async () => {
+    const guid = 'iMessage;-;+15556781234';
+    await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
+
+    await fireEvent.press(screen.getByLabelText('Mute'));
+    await fireEvent.press(screen.getByLabelText('Archive'));
+
+    expect(mockSetChatMute).toHaveBeenCalledWith(undefined, guid, 'mute');
+    expect(mockSetChatArchive).toHaveBeenCalledWith(undefined, guid, true);
+  });
+
+  it('keeps repeated Delete dialogs generic while both callbacks retain the exact guid and original lease', async () => {
+    const guid = 'iMessage;-;+15559876543';
+    await renderWithTheme(
+      <ConversationTile
+        row={makeRow({
+          guid,
+          customName: PRIVATE_TITLE,
+          participantNames: PRIVATE_PARTICIPANT,
+          participantAvatars: PRIVATE_AVATAR_URI,
+          lastText: PRIVATE_PREVIEW,
+        })}
+        onPress={() => {}}
+      />,
+    );
+
+    await fireEvent.press(screen.getByLabelText('Delete'));
+    expect(mockShowDialog).toHaveBeenNthCalledWith(
+      1,
+      'Delete Conversation',
+      GENERIC_DELETE_MESSAGE,
+      expect.any(Array),
+    );
+    expect(JSON.stringify(mockShowDialog.mock.calls[0])).not.toContain(PRIVATE_TITLE);
+    const firstDelete = dialogButtons(0).find((button) => button.style === 'destructive');
+    expect(firstDelete?.onPress).toEqual(expect.any(Function));
+
+    await fireEvent.press(screen.getByLabelText('Delete'));
+    expect(mockShowDialog).toHaveBeenNthCalledWith(
+      2,
+      'Delete Conversation',
+      GENERIC_DELETE_MESSAGE,
+      expect.any(Array),
+    );
+    expect(JSON.stringify(mockShowDialog.mock.calls[1])).not.toContain(PRIVATE_TITLE);
+    const repeatedDelete = dialogButtons(1).find((button) => button.style === 'destructive');
+    expect(repeatedDelete?.onPress).toEqual(expect.any(Function));
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    firstDelete?.onPress?.();
+    repeatedDelete?.onPress?.();
+
+    expect(mockDeleteChat.mock.calls.map((call) => call[0])).toEqual([guid, guid]);
+    const originalLease = mockDeleteChat.mock.calls[0]?.[1] as { isCurrent(): boolean };
+    expect(originalLease).toEqual(
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
+    expect(mockDeleteChat.mock.calls[1]?.[1]).toBe(originalLease);
+    expect(originalLease.isCurrent()).toBe(false);
+  });
+});
+
 describe('ConversationTile — pinned state is inert in the tile', () => {
+  it('remains wrapped in React.memo for stable list-row props', () => {
+    expect(ConversationTile.$$typeof).toBe(Symbol.for('react.memo'));
+  });
+
   it('renders identically whether or not row.isPinned is set (pinning is a list concern)', async () => {
     // The tile has no pin affordance — ConversationListScreen splits pinned rows into PinnedGrid.
     await renderWithTheme(<ConversationTile row={makeRow({ isPinned: 1 })} onPress={() => {}} />);

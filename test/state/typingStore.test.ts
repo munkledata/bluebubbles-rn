@@ -3,7 +3,7 @@ import { useTypingStore } from '@state/typingStore';
 describe('typingStore', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    useTypingStore.setState({ typing: {} });
+    useTypingStore.getState().reset();
   });
   afterEach(() => jest.useRealTimers());
 

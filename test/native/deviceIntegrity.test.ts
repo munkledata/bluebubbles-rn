@@ -20,6 +20,7 @@ jest.mock('jail-monkey', () => ({
 }));
 
 import { checkDeviceIntegrity } from '@native/deviceIntegrity';
+import { logger } from '@core/secure';
 
 describe('checkDeviceIntegrity', () => {
   beforeEach(() => {
@@ -29,13 +30,23 @@ describe('checkDeviceIntegrity', () => {
   });
 
   it('flags a jailbroken device', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     mockJailBroken = true;
     expect(await checkDeviceIntegrity()).toEqual({ compromised: true });
+    expect(warn).toHaveBeenCalledWith(
+      '[security] device appears rooted/compromised — at-rest secrets are at higher risk',
+    );
+    warn.mockRestore();
   });
 
   it('flags mock-location capability', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     mockMockLocation = true;
     expect(await checkDeviceIntegrity()).toEqual({ compromised: true });
+    expect(warn).toHaveBeenCalledWith(
+      '[security] device appears rooted/compromised — at-rest secrets are at higher risk',
+    );
+    warn.mockRestore();
   });
 
   it('reports clean on a normal device', async () => {

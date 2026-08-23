@@ -1,13 +1,14 @@
 /**
  * AccountScreen route (app/(app)/account.tsx): the iMessage account + alias picker,
- * backed by TanStack Query (['server','icloud-account']).
+ * backed by a generation-scoped TanStack Query key (['server','icloud-account',generation]).
  *
  * Locks in the query wiring:
  *   - the resolved account query renders the Apple ID / name / alias rows;
  *   - a failed query shows the error state, and "Try again" refetches into success;
  *   - picking an alias calls setActiveAlias and moves the checkmark via the query cache;
  *   - a non-vetted alias is disabled (never calls setActiveAlias);
- *   - a failed alias change surfaces the Account dialog and keeps the old selection.
+ *   - a failed alias change surfaces the Account dialog, clears its saving state, and can retry;
+ *   - account generations keep separate query-cache entries and stale callbacks cannot cross them.
  *
  * Each test gets a FRESH QueryClient (retry off so errors surface immediately; gcTime
  * Infinity so no GC timers linger past the test).
@@ -52,6 +53,11 @@ import * as icloudApi from '@core/api/endpoints/icloud';
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
 import { ApiError, UnimplementedEndpointError } from '@core/api/errors';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const mockGetAccountInfo = icloudApi.getAccountInfo as jest.Mock;
 const mockSetActiveAlias = icloudApi.setActiveAlias as jest.Mock;
@@ -65,22 +71,55 @@ const ACCOUNT = {
   loginStatusMessage: null,
 };
 
-async function renderScreen(): Promise<void> {
-  const client = new QueryClient({
+const OTHER_ACCOUNT = {
+  ...ACCOUNT,
+  appleId: 'next@icloud.com',
+  displayName: 'Next User',
+  activeAlias: 'next@icloud.com',
+  aliases: ['next@icloud.com'],
+};
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function makeQueryClient(): QueryClient {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
-  await renderWithTheme(
+}
+
+async function renderScreen(client = makeQueryClient()) {
+  const view = await renderWithTheme(
     <QueryClientProvider client={client}>
       <AccountScreen />
     </QueryClientProvider>,
   );
+  return { client, view };
 }
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.clearAllMocks();
   useDialogStore.setState({ current: null, queue: [] });
   mockGetAccountInfo.mockResolvedValue(ACCOUNT);
   mockSetActiveAlias.mockResolvedValue({ activeAlias: 'b@icloud.com' });
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 describe('AccountScreen — account query', () => {
@@ -93,6 +132,15 @@ describe('AccountScreen — account query', () => {
     expect(
       within(screen.getByRole('button', { name: /b@icloud\.com/ })).queryByText('✓'),
     ).toBeNull();
+  });
+
+  it('goes back from the header', async () => {
+    await renderScreen();
+    await screen.findByText('user@icloud.com');
+    await act(async () => {
+      fireEvent.press(screen.getByText('‹ Back'));
+    });
+    expect(mockBack).toHaveBeenCalledTimes(1);
   });
 
   it('shows the error state, and Try again refetches into success', async () => {
@@ -129,6 +177,82 @@ describe('AccountScreen — account query', () => {
     // Still recoverable the same way.
     expect(screen.getByText('Try again')).toBeTruthy();
   });
+
+  it('discards a delayed old-account GET before the next account reads the cache', async () => {
+    const oldResponse = deferred<typeof ACCOUNT>();
+    mockGetAccountInfo.mockReset().mockReturnValueOnce(oldResponse.promise);
+    const client = makeQueryClient();
+    const { view } = await renderScreen(client);
+    await waitFor(() => expect(mockGetAccountInfo).toHaveBeenCalledTimes(1));
+
+    // A read has no durable side effect, so it must not make Disconnect wait. The captured
+    // generation and cache key are what make its eventual completion safe.
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+
+    await act(async () => {
+      oldResponse.resolve(ACCOUNT);
+    });
+    await waitFor(() => expect(client.getQueryCache().getAll()[0]?.state.status).toBe('success'));
+    expect(screen.queryByText('user@icloud.com')).toBeNull();
+    expect(
+      client
+        .getQueryCache()
+        .getAll()
+        .some((query) => query.state.data === ACCOUNT),
+    ).toBe(false);
+
+    await view.unmount();
+    mockGetAccountInfo.mockResolvedValueOnce(OTHER_ACCOUNT);
+    await renderScreen(client);
+
+    expect(await screen.findByText('Next User')).toBeTruthy();
+    expect(screen.getAllByText('next@icloud.com')).toHaveLength(2);
+    expect(screen.queryByText('user@icloud.com')).toBeNull();
+    const accountQueryKeys = client
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.queryKey);
+    expect(accountQueryKeys).toHaveLength(2);
+    expect(accountQueryKeys.map((key) => key.slice(0, 2))).toEqual([
+      ['server', 'icloud-account'],
+      ['server', 'icloud-account'],
+    ]);
+    expect(new Set(accountQueryKeys.map((key) => key[2])).size).toBe(2);
+  });
+
+  it('does not surface a delayed old-account GET error after reconnect', async () => {
+    const oldResponse = deferred<typeof ACCOUNT>();
+    mockGetAccountInfo.mockReset().mockReturnValueOnce(oldResponse.promise);
+    const client = makeQueryClient();
+    const { view } = await renderScreen(client);
+    await waitFor(() => expect(mockGetAccountInfo).toHaveBeenCalledTimes(1));
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      oldResponse.reject(new Error('old account helper failed'));
+    });
+    await waitFor(() => expect(client.getQueryCache().getAll()[0]?.state.status).toBe('success'));
+    await view.unmount();
+
+    mockGetAccountInfo.mockResolvedValueOnce(OTHER_ACCOUNT);
+    await renderScreen(client);
+    expect(await screen.findByText('Next User')).toBeTruthy();
+    expect(screen.getAllByText('next@icloud.com')).toHaveLength(2);
+    expect(screen.queryByText(/Couldn.t load your account/)).toBeNull();
+    expect(screen.queryByText(/Private API helper on your Mac may be off/)).toBeNull();
+    const accountQueryKeys = client
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.queryKey);
+    expect(accountQueryKeys).toHaveLength(2);
+    expect(accountQueryKeys.map((key) => key.slice(0, 2))).toEqual([
+      ['server', 'icloud-account'],
+      ['server', 'icloud-account'],
+    ]);
+    expect(new Set(accountQueryKeys.map((key) => key[2])).size).toBe(2);
+  });
 });
 
 describe('AccountScreen — alias picker', () => {
@@ -161,8 +285,8 @@ describe('AccountScreen — alias picker', () => {
     expect(mockSetActiveAlias).not.toHaveBeenCalled();
   });
 
-  it('a failed alias change shows the Account dialog and keeps the old selection', async () => {
-    mockSetActiveAlias.mockRejectedValue(new Error('not enabled'));
+  it('a failed alias change keeps the old selection and clears saving for a retry', async () => {
+    mockSetActiveAlias.mockRejectedValueOnce(new Error('not enabled'));
     await renderScreen();
     await screen.findByText('user@icloud.com');
     await act(async () => {
@@ -175,5 +299,98 @@ describe('AccountScreen — alias picker', () => {
     expect(
       within(screen.getByRole('button', { name: /b@icloud\.com/ })).queryByText('✓'),
     ).toBeNull();
+
+    useDialogStore.setState({ current: null, queue: [] });
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /b@icloud\.com/ }).props.accessibilityState,
+      ).toEqual(expect.objectContaining({ disabled: false })),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByText('b@icloud.com'));
+    });
+    await waitFor(() => expect(mockSetActiveAlias).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('button', { name: /b@icloud\.com/ })).getByText('✓'),
+      ).toBeTruthy(),
+    );
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('holds Disconnect for an accepted alias POST and disowns its late response', async () => {
+    const response = deferred<{ activeAlias: string }>();
+    mockSetActiveAlias.mockReturnValueOnce(response.promise);
+    const { client, view } = await renderScreen();
+    await screen.findByText('user@icloud.com');
+
+    fireEvent.press(screen.getByText('b@icloud.com'));
+    await waitFor(() => expect(mockSetActiveAlias).toHaveBeenCalledTimes(1));
+    let drained = false;
+    const drain = pauseRealtimeDeliveries().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+
+    await act(async () => {
+      response.resolve({ activeAlias: 'b@icloud.com' });
+      await drain;
+    });
+    expect(useDialogStore.getState().current).toBeNull();
+    expect(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.state.data)
+        .filter(Boolean),
+    ).toContainEqual(ACCOUNT);
+    expect(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.state.data)
+        .filter(Boolean),
+    ).not.toContainEqual({ ...ACCOUNT, activeAlias: 'b@icloud.com' });
+
+    resumeRealtimeDeliveries();
+    await view.unmount();
+    mockGetAccountInfo.mockResolvedValueOnce(OTHER_ACCOUNT);
+    await renderScreen(client);
+    expect(await screen.findByText('Next User')).toBeTruthy();
+    expect(
+      within(screen.getByRole('button', { name: /next@icloud\.com/ })).getByText('✓'),
+    ).toBeTruthy();
+  });
+
+  it('does not POST when an old screen callback is pressed after reconnect', async () => {
+    await renderScreen();
+    await screen.findByText('user@icloud.com');
+    const oldAliasRow = screen.getByRole('button', { name: /b@icloud\.com/ });
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    fireEvent.press(oldAliasRow);
+
+    expect(mockSetActiveAlias).not.toHaveBeenCalled();
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('suppresses an old alias error that arrives during Disconnect', async () => {
+    const response = deferred<{ activeAlias: string }>();
+    mockSetActiveAlias.mockReturnValueOnce(response.promise);
+    await renderScreen();
+    await screen.findByText('user@icloud.com');
+
+    fireEvent.press(screen.getByText('b@icloud.com'));
+    await waitFor(() => expect(mockSetActiveAlias).toHaveBeenCalledTimes(1));
+    const drain = pauseRealtimeDeliveries();
+    await act(async () => {
+      response.reject(new Error('old account helper failed'));
+      await drain;
+    });
+    resumeRealtimeDeliveries();
+
+    expect(useDialogStore.getState().current).toBeNull();
   });
 });

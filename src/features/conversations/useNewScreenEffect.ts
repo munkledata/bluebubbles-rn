@@ -36,6 +36,9 @@ export function useNewScreenEffect(
     if (newestId > lastIdRef.current) {
       lastIdRef.current = newestId;
       const e = screenEffectOf(newestStyleId);
+      // This effect converts an external message-stream transition into one-shot presentation
+      // state. It cannot be derived from the current row alone because clear() must consume it.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (e) setEffect(e);
     }
   }, [newestId, newestStyleId]);

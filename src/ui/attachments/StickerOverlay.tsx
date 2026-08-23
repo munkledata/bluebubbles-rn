@@ -3,10 +3,12 @@ import * as Network from 'expo-network';
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { StickerRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useTheme } from '../theme';
+import { useAttachmentCachePathProtection } from './useAttachmentCachePathProtection';
 
 /** A sticker tile is a fixed dp box — never a percentage, which would resolve to width 0. */
 const STICKER_SIZE = 72;
@@ -60,12 +62,15 @@ function StickerTile({
   onDismiss: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const att = sticker.attachment;
   const status = useDownloadStore((s) => (att ? s.status[att.guid] : undefined));
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const wifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const netType = Network.useNetworkState().type;
   const [faded, setFaded] = useState(false);
+  const local = useAttachmentCachePathProtection(att?.localPath);
+  const protectionRefused = !!att?.localPath && !local;
 
   useEffect(() => {
     if (!att) return;
@@ -75,21 +80,21 @@ function StickerTile({
     // left for the user to retry by tapping — otherwise a permanently-failing sticker would
     // re-download on EVERY reactive flush and hog the download concurrency slots.
     if (status !== undefined) return;
-    void download(att);
+    void download(att, 'automatic', accountLease);
     // Keyed on guid/localPath/status, NOT the whole `att` — useMessages rebuilds every row object
     // on each reactive flush, and that identity churn is what caused a re-download storm before.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [att?.guid, att?.localPath, autoDownload, wifiOnly, netType, status]);
 
-  const local = att?.localPath ?? null;
-
   // The tap outcome differs by state, so the label has to say which — a Pressable whose label only
   // names the kind is an anonymous button under TalkBack.
-  const label = !local
-    ? 'Sticker, not downloaded — tap to download'
-    : faded
-      ? 'Sticker, faded — tap to restore, long press to remove'
-      : 'Sticker — tap to fade, long press to remove';
+  const label = protectionRefused
+    ? 'Sticker unavailable'
+    : !local
+      ? 'Sticker, not downloaded — tap to download'
+      : faded
+        ? 'Sticker, faded — tap to restore, long press to remove'
+        : 'Sticker — tap to fade, long press to remove';
 
   return (
     <Pressable
@@ -99,7 +104,9 @@ function StickerTile({
       onLongPress={onDismiss}
       onPress={() => {
         if (!local) {
-          if (att) void download(att);
+          // A path that exists but could not be pinned may already belong to retirement. Do not
+          // ask the downloader to reuse it or pretend it is merely undownloaded.
+          if (att && !att.localPath) void download(att, 'manual', accountLease);
           return;
         }
         setFaded((f) => !f);

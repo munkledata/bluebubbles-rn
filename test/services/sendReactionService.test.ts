@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { Chat } from '@core/models';
+import { logger } from '@core/secure';
 import {
   listReactionsByMessageGuids,
   upsertChats,
@@ -79,6 +80,7 @@ describe('sendReactionMessage', () => {
   });
 
   it('marks the reaction errored on failure', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
     await seed(db);
     await sendReactionMessage(
@@ -96,6 +98,11 @@ describe('sendReactionMessage', () => {
         ) as { s: string; e: number }
       ).s,
     ).toBe('error');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[send-reaction] failed for chat c1 (code 500, HTTP 500): boom',
+    );
+    warn.mockRestore();
   });
 
   it('does not reorder the inbox (latest_message_date unchanged)', async () => {

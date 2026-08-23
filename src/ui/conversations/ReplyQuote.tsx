@@ -1,8 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import type { MessagePreview } from '@db/repositories';
-import { useRedactedModeStore } from '@state/redactedModeStore';
-import { redactMessageText, redactTitle } from '@utils/privacy';
 import { useTheme } from '../theme';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
@@ -37,18 +35,10 @@ export function ReplyQuote({
     theme.color.tertiaryLabel,
     theme.color.label,
   ).color;
-  const redacted = useRedactedModeStore((s) => s.enabled);
-  // Redacted mode masks the quoted sender + text like every other content path ("You" reveals
-  // nothing and stays, mirroring the tombstone in MessageBubble).
-  const who =
-    preview.isFromMe === 1 ? 'You' : redactTitle(preview.senderName ?? 'Unknown', redacted);
+  const who = preview.isFromMe === 1 ? 'You' : (preview.senderName ?? 'Unknown');
   const text =
-    redactMessageText(preview.text, redacted) ||
-    (preview.hasAttachments === 1
-      ? // A Genmoji's description is MESSAGE CONTENT — surface it ONLY when NOT redacted; the redacted
-        // path keeps the generic placeholder (matching the masked text/tombstone above).
-        (!redacted && preview.attachmentDescription?.trim()) || '📎 Attachment'
-      : '');
+    (preview.text ?? '') ||
+    (preview.hasAttachments === 1 ? preview.attachmentDescription?.trim() || '📎 Attachment' : '');
 
   return (
     <Pressable

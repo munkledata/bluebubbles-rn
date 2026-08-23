@@ -1,6 +1,6 @@
 import { sendReaction } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { getChatIdByGuid, insertOutgoingReaction } from '@db/repositories';
+import { insertOutgoingReaction } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
@@ -27,13 +27,9 @@ export async function sendReactionMessage(
   args: SendReactionArgs,
   now: number = Date.now(),
 ): Promise<{ tempGuid: string }> {
-  const chatId = await getChatIdByGuid(db, args.chatGuid);
-  if (chatId == null) throw new Error(`unknown chat ${args.chatGuid}`);
-
   const tempGuid = generateTempGuid();
   await insertOutgoingReaction(db, {
     tempGuid,
-    chatId,
     chatGuid: args.chatGuid,
     targetGuid: args.targetGuid,
     reaction: args.reaction,

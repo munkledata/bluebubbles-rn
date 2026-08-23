@@ -7,10 +7,17 @@ import {
   validateIntent,
 } from '@core/secure';
 
-// mintToken lazy-imports expo-crypto; mock it with a per-call-varying CSPRNG stub.
-jest.mock('expo-crypto', () => {
-  let n = 0;
-  return { getRandomBytes: (len: number) => new Uint8Array(len).fill((n++ % 254) + 1) };
+let randomByte = 1;
+const secureRandom = {
+  async randomBytes(length: number): Promise<Uint8Array> {
+    const bytes = new Uint8Array(length).fill(randomByte);
+    randomByte = (randomByte % 254) + 1;
+    return bytes;
+  },
+};
+
+beforeEach(() => {
+  randomByte = 1;
 });
 
 const ACTION = ALLOWED_ACTIONS[0]; // 'com.gator.external.GET_SERVER_URL'
@@ -18,40 +25,50 @@ const ACTION = ALLOWED_ACTIONS[0]; // 'com.gator.external.GET_SERVER_URL'
 describe('automation token', () => {
   it('mints + persists on first use and is idempotent', async () => {
     const vault = new InMemoryVault();
-    const a = await getOrCreateAutomationToken(vault);
+    const a = await getOrCreateAutomationToken(vault, secureRandom);
     expect(a).toBeTruthy();
     expect(await vault.get('automationToken')).toBe(a);
-    expect(await getOrCreateAutomationToken(vault)).toBe(a); // same token, no re-mint
+    expect(await getOrCreateAutomationToken(vault, secureRandom)).toBe(a); // same token, no re-mint
   });
 
   it('rotate produces a different token and the old one stops validating', async () => {
     const vault = new InMemoryVault();
-    const old = await getOrCreateAutomationToken(vault);
-    const next = await rotateAutomationToken(vault);
+    const old = await getOrCreateAutomationToken(vault, secureRandom);
+    const next = await rotateAutomationToken(vault, secureRandom);
     expect(next).not.toBe(old);
     expect((await validateIntent({ action: ACTION, token: old }, vault)).ok).toBe(false);
     expect((await validateIntent({ action: ACTION, token: next }, vault)).ok).toBe(true);
+  });
+
+  it('refuses a broken random backend instead of persisting a weak token', async () => {
+    const vault = new InMemoryVault();
+    const shortRandom = { randomBytes: async () => new Uint8Array(4) };
+
+    await expect(getOrCreateAutomationToken(vault, shortRandom)).rejects.toThrow(
+      'returned 4 bytes; expected 32',
+    );
+    expect(await vault.get('automationToken')).toBeNull();
   });
 });
 
 describe('validateIntent', () => {
   it('rejects a non-whitelisted action even with the correct token (default-deny)', async () => {
     const vault = new InMemoryVault();
-    const token = await getOrCreateAutomationToken(vault);
+    const token = await getOrCreateAutomationToken(vault, secureRandom);
     const r = await validateIntent({ action: 'com.evil.DO_THING', token }, vault);
     expect(r).toEqual({ ok: false, reason: 'unknown_action' });
   });
 
   it('rejects a malformed (empty / oversized) action', async () => {
     const vault = new InMemoryVault();
-    await getOrCreateAutomationToken(vault);
+    await getOrCreateAutomationToken(vault, secureRandom);
     expect((await validateIntent({ action: '', token: 'x' }, vault)).ok).toBe(false);
     expect((await validateIntent({ action: 'a'.repeat(300), token: 'x' }, vault)).ok).toBe(false);
   });
 
   it('rejects a wrong, empty, or missing token; accepts the exact token', async () => {
     const vault = new InMemoryVault();
-    const token = await getOrCreateAutomationToken(vault);
+    const token = await getOrCreateAutomationToken(vault, secureRandom);
     expect(await validateIntent({ action: ACTION, token: 'wrong' }, vault)).toEqual({
       ok: false,
       reason: 'bad_token',
@@ -77,7 +94,7 @@ describe('validateIntent', () => {
 
   it('happy path returns the action + sanitized params', async () => {
     const vault = new InMemoryVault();
-    const token = await getOrCreateAutomationToken(vault);
+    const token = await getOrCreateAutomationToken(vault, secureRandom);
     const r = await validateIntent(
       { action: ACTION, token, params: { id: 'caller-1', junk: 'drop-me' } },
       vault,

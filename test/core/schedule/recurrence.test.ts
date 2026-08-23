@@ -1,20 +1,10 @@
-import {
-  asRecurrence,
-  nextOccurrence,
-  recurrenceLabel,
-  RECURRENCE_VALUES,
-} from '@core/schedule';
+import { asRecurrence, nextOccurrence, recurrenceLabel, RECURRENCE_VALUES } from '@core/schedule';
 
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Local-time epoch ms (monthly math is local-calendar based, so tests build local dates). */
-const local = (
-  y: number,
-  m: number,
-  d: number,
-  h = 9,
-  min = 30,
-): number => new Date(y, m - 1, d, h, min, 0, 0).getTime();
+const local = (y: number, m: number, d: number, h = 9, min = 30): number =>
+  new Date(y, m - 1, d, h, min, 0, 0).getTime();
 
 describe('asRecurrence', () => {
   it('narrows the three valid values and rejects everything else', () => {

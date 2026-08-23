@@ -3,26 +3,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { FindMyDevice, FindMyFriend } from '@core/findmy';
 import { useFindMyStore } from '@state/findmyStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
-import {
-  hasCoordinates,
-  redactBatteryPercent,
-  redactLabel,
-  redactLocationDetail,
-  resolveDisplayPoint,
-  safeOpenUrl,
-  type DisplayPoint,
-} from '@utils';
+import { hasCoordinates, resolveDisplayPoint, safeOpenUrl, type DisplayPoint } from '@utils';
 import { Screen, ScreenHeader, useTheme } from '@ui';
-import { FindMyMap, FindMyMapHidden, type MapMarker } from '@ui/findmy/FindMyMap';
+import { FindMyMap, type MapMarker } from '@ui/findmy/FindMyMap';
+import { useFindMyPolling } from '@/features/findmy/use-find-my-polling';
 
 /**
  * Open the system maps app at a point.
  *
- * Takes a resolved {@link DisplayPoint} rather than raw store values ON PURPOSE: the type makes it
- * impossible to hand this function a coordinate that redacted mode was supposed to hide, which is
- * exactly the leak that used to exist here. Goes through `safeOpenUrl` (geo: is allowlisted)
- * instead of `Linking.openURL` so the scheme is validated at one place.
+ * Takes a resolved {@link DisplayPoint} rather than raw store values so a missing, partial, or
+ * non-finite coordinate cannot become a map intent. Goes through `safeOpenUrl` (`geo:` is
+ * allowlisted) instead of `Linking.openURL` so the scheme is validated at one place.
  */
 function openInMaps(point: DisplayPoint, label: string): void {
   if (!point.visible) return;
@@ -32,7 +23,7 @@ function openInMaps(point: DisplayPoint, label: string): void {
   );
 }
 
-/** Find My: an interactive OSM map + devices/items/people with last location and battery. */
+/** Find My: devices/items/people with last location, battery, and explicit system-map actions. */
 export default function FindMyScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
@@ -44,12 +35,6 @@ export default function FindMyScreen(): React.JSX.Element {
   const error = useFindMyStore((s) => s.error);
   const load = useFindMyStore((s) => s.load);
   const refresh = useFindMyStore((s) => s.refresh);
-  // FAIL CLOSED: treat "not yet hydrated" as redacted. The flag is read from kv asynchronously at
-  // root mount, and this screen plots real home addresses — so a brief unredacted flash is the one
-  // outcome worth designing against. Defence in depth (Find My is only reachable from home or
-  // settings, both of which mount after hydrate) and it cannot flash the other way, since the
-  // Find My data itself has not loaded yet either.
-  const redacted = useRedactedModeStore((s) => s.enabled || !s.hydrated);
   const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
   const [focusId, setFocusId] = useState<string | null>(null);
 
@@ -57,52 +42,33 @@ export default function FindMyScreen(): React.JSX.Element {
     void load();
   }, [load]);
 
-  // Live-ish locations: the Gator Find My backend is a read-only cache (no location push events),
-  // so instead of a socket subscription we poll a server refresh every 60s while this screen is
-  // open. The store's `refreshing` guard coalesces overlapping refreshes.
-  useEffect(() => {
-    const id = setInterval(() => void refresh(), 60_000);
-    return () => clearInterval(id);
-  }, [refresh]);
+  // The backend is a read-only cache (no location push events). Poll only while this route is
+  // focused AND the app is active; returning to it gets an immediate refresh.
+  useFindMyPolling(refresh);
 
   // Marker id namespaces the source so a device + friend can't collide; the list rows reuse it.
   const midDevice = (d: FindMyDevice, k: 'd' | 'i'): string => `${k}:${d.id}`;
   const midFriend = (f: FindMyFriend): string => `p:${f.id}`;
 
-  // Every located entity becomes a map marker — but the COORDINATE is resolved first, so under
-  // redaction nothing is pushed at all. Masking only the popup label (the old behaviour) still
-  // plotted a real pin at a real address, which defeats the point of the mode.
+  // Every located entity becomes a map marker only after the coordinate pair passes the shared
+  // finite-value validator. A partial location must never fall through to an accidental (0, 0).
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = [];
-    const push = (
-      id: string,
-      lat: number | null,
-      lng: number | null,
-      name: string,
-      kind: string,
-    ) => {
-      const pt = resolveDisplayPoint(lat, lng, redacted);
+    const push = (id: string, lat: number | null, lng: number | null, name: string) => {
+      const pt = resolveDisplayPoint(lat, lng);
       if (!pt.visible) return;
-      // Label stays redacted too, as belt-and-braces for any future partial-visibility branch.
       out.push({
         id,
         lat: pt.latitude,
         lng: pt.longitude,
-        label: redactLabel(name, kind, redacted),
+        label: name,
       });
     };
-    devices.forEach((d) => push(midDevice(d, 'd'), d.latitude, d.longitude, d.name, 'Device'));
-    items.forEach((d) => push(midDevice(d, 'i'), d.latitude, d.longitude, d.name, 'Item'));
-    friends.forEach((f) => push(midFriend(f), f.latitude, f.longitude, f.name, 'Person'));
+    devices.forEach((d) => push(midDevice(d, 'd'), d.latitude, d.longitude, d.name));
+    items.forEach((d) => push(midDevice(d, 'i'), d.latitude, d.longitude, d.name));
+    friends.forEach((f) => push(midFriend(f), f.latitude, f.longitude, f.name));
     return out;
-  }, [devices, items, friends, redacted]);
-
-  // Carries no coordinate — just "is anything locatable", so the redacted screen can explain the
-  // missing map instead of silently dropping a 260dp panel out of the layout.
-  const anyLocated = useMemo(
-    () => [...devices, ...items, ...friends].some((e) => hasCoordinates(e.latitude, e.longitude)),
-    [devices, items, friends],
-  );
+  }, [devices, items, friends]);
 
   const rows = tab === 'devices' ? devices : tab === 'items' ? items : friends;
 
@@ -120,13 +86,7 @@ export default function FindMyScreen(): React.JSX.Element {
         }
       />
 
-      {/* `focusId` is masked too: a marker id can embed a device NAME, and it would otherwise ride
-          into injectJavaScript. Under redaction there are no markers to recenter anyway. */}
-      {markers.length > 0 ? (
-        <FindMyMap markers={markers} focusId={redacted ? null : focusId} />
-      ) : redacted && anyLocated ? (
-        <FindMyMapHidden />
-      ) : null}
+      {markers.length > 0 ? <FindMyMap markers={markers} focusId={focusId} /> : null}
 
       <View style={[styles.tabs, { borderBottomColor: theme.color.separator }]}>
         {(['devices', 'items', 'people'] as const).map((t) => (
@@ -169,31 +129,14 @@ export default function FindMyScreen(): React.JSX.Element {
         ) : null}
         {tab === 'devices'
           ? devices.map((d) => (
-              <DeviceRow
-                key={d.id}
-                device={d}
-                redacted={redacted}
-                kind="Device"
-                onFocus={() => setFocusId(midDevice(d, 'd'))}
-              />
+              <DeviceRow key={d.id} device={d} onFocus={() => setFocusId(midDevice(d, 'd'))} />
             ))
           : tab === 'items'
             ? items.map((d) => (
-                <DeviceRow
-                  key={d.id}
-                  device={d}
-                  redacted={redacted}
-                  kind="Item"
-                  onFocus={() => setFocusId(midDevice(d, 'i'))}
-                />
+                <DeviceRow key={d.id} device={d} onFocus={() => setFocusId(midDevice(d, 'i'))} />
               ))
             : friends.map((f) => (
-                <FriendRow
-                  key={f.id}
-                  friend={f}
-                  redacted={redacted}
-                  onFocus={() => setFocusId(midFriend(f))}
-                />
+                <FriendRow key={f.id} friend={f} onFocus={() => setFocusId(midFriend(f))} />
               ))}
       </ScrollView>
     </Screen>
@@ -202,25 +145,23 @@ export default function FindMyScreen(): React.JSX.Element {
 
 function DeviceRow({
   device,
-  redacted,
-  kind,
   onFocus,
 }: {
   device: FindMyDevice;
-  redacted: boolean;
-  /** The items tab reuses this row, so the redacted placeholder must say "Item", not "Device". */
-  kind: 'Device' | 'Item';
   onFocus: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  const point = resolveDisplayPoint(device.latitude, device.longitude, redacted);
+  const point = resolveDisplayPoint(device.latitude, device.longitude);
   const located = hasCoordinates(device.latitude, device.longitude);
-  const name = redactLabel(device.name, kind, redacted);
-  const detail = redactLocationDetail(device.address, located, redacted);
-  const battery = redactBatteryPercent(device.batteryLevel, redacted);
+  const name = device.name;
+  const detail = device.address ?? (located ? 'Location available' : 'No location');
+  const batteryLevel = device.batteryLevel;
+  const battery =
+    typeof batteryLevel === 'number' && Number.isFinite(batteryLevel)
+      ? Math.round(batteryLevel * 100)
+      : null;
   return (
-    // Gated on `point.visible`, NOT `located`: under redaction there is no map to recenter, so the
-    // row must be inert. One variable drives both gates so they cannot drift apart.
+    // One validated point drives focus and native-map admission so those paths cannot drift apart.
     <Pressable
       onPress={point.visible ? onFocus : undefined}
       disabled={!point.visible}
@@ -244,18 +185,16 @@ function DeviceRow({
 
 function FriendRow({
   friend,
-  redacted,
   onFocus,
 }: {
   friend: FindMyFriend;
-  redacted: boolean;
   onFocus: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  const point = resolveDisplayPoint(friend.latitude, friend.longitude, redacted);
+  const point = resolveDisplayPoint(friend.latitude, friend.longitude);
   const located = hasCoordinates(friend.latitude, friend.longitude);
-  const name = redactLabel(friend.name, 'Person', redacted);
-  const detail = redactLocationDetail(friend.address, located, redacted);
+  const name = friend.name;
+  const detail = friend.address ?? (located ? 'Location available' : 'No location');
   return (
     <Pressable
       onPress={point.visible ? onFocus : undefined}

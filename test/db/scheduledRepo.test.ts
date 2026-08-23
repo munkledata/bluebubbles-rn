@@ -1,6 +1,8 @@
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
+import { sql } from 'drizzle-orm';
 import {
+  claimDueScheduled,
   claimScheduled,
   deleteScheduled,
   deleteScheduledHistory,
@@ -17,6 +19,7 @@ import {
   SCHED_MAX_ATTEMPTS,
   updateScheduled,
 } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { nextOccurrence } from '@core/schedule';
 import * as scheduledApi from '@core/api/endpoints/scheduled';
 import { ScheduledItem } from '@core/api/endpoints/scheduled';
@@ -73,9 +76,10 @@ describe('scheduled messages repo', () => {
     expect(due.map((d) => d.id)).toEqual([past]);
   });
 
-  it('listScheduledHistory surfaces sent + errored rows (newest-first) and Clear removes them', async () => {
+  it('listScheduledHistory surfaces sent, errored, and uncertain rows and Clear removes them', async () => {
     const { db } = await createTestDb();
     const sent = await insertScheduled(db, { chatGuid: 'c1', text: 'went out', scheduledFor: 100 });
+    await claimScheduled(db, sent);
     await markScheduledSent(db, sent);
     const failed = await insertScheduled(db, {
       chatGuid: 'c1',
@@ -83,14 +87,24 @@ describe('scheduled messages repo', () => {
       scheduledFor: 200,
     });
     // Exhaust attempts → retired to status='error' (the silently-vanishing case this fixes).
-    for (let i = 0; i < SCHED_MAX_ATTEMPTS; i++) await markScheduledFailed(db, failed);
+    for (let i = 0; i < SCHED_MAX_ATTEMPTS; i++) {
+      await claimScheduled(db, failed);
+      await markScheduledFailed(db, failed);
+    }
+    const uncertain = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'check the conversation',
+      scheduledFor: 250,
+    });
+    await db.run(sql`UPDATE scheduled_messages SET status = 'uncertain' WHERE id = ${uncertain}`);
     await insertScheduled(db, { chatGuid: 'c1', text: 'still pending', scheduledFor: 300 });
 
     const history = await listScheduledHistory(db);
-    expect(history.map((r) => r.status)).toEqual(['error', 'sent']); // newest-first, no pending
-    expect(history.map((r) => r.text)).toEqual(['no luck', 'went out']);
+    expect(history.map((r) => r.status)).toEqual(['uncertain', 'error', 'sent']);
+    expect(history.map((r) => r.text)).toEqual(['check the conversation', 'no luck', 'went out']);
 
     await deleteScheduledHistory(db, failed);
+    await deleteScheduledHistory(db, uncertain);
     expect((await listScheduledHistory(db)).map((r) => r.id)).toEqual([sent]);
     // Clear never touches a pending row.
     const pendingRow = (await listAllScheduled(db))[0]!;
@@ -101,12 +115,290 @@ describe('scheduled messages repo', () => {
   it('markScheduledSent removes a row from pending + due lists', async () => {
     const { db } = await createTestDb();
     const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
-    await markScheduledSent(db, id);
+    await claimScheduled(db, id);
+    expect(await markScheduledSent(db, id)).toBe(true);
     expect(await listAllScheduled(db)).toHaveLength(0);
     expect(await listDueScheduled(db, 9999)).toHaveLength(0);
   });
 
+  it('queues every delivery transition behind a rolling-back neighbour', async () => {
+    const { db, raw } = await createTestDb();
+    const claimId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'claim',
+      scheduledFor: 100,
+    });
+    const sentId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'sent',
+      scheduledFor: 200,
+    });
+    const rearmId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'rearm',
+      scheduledFor: 300,
+    });
+    const failedId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'failed',
+      scheduledFor: 400,
+    });
+    raw
+      .prepare(
+        "UPDATE scheduled_messages SET status = 'sending', attempts = CASE WHEN id = ? THEN 2 ELSE attempts END WHERE id IN (?, ?, ?)",
+      )
+      .run(failedId, sentId, rearmId, failedId);
+
+    const readStates = () =>
+      raw
+        .prepare(
+          'SELECT id, status, server_id, scheduled_for, attempts FROM scheduled_messages ORDER BY id',
+        )
+        .all();
+    const initial = readStates();
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let completed = 0;
+    const track = <T>(operation: Promise<T>): Promise<T> =>
+      operation.then((value) => {
+        completed += 1;
+        return value;
+      });
+    const operations = [
+      track(claimScheduled(db, claimId)),
+      track(markScheduledSent(db, sentId, 'server-terminal')),
+      track(rearmScheduled(db, rearmId, 9_000)),
+      track(markScheduledFailed(db, failedId)),
+    ] as const;
+    await Promise.resolve();
+    const whileBlocked = readStates();
+    const completedWhileBlocked = completed;
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(Promise.all(operations)).resolves.toEqual([true, true, true, 'pending']);
+
+    expect(completedWhileBlocked).toBe(0);
+    expect(whileBlocked).toEqual(initial);
+    expect(readStates()).toEqual([
+      expect.objectContaining({ id: claimId, status: 'sending', attempts: 0 }),
+      expect.objectContaining({
+        id: sentId,
+        status: 'sent',
+        server_id: 'server-terminal',
+      }),
+      expect.objectContaining({
+        id: rearmId,
+        status: 'pending',
+        scheduled_for: 9_000,
+        attempts: 0,
+      }),
+      expect.objectContaining({ id: failedId, status: 'pending', attempts: 3 }),
+    ]);
+  });
+
+  it('rolls back every queued delivery transition when its account guard is revoked', async () => {
+    const { db, raw } = await createTestDb();
+    const claimId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'claim',
+      scheduledFor: 100,
+    });
+    const sentId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'sent',
+      scheduledFor: 200,
+    });
+    const rearmId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'rearm',
+      scheduledFor: 300,
+    });
+    const failedId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'failed',
+      scheduledFor: 400,
+    });
+    raw
+      .prepare(
+        "UPDATE scheduled_messages SET status = 'sending', attempts = CASE WHEN id = ? THEN 2 ELSE attempts END WHERE id IN (?, ?, ?)",
+      )
+      .run(failedId, sentId, rearmId, failedId);
+
+    const readStates = () =>
+      raw
+        .prepare(
+          'SELECT id, status, server_id, scheduled_for, attempts FROM scheduled_messages ORDER BY id',
+        )
+        .all();
+    const initial = readStates();
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    let current = true;
+    const guard = () => current;
+    let completed = 0;
+    const track = <T>(operation: Promise<T>): Promise<T> =>
+      operation.finally(() => {
+        completed += 1;
+      });
+    const operations = [
+      track(claimScheduled(db, claimId, guard)),
+      track(markScheduledSent(db, sentId, 'must-not-land', guard)),
+      track(rearmScheduled(db, rearmId, 9_000, guard)),
+      track(markScheduledFailed(db, failedId, guard)),
+    ];
+    const outcomesPromise = Promise.allSettled(operations);
+    await Promise.resolve();
+    const whileBlocked = readStates();
+    const completedWhileBlocked = completed;
+    current = false;
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    const outcomes = await outcomesPromise;
+
+    expect(completedWhileBlocked).toBe(0);
+    expect(whileBlocked).toEqual(initial);
+    expect(outcomes).toHaveLength(4);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe('rejected');
+      if (outcome.status === 'rejected') {
+        expect(outcome.reason).toBeInstanceOf(DbCommitGuardRejectedError);
+      }
+    }
+    expect(readStates()).toEqual(initial);
+  });
+
+  it('queues create, edit, delete, and history clearing behind a rolling-back neighbour', async () => {
+    const { db } = await createTestDb();
+    const editId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'before edit',
+      scheduledFor: 1000,
+    });
+    const deleteId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'delete me',
+      scheduledFor: 2000,
+    });
+    const historyId = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'clear me',
+      scheduledFor: 3000,
+    });
+    await claimScheduled(db, historyId);
+    await markScheduledSent(db, historyId);
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const created = insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'created later',
+      scheduledFor: 4000,
+    });
+    const edited = updateScheduled(db, editId, { text: 'after edit', scheduledFor: 5000 });
+    const deleted = deleteScheduled(db, deleteId);
+    const historyCleared = deleteScheduledHistory(db, historyId);
+    await Promise.resolve();
+
+    expect(await getScheduledById(db, editId)).toMatchObject({
+      text: 'before edit',
+      scheduledFor: 1000,
+    });
+    expect(await getScheduledById(db, deleteId)).not.toBeNull();
+    expect(await listScheduledHistory(db)).toHaveLength(1);
+    expect(await listAllScheduled(db)).toHaveLength(2);
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(created).resolves.toEqual(expect.any(Number));
+    await Promise.all([edited, deleted, historyCleared]);
+
+    expect(await getScheduledById(db, editId)).toMatchObject({
+      text: 'after edit',
+      scheduledFor: 5000,
+    });
+    expect(await getScheduledById(db, deleteId)).toBeNull();
+    expect(await listScheduledHistory(db)).toHaveLength(0);
+    expect((await listAllScheduled(db)).map((row) => row.text).sort()).toEqual([
+      'after edit',
+      'created later',
+    ]);
+  });
+
   describe('concurrency claim (no double-send)', () => {
+    it('claims only a still-due local row and returns its authoritative payload', async () => {
+      const { db } = await createTestDb();
+      const dueId = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'before edit',
+        scheduledFor: 100,
+        selectedMessageGuid: 'reply-guid',
+      });
+      const futureId = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'future',
+        scheduledFor: 2_000,
+      });
+      const serverId = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'server-owned',
+        scheduledFor: 100,
+        serverId: 'srv-claim',
+      });
+      await updateScheduled(db, dueId, { text: 'after edit' });
+
+      await expect(claimDueScheduled(db, dueId, 1_000)).resolves.toMatchObject({
+        id: dueId,
+        status: 'sending',
+        text: 'after edit',
+        selectedMessageGuid: 'reply-guid',
+      });
+      await expect(claimDueScheduled(db, futureId, 1_000)).resolves.toBeNull();
+      await expect(claimDueScheduled(db, serverId, 1_000)).resolves.toBeNull();
+      expect((await getScheduledById(db, futureId))?.status).toBe('pending');
+      expect((await getScheduledById(db, serverId))?.status).toBe('pending');
+    });
+
     it('claimScheduled is a one-shot lock: first claim wins, second fails', async () => {
       const { db } = await createTestDb();
       const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
@@ -174,6 +466,130 @@ describe('scheduled messages repo', () => {
       expect(await listAllScheduled(db)).toHaveLength(1); // still tracked
     });
 
+    it('applies the headless cap after excluding server-backed rows (no local starvation)', async () => {
+      const { db } = await createTestDb();
+      for (let i = 0; i < 3; i += 1) {
+        await insertScheduled(db, {
+          chatGuid: 'c1',
+          text: `server-${i}`,
+          scheduledFor: i + 1,
+          serverId: `srv-${i}`,
+        });
+      }
+      await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'local-due',
+        scheduledFor: 10,
+      });
+      const sent: string[] = [];
+
+      const fired = await runDueScheduled(
+        db,
+        noHttp,
+        1000,
+        async (_guid, text) => {
+          sent.push(text);
+        },
+        undefined,
+        1,
+      );
+
+      expect(fired).toBe(1);
+      expect(sent).toEqual(['local-due']);
+      expect(await listAllScheduled(db)).toHaveLength(3); // the server-owned rows remain tracked
+    });
+
+    it('rejects a queued claim when its account scope is revoked', async () => {
+      const { db, raw } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'once', scheduledFor: 1 });
+      let entered!: () => void;
+      const neighbourEntered = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const neighbour = withDbTransaction(db, async () => {
+        entered();
+        await gate;
+        throw new Error('neighbour rolled back');
+      }).catch((error: unknown) => error);
+      await neighbourEntered;
+      let sends = 0;
+      let current = true;
+      let scopeChecks = 0;
+      const accountScope = {
+        isCurrent: () => {
+          scopeChecks += 1;
+          return current;
+        },
+      };
+
+      const run = runDueScheduled(
+        db,
+        noHttp,
+        1000,
+        async () => {
+          sends += 1;
+        },
+        accountScope,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const sendsWhileBlocked = sends;
+      const checksBeforeRevocation = scopeChecks;
+      current = false;
+      release();
+      expect(await neighbour).toBeInstanceOf(Error);
+      await expect(run).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+      expect(checksBeforeRevocation).toBeGreaterThanOrEqual(3);
+      expect(sendsWhileBlocked).toBe(0);
+      expect(sends).toBe(0);
+      expect(raw.prepare('SELECT status FROM scheduled_messages WHERE id = ?').get(id)).toEqual(
+        expect.objectContaining({ status: 'pending' }),
+      );
+    });
+
+    it('serializes a pre-handover failure write behind a neighbouring rollback', async () => {
+      const { db, raw } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'retry', scheduledFor: 1 });
+      let entered!: () => void;
+      const neighbourEntered = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let neighbour: Promise<unknown> | undefined;
+      const run = runDueScheduled(db, noHttp, 1000, async () => {
+        neighbour = withDbTransaction(db, async () => {
+          entered();
+          await gate;
+          throw new Error('neighbour rolled back');
+        }).catch((error: unknown) => error);
+        await neighbourEntered;
+        throw new Error('send failed before handoff');
+      });
+      await neighbourEntered;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // The failure UPDATE is waiting for its own transaction; it did not join the doomed one.
+      expect((await getScheduledById(db, id))?.status).toBe('sending');
+      release();
+      expect(await neighbour).toBeInstanceOf(Error);
+      await expect(run).resolves.toBe(0);
+      expect((await getScheduledById(db, id))?.status).toBe('pending');
+      expect(
+        (
+          raw.prepare('SELECT attempts FROM scheduled_messages WHERE id = ?').get(id) as {
+            attempts: number;
+          }
+        ).attempts,
+      ).toBe(1);
+    });
+
     it('a failing send bumps attempts and releases back to pending for retry', async () => {
       const { db } = await createTestDb();
       const id = await insertScheduled(db, { chatGuid: 'c1', text: 'fail', scheduledFor: 1 });
@@ -203,9 +619,11 @@ describe('scheduled messages repo', () => {
 
   describe('recurrence (re-arm instead of mark-sent)', () => {
     const attemptsOf = (raw: import('better-sqlite3').Database, id: number): number =>
-      (raw.prepare('SELECT attempts FROM scheduled_messages WHERE id = ?').get(id) as {
-        attempts: number;
-      }).attempts;
+      (
+        raw.prepare('SELECT attempts FROM scheduled_messages WHERE id = ?').get(id) as {
+          attempts: number;
+        }
+      ).attempts;
 
     it('round-trips the recurrence column through insert + read', async () => {
       const { db } = await createTestDb();
@@ -372,6 +790,7 @@ describe('scheduled messages repo', () => {
       const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
       const statuses: string[] = [];
       for (let i = 0; i < SCHED_MAX_ATTEMPTS; i += 1) {
+        await claimScheduled(db, id);
         statuses.push(await markScheduledFailed(db, id));
       }
       expect(statuses.slice(0, -1).every((s) => s === 'pending')).toBe(true);
@@ -389,6 +808,68 @@ describe('scheduled messages repo', () => {
       const all = await listAllScheduled(db);
       expect(all).toHaveLength(1);
       expect(all[0]?.id).toBe(id);
+    });
+
+    it('queues behind a rolling-back neighbour instead of joining it', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
+      await claimScheduled(db, id);
+
+      let neighbourStarted!: () => void;
+      let releaseNeighbour!: () => void;
+      const started = new Promise<void>((resolve) => {
+        neighbourStarted = resolve;
+      });
+      const release = new Promise<void>((resolve) => {
+        releaseNeighbour = resolve;
+      });
+      const neighbour = withDbTransaction(db, async () => {
+        neighbourStarted();
+        await release;
+        throw new Error('neighbour rollback');
+      });
+      await started;
+
+      const reset = resetStuckScheduled(db);
+      await Promise.resolve();
+      expect((await getScheduledById(db, id))?.status).toBe('sending');
+
+      releaseNeighbour();
+      await expect(neighbour).rejects.toThrow('neighbour rollback');
+      await expect(reset).resolves.toBe(1);
+      expect((await getScheduledById(db, id))?.status).toBe('pending');
+    });
+
+    it('leaves the row untouched when its account commit guard is revoked', async () => {
+      const { db } = await createTestDb();
+      const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
+      await claimScheduled(db, id);
+
+      await expect(resetStuckScheduled(db, undefined, () => false)).rejects.toBeInstanceOf(
+        DbCommitGuardRejectedError,
+      );
+      expect((await getScheduledById(db, id))?.status).toBe('sending');
+    });
+
+    it('recovers only local work and never takes a server-owned row away from the server', async () => {
+      const { db } = await createTestDb();
+      const localId = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'local interrupted',
+        scheduledFor: 1,
+      });
+      const serverId = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'server interrupted',
+        scheduledFor: 1,
+        serverId: 'srv-reset',
+      });
+      await claimScheduled(db, localId);
+      await claimScheduled(db, serverId);
+
+      await expect(resetStuckScheduled(db)).resolves.toBe(1);
+      expect((await getScheduledById(db, localId))?.status).toBe('pending');
+      expect((await getScheduledById(db, serverId))?.status).toBe('sending');
     });
   });
 

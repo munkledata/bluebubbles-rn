@@ -22,9 +22,9 @@ describe('resolveChatNavigation', () => {
 
   it('does nothing even when encoding differs between the current path and the target', () => {
     // usePathname() reports the guid DECODED; chatDeepLink ENCODES it — both must normalize equal.
-    expect(
-      resolveChatNavigation('/chat/iMessage;-;+1555', '/chat/iMessage%3B-%3B%2B1555'),
-    ).toBe('none');
+    expect(resolveChatNavigation('/chat/iMessage;-;+1555', '/chat/iMessage%3B-%3B%2B1555')).toBe(
+      'none',
+    );
   });
 
   it('REPLACES when switching to a different thread (so Back still → Messages)', () => {

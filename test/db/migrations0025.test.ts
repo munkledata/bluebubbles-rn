@@ -8,9 +8,9 @@ describe('migration 0025_error_reports', () => {
       .get();
     expect(table).toBeTruthy();
 
-    const cols = (
-      raw.prepare('PRAGMA table_info(error_reports)').all() as { name: string }[]
-    ).map((c) => c.name);
+    const cols = (raw.prepare('PRAGMA table_info(error_reports)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
     expect(cols).toEqual(
       expect.arrayContaining([
         'id',
@@ -26,7 +26,9 @@ describe('migration 0025_error_reports', () => {
     );
 
     const idx = raw
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='error_reports_retry_idx'")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='error_reports_retry_idx'",
+      )
       .get();
     expect(idx).toBeTruthy();
   });

@@ -7,6 +7,7 @@ import {
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
+import type { DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 
 /**
@@ -24,24 +25,28 @@ export async function reconcileSendOutcome(
   tempGuid: string,
   ack: SendAck,
   now: number,
+  commitGuard?: DbCommitGuard,
 ): Promise<void> {
   if (ack.guid) {
-    await reconcileOutgoingSuccess(db, tempGuid, {
-      guid: ack.guid,
-      dateCreated: now,
-      dateDelivered: null,
-    });
+    await reconcileOutgoingSuccess(
+      db,
+      tempGuid,
+      {
+        guid: ack.guid,
+        dateCreated: now,
+        dateDelivered: null,
+      },
+      commitGuard,
+    );
   } else {
-    await markOutgoingSentNoGuid(db, tempGuid);
+    await markOutgoingSentNoGuid(db, tempGuid, commitGuard);
   }
 }
 
 /**
- * Flip a failed optimistic send to the error bubble, logging WHY it failed (error code +
- * HTTP status + server message) so a failed bubble is diagnosable from the device log —
- * e.g. an RCS auth-expiry reads "...Google login expired... refresh cookies on the
- * dashboard" instead of a silent errored bubble. The redacting logger scrubs any secret
- * before sinks. `now` seeds the retry backoff (defaults to Date.now() in the repo).
+ * Flip a failed optimistic send to the error bubble. A development-only warning records the error
+ * code/status/message for local diagnosis; release builds drop that free-form line before every
+ * sink. `now` seeds the retry backoff (defaults to Date.now() in the repo).
  */
 export async function handleSendFailure(
   db: AppDatabase,
@@ -50,21 +55,24 @@ export async function handleSendFailure(
   logTag: string,
   chatGuid: string,
   now?: number,
+  commitGuard?: DbCommitGuard,
 ): Promise<void> {
   const status = err instanceof ApiError ? (err.status ?? null) : null;
-  // Neither a local file problem nor a cancellation has an HTTP status, so `sendErrorCode` would
-  // call both a connection refusal. Name them for what they are instead.
+  // Local-file, cancellation, and client-side timeout failures have no HTTP status, so
+  // `sendErrorCode` would call all three a connection refusal. Name them for what they are instead.
   const kind = err instanceof ApiError ? err.kind : null;
   const code =
     kind === 'local_file'
       ? ClientErrorCode.attachmentUnreadable
       : kind === 'cancelled'
         ? ClientErrorCode.userCanceled
-        : sendErrorCode(status);
+        : kind === 'timeout'
+          ? ClientErrorCode.gatewayTimeout
+          : sendErrorCode(status);
   logger.warn(
     `[${logTag}] failed for chat ${chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
       err instanceof Error ? err.message : String(err)
     }`,
   );
-  await reconcileOutgoingError(db, tempGuid, code, now);
+  await reconcileOutgoingError(db, tempGuid, code, now, commitGuard);
 }

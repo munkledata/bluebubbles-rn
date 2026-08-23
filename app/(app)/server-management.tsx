@@ -1,15 +1,40 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import { buildSetupQr } from '@features/setup/qr';
 import { http, startSync } from '@/services';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+
+/**
+ * Read-only queries do not hold Disconnect open. Their generation-specific cache key isolates the
+ * eventual TanStack Query commit; this guard also turns a late old-account result/error into null
+ * so the retired screen cannot render it or copy it into app-wide state.
+ */
+async function readForAccount<T>(
+  lease: RealtimeDeliveryLease,
+  read: () => Promise<T>,
+): Promise<T | null> {
+  if (!lease.isCurrent()) return null;
+  try {
+    const value = await read();
+    return lease.isCurrent() ? value : null;
+  } catch (error) {
+    if (!lease.isCurrent()) return null;
+    throw error;
+  }
+}
 
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
@@ -25,15 +50,34 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // re-render loop ("Maximum update depth exceeded"). zustand has no auto-shallow-compare.
   const syncChats = useSyncStore((s) => s.chats);
   const syncMessages = useSyncStore((s) => s.messages);
+  // Every query/callback created by this screen belongs to the account that mounted it. A global
+  // confirm dialog can retain its button callback after navigation, so checking only mounted state
+  // is insufficient.
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
   const [logs, setLogs] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
 
+  // The lease revokes callbacks synchronously, but currentness is not reactive. Force an old
+  // mounted route to unmount credential/log subtrees as soon as its account generation retires.
+  useLayoutEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+        setAccountRetired(true);
+        setLogs(null);
+        setQrOpen(false);
+      }),
+    [accountLease],
+  );
+
+  const accountCurrent = !accountRetired && accountLease.isCurrent();
+
   // The pairing payload embeds the PASSWORD — build it in memory only, never log it,
   // and only hand it to the reveal-gated PairingQr inside the modal.
   let pairingPayload: string | null = null;
-  if (origin && password) {
+  if (accountCurrent && origin && password) {
     try {
       pairingPayload = buildSetupQr(origin, password);
     } catch {
@@ -45,27 +89,34 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // reachability check must not mask a down server by silently retrying, and
   // `staleTime: 0` makes every visit re-probe instead of showing a cached answer.
   const pingQuery = useQuery({
-    queryKey: ['server', 'ping'],
-    queryFn: async () => {
-      const t0 = Date.now();
-      await serverApi.ping(http);
-      return Date.now() - t0;
-    },
+    queryKey: ['server', 'ping', accountLease.generation],
+    queryFn: () =>
+      readForAccount(accountLease, async () => {
+        const t0 = Date.now();
+        await serverApi.ping(http);
+        return Date.now() - t0;
+      }),
     retry: false,
     staleTime: 0,
   });
-  const latency = pingQuery.data ?? null;
-  const reachable = pingQuery.isSuccess ? true : pingQuery.isError ? false : null;
+  const latency = accountLease.isCurrent() ? (pingQuery.data ?? null) : null;
+  const reachable = !accountLease.isCurrent()
+    ? null
+    : pingQuery.isSuccess && pingQuery.data != null
+      ? true
+      : pingQuery.isError
+        ? false
+        : null;
 
   // Statistics ARE served on the password path (admin-command dispatcher) — loaded on mount.
   // On total failure we flag an INLINE error in the section (no modal alert); a partial result
   // (some channels missing on an older server) still shows the numbers it could load.
   const statsQuery = useQuery({
-    queryKey: ['server', 'stats'],
-    queryFn: () => serverApi.serverStatTotals(http),
+    queryKey: ['server', 'stats', accountLease.generation],
+    queryFn: () => readForAccount(accountLease, () => serverApi.serverStatTotals(http)),
   });
-  const totals = statsQuery.data ?? null;
-  const statsError = statsQuery.isError;
+  const totals = accountLease.isCurrent() ? (statsQuery.data ?? null) : null;
+  const statsError = accountLease.isCurrent() && statsQuery.isError;
   // All-channels-404 (no dispatcher, or a reverse proxy blocking /admin/*) is surfaced as
   // Unimplemented by serverStatTotals — show honest copy instead of blaming the connection.
   const statsUnsupported = statsError && isUnimplementedEndpoint(statsQuery.error);
@@ -74,13 +125,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // `connected` action never ran, so the session store still has serverInfo=null → "Unknown";
   // fetching it here populates the STATUS section (and the app-wide `privateApiEnabled` gate).
   const infoQuery = useQuery({
-    queryKey: ['server', 'info'],
-    queryFn: () => serverApi.serverInfo(http),
+    queryKey: ['server', 'info', accountLease.generation],
+    queryFn: () => readForAccount(accountLease, () => serverApi.serverInfo(http)),
   });
   const latestServerInfo = infoQuery.data;
   useEffect(() => {
-    if (latestServerInfo) setServerInfo(latestServerInfo);
-  }, [latestServerInfo, setServerInfo]);
+    if (latestServerInfo && accountLease.isCurrent()) setServerInfo(latestServerInfo);
+  }, [accountLease, latestServerInfo, setServerInfo]);
 
   // Distinguish "this server doesn't support the action" from a real connection failure so
   // the copy isn't misleading (the old code blamed every 404 on the connection).
@@ -91,12 +142,21 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
   // Run an admin action with an in-flight guard; reports the outcome.
   const run = (label: string, fn: () => Promise<unknown>, okMsg: string): void => {
-    if (busy) return;
+    if (busy || !accountLease.isCurrent()) return;
     setBusy(label);
-    void fn()
-      .then(() => showDialog('Server', okMsg))
-      .catch((e: unknown) => showDialog('Server', failCopy(label, e)))
-      .finally(() => setBusy(null));
+    void (async () => {
+      try {
+        await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+          if (!activeLease.isCurrent()) return;
+          await fn();
+          if (activeLease.isCurrent()) showDialog('Server', okMsg);
+        });
+      } catch (e) {
+        if (accountLease.isCurrent()) showDialog('Server', failCopy(label, e));
+      } finally {
+        if (accountLease.isCurrent()) setBusy(null);
+      }
+    })();
   };
 
   const confirmThen = (
@@ -106,6 +166,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
     okMsg: string,
     destructive = false,
   ): void => {
+    if (!accountLease.isCurrent()) return;
     showDialog(label, message, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -117,24 +178,38 @@ export default function ServerManagementScreen(): React.JSX.Element {
   };
 
   const onLoadStats = (): void => {
-    if (busy) return;
+    if (busy || !accountLease.isCurrent()) return;
     setBusy('Load Stats');
     // `refetch` never rejects — success/failure land in `statsQuery.data` / `.isError`.
-    void statsQuery.refetch().finally(() => setBusy(null));
+    void statsQuery.refetch().finally(() => {
+      if (accountLease.isCurrent()) setBusy(null);
+    });
   };
 
   const onViewLogs = (): void => {
-    if (busy) return;
+    if (busy || !accountLease.isCurrent()) return;
     setBusy('View Logs');
-    void serverApi
-      .serverLogs(http, 500)
-      .then((res) => setLogs(res.trim() ? res : 'No recent log lines.'))
-      .catch((e: unknown) => showDialog('Server', failCopy('Fetch logs', e)))
-      .finally(() => setBusy(null));
+    void (async () => {
+      try {
+        await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+          if (!activeLease.isCurrent()) return;
+          const res = await serverApi.serverLogs(http, 500);
+          if (activeLease.isCurrent()) {
+            setLogs(res.trim() ? res : 'No recent log lines.');
+          }
+        });
+      } catch (e) {
+        if (accountLease.isCurrent()) {
+          showDialog('Server', failCopy('Fetch logs', e));
+        }
+      } finally {
+        if (accountLease.isCurrent()) setBusy(null);
+      }
+    })();
   };
 
   const onSyncNow = (): void => {
-    if (busy || syncStatus === 'syncing') return;
+    if (busy || syncStatus === 'syncing' || !accountLease.isCurrent()) return;
     void startSync();
   };
 
@@ -143,9 +218,16 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
   // Share the server URL (the share sheet includes Copy) — avoids a clipboard native dep.
   const onShareUrl = (): void => {
-    if (!origin) return;
+    if (!origin || !accountLease.isCurrent()) return;
     void Share.share({ message: origin }).catch(() => {});
   };
+
+  // A retired screen must not adopt account B's store values before Expo Router unmounts it.
+  const visibleServerInfo = accountCurrent ? serverInfo : null;
+  const visibleOrigin = accountCurrent ? origin : null;
+  const visibleSyncStatus = accountCurrent ? syncStatus : 'idle';
+  const visibleSyncChats = accountCurrent ? syncChats : 0;
+  const visibleSyncMessages = accountCurrent ? syncMessages : 0;
 
   return (
     <Screen>
@@ -159,30 +241,39 @@ export default function ServerManagementScreen(): React.JSX.Element {
               latency != null ? ` · ${latency} ms` : ''
             }`}
           />
-          <InfoRow label="Server version" value={serverInfo?.server_version ?? 'Unknown'} />
-          <InfoRow label="macOS" value={serverInfo?.os_version ?? 'Unknown'} />
-          <InfoRow label="Private API" value={serverInfo?.private_api ? 'Enabled' : 'Disabled'} />
-          <InfoRow label="Proxy" value={serverInfo?.proxy_service ?? 'Direct'} />
-          <Pressable onPress={onShareUrl} disabled={!origin} style={styles.row}>
+          <InfoRow label="Server version" value={visibleServerInfo?.server_version ?? 'Unknown'} />
+          <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
+          <InfoRow
+            label="Private API"
+            value={visibleServerInfo?.private_api ? 'Enabled' : 'Disabled'}
+          />
+          <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
+          <Pressable
+            onPress={onShareUrl}
+            disabled={!visibleOrigin}
+            accessibilityRole="button"
+            accessibilityLabel={`Share server URL ${visibleOrigin ?? 'Unknown'}`}
+            style={styles.row}
+          >
             <Text style={[styles.rowLabel, { color: theme.color.label }]}>Server URL</Text>
             <Text
               style={[
                 styles.rowValue,
-                { color: origin ? theme.color.tint : theme.color.secondaryLabel },
+                { color: visibleOrigin ? theme.color.tint : theme.color.secondaryLabel },
               ]}
               numberOfLines={1}
             >
-              {origin ?? 'Unknown'}
+              {visibleOrigin ?? 'Unknown'}
             </Text>
           </Pressable>
           <InfoRow
             label="Sync"
             value={
-              syncStatus === 'syncing'
-                ? `Syncing… (${syncChats} chats, ${syncMessages} msgs)`
-                : syncStatus === 'done'
-                  ? `Up to date (${syncMessages} msgs)`
-                  : syncStatus === 'error'
+              visibleSyncStatus === 'syncing'
+                ? `Syncing… (${visibleSyncChats} chats, ${visibleSyncMessages} msgs)`
+                : visibleSyncStatus === 'done'
+                  ? `Up to date (${visibleSyncMessages} msgs)`
+                  : visibleSyncStatus === 'error'
                     ? 'Error'
                     : 'Idle'
             }
@@ -191,8 +282,18 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
         <SettingsSection label="ACTIONS" style={styles.gap}>
           <ActionRow label="Sync Now" disabled={syncStatus === 'syncing'} onPress={onSyncNow} />
-          <ActionRow label="Server Health" onPress={() => router.push('/server-health')} />
-          <ActionRow label="Show Pairing QR" onPress={() => setQrOpen(true)} />
+          <ActionRow
+            label="Server Health"
+            onPress={() => {
+              if (accountLease.isCurrent()) router.push('/server-health');
+            }}
+          />
+          <ActionRow
+            label="Show Pairing QR"
+            onPress={() => {
+              if (accountLease.isCurrent()) setQrOpen(true);
+            }}
+          />
           <ActionRow
             label="Restart iMessage"
             disabled={!!busy}
@@ -270,7 +371,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
       {/* Conditionally rendered (not just visible=false) so PairingQr fully unmounts on close,
           dropping any revealed QR state along with it. */}
-      {qrOpen ? (
+      {accountCurrent && qrOpen ? (
         <Modal visible animationType="slide" onRequestClose={() => setQrOpen(false)}>
           <Screen>
             <ScreenHeader
@@ -291,28 +392,30 @@ export default function ServerManagementScreen(): React.JSX.Element {
         </Modal>
       ) : null}
 
-      <Modal visible={logs != null} animationType="slide" onRequestClose={() => setLogs(null)}>
-        <Screen>
-          <ScreenHeader
-            title="Server Logs"
-            right={
-              <Pressable
-                onPress={() => setLogs(null)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Close server logs"
-              >
-                <Text style={[styles.done, { color: theme.color.tint }]}>Done</Text>
-              </Pressable>
-            }
-          />
-          <ScrollView contentContainerStyle={styles.logBody} horizontal={false}>
-            <Text style={[styles.logText, { color: theme.color.secondaryLabel }]} selectable>
-              {logs}
-            </Text>
-          </ScrollView>
-        </Screen>
-      </Modal>
+      {accountCurrent && logs != null ? (
+        <Modal visible animationType="slide" onRequestClose={() => setLogs(null)}>
+          <Screen>
+            <ScreenHeader
+              title="Server Logs"
+              right={
+                <Pressable
+                  onPress={() => setLogs(null)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close server logs"
+                >
+                  <Text style={[styles.done, { color: theme.color.tint }]}>Done</Text>
+                </Pressable>
+              }
+            />
+            <ScrollView contentContainerStyle={styles.logBody} horizontal={false}>
+              <Text style={[styles.logText, { color: theme.color.secondaryLabel }]} selectable>
+                {logs}
+              </Text>
+            </ScrollView>
+          </Screen>
+        </Modal>
+      ) : null}
     </Screen>
   );
 }
@@ -337,6 +440,8 @@ function ActionRow({
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       style={[styles.row, { opacity: disabled ? 0.4 : 1 }]}
     >
       <Text style={[styles.rowLabel, { color }]}>{label}</Text>

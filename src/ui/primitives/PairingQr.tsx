@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useTheme } from '../theme';
 import { QrCode } from './QrCode';
@@ -20,14 +20,42 @@ export interface PairingQrProps {
 
 export function PairingQr({ payload }: PairingQrProps): React.JSX.Element {
   const theme = useTheme();
-  const [revealed, setRevealed] = useState(false);
+  // A reveal grant belongs to one exact payload revision. The opaque object changes whenever the
+  // payload changes without copying the password-bearing string into component state.
+  const payloadIdentity = useMemo<object>(() => ({ present: payload != null }), [payload]);
+  const revocationRef = useRef(0);
+  const [committedRevocation, setCommittedRevocation] = useState(0);
+  const currentGrant = useMemo<object>(
+    () => ({ payloadIdentity, revocation: committedRevocation }),
+    [committedRevocation, payloadIdentity],
+  );
+  const [revealedGrant, setRevealedGrant] = useState<object | null>(null);
+  const revealed = payload != null && revealedGrant === currentGrant;
+
+  const revokeReveal = useCallback(() => {
+    const next = revocationRef.current + 1;
+    // Ref first: a retained pre-revocation Pressable callback is inert immediately, even before
+    // React commits the state-backed generation and renders a fresh control.
+    revocationRef.current = next;
+    setRevealedGrant(null);
+    setCommittedRevocation(next);
+  }, []);
 
   // Hide again on blur/unfocus — the cleanup runs when this screen loses focus.
   useFocusEffect(
     useCallback(() => {
-      return () => setRevealed(false);
-    }, []),
+      return revokeReveal;
+    }, [revokeReveal]),
   );
+
+  // Navigation focus can remain active while Android backgrounds the app or opens Recents. Revoke
+  // the credential display on that independent lifecycle too.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') revokeReveal();
+    });
+    return () => subscription.remove();
+  }, [revokeReveal]);
 
   if (!payload) {
     return (
@@ -49,7 +77,10 @@ export function PairingQr({ payload }: PairingQrProps): React.JSX.Element {
         <QrCode value={payload} size={260} testID="pairing-qr-code" />
       ) : (
         <Pressable
-          onPress={() => setRevealed(true)}
+          onPress={() => {
+            if (revocationRef.current !== committedRevocation) return;
+            setRevealedGrant(currentGrant);
+          }}
           accessibilityRole="button"
           style={[styles.revealButton, { backgroundColor: theme.color.tint }]}
         >

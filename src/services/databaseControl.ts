@@ -1,10 +1,17 @@
+import { sql } from 'drizzle-orm';
 import { logger } from '@core/secure';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import { getDatabase, getRawDatabase, initDatabase } from '@db/database';
 import { resolveDbKey, rotateDbKey } from '@db/key';
-import { kvGet, kvSet } from '@db/repositories';
+import { kvGet, kvSetWithinTransaction } from '@db/repositories';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbTransactionContext,
+} from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { vault } from './clients';
+import { runTrackedRealtimeWork, type RealtimeDeliveryLease } from './realtime/deliveryCoordinator';
 
 /**
  * The in-flight FIRST open, shared by every concurrent caller (single-flight).
@@ -69,67 +76,226 @@ export async function rotateDatabaseKey(): Promise<void> {
  * retry next launch. Newly synced messages get this at upsert time, so this only backfills history.
  */
 const SEARCH_BACKFILL_FLAG = 'maintenance.searchTextBackfill.v1';
+const SEARCH_BACKFILL_BATCH_SIZE = 50;
+let searchBackfillTail: Promise<void> = Promise.resolve();
+const searchBackfillFlights = new Map<number, Promise<void>>();
 
-/**
- * Did every row this pass claims to have written actually end up with text? Chunked so a large
- * history can't build a statement with more bound parameters than SQLite accepts.
- *
- * Deliberately checks THE IDS WE WROTE, not "is the selecting query now empty" — rows whose
- * attributedBody decodes to nothing stay in that result set forever, so the empty-set version could
- * never be satisfied and every launch would repeat the full table scan.
- */
-async function backfillWritesLanded(
-  raw: ReturnType<typeof getRawDatabase>,
-  ids: number[],
-): Promise<boolean> {
-  for (let i = 0; i < ids.length; i += 400) {
-    const chunk = ids.slice(i, i + 400);
-    const res = await raw.execute(
-      `SELECT COUNT(*) AS c FROM messages WHERE id IN (${chunk.map(() => '?').join(',')})
-         AND text IS NOT NULL AND text != ''`,
-      chunk,
-    );
-    const row = (res.rows ?? [])[0] as { c?: number } | undefined;
-    if ((row?.c ?? 0) !== chunk.length) return false;
-  }
-  return true;
+interface SearchBackfillRow {
+  readonly id: number;
+  readonly ab: string;
 }
 
-export async function runSearchTextBackfillOnce(): Promise<void> {
-  try {
-    const db = getDatabase();
-    if ((await kvGet(db, SEARCH_BACKFILL_FLAG)) === 'done') return;
-    // Use the RAW handle so this bulk pass doesn't trigger a reactive flush per row (FTS triggers
-    // still fire on the UPDATE); flush once at the end. Only edited/SMS rows have empty text.
-    const raw = getRawDatabase();
-    const res = await raw.execute(
-      `SELECT id, attributed_body AS ab FROM messages WHERE (text IS NULL OR text = '') AND attributed_body IS NOT NULL`,
-    );
-    const rows = (res.rows ?? []) as Array<{ id: number; ab: string | null }>;
-    const fixedIds: number[] = [];
-    for (const r of rows) {
-      const text = plainTextFromAttributedBody(r.ab);
-      if (!text) continue;
-      await raw.execute(`UPDATE messages SET text = ? WHERE id = ?`, [text, r.id]);
-      fixedIds.push(r.id);
+function parseBackfillRows(value: unknown, afterId: number): SearchBackfillRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error('search-text backfill returned a non-array page');
+  }
+  const rows: SearchBackfillRow[] = [];
+  let previousId = afterId;
+  for (const valueRow of value) {
+    if (!valueRow || typeof valueRow !== 'object') {
+      throw new Error('search-text backfill returned an invalid row');
     }
-    if (fixedIds.length > 0) raw.flushPendingReactiveQueries();
-    // Set the "done" flag from EVIDENCE, never from having reached this line. This pass runs on the
-    // ONE shared connection, so its plain UPDATEs join whatever transaction happens to be open (see
-    // db/transaction.ts) — a rollback there erases everything the loop wrote, while the kvSet below
-    // is its own autocommit and would still retire the only pass that would ever repair those rows.
-    // A zero-write pass has nothing to verify and is legitimately done (it must NOT re-scan forever).
-    if (fixedIds.length > 0 && !(await backfillWritesLanded(raw, fixedIds))) {
-      logger.warn('[search] search-text backfill did not persist; retrying next launch', {
-        attempted: fixedIds.length,
+    const candidate = valueRow as Record<string, unknown>;
+    const id = candidate.id;
+    const ab = candidate.ab;
+    if (!Number.isSafeInteger(id) || typeof id !== 'number' || id <= previousId) {
+      throw new Error('search-text backfill returned an invalid or unordered id');
+    }
+    if (typeof ab !== 'string') {
+      throw new Error('search-text backfill returned an invalid attributed body');
+    }
+    rows.push({ id, ab });
+    previousId = id;
+  }
+  return rows;
+}
+
+async function readSearchTextBackfillPage(
+  raw: ReturnType<typeof getRawDatabase>,
+  afterId: number,
+): Promise<SearchBackfillRow[]> {
+  const result = await raw.execute(
+    `SELECT id, attributed_body AS ab
+       FROM messages
+      WHERE id > ? AND (text IS NULL OR text = '') AND attributed_body IS NOT NULL
+      ORDER BY id ASC
+      LIMIT ?`,
+    [afterId, SEARCH_BACKFILL_BATCH_SIZE],
+  );
+  return parseBackfillRows(result.rows ?? [], afterId);
+}
+
+function searchTextBackfillPagesMatch(
+  prepared: ReadonlyArray<SearchBackfillRow>,
+  current: ReadonlyArray<SearchBackfillRow>,
+): boolean {
+  return (
+    prepared.length === current.length &&
+    prepared.every((row, index) => row.id === current[index]?.id && row.ab === current[index]?.ab)
+  );
+}
+
+async function updateSearchTextBatch(
+  context: DbTransactionContext,
+  rows: ReadonlyArray<{
+    readonly id: number;
+    readonly attributedBody: string;
+    readonly text: string;
+  }>,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    const cases = sql.join(
+      rows.map(
+        (row) =>
+          sql`WHEN id = ${row.id} AND attributed_body = ${row.attributedBody} THEN ${row.text}`,
+      ),
+      sql` `,
+    );
+    const matches = sql.join(
+      rows.map((row) => sql`(id = ${row.id} AND attributed_body = ${row.attributedBody})`),
+      sql` OR `,
+    );
+    const changed = await db.all<{ id: number }>(sql`
+      UPDATE messages
+         SET text = CASE ${cases} ELSE text END
+       WHERE (${matches}) AND (text IS NULL OR text = '')
+       RETURNING id
+    `);
+    // RETURNING belongs to this exact statement. Unlike connection-global `SELECT changes()`, a
+    // neighbouring writer cannot replace the count between awaits.
+    if (changed.length !== rows.length) {
+      throw new Error('search-text source changed before its guarded update');
+    }
+  });
+}
+
+async function tryFinishSearchTextBackfill(
+  db: AppDatabase,
+  raw: ReturnType<typeof getRawDatabase>,
+  lease: RealtimeDeliveryLease,
+  afterId: number,
+): Promise<'done' | 'more' | 'paused'> {
+  let trailingRowsFound = false;
+  let markedDone = false;
+  const completion = await runTrackedRealtimeWork(lease, async (activeLease) => {
+    await withDbTransaction(
+      db,
+      async (context) => {
+        // Check and flag under the same short write lock. A sync page that appended an eligible
+        // row after our last SELECT therefore wins either before this check or after the flag;
+        // newly ingested rows compute text during upsert, so only the former needs another page.
+        const trailing = await raw.execute(
+          `SELECT id
+             FROM messages
+            WHERE id > ? AND (text IS NULL OR text = '') AND attributed_body IS NOT NULL
+            ORDER BY id ASC
+            LIMIT 1`,
+          [afterId],
+        );
+        trailingRowsFound = (trailing.rows ?? []).length > 0;
+        if (trailingRowsFound) return;
+        await kvSetWithinTransaction(context, SEARCH_BACKFILL_FLAG, 'done');
+        markedDone = true;
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+  if (completion === 'paused') return 'paused';
+  if (trailingRowsFound) return 'more';
+  return markedDone ? 'done' : 'paused';
+}
+
+async function runSearchTextBackfillPass(lease: RealtimeDeliveryLease): Promise<void> {
+  try {
+    if (!lease.isCurrent()) return;
+    const db = getDatabase();
+    if (!lease.isCurrent()) return;
+    if ((await kvGet(db, SEARCH_BACKFILL_FLAG)) === 'done') return;
+    if (!lease.isCurrent()) return;
+
+    // The raw handle permits one CASE update per page instead of one reactive write per row. The
+    // preliminary read and decoding stay outside the mutex; the guarded exact re-read plus optional
+    // update commit through it, so a dirty preliminary page can never advance the cursor.
+    const raw = getRawDatabase();
+    let afterId = 0;
+    let fixed = 0;
+    while (lease.isCurrent()) {
+      const rows = await readSearchTextBackfillPage(raw, afterId);
+      if (!lease.isCurrent()) return;
+      if (rows.length === 0) {
+        const completion = await tryFinishSearchTextBackfill(db, raw, lease, afterId);
+        if (completion === 'more') continue;
+        if (completion === 'done' && fixed > 0) {
+          logger.info('[search] backfilled searchable text', { fixed });
+        }
+        return;
+      }
+
+      const last = rows.at(-1);
+      if (!last) break;
+      const updates = rows.flatMap((row) => {
+        const text = plainTextFromAttributedBody(row.ab);
+        return text ? [{ id: row.id, attributedBody: row.ab, text }] : [];
       });
+      let pageMatched = false;
+      const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
+        await withDbTransaction(
+          db,
+          async (transactionContext) => {
+            // The prepared SELECT runs outside the mutex so decoding cannot hold the shared write
+            // queue. Re-read the exact bounded page after acquiring it: an unrelated transaction
+            // may have temporarily changed `text` on this shared connection and then rolled back.
+            // Advancing from that dirty page would skip the restored row forever and let the
+            // terminal check record a false completion marker.
+            const currentRows = await readSearchTextBackfillPage(raw, afterId);
+            pageMatched = searchTextBackfillPagesMatch(rows, currentRows);
+            if (!pageMatched) return;
+            if (updates.length > 0) {
+              await updateSearchTextBatch(transactionContext, updates);
+            }
+          },
+          () => activeLease.isCurrent(),
+        );
+      });
+      if (status === 'paused') return;
+      // A changed page committed no message writes. Retry from the same cursor against a fresh
+      // committed view, including when every row in the prepared page was undecodable.
+      if (!pageMatched) continue;
+      fixed += updates.length;
+      // Move past a page only after its conditional write commits. Undecodable rows deliberately
+      // advance too; otherwise one historical corrupt body would make every launch loop forever.
+      afterId = last.id;
+      if (rows.length === SEARCH_BACKFILL_BATCH_SIZE) continue;
+
+      const completion = await tryFinishSearchTextBackfill(db, raw, lease, afterId);
+      if (completion === 'more') continue;
+      if (completion === 'done' && fixed > 0) {
+        logger.info('[search] backfilled searchable text', { fixed });
+      }
       return;
     }
-    await kvSet(db, SEARCH_BACKFILL_FLAG, 'done');
-    if (fixedIds.length > 0) {
-      logger.info('[search] backfilled searchable text', { fixed: fixedIds.length });
-    }
   } catch (e) {
+    if (!lease.isCurrent()) return;
     logger.warn('[search] search-text backfill skipped', e);
   }
+}
+
+/**
+ * Repair one account generation without racing another generation's use of the shared connection.
+ * Same-generation callers share a Promise; a replacement account waits for the stale pass to stop.
+ */
+export function runSearchTextBackfillOnce(lease: RealtimeDeliveryLease): Promise<void> {
+  const existing = searchBackfillFlights.get(lease.generation);
+  if (existing) return existing;
+
+  const attempt = searchBackfillTail.then(() => runSearchTextBackfillPass(lease));
+  searchBackfillTail = attempt.catch(() => undefined);
+  searchBackfillFlights.set(lease.generation, attempt);
+  const clear = (): void => {
+    if (searchBackfillFlights.get(lease.generation) === attempt) {
+      searchBackfillFlights.delete(lease.generation);
+    }
+  };
+  void attempt.then(clear, clear);
+  return attempt;
 }

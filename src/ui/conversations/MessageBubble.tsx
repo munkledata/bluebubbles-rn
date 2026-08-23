@@ -12,7 +12,6 @@ import type {
   UrlPreviewRow,
 } from '@db/repositories';
 import { isSafePreviewUrl } from '@/services/urlPreview';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useUrlPreview } from '@features/conversations/useUrlPreview';
 import {
   errorTitleForCode,
@@ -22,7 +21,7 @@ import {
   safeOpenUrl,
   type BubbleRect,
 } from '@utils';
-import { useTheme } from '../theme';
+import { contrastRatio, readableTextOn, useTheme } from '../theme';
 import { AttachmentGalleryGrid, AttachmentView, StickerOverlay } from '../attachments';
 import { BubbleEffectView } from './effects';
 import { ReactionCluster } from './ReactionCluster';
@@ -87,7 +86,6 @@ export const MessageBubble = React.memo(function MessageBubble({
   // Frosted-pill treatment for the bubble's unbacked texts over a wallpaper (see MessageRow).
   const overlay = overlayTextStyle(hasBackground, theme.color.tertiaryLabel, theme.color.label);
   const pill = overlayPillStyle(hasBackground, theme.color.background);
-  const redacted = useRedactedModeStore((s) => s.enabled);
   // Measure the bubble on long-press so the reaction/action menu can float around its actual
   // on-screen position (iMessage-style), rather than sit in a bottom sheet. measureInWindow is
   // async (one frame) — fine for a long-press.
@@ -118,8 +116,8 @@ export const MessageBubble = React.memo(function MessageBubble({
   // so rendering them would show empty "file box" chips.
   const atts = (msg.attachments ?? []).filter((a) => !a.hideAttachment);
   const reactions = msg.reactions ?? [];
-  // Redacted mode must not render sticker imagery — same rule as the attachment placeholder below.
-  const stickers = redacted ? [] : (msg.stickers ?? []);
+  const showReactionCluster = reactions.length > 0;
+  const stickers = msg.stickers ?? [];
   // Remount the overlay when the sticker SET changes so per-sticker fade/dismiss state can't ride
   // onto a different sticker in a recycled FlashList row.
   const stickerKey = stickers.map((s) => s.stickerMessageGuid).join('|');
@@ -144,18 +142,17 @@ export const MessageBubble = React.memo(function MessageBubble({
   // The retracted tombstone returns early below, so a retracted row never reaches the badge;
   // scheduled rows are always from-me, so no defer/avatar interaction.
   const isScheduled = !!msg.isScheduled && msg.isSent !== 1;
-  // Redacted mode also suppresses the link preview (it would leak the URL/title).
   const previewUrl = useMemo(
-    () => (!redacted && hasText && !isRetracted ? firstUrl(bodyText) : null),
-    [redacted, hasText, isRetracted, bodyText],
+    () => (hasText && !isRetracted ? firstUrl(bodyText) : null),
+    [hasText, isRetracted, bodyText],
   );
   // Apple's rich-link metadata (server-decoded payload_data): the title/summary/image the
   // SENDER's device already fetched. When it carries something renderable, synthesize the card
   // row directly — no network fetch, no url_previews cache — which is what makes bot-hostile
-  // sites (X, Instagram, …) preview reliably. Image/icon URLs pass the same SSRF guard as the
-  // fetch path (they come from the wire, so treat them like any server-supplied URL).
+  // sites (X, Instagram, …) preview reliably. Image/icon URLs remain validated for a future
+  // bounded pipeline, but NET-00's card deliberately never mounts remote preview artwork.
   const payloadPreview = useMemo<UrlPreviewRow | null>(() => {
-    if (redacted || isRetracted || !msg.payloadData) return null;
+    if (isRetracted || !msg.payloadData) return null;
     const item = parsePayloadData(msg.payloadData)?.urlData?.[0];
     if (!item) return null;
     const img =
@@ -164,7 +161,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         : item.iconUrl && isSafePreviewUrl(item.iconUrl)
           ? item.iconUrl
           : null;
-    if (!item.title && !img) return null; // nothing the card could render — fall back to fetch
+    if (!item.title && !img) return null; // fall back to the local cache lookup / raw link
     return {
       url: item.url ?? item.originalUrl ?? '',
       title: item.title ?? null,
@@ -174,14 +171,19 @@ export const MessageBubble = React.memo(function MessageBubble({
       fetchedAt: null,
       error: 0,
     };
-  }, [redacted, isRetracted, msg.payloadData]);
+  }, [isRetracted, msg.payloadData]);
   // Own the preview lookup here (not inside the card) so we can also decide whether to draw the
   // raw link text. When the WHOLE message is just a URL and its card loaded, hide the text so we
   // don't show a blue link AND a card (matching iMessage). If the preview failed, keep the link
   // so it's still tappable. Hook is called unconditionally (null url → null) to keep hook order —
-  // and a payload-backed message passes null so it NEVER fetches or touches the cache table.
+  // and a renderable payload-backed message passes null so it never touches the cache table. On
+  // other messages the hook is cache-read-only: a miss cannot start HTML or image traffic.
   const fetched = useUrlPreview(payloadPreview ? null : previewUrl);
-  const preview = payloadPreview ?? fetched;
+  // useReactiveQuery deliberately keeps the previous dependency's data until the next read
+  // resolves. A recycled FlashList row may therefore briefly carry URL A's cached preview while
+  // rendering URL B. Adopt cache data only when its exact key matches the current message URL.
+  const fetchedForCurrentUrl = fetched?.url === previewUrl ? fetched : null;
+  const preview = payloadPreview ?? fetchedForCurrentUrl;
   // The card's tap target/domain line. Prefer the text URL; a URL balloon whose text somehow
   // lacks a regex-matchable URL (bare-domain text) still gets its card via the payload URL.
   const cardUrl = previewUrl ?? (payloadPreview?.url ? payloadPreview.url : null);
@@ -197,19 +199,19 @@ export const MessageBubble = React.memo(function MessageBubble({
   );
   // Keep the text bubble if it carries a reaction — the reaction cluster anchors to it.
   const showText = hasText && !(urlOnly && previewLoaded && (msg.reactions?.length ?? 0) === 0);
-  // Subject line (Private API): a bold line above the body. Hidden under redacted mode.
+  // Subject line (Private API): a bold line above the body.
   const subjectText = msg.subject?.trim() ?? '';
-  const hasSubject = !redacted && subjectText.length > 0;
+  const hasSubject = subjectText.length > 0;
   // Emoji-only message (no attachments, no subject) → enlarged, bubble-less (matches iMessage).
   const emojiOnly = useMemo(() => isBigEmoji(bodyText), [bodyText]);
-  const bigEmoji = !redacted && !hasSubject && atts.length === 0 && emojiOnly;
+  const bigEmoji = !hasSubject && atts.length === 0 && emojiOnly;
   // Reactions anchor to the text/subject/emoji bubble when there is one; for an attachment-ONLY
   // message they must anchor to the attachment instead, or a tapback on a photo shows nothing.
   // Reactions AND stickers anchor to the text/subject/emoji bubble when there is one; for an
   // attachment-ONLY message they must anchor to the attachment instead, or an overlay on a photo
   // shows nothing.
   const attsOverlayAnchor =
-    (reactions.length > 0 || stickers.length > 0) &&
+    (showReactionCluster || stickers.length > 0) &&
     atts.length > 0 &&
     !showText &&
     !hasSubject &&
@@ -236,9 +238,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     return (
       <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
         <Text style={[styles.tombstone, overlay, pill]}>
-          {isFromMe
-            ? 'You unsent a message'
-            : `${(redacted ? null : msg.senderName) ?? 'They'} unsent a message`}
+          {isFromMe ? 'You unsent a message' : `${msg.senderName ?? 'They'} unsent a message`}
         </Text>
       </View>
     );
@@ -254,7 +254,17 @@ export const MessageBubble = React.memo(function MessageBubble({
       ? nonImessageBg
       : resolveBubbleColor(accentColor, b.senderBackground)
     : b.receivedBackgroundBottom;
-  const textColor = isFromMe ? b.senderText : b.receivedText;
+  // Own bubbles can use the theme sender colour, a per-chat accent, SMS green, or RCS teal.
+  // Choose text from the background we actually rendered instead of reusing senderText, which
+  // only describes the normal iMessage bubble and becomes unreadable on the brighter variants.
+  const textColor = isFromMe ? readableTextOn(backgroundColor) : b.receivedText;
+  // A sent mention must use the same readable foreground as the rest of the sent text. Received
+  // mentions keep the accent when it clears AA, otherwise they fall back to readable body text.
+  const mentionColor = isFromMe
+    ? textColor
+    : contrastRatio(theme.color.tint, backgroundColor) >= 4.5
+      ? theme.color.tint
+      : textColor;
 
   // Tail corner is the bottom corner toward the screen edge, only on last-in-group.
   // The text bubble tails only when there are no attachments below it.
@@ -267,7 +277,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     <Pressable
       ref={bubbleRef}
       onLongPress={onLongPress ? handleLongPress : undefined}
-      delayLongPress={350}
+      delayLongPress={onLongPress ? 350 : undefined}
       style={{ opacity: isSending ? 0.6 : 1 }}
     >
       {msg.replyPreview && msg.threadOriginatorGuid ? (
@@ -278,22 +288,12 @@ export const MessageBubble = React.memo(function MessageBubble({
           onPress={onJumpToReply}
         />
       ) : null}
-      {redacted && atts.length > 0 ? (
-        // Redacted mode hides attachment content (photos/videos/files) behind a placeholder,
-        // matching the inbox/media-gallery masking — else the thread leaks images on screen-share.
-        <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
-          <View style={[styles.redactedAtt, { backgroundColor: theme.color.secondaryBackground }]}>
-            <Text style={{ color: theme.color.tertiaryLabel, fontSize: 13 }}>
-              {atts.length > 1 ? `${atts.length} attachments` : 'Attachment'}
-            </Text>
-          </View>
-        </View>
-      ) : attsOverlayAnchor ? (
+      {attsOverlayAnchor ? (
         // Attachment-only message with a tapback: wrap in a relative anchor so the (absolutely
         // positioned) reaction cluster pins to the attachment's top corner.
         <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
           {attachmentsNode}
-          {reactions.length > 0 ? (
+          {showReactionCluster ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
           ) : null}
           {stickers.length ? (
@@ -310,7 +310,9 @@ export const MessageBubble = React.memo(function MessageBubble({
             style={[
               styles.bigEmoji,
               {
-                color: textColor,
+                // Emoji-only messages have no bubble, so their fallback glyph colour belongs to
+                // the screen surface rather than the sent-bubble foreground chosen above.
+                color: theme.color.label,
                 fontSize: theme.font.size.body * 3,
                 lineHeight: theme.font.size.body * 3.4,
               },
@@ -318,7 +320,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           >
             {bodyText}
           </Text>
-          {reactions.length > 0 ? (
+          {showReactionCluster ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
           ) : null}
           {stickers.length ? (
@@ -340,11 +342,11 @@ export const MessageBubble = React.memo(function MessageBubble({
             ) : null}
             {showText ? (
               <Text style={[styles.text, { color: textColor, fontSize: theme.font.size.body }]}>
-                {redacted ? 'Message' : renderRuns(runs, textColor, theme.color.tint)}
+                {renderRuns(runs, textColor, mentionColor)}
               </Text>
             ) : null}
           </View>
-          {reactions.length > 0 ? (
+          {showReactionCluster ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
           ) : null}
           {stickers.length ? (
@@ -463,14 +465,6 @@ function linkify(text: string, color: string): React.ReactNode {
 
 const styles = StyleSheet.create({
   anchor: { position: 'relative', marginHorizontal: 10, maxWidth: '78%' },
-  redactedAtt: {
-    width: 160,
-    height: 120,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 1,
-  },
   bubble: {
     paddingVertical: 8,
     paddingHorizontal: 14,

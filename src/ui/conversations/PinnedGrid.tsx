@@ -1,14 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { InboxRow } from '@db/repositories';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import {
   avatarSeed,
   dedupeParticipants,
   isGroupRow,
   participantAvatars,
   participantList,
-  redactTitle,
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar } from '../primitives';
@@ -27,12 +25,11 @@ export function PinnedGrid({
   onLongPress,
 }: PinnedGridProps): React.JSX.Element | null {
   const theme = useTheme();
-  const redacted = useRedactedModeStore((s) => s.enabled);
   if (rows.length === 0) return null;
   return (
     <View style={styles.grid}>
-      {rows.map((row) => {
-        const title = redactTitle(resolveTitle(row), redacted);
+      {rows.map((row, index) => {
+        const title = resolveTitle(row);
         const unread = row.unreadCount > 0;
         const parts = dedupeParticipants(
           participantList(row.participantNames),
@@ -52,31 +49,25 @@ export function PinnedGrid({
           >
             <View style={styles.avatarWrap}>
               {isGroupRow(row) ? (
-                <GroupAvatar
-                  names={redacted ? ['Contact', 'Contact'] : parts.names}
-                  uris={redacted ? [] : parts.uris}
-                  seeds={redacted ? participantList(row.participantNames) : undefined}
-                  size={64}
-                />
+                <GroupAvatar names={parts.names} uris={parts.uris} size={64} />
               ) : (
                 <Avatar
                   name={avatarSeed(row)}
-                  uri={redacted ? null : participantAvatars(row.participantAvatars)[0]}
-                  seed={redacted ? avatarSeed(row) : undefined}
+                  uri={participantAvatars(row.participantAvatars)[0]}
                   size={64}
                 />
               )}
               {/* Presence only, never the count — the cell is ~64px and a number would crowd the
                   avatar. The ring is the page background so the dot reads over a photo's edge.
-                  Not gated on redacted mode: "there is something unread" leaks nothing about who
-                  or what, and it's the whole point of pinning a chat. */}
+                  Presence alone says only that there is something unread, and it's the whole point
+                  of pinning a chat. */}
               {unread ? (
                 <View
                   style={[
                     styles.unreadDot,
                     { backgroundColor: theme.color.tint, borderColor: theme.color.background },
                   ]}
-                  testID={`pinned-unread-${row.guid}`}
+                  testID={`pinned-unread-${index}`}
                   accessible={false}
                 />
               ) : null}

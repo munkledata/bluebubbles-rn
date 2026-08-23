@@ -10,6 +10,10 @@ import {
   View,
 } from 'react-native';
 import { discardMessage, retry } from '@/services/send';
+import {
+  captureRealtimeDeliveryLease,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import {
   chatServiceFromGuid,
@@ -24,7 +28,7 @@ import {
   type ScrollPinState,
 } from '@utils';
 import { usePullToRefresh } from '../primitives';
-import { useTheme, withAlpha } from '../theme';
+import { readableTextOn, useTheme, withAlpha } from '../theme';
 import { MessageRow } from './MessageRow';
 import { FailedMessageSheet } from './FailedMessageSheet';
 import { ReactionDetailsSheet } from './ReactionDetailsSheet';
@@ -67,6 +71,8 @@ interface MessageListProps {
    *  the live newest window. The window's own bottom is NOT the newest message, so a plain
    *  scrollToEnd would lie. */
   onExitAnchor?: () => void;
+  /** Mount-account lease for delayed failed-message sheet actions. */
+  accountLease?: RealtimeDeliveryLease;
 }
 
 function distFromBottomOf(e: NativeSyntheticEvent<NativeScrollEvent>): number {
@@ -94,8 +100,10 @@ export function MessageList({
   selectedGuids,
   onToggleSelect,
   onExitAnchor,
+  accountLease,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
+  const [screenLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
   // memoized inside the hook so FlashList's layout stays stable across the frequent re-renders.
   // The spinner offset drops it below a floating header instead of under it.
@@ -462,7 +470,9 @@ export function MessageList({
           <Text style={[styles.fabGlyph, { color: theme.color.tint }]}>↓</Text>
           {missed > 0 ? (
             <View style={[styles.fabBadge, { backgroundColor: theme.color.tint }]}>
-              <Text style={styles.fabBadgeText}>{missed > 99 ? '99+' : missed}</Text>
+              <Text style={[styles.fabBadgeText, { color: readableTextOn(theme.color.tint) }]}>
+                {missed > 99 ? '99+' : missed}
+              </Text>
             </View>
           ) : null}
         </Pressable>
@@ -476,10 +486,10 @@ export function MessageList({
           // Passing the bubble's text/image is what made a failed contact card go out as a plain
           // message reading the contact's name, and dropped a reply's target / effect / subject /
           // mentions, none of which this component can see.
-          if (stillFailed && failed) void retry(failed.guid);
+          if (stillFailed && failed) void retry(failed.guid, screenLease);
         }}
         onDelete={() => {
-          if (stillFailed && failed) void discardMessage(failed.guid);
+          if (stillFailed && failed) void discardMessage(failed.guid, Date.now(), screenLease);
         }}
       />
       <ReactionDetailsSheet
@@ -526,5 +536,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fabBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  fabBadgeText: { fontSize: 11, fontWeight: '700' },
 });

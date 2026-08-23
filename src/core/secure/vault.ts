@@ -10,6 +10,9 @@
 export type SecretKey =
   | 'serverPassword'
   | 'serverAddress'
+  // Correlates the two credential keys so a crash/Keystore failure between writes cannot make a
+  // partial connection look active, and a failed double-delete cannot resurrect a forgotten one.
+  | 'serverSessionState'
   | 'iCloudAccount'
   | 'dbEncryptionKey'
   // Staging slot for crash-safe DB-key rotation: the new key is written here BEFORE the
@@ -17,12 +20,34 @@ export type SecretKey =
   // mid-rotation is recoverable (see resolveDbKey).
   | 'dbEncryptionKeyPending'
   | 'automationToken'
-  // App-lock enabled flag. Lives OUTSIDE the encrypted DB (it must be readable at
-  // cold boot BEFORE the DB key is released) — hence the vault, not the kv table.
-  | 'appLockEnabled'
-  // TLS public-key pins (JSON: host → base64 SHA-256 SPKI hashes). Applied at boot
-  // before any network call; outside the DB so pinning is active before sync/connect.
-  | 'certPins';
+  // App-lock enabled flag. Lives OUTSIDE the encrypted DB so boot can decide whether
+  // to show the UI gate before the database is initialized — hence the vault, not kv.
+  | 'appLockEnabled';
+
+export const SERVER_SESSION_STATE = {
+  writing: 'writing',
+  active: 'active',
+  forgotten: 'forgotten',
+} as const;
+
+export type ServerSessionState = (typeof SERVER_SESSION_STATE)[keyof typeof SERVER_SESSION_STATE];
+
+export const CREDENTIAL_REMOVAL_FAILURE_MESSAGE =
+  "Secure credential removal could not be confirmed. Clear Gator's app data in Android Settings before handing off this device.";
+
+/**
+ * Decide whether the three correlated vault values describe a usable server session.
+ *
+ * A missing marker is the one-time compatibility path for installs created before the marker
+ * existed. Every present value other than `active` fails closed, including malformed values.
+ */
+export function hasActiveServerSession(
+  state: string | null,
+  address: string | null,
+  password: string | null,
+): boolean {
+  return (state === null || state === SERVER_SESSION_STATE.active) && !!address && !!password;
+}
 
 export interface SecureVault {
   get(key: SecretKey): Promise<string | null>;

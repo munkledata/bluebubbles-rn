@@ -18,6 +18,7 @@ import { ThemeProvider } from '@ui/theme/ThemeProvider';
 import { useThemeStore } from '@state/themeStore';
 import { DEFAULT_PRESET } from '@ui/theme/tokens';
 import { usePullToRefresh } from '@ui/primitives/PullToRefresh';
+import { logger } from '@core/secure';
 
 function wrapper({ children }: { children: ReactNode }): React.JSX.Element {
   return <ThemeProvider>{children}</ThemeProvider>;
@@ -32,6 +33,10 @@ beforeEach(() => {
     customTokens: null,
     hydrated: true,
   });
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('usePullToRefresh', () => {
@@ -81,7 +86,9 @@ describe('usePullToRefresh', () => {
   });
 
   it('swallows a rejected run and still clears the spinner (never throws)', async () => {
-    const run = jest.fn().mockRejectedValue(new Error('sync failed'));
+    const error = new Error('sync failed');
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const run = jest.fn().mockRejectedValue(error);
     const { result } = await renderHook(() => usePullToRefresh(run), { wrapper });
 
     await act(async () => {
@@ -89,6 +96,7 @@ describe('usePullToRefresh', () => {
     });
     await waitFor(() => expect(result.current.refreshing).toBe(false));
     expect(run).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[refresh] failed', error);
   });
 
   it('forwards progressViewOffset onto the RefreshControl element', async () => {

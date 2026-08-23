@@ -5,45 +5,92 @@ on:
     branches: [master, main, development]
   pull_request:
 
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Block newly introduced high-risk dependencies
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+
   check:
     name: Typecheck · Format · Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The secret-hygiene guard intentionally scans repository history.
+          fetch-depth: 0
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
 
+      - name: Workflow supply-chain guard
+        run: |
+          node --test scripts/check-workflow-security.test.mjs
+          node scripts/check-workflow-security.mjs
+
+      - name: Verify toolchain pins
+        run: npm run check:toolchain
+
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit clean lockfile (all dependencies)
+        run: npm audit --audit-level=high
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Architecture and secret hygiene guards
+        run: |
+          npm run check:architecture
+          npm run check:secret-hygiene
+          npm run check:error-diagnostics
+
+      - name: Expo dependency health
+        run: |
+          npm run doctor
+          ./node_modules/.bin/expo install --check
+
+      - name: Production Expo export
+        env:
+          GOOGLE_SERVICES_JSON: ./test/fixtures/google-services.ci.json
+        run: ./node_modules/.bin/expo export --platform android --output-dir dist-ci
+
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Migration allocation guard
+        run: npm run check:migrations
 
       - name: Lint (ESLint — react-hooks)
         run: npm run lint
 
       - name: Prettier (check)
-        run: npx prettier --check "src/**/*.{ts,tsx}" "app/**/*.{ts,tsx}" "test/**/*.ts"
+        run: npm run format:check
 
-      - name: Guards (no raw console.*; dev fixtures stay __DEV__-gated)
+      - name: Guard dev fixtures behind __DEV__
         run: |
           set -e
-          # All logging must go through the redacting logger (src/core/secure/logger.ts is the only sink).
-          if grep -rnE "console\.(log|warn|error|info|debug)\(" src app \
-               --include='*.ts' --include='*.tsx' | grep -v 'src/core/secure/logger.ts'; then
-            echo "::error::Raw console.* found — use the redacting logger (import { logger } from '@core/secure')."
-            exit 1
-          fi
           # The dev-fixture origin must only appear in __DEV__-gated entry points.
           STRAY=$(grep -rln "dev.local" src app --include='*.ts' --include='*.tsx' \
                     | grep -vE 'utils/isDev\.ts|welcome\.tsx' || true)
@@ -54,3 +101,67 @@ jobs:
 
       - name: Unit tests
         run: npm test -- --ci
+
+  android:
+    name: Clean Android prebuild · native modules · APK + AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4.9.0
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Install pinned Android SDK inputs
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-36"
+          "build-tools;36.0.0"
+          "ndk;27.1.12297006"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Clean Expo prebuild
+        env:
+          GOOGLE_SERVICES_JSON: ./test/fixtures/google-services.ci.json
+        run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
+
+      - name: Scan generated Android diagnostics
+        run: npm run check:error-diagnostics
+
+      - name: Verify Expo module discovery
+        run: ./node_modules/.bin/expo-modules-autolinking search -p android
+
+      # Keep packaging variants in separate Gradle invocations. A combined assembleDebug +
+      # bundleRelease run has intermittently failed inside PackageAndroidArtifact's incremental
+      # splitter even though each isolated task succeeds against the same compiled inputs.
+      - name: Compile local native modules
+        working-directory: android
+        run: >-
+          ./gradlew
+          :gator-paste-input:compileDebugKotlin
+          :gator-share-shortcuts:compileDebugKotlin
+          :gator-bounded-download:compileDebugKotlin
+          --no-daemon
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Bundle release AAB
+        working-directory: android
+        run: ./gradlew :app:bundleRelease --no-daemon
+
+      - name: Verify debug/release manifests, release AAB, and headless entry
+        run: npm run check:android-build

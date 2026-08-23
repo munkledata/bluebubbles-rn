@@ -12,6 +12,8 @@ interface SyncState {
   progress: (p: { chats: number; messages: number }) => void;
   done: (p: { chats: number; messages: number }) => void;
   fail: (message: string) => void;
+  /** Account teardown: clear status, counts, and any previous-server error copy. */
+  reset: () => void;
 }
 
 export const useSyncStore = create<SyncState>((set) => ({
@@ -24,4 +26,5 @@ export const useSyncStore = create<SyncState>((set) => ({
   progress: (p) => set({ chats: p.chats, messages: p.messages }),
   done: (p) => set({ status: 'done', chats: p.chats, messages: p.messages }),
   fail: (message) => set({ status: 'error', error: message }),
+  reset: () => set({ status: 'idle', chats: 0, messages: 0, error: null }),
 }));

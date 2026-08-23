@@ -1,17 +1,19 @@
 import type Database from 'better-sqlite3';
-import { Chat } from '@core/models';
-import { getChatParticipants, upsertChats, upsertHandles } from '@db/repositories';
+import { Chat, Message } from '@core/models';
+import { getChatParticipants, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
+import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 /**
  * Record a chat's participant-link count after EVERY write statement, and return the growing log.
  *
- * Each statement is its own commit here, and on device the drizzle→op-sqlite adapter calls
- * `flushPendingReactiveQueries()` after every write — so these snapshots are exactly the states
- * the inbox, the chat header, and the unknown-sender notification gate can observe. A 0 in the log
- * for a chat that had members before and after is the bug: no participant rows means no
- * `participantNames`, so the title falls back to the raw `chat_identifier` (a phone number) and
- * `chatHasKnownSender` answers false, permanently dropping the notification.
+ * On device the drizzle→op-sqlite adapter calls `flushPendingReactiveQueries()` after every write,
+ * including writes inside the owning transaction. These snapshots therefore record each state the
+ * shared connection can expose to reactive readers. A 0 in the log for a chat that had members
+ * before and after is the bug: no participant rows means no `participantNames`, so the title falls
+ * back to the raw `chat_identifier` (a phone number) and `chatHasKnownSender` answers false,
+ * permanently dropping the notification.
  */
 function watchParticipantCount(raw: Database.Database, chatId: number): number[] {
   const seen: number[] = [];
@@ -41,7 +43,217 @@ function watchParticipantCount(raw: Database.Database, chatId: number): number[]
   return seen;
 }
 
+async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+  release: () => void;
+  failure: Promise<unknown>;
+}> {
+  let markStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const neighbour = withDbTransaction(db, async () => {
+    markStarted();
+    await held;
+    throw new Error('neighbour rollback');
+  });
+  const failure = neighbour.then(
+    () => null,
+    (error: unknown) => error,
+  );
+  await started;
+  return { release, failure };
+}
+
+async function finishAfterQueuedObservation<T>(
+  neighbour: { release: () => void; failure: Promise<unknown> },
+  pending: Promise<T>,
+  observe: () => void | Promise<void>,
+): Promise<T> {
+  let observationError: unknown;
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await observe();
+  } catch (error) {
+    observationError = error;
+  } finally {
+    neighbour.release();
+  }
+  const neighbourError = await neighbour.failure;
+  const result = await pending;
+  if (observationError) throw observationError;
+  expect(String(neighbourError)).toContain('neighbour rollback');
+  return result;
+}
+
 describe('getChatParticipants', () => {
+  it('queues a public chat upsert behind a rolling-back neighbour', async () => {
+    const t = await createTestDb();
+    const handles = await upsertHandles(t.db, [{ address: 'queued@x.com' }]);
+    const neighbour = await holdRollingBackTransaction(t.db);
+    const pending = upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'queued-chat', participants: [{ address: 'queued@x.com' }] })],
+      handles,
+    );
+
+    await finishAfterQueuedObservation(neighbour, pending, () => {
+      expect(
+        t.raw.prepare("SELECT guid FROM chats WHERE guid = 'queued-chat'").get(),
+      ).toBeUndefined();
+    });
+    expect(t.raw.prepare("SELECT guid FROM chats WHERE guid = 'queued-chat'").get()).toEqual({
+      guid: 'queued-chat',
+    });
+  });
+
+  it('rolls back the chat update and added participant when the later prune fails', async () => {
+    const t = await createTestDb();
+    const handles = await upsertHandles(t.db, [
+      { address: 'a@x.com' },
+      { address: 'b@x.com' },
+      { address: 'c@x.com' },
+    ]);
+    const initial = await upsertChats(
+      t.db,
+      [
+        Chat.parse({
+          guid: 'atomic-chat',
+          displayName: 'Before',
+          participants: [{ address: 'a@x.com' }, { address: 'b@x.com' }],
+        }),
+      ],
+      handles,
+    );
+    const chatId = initial.get('atomic-chat');
+    expect(chatId).toBeDefined();
+    if (chatId == null) return;
+    const departed = t.raw.prepare("SELECT id FROM handles WHERE address = 'b@x.com'").get() as {
+      id: number;
+    };
+    t.raw.exec(`
+      CREATE TRIGGER fail_atomic_chat_prune
+      BEFORE DELETE ON chat_handles
+      WHEN OLD.chat_id = ${chatId} AND OLD.handle_id = ${departed.id}
+      BEGIN
+        SELECT RAISE(ABORT, 'forced participant prune failure');
+      END
+    `);
+
+    let failure: unknown;
+    try {
+      await upsertChats(
+        t.db,
+        [
+          Chat.parse({
+            guid: 'atomic-chat',
+            displayName: 'After',
+            participants: [{ address: 'a@x.com' }, { address: 'c@x.com' }],
+          }),
+        ],
+        handles,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(String(failure)).toContain('forced participant prune failure');
+    expect(
+      t.raw.prepare('SELECT display_name AS displayName FROM chats WHERE id = ?').get(chatId),
+    ).toEqual({ displayName: 'Before' });
+    expect((await getChatParticipants(t.db, 'atomic-chat')).map((p) => p.address).sort()).toEqual([
+      'a@x.com',
+      'b@x.com',
+    ]);
+  });
+
+  it('rolls back completed participant pruning and tombstone handover when its guard is revoked', async () => {
+    const t = await createTestDb();
+    const handles = await upsertHandles(t.db, [
+      { address: 'a@x.com' },
+      { address: 'b@x.com' },
+      { address: 'c@x.com' },
+    ]);
+    const initial = await upsertChats(
+      t.db,
+      [
+        Chat.parse({
+          guid: 'guarded-chat',
+          displayName: 'Before',
+          participants: [{ address: 'a@x.com' }, { address: 'b@x.com' }],
+        }),
+      ],
+      handles,
+    );
+    const chatId = initial.get('guarded-chat');
+    expect(chatId).toBeDefined();
+    if (chatId == null) return;
+    await upsertMessages(
+      t.db,
+      [
+        Message.parse({ guid: 'before-floor', text: 'old', isFromMe: false, dateCreated: 100 }),
+        Message.parse({ guid: 'after-floor', text: 'new', isFromMe: false, dateCreated: 300 }),
+      ],
+      () => chatId,
+      handles,
+    );
+    t.raw
+      .prepare('UPDATE chats SET deleted_at = 200, last_read_message_guid = NULL WHERE id = ?')
+      .run(chatId);
+
+    let guardCurrent = true;
+    let triggerRan = false;
+    t.raw.function('revoke_chat_ingestion_guard', () => {
+      triggerRan = true;
+      guardCurrent = false;
+      return 1;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_guard_after_tombstone_handover
+      AFTER UPDATE OF deleted_at ON chats
+      WHEN OLD.id = ${chatId} AND OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+        AND NEW.last_read_message_guid = 'before-floor'
+      BEGIN
+        SELECT revoke_chat_ingestion_guard();
+      END
+    `);
+
+    let failure: unknown;
+    try {
+      await upsertChats(
+        t.db,
+        [
+          Chat.parse({
+            guid: 'guarded-chat',
+            displayName: 'After',
+            participants: [{ address: 'a@x.com' }, { address: 'c@x.com' }],
+          }),
+        ],
+        handles,
+        () => guardCurrent,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(triggerRan).toBe(true);
+    expect(String(failure)).toContain('database commit guard rejected');
+    expect(
+      t.raw
+        .prepare(
+          'SELECT display_name AS displayName, deleted_at AS deletedAt, last_read_message_guid AS lastReadMessageGuid FROM chats WHERE id = ?',
+        )
+        .get(chatId),
+    ).toEqual({ displayName: 'Before', deletedAt: 200, lastReadMessageGuid: null });
+    expect((await getChatParticipants(t.db, 'guarded-chat')).map((p) => p.address).sort()).toEqual([
+      'a@x.com',
+      'b@x.com',
+    ]);
+  });
+
   it('returns each participant address + resolved name (for group add/remove)', async () => {
     const t = await createTestDb();
     const handles = await upsertHandles(t.db, [
@@ -138,7 +350,7 @@ describe('getChatParticipants', () => {
     ]);
   });
 
-  it('never leaves a chat with ZERO participant links at any commit boundary mid-batch', async () => {
+  it('never exposes a chat with ZERO participant links at any statement boundary mid-batch', async () => {
     const t = await createTestDb();
     const handles = await upsertHandles(t.db, [{ address: 'a@x.com' }, { address: 'b@x.com' }]);
     const chatOf = (guid: string) =>

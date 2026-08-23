@@ -1,4 +1,9 @@
-import { isCleartext, sanitizeServerAddress, ServerUrlResolver } from '@core/config';
+import {
+  isCleartext,
+  sanitizeServerAddress,
+  ServerUrlResolver,
+  strictServerOrigin,
+} from '@core/config';
 
 describe('sanitizeServerAddress', () => {
   it('adds https:// when no scheme is provided', () => {
@@ -23,6 +28,35 @@ describe('sanitizeServerAddress', () => {
   it('flags cleartext origins', () => {
     expect(isCleartext('http://x')).toBe(true);
     expect(isCleartext('https://x')).toBe(false);
+  });
+});
+
+describe('strictServerOrigin', () => {
+  it.each([
+    ['https://example.com', 'https://example.com'],
+    ['https://example.com/', 'https://example.com'],
+    ['HTTPS://EXAMPLE.COM:443', 'https://example.com'],
+    ['http://192.168.1.10:1234', 'http://192.168.1.10:1234'],
+    ['https://[2001:db8::1]:8443', 'https://[2001:db8::1]:8443'],
+  ])('canonicalizes the strict origin %s', (input, expected) => {
+    expect(strictServerOrigin(input)).toBe(expected);
+  });
+
+  it.each([
+    '',
+    ' example.com',
+    'example.com',
+    'https://user:secret@example.com',
+    'https://example.com/api',
+    'https://example.com?next=https://evil.example',
+    'https://example.com#fragment',
+    'https://example.com?#',
+    'https://example.com\\@evil.example',
+    'https://example.com\n.evil.example',
+    'javascript:alert(1)',
+    'ws://example.com',
+  ])('rejects non-origin or parser-smuggling input %p', (input) => {
+    expect(strictServerOrigin(input)).toBeNull();
   });
 });
 

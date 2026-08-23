@@ -3,8 +3,9 @@ import type { SharedAttachment } from '@state/shareIntentStore';
 import type { ShareSource } from './shareIntentPayload';
 
 /**
- * Copies files shared INTO the app out of the sending app's territory and into app-private
- * cache, so everything downstream of `shareIntentStore` only ever sees a readable `file://` path.
+ * Historical, dormant JS materialization logic. No production native binding calls this module
+ * while IPC-01 is fail-closed: its `copy` interface cannot observe/cancel bytes as they stream and
+ * therefore cannot provide the required hard size/deadline guarantees by itself.
  *
  * WHY THIS MUST HAPPEN AT CAPTURE TIME, NOT AT SEND TIME: Android's `FLAG_GRANT_READ_URI_PERMISSION`
  * is a TRANSIENT grant scoped to the receiving task. A staged attachment can sit in the composer
@@ -17,7 +18,7 @@ import type { ShareSource } from './shareIntentPayload';
  * so the logic runs in the node jest project with no expo/native imports.
  */
 
-/** Every filesystem touch this module needs. Implemented for real in `shareFileIo.ts`. */
+/** Injected only by tests; the former production `shareFileIo.ts` binding was removed. */
 export interface ShareFileIO {
   /** Create a directory (and parents); must not throw when it already exists. */
   makeDir: (dirUri: string) => Promise<void>;

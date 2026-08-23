@@ -14,10 +14,9 @@ const mockIo = jest.fn((..._args: unknown[]) => ({
 }));
 jest.mock('socket.io-client', () => ({ io: mockIo }));
 
-import type { EventSink } from '@core/realtime';
-import { SocketService } from '@/services/realtime/socketService';
+import { SocketService, type RawRealtimeEventHandler } from '@/services/realtime/socketService';
 
-const sink: EventSink = { onEvent: jest.fn() };
+const handleRawEvent: RawRealtimeEventHandler = async () => null;
 
 function lastIoOptions(): Record<string, unknown> {
   const { calls } = mockIo.mock;
@@ -31,7 +30,7 @@ describe('SocketService auth mode', () => {
   });
 
   it('secure default: sends the auth payload and no query', () => {
-    new SocketService(sink).connect('https://srv', 'pw', {
+    new SocketService(handleRawEvent).connect('https://srv', 'pw', {
       headers: { Authorization: 'Bearer pw' },
     });
     const opts = lastIoOptions();
@@ -41,19 +40,19 @@ describe('SocketService auth mode', () => {
   });
 
   it('legacy mode: sends a ?guid= query and no auth payload', () => {
-    new SocketService(sink).connect('https://srv', 'pw', { legacyQueryAuth: true });
+    new SocketService(handleRawEvent).connect('https://srv', 'pw', { legacyQueryAuth: true });
     const opts = lastIoOptions();
     expect(opts.query).toEqual({ guid: 'pw' });
     expect(opts.auth).toBeUndefined();
   });
 
   it('never places the password in the connection origin (URL)', () => {
-    new SocketService(sink).connect('https://srv', 'pw', { legacyQueryAuth: false });
+    new SocketService(handleRawEvent).connect('https://srv', 'pw', { legacyQueryAuth: false });
     expect(mockIo.mock.calls[0]![0]).toBe('https://srv');
   });
 
   it('emit() forwards to the socket; no-op before connect', () => {
-    const svc = new SocketService(sink);
+    const svc = new SocketService(handleRawEvent);
     svc.emit('started-typing', { chatGuid: 'c1' }); // not connected → no throw, no call
     expect(mockEmit).not.toHaveBeenCalled();
     svc.connect('https://srv', 'pw', {});

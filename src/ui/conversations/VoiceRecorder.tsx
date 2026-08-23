@@ -20,9 +20,13 @@ function fmt(sec: number): string {
 export function VoiceRecorder({
   onClose,
   onSend,
+  onPermissionDenied,
+  onPermissionError,
 }: {
   onClose: () => void;
   onSend: (uri: string) => void;
+  onPermissionDenied?: () => void;
+  onPermissionError?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -33,8 +37,18 @@ export function VoiceRecorder({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const perm = await requestRecordingPermissionsAsync();
+      let perm: Awaited<ReturnType<typeof requestRecordingPermissionsAsync>>;
+      try {
+        perm = await requestRecordingPermissionsAsync();
+      } catch {
+        if (!active || finished.current) return;
+        onPermissionError?.();
+        onClose();
+        return;
+      }
+      if (!active || finished.current) return;
       if (!perm.granted) {
+        onPermissionDenied?.();
         onClose();
         return;
       }
@@ -43,8 +57,8 @@ export function VoiceRecorder({
       } catch {
         /* best-effort audio mode */
       }
-      // Re-check after every await: the user may have cancelled/sent (finished) or the
-      // modal may have unmounted before recording actually started.
+      // Re-check after every await: the user may have cancelled/sent (finished) or the modal may
+      // have unmounted before recording actually started.
       if (!active || finished.current) return;
       await recorder.prepareToRecordAsync();
       if (!active || finished.current) return;

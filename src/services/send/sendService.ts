@@ -1,6 +1,11 @@
 import type { HttpClient } from '@core/api/http';
 import { sendText, type MessageMention } from '@core/api/endpoints/messages';
-import { getChatIdByGuid, insertOutgoingText } from '@db/repositories';
+import {
+  handoverScheduledTextToOutgoing,
+  insertOutgoingText,
+  type ScheduledTextHandoverTransition,
+} from '@db/repositories';
+import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sessionAccessors } from '@state/sessionStore';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
@@ -35,6 +40,19 @@ export interface SendTextArgs {
 }
 
 /**
+ * Optional ownership transfer used only by the local scheduled-message runner.
+ *
+ * The scheduled transition and optimistic outgoing rows must share one commit. Otherwise a
+ * process kill between their separate commits leaves two durable owners that can send the same
+ * occurrence after restart.
+ */
+export interface ScheduledTextHandover {
+  scheduledId: number;
+  transition: ScheduledTextHandoverTransition;
+  commitGuard?: DbCommitGuard;
+}
+
+/**
  * Optimistic text send. Inserts a temp message (`sendState='sending'`) + a queue
  * row, POSTs, then reconciles by tempGuid. On error the bubble flips to
  * `sendState='error'` (the UI signal) — we don't rethrow into render. Pure
@@ -55,14 +73,11 @@ export async function sendTextMessage(
    * re-fired the other.
    */
   onQueued?: () => Promise<void> | void,
+  scheduledHandover?: ScheduledTextHandover,
 ): Promise<{ tempGuid: string }> {
-  const chatId = await getChatIdByGuid(db, args.chatGuid);
-  if (chatId == null) throw new Error(`unknown chat ${args.chatGuid}`);
-
   const tempGuid = generateTempGuid();
-  await insertOutgoingText(db, {
+  const outgoing = {
     tempGuid,
-    chatId,
     chatGuid: args.chatGuid,
     text: args.text,
     now,
@@ -75,8 +90,29 @@ export async function sendTextMessage(
     subject: args.subject,
     // Into the queue payload only, so a crash-recovery resend keeps the spans.
     mentions: args.mentions,
-  });
+  };
+  if (scheduledHandover) {
+    await handoverScheduledTextToOutgoing(
+      db,
+      {
+        scheduledId: scheduledHandover.scheduledId,
+        transition: scheduledHandover.transition,
+        outgoing,
+      },
+      scheduledHandover.commitGuard,
+    );
+  } else {
+    await insertOutgoingText(db, outgoing);
+  }
   await onQueued?.();
+
+  // The guarded handoff may have committed just before Disconnect revoked this account. Re-check
+  // synchronously at the network boundary so account A's text can never start a request using
+  // account B's newly-live client configuration. There is no await between this check and the
+  // call into HttpClient, so JavaScript cannot interleave a session change inside that gap.
+  if (scheduledHandover?.commitGuard && !scheduledHandover.commitGuard()) {
+    throw new DbCommitGuardRejectedError();
+  }
 
   try {
     // Subject lines + mentions, like replies/effects, are Private-API-only features.
@@ -94,9 +130,17 @@ export async function sendTextMessage(
       mentions: args.mentions,
       method,
     });
-    await reconcileSendOutcome(db, tempGuid, server, now);
+    await reconcileSendOutcome(db, tempGuid, server, now, scheduledHandover?.commitGuard);
   } catch (e) {
-    await handleSendFailure(db, tempGuid, e, 'send', args.chatGuid);
+    await handleSendFailure(
+      db,
+      tempGuid,
+      e,
+      'send',
+      args.chatGuid,
+      undefined,
+      scheduledHandover?.commitGuard,
+    );
   }
 
   return { tempGuid };

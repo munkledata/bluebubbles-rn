@@ -4,9 +4,12 @@ import {
   getSyncedBackgroundState,
   setBackgroundIsLight,
   setChatTheme,
+  setSyncedBackgroundLuminanceIfCurrent,
   setSyncedBackgroundUri,
+  setSyncedBackgroundUriIfCurrent,
   upsertChats,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 
 /** Seed one chat row so the theme update has a target. */
@@ -94,6 +97,42 @@ describe('setChatTheme / getChatTheme', () => {
     await setBackgroundIsLight(t.db, 'g1', null);
     expect((await getChatTheme(t.db, 'g1'))?.backgroundIsLight).toBeNull();
   });
+
+  it('queues theme and luminance behind a rolling-back neighbouring transaction', async () => {
+    const t = await createTestDb();
+    await seedChat(t.db);
+
+    let releaseNeighbour!: () => void;
+    let neighbourStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const theme = setChatTheme(t.db, 'g1', { backgroundUri: 'file:///queued.jpg' });
+    const luminance = setBackgroundIsLight(t.db, 'g1', true);
+    await Promise.resolve();
+    expect(await getChatTheme(t.db, 'g1')).toMatchObject({
+      backgroundUri: null,
+      backgroundIsLight: null,
+    });
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await Promise.all([theme, luminance]);
+    expect(await getChatTheme(t.db, 'g1')).toMatchObject({
+      backgroundUri: 'file:///queued.jpg',
+      backgroundIsLight: 1,
+    });
+  });
 });
 
 describe('synced background (macOS 26)', () => {
@@ -135,5 +174,145 @@ describe('synced background (macOS 26)', () => {
     expect((await getChatTheme(t.db, 'g1'))?.syncedBackgroundUri).toBe(
       'file:///synced/g1-CH-1.jpg',
     );
+  });
+
+  it('moves the synced URI only when channel and previous URI still match', async () => {
+    const t = await createTestDb();
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })],
+      new Map(),
+    );
+
+    expect(
+      await setSyncedBackgroundUriIfCurrent(t.db, 'g1', 'CH-1', null, 'file:///synced/one.jpg'),
+    ).toBe(true);
+    expect(
+      await setSyncedBackgroundUriIfCurrent(
+        t.db,
+        'g1',
+        'CH-1',
+        null,
+        'file:///synced/stale-uri.jpg',
+      ),
+    ).toBe(false);
+
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-2' })],
+      new Map(),
+    );
+    expect(
+      await setSyncedBackgroundUriIfCurrent(
+        t.db,
+        'g1',
+        'CH-1',
+        'file:///synced/one.jpg',
+        'file:///synced/stale-channel.jpg',
+      ),
+    ).toBe(false);
+    expect((await getSyncedBackgroundState(t.db, 'g1'))?.uri).toBe('file:///synced/one.jpg');
+  });
+
+  it('writes synced luminance only for the measured channel/URI and no local override', async () => {
+    const t = await createTestDb();
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })],
+      new Map(),
+    );
+    await setSyncedBackgroundUri(t.db, 'g1', 'file:///synced/one.jpg');
+
+    expect(
+      await setSyncedBackgroundLuminanceIfCurrent(
+        t.db,
+        'g1',
+        'CH-1',
+        'file:///synced/one.jpg',
+        true,
+      ),
+    ).toBe(true);
+    expect((await getChatTheme(t.db, 'g1'))?.backgroundIsLight).toBe(1);
+    expect(
+      await setSyncedBackgroundLuminanceIfCurrent(
+        t.db,
+        'g1',
+        'CH-1',
+        'file:///synced/stale.jpg',
+        false,
+      ),
+    ).toBe(false);
+
+    await setChatTheme(t.db, 'g1', { backgroundUri: 'file:///local.jpg' });
+    expect(
+      await setSyncedBackgroundLuminanceIfCurrent(
+        t.db,
+        'g1',
+        'CH-1',
+        'file:///synced/one.jpg',
+        false,
+      ),
+    ).toBe(false);
+    expect((await getChatTheme(t.db, 'g1'))?.backgroundIsLight).toBe(1);
+  });
+
+  it('queues direct URI, URI compare-and-swap, and luminance behind a rolling-back neighbour', async () => {
+    const t = await createTestDb();
+    await upsertChats(
+      t.db,
+      [
+        Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' }),
+        Chat.parse({ guid: 'g2', style: 43, backgroundChannelGuid: 'CH-2' }),
+        Chat.parse({ guid: 'g3', style: 43, backgroundChannelGuid: 'CH-3' }),
+      ],
+      new Map(),
+    );
+    await setSyncedBackgroundUri(t.db, 'g2', 'file:///synced/two.jpg');
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(t.db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const directUri = setSyncedBackgroundUri(t.db, 'g3', 'file:///synced/three.jpg');
+    const currentUri = setSyncedBackgroundUriIfCurrent(
+      t.db,
+      'g1',
+      'CH-1',
+      null,
+      'file:///synced/one.jpg',
+    );
+    const luminance = setSyncedBackgroundLuminanceIfCurrent(
+      t.db,
+      'g2',
+      'CH-2',
+      'file:///synced/two.jpg',
+      true,
+    );
+    await Promise.resolve();
+
+    expect((await getSyncedBackgroundState(t.db, 'g1'))?.uri).toBeNull();
+    expect((await getChatTheme(t.db, 'g2'))?.backgroundIsLight).toBeNull();
+    expect((await getSyncedBackgroundState(t.db, 'g3'))?.uri).toBeNull();
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await expect(currentUri).resolves.toBe(true);
+    await expect(luminance).resolves.toBe(true);
+    await directUri;
+
+    expect((await getSyncedBackgroundState(t.db, 'g1'))?.uri).toBe('file:///synced/one.jpg');
+    expect((await getChatTheme(t.db, 'g2'))?.backgroundIsLight).toBe(1);
+    expect((await getSyncedBackgroundState(t.db, 'g3'))?.uri).toBe('file:///synced/three.jpg');
   });
 });

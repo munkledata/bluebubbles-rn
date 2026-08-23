@@ -30,3 +30,8 @@ export function takePendingNotification(): Record<string, unknown> | null {
   pending = null;
   return p;
 }
+
+/** Drop a tap owned by the account being disconnected without trying to navigate it. */
+export function resetPendingNotification(): void {
+  pending = null;
+}

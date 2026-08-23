@@ -5,6 +5,13 @@ import { useChats } from '@features/conversations/useChats';
 import { type ReactiveState } from '@db/useReactiveQuery';
 import { resolveTitle } from '@utils';
 
+const NO_MESSAGE_MATCHES = new Set<string>();
+
+interface MessageMatchResult {
+  term: string;
+  guids: Set<string>;
+}
+
 /**
  * Filters the loaded (non-archived) inbox rows to those matching a query. A chat always matches when
  * the term is in its resolved title or participant names. When `contentMatches` is true (the inbox
@@ -25,40 +32,44 @@ export function useChatMatches(
 ): ReactiveState<InboxRow[]> {
   const contentMatches = opts?.contentMatches ?? true;
   const state = useChats();
-  const [msgMatchGuids, setMsgMatchGuids] = useState<Set<string>>(new Set());
+  const term = query.trim();
+  const [messageMatchResult, setMessageMatchResult] = useState<MessageMatchResult | null>(null);
 
   useEffect(() => {
-    const term = query.trim();
-    if (!contentMatches || term.length < 2) {
-      setMsgMatchGuids(new Set());
-      return;
-    }
+    if (!contentMatches || term.length < 2) return;
     let cancelled = false;
     const t = setTimeout(() => {
       searchChatGuidsByMessage(getDatabase(), term)
         .then((guids) => {
-          if (!cancelled) setMsgMatchGuids(new Set(guids));
+          if (!cancelled) setMessageMatchResult({ term, guids: new Set(guids) });
         })
         .catch(() => {
-          if (!cancelled) setMsgMatchGuids(new Set());
+          if (!cancelled) setMessageMatchResult({ term, guids: new Set() });
         });
     }, 200);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [query, contentMatches]);
+  }, [term, contentMatches]);
+
+  // A result only applies to the exact term that produced it. Short/disabled/new queries derive
+  // an empty set immediately, instead of synchronously clearing state in an effect after render.
+  const msgMatchGuids =
+    contentMatches && term.length >= 2 && messageMatchResult?.term === term
+      ? messageMatchResult.guids
+      : NO_MESSAGE_MATCHES;
 
   const data = useMemo(() => {
     const all = state.data ?? [];
-    const term = query.trim().toLowerCase();
-    if (!term) return all;
+    const normalizedTerm = term.toLowerCase();
+    if (!normalizedTerm) return all;
     return all.filter(
       (r) =>
-        `${resolveTitle(r)} ${r.participantNames ?? ''}`.toLowerCase().includes(term) ||
+        `${resolveTitle(r)} ${r.participantNames ?? ''}`.toLowerCase().includes(normalizedTerm) ||
         msgMatchGuids.has(r.guid),
     );
-  }, [state.data, query, msgMatchGuids]);
+  }, [state.data, term, msgMatchGuids]);
 
   return { ...state, data };
 }

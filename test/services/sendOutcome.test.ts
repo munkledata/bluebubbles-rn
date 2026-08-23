@@ -98,6 +98,23 @@ describe('handleSendFailure', () => {
     expect(msgRow(raw, 'temp-ffff0000')?.e).not.toBe(ClientErrorCode.connectionRefused);
   });
 
+  it('maps a client-side timeout to "Network Timed Out", not "Connection Refused"', async () => {
+    const { db, raw } = await createTestDb();
+    await seedOutgoing(db, 'temp-timeout0000', 1000);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await handleSendFailure(
+      db,
+      'temp-timeout0000',
+      new ApiError('timeout', 'Attachment retry timed out'),
+      'queue',
+      'c1',
+    );
+
+    expect(msgRow(raw, 'temp-timeout0000')?.e).toBe(ClientErrorCode.gatewayTimeout);
+    expect(msgRow(raw, 'temp-timeout0000')?.e).not.toBe(ClientErrorCode.connectionRefused);
+  });
+
   it('maps a non-HTTP throw to the connection error code (no HTTP part in the log)', async () => {
     const { db, raw } = await createTestDb();
     await seedOutgoing(db, 'temp-eeee0000', 1000);

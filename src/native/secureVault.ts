@@ -8,12 +8,12 @@ import type { SecretKey, SecureVault } from '@core/secure';
  * PLAINTEXT SharedPreferences. Keys are stable, alphanumeric SecretKey strings.
  *
  * DECISION (F-10/F-32): `requireAuthentication` is intentionally OFF. A headless killed-app
- * FCM push must be able to decrypt the DB (read the SQLCipher key from this vault) WHILE the
- * app is locked, to write the message + post a notification (content is gated separately by
- * redacted/locked mode — see deliverRespectingLock). Turning `requireAuthentication` on would
- * gate the key behind a biometric prompt that can't run in the headless context, dropping
- * killed-app delivery. The bare emulator also has no enrolled biometric, which would lock it
- * out entirely. So app-lock is a UI gate over delivery, NOT at-rest key custody.
+ * FCM push must be able to read the SQLCipher key whenever App Lock is disabled or its live grace
+ * window still considers the UI unlocked. Turning `requireAuthentication` on would gate every
+ * such wake behind a biometric prompt that cannot run headlessly, dropping delivery. When the
+ * App Lock policy considers the app locked, `deliverRespectingLock` refuses to open the DB and
+ * posts a generic notice instead. The bare emulator also has no enrolled biometric. App Lock is
+ * therefore a foreground/policy gate, NOT user-auth-bound at-rest key custody.
  *
  * `keychainAccessible: WHEN_UNLOCKED` is an iOS-only attribute and is INERT on Android (the
  * Android Keystore has no equivalent "accessible only when device unlocked" flag applied here);

@@ -37,7 +37,7 @@ they only add independent test files.
 > ### Hard constraints for component tests
 > 1. **Never import real native modules in a test path.** `@op-engineering/op-sqlite`,
 >    `react-native-notify-kit` (a stub exists at `test/__mocks__/notifee.ts`, mapped in `jest.config.js`; the mock file name is intentionally kept), Firebase,
->    `react-native-libsodium`, `jail-monkey`, `react-native-ssl-public-key-pinning` have no
+>    `react-native-libsodium` and `jail-monkey` have no
 >    native half in jest. jest-expo auto-mocks most `expo-*` packages; for the rest add
 >    `moduleNameMapper` entries or `jest.mock()` in the test file.
 > 2. **`@db/database` throws off-device.** Any store/component that hydrates from the DB needs

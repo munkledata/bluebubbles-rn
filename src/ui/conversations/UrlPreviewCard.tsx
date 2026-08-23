@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { logger } from '@core/secure';
+import React from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
@@ -19,21 +18,10 @@ export function UrlPreviewCard({
   isFromMe,
 }: UrlPreviewCardProps): React.JSX.Element | null {
   const theme = useTheme();
-  // Many OG images fail to load on device (hotlink/403 protection, dead/relative URLs). Without a
-  // placeholder this left a persistent blank 140px box; track a load error so a failed image
-  // collapses (to a text-only card, or nothing) instead of showing an empty box. Reset when the
-  // image URL changes — MessageBubble is memoized inside a RECYCLING FlashList, so the same card
-  // instance is reused across messages (also why the <Image> below needs a recyclingKey).
-  const [imgFailed, setImgFailed] = useState(false);
-  const imageUrl = preview?.imageUrl ?? null;
-  useEffect(() => {
-    setImgFailed(false);
-  }, [imageUrl]);
-  const showImage = !!imageUrl && !imgFailed;
-
-  // Nothing useful to show (loading, negative cache, or an image-only card whose image failed to
-  // load) → render nothing rather than a blank box.
-  if (!preview || preview.error === 1 || (!preview.title && !showImage)) return null;
+  // NET-00: mounting a remote <Image> is itself an automatic in-app network request. Preserve
+  // cached/server-supplied metadata, but never render preview artwork until NET-01 provides a
+  // bounded fetch pipeline. An image-only server payload degrades to the external link's domain.
+  if (!preview || preview.error === 1 || (!preview.title && !preview.imageUrl)) return null;
 
   let domain = url;
   try {
@@ -44,6 +32,7 @@ export function UrlPreviewCard({
 
   return (
     <Pressable
+      testID="url-preview-card"
       onPress={() => void safeOpenUrl(url)}
       style={[
         styles.card,
@@ -54,24 +43,6 @@ export function UrlPreviewCard({
         },
       ]}
     >
-      {showImage && imageUrl ? (
-        // Keyed by the URL so a recycled row remounts and loads the NEW image instead of
-        // briefly showing the previous message's.
-        <Image
-          testID="url-preview-image"
-          key={imageUrl}
-          source={{ uri: imageUrl }}
-          onError={(e) => {
-            logger.warn('[preview] img failed', {
-              uri: imageUrl,
-              error: e.nativeEvent?.error != null ? String(e.nativeEvent.error) : 'unknown',
-            });
-            setImgFailed(true);
-          }}
-          resizeMode="cover"
-          style={[styles.image, { backgroundColor: theme.color.separator }]}
-        />
-      ) : null}
       <View style={styles.body}>
         <Text numberOfLines={2} style={[styles.title, { color: theme.color.label }]}>
           {preview.title ?? domain}
@@ -91,12 +62,7 @@ export function UrlPreviewCard({
 
 const styles = StyleSheet.create({
   card: {
-    // width — NOT maxWidth — is load-bearing. With maxWidth only, the alignSelf'd card
-    // sizes itself from its CHILDREN, and the image's width:'100%' then references a
-    // parent whose width depends on the image: Yoga resolves that cycle to width 0. The
-    // image "loads" (onLoad fires at 0×140) but is invisible — the origin of the eternal
-    // blank-image-box bug, identical under expo-image and RN Image, debug and release.
-    // A fixed 78% makes the card constant-width (matches iMessage) and the cycle gone.
+    // Keep the existing iMessage-like constant card width while preview artwork is contained.
     width: '78%',
     borderRadius: 14,
     overflow: 'hidden',
@@ -104,7 +70,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     marginTop: 2,
   },
-  image: { width: '100%', height: 140 },
   body: { padding: 10, gap: 2 },
   title: { fontSize: 14, fontWeight: '600' },
   desc: { fontSize: 13, lineHeight: 17 },

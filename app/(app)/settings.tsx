@@ -1,12 +1,20 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import Constants from 'expo-constants';
+import { useLayoutEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { logger } from '@core/secure';
+import { getDatabase } from '@db/database';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
-import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
+import { disconnectFailureMessage, forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { requestDisableBatteryOptimization } from '@/services/battery';
-import { syncContacts } from '@/services/contacts/contactsService';
+import { isContactsAccountChangedError, syncContacts } from '@/services/contacts/contactsService';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
+} from '@/services/realtime/deliveryCoordinator';
 import {
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
   useFeatureSettingsStore,
@@ -14,7 +22,6 @@ import {
 } from '@state/featureSettingsStore';
 import { MESSAGES_PER_CHAT_OPTIONS, useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useLockStore } from '@state/lockStore';
-import { useRedactedModeStore } from '@state/redactedModeStore';
 import { useSessionStore } from '@state/sessionStore';
 import { useThemeStore } from '@state/themeStore';
 import {
@@ -38,16 +45,22 @@ const AUTO_DOWNLOAD_DEST_OPTIONS: { value: AutoDownloadDestination; label: strin
   { value: 'album', label: 'Gator album' },
 ];
 
+const APP_VERSION = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '—';
+const APP_BUILD =
+  Constants.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode?.toString() ?? '—';
+
 /** Settings: theme presets + contacts sync (more sections land in later phases). */
 export default function SettingsScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Native permission/address-book reads can outlive this route. Keep their eventual DB result and
+  // dialog bound to the account that mounted this screen instance.
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const preset = useThemeStore((s) => s.preset);
   const setPreset = useThemeStore((s) => s.setPreset);
   const appLock = useLockStore((s) => s.enabled);
-  const redacted = useRedactedModeStore((s) => s.enabled);
-  const setRedacted = useRedactedModeStore((s) => s.setEnabled);
   const maxDownloads = useFeatureSettingsStore((s) => s.maxConcurrentDownloads);
   const setMaxDownloads = useFeatureSettingsStore((s) => s.setMaxConcurrentDownloads);
   const privateApiEnabled = useFeatureSettingsStore((s) => s.privateApiEnabled);
@@ -63,6 +76,8 @@ export default function SettingsScreen(): React.JSX.Element {
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
   const filterUnknownSenders = useFeatureSettingsStore((s) => s.filterUnknownSenders);
   const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
+  const errorReportingEnabled = useFeatureSettingsStore((s) => s.errorReportingEnabled);
+  const setErrorReportingConsent = useFeatureSettingsStore((s) => s.setErrorReportingConsent);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
   const messagesPerChat = useSyncSettingsStore((s) => s.messagesPerChat);
   const setMessagesPerChat = useSyncSettingsStore((s) => s.setMessagesPerChat);
@@ -70,6 +85,20 @@ export default function SettingsScreen(): React.JSX.Element {
   const mpcIndex = Math.max(0, mpcOptions.indexOf(messagesPerChat));
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  // Lease currentness revokes callbacks immediately but is not reactive. Commit a monotonic
+  // retired state so account-A server values and routes disappear without waiting for an
+  // incidental session-store rerender. Cleanup only unsubscribes; React StrictMode's probe must
+  // not retire a still-current screen instance.
+  useLayoutEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+        setAccountRetired(true);
+      }),
+    [accountLease],
+  );
+  const accountCurrent = !accountRetired && accountLease.isCurrent();
+  const visibleOrigin = accountCurrent ? origin : null;
+  const visibleServerInfo = accountCurrent ? serverInfo : null;
   const [syncing, setSyncing] = useState(false);
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
@@ -86,15 +115,18 @@ export default function SettingsScreen(): React.JSX.Element {
     downloads:
       'downloads parallel concurrent attachments images media bandwidth auto-download wifi gallery album photos save destination location',
     sync: 'sync messages per chat initial history',
-    privacy: 'privacy redacted mode hide previews encryption key rotate security',
+    privacy:
+      'privacy encryption key rotate security storage files plaintext attachments cache logs wallpaper backups app private error reports crashes diagnostics consent share',
     server:
       'server management restart logs statistics health diagnostics private api find my keys push uptime alerts account alias apple id imessage start chats using',
-    about: 'about server version macos private api disconnect forget app logs debug diagnostics',
+    about:
+      'about app version build server version macos private api disconnect forget app logs debug diagnostics',
   } as const;
   const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
   const anyMatch = Object.values(SECTIONS).some(match);
 
   const onDisconnect = (): void => {
+    if (!accountLease.isCurrent()) return;
     showDialog(
       'Disconnect',
       // This is the ONLY consent gate on the wipe (home.tsx's Disconnect is inside the __DEV__
@@ -108,12 +140,26 @@ export default function SettingsScreen(): React.JSX.Element {
         'Pins, mutes, custom chat names, chat themes and wallpapers, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Disconnect', style: 'destructive', onPress: () => void forget() },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: () => {
+            // The dialog is global and can outlive this route. Never let account A's retained
+            // confirmation disconnect account B. `forget()` itself owns the teardown barrier, so
+            // it must not be wrapped in a tracked slot (that would wait on itself forever).
+            if (!accountLease.isCurrent()) return;
+            void forget().catch((e: unknown) => {
+              logger.warn('[settings] Disconnect cleanup remains incomplete', e);
+              showDialog('Disconnect incomplete', disconnectFailureMessage(e));
+            });
+          },
+        },
       ],
     );
   };
 
   const onRotateKey = (): void => {
+    if (!accountLease.isCurrent()) return;
     showDialog(
       'Rotate encryption key',
       'Re-encrypt the local database with a fresh key? Your data is unchanged; this is crash-safe.',
@@ -121,10 +167,25 @@ export default function SettingsScreen(): React.JSX.Element {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Rotate',
-          onPress: () =>
-            void rotateDatabaseKey()
-              .then(() => showDialog('Encryption key', 'Database key rotated.'))
-              .catch(() => showDialog('Encryption key', 'Couldn’t rotate the key.')),
+          onPress: () => {
+            // Rotation uses the one shared SQLCipher connection. Admit it under the account
+            // barrier so Disconnect either drains the rekey or blocks the transition; a retained
+            // account-A confirmation is rejected before it can touch account B's database.
+            void runTrackedRealtimeWork(accountLease, async (activeLease) => {
+              if (!activeLease.isCurrent()) return;
+              await rotateDatabaseKey();
+            })
+              .then((status) => {
+                if (status === 'delivered' && accountLease.isCurrent()) {
+                  showDialog('Encryption key', 'Database key rotated.');
+                }
+              })
+              .catch(() => {
+                if (accountLease.isCurrent()) {
+                  showDialog('Encryption key', 'Couldn’t rotate the key.');
+                }
+              });
+          },
         },
       ],
     );
@@ -151,9 +212,11 @@ export default function SettingsScreen(): React.JSX.Element {
       // the sync succeeded while the contact they just added is still missing. A forced call still
       // SERIALIZES behind that run (two overlapping contact syncs prune each other's rows), then
       // re-reads the address book.
-      const { contacts, matched } = await syncContacts({ force: true });
+      const { contacts, matched } = await syncContacts({ force: true, accountLease });
+      if (!accountLease.isCurrent()) return;
       showDialog('Contacts synced', `Read ${contacts} contacts, matched ${matched}.`);
     } catch (e) {
+      if (isContactsAccountChangedError(e) || !accountLease.isCurrent()) return;
       showDialog(
         'Contacts',
         e instanceof Error && e.message === 'contacts-permission-denied'
@@ -161,8 +224,46 @@ export default function SettingsScreen(): React.JSX.Element {
           : 'Sync failed.',
       );
     } finally {
-      setSyncing(false);
+      if (accountLease.isCurrent()) setSyncing(false);
     }
+  };
+
+  const persistErrorReportingConsent = async (next: boolean): Promise<void> => {
+    if (!accountLease.isCurrent()) return;
+    try {
+      const db = getDatabase();
+      await setErrorReportingConsent(next, {
+        db,
+        shouldCommit: () => accountLease.isCurrent(),
+      });
+    } catch {
+      if (!accountLease.isCurrent()) return;
+      showDialog(
+        'Error Reports',
+        'Gator could not save that privacy choice. Your previous setting is still active; try again after restarting the app.',
+      );
+    }
+  };
+
+  const onToggleErrorReporting = (next: boolean): void => {
+    if (!accountLease.isCurrent()) return;
+    if (!next) {
+      void persistErrorReportingConsent(false);
+      return;
+    }
+    showDialog(
+      'Share error reports?',
+      'When allowed, Gator sends a finite error code, limited technical fields such as error type or HTTP status, app and Android versions, and a synthetic Gator event frame to your connected server when it supports uploads. Gator does not send the original error message or stack trace. You can turn this off at any time.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Allow',
+          onPress: () => {
+            if (accountLease.isCurrent()) void persistErrorReportingConsent(true);
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -224,6 +325,7 @@ export default function SettingsScreen(): React.JSX.Element {
               onValueChange={(v) => void onToggleAppLock(v)}
               accessibilityLabel="Require biometric unlock to open the app"
             />
+            <NoteRow text="App Lock blocks the app screen after it locks. It does not make the database key biometric-bound, encrypt files, or block screenshots, screen recording, or task-switcher snapshots. Locked pushes show a generic notice and sync after unlock." />
             <NavRow
               label="Reminders"
               color="label"
@@ -319,13 +421,13 @@ export default function SettingsScreen(): React.JSX.Element {
               onValueChange={(v) => void setFlag('messageNotifications', v)}
               accessibilityLabel="Show notifications for new messages"
             />
-            {/* Android reliability: exempting the app from battery optimization (Doze) keeps
-                background FCM/notification delivery from being killed. Opens the OS dialog. */}
+            {/* Android reliability: open the general battery-optimization settings, where the
+                user can review or change Gator's treatment. This is not a direct exemption. */}
             {Platform.OS === 'android' ? (
               <NavRow
-                label="Disable Battery Optimization…"
+                label="Battery Optimization Settings…"
                 onPress={() => void requestDisableBatteryOptimization()}
-                accessibilityLabel="Disable battery optimization for reliable notifications"
+                accessibilityLabel="Open battery optimization settings for reliable notifications"
               />
             ) : null}
           </SettingsSection>
@@ -395,10 +497,15 @@ export default function SettingsScreen(): React.JSX.Element {
         {match(SECTIONS.privacy) && (
           <SettingsSection label="PRIVACY" style={styles.gap}>
             <SwitchRow
-              label="Redacted Mode"
-              value={redacted}
-              onValueChange={(v) => void setRedacted(v)}
-              accessibilityLabel="Hide message previews, names, and notification contents"
+              label="Share Error Reports"
+              value={errorReportingEnabled}
+              onValueChange={onToggleErrorReporting}
+              accessibilityLabel="Allow Gator to send redacted error reports to your connected server"
+            />
+            <NoteRow text="Off by default. While off, Gator does not queue or send error reports, and any queued reports are deleted. Your connected server must also support report uploads." />
+            <NavRow
+              label="Storage & File Privacy…"
+              onPress={() => router.push('/storage-privacy')}
             />
             <NavRow label="Rotate encryption key…" chevron={false} onPress={onRotateKey} />
           </SettingsSection>
@@ -408,7 +515,7 @@ export default function SettingsScreen(): React.JSX.Element {
           <SettingsSection label="SERVER" style={styles.gap}>
             {/* Only when the server advertises the icloud/account endpoints (Private API on). The
                 account screen keeps its own 404 fallback for a deep link / stale serverInfo. */}
-            {serverInfo?.supports_icloud_account && (
+            {visibleServerInfo?.supports_icloud_account && (
               <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
             )}
             <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
@@ -418,10 +525,15 @@ export default function SettingsScreen(): React.JSX.Element {
 
         {match(SECTIONS.about) && (
           <SettingsSection label="ABOUT" style={styles.gap}>
-            <InfoRow label="Server" value={origin ?? '—'} />
-            <InfoRow label="Version" value={serverInfo?.server_version ?? '—'} />
-            <InfoRow label="macOS" value={serverInfo?.os_version ?? '—'} />
-            <InfoRow label="Private API" value={serverInfo?.private_api ? 'Enabled' : 'Disabled'} />
+            <InfoRow label="App Version" value={APP_VERSION} />
+            <InfoRow label="App Build" value={APP_BUILD} />
+            <InfoRow label="Server" value={visibleOrigin ?? '—'} />
+            <InfoRow label="Server Version" value={visibleServerInfo?.server_version ?? '—'} />
+            <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? '—'} />
+            <InfoRow
+              label="Private API"
+              value={visibleServerInfo?.private_api ? 'Enabled' : 'Disabled'}
+            />
             <NavRow
               label="App Logs…"
               onPress={() => router.push('/logs')}

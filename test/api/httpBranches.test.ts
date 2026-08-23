@@ -8,6 +8,7 @@ jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
 import ky from 'ky';
 import { HttpClient } from '@core/api/http';
+import { logger } from '@core/secure';
 import { z } from 'zod/v4';
 
 const mockKy = ky as unknown as jest.Mock;
@@ -58,6 +59,52 @@ describe('verbs + accessors', () => {
     expect(search.get('c')).toBe('z');
     expect(search.has('b')).toBe(false);
   });
+
+  it('captures one immutable native transport identity across live config changes', () => {
+    let origin = 'https://old.example';
+    let password = 'old-password';
+    let headerAuth = true;
+    let customHeaders = { 'X-Account': 'old' };
+    const client = new HttpClient({
+      getOrigin: () => origin,
+      getPassword: () => password,
+      useHeaderAuth: () => headerAuth,
+      getCustomHeaders: () => customHeaders,
+    });
+
+    const transport = client.snapshotTransport();
+    origin = 'https://new.example';
+    password = 'new-password';
+    headerAuth = false;
+    customHeaders = { 'X-Account': 'new' };
+
+    expect(Object.isFrozen(transport)).toBe(true);
+    expect(Object.isFrozen(transport.headers)).toBe(true);
+    expect(transport.origin).toBe('https://old.example');
+    expect(transport.authMode).toBe('header');
+    expect(transport.password).toBe('old-password');
+    expect(transport.headers).toMatchObject({
+      Authorization: 'Bearer old-password',
+      'X-Account': 'old',
+    });
+    expect(transport.buildUrl('/binary')).toBe('https://old.example/api/v1/binary');
+  });
+
+  it('centralizes explicit legacy auth in native transport URLs', () => {
+    const onLegacyAuth = jest.fn();
+    const transport = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'space password',
+      useHeaderAuth: () => false,
+      onLegacyAuth,
+    }).snapshotTransport();
+
+    expect(transport.headers.Authorization).toBeUndefined();
+    expect(transport.buildUrl('/contact/c1/avatar?size=thumb')).toBe(
+      'https://old.example/api/v1/contact/c1/avatar?size=thumb&guid=space+password',
+    );
+    expect(onLegacyAuth).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('error mapping', () => {
@@ -103,11 +150,59 @@ describe('retry wiring', () => {
     expect(mockKy).toHaveBeenCalledTimes(2);
   });
 
+  it('retires an old logical request after account rotation, then uses one coherent new transport', async () => {
+    let origin = 'https://old.example';
+    let password = 'old-password';
+    let headerAuth = true;
+    let customHeader = 'old-header';
+    const client = new HttpClient({
+      getOrigin: () => origin,
+      getPassword: () => password,
+      useHeaderAuth: () => headerAuth,
+      getCustomHeaders: () => ({ 'x-account': customHeader }),
+    });
+    mockKy.mockImplementationOnce(async () => {
+      // Deterministically model Disconnect + reconnect while the first attempt is failing.
+      origin = 'https://new.example';
+      password = 'new-password';
+      headerAuth = false;
+      customHeader = 'new-header';
+      throw new Error('socket hang up');
+    });
+    mockKy.mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await expect(
+      client.get('/account-bound', okSchema, {
+        retry: { attempts: 2, baseMs: 0, maxMs: 0, random: () => 0 },
+      }),
+    ).rejects.toMatchObject({ kind: 'cancelled' });
+
+    // The retry detects the changed snapshot before issuing any second network request.
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    expect(mockKy.mock.calls[0]?.[0]).toBe('https://old.example/api/v1/account-bound');
+    expect(mockKy.mock.calls[0]?.[1].headers).toMatchObject({
+      Authorization: 'Bearer old-password',
+      'x-account': 'old-header',
+    });
+    expect(mockKy.mock.calls[0]?.[1].searchParams.has('guid')).toBe(false);
+
+    // A newly initiated request owns the complete new legacy-query configuration; no old header,
+    // origin, or password crosses the account boundary.
+    await expect(client.get('/account-bound', okSchema, { retry: false })).resolves.toEqual({
+      ok: true,
+    });
+    expect(mockKy).toHaveBeenCalledTimes(2);
+    expect(mockKy.mock.calls[1]?.[0]).toBe('https://new.example/api/v1/account-bound');
+    expect(mockKy.mock.calls[1]?.[1].headers.Authorization).toBeUndefined();
+    expect(mockKy.mock.calls[1]?.[1].headers['x-account']).toBe('new-header');
+    expect(mockKy.mock.calls[1]?.[1].searchParams.get('guid')).toBe('new-password');
+  });
+
   it('does NOT retry a POST — a retried write could double-send', async () => {
     mockKy.mockRejectedValue(new Error('socket hang up'));
-    await expect(client().post('/message/text', okSchema, { json: { a: 1 } })).rejects.toMatchObject(
-      { kind: 'no_connection' },
-    );
+    await expect(
+      client().post('/message/text', okSchema, { json: { a: 1 } }),
+    ).rejects.toMatchObject({ kind: 'no_connection' });
     // Exactly one attempt: the same failure on a GET above produced two.
     expect(mockKy).toHaveBeenCalledTimes(1);
   });
@@ -172,6 +267,7 @@ describe('multipart upload (raw fetch path)', () => {
   });
 
   it('maps a failed upload to a "no_connection" ApiError', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
     const fetchImpl = jest.fn().mockRejectedValue(new Error('Network request failed'));
     const client = new HttpClient({
       getOrigin: () => 'https://x',
@@ -181,5 +277,9 @@ describe('multipart upload (raw fetch path)', () => {
     await expect(
       client.post('/attachment', okSchema, { form: new FormData() }),
     ).rejects.toMatchObject({ kind: 'no_connection' });
+    expect(warn).toHaveBeenCalledWith(
+      '[http] multipart upload failed url=https://x/api/v1/attachment err=Error: Network request failed',
+    );
+    warn.mockRestore();
   });
 });

@@ -1,6 +1,6 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { asRecurrence, recurrenceLabel } from '@core/schedule';
 import { showDialog } from '@ui/dialog/dialogStore';
@@ -13,6 +13,10 @@ import {
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { cancelScheduled, syncScheduledFromServer } from '@/services/send';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+} from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { formatChatDate, formatTime } from '@utils';
 
@@ -21,15 +25,17 @@ type ListItem = { kind: 'header'; key: string; label: string } | { kind: 'row'; 
 
 /**
  * Scheduled messages: PENDING rows (tap to edit, Cancel to drop) plus a COMPLETED history of
- * sent/errored one-time sends — previously a failed scheduled send silently vanished from the UI.
+ * sent, errored, and one-time legacy-uncertain sends. Previously a failed scheduled send silently
+ * vanished from the UI.
  */
 export default function ScheduledScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   // Reconcile server-scheduled rows on open so the list reflects what the server is tracking.
   useEffect(() => {
-    void syncScheduledFromServer();
-  }, []);
+    void syncScheduledFromServer(accountLease);
+  }, [accountLease]);
   const { data } = useReactiveQuery<{ pending: ScheduledRow[]; history: ScheduledRow[] }>(
     async () => ({
       pending: await listAllScheduled(getDatabase()),
@@ -50,6 +56,11 @@ export default function ScheduledScreen(): React.JSX.Element {
 
   const statusLine = (row: ScheduledRow): { label: string; color: string } => {
     if (row.status === 'sent') return { label: '✓ Sent', color: theme.color.tint };
+    if (row.status === 'uncertain')
+      return {
+        label: 'Delivery uncertain — check conversation',
+        color: theme.color.secondaryLabel,
+      };
     if (row.status === 'error')
       return { label: '✕ Failed to send', color: theme.color.destructive };
     return {
@@ -81,10 +92,11 @@ export default function ScheduledScreen(): React.JSX.Element {
           const pendingRow = isPendingRow(row);
           // Compact recurrence tag, e.g. "· Repeats daily" (null for one-shot rows).
           const rec = asRecurrence(row.recurrence);
+          const subtitle = `${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec && pendingRow ? ` · ${recurrenceLabel(rec)}` : ''}`;
           return (
             <ActionListRow
               title={row.text}
-              subtitle={`${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec ? ` · ${recurrenceLabel(rec)}` : ''}`}
+              subtitle={subtitle}
               subtitleColor={status.color}
               disabled={!pendingRow}
               onPress={() => router.push(`/scheduled-edit/${row.id}`)}
@@ -99,14 +111,24 @@ export default function ScheduledScreen(): React.JSX.Element {
                       label: 'Cancel',
                       color: theme.color.destructive,
                       onPress: () =>
-                        void cancelScheduled(row).catch(() =>
-                          showDialog('Scheduled', 'Couldn’t cancel that message.'),
-                        ),
+                        void cancelScheduled(row, accountLease).catch(() => {
+                          if (accountLease.isCurrent()) {
+                            showDialog('Scheduled', 'Couldn’t cancel that message.');
+                          }
+                        }),
                     }
                   : {
                       label: 'Clear',
                       color: theme.color.tertiaryLabel,
-                      onPress: () => void deleteScheduledHistory(getDatabase(), row.id),
+                      onPress: () => {
+                        void runTrackedRealtimeWork(accountLease, async () => {
+                          await deleteScheduledHistory(getDatabase(), row.id);
+                        }).catch(() => {
+                          if (accountLease.isCurrent()) {
+                            showDialog('Scheduled', 'Couldn’t clear that history item.');
+                          }
+                        });
+                      },
                       accessibilityLabel: 'Remove from history',
                     }
               }

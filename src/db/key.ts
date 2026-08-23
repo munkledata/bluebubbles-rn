@@ -34,13 +34,21 @@ export async function getOrCreateDbKey(vault: SecureVault): Promise<string> {
 /** True if `key` actually opens the encrypted DB (SQLCipher rejects a wrong key on read). */
 async function keyOpensDb(key: string): Promise<boolean> {
   const { open } = await import('@op-engineering/op-sqlite');
+  let db: ReturnType<typeof open>;
   try {
-    const db = open({ name: DB_NAME, encryptionKey: key });
+    db = open({ name: DB_NAME, encryptionKey: key });
+  } catch {
+    return false;
+  }
+  try {
     await db.execute('SELECT count(*) FROM sqlite_master'); // throws on the wrong key
-    db.close();
     return true;
   } catch {
     return false;
+  } finally {
+    // SQLCipher validates the key on the first read, not necessarily on open(). Close both the
+    // readable and wrong-key handles before resolveDbKey can open the selected key for real.
+    db.close();
   }
 }
 
@@ -64,10 +72,15 @@ export async function resolveDbKey(
     await vault.delete('dbEncryptionKeyPending');
     return primary;
   }
-  // The DB was rekeyed to the staged key but the promote was interrupted. Promote it now.
-  await vault.set('dbEncryptionKey', pending);
-  await vault.delete('dbEncryptionKeyPending');
-  return pending;
+  if (await probe(pending)) {
+    // The DB was rekeyed to the staged key but the promote was interrupted. Promote it now.
+    await vault.set('dbEncryptionKey', pending);
+    await vault.delete('dbEncryptionKeyPending');
+    return pending;
+  }
+  // A probe can fail for reasons other than a wrong key (for example, a native I/O or lock error).
+  // Keep both recovery candidates intact until a later boot can prove which key owns the file.
+  throw new Error('Neither stored encryption key could open the database');
 }
 
 /**
@@ -92,65 +105,4 @@ export async function rotateDbKey(vault: SecureVault, rawDb: RawExec): Promise<v
   await withDbWriteLock(() => rawDb.execute(`PRAGMA rekey = '${newKey}'`));
   await vault.set('dbEncryptionKey', newKey); // 3. promote
   await vault.delete('dbEncryptionKeyPending'); // 4. done
-}
-
-function firstValue(res: unknown): string | undefined {
-  const rows = (res as { rows?: unknown }).rows;
-  const arr = Array.isArray(rows)
-    ? (rows as Array<{ v?: string }>)
-    : ((rows as { _array?: Array<{ v?: string }> } | undefined)?._array ?? []);
-  return arr[0]?.v;
-}
-
-/**
- * DEV/device de-risking spike for key rotation: prove op-sqlite's SQLCipher `PRAGMA
- * rekey` actually re-encrypts the DB on THIS device — on a THROWAWAY db, never the real
- * one. (Jest's better-sqlite3 has no SQLCipher codec, so this can only run on device;
- * the crypto self-test already showed jest-green ≠ device-correct.) Returns ok only if
- * rekey succeeds, the row survives a reopen with the NEW key, and a reopen with the OLD
- * key is rejected. This must pass before any crash-safe rotation is built on top.
- */
-export async function runDbRekeySelfTest(): Promise<{ ok: boolean; detail: string }> {
-  const { open } = await import('@op-engineering/op-sqlite');
-  const name = 'rekey-selftest.db';
-  const keyA = toHex(Crypto.getRandomBytes(KEY_BYTES));
-  const keyB = toHex(Crypto.getRandomBytes(KEY_BYTES));
-  const wipe = (): void => {
-    try {
-      open({ name }).delete(); // remove any leftover (it's keyed to a prior run's keyB)
-    } catch {
-      /* nothing to wipe */
-    }
-  };
-  try {
-    wipe();
-    let db = open({ name, encryptionKey: keyA });
-    await db.execute('CREATE TABLE t (v TEXT)');
-    await db.execute("INSERT INTO t (v) VALUES ('hello')");
-    await db.execute(`PRAGMA rekey = '${keyB}'`);
-    db.close();
-
-    db = open({ name, encryptionKey: keyB });
-    const got = firstValue(await db.execute('SELECT v FROM t'));
-    db.close();
-
-    let oldRejected = false;
-    try {
-      const stale = open({ name, encryptionKey: keyA });
-      await stale.execute('SELECT v FROM t'); // SQLCipher rejects the wrong key on first read
-      stale.close();
-    } catch {
-      oldRejected = true;
-    }
-
-    const ok = got === 'hello' && oldRejected;
-    return {
-      ok,
-      detail: ok ? 'rekey + reopen(new) + reject(old) OK' : `got=${got} oldRejected=${oldRejected}`,
-    };
-  } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : 'rekey self-test threw' };
-  } finally {
-    wipe();
-  }
 }

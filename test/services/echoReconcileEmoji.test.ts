@@ -9,7 +9,6 @@ import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
 import {
-  getChatIdByGuid,
   insertOutgoingReaction,
   listReactionsByMessageGuids,
   markOutgoingSentNoGuid,

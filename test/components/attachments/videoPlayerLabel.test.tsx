@@ -18,7 +18,7 @@
  * from that feature's own tests.
  */
 import React from 'react';
-import { renderWithTheme, screen } from '../support/renderWithTheme';
+import { fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -41,7 +41,16 @@ jest.mock('expo-image', () => {
 jest.mock('expo-router', () => ({ useFocusEffect: (cb: () => void) => cb() }));
 
 // The download service pulls `ky` (ESM) — never exercised here.
-jest.mock('@/services/download', () => ({ download: jest.fn() }));
+const mockDownload = jest.fn();
+const mockAccountLease = { generation: 44, isCurrent: jest.fn(() => true) };
+const mockNextAccountLease = { generation: 45, isCurrent: jest.fn(() => true) };
+const mockCaptureAccountLease = jest.fn(() => mockAccountLease);
+jest.mock('@/services/download', () => ({
+  download: (...args: unknown[]) => mockDownload(...args),
+}));
+jest.mock('@/services/realtime/deliveryCoordinator', () => ({
+  captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),
+}));
 
 // Not under test, and owned by an in-flight feature: keep it out of these assertions.
 jest.mock('@ui/attachments/UploadProgressOverlay', () => ({ UploadProgressOverlay: () => null }));
@@ -71,6 +80,11 @@ function vid(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
 
 beforeEach(() => {
   useDownloadStore.setState({ status: {}, progress: {} });
+  mockDownload.mockClear();
+  mockCaptureAccountLease
+    .mockReset()
+    .mockReturnValueOnce(mockAccountLease)
+    .mockReturnValue(mockNextAccountLease);
 });
 
 describe('VideoPlayer — accessibility label tracks what the tap will do (F20)', () => {
@@ -82,8 +96,15 @@ describe('VideoPlayer — accessibility label tracks what the tap will do (F20)'
   });
 
   it('announces that an undownloaded video is not downloaded', async () => {
-    await renderWithTheme(<VideoPlayer att={vid({ localPath: null })} isFromMe={false} showTail />);
-    expect(await screen.findByLabelText('Video, not downloaded')).toBeTruthy();
+    const att = vid({ localPath: null });
+    const view = await renderWithTheme(<VideoPlayer att={att} isFromMe={false} showTail />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
+    await view.rerender(<VideoPlayer att={{ ...att }} isFromMe={false} showTail />);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
+    const pressable = await screen.findByLabelText('Video, not downloaded');
+    fireEvent.press(pressable);
+    expect(mockDownload).toHaveBeenCalledWith(att, 'manual', mockAccountLease);
+    expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
   });
 
   it('announces in-flight download progress', async () => {

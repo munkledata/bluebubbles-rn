@@ -9,6 +9,12 @@ import type { AppDatabase } from '@db/types';
 import type { Reminder } from '@core/models';
 import { logger } from '@core/secure';
 import { cancelReminderNotification, scheduleReminderNotification } from './notifeeService';
+import { isSafeReminderNotificationId, newReminderNotificationId } from './notificationRouting';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from '../realtime/deliveryCoordinator';
 
 /** The Notifee side, injectable so the scheduling logic is Node-testable. */
 export interface ReminderScheduler {
@@ -29,8 +35,72 @@ const notifeeScheduler: ReminderScheduler = {
   cancel: cancelReminderNotification,
 };
 
-function newNotificationId(messageGuid: string, scheduledFor: number): string {
-  return `reminder-${messageGuid}-${scheduledFor}`;
+/** A reminder action was retired by Disconnect before it could safely finish. */
+export class ReminderSessionChangedError extends Error {
+  constructor() {
+    super('Reminder operation stopped because the account session changed');
+    this.name = 'ReminderSessionChangedError';
+  }
+}
+
+function assertReminderLease(lease: RealtimeDeliveryLease): void {
+  if (!lease.isCurrent()) throw new ReminderSessionChangedError();
+}
+
+/**
+ * Keep the complete DB → native → DB sequence visible to Disconnect's drain. A candidate
+ * trigger id may be supplied for cleanup: native scheduling can finish just after revocation, and
+ * cancelling that id is safe even when scheduling actually failed or the trigger already fired.
+ */
+async function runReminderAccountOperation<T>(
+  lease: RealtimeDeliveryLease,
+  task: () => Promise<T>,
+  scheduler: ReminderScheduler,
+  candidateTrigger: () => string | null,
+): Promise<T> {
+  let completed = false;
+  let result!: T;
+  let revokedCleanupAttempted = false;
+  const cleanupRevokedCandidate = async (): Promise<void> => {
+    if (revokedCleanupAttempted) return;
+    revokedCleanupAttempted = true;
+    const notificationId = candidateTrigger();
+    if (notificationId != null) await retireTrigger(scheduler, notificationId);
+  };
+  try {
+    const status = await runTrackedRealtimeWork(lease, async () => {
+      assertReminderLease(lease);
+      try {
+        result = await task();
+        assertReminderLease(lease);
+        completed = true;
+      } catch (error) {
+        if (!lease.isCurrent()) {
+          // Keep the compensating native cancel inside the admitted drain slot. Otherwise
+          // Disconnect could observe this task as idle while its late trigger cleanup was still
+          // crossing the bridge.
+          await cleanupRevokedCandidate();
+          throw new ReminderSessionChangedError();
+        }
+        throw error;
+      }
+    });
+    // Disconnect can invalidate the lease in the promise handoff after `task`'s final assertion
+    // but before this continuation runs. Treat that narrow window as retired too, so an old screen
+    // cannot report success in the replacement account; teardown still wipes the completed write.
+    if (status === 'paused' || !completed || !lease.isCurrent()) {
+      await cleanupRevokedCandidate();
+      throw new ReminderSessionChangedError();
+    }
+    return result;
+  } catch (error) {
+    if (!lease.isCurrent()) {
+      // Covers a rejected admission and the tiny handoff after the tracked callback has completed.
+      await cleanupRevokedCandidate();
+      throw new ReminderSessionChangedError();
+    }
+    throw error;
+  }
 }
 
 /**
@@ -44,6 +114,20 @@ async function retireTrigger(scheduler: ReminderScheduler, notificationId: strin
     await scheduler.cancel(notificationId);
   } catch (e) {
     logger.warn('[reminder] cancelling the superseded trigger failed', e);
+  }
+}
+
+async function retireUncertainTrigger(
+  scheduler: ReminderScheduler,
+  notificationId: string,
+  originalError: unknown,
+): Promise<void> {
+  try {
+    await scheduler.cancel(notificationId);
+  } catch (cleanupError) {
+    throw new Error(
+      `could not retire an uncertain reminder trigger (${String(originalError)}; ${String(cleanupError)})`,
+    );
   }
 }
 
@@ -73,60 +157,102 @@ export async function scheduleReminder(
   db: AppDatabase,
   args: ScheduleReminderArgs,
   scheduler: ReminderScheduler = notifeeScheduler,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<number> {
-  const existing = await getReminderByMessageGuid(db, args.messageGuid);
-  const notificationId = newNotificationId(args.messageGuid, args.scheduledFor);
-  // Re-picking the same minute yields the same id, so `schedule` re-arms the SAME trigger in place.
-  // Retiring "the old" one would then cancel the one we just armed — and the failure path must not
-  // cancel it either, since the pre-existing row still depends on it.
-  const rearmedInPlace = existing != null && existing.notificationId === notificationId;
-  // Look up the reminded message's date so the notification tap can center the chat on it
-  // (?focusDate deep-link). null when the message is gone — the tap still opens the chat.
-  const messageDate = (await getMessageDateByGuid(db, args.messageGuid)) ?? undefined;
-  await scheduler.schedule({
-    notificationId,
-    chatGuid: args.chatGuid,
-    messageGuid: args.messageGuid,
-    title: args.chatTitle,
-    body: args.messagePreview ?? 'Reminder',
-    scheduledFor: args.scheduledFor,
-    messageDate,
-  });
+  let candidateNotificationId: string | null = null;
+  return runReminderAccountOperation(
+    accountLease,
+    async () => {
+      assertReminderLease(accountLease);
+      const existing = await getReminderByMessageGuid(db, args.messageGuid);
+      assertReminderLease(accountLease);
+      let notificationId: string;
+      if (
+        existing?.scheduledFor === args.scheduledFor &&
+        isSafeReminderNotificationId(existing.notificationId)
+      ) {
+        notificationId = existing.notificationId;
+      } else {
+        notificationId = await newReminderNotificationId(db, args.messageGuid, args.scheduledFor);
+        assertReminderLease(accountLease);
+      }
+      candidateNotificationId = notificationId;
+      // Re-picking the same minute yields the same id, so `schedule` re-arms the SAME trigger in place.
+      // Retiring "the old" one would then cancel the one we just armed — and the failure path must not
+      // cancel it either, since the pre-existing row still depends on it.
+      const rearmedInPlace = existing != null && existing.notificationId === notificationId;
+      // Look up the reminded message's date so the notification tap can center the chat on it
+      // (?focusDate deep-link). null when the message is gone — the tap still opens the chat.
+      const messageDate = (await getMessageDateByGuid(db, args.messageGuid)) ?? undefined;
+      assertReminderLease(accountLease);
+      try {
+        await scheduler.schedule({
+          notificationId,
+          chatGuid: args.chatGuid,
+          messageGuid: args.messageGuid,
+          title: args.chatTitle,
+          body: args.messagePreview ?? 'Reminder',
+          scheduledFor: args.scheduledFor,
+          messageDate,
+        });
+      } catch (error) {
+        if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, error);
+        throw error;
+      }
+      assertReminderLease(accountLease);
 
-  let id: number | null = null;
-  try {
-    // MOVE the existing row rather than delete-and-recreate it: the Reminders list is a reactive
-    // query and every write wakes it, so a delete-then-insert genuinely renders "No reminders" in
-    // between. A zero-row move means it was cancelled while the time picker sat open — fall through
-    // to an insert so the trigger we just armed always has a row behind it.
-    // (The moved row keeps its original preview text; the notification body the user actually sees
-    // was just re-baked from the fresh preview above.)
-    if (
-      existing &&
-      (await updateReminderTime(db, existing.id, args.scheduledFor, notificationId))
-    ) {
-      id = existing.id;
-    }
-    if (id == null) {
-      id = await createReminder(db, {
-        messageGuid: args.messageGuid,
-        chatGuid: args.chatGuid,
-        messagePreview: args.messagePreview,
-        senderName: args.senderName,
-        scheduledFor: args.scheduledFor,
-        notificationId,
-        createdAt: args.now ?? null,
-      });
-    }
-  } catch (e) {
-    // The durable half failed after the alarm was armed. Un-arm it, or it fires with no row behind
-    // it — unlistable, uncancellable, and missed even by `forget()` (which can only cancel the
-    // triggers `listReminders` knows about).
-    if (!rearmedInPlace) await retireTrigger(scheduler, notificationId);
-    throw e;
-  }
-  if (existing && !rearmedInPlace) await retireTrigger(scheduler, existing.notificationId);
-  return id;
+      let id: number | null = null;
+      try {
+        // MOVE the existing row rather than delete-and-recreate it: the Reminders list is a reactive
+        // query and every write wakes it, so a delete-then-insert genuinely renders "No reminders" in
+        // between. Match the notification id we read before crossing the native bridge. If another
+        // operation changed or deleted that row while scheduling, this older operation must retire its
+        // candidate instead of overwriting the newer reminder or creating a duplicate row.
+        // (The moved row keeps its original preview text; the notification body the user actually sees
+        // was just re-baked from the fresh preview above.)
+        if (existing) {
+          const moved = await updateReminderTime(
+            db,
+            existing.id,
+            args.scheduledFor,
+            notificationId,
+            () => accountLease.isCurrent(),
+            existing.notificationId,
+          );
+          if (!moved) throw new Error('reminder no longer matches');
+          id = existing.id;
+        }
+        assertReminderLease(accountLease);
+        if (id == null) {
+          id = await createReminder(
+            db,
+            {
+              messageGuid: args.messageGuid,
+              chatGuid: args.chatGuid,
+              messagePreview: args.messagePreview,
+              senderName: args.senderName,
+              scheduledFor: args.scheduledFor,
+              notificationId,
+              createdAt: args.now ?? null,
+            },
+            () => accountLease.isCurrent(),
+          );
+          assertReminderLease(accountLease);
+        }
+      } catch (e) {
+        // The durable half failed after the alarm was armed. Un-arm it, or it fires with no row behind
+        // it — unlistable and uncancellable during the live session. Disconnect's broad native
+        // cancellation is a backstop, but normal reminder management still needs a durable row.
+        if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, e);
+        throw e;
+      }
+      if (existing && !rearmedInPlace) await retireTrigger(scheduler, existing.notificationId);
+      assertReminderLease(accountLease);
+      return id;
+    },
+    scheduler,
+    () => candidateNotificationId,
+  );
 }
 
 /** Cancel + delete a reminder (the Notifee trigger and the DB row). */
@@ -134,9 +260,26 @@ export async function cancelReminder(
   db: AppDatabase,
   reminder: Pick<Reminder, 'id' | 'notificationId'>,
   scheduler: ReminderScheduler = notifeeScheduler,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  await scheduler.cancel(reminder.notificationId);
-  await deleteReminder(db, reminder.id);
+  await runReminderAccountOperation(
+    accountLease,
+    async () => {
+      assertReminderLease(accountLease);
+      await scheduler.cancel(reminder.notificationId);
+      assertReminderLease(accountLease);
+      const deleted = await deleteReminder(
+        db,
+        reminder.id,
+        () => accountLease.isCurrent(),
+        reminder.notificationId,
+      );
+      assertReminderLease(accountLease);
+      if (!deleted) throw new Error('reminder no longer matches');
+    },
+    scheduler,
+    () => null,
+  );
 }
 
 /**
@@ -148,39 +291,72 @@ export async function rescheduleReminder(
   reminder: Reminder,
   scheduledFor: number,
   scheduler: ReminderScheduler = notifeeScheduler,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<string> {
-  const notificationId = newNotificationId(reminder.messageGuid, scheduledFor);
-  const messageDate = (await getMessageDateByGuid(db, reminder.messageGuid)) ?? undefined;
-  const rearmedInPlace = reminder.notificationId === notificationId;
-  // Schedule the new trigger FIRST so a failure leaves the old reminder intact
-  // (no orphaned DB row pointing at a cancelled trigger).
-  await scheduler.schedule({
-    notificationId,
-    chatGuid: reminder.chatGuid,
-    messageGuid: reminder.messageGuid,
-    title: reminder.senderName ?? 'Reminder',
-    body: reminder.messagePreview ?? 'Reminder',
-    scheduledFor,
-    messageDate,
-  });
+  let candidateNotificationId: string | null = null;
+  return runReminderAccountOperation(
+    accountLease,
+    async () => {
+      assertReminderLease(accountLease);
+      const notificationId = await newReminderNotificationId(
+        db,
+        reminder.messageGuid,
+        scheduledFor,
+      );
+      assertReminderLease(accountLease);
+      candidateNotificationId = notificationId;
+      const messageDate = (await getMessageDateByGuid(db, reminder.messageGuid)) ?? undefined;
+      assertReminderLease(accountLease);
+      const rearmedInPlace = reminder.notificationId === notificationId;
+      // Schedule the new trigger FIRST so a failure leaves the old reminder intact
+      // (no orphaned DB row pointing at a cancelled trigger).
+      try {
+        await scheduler.schedule({
+          notificationId,
+          chatGuid: reminder.chatGuid,
+          messageGuid: reminder.messageGuid,
+          title: reminder.senderName ?? 'Reminder',
+          body: reminder.messagePreview ?? 'Reminder',
+          scheduledFor,
+          messageDate,
+        });
+      } catch (error) {
+        if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, error);
+        throw error;
+      }
+      assertReminderLease(accountLease);
 
-  let moved: boolean;
-  try {
-    moved = await updateReminderTime(db, reminder.id, scheduledFor, notificationId);
-  } catch (e) {
-    if (!rearmedInPlace) await retireTrigger(scheduler, notificationId);
-    throw e;
-  }
-  // `reminder` is a snapshot the screen captured BEFORE the time picker opened — a dialog that can
-  // sit there for minutes — so by now the row may have been deleted from that same screen. The
-  // update reports that (0 rows) instead of silently succeeding; without acting on it we would walk
-  // away having armed an alarm for a reminder that no longer exists: it still fires, the Reminders
-  // screen can neither show nor cancel it, and `forget()` can't either, because it only cancels the
-  // triggers `listReminders` can find.
-  if (!moved) {
-    await retireTrigger(scheduler, notificationId);
-    throw new Error('reminder no longer exists');
-  }
-  if (!rearmedInPlace) await retireTrigger(scheduler, reminder.notificationId);
-  return notificationId;
+      let moved: boolean;
+      try {
+        moved = await updateReminderTime(
+          db,
+          reminder.id,
+          scheduledFor,
+          notificationId,
+          () => accountLease.isCurrent(),
+          reminder.notificationId,
+        );
+        assertReminderLease(accountLease);
+      } catch (e) {
+        if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, e);
+        throw e;
+      }
+      // `reminder` is a snapshot the screen captured BEFORE the time picker opened — a dialog that can
+      // sit there for minutes — so by now the row may have been deleted from that same screen. The
+      // update reports that (0 rows) instead of silently succeeding; without acting on it we would walk
+      // away having armed an alarm for a reminder that no longer exists: it still fires, the Reminders
+      // screen can neither show nor cancel it. Disconnect's broad native cancellation is a final
+      // backstop, but normal in-session cleanup still needs the durable row to target it.
+      if (!moved) {
+        const missing = new Error('reminder no longer exists');
+        await retireUncertainTrigger(scheduler, notificationId, missing);
+        throw missing;
+      }
+      if (!rearmedInPlace) await retireTrigger(scheduler, reminder.notificationId);
+      assertReminderLease(accountLease);
+      return notificationId;
+    },
+    scheduler,
+    () => candidateNotificationId,
+  );
 }

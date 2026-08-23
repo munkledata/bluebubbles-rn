@@ -2,9 +2,11 @@ import { useRouter } from 'expo-router';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ensureDatabase } from '@/services';
+import { resumeRealtimeDeliveries } from '@/services/realtime/deliveryCoordinator';
 import { seedFixtures } from '@features/conversations/devSeed';
 import { useSessionStore } from '@state/sessionStore';
 import { Button, Screen, useTheme } from '@ui';
+import { DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD } from '@utils/isDev';
 
 export default function Welcome(): React.JSX.Element {
   const theme = useTheme();
@@ -15,7 +17,13 @@ export default function Welcome(): React.JSX.Element {
   const devSeedAndOpen = async (): Promise<void> => {
     await ensureDatabase();
     await seedFixtures();
-    useSessionStore.getState().connected('https://dev.local', 'dev', { server_version: '1.9.0' });
+    useSessionStore
+      .getState()
+      .connected(DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD, { server_version: '1.9.0' });
+    // Normal connected boot reopens this gate after durable-session validation. This DEV-only
+    // shortcut deliberately bypasses that boot path, so reopen it here before Home captures its
+    // account lease; otherwise the visible Inject/FaceTime fixture controls silently do nothing.
+    resumeRealtimeDeliveries();
     router.replace('/home');
   };
 

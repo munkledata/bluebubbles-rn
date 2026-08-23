@@ -1,16 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logger } from '@core/secure';
 import { authenticate } from '@native/biometrics';
 import { useLockStore } from '@state/lockStore';
-import { useTheme } from '@ui';
+import { useTheme } from '@ui/theme/ThemeProvider';
 
 interface LockScreenProps {
   /**
    * Called after a successful biometric auth. Defaults to clearing the gate; the
-   * root layout passes `completeUnlock` so a cold-boot unlock also opens the DB +
-   * routes (the SQLCipher key is withheld until this runs).
+   * root layout passes `completeUnlock` so a foreground cold-boot unlock also opens the DB +
+   * routes. A locked headless push posts a generic notice and leaves DB work for post-unlock sync.
    */
   onUnlock?: () => void | Promise<void>;
 }
@@ -24,6 +24,16 @@ export function LockScreen({ onUnlock }: LockScreenProps = {}): React.JSX.Elemen
   // Set when biometric auth SUCCEEDED but unlocking still failed (see below) — a different
   // situation from a failed prompt, and "Try again" would be a lie.
   const [unlockError, setUnlockError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const appActiveRef = useRef(AppState.currentState === 'active');
+  const awaitInitialActiveRef = useRef(
+    AppState.currentState !== 'active' &&
+      AppState.currentState !== 'background' &&
+      AppState.currentState !== 'inactive',
+  );
+  const authorityEpochRef = useRef(0);
+  const nextAttemptRef = useRef(0);
+  const inFlightAttemptRef = useRef<number | null>(null);
 
   /**
    * Both awaits are guarded, because an unhandled rejection here strands the user on this screen
@@ -40,35 +50,72 @@ export function LockScreen({ onUnlock }: LockScreenProps = {}): React.JSX.Elemen
    *    cannot fix a corrupt database, so this gets its own message instead of "Try again".
    */
   const tryUnlock = async (): Promise<void> => {
+    if (!mountedRef.current || !appActiveRef.current || inFlightAttemptRef.current !== null) {
+      return;
+    }
+    const attemptId = ++nextAttemptRef.current;
+    const authorityEpoch = authorityEpochRef.current;
+    inFlightAttemptRef.current = attemptId;
+    const isCurrentAttempt = (): boolean =>
+      mountedRef.current &&
+      appActiveRef.current &&
+      authorityEpochRef.current === authorityEpoch &&
+      inFlightAttemptRef.current === attemptId;
+
     setFailed(false);
     setUnlockError(null);
-    let ok = false;
     try {
-      ok = await authenticate('Unlock Gator');
-    } catch (e) {
-      logger.warn(`[lock] biometric prompt threw: ${e instanceof Error ? e.message : String(e)}`);
-      setFailed(true);
-      return;
-    }
-    if (!ok) {
-      setFailed(true);
-      return;
-    }
-    try {
-      await (onUnlock ?? storeUnlock)();
-    } catch (e) {
-      logger.error(
-        `[lock] unlock failed after a successful auth: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      );
-      setUnlockError('Couldn’t open your messages. Close Gator and open it again.');
+      let ok = false;
+      try {
+        ok = await authenticate('Unlock Gator');
+      } catch (e) {
+        if (!isCurrentAttempt()) return;
+        logger.warn(`[lock] biometric prompt threw: ${e instanceof Error ? e.message : String(e)}`);
+        setFailed(true);
+        return;
+      }
+      if (!isCurrentAttempt()) return;
+      if (!ok) {
+        setFailed(true);
+        return;
+      }
+      try {
+        await (onUnlock ?? storeUnlock)();
+        if (!isCurrentAttempt()) return;
+      } catch (e) {
+        if (!isCurrentAttempt()) return;
+        logger.error('[lock] unlock failed after successful auth', e);
+        setUnlockError('Couldn’t open your messages. Close Gator and open it again.');
+      }
+    } finally {
+      if (inFlightAttemptRef.current === attemptId) inFlightAttemptRef.current = null;
     }
   };
 
   // Prompt automatically when the lock screen appears.
   useEffect(() => {
-    void tryUnlock();
+    mountedRef.current = true;
+    const subscription = AppState.addEventListener('change', (state) => {
+      appActiveRef.current = state === 'active';
+      if (!appActiveRef.current) {
+        awaitInitialActiveRef.current = false;
+        authorityEpochRef.current += 1;
+        return;
+      }
+      if (!awaitInitialActiveRef.current) return;
+      awaitInitialActiveRef.current = false;
+      void tryUnlock();
+    });
+    // Mounting the gate intentionally starts the external biometric prompt; tryUnlock's state
+    // changes reflect that native prompt's result and are also shared by the retry button.
+    if (appActiveRef.current) void tryUnlock();
+    return () => {
+      mountedRef.current = false;
+      appActiveRef.current = false;
+      awaitInitialActiveRef.current = false;
+      authorityEpochRef.current += 1;
+      subscription.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

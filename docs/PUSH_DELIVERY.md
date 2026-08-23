@@ -11,27 +11,27 @@ Spans two repos: this one (the RN app) and `bluebubbles-server` (`packages/bbd`,
 
 ## 1. The delivery chain
 
-Ten links. Any one can break it, and until this work most of them broke it *silently*.
+Ten links. Any one can break it, and until this work most of them broke it _silently_.
 
-| # | Link | Where |
-|---|------|-------|
-| 1 | An iMessage/RCS event reaches the server's domain bus | `packages/bbd/src/serialize/messageFanout.ts` |
-| 2 | The fanout calls `pushMessageSink` | `packages/bbd/src/backend.ts` |
-| 3 | It reads registered devices | `configStore.listDevices()` |
-| 4 | The body is trimmed under FCM's hard 4096-byte data cap | `packages/bbd/src/serialize/pushPayloadCap.ts` |
-| 5 | The registry fans out, deduping by send target (token) | `packages/bbd/src/notifications/NotificationRegistry.ts` |
-| 6 | FCM v1: mint an OAuth token from the service account, POST the data message | `packages/bbd/src/notifications/FcmProvider.ts` |
-| 7 | Google delivers to the device | — |
-| 8 | The app's background/foreground handler receives it | `src/services/notifications/fcmMessaging.ts` |
-| 9 | Envelope parsed → decrypted → normalized → deduped | `fcmPayload.ts`, `fcmDecrypt.ts`, `core/realtime/eventRouter.ts` |
-| 10 | DB write (source of truth), then intent → Android notification | `dbEventSink.ts` → `intents.ts` → `notifeeService.ts` |
+| #   | Link                                                                        | Where                                                            |
+| --- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 1   | An iMessage/RCS event reaches the server's domain bus                       | `packages/bbd/src/serialize/messageFanout.ts`                    |
+| 2   | The fanout calls `pushMessageSink`                                          | `packages/bbd/src/backend.ts`                                    |
+| 3   | It reads registered devices                                                 | `configStore.listDevices()`                                      |
+| 4   | The body is trimmed under FCM's hard 4096-byte data cap                     | `packages/bbd/src/serialize/pushPayloadCap.ts`                   |
+| 5   | The registry fans out, deduping by send target (token)                      | `packages/bbd/src/notifications/NotificationRegistry.ts`         |
+| 6   | FCM v1: mint an OAuth token from the service account, POST the data message | `packages/bbd/src/notifications/FcmProvider.ts`                  |
+| 7   | Google delivers to the device                                               | —                                                                |
+| 8   | The app's background/foreground handler receives it                         | `src/services/notifications/fcmMessaging.ts`                     |
+| 9   | Envelope parsed → decrypted → normalized → deduped                          | `fcmPayload.ts`, `fcmDecrypt.ts`, `core/realtime/eventRouter.ts` |
+| 10  | DB write (source of truth), then intent → Android notification              | `dbEventSink.ts` → `intents.ts` → `notifeeService.ts`            |
 
 Properties worth knowing:
 
 - **Priority is split deliberately.** Only `new-message` is sent at FCM `high` priority.
   `updated-message` (delivered/read/edit receipts) and `message-deleted` are silent data-only syncs
   sent at `normal`, so they don't burn the app's finite high-priority Doze wake quota — once that
-  quota is spent, Android downgrades the *real* message pushes and defers them by minutes.
+  quota is spent, Android downgrades the _real_ message pushes and defers them by minutes.
 - **The device token is re-registered on EVERY reconnect**, not once (`startRealtime()`). The server
   dedups by token, so it's idempotent. That per-connect retry is the only thing that recovers a
   registration broken by a first-boot failure, a server change, or an FCM token rotation.
@@ -58,24 +58,24 @@ The message reached the device and was dropped there. Server-side, the same push
 `{total: 2, sent: 2, failed: 0}` — every layer claimed success.
 
 **Cause.** `setBackgroundMessageHandler` (RNFB), `notifee.onBackgroundEvent`, and
-`TaskManager.defineTask` each register a *named headless task* that Android looks up the instant it
+`TaskManager.defineTask` each register a _named headless task_ that Android looks up the instant it
 wakes the app — with **no render**. All three were registered by side-effect imports at the top of
 `app/_layout.tsx`. But `_layout.tsx` is a **route module**: expo-router loads it lazily through its
 `require.context`, at render time. A headless wake evaluates the bundle entry and never renders, so
 that module was never evaluated and the tasks were never registered.
 
 **Why it looked intermittent.** As long as the process stayed alive from the last time the user
-opened the app, the handler *was* registered and push worked. The moment Android reclaimed the
+opened the app, the handler _was_ registered and push worked. The moment Android reclaimed the
 process — routine, and aggressive on Samsung One UI — every push was dropped until the app was
 manually reopened.
 
 **Fix.** A real bundle entry, `index.js`, referenced by `package.json` `main`:
 
 ```js
-import './src/services/notifications/backgroundEvents';  // notify-kit headless taps
-import './src/services/background/backgroundSync';       // TaskManager.defineTask('gator-bg-sync')
-import './src/services/notifications/fcmMessaging';      // setBackgroundMessageHandler
-import 'expo-router/entry';                              // MUST be last
+import './src/services/notifications/backgroundEvents'; // notify-kit headless taps
+import './src/services/background/backgroundSync'; // TaskManager.defineTask('gator-bg-sync')
+import './src/services/notifications/fcmMessaging'; // setBackgroundMessageHandler
+import 'expo-router/entry'; // MUST be last
 ```
 
 `app/_layout.tsx` keeps its imports (the module cache makes them a no-op) so the app still works if
@@ -95,7 +95,7 @@ this investigation it had to be bypassed entirely (logcat was used instead). A d
 only produce false negatives is worse than none — it actively misleads.
 
 **Fix.** `test-notification` is now a fully handled event through all six touch points. It renders
-even under redacted mode (it carries no user content, and seeing it *is* the passing result) and
+even under redacted mode (it carries no user content, and seeing it _is_ the passing result) and
 deliberately bypasses the "Message Notifications" toggle and unknown-sender filter, since it is a
 user-initiated diagnostic rather than a message.
 
@@ -106,10 +106,11 @@ user-initiated diagnostic rather than a message.
 revoked service account, a spent quota, an HTTP 403) produced **no visible server log at all**.
 
 **Fix.**
+
 - Delivery failures log at `warn`, naming the device and carrying the provider's error message.
   Dead targets (404/410) stay at `debug` — expected, self-healing via the prune, and otherwise they
   would warn on every message until the prune lands.
-- `pushMessageSink` logs the failure *shape*: `2/2 device deliveries failed` means the pipeline is
+- `pushMessageSink` logs the failure _shape_: `2/2 device deliveries failed` means the pipeline is
   down; `1/2` means one phone is gone.
 - `send-test-notification` returns the actual error strings (`errors: string[]`), so
   "FCM send returned HTTP 403: …" reaches the user instead of a bare `failed: 1`.
@@ -125,14 +126,15 @@ Compounding it, all three `postNotification` call sites were bare `void postNoti
 so the throw surfaced only as an unhandled rejection with no attribution.
 
 **Fix.** `ensureChannel` clears its memo on rejection, matching the other two. A new
-`postNotificationSafely` wrapper logs failures at `warn` so a notification that fails to post is
-visible in App Logs instead of silently absent. The three near-identical status-notification blocks
-were folded into one `postStatusNotification` helper rather than adding a fourth copy.
+`postNotificationSafely` wrapper contains failures and emits a development-only `warn`; release
+builds suppress free-form non-error logs, while durable deliveries keep their retry/backoff path.
+The three near-identical status-notification blocks were folded into one `postStatusNotification`
+helper rather than adding a fourth copy.
 
 ### 2.5 Not a bug (recorded so it isn't "fixed")
 
 - **Two registered devices.** The server had two FCM rows, "Gator (Android 36)" and "Gator (Android
-  37)". These are two *distinct tokens*, i.e. two distinct installs — the phone under test is API 36.
+  37)". These are two _distinct tokens_, i.e. two distinct installs — the phone under test is API 36.
   The registry dedups by token, so this is correct behaviour, not duplicate delivery. Purging would
   have deregistered a live device.
 - **`hoistChatGuid`** (`fcmPayload.ts`) folds a top-level envelope `chatGuid` into the body, but the
@@ -145,12 +147,14 @@ were folded into one `postStatusNotification` helper rather than adding a fourth
 
 Work the chain from the middle out; each step tells you which side you're on.
 
-1. **Is the server sending?** Fire the test push and read the counts *and* errors:
+1. **Is the server sending?** Fire the test push and read the counts _and_ errors:
+
    ```bash
    curl -s -X POST http://127.0.0.1:1235/api/v1/admin/command \
      -H 'content-type: application/json' -H "x-bbd-local-auth: $TOKEN" \
      -d '{"channel":"send-test-notification","data":{}}'
    ```
+
    `sent: N, failed: 0` means links 1–6 are healthy. Any `errors[]` entry now names the real cause.
    (The local-auth token is on the Gator renderer process's command line: `--bbd-local-auth=…`.)
 
@@ -158,11 +162,13 @@ Work the chain from the middle out; each step tells you which side you're on.
    the token count matches the number of real installs.
 
 3. **Did it reach the phone?** This is the step that found the bug:
+
    ```bash
    adb logcat -c
    # fire the push
    adb logcat -d | grep -E 'RNFirebaseMsgReceiver|No task registered|HeadlessTask'
    ```
+
    `broadcast received for message` with **no** following warning = delivered and handled.
 
 4. **Is the device even allowed to show it?**
@@ -176,7 +182,7 @@ Work the chain from the middle out; each step tells you which side you're on.
 ### The `am kill` vs `am force-stop` trap
 
 Use **`adb shell am kill <pkg>`** to simulate the OS reclaiming the process. Do **not** use
-`am force-stop`: it puts the app in Android's "stopped" state, where the OS cancels *all* broadcasts
+`am force-stop`: it puts the app in Android's "stopped" state, where the OS cancels _all_ broadcasts
 until a manual launch (`logcat` shows `broadcast intent callback: result=CANCELLED`). The bug then
 looks unreproducible. This cost real time during the investigation.
 
@@ -192,16 +198,16 @@ the first investigation was driven entirely against a Galaxy S25 Ultra on Androi
 
 **Ruled out on the Pixel, with evidence:** token registration (its row is current, re-registers on
 launch, token unchanged, FCM returns `failed: 0` — a dead token would 404 and auto-prune); app
-version (0.1.33 vc46, *newer* than the S25's vc44); OS restrictions (`POST_NOTIFICATIONS` granted,
+version (0.1.33 vc46, _newer_ than the S25's vc44); OS restrictions (`POST_NOTIFICATIONS` granted,
 standby bucket 5, battery-exempt, Data Saver off, `RUN_ANY_IN_BACKGROUND: allow`, not dozing);
-app-side errors (App Logs show no `[fcm]`/`[notify]` failures); and the server (every send
-`sent: 2, failed: 0`).
+app-side errors (the development build's App Logs showed no `[fcm]`/`[notify]` failures); and the
+server (every send `sent: 2, failed: 0`).
 
 **The Pixel's chain does work.** Killed its process (`am kill-all`, 0 processes), fired a push, and
 Android logged `Start proc … for broadcast {ReactNativeFirebaseMessagingReceiver}` followed by the
 notification posting. Killed → woken → shown.
 
-**But it is genuinely intermittent.** Two *identical* killed-process tests a minute apart: the first
+**But it is genuinely intermittent.** Two _identical_ killed-process tests a minute apart: the first
 never started the process and posted nothing; the second worked. Same device, same push, same state.
 Root cause of that last hop is **NOT yet established** — do not assume it is.
 
@@ -209,14 +215,15 @@ Two theories were falsified along the way and are recorded so they aren't retrie
 Keystore failure aborting `dispatchRealtimeEvent` at `ensureDatabase()` (dead — unlocking changed
 nothing), and the Pixel running an older build (dead — it is newer).
 
-**What was added:** a receipt breadcrumb, `[fcm] push received {event, source}`, logged in
-`deliverRespectingLock` — the single entry point both the headless background handler and the
-foreground `onMessage` share, with `source` recording which. Until then only FAILURES were logged,
-so a dropped push and a silently-handled one were indistinguishable in App Logs: both simply absent
-(an `updated-message` receipt posts no notification by design). That is why the Pixel's logs could
-not settle the question. Event NAME only — never the body, which carries message text and is written
-to disk. Next missed message, compare the device's receipts against the server's sends; the failing
-hop is then immediate rather than inferred.
+**What was added:** a development-only receipt breadcrumb,
+`[fcm] push received {event, source}`, in `deliverRespectingLock` — the single entry point both the
+headless background handler and foreground `onMessage` share, with `source` recording which. Until
+then a dropped push and a silently-handled one were indistinguishable in the development App Logs:
+both simply absent (an `updated-message` receipt posts no notification by design). Event NAME only —
+never the body, which carries message text. `LOG-01B` now suppresses and does not persist this
+free-form line in release builds; candidate release investigation must use native traces, temporary
+instrumentation, or a future finite diagnostic event rather than expecting this breadcrumb in App
+Logs.
 
 Also of note: measurement artifacts cost real time here. `RNFirebaseMsgReceiver` was briefly believed
 not to be emitted (it is — the capture window was wrong), and `dumpsys notification` counts are

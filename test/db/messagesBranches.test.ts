@@ -9,15 +9,13 @@ import { Chat, Message } from '@core/models';
 import {
   applyLocalEdit,
   applyLocalUnsend,
-  clearLocalUnsend,
-  deleteMessageByGuid,
   getChatGuidByMessageGuid,
   getChatIdByGuid,
   getMessagePreviewByGuid,
   getMessageTextByGuid,
-  insertOutgoingText,
   listMessagesAround,
   listMessagesWithSenders,
+  revertLocalUnsend,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -154,7 +152,7 @@ describe('paginate + around windows', () => {
   });
 });
 
-describe('read-null helpers + edit/unsend + delete', () => {
+describe('read-null helpers + edit/unsend', () => {
   it('getMessagePreviewByGuid returns null for a miss, a preview for a hit', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
@@ -176,7 +174,7 @@ describe('read-null helpers + edit/unsend + delete', () => {
     expect(await getChatGuidByMessageGuid(db, 'nope')).toBeNull();
   });
 
-  it('applyLocalEdit / applyLocalUnsend / clearLocalUnsend mutate in place; getMessageTextByGuid reflects it', async () => {
+  it('applyLocalEdit / applyLocalUnsend / revertLocalUnsend mutate in place; getMessageTextByGuid reflects it', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
     await put(db, chatId, hm, { guid: 'e1', text: 'orig', dateCreated: 1 });
@@ -186,28 +184,8 @@ describe('read-null helpers + edit/unsend + delete', () => {
 
     await applyLocalUnsend(db, 'e1', 12);
     expect(await getMessageTextByGuid(db, 'e1')).not.toBeNull(); // row still there
-    await clearLocalUnsend(db, 'e1'); // revert an optimistic unsend
+    expect(await revertLocalUnsend(db, 'e1', 12)).toBe(true);
     const around = await listMessagesWithSenders(db, chatId);
     expect(around.find((m) => m.guid === 'e1')?.dateRetracted).toBeNull();
-  });
-
-  it('deleteMessageByGuid removes the message AND its outgoing_queue row', async () => {
-    const { db, raw } = await createTestDb();
-    const { chatId } = await seedChat(db);
-    await insertOutgoingText(db, {
-      tempGuid: 'temp-del',
-      chatId,
-      chatGuid: 'c1',
-      text: 'bye',
-      now: 1,
-    });
-    await deleteMessageByGuid(db, 'temp-del');
-    expect(col(raw, 'temp-del', 'guid')).toBeUndefined();
-    const q = raw
-      .prepare('SELECT COUNT(*) c FROM outgoing_queue WHERE temp_guid = ?')
-      .get('temp-del') as {
-      c: number;
-    };
-    expect(q.c).toBe(0);
   });
 });

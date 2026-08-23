@@ -3,12 +3,21 @@
 import * as Contacts from 'expo-contacts/legacy';
 import { getDatabase } from '@db/database';
 import { logger } from '@core/secure';
-import { matchContactsToHandles, upsertContacts, type DeviceContact } from '@db/repositories';
-import { sessionAccessors } from '@state/sessionStore';
+import {
+  matchContactsToHandles,
+  upsertContacts,
+  type ContactDbTaskRunner,
+  type DeviceContact,
+} from '@db/repositories';
 // The session-bound HTTP client (used only at runtime inside syncContacts).
 import { http } from '../clients';
 import { backfillServerAvatars } from './serverAvatars';
 import type { ContactCard } from '../send/sendContactService';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
+} from '../realtime/deliveryCoordinator';
 
 /** Request READ_CONTACTS. Returns true if granted. */
 export async function requestContactsPermission(): Promise<boolean> {
@@ -16,14 +25,35 @@ export async function requestContactsPermission(): Promise<boolean> {
   return status === 'granted';
 }
 
+/** Check READ_CONTACTS without showing an Android permission dialog. */
+async function hasContactsPermission(): Promise<boolean> {
+  const { status } = await Contacts.getPermissionsAsync();
+  return status === 'granted';
+}
+
+/** The user declined READ_CONTACTS; distinct from closing the contact picker without a choice. */
+export class ContactsPermissionDeniedError extends Error {
+  constructor() {
+    super('contacts-permission-denied');
+    this.name = 'ContactsPermissionDeniedError';
+  }
+}
+
+export function isContactsPermissionDeniedError(
+  error: unknown,
+): error is ContactsPermissionDeniedError {
+  return error instanceof ContactsPermissionDeniedError;
+}
+
 /**
  * Present the native contact picker and map the chosen contact to the structured fields the
- * `send-contact` endpoint wants. Returns null when the user cancels or denies access — the caller
- * simply sends nothing. Only name/org/phones/emails are carried (the server builds the vCard);
- * the device photo is intentionally left off (the server-side vCard builder omits PHOTO too).
+ * `send-contact` endpoint wants. Returns null when the user cancels, but throws
+ * `ContactsPermissionDeniedError` when access is denied so the UI can explain recovery. Only
+ * name/org/phones/emails are carried (the server builds the vCard); the device photo is
+ * intentionally left off (the server-side vCard builder omits PHOTO too).
  */
 export async function pickContact(): Promise<ContactCard | null> {
-  if (!(await requestContactsPermission())) return null;
+  if (!(await requestContactsPermission())) throw new ContactsPermissionDeniedError();
   const c = await Contacts.presentContactPickerAsync();
   if (!c) return null;
   return {
@@ -42,18 +72,32 @@ export async function pickContact(): Promise<ContactCard | null> {
 /** Counts reported back to the UI by a contacts sync. */
 type ContactsSyncResult = { contacts: number; matched: number };
 
-/** The single in-flight contacts sync, shared by every concurrent caller (see `syncContacts`). */
-let inFlight: Promise<ContactsSyncResult> | null = null;
-/**
- * When the run the slot is waiting on actually STARTED (ms) — drives the abandonment check below.
- *
- * Stamped by `runContactsSync` itself, never at publish time. A chained (forced) call publishes a
- * new slot whose predecessor may already be minutes old, and stamping at publish would launder
- * that stale, possibly-wedged run into a fresh-looking one: every later caller would then wait out
- * a full abandonment window again, and each further tap would push the deadline out once more. A
- * chain therefore carries its PREDECESSOR's age until its own run begins.
- */
-let inFlightStartedAt = 0;
+/** A retired screen/session should quietly discard its pending contacts result. */
+export class ContactsAccountChangedError extends Error {
+  constructor() {
+    super('contacts sync belongs to a previous account');
+    this.name = 'ContactsAccountChangedError';
+  }
+}
+
+export function isContactsAccountChangedError(error: unknown): boolean {
+  return error instanceof ContactsAccountChangedError;
+}
+
+function assertCurrentAccount(lease: RealtimeDeliveryLease): void {
+  if (!lease.isCurrent()) throw new ContactsAccountChangedError();
+}
+
+interface ContactsSyncSlot {
+  readonly generation: number;
+  readonly lease: RealtimeDeliveryLease;
+  promise: Promise<ContactsSyncResult>;
+  /** When the run this slot currently waits on actually started (for abandonment). */
+  startedAt: number;
+}
+
+/** The current account generation's coalescing slot (see `syncContacts`). */
+let inFlight: ContactsSyncSlot | null = null;
 
 /**
  * How long a run may hold the coalescing slot before later callers stop waiting on it. A real run
@@ -106,15 +150,26 @@ function settleWithin(p: Promise<unknown>, ms: number): Promise<void> {
  * coalescing exists to prevent) and only then does its own fresh read. The chain carries the
  * abandonment cap with it, so it can never be stranded behind a run that will not finish.
  */
-export function syncContacts(opts: { force?: boolean } = {}): Promise<ContactsSyncResult> {
+export function syncContacts(
+  opts: { force?: boolean; accountLease?: RealtimeDeliveryLease } = {},
+): Promise<ContactsSyncResult> {
+  const accountLease = opts.accountLease ?? captureRealtimeDeliveryLease();
+  if (!accountLease.isCurrent()) return Promise.reject(new ContactsAccountChangedError());
+
+  // Coalescing is account-scoped. A permission/contact read from A may stay pending after A was
+  // disconnected; B must start its own read rather than join A's eventual stale result.
+  if (inFlight?.generation !== accountLease.generation || !inFlight.lease.isCurrent()) {
+    inFlight = null;
+  }
+
   // A slot older than the abandonment window is treated as gone: joiners start their own run
   // instead of waiting on it.
   let live = inFlight;
-  if (live && Date.now() - inFlightStartedAt >= IN_FLIGHT_ABANDON_MS) {
+  if (live && Date.now() - live.startedAt >= IN_FLIGHT_ABANDON_MS) {
     logger.debug('[contacts] previous sync never settled; starting a fresh run');
     live = null;
   }
-  if (live && !opts.force) return live;
+  if (live && !opts.force) return live.promise;
 
   // A chained run waits out the REMAINDER of its predecessor's abandonment window, never longer:
   // the check above only fires for a caller that happens to arrive after the window has already
@@ -122,25 +177,72 @@ export function syncContacts(opts: { force?: boolean } = {}): Promise<ContactsSy
   // wedged run the cap exists to break and could never execute at all — leaving the Settings
   // button's spinner up for the life of the screen. The remainder (not a fresh full window) is
   // what keeps a run's deadline fixed at its own start, however many callers chain onto it.
+  const slot: ContactsSyncSlot = {
+    generation: accountLease.generation,
+    lease: accountLease,
+    promise: Promise.resolve({ contacts: 0, matched: 0 }),
+    // A forced chain inherits its predecessor's age until its own run actually begins.
+    startedAt: live?.startedAt ?? Date.now(),
+  };
+  const start = (): Promise<ContactsSyncResult> => {
+    slot.startedAt = Date.now();
+    // `force` is reserved for the explicit Settings button. Background startup sync may use an
+    // existing grant, but must never surprise the user with a permission dialog.
+    return runContactsSync(accountLease, opts.force === true);
+  };
   const next = live
-    ? settleWithin(live, Math.max(0, IN_FLIGHT_ABANDON_MS - (Date.now() - inFlightStartedAt))).then(
-        () => runContactsSync(),
-      )
-    : runContactsSync();
+    ? settleWithin(
+        live.promise,
+        Math.max(0, IN_FLIGHT_ABANDON_MS - (Date.now() - live.startedAt)),
+      ).then(start)
+    : start();
   // Only the run that still OWNS the slot may clear it: a forced run that replaced this one has
   // already published a newer promise, and clearing that would let the next caller start a THIRD
   // run alongside it.
-  const slot: Promise<ContactsSyncResult> = next.finally(() => {
+  slot.promise = next.finally(() => {
     if (inFlight === slot) inFlight = null;
   });
   inFlight = slot;
-  return slot;
+  return slot.promise;
 }
 
-async function runContactsSync(): Promise<ContactsSyncResult> {
-  // Stamped HERE, not at publish — see `inFlightStartedAt`.
-  inFlightStartedAt = Date.now();
-  if (!(await requestContactsPermission())) throw new Error('contacts-permission-denied');
+/**
+ * Admit exactly one short DB statement for the captured account. Native permission/address-book
+ * waits stay outside teardown, while Disconnect drains a statement that already won the race and
+ * rejects every later statement before it can touch a stale DB handle.
+ */
+async function runContactDbTask<T>(
+  lease: RealtimeDeliveryLease,
+  task: () => Promise<T>,
+): Promise<T> {
+  let resolved = false;
+  let value: T | undefined;
+  try {
+    const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
+      assertCurrentAccount(activeLease);
+      value = await task();
+      resolved = true;
+      assertCurrentAccount(activeLease);
+    });
+    if (status === 'paused' || !resolved) throw new ContactsAccountChangedError();
+    assertCurrentAccount(lease);
+    return value as T;
+  } catch (error) {
+    if (!lease.isCurrent()) throw new ContactsAccountChangedError();
+    throw error;
+  }
+}
+
+async function runContactsSync(
+  accountLease: RealtimeDeliveryLease,
+  requestPermission: boolean,
+): Promise<ContactsSyncResult> {
+  assertCurrentAccount(accountLease);
+  const permissionGranted = requestPermission
+    ? await requestContactsPermission()
+    : await hasContactsPermission();
+  assertCurrentAccount(accountLease);
+  if (!permissionGranted) throw new Error('contacts-permission-denied');
 
   const { data } = await Contacts.getContactsAsync({
     fields: [
@@ -152,6 +254,7 @@ async function runContactsSync(): Promise<ContactsSyncResult> {
       Contacts.Fields.Image,
     ],
   });
+  assertCurrentAccount(accountLease);
 
   const items: DeviceContact[] = data.map((c, i) => ({
     sourceId: c.id ?? `c-${i}`,
@@ -164,37 +267,24 @@ async function runContactsSync(): Promise<ContactsSyncResult> {
     avatar: c.imageAvailable && c.image?.uri ? c.image.uri : null,
   }));
 
-  const db = getDatabase();
-  const contacts = await upsertContacts(db, items);
-  const matched = await matchContactsToHandles(db);
+  // Obtain the handle under the same short admission rule as every statement that uses it. If A
+  // is revoked between statements, the next runner rejects before invoking its closure, so B can
+  // never be mutated through A's captured handle.
+  const db = await runContactDbTask(accountLease, async () => getDatabase());
+  const runDbTask: ContactDbTaskRunner = (task) => runContactDbTask(accountLease, task);
+  const contacts = await upsertContacts(db, items, runDbTask);
+  const matched = await matchContactsToHandles(db, runDbTask);
+  assertCurrentAccount(accountLease);
   // Best-effort: fill in avatars from the server for handles the device address book had no
   // photo for. Fully guarded — a failure here must NOT fail the (already-complete) device sync.
   try {
-    const filled = await backfillServerAvatars(db, http);
+    const filled = await backfillServerAvatars(db, http, accountLease);
+    assertCurrentAccount(accountLease);
     if (filled > 0) logger.debug(`[contacts] backfilled ${filled} server avatar(s)`);
   } catch (e) {
+    if (!accountLease.isCurrent()) throw new ContactsAccountChangedError();
     logger.debug('[contacts] server-avatar backfill skipped', e);
   }
-  // Names and photos just changed, so the system's Direct Share chips are now stale. Lazily
-  // imported to keep this module's Node import graph free of the native shortcuts bridge.
-  //
-  // ONLY WHILE A SESSION EXISTS. This run is fire-and-forget from the tail of every sync, so it
-  // routinely outlives its parent — and `awaitSyncIdle` explicitly does NOT cover it, so it can
-  // still be running after `forget()` has finished. `forget()` clears the chips LAST (bootstrap's
-  // `runForget`, after the wipe) precisely so nothing still unwinding above it can republish; this
-  // run is the one writer that can outlive even that, from `chats` rows that were fully populated
-  // when it started. Republishing there would put the PREVIOUS account's conversation names and
-  // contact photos back into the system share sheet, where they are persistent state that outlives
-  // the process: nothing later clears them, because a refresh over an emptied inbox returns early
-  // rather than publishing zero. `forget()` resets the session before it drains, so an absent
-  // origin is the signal that there is no account left to advertise.
-  if (sessionAccessors.getOrigin()) {
-    try {
-      const { refreshShareShortcuts } = await import('@/services/shortcuts/shareShortcuts');
-      void refreshShareShortcuts();
-    } catch {
-      // best-effort
-    }
-  }
+  assertCurrentAccount(accountLease);
   return { contacts, matched };
 }

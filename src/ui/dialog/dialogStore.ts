@@ -25,6 +25,8 @@ interface DialogState {
   enqueue: (req: Omit<DialogRequest, 'id'>) => void;
   /** Close the current dialog and promote the next queued one (if any). */
   dismiss: () => void;
+  /** Account teardown: discard dialog copy/callbacks that belong to the previous server. */
+  reset: () => void;
 }
 
 let nextId = 1;
@@ -48,6 +50,7 @@ export const useDialogStore = create<DialogState>((set, get) => ({
       const [next, ...rest] = s.queue;
       return { current: next ?? null, queue: rest };
     }),
+  reset: () => set({ current: null, queue: [] }),
 }));
 
 /**

@@ -64,6 +64,27 @@ jest.mock('@core/api', () => ({
 import { getDatabase } from '@db/database';
 import { ensureDatabase } from '@/services/databaseControl';
 import { markRead, markUnread } from '@/services/chatActions';
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+async function waitForCall(mock: jest.Mock): Promise<void> {
+  for (let turn = 0; turn < 20 && mock.mock.calls.length === 0; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  if (mock.mock.calls.length === 0) {
+    throw new Error('expected mock call did not start within 20 event-loop turns');
+  }
+}
 
 async function seedChat(db: AppDatabase, guid: string): Promise<void> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
@@ -79,6 +100,7 @@ const readMarker = (raw: import('better-sqlite3').Database, guid: string) =>
   ).m;
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   mockMarkChatUnread.mockReset().mockResolvedValue({});
   mockMarkChatRead.mockReset().mockResolvedValue({});
   mockPrivateApiEnabled = true;
@@ -86,6 +108,10 @@ beforeEach(() => {
   mockHydrate.mockClear();
   (ensureDatabase as jest.Mock).mockClear();
   (getDatabase as jest.Mock).mockClear();
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 describe('markUnread', () => {
@@ -227,5 +253,84 @@ describe('markRead', () => {
     await markRead('iMessage;-;+19999999999');
 
     expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps teardown waiting for a read receipt and disowns its late A-account completion', async () => {
+    const accountA = await createTestDb();
+    const accountB = await createTestDb();
+    const guid = 'iMessage;-;+15551234567';
+    mockDb = accountA.db;
+
+    for (const { db, messageGuid } of [
+      { db: accountA.db, messageGuid: 'a-newest' },
+      { db: accountB.db, messageGuid: 'b-newest' },
+    ]) {
+      const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+      await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+      const chatId = (await getChatIdByGuid(db, guid))!;
+      await upsertMessages(
+        db,
+        [Message.parse({ guid: messageGuid, text: 'hi', isFromMe: false, dateCreated: 1000 })],
+        () => chatId,
+        hm,
+      );
+    }
+    // Give B a sentinel marker that an old same-guid action must never advance or clear.
+    await setLastReadMessageGuid(accountB.db, guid, 'b-sentinel');
+
+    const server = deferred<unknown>();
+    mockMarkChatRead.mockImplementationOnce(() => server.promise);
+    const oldAction = markRead(guid);
+    let pause: Promise<void> | undefined;
+    let pauseSettled = false;
+    try {
+      await waitForCall(mockMarkChatRead);
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseSettled = true;
+      });
+      mockDb = accountB.db;
+      await Promise.resolve();
+      expect(pauseSettled).toBe(false); // the whole action, not just its DB write, is tracked
+    } finally {
+      // Never strand the delivery slot when a synchronization assertion fails: that would make the
+      // next independent account-switch case time out and hide the original failure.
+      server.resolve({});
+      await Promise.allSettled([oldAction, pause ?? Promise.resolve()]);
+      resumeRealtimeDeliveries();
+    }
+
+    await expect(oldAction).resolves.toBeUndefined();
+    await pause;
+
+    expect(readMarker(accountB.raw, guid)).toBe('b-sentinel');
+  });
+});
+
+describe('account-switch containment', () => {
+  it('does not let an A-account mark-unread parked on DB open clear B’s same-guid row', async () => {
+    const accountB = await createTestDb();
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(accountB.db, guid);
+
+    const opening = deferred<AppDatabase>();
+    (ensureDatabase as jest.Mock).mockImplementationOnce(() => opening.promise);
+    const oldAction = markUnread(guid);
+    expect(ensureDatabase).toHaveBeenCalledTimes(1);
+
+    let pauseSettled = false;
+    const pause = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    mockDb = accountB.db;
+    await Promise.resolve();
+    expect(pauseSettled).toBe(false);
+
+    opening.resolve(accountB.db);
+    await expect(oldAction).resolves.toBeUndefined();
+    await pause;
+    resumeRealtimeDeliveries();
+
+    expect(readMarker(accountB.raw, guid)).toBe('marker-1');
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
   });
 });

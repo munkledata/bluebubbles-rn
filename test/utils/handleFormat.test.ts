@@ -121,9 +121,9 @@ describe('primaryChatAddress', () => {
 
   it('falls back to the identifier when no handles have synced yet', () => {
     expect(primaryChatAddress({ chatIdentifier: '+15551234567' })).toBe('+15551234567');
-    expect(
-      primaryChatAddress({ chatIdentifier: '+15551234567', participantAddresses: null }),
-    ).toBe('+15551234567');
+    expect(primaryChatAddress({ chatIdentifier: '+15551234567', participantAddresses: null })).toBe(
+      '+15551234567',
+    );
   });
 
   it('never returns a raw chat-guid identifier (it is not an address)', () => {

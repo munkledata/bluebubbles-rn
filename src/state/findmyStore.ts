@@ -6,7 +6,7 @@ import {
   type FindMyDevice,
   type FindMyFriend,
 } from '@core/findmy';
-import { http } from '@/services';
+import { http } from '@/services/clients';
 import { isDevServer } from '@utils/isDev';
 
 // DEV fixtures so the screen renders without a real iCloud-connected server.
@@ -102,9 +102,15 @@ interface FindMyState {
   load: () => Promise<void>;
   /** Force the server to re-poll iCloud for fresh locations, then merge the result. */
   refresh: () => Promise<void>;
+  /** Account teardown: clear location data and invalidate requests already in flight. */
+  reset: () => void;
 }
 
 const isDev = isDevServer;
+// A request cannot be reliably aborted once every endpoint has started, but it can be disowned.
+// Reset increments this generation synchronously; an old account's later success/error then has no
+// authority to write into the newly empty store (or over a new account's newer result).
+let accountGeneration = 0;
 
 /** Find My devices + friends. Dev session uses fixtures; prod fetches the server. */
 export const useFindMyStore = create<FindMyState>((set, get) => ({
@@ -115,14 +121,17 @@ export const useFindMyStore = create<FindMyState>((set, get) => ({
   refreshing: false,
   error: null,
   load: async () => {
+    const generation = accountGeneration;
     if (isDev()) {
-      set({
-        devices: FIXTURE_DEVICES,
-        friends: FIXTURE_FRIENDS,
-        items: FIXTURE_ITEMS,
-        loading: false,
-        error: null,
-      });
+      if (generation === accountGeneration) {
+        set({
+          devices: FIXTURE_DEVICES,
+          friends: FIXTURE_FRIENDS,
+          items: FIXTURE_ITEMS,
+          loading: false,
+          error: null,
+        });
+      }
       return;
     }
     set({ loading: true, error: null });
@@ -132,6 +141,7 @@ export const useFindMyStore = create<FindMyState>((set, get) => ({
         findMyApi.getFriends(http),
         findMyApi.getItems(http),
       ]);
+      if (generation !== accountGeneration) return;
       set({
         devices: devRaw.map(normalizeDevice),
         friends: friRaw.map(normalizeFriend),
@@ -140,10 +150,13 @@ export const useFindMyStore = create<FindMyState>((set, get) => ({
         loading: false,
       });
     } catch {
-      set({ loading: false, error: 'Couldn’t load Find My. Check your server connection.' });
+      if (generation === accountGeneration) {
+        set({ loading: false, error: 'Couldn’t load Find My. Check your server connection.' });
+      }
     }
   },
   refresh: async () => {
+    const generation = accountGeneration;
     // ONE server refresh at a time — this is the coalescing guard the findmy screen relies on.
     // It polls `refresh()` on a bare 60s interval and pull-to-refresh calls it directly; neither
     // goes through the header button's `disabled={refreshing}`, and a slow iCloud re-poll easily
@@ -152,13 +165,15 @@ export const useFindMyStore = create<FindMyState>((set, get) => ({
     // which is not necessarily the run that fetched the freshest locations.
     if (get().refreshing) return;
     if (isDev()) {
-      set({
-        devices: FIXTURE_DEVICES,
-        friends: FIXTURE_FRIENDS,
-        items: FIXTURE_ITEMS,
-        refreshing: false,
-        error: null,
-      });
+      if (generation === accountGeneration) {
+        set({
+          devices: FIXTURE_DEVICES,
+          friends: FIXTURE_FRIENDS,
+          items: FIXTURE_ITEMS,
+          refreshing: false,
+          error: null,
+        });
+      }
       return;
     }
     set({ refreshing: true, error: null });
@@ -170,6 +185,7 @@ export const useFindMyStore = create<FindMyState>((set, get) => ({
         findMyApi.refreshFriends(http),
         findMyApi.refreshItems(http),
       ]);
+      if (generation !== accountGeneration) return;
       set({
         devices: devRaw.map(normalizeDevice),
         friends: friRaw.map(normalizeFriend),
@@ -177,10 +193,23 @@ export const useFindMyStore = create<FindMyState>((set, get) => ({
         refreshing: false,
       });
     } catch {
-      set({
-        refreshing: false,
-        error: 'Couldn’t refresh locations. Check your server connection.',
-      });
+      if (generation === accountGeneration) {
+        set({
+          refreshing: false,
+          error: 'Couldn’t refresh locations. Check your server connection.',
+        });
+      }
     }
+  },
+  reset: () => {
+    accountGeneration += 1;
+    set({
+      devices: [],
+      friends: [],
+      items: [],
+      loading: false,
+      refreshing: false,
+      error: null,
+    });
   },
 }));

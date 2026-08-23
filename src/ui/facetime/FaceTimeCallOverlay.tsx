@@ -1,20 +1,14 @@
-import { lazy, Suspense } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isFaceTimeLink } from '@core/facetime';
+import { logger } from '@core/secure';
 import { useFaceTimeStore } from '@state/faceTimeStore';
-import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
-
-// Lazy so the native react-native-webview module is only pulled in when a call is on
-// screen; a build that hasn't linked it falls through to the LoadErrorBoundary fallback.
-const FaceTimeWebView = lazy(() =>
-  import('./FaceTimeWebView').then((m) => ({ default: m.FaceTimeWebView })),
-);
 
 /**
- * Full-screen in-app FaceTime call overlay (Phase 1). Renders whenever a call is active
- * (`faceTimeStore.call`). Hosts the FaceTime-web client in an embedded WebView; if that
- * can't load (module not linked yet, or Apple rejects the in-app browser) it falls back
- * to opening the validated link in the system browser, so the call still works.
+ * Safe FaceTime handoff for an active call. The embedded WebView is deliberately disabled while
+ * FACE-01 is open: it granted camera/microphone access while allowing broad navigation. The link
+ * has already passed the FaceTime allowlist before entering the store, and the system browser owns
+ * its navigation and media permission prompts.
  */
 export function FaceTimeCallOverlay(): React.JSX.Element | null {
   const call = useFaceTimeStore((s) => s.call);
@@ -24,30 +18,30 @@ export function FaceTimeCallOverlay(): React.JSX.Element | null {
   if (!call) return null;
 
   const openInBrowser = (): void => {
-    void Linking.openURL(call.link);
+    if (!isFaceTimeLink(call.link)) {
+      logger.warn('[facetime] refused non-FaceTime browser handoff');
+      return;
+    }
+    void Linking.openURL(call.link).catch((error) => {
+      logger.warn('[facetime] browser handoff failed', error);
+    });
   };
-
-  const fallback = (
-    <View style={styles.fallback}>
-      <Text style={styles.fallbackText}>Open this FaceTime call in your browser to continue.</Text>
-      <Pressable
-        style={styles.fallbackBtn}
-        onPress={openInBrowser}
-        accessibilityRole="button"
-        accessibilityLabel="Open FaceTime call in browser"
-      >
-        <Text style={styles.fallbackBtnText}>Open in browser</Text>
-      </Pressable>
-    </View>
-  );
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.container]}>
-      <LoadErrorBoundary fallback={fallback}>
-        <Suspense fallback={<ActivityIndicator style={styles.flex} color="#fff" />}>
-          <FaceTimeWebView uri={call.link} />
-        </Suspense>
-      </LoadErrorBoundary>
+      <View style={styles.fallback}>
+        <Text style={styles.fallbackText}>
+          Open this FaceTime call in your browser to continue.
+        </Text>
+        <Pressable
+          style={styles.fallbackBtn}
+          onPress={openInBrowser}
+          accessibilityRole="button"
+          accessibilityLabel="Open FaceTime call in browser"
+        >
+          <Text style={styles.fallbackBtnText}>Open in browser</Text>
+        </Pressable>
+      </View>
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
         <Text style={styles.title} numberOfLines={1}>
           FaceTime
@@ -68,7 +62,6 @@ export function FaceTimeCallOverlay(): React.JSX.Element | null {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#000', zIndex: 100 },
-  flex: { flex: 1 },
   topBar: {
     position: 'absolute',
     top: 0,

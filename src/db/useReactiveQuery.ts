@@ -53,6 +53,9 @@ export function useReactiveQuery<T>(
   useEffect(() => {
     if (!enabled) {
       // Idle state; the functional update bails (same object) when already idle.
+      // This synchronous transition is the hook's explicit public gate: consumers must stop
+      // seeing cached data as soon as a query is disabled, before any async callback can run.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState((s) =>
         s.data === null && !s.isLoading && s.error === null
           ? s

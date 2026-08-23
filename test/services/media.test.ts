@@ -16,9 +16,28 @@ jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn(),
   shareAsync: jest.fn(),
 }));
+const mockFileExists = jest.fn((_path: string) => true);
+jest.mock('expo-file-system', () => ({
+  File: class {
+    constructor(private readonly path: string) {}
+    get exists(): boolean {
+      return mockFileExists(this.path);
+    }
+  },
+}));
+
+const mockReleaseProtection = jest.fn();
+const mockProtectPath = jest.fn<{ path: string; release: () => void } | null, [string]>((path) => ({
+  path,
+  release: mockReleaseProtection,
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: { protect: (path: string) => mockProtectPath(path) },
+}));
 
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
+import { statNativeAttachmentCacheFile } from '@native/boundedDownload';
 import { saveAttachmentsToPhotos, saveImageToLibrary, shareAttachment } from '@/services/media';
 
 const requestPerm = MediaLibrary.requestPermissionsAsync as jest.Mock;
@@ -29,19 +48,113 @@ const createAlbum = MediaLibrary.createAlbumAsync as jest.Mock;
 const addToAlbum = MediaLibrary.addAssetsToAlbumAsync as jest.Mock;
 const isAvailable = Sharing.isAvailableAsync as jest.Mock;
 const shareAsync = Sharing.shareAsync as jest.Mock;
+const statAttachment = statNativeAttachmentCacheFile as jest.Mock;
 
 beforeEach(() => {
   // The helpers log failures via the redacting logger's console sink — keep test output clean.
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
+  mockProtectPath.mockReset().mockImplementation((path: string) => ({
+    path,
+    release: mockReleaseProtection,
+  }));
+  mockReleaseProtection.mockReset();
+  statAttachment.mockReset().mockResolvedValue({ exists: true, bytes: 100 });
+  mockFileExists.mockReset().mockReturnValue(true);
 });
 
 describe('shareAttachment', () => {
   it('opens the share sheet with the path + mimeType and reports ok', async () => {
     isAvailable.mockResolvedValue(true);
     shareAsync.mockResolvedValue(undefined);
-    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({ ok: true });
+    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({
+      ok: true,
+    });
     expect(shareAsync).toHaveBeenCalledWith('file:///docs/a.jpg', { mimeType: 'image/jpeg' });
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
+  it('acquires its operation pin synchronously and holds it until sharing settles', async () => {
+    let settle!: (available: boolean) => void;
+    isAvailable.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        settle = resolve;
+      }),
+    );
+
+    const result = shareAttachment('file:///docs/a.jpg', 'image/jpeg');
+    expect(mockProtectPath).toHaveBeenCalledWith('file:///docs/a.jpg');
+    expect(mockReleaseProtection).not.toHaveBeenCalled();
+
+    settle(false);
+    await expect(result).resolves.toEqual({ ok: false, reason: 'unavailable' });
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
+  it('never hands the path to native sharing when protection is refused', async () => {
+    mockProtectPath.mockReturnValueOnce(null);
+    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+    expect(statAttachment).not.toHaveBeenCalled();
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the exact file under the pin before opening the share sheet', async () => {
+    statAttachment.mockResolvedValueOnce({ exists: false, bytes: 0 });
+    await expect(shareAttachment('file:///docs/a.jpg', 'image/jpeg')).resolves.toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+    expect(statAttachment).toHaveBeenCalledWith('file:///docs/a.jpg');
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(shareAsync).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses an exact Expo stat for a valid user file outside the fixed cache boundary', async () => {
+    statAttachment.mockRejectedValueOnce(new Error('outside attachment root'));
+    isAvailable.mockResolvedValue(true);
+    shareAsync.mockResolvedValue(undefined);
+
+    await expect(shareAttachment('file:///picker/a.jpg', 'image/jpeg')).resolves.toEqual({
+      ok: true,
+    });
+    expect(mockFileExists).toHaveBeenCalledWith('file:///picker/a.jpg');
+    expect(shareAsync).toHaveBeenCalledWith('file:///picker/a.jpg', { mimeType: 'image/jpeg' });
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when native stat rejects a canonical managed-cache path', async () => {
+    const managedPath =
+      'file:///data/user/0/app/files/attachments/media-att-1/generation-1/media-a.jpg';
+    statAttachment.mockRejectedValueOnce(new Error('symlink or corrupt managed path'));
+
+    await expect(shareAttachment(managedPath, 'image/jpeg')).resolves.toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+    expect(mockFileExists).not.toHaveBeenCalled();
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(shareAsync).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fall back when native stat rejects a malformed path in the managed namespace', async () => {
+    const malformedManagedPath =
+      'file:///data/user/0/app/files/attachments/media-att-1/generation-01/media-a.jpg';
+    statAttachment.mockRejectedValueOnce(new Error('noncanonical managed path'));
+
+    await expect(shareAttachment(malformedManagedPath, 'image/jpeg')).resolves.toEqual({
+      ok: false,
+      reason: 'failed',
+    });
+    expect(mockFileExists).not.toHaveBeenCalled();
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(shareAsync).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
   });
 
   it('maps a null mimeType to undefined', async () => {
@@ -95,6 +208,34 @@ describe('saveAttachmentsToPhotos', () => {
     expect(requestPerm).toHaveBeenCalledWith(true);
   });
 
+  it('pins every local source synchronously before the first permission await', async () => {
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    saveToLibrary.mockResolvedValue(undefined);
+
+    const result = saveAttachmentsToPhotos(['file:///docs/a.jpg', 'file:///docs/b.jpg']);
+    expect(mockProtectPath).toHaveBeenNthCalledWith(1, 'file:///docs/a.jpg');
+    expect(mockProtectPath).toHaveBeenNthCalledWith(2, 'file:///docs/b.jpg');
+    expect(mockReleaseProtection).not.toHaveBeenCalled();
+
+    await expect(result).resolves.toEqual({ status: 'saved', saved: 2 });
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips a path whose protection is refused and never passes it to MediaLibrary', async () => {
+    mockProtectPath.mockImplementation((path: string) =>
+      path.endsWith('/a.jpg') ? null : { path, release: mockReleaseProtection },
+    );
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    saveToLibrary.mockResolvedValue(undefined);
+
+    await expect(
+      saveAttachmentsToPhotos(['file:///docs/a.jpg', 'file:///docs/b.jpg']),
+    ).resolves.toEqual({ status: 'saved', saved: 1 });
+    expect(saveToLibrary).toHaveBeenCalledTimes(1);
+    expect(saveToLibrary).toHaveBeenCalledWith('file:///docs/b.jpg');
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
   it('reports denied (and saves nothing) without the Photos permission', async () => {
     requestPerm.mockResolvedValue({ status: 'denied' });
     await expect(saveAttachmentsToPhotos(['file:///docs/a.jpg'])).resolves.toEqual({
@@ -121,10 +262,11 @@ describe('saveAttachmentsToPhotos', () => {
   });
 
   it('reports none when nothing is downloaded yet', async () => {
-    requestPerm.mockResolvedValue({ status: 'granted' });
     await expect(saveAttachmentsToPhotos([null, 'https://dev.local/b.jpg'])).resolves.toEqual({
       status: 'none',
     });
+    expect(requestPerm).not.toHaveBeenCalled();
+    expect(mockProtectPath).not.toHaveBeenCalled();
     expect(saveToLibrary).not.toHaveBeenCalled();
   });
 
@@ -155,6 +297,7 @@ describe('saveImageToLibrary', () => {
     requestPerm.mockResolvedValue({ status: 'denied' });
     await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('denied');
     expect(saveToLibrary).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
   });
 
   it('asks for WRITE-ONLY permission on the auto-download path too', async () => {
@@ -170,6 +313,15 @@ describe('saveImageToLibrary', () => {
     await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('saved');
     expect(saveToLibrary).toHaveBeenCalledWith('file:///docs/a.jpg');
     expect(createAsset).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
+  it('never calls the library when its operation pin is refused', async () => {
+    mockProtectPath.mockReturnValueOnce(null);
+    await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('error');
+    expect(statAttachment).not.toHaveBeenCalled();
+    expect(requestPerm).not.toHaveBeenCalled();
+    expect(saveToLibrary).not.toHaveBeenCalled();
   });
 
   // THE GUARD, and the reason the album path looks the way it does: `addAssetsToAlbumAsync(…,

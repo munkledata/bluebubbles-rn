@@ -2,7 +2,6 @@ import { Chat, Message, parseMessageSummaryInfo } from '@core/models';
 import {
   applyLocalEdit,
   applyLocalUnsend,
-  clearLocalUnsend,
   getMessageTextByGuid,
   revertLocalEdit,
   revertLocalUnsend,
@@ -12,7 +11,10 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+
+type Outcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; error: unknown };
 
 async function seed(db: AppDatabase): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
@@ -42,15 +44,66 @@ describe('edit/unsend repo fns', () => {
     expect(row.dateRetracted).toBeNull();
   });
 
-  it('applyLocalUnsend sets, and clearLocalUnsend clears, dateRetracted', async () => {
-    const { db } = await createTestDb();
-    const chatId = await seed(db);
-    await applyLocalUnsend(db, 'm1', 7000);
-    let row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
-    expect(row.dateRetracted).toBe(7000);
-    await clearLocalUnsend(db, 'm1');
-    row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
-    expect(row.dateRetracted).toBeNull();
+  it('applyLocalUnsend snapshots and restores the exact prior dateRetracted', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seed(db);
+      for (const prior of [4_321, 0]) {
+        raw.prepare("UPDATE messages SET date_retracted = ? WHERE guid = 'm1'").run(prior);
+        const previous = await applyLocalUnsend(db, 'm1', 7000);
+        expect(previous).toEqual({ dateRetracted: prior, chatGuid: 'c1' });
+        let row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
+        expect(row.dateRetracted).toBe(7000);
+        expect(await revertLocalUnsend(db, 'm1', 7000, previous?.dateRetracted)).toBe(true);
+        row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
+        expect(row.dateRetracted).toBe(prior);
+      }
+      expect(await applyLocalUnsend(db, 'missing', 7001)).toBeNull();
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('rolls a failed unsend apply back, releases the owner, and retries with the same snapshot', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      await seed(db);
+      raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+      raw.exec(`CREATE TRIGGER fail_unsend_apply
+        BEFORE UPDATE OF date_retracted ON messages
+        WHEN NEW.date_retracted = 7000
+        BEGIN SELECT RAISE(ABORT, 'UNSEND_APPLY_CANARY'); END`);
+      try {
+        const failure = await applyLocalUnsend(db, 'm1', 7000).then<
+          Outcome<unknown>,
+          Outcome<unknown>
+        >(
+          (value) => ({ kind: 'fulfilled', value }),
+          (error: unknown) => ({ kind: 'rejected', error }),
+        );
+        expect(failure.kind).toBe('rejected');
+        if (failure.kind === 'rejected') {
+          const record = failure.error as { message?: unknown };
+          expect(record.message).toBe('UNSEND_APPLY_CANARY');
+        }
+        expect(raw.inTransaction).toBe(false);
+        expect(
+          (
+            raw.prepare("SELECT date_retracted AS value FROM messages WHERE guid='m1'").get() as {
+              value: number | null;
+            }
+          ).value,
+        ).toBe(4321);
+      } finally {
+        raw.exec('DROP TRIGGER IF EXISTS fail_unsend_apply');
+      }
+
+      const retry = await applyLocalUnsend(db, 'm1', 7000);
+      expect(retry).toEqual({ dateRetracted: 4321, chatGuid: 'c1' });
+      expect(await revertLocalUnsend(db, 'm1', 7000, retry?.dateRetracted)).toBe(true);
+    } finally {
+      raw.close();
+    }
   });
 
   it('getMessageTextByGuid returns the current text/edit marker', async () => {
@@ -71,6 +124,82 @@ describe('edit/unsend repo fns', () => {
     );
     const row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
     expect(row.dateRetracted).toBe(9000);
+  });
+
+  it('queues optimistic edits, unsends, and both reverts behind a rolling-back neighbour', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({ guid: 'm2', text: 'original two', dateCreated: 200 }),
+        Message.parse({
+          guid: 'm3',
+          text: 'optimistic edit',
+          dateCreated: 300,
+          dateEdited: 5000,
+        }),
+        Message.parse({
+          guid: 'm4',
+          text: 'optimistic unsend',
+          dateCreated: 400,
+          dateRetracted: 7000,
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+
+    let neighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const started = new Promise<void>((resolve) => {
+      neighbourStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourStarted();
+      await release;
+      throw new Error('neighbour rollback');
+    });
+    await started;
+
+    const edit = applyLocalEdit(db, 'm1', 'queued edit', 6000);
+    const unsend = applyLocalUnsend(db, 'm2', 8000);
+    const editRevert = revertLocalEdit(db, 'm3', 'before edit', null, 5000);
+    const unsendRevert = revertLocalUnsend(db, 'm4', 7000);
+    await Promise.resolve();
+
+    const before = await listMessagesWithSenders(db, chatId);
+    expect(before.find((row) => row.guid === 'm1')).toMatchObject({
+      text: 'original',
+      dateEdited: null,
+    });
+    expect(before.find((row) => row.guid === 'm2')?.dateRetracted).toBeNull();
+    expect(before.find((row) => row.guid === 'm3')).toMatchObject({
+      text: 'optimistic edit',
+      dateEdited: 5000,
+    });
+    expect(before.find((row) => row.guid === 'm4')?.dateRetracted).toBe(7000);
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    await Promise.all([edit, unsend]);
+    await expect(editRevert).resolves.toBe(true);
+    await expect(unsendRevert).resolves.toBe(true);
+
+    const after = await listMessagesWithSenders(db, chatId);
+    expect(after.find((row) => row.guid === 'm1')).toMatchObject({
+      text: 'queued edit',
+      dateEdited: 6000,
+    });
+    expect(after.find((row) => row.guid === 'm2')?.dateRetracted).toBe(8000);
+    expect(after.find((row) => row.guid === 'm3')).toMatchObject({
+      text: 'before edit',
+      dateEdited: null,
+    });
+    expect(after.find((row) => row.guid === 'm4')?.dateRetracted).toBeNull();
   });
 });
 
@@ -143,7 +272,14 @@ describe('messageSummaryInfo persistence (edit history)', () => {
   it('overwrites with the fuller history when a new edit re-supplies it', async () => {
     const { db } = await createTestDb();
     const chatId = await seed(db);
-    const v1 = { editedParts: { '0': [{ date: 100, text: 'a' }, { date: 200, text: 'b' }] } };
+    const v1 = {
+      editedParts: {
+        '0': [
+          { date: 100, text: 'a' },
+          { date: 200, text: 'b' },
+        ],
+      },
+    };
     const v2 = {
       editedParts: {
         '0': [
