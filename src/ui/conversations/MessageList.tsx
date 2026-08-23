@@ -1,6 +1,7 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -80,6 +81,41 @@ function distFromBottomOf(e: NativeSyntheticEvent<NativeScrollEvent>): number {
   return contentSize.height - contentOffset.y - layoutMeasurement.height;
 }
 
+function useReduceMotionPreference(): readonly [boolean | null, React.RefObject<boolean | null>] {
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+  const reduceMotionRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    let receivedPreferenceEvent = false;
+    const applyPreference = (enabled: boolean): void => {
+      reduceMotionRef.current = enabled;
+      setReduceMotion(enabled);
+    };
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+      receivedPreferenceEvent = true;
+      if (mounted) applyPreference(enabled);
+    });
+
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted && !receivedPreferenceEvent) applyPreference(enabled);
+      },
+      () => {
+        // If the native query is unavailable, retain the existing animated behavior.
+        if (mounted && !receivedPreferenceEvent) applyPreference(false);
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return [reduceMotion, reduceMotionRef];
+}
+
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
 // from the bottom so the newest message is visible and the list stays pinned
 // (the scrollPin convergence loop below is what "pinned" means).
@@ -103,6 +139,7 @@ export function MessageList({
   accountLease,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
+  const [reduceMotion, reduceMotionRef] = useReduceMotionPreference();
   const [screenLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
   // memoized inside the hook so FlashList's layout stays stable across the frequent re-renders.
@@ -223,12 +260,16 @@ export function MessageList({
       const index = rowsRef.current.findIndex((m) => m.guid === originatorGuid);
       if (index < 0) return; // the original isn't in the loaded window
       applyPin(unpinExplicitly(pinRef.current));
-      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+      listRef.current?.scrollToIndex({
+        index,
+        animated: reduceMotionRef.current === false,
+        viewPosition: 0.4,
+      });
       setHighlightGuid(originatorGuid);
       if (highlightTimer.current) clearTimeout(highlightTimer.current);
       highlightTimer.current = setTimeout(() => setHighlightGuid(null), 1600);
     },
-    [applyPin],
+    [applyPin, reduceMotionRef],
   );
   // Highlight the target once it's mounted in view (once per target); nudge it toward center.
   const focusedRef = useRef<string | null>(null);
@@ -348,12 +389,12 @@ export function MessageList({
       // short, leaving the just-sent bubble hidden below the fold.
       if (appendRaf.current != null) cancelAnimationFrame(appendRaf.current);
       appendRaf.current = requestAnimationFrame(() =>
-        listRef.current?.scrollToEnd({ animated: true }),
+        listRef.current?.scrollToEnd({ animated: reduceMotionRef.current === false }),
       );
     } else if (!pinRef.current.pinned) {
       setMissed((n) => n + 1);
     }
-  }, [rows, applyPin]);
+  }, [rows, applyPin, reduceMotionRef]);
 
   // The floating "jump to newest" button: shows whenever the list isn't following the newest
   // message. In an anchored session it EXITS the anchor (the screen clears it and the chat
@@ -364,8 +405,8 @@ export function MessageList({
       return;
     }
     applyPin(pinExplicitly(pinRef.current));
-    listRef.current?.scrollToEnd({ animated: true });
-  }, [onExitAnchor, applyPin]);
+    listRef.current?.scrollToEnd({ animated: reduceMotionRef.current === false });
+  }, [onExitAnchor, applyPin, reduceMotionRef]);
   const showFab = onExitAnchor != null || (fabVisible && rows.length > 0);
 
   return (
@@ -388,7 +429,12 @@ export function MessageList({
         maintainVisibleContentPosition={
           focusReady
             ? undefined
-            : { startRenderingFromBottom: true, autoscrollToBottomThreshold: 0.2 }
+            : {
+                startRenderingFromBottom: true,
+                autoscrollToBottomThreshold: 0.2,
+                // FlashList otherwise defaults its near-bottom auto-follow to animated.
+                animateAutoScrollToBottom: reduceMotion === false,
+              }
         }
         // MUST be "handled" (the RN default is "never"). Under "never", while the keyboard is up
         // ANY touch on the list dismisses it AND the children never receive that touch — which
