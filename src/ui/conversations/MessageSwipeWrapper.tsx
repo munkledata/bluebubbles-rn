@@ -1,5 +1,6 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Animated, PanResponder, StyleSheet, View } from 'react-native';
+import { useReduceMotionPreferenceRef } from '../hooks/useReduceMotionPreference';
 import {
   isHorizontalSwipe,
   isReplyTrigger,
@@ -36,23 +37,64 @@ export function MessageSwipeWrapper({
 }: MessageSwipeWrapperProps): React.JSX.Element {
   const theme = useTheme();
   const tx = useRef(new Animated.Value(0)).current;
+  const activeSettle = useRef<Animated.CompositeAnimation | null>(null);
   // The responder is created once; ref the latest onReply so the bound-per-render closure
   // (row-memo pattern) isn't stale inside it.
   const onReplyRef = useRef(onReply);
   onReplyRef.current = onReply;
 
-  const settle = (): void => {
-    Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
+  const stopActiveSettle = (): boolean => {
+    const animation = activeSettle.current;
+    activeSettle.current = null;
+    animation?.stop();
+    return animation != null;
   };
 
-  const responder = useRef(
-    PanResponder.create({
+  const reduceMotion = useReduceMotionPreferenceRef((enabled) => {
+    // A setting change must not move a row under the user's finger. Only retire an automatic
+    // return that this wrapper currently owns.
+    if (enabled && stopActiveSettle()) tx.setValue(0);
+  });
+
+  const settle = (): void => {
+    stopActiveSettle();
+    if (reduceMotion.current !== false) {
+      tx.setValue(0);
+      return;
+    }
+
+    const animation = Animated.spring(tx, {
+      toValue: 0,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 20,
+    });
+    activeSettle.current = animation;
+    animation.start(() => {
+      if (activeSettle.current === animation) activeSettle.current = null;
+    });
+  };
+
+  useEffect(
+    () => () => {
+      stopActiveSettle();
+    },
+    [],
+  );
+
+  const responderRef = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (responderRef.current === null) {
+    responderRef.current = PanResponder.create({
       // Never claim on touch-start, so taps/long-press reach the bubble.
       onStartShouldSetPanResponder: () => false,
       // Claim only a mostly-horizontal drag so vertical list scrolling is untouched — in BOTH the
       // bubble and capture phases so the swipe is recognised before the FlashList scroll engages.
       onMoveShouldSetPanResponder: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
       onMoveShouldSetPanResponderCapture: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
+      onPanResponderGrant: () => {
+        // A fresh finger owns the value now; stop an older automatic return without snapping.
+        stopActiveSettle();
+      },
       onPanResponderMove: (_e, g) => tx.setValue(swipeTranslate(g.dx, !!onReplyRef.current)),
       onPanResponderRelease: (_e, g) => {
         if (isReplyTrigger(g.dx, !!onReplyRef.current)) onReplyRef.current?.();
@@ -64,8 +106,9 @@ export function MessageSwipeWrapper({
       // Android: block the native scroll once the JS gesture is granted (RN default; explicit here).
       onShouldBlockNativeResponder: () => true,
       onPanResponderTerminate: settle,
-    }),
-  ).current;
+    });
+  }
+  const responder = responderRef.current;
 
   return (
     <View style={styles.wrap}>
