@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
 import type { BubbleEffect } from '@core/effects';
 import { useTheme } from '../../theme';
 
@@ -8,27 +8,81 @@ interface BubbleEffectViewProps {
   children: React.ReactNode;
 }
 
+function useReduceMotionPreference(): boolean | null {
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    let receivedPreferenceEvent = false;
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+      receivedPreferenceEvent = true;
+      if (mounted) setReduceMotion(enabled);
+    });
+
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
+      },
+      () => {
+        // If the native query is unavailable, retain the existing animated behavior.
+        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reduceMotion;
+}
+
 /**
  * Plays an iMessage bubble send-effect once when the message first renders, using
  * RN's built-in Animated (no Reanimated). Invisible-ink hides the content behind
  * a tap-to-reveal overlay instead of animating.
  */
 export function BubbleEffectView({ effect, children }: BubbleEffectViewProps): React.JSX.Element {
-  if (effect === 'invisibleInk') return <InvisibleInk>{children}</InvisibleInk>;
-  return <AnimatedEntrance effect={effect}>{children}</AnimatedEntrance>;
+  const reduceMotion = useReduceMotionPreference();
+
+  if (effect === 'invisibleInk') {
+    return <InvisibleInk reduceMotion={reduceMotion}>{children}</InvisibleInk>;
+  }
+  return (
+    <AnimatedEntrance effect={effect} reduceMotion={reduceMotion}>
+      {children}
+    </AnimatedEntrance>
+  );
 }
 
 function AnimatedEntrance({
   effect,
+  reduceMotion,
   children,
 }: {
   effect: Exclude<BubbleEffect, 'invisibleInk'>;
+  reduceMotion: boolean | null;
   children: React.ReactNode;
 }): React.JSX.Element {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(1)).current;
+  const entranceConsumed = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (reduceMotion === null || entranceConsumed.current) {
+      scale.setValue(1);
+      opacity.setValue(1);
+      return;
+    }
+
+    entranceConsumed.current = true;
+    if (reduceMotion) {
+      scale.setValue(1);
+      opacity.setValue(1);
+      return;
+    }
+
     let anim: Animated.CompositeAnimation;
     if (effect === 'slam') {
       // Drops in oversized, then slams to size with a spring overshoot.
@@ -70,14 +124,18 @@ function AnimatedEntrance({
     anim.start();
     // Stop if the row unmounts mid-animation (FlashList recycles rows).
     return () => anim.stop();
-    // Play once on first mount of this message.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [effect, opacity, reduceMotion, scale]);
 
   return <Animated.View style={{ opacity, transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
-function InvisibleInk({ children }: { children: React.ReactNode }): React.JSX.Element {
+function InvisibleInk({
+  children,
+  reduceMotion,
+}: {
+  children: React.ReactNode;
+  reduceMotion: boolean | null;
+}): React.JSX.Element {
   const theme = useTheme();
   const [revealed, setRevealed] = useState(false);
   const contentOpacity = useRef(new Animated.Value(0.04)).current;
@@ -86,8 +144,22 @@ function InvisibleInk({ children }: { children: React.ReactNode }): React.JSX.El
 
   useEffect(() => () => revealAnim.current?.stop(), []); // stop if unmounted mid-reveal
 
+  useLayoutEffect(() => {
+    if (!revealed || !reduceMotion) return;
+    revealAnim.current?.stop();
+    revealAnim.current = null;
+    contentOpacity.setValue(1);
+    overlayOpacity.setValue(0);
+  }, [contentOpacity, overlayOpacity, reduceMotion, revealed]);
+
   const reveal = (): void => {
     setRevealed(true);
+    if (reduceMotion !== false) {
+      contentOpacity.setValue(1);
+      overlayOpacity.setValue(0);
+      return;
+    }
+
     revealAnim.current = Animated.parallel([
       Animated.timing(contentOpacity, { toValue: 1, duration: 450, useNativeDriver: true }),
       Animated.timing(overlayOpacity, { toValue: 0, duration: 450, useNativeDriver: true }),
