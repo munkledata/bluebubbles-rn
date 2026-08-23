@@ -23,7 +23,7 @@
  * Each test gets a FRESH QueryClient (retry off; gcTime Infinity so no GC timers linger).
  */
 import React from 'react';
-import { Share } from 'react-native';
+import { AccessibilityInfo, Share } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 
@@ -32,6 +32,13 @@ const mockBack = jest.fn();
 // `mock*` prefix so the jest.mock factory below may close over it (hoisting rule).
 const mockHttpPost = jest.fn();
 const mockQrCode = jest.fn();
+const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
+  typeof AccessibilityInfo.isReduceMotionEnabled
+>;
+const mockAddEventListener = AccessibilityInfo.addEventListener as jest.Mock;
+
+let reduceMotionListeners: Array<(enabled: boolean) => void>;
+let removeReduceMotionListeners: jest.Mock[];
 
 // The full `@ui` barrel drags in the conversation/attachment tree (expo-video/expo-image/ky —
 // native/ESM modules jest-expo can't load). The screen only needs `Screen` + `useTheme`.
@@ -234,6 +241,16 @@ function arrangeSecondServer(): void {
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
+  reduceMotionListeners = [];
+  removeReduceMotionListeners = [];
+  mockIsReduceMotionEnabled.mockReset().mockResolvedValue(false);
+  mockAddEventListener.mockReset().mockImplementation((event, listener) => {
+    expect(event).toBe('reduceMotionChanged');
+    reduceMotionListeners.push(listener as (enabled: boolean) => void);
+    const remove = jest.fn();
+    removeReduceMotionListeners.push(remove);
+    return { remove };
+  });
   useSessionStore.setState({ origin: 'https://gator.example', serverInfo: null });
   useSyncStore.setState({ status: 'idle', chats: 0, messages: 0, error: null });
   useDialogStore.setState({ current: null, queue: [] });
@@ -588,6 +605,44 @@ async function renderSettledScreen(): Promise<void> {
   await screen.findByText(/Reachable/); // ping
 }
 
+async function settleInitialMotionPreference(): Promise<void> {
+  await waitFor(() => expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+async function emitReduceMotion(enabled: boolean): Promise<void> {
+  expect(reduceMotionListeners).toHaveLength(1);
+  await act(async () => {
+    reduceMotionListeners[0]?.(enabled);
+  });
+}
+
+async function openPairingQr(): Promise<ReturnType<typeof screen.getByTestId>> {
+  await invokeConfiguredPress(
+    retainConfiguredPress(screen.getByRole('button', { name: 'Show Pairing QR' })),
+  );
+  return screen.findByTestId('pairing-qr-modal');
+}
+
+async function closePairingQr(): Promise<void> {
+  await fireEvent.press(screen.getByRole('button', { name: 'Close pairing QR' }));
+  await waitFor(() => expect(screen.queryByTestId('pairing-qr-modal')).toBeNull());
+}
+
+async function openServerLogs(): Promise<ReturnType<typeof screen.getByTestId>> {
+  await invokeConfiguredPress(
+    retainConfiguredPress(screen.getByRole('button', { name: 'View Server Logs' })),
+  );
+  return screen.findByTestId('server-logs-modal');
+}
+
+async function closeServerLogs(): Promise<void> {
+  await fireEvent.press(screen.getByRole('button', { name: 'Close server logs' }));
+  await waitFor(() => expect(screen.queryByTestId('server-logs-modal')).toBeNull());
+}
+
 /** Press an ACTIONS row and return the confirm dialog it enqueued (AppDialog isn't mounted here,
  *  so the dialog only exists in the store — which is exactly where the button handlers live). */
 async function pressRowAndGetConfirm(label: string): Promise<DialogRequest> {
@@ -852,4 +907,172 @@ describe('ServerManagementScreen — View Server Logs', () => {
       resumeRealtimeDeliveries();
     },
   );
+});
+
+describe('ServerManagementScreen — Reduce Motion modal openings', () => {
+  it('opens safely while the preference is unresolved and only slides after a later false result', async () => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    await renderSettledScreen();
+
+    expect((await openPairingQr()).props.animationType).toBe('none');
+    await act(async () => {
+      preference.resolve(false);
+      await preference.promise;
+    });
+    expect(screen.getByTestId('pairing-qr-modal').props.animationType).toBe('none');
+
+    await closePairingQr();
+    expect((await openPairingQr()).props.animationType).toBe('slide');
+  });
+
+  it('suppresses both modal slides when Reduce Motion is initially enabled', async () => {
+    mockIsReduceMotionEnabled.mockResolvedValue(true);
+    mockHttpPost.mockResolvedValueOnce({ logs: PRIVATE_LOG });
+    await renderSettledScreen();
+    await settleInitialMotionPreference();
+
+    expect((await openPairingQr()).props.animationType).toBe('none');
+    await closePairingQr();
+    expect((await openServerLogs()).props.animationType).toBe('none');
+    expect(await screen.findByText(PRIVATE_LOG)).toBeTruthy();
+  });
+
+  it('retains both existing modal slides when Reduce Motion is initially disabled', async () => {
+    mockIsReduceMotionEnabled.mockResolvedValue(false);
+    mockHttpPost.mockResolvedValueOnce({ logs: PRIVATE_LOG });
+    await renderSettledScreen();
+    await settleInitialMotionPreference();
+
+    expect((await openPairingQr()).props.animationType).toBe('slide');
+    await closePairingQr();
+    expect((await openServerLogs()).props.animationType).toBe('slide');
+    expect(await screen.findByText(PRIVATE_LOG)).toBeTruthy();
+  });
+
+  it('does not recreate an open modal when the native query rejects, then restores future slides', async () => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    await renderSettledScreen();
+
+    expect((await openPairingQr()).props.animationType).toBe('none');
+    await act(async () => {
+      preference.reject(new Error('motion preference unavailable'));
+      await preference.promise.catch(() => undefined);
+    });
+    expect(screen.getByTestId('pairing-qr-modal').props.animationType).toBe('none');
+
+    await closePairingQr();
+    expect((await openPairingQr()).props.animationType).toBe('slide');
+  });
+
+  it('preserves an open revealed QR when motion becomes reduced and suppresses its next opening', async () => {
+    await renderSettledScreen();
+    await settleInitialMotionPreference();
+    const retainedOpen = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Show Pairing QR' }),
+    );
+
+    await invokeConfiguredPress(retainedOpen);
+    expect((await screen.findByTestId('pairing-qr-modal')).props.animationType).toBe('slide');
+    await fireEvent.press(screen.getByRole('button', { name: 'Reveal QR Code' }));
+    expect(await screen.findByTestId('pairing-qr-code')).toBeTruthy();
+
+    await emitReduceMotion(true);
+    await invokeConfiguredPress(retainedOpen);
+    expect(screen.getByTestId('pairing-qr-modal').props.animationType).toBe('slide');
+    expect(screen.getByTestId('pairing-qr-code')).toBeTruthy();
+
+    await closePairingQr();
+    expect((await openPairingQr()).props.animationType).toBe('none');
+    expect(screen.queryByTestId('pairing-qr-code')).toBeNull();
+  });
+
+  it('preserves open logs and captures the preference when a later response is published', async () => {
+    mockHttpPost.mockResolvedValueOnce({ logs: PRIVATE_LOG });
+    await renderSettledScreen();
+    await settleInitialMotionPreference();
+
+    expect((await openServerLogs()).props.animationType).toBe('slide');
+    expect(await screen.findByText(PRIVATE_LOG)).toBeTruthy();
+    await emitReduceMotion(true);
+    expect(screen.getByTestId('server-logs-modal').props.animationType).toBe('slide');
+    expect(screen.getByText(PRIVATE_LOG)).toBeTruthy();
+
+    await closeServerLogs();
+    const response = deferred<{ logs: string }>();
+    mockHttpPost.mockReturnValueOnce(response.promise);
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'View Server Logs' })),
+    );
+    await waitFor(() => expect(mockHttpPost).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('server-logs-modal')).toBeNull();
+
+    await emitReduceMotion(false);
+    await act(async () => {
+      response.resolve({ logs: SECOND_LOG });
+      await response.promise;
+    });
+    expect((await screen.findByTestId('server-logs-modal')).props.animationType).toBe('slide');
+    expect(await screen.findByText(SECOND_LOG)).toBeTruthy();
+  });
+
+  it('keeps an open none modal intact when slides become allowed and slides on the next opening', async () => {
+    mockIsReduceMotionEnabled.mockResolvedValue(true);
+    await renderSettledScreen();
+    await settleInitialMotionPreference();
+    const retainedOpen = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Show Pairing QR' }),
+    );
+
+    await invokeConfiguredPress(retainedOpen);
+    expect((await screen.findByTestId('pairing-qr-modal')).props.animationType).toBe('none');
+    await emitReduceMotion(false);
+    await invokeConfiguredPress(retainedOpen);
+    expect(screen.getByTestId('pairing-qr-modal').props.animationType).toBe('none');
+
+    await closePairingQr();
+    expect((await openPairingQr()).props.animationType).toBe('slide');
+  });
+
+  it.each([
+    ['false event over a stale true query', false, true, 'slide'],
+    ['true event over a stale false query', true, false, 'none'],
+  ] as const)('keeps the %s', async (_label, eventValue, staleQueryValue, expectedAnimation) => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    await renderSettledScreen();
+    await waitFor(() => expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1));
+
+    await emitReduceMotion(eventValue);
+    await act(async () => {
+      preference.resolve(staleQueryValue);
+      await preference.promise;
+    });
+
+    expect((await openPairingQr()).props.animationType).toBe(expectedAnimation);
+  });
+
+  it('removes its listener and ignores late native callbacks and query rejection after unmount', async () => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    const { view } = await renderScreen();
+    await screen.findByText('9.9.9');
+    await screen.findByText('42');
+    await screen.findByText(/Reachable/);
+    await waitFor(() => expect(reduceMotionListeners).toHaveLength(1));
+    const lateListener = reduceMotionListeners[0];
+
+    await view.unmount();
+    expect(removeReduceMotionListeners).toHaveLength(1);
+    expect(removeReduceMotionListeners[0]).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      lateListener?.(true);
+      preference.reject(new Error('late native preference failure'));
+      await preference.promise.catch(() => undefined);
+    });
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(removeReduceMotionListeners[0]).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,7 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useEffect, useLayoutEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Modal,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
@@ -36,10 +45,52 @@ async function readForAccount<T>(
   }
 }
 
+type ModalAnimationType = 'none' | 'slide';
+
+interface LogsModalState {
+  text: string;
+  animationType: ModalAnimationType;
+}
+
+function useReduceMotionPreferenceRef(): React.RefObject<boolean | null> {
+  const reduceMotion = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    let receivedPreferenceEvent = false;
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+      receivedPreferenceEvent = true;
+      if (mounted) reduceMotion.current = enabled;
+    });
+
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted && !receivedPreferenceEvent) reduceMotion.current = enabled;
+      },
+      () => {
+        // If the native query is unavailable, retain the existing slide behavior for future opens.
+        if (mounted && !receivedPreferenceEvent) reduceMotion.current = false;
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reduceMotion;
+}
+
+function modalAnimationFor(reduceMotion: boolean | null): ModalAnimationType {
+  return reduceMotion === false ? 'slide' : 'none';
+}
+
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
+  const reduceMotion = useReduceMotionPreferenceRef();
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const setServerInfo = useSessionStore((s) => s.setServerInfo);
   const origin = useSessionStore((s) => s.origin);
@@ -57,8 +108,8 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
-  const [logs, setLogs] = useState<string | null>(null);
-  const [qrOpen, setQrOpen] = useState(false);
+  const [logsModal, setLogsModal] = useState<LogsModalState | null>(null);
+  const [qrModal, setQrModal] = useState<ModalAnimationType | null>(null);
 
   // The lease revokes callbacks synchronously, but currentness is not reactive. Force an old
   // mounted route to unmount credential/log subtrees as soon as its account generation retires.
@@ -66,8 +117,8 @@ export default function ServerManagementScreen(): React.JSX.Element {
     () =>
       subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
         setAccountRetired(true);
-        setLogs(null);
-        setQrOpen(false);
+        setLogsModal(null);
+        setQrModal(null);
       }),
     [accountLease],
   );
@@ -195,7 +246,11 @@ export default function ServerManagementScreen(): React.JSX.Element {
           if (!activeLease.isCurrent()) return;
           const res = await serverApi.serverLogs(http, 500);
           if (activeLease.isCurrent()) {
-            setLogs(res.trim() ? res : 'No recent log lines.');
+            const nextModal = {
+              text: res.trim() ? res : 'No recent log lines.',
+              animationType: modalAnimationFor(reduceMotion.current),
+            };
+            setLogsModal((current) => current ?? nextModal);
           }
         });
       } catch (e) {
@@ -291,7 +346,10 @@ export default function ServerManagementScreen(): React.JSX.Element {
           <ActionRow
             label="Show Pairing QR"
             onPress={() => {
-              if (accountLease.isCurrent()) setQrOpen(true);
+              if (accountLease.isCurrent()) {
+                const animationType = modalAnimationFor(reduceMotion.current);
+                setQrModal((current) => current ?? animationType);
+              }
             }}
           />
           <ActionRow
@@ -371,14 +429,19 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
       {/* Conditionally rendered (not just visible=false) so PairingQr fully unmounts on close,
           dropping any revealed QR state along with it. */}
-      {accountCurrent && qrOpen ? (
-        <Modal visible animationType="slide" onRequestClose={() => setQrOpen(false)}>
+      {accountCurrent && qrModal ? (
+        <Modal
+          visible
+          animationType={qrModal}
+          onRequestClose={() => setQrModal(null)}
+          testID="pairing-qr-modal"
+        >
           <Screen>
             <ScreenHeader
               title="Pairing QR"
               right={
                 <Pressable
-                  onPress={() => setQrOpen(false)}
+                  onPress={() => setQrModal(null)}
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel="Close pairing QR"
@@ -392,14 +455,19 @@ export default function ServerManagementScreen(): React.JSX.Element {
         </Modal>
       ) : null}
 
-      {accountCurrent && logs != null ? (
-        <Modal visible animationType="slide" onRequestClose={() => setLogs(null)}>
+      {accountCurrent && logsModal ? (
+        <Modal
+          visible
+          animationType={logsModal.animationType}
+          onRequestClose={() => setLogsModal(null)}
+          testID="server-logs-modal"
+        >
           <Screen>
             <ScreenHeader
               title="Server Logs"
               right={
                 <Pressable
-                  onPress={() => setLogs(null)}
+                  onPress={() => setLogsModal(null)}
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel="Close server logs"
@@ -410,7 +478,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
             />
             <ScrollView contentContainerStyle={styles.logBody} horizontal={false}>
               <Text style={[styles.logText, { color: theme.color.secondaryLabel }]} selectable>
-                {logs}
+                {logsModal.text}
               </Text>
             </ScrollView>
           </Screen>
