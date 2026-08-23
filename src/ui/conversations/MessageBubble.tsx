@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
 import { parsePayloadData } from '@core/models';
 import { parseAttributedRuns, type TextRun } from '@core/richtext';
@@ -67,6 +67,7 @@ interface MessageBubbleProps {
 }
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
+const MESSAGE_ACTIONS = [{ name: 'longpress', label: 'Show message actions' }] as const;
 
 /** iOS message bubble: reply quote + attachments + text, with reactions + long-press.
  * Memoized (it does heavy work: attachments, reactions, URL preview, run rendering). */
@@ -96,6 +97,12 @@ export const MessageBubble = React.memo(function MessageBubble({
     if (!node) return;
     node.measureInWindow((x, y, width, height) => onLongPress({ x, y, width, height }));
   }, [onLongPress]);
+  const handleAccessibilityAction = useCallback(
+    (event: AccessibilityActionEvent): void => {
+      if (event.nativeEvent.actionName === 'longpress') handleLongPress();
+    },
+    [handleLongPress],
+  );
   const b = theme.color.bubble;
   const isFromMe = msg.isFromMe === 1;
   // From-me bubbles colour from the CHAT's service only — never the joined-handle `senderService`.
@@ -278,6 +285,9 @@ export const MessageBubble = React.memo(function MessageBubble({
       ref={bubbleRef}
       onLongPress={onLongPress ? handleLongPress : undefined}
       delayLongPress={onLongPress ? 350 : undefined}
+      accessibilityActions={onLongPress ? MESSAGE_ACTIONS : undefined}
+      accessibilityHint={onLongPress ? 'Double tap and hold for message actions' : undefined}
+      onAccessibilityAction={onLongPress ? handleAccessibilityAction : undefined}
       style={{ opacity: isSending ? 0.6 : 1 }}
     >
       {msg.replyPreview && msg.threadOriginatorGuid ? (

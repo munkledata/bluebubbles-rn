@@ -14,7 +14,8 @@
  * @utils/messageStatus, and the effect id map in @core/effects/effectsMapper.
  */
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import type { TestInstance } from 'test-renderer';
 import { renderWithTheme, screen, fireEvent, act } from '../support/renderWithTheme';
 import type {
   AttachmentRow,
@@ -288,13 +289,11 @@ interface PressabilityConfig {
   onLongPress?: (event: object) => void;
 }
 
-interface TestNode {
-  parent: TestNode | null;
-  props: Record<string, unknown>;
-}
+const mockMeasureInWindow = (View as unknown as { prototype: { measureInWindow: jest.Mock } })
+  .prototype.measureInWindow;
 
-function configuredLongPress(node: TestNode): PressabilityConfig['onLongPress'] {
-  let current: TestNode | null = node;
+function pressableHost(node: TestInstance): TestInstance {
+  let current: TestInstance | null = node;
   while (current) {
     const responder = current.props.onStartShouldSetResponder;
     if (typeof responder === 'function') {
@@ -303,11 +302,21 @@ function configuredLongPress(node: TestNode): PressabilityConfig['onLongPress'] 
           testOnly_pressabilityConfig?: () => PressabilityConfig;
         }
       ).testOnly_pressabilityConfig;
-      if (typeof readConfig === 'function') return readConfig().onLongPress;
+      if (typeof readConfig === 'function') return current;
     }
     current = current.parent;
   }
   throw new Error('Expected a React Native Pressability configuration');
+}
+
+function configuredLongPress(node: TestInstance): PressabilityConfig['onLongPress'] {
+  const responder = pressableHost(node).props.onStartShouldSetResponder as () => unknown;
+  const readConfig = (
+    responder as typeof responder & {
+      testOnly_pressabilityConfig: () => PressabilityConfig;
+    }
+  ).testOnly_pressabilityConfig;
+  return readConfig().onLongPress;
 }
 
 function expectContentCanariesPresent(tree: unknown): void {
@@ -480,6 +489,53 @@ describe('MessageBubble content paths', () => {
     await fireEvent.press(screen.getByLabelText('View who reacted'));
     expect(onJumpToReply).toHaveBeenCalledTimes(1);
     expect(onShowReactions).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MessageBubble accessibility actions', () => {
+  beforeEach(() => mockMeasureInWindow.mockReset());
+
+  it('opens the measured message menu for the standard longpress action only', async () => {
+    const onLongPress = jest.fn();
+    const rect = { x: 11, y: 22, width: 33, height: 44 };
+    mockMeasureInWindow.mockImplementationOnce(
+      (callback: (x: number, y: number, width: number, height: number) => void) =>
+        callback(rect.x, rect.y, rect.width, rect.height),
+    );
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail onLongPress={onLongPress} />,
+    );
+
+    const host = pressableHost(screen.getByText('Hello there'));
+    expect(host).toHaveAccessibleName('Hello there');
+    expect(host.props.accessibilityActions).toEqual([
+      { name: 'longpress', label: 'Show message actions' },
+    ]);
+    expect(host.props.accessibilityHint).toBe('Double tap and hold for message actions');
+    expect(host.props.onAccessibilityAction).toEqual(expect.any(Function));
+
+    await act(async () => {
+      fireEvent(host, 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
+    });
+    expect(mockMeasureInWindow).not.toHaveBeenCalled();
+    expect(onLongPress).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent(host, 'accessibilityAction', { nativeEvent: { actionName: 'longpress' } });
+    });
+    expect(mockMeasureInWindow).toHaveBeenCalledTimes(1);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(onLongPress).toHaveBeenCalledWith(rect);
+  });
+
+  it('does not advertise a message action or hint when long-press is unavailable', async () => {
+    await renderWithTheme(<MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail />);
+
+    const host = pressableHost(screen.getByText('Hello there'));
+    expect(host).toHaveAccessibleName('Hello there');
+    expect(host.props.accessibilityActions).toBeUndefined();
+    expect(host.props.accessibilityHint).toBeUndefined();
+    expect(host.props.onAccessibilityAction).toBeUndefined();
   });
 });
 
