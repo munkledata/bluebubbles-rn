@@ -6,8 +6,10 @@
 > `DEVICE-01B2-DATA-NATIVE-MATRIX` have reconciled the current notification/lifecycle and
 > data/native guidance below, but every result remains open until the external prerequisites and
 > separate execution approvals exist. `DEVICE-01B3-UI-ACCESSIBILITY-MATRIX` has now reconciled the
-> remaining permission, UI, accessibility, browser, theme, and account-transition guidance. The old
-> behavior matrix remains historical and permanently non-executable.
+> remaining permission, UI, accessibility, browser, theme, and account-transition guidance.
+> `DEVICE-01B4-A11Y-02-MOTION-MATRIX` refines its Reduce Motion evidence, but that matrix is blocked
+> on a later eligible candidate because frozen version code `56` predates the completed host work.
+> The old behavior matrix remains historical and permanently non-executable.
 
 This is the evidence record for the exact Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
@@ -30,6 +32,14 @@ copy a result from a development build or an older Play build into the candidate
 | Packaged Android boundary  | `arm64-v8a` only; minimum SDK 24; target SDK 36                                                   |
 | Distribution boundary      | Private Google Play Internal Testing only; no promotion                                           |
 | Current external state     | Not proven uploaded, accepted, published, Play-installed, or device-tested                        |
+
+**Reduce Motion applicability gate:** Git ancestry places the frozen source commit `5d367eb` 24
+commits before `8c5e783`, the commit containing the completed `A11Y-02A..L` host implementation.
+Version code `56` therefore cannot earn `A11Y-02` device credit, and the motion matrix below must not
+be executed on it. A later, separately approved Play candidate must be built locally from a commit
+that contains `8c5e7836b52df4207e315a7a445893f7b36b4a41`, then receive its own artifact/source/install ledger
+before motion testing. This documentation milestone neither authorizes nor creates that build,
+upload, install, or device session.
 
 Do **not** rebuild this candidate. The production profile auto-increments, so another production
 build would consume version code `57` and create a different artifact. If a separate upload is later
@@ -582,13 +592,14 @@ FaceTime-alert results remain owned by slice 1. Do not begin this slice until se
 approves Play distribution, the device session, controlled OS-setting changes, and both synthetic
 server identities used for account isolation.
 
-Use only the frozen Play-installed candidate, controlled tester profiles, synthetic contacts,
-neutral media, non-sensitive coordinates, and bounded staged-server fixtures. Do not rebuild,
-sideload, clear app data/cache/defaults, uninstall or disable handler apps, use `run-as`, capture raw
-logs/QR payloads/private paths, install an interception certificate or proxy on a personal device,
-or manufacture cleanup, permission, storage, browser, or native failures. Stop on production data,
-an unexpected permission or intent, private evidence exposure, account-B admission after an
-incomplete cleanup, uncontrolled external traffic, or a setting that cannot be restored safely.
+Except for the explicitly post-v56 motion matrix in section 5, use only the frozen Play-installed
+candidate, controlled tester profiles, synthetic contacts, neutral media, non-sensitive coordinates,
+and bounded staged-server fixtures. Do not rebuild, sideload, clear app data/cache/defaults, uninstall
+or disable handler apps, use `run-as`, capture raw logs/QR payloads/private paths, install an
+interception certificate or proxy on a personal device, or manufacture cleanup, permission, storage,
+browser, or native failures. Stop on production data, an unexpected permission or intent, private
+evidence exposure, account-B admission after an incomplete cleanup, uncontrolled external traffic,
+or a setting that cannot be restored safely.
 
 ### 1. Candidate state, fixtures, and Android applicability
 
@@ -736,10 +747,64 @@ outside this candidate's supported product, not as proof for `ANDROID-02` or `AN
       with inputs, the manual HTTP switch lacks a programmatic label, and message bubbles expose no
       TalkBack accessibility action for their long-press menu. These are findings, not candidate
       passes even if an adjacent label is read incidentally.
-- [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** With Android Remove animations/Reduce Motion on,
-      record that Gator effects currently do not adapt. Preserve content/control behavior, but keep
-      `A11Y-02` open and do not describe the unchanged animation as a successful reduced-motion
-      branch.
+
+#### `DEVICE-01B4-A11Y-02-MOTION-MATRIX` — future eligible candidate only
+
+Every row below is **BLOCKED ON A POST-v56 SOURCE REFRESH**. Do not run or check one against version
+code `56`. First freeze a separately approved, locally built Play candidate that passes the
+applicability gate above and record its new artifact, source, Play-install, delivered-signature, and
+session ledger. For every applicable row, exercise Reduce Motion off and on, a cold first opening, a
+foreground live toggle, a toggle while backgrounded followed by resume, and restoration to off.
+Record Android/API, OEM/device, navigation mode, keyboard state, font/display scale, and TalkBack
+state. Keep query-failure ordering, native listener counts, and generation fencing as host evidence;
+do not infer them visually or manufacture a native failure.
+
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02A` — screen effects:** With Reduce Motion
+      on, a new synthetic screen effect shows no particles or first-frame flash; live enablement
+      stops and settles an active effect once without hiding content or controls. Restoring off
+      changes only future effects.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02B` — bubble and invisible-ink effects:**
+      Bubble entrances remain static while reduced; live enablement lands final opacity/scale without
+      replay. Invisible ink stays concealed until explicit reveal, then reveals immediately while
+      reduced and with its existing animation while off; a consumed entrance does not replay
+      unexpectedly.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02C` — typing pulse:** Reduced motion keeps
+      three visible static dots; live enablement stops the pulse, and restoring off starts one fresh,
+      non-overlapping pulse. Grouping, layout, and meaning remain usable.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02D` — message-action overlay:** The anchored
+      action UI opens fully visible without its pop and leaves every control reachable. Live
+      enablement settles an active pop at its final values without replaying, recreating, dismissing,
+      or changing the anchored placement; restoring off affects only a later opening.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02E` — server modals:** QR and log modals
+      suppress the slide while reduced and retain it while off; a visible opening stays latched, and
+      close/reopen uses the latest preference. Verify Back/Done, QR concealment, content, and focus.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02F` — photo reset:** Pinch and pan remain
+      finger-controlled; automatic return snaps while reduced and springs while off. Live enablement
+      lands safely, and re-grab, pager/offscreen reuse, and TalkBack remain usable.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02G` — message-list scroll:** Reply jump,
+      delayed own-send reveal, newest action, and near-bottom following are immediate while reduced
+      and animated while off. Direct scroll, target landing, pinning, and late growth stay correct;
+      record queued/in-flight native behavior without claiming cancellation that cannot be observed.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02H/H1` — shared motion owner:** Long,
+      high-count message and conversation lists plus recycle/remount react consistently without stale
+      rows, flicker, or duplicated visible behavior. Only retained host tests—not visual inspection—
+      may prove one native query/listener owner.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02I` — message swipe:** Left timestamp and
+      right reply tracking stay direct; automatic release snaps instead of springing while reduced.
+      Verify live toggles during held/return motion, rapid re-grab, recycling, keyboard-open and
+      vertical-list arbitration, and Samsung behavior.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02J` — conversation swipe:** Left/right
+      tracking and actions stay direct; automatic destinations and action close snap while reduced,
+      with each callback firing once. Verify live toggles, rapid re-grab, recycling, and vertical-list/
+      OEM arbitration.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02K` — global Theme Studio:** New/Edit opens
+      without a slide while reduced. A visible editor's identity, name, tokens, draft, and focus
+      survive live toggles; Back/Cancel write nothing, successful Apply closes, and reopen uses the
+      latest preference.
+- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02L` — per-chat Theme Studio:** Repeat the
+      modal, draft, focus, close, and reopen checks while proving Apply targets only the current chat
+      GUID. Retired callbacks stay inert, GUID/account replacement exposes no prior data, and the
+      route shows no duplicated preference behavior across keyed replacements.
 - [ ] **`EXACT PLAY CANDIDATE`:** Run separate TalkBack journeys for labeled inbox/header/composer/
       tray/reaction/media controls and the aggregate upload progressbar, then record the known audio
       load/retry, generic file chip, fullscreen zoom image, voice recorder, and Theme Studio semantic
@@ -794,7 +859,8 @@ actually created by this slice, in their owning apps; have the server owner remo
 device rows, retire credentials, and delete temporary captures after private review. Do not clear
 app data or uninstall as a substitute.
 
-All **40** result fields above remain open. This offline reconciliation did not run a Play install,
+All **51** result fields above remain open; the 12 motion fields are B4-owned refinements within this
+slice, not additional parent results. This offline reconciliation did not run a Play install,
 permission prompt, OS-setting change, browser/Maps handoff, network observation, synthetic server
 event, effect, accessibility scan, Disconnect, account transition, device command, or cleanup.
 `PERM-01`, `ONBOARD-01`, `UI-01`, `THEME-01A/B`, `THEME-02`, `HANDLE-COLOR-01`, `A11Y-01..03`,
