@@ -1,47 +1,147 @@
 # Device Verification Checklist
 
-A plain-English, tick-the-box guide for your next on-device session. `npm run typecheck`
-and `npm test` already pass on your machine, but a lot of this app only actually _runs_ on a
-real Android phone (notifications, FCM push, the encrypted database, the crypto backend,
-full-screen call screens). This checklist walks through everything that changed in the
-SDK 57 / notify-kit upgrade so you can confirm it works before trusting it.
+> **Status (2026-08-23): PREPARED ONLY — NO VERSION-CODE-56 DEVICE OR PLAY RESULTS.** This
+> document does not authorize or prove an upload, submission, tester invitation, server deployment,
+> Play install, or device result. The old behavior matrix below is quarantined as historical and
+> must not be executed until `DEVICE-01B-CURRENT-FLOW-MATRIX` reconciles it with the current app and
+> staged-data rules.
 
-Work top to bottom. Each `- [ ]` is one thing to check off. If something fails, note which
-box and what you saw — that's the bug report.
+This is the evidence record for the exact Google Play Internal Testing candidate. Host tests can
+support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
+bridges, process death, and Play delivery need evidence from the exact installed candidate. Never
+copy a result from a development build or an older Play build into the candidate record.
 
-> **2026-07-23 remote adb session (installed Play build 0.1.28 / versionCode 39, Galaxy
-> S25 Ultra, Android 16):** boxes marked `[x] (2026-07-23 …)` below were verified over adb
-> (screenshots + logcat + dumpsys), driving the INSTALLED release build — no dev client was
-> installed (that would force a data-wiping reinstall), so the section (a)/(f)/(k) dev-build
-> items and anything needing a human (biometics, FaceTime, incoming messages, visual share-
-> sheet row) remain open. Ticks apply to 0.1.28, which predates the RCS-send-reliability
-> commits (9db7b4d+) and the uncommitted reaction-menu rework.
+## Exact version-code-56 candidate boundary
+
+| Field                      | Frozen value                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| App/package                | Gator / `com.bluegreengatorapps.messages`                                                         |
+| App version                | `0.1.40`                                                                                          |
+| Android version code       | `56`                                                                                              |
+| Candidate source commit    | `5d367eb58e38126258423f1cd9ce0da42b179f7f`                                                        |
+| Local AAB                  | `gator-release-0.1.40-v56-5d367eb.aab` — ignored; never commit it                                 |
+| Size                       | `55,729,707` bytes                                                                                |
+| AAB SHA-256                | `926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`                                |
+| Upload certificate SHA-256 | `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43` |
+| Build provenance           | Local EAS production build, 2026-08-23; tracking ID `0c5e82fe-e8d2-4dfa-ad94-38f9e805df7e`        |
+| Packaged Android boundary  | `arm64-v8a` only; minimum SDK 24; target SDK 36                                                   |
+| Distribution boundary      | Private Google Play Internal Testing only; no promotion                                           |
+| Current external state     | Not proven uploaded, accepted, published, Play-installed, or device-tested                        |
+
+Do **not** rebuild this candidate. The production profile auto-increments, so another production
+build would consume version code `57` and create a different artifact. If a separate upload is later
+approved, select this exact local file by name and recompute its digest immediately beforehand;
+never select an ambiguous "latest" artifact. The newest recorded hosted EAS build is code `54`, with
+zero hosted builds recorded for codes `55` and `56`. GitHub Actions and development artifacts are
+disposable supporting builds, not this candidate.
+
+The AAB digest identifies the local file, and the upload-certificate fingerprint identifies its
+upload signature. Google Play delivers split APKs signed with the separate **Play App Signing
+delivery certificate**. Record that certificate and verify the installed package against it; do not
+expect an installed split APK hash to equal the original AAB hash. A local or sideloaded install can
+exercise behavior but cannot prove Google Play Internal Testing delivery.
+
+## Candidate session and evidence ledger
+
+Leave every field `OPEN` until a separate approved Play/device session produces evidence. Use an
+alias rather than a tester's email address or device serial.
+
+| Field                                  | Safe value to record                                                   | Status |
+| -------------------------------------- | ---------------------------------------------------------------------- | ------ |
+| Evidence-record commit/date            | `[OPEN — commit containing the completed results]`                     | OPEN   |
+| Tester evidence alias                  | `[OPEN — no account address]`                                          | OPEN   |
+| Device model                           | `[OPEN]`                                                               | OPEN   |
+| Android version / API level            | `[OPEN]`                                                               | OPEN   |
+| Device ABI                             | `[OPEN]`                                                               | OPEN   |
+| Navigation mode                        | `[OPEN — gesture or three-button]`                                     | OPEN   |
+| Display/font/TalkBack state            | `[OPEN]`                                                               | OPEN   |
+| Permission baseline                    | `[OPEN — fresh, denied, or previously granted]`                        | OPEN   |
+| Test branch                            | `[OPEN — clean Play install or approved prior-build Play update]`      | OPEN   |
+| Approved prior-build baseline          | `[OPEN — version, version code, and source label]`                     | OPEN   |
+| Live Play inventory alias/date         | `[OPEN — private evidence reference]`                                  | OPEN   |
+| Internal release status/artifact       | `[OPEN]`                                                               | OPEN   |
+| Tester-list label/count                | `[OPEN — never tester identities]`                                     | OPEN   |
+| Opt-in evidence alias                  | `[OPEN — never the link]`                                              | OPEN   |
+| Install source                         | `[OPEN — must prove Google Play delivery]`                             | OPEN   |
+| Installed package/version/version code | `[OPEN — must equal com.bluegreengatorapps.messages / 0.1.40 / 56]`    | OPEN   |
+| Play delivery-certificate SHA-256      | `[OPEN — separate from the upload certificate]`                        | OPEN   |
+| Installed signing fingerprint/result   | `[OPEN — compare with the Play delivery certificate]`                  | OPEN   |
+| Server environment label/version       | `[OPEN — no hostname, URL, or credential]`                             | OPEN   |
+| Synthetic fixture / Firebase labels    | `[OPEN — no message content or key material]`                          | OPEN   |
+| Feedback route alias                   | `[OPEN — no private address or token]`                                 | OPEN   |
+| Tester notice version/approval         | `[OPEN]`                                                               | OPEN   |
+| Test halt owner role                   | `[OPEN]`                                                               | OPEN   |
+| Test window / credential expiry        | `[OPEN]`                                                               | OPEN   |
+| Server/feedback dry-run evidence       | `[OPEN — private evidence aliases]`                                    | OPEN   |
+| Cleanup/teardown owner role            | `[OPEN]`                                                               | OPEN   |
+| Cleanup evidence alias                 | `[OPEN — local, server, FCM, credential, tester, and capture cleanup]` | OPEN   |
+| Test date / result                     | `[OPEN]`                                                               | OPEN   |
+| Private evidence reference             | `[OPEN — approved private storage only]`                               | OPEN   |
+
+Evidence must use the approved isolated server and synthetic conversations. Never put accounts,
+endpoints, credentials, QR payloads, opt-in links, message bodies, private filenames, device
+serials, raw logs, or unredacted screenshots in Git or public feedback. Record a sanitized result
+and a private evidence reference; delete temporary captures after the approved reviewer has checked
+them.
+
+### Historical evidence — not version-code-56 credit
+
+The 2026-07-23 remote ADB session used installed Play build `0.1.28` / version code `39` on a Galaxy
+S25 Ultra with Android 16. Later database checks used a local API-35 arm64 development emulator.
+Every existing `[x]` below is historical supporting evidence only, even when the checked line does
+not repeat this label. None satisfies `DEVICE-01` or the version-code-56 release gate.
 
 ---
 
-## (a) Clean rebuild first
+## (a) Exact-candidate and session preflight — do not rebuild
 
-A plain "reload JS" is NOT enough this time — several native pieces changed, so you must
-recompile the Android app from scratch.
+These boxes remain open until the release owner separately approves the Play/device session.
 
-- [ ] Close other heavy apps first (the build is memory-hungry; the build machine has very
-      little free RAM and the OS will kill the build if it runs out).
-- [ ] From the project root, run `rm -rf android && npx expo run:android` to delete the old
-      native project and recompile from scratch.
-- [ ] If the build gets killed partway (out-of-memory), re-run the same command — Gradle
-      resumes from its cache. Passing `--no-daemon` (no long-lived Gradle process) and
-      building arm64-only keeps memory use down on a low-RAM machine.
+- [ ] Confirm `STORE-01G-TESTER-READINESS` records an approved tester notice and access plan, halt
+      owner, test window/credential expiry, and successful staged-server and feedback dry runs.
+      Device-session approval does not replace those still-open prerequisites.
+- [ ] Recompute the SHA-256 of `gator-release-0.1.40-v56-5d367eb.aab` immediately before any
+      approved upload and stop unless it matches the frozen value above.
+- [ ] Before any separately approved submission, use a read-only Play preflight to confirm the
+      selected app/package, intended track inventory, tester-list label/count, feedback destination,
+      and opt-in state. Record version code `56` as absent, draft, or another observed state; do not
+      invent acceptance and do not save unrelated Console changes.
+- [ ] After a separately approved upload and Play acceptance, confirm the Internal Testing release
+      identifies exact version code `56` before enrollment or install evidence begins.
+- [ ] Select either the clean-install branch or the separately approved prior-build Play-update
+      branch. For an update, record the prior version, version code, and authorized source first;
+      never silently use the old `0.1.28` / code `39` record as the baseline.
+- [ ] Confirm the staged server, synthetic fixture, Firebase environment, tester alias, feedback
+      route, and evidence custodian are approved without recording their private values here.
+- [ ] Keep local, CI, and development installs off both Play candidate branches. They may support
+      separate native debugging, but they do not prove candidate delivery and may replace or wipe
+      the Play-installed app state.
+- [ ] After installation from Play, record the installer/source, exact package, version name, and
+      version code, then verify the installed signing fingerprint against the Play App Signing
+      delivery certificate.
+- [ ] Record permissions, display/font/TalkBack state, Android/API, ABI, navigation mode, test date,
+      and private evidence reference before executing a refreshed behavior matrix.
 
-**Why a clean rebuild is required (not optional):**
+Stop immediately on a wrong file digest, package, version, version code, install source, or signing
+certificate; an unapproved update baseline; an unexpected active later track; unintended tester
+access; production data or credentials; or private information entering public evidence.
 
-- The notification library was swapped from the archived `@notifee/react-native` to
-  `react-native-notify-kit`, whose native core now **compiles from source** — different
-  native code than before.
-- `POST_NOTIFICATIONS` moved: notify-kit does NOT auto-add it (notifee did), so it's now
-  declared explicitly in `app.config.ts` under `android.permissions`. That only takes effect
-  after a native rebuild.
-- Expo bumped to **SDK 57** (React Native 0.86) and **React Native Firebase to v25** — both
-  ship new native code.
+### Separate development/native lane — supporting evidence only
+
+Native debug harnesses may require a fresh **local** development build on disposable device state.
+That lane must have its own artifact identity and cannot run on the clean-install or update branch.
+Do not check a candidate box from a `__DEV__` marker, emulator-only harness, sideloaded build, or
+GitHub Actions artifact.
+
+---
+
+## Historical behavior matrix — DO NOT EXECUTE UNTIL `DEVICE-01B-CURRENT-FLOW-MATRIX`
+
+Sections (b)–(z) are retained only as an inventory of past checks. They mix version-code-39 results,
+development-only harnesses, removed settings, real-account prompts, stale full-screen-intent claims,
+and evidence commands that may expose private data. Do not run, tick, or use them as tester
+instructions. `DEVICE-01B-CURRENT-FLOW-MATRIX` must reconcile each flow against the current app,
+synthetic-only staged environment, permission behavior, and safe evidence rules first.
 
 ---
 
@@ -164,28 +264,34 @@ beyond its header both before and after crashing exact A, and retains only allow
 and migration-head/count metadata under the ignored
 `android/app/build/reports/db-active-migration-death/` directory.
 
-- [x] Local API-35 arm64 emulator: **PASS**, schema 3, 38 migrations at head `0038`, all 28 checks
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Local API-35 arm64 emulator: **PASS**, schema 3,
+      38 migrations at head `0038`, all 28 checks
       true; retained artifact `android-db-contract-2026-08-20T05-04-33-795Z.json`.
 - [ ] Repeat on the exact release candidate and a supported physical device.
-- [x] DB-03A: run the exact current production migration registry from `0001` through `0038`, prove
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** DB-03A: run the exact current production
+      migration registry from `0001` through `0038`, prove
       per-migration `0030` rollback/retry, and validate audited head-`0029` upgrade data.
-- [x] DB-03B1: on the local API-35 arm64 DEV emulator, emit READY while process A retains its fixed
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** DB-03B1: on the local API-35 arm64 DEV emulator,
+      emit READY while process A retains its fixed
       encrypted throwaway handle, force-stop A, observe no process, launch a distinct PID B, and
       require B to verify the existing head-`0029` state through `readOnly: true` before any
       read-write reopen or exact `0030`–`0038` retry. All 7 prepare, 12 resume, and 3 host checks are
       true in retained artifact `android-db-relaunch-2026-08-20T02-09-52-914Z.json`.
-- [x] DB-03B2A: pin three reviewed repository logical heads (`0024`, `0027`, `0029`) to full Git
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** DB-03B2A: pin three reviewed repository logical
+      heads (`0024`, `0027`, `0029`) to full Git
       objects. On API 35, construct encrypted `0024`/`0027` fixtures, close and verify them read-only,
       then apply their exact tails through `0038`; retain the existing `0029` migration path. V3 is
       28/28 in the artifact above.
-- [x] DB-03B2B1: on the local API-35 arm64 DEV emulator, process A commits an exact WAL baseline,
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** DB-03B2B1: on the local API-35 arm64 DEV emulator,
+      process A commits an exact WAL baseline,
       checkpoints, opens a bounded ordinary write transaction, and emits READY while it and the
       encrypted handle remain open. The host proves physical WAL growth, crashes exact A, observes no
       process, and launches distinct B. B first proves the exact baseline-only state read-only, then
       commits and reopens one recovery row and cleans every fixed database/sidecar/marker path. All 9
       READY, 12 final, and 5 host checks are true in retained artifact
       `android-db-wal-write-death-2026-08-20T16-46-24-970Z.json`.
-- [x] DB-03B2B2: on the local API-35 arm64 DEV emulator, process A prepares exact head `0037` and an
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** DB-03B2B2: on the local API-35 arm64 DEV emulator,
+      process A prepares exact head `0037` and an
       exact 133-row fixture, then emits READY only after the exact production migration `0038`
       `UPDATE` resolves inside its open transaction while the ledger remains at `0037` and before the
       runner can issue its ledger insert or commit. The host proves WAL beyond its header before and
@@ -288,10 +394,12 @@ files, `SEND_MULTIPLE`, or Direct Share targets until an owned bounded native in
 
 ## (i) Background sync + FCM token
 
-- [x] After you connect to a server, confirm the **background sync task registered**: the dev
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** After you connect to a server, confirm the
+      **background sync task registered**: the dev
       log shows `[bg] background sync registered` (this is the ~15-minute catch-up sync).
       _(2026-07-23 adb, v0.1.28: line observed in logcat on a cold start of the release build.)_
-- [x] Confirm **FCM token registration** succeeds after connecting — the device token is
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Confirm **FCM token registration** succeeds after
+      connecting — the device token is
       fetched (`getToken`, Firebase v25 API) and sent to the server. On failure you'd see
       `[fcm] device token registration failed` in the log; a clean connect should not log
       that. _(2026-07-23 adb, v0.1.28: cold start + 20s observation — no failure line logged.
@@ -303,12 +411,14 @@ files, `SEND_MULTIPLE`, or Direct Share targets until an owned bounded native in
 
 A quick pass over the screens most likely to be disturbed by the RN 0.86 upgrade:
 
-- [x] Open a chat and scroll — messages scroll smoothly and, when you tap the composer, the
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Open a chat and scroll — messages scroll smoothly
+      and, when you tap the composer, the
       keyboard pushes the input up instead of hiding it behind the keyboard.
       _(2026-07-23 adb, v0.1.28: scrolled a long thread both directions — reply-quotes, reactions,
       date pills all render; keyboard open showed the composer above it. Smoothness/fps is a feel
       judgment adb can't make — re-confirm by hand if it ever feels off.)_
-- [x] Open a chat that has a **wallpaper/background** — the header and composer bars are the
+- [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Open a chat that has a **wallpaper/background** —
+      the header and composer bars are the
       frosted/translucent style and the message list runs under them without a smoky fringe.
       _(2026-07-23 adb, v0.1.28: verified on a wallpapered group chat — frosted chips, edge-fade
       dissolve under both bars, sender/date pills legible over the photo.)_
@@ -444,6 +554,9 @@ rendering without waiting for someone to send one.
       still save as before — check one to be sure the skip is sticker-only.)
 - [ ] With Redacted Mode **ON**, confirm the sticker imagery is **not** rendered.
 
-_Report format that helps most: which box, what you saw, and a screenshot or the logcat line._
+_Historical report note only: do not use the old request for screenshots or raw logcat output. A
+future version-code-56 result must use the candidate ledger above, a sanitized summary, and an
+approved private evidence reference._
 
-_When every box is ticked, the SDK 57 / notify-kit upgrade is verified on-device._
+_No combination of boxes in this quarantined matrix signs off version code 56. Candidate sign-off
+requires a refreshed matrix plus exact Google Play install and signing provenance._
