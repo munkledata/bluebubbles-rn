@@ -24,7 +24,7 @@ export default function Manual(): React.JSX.Element {
   const status = useSessionStore((s) => s.status);
   const error = useSessionStore((s) => s.error);
 
-  // Show the insecure-connection acknowledgement only for an explicit http:// URL.
+  const label = 'Allow insecure connection';
   const isHttp = /^http:\/\//i.test(url.trim());
   const submit = (): void => void connect(url.trim(), password, allowInsecure);
 
@@ -69,14 +69,12 @@ export default function Manual(): React.JSX.Element {
           {isHttp ? (
             <View style={styles.insecureRow}>
               <View style={styles.insecureText}>
-                <Text style={[styles.insecureTitle, { color: theme.color.label }]}>
-                  Allow insecure connection
-                </Text>
+                <Text style={[styles.insecureTitle, { color: theme.color.label }]}>{label}</Text>
                 <Text style={[styles.insecureSub, { color: theme.color.secondaryLabel }]}>
                   This server uses unencrypted http://. Only enable for a server you trust.
                 </Text>
               </View>
-              <Switch value={allowInsecure} onValueChange={setAllowInsecure} />
+              <Switch aria-label={label} value={allowInsecure} onValueChange={setAllowInsecure} />
             </View>
           ) : null}
           {error ? (

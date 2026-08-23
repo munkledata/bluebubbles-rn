@@ -667,7 +667,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2",
       "path": "app/(setup)/manual.tsx",
-      "line": 89,
+      "line": 87,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
