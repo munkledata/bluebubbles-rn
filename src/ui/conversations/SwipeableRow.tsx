@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { isHorizontalSwipe } from '@utils';
+import { useReduceMotionPreferenceRef } from '../hooks/useReduceMotionPreference';
 import { Icon } from '../primitives';
 
 export interface SwipeAction {
@@ -42,6 +43,7 @@ export function SwipeableRow({
 }: SwipeableRowProps): React.JSX.Element {
   const tx = useRef(new Animated.Value(0)).current;
   const offset = useRef(0); // committed open offset (0 = closed)
+  const activeSnap = useRef<Animated.CompositeAnimation | null>(null);
   const leftW = (left?.length ?? 0) * ACTION_W;
   const rightW = (right?.length ?? 0) * ACTION_W;
   // The responder is created once; ref the CURRENT widths so a later change to the action sets
@@ -49,25 +51,66 @@ export function SwipeableRow({
   const widthsRef = useRef({ leftW, rightW });
   widthsRef.current = { leftW, rightW };
 
+  const stopActiveSnap = (): boolean => {
+    const animation = activeSnap.current;
+    activeSnap.current = null;
+    animation?.stop();
+    return animation != null;
+  };
+
+  const reduceMotion = useReduceMotionPreferenceRef((enabled) => {
+    // A setting change must not move a row under the user's finger. Only finish an automatic
+    // snap that this row currently owns.
+    if (enabled && stopActiveSnap()) tx.setValue(offset.current);
+  });
+
   const snap = (to: number): void => {
+    stopActiveSnap();
     offset.current = to;
-    Animated.spring(tx, { toValue: to, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
+    if (reduceMotion.current !== false) {
+      tx.setValue(to);
+      return;
+    }
+
+    const animation = Animated.spring(tx, {
+      toValue: to,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 20,
+    });
+    activeSnap.current = animation;
+    animation.start(() => {
+      if (activeSnap.current === animation) activeSnap.current = null;
+    });
   };
 
   // Re-center when the row is recycled to a different chat (guards against offset bleed).
   useEffect(() => {
+    stopActiveSnap();
     offset.current = 0;
     tx.setValue(0);
   }, [resetKey, tx]);
 
-  const responder = useRef(
-    PanResponder.create({
+  useEffect(
+    () => () => {
+      stopActiveSnap();
+    },
+    [],
+  );
+
+  const responderRef = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (responderRef.current === null) {
+    responderRef.current = PanResponder.create({
       // Never claim on touch-start, so taps/long-press reach the child.
       onStartShouldSetPanResponder: () => false,
       // Claim only a mostly-horizontal drag (so vertical list scrolling still works) — in BOTH the
       // bubble and capture phases so the swipe is recognised before the FlashList scroll engages.
       onMoveShouldSetPanResponder: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
       onMoveShouldSetPanResponderCapture: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
+      onPanResponderGrant: () => {
+        // A fresh finger owns the value now; stop an older automatic snap without moving it.
+        stopActiveSnap();
+      },
       onPanResponderMove: (_e, g) => {
         let next = offset.current + g.dx;
         // Clamp to the available action width per side (no overscroll past the panel).
@@ -86,8 +129,9 @@ export function SwipeableRow({
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderTerminate: () => snap(0),
-    }),
-  ).current;
+    });
+  }
+  const responder = responderRef.current;
 
   const fire = (a: SwipeAction): void => {
     snap(0);
