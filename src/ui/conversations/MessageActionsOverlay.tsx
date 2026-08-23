@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
   Modal,
   Pressable,
@@ -99,6 +100,36 @@ const BAR_HEIGHT = 56; // the tapback pill's height (44px targets + padding)
 const HOLE_PAD = 6; // breathing room around the "lifted" bubble in the scrim punch-out
 const SCRIM = 'rgba(0,0,0,0.45)';
 
+function useReduceMotionPreference(): boolean | null {
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    let receivedPreferenceEvent = false;
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+      receivedPreferenceEvent = true;
+      if (mounted) setReduceMotion(enabled);
+    });
+
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
+      },
+      () => {
+        // If the native query is unavailable, retain the existing animated behavior.
+        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reduceMotion;
+}
+
 /** One row in the action menu (Reply / Copy / … ), built once and rendered in either layout. */
 interface ActionDef {
   key: string;
@@ -136,22 +167,61 @@ export function MessageActionsOverlay({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
+  const reduceMotion = useReduceMotionPreference();
+  const selectedGuid = selected?.guid ?? null;
+  const hasAnchor = selected?.anchorRect != null;
   const mine = new Set(selected?.mine ?? []);
   const myEmojis = selected?.myEmojis ?? [];
   const [emojiDraft, setEmojiDraft] = useState('');
   const [showEmojiInput, setShowEmojiInput] = useState(false);
-  // A single spring drives the pop-in (scrim fade + bar/menu scale) of the anchored layout.
-  const anim = useRef(new Animated.Value(0)).current;
-  // Fresh input state + a replayed pop each time the menu opens for a (different) message.
+  // A single retained spring drives the pop-in (scrim fade + bar/menu scale) of the anchored layout.
+  const anim = useRef(new Animated.Value(1)).current;
+  const activePop = useRef<Animated.CompositeAnimation | null>(null);
+  const openingGuid = useRef<string | null>(null);
+
+  // Fresh input state each time the menu opens for a different message.
   useEffect(() => {
     // The same mounted overlay can switch messages; drafts must never leak to the next message.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEmojiDraft('');
     setShowEmojiInput(false);
-    if (!selected?.anchorRect) return;
-    anim.setValue(0);
-    Animated.spring(anim, { toValue: 1, useNativeDriver: true, friction: 9, tension: 90 }).start();
-  }, [selected?.guid, selected?.anchorRect, anim]);
+  }, [selectedGuid]);
+
+  useLayoutEffect(() => {
+    const stopAndSnap = (): void => {
+      const current = activePop.current;
+      activePop.current = null;
+      current?.stop();
+      anim.setValue(1);
+    };
+
+    if (selectedGuid === null) {
+      stopAndSnap();
+      openingGuid.current = null;
+      return stopAndSnap;
+    }
+
+    const isNewOpening = openingGuid.current !== selectedGuid;
+    if (isNewOpening) {
+      stopAndSnap();
+      openingGuid.current = selectedGuid;
+      if (hasAnchor && reduceMotion === false) {
+        anim.setValue(0);
+        const next = Animated.spring(anim, {
+          toValue: 1,
+          useNativeDriver: true,
+          friction: 9,
+          tension: 90,
+        });
+        activePop.current = next;
+        next.start();
+      }
+      return stopAndSnap;
+    }
+
+    if (!hasAnchor || reduceMotion !== false) stopAndSnap();
+    return stopAndSnap;
+  }, [anim, hasAnchor, reduceMotion, selectedGuid]);
 
   const hasText = !!selected?.text && selected.text.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;

@@ -24,12 +24,70 @@
  * environment (an un-flushed press corrupts later renders — RNTL 14 / React 19 gotcha).
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import { AccessibilityInfo, Animated } from 'react-native';
+import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import {
   MessageActionsOverlay,
   type SelectedMessage,
 } from '@ui/conversations/MessageActionsOverlay';
 import type { ReactionBaseType } from '@core/reactions/reactionType';
+
+interface CompositeHandle {
+  start: jest.Mock;
+  stop: jest.Mock;
+  reset: jest.Mock;
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+}
+
+const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
+  typeof AccessibilityInfo.isReduceMotionEnabled
+>;
+const mockAddEventListener = AccessibilityInfo.addEventListener as jest.Mock;
+
+let reduceMotionListeners: Array<(enabled: boolean) => void>;
+let removeReduceMotionListeners: jest.Mock[];
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function spySprings(): {
+  handles: CompositeHandle[];
+  spy: jest.SpyInstance;
+  restore: () => void;
+} {
+  const handles: CompositeHandle[] = [];
+  const spy = jest.spyOn(Animated, 'spring').mockImplementation(() => {
+    const handle: CompositeHandle = { start: jest.fn(), stop: jest.fn(), reset: jest.fn() };
+    handles.push(handle);
+    return handle as unknown as Animated.CompositeAnimation;
+  });
+  return { handles, spy, restore: () => spy.mockRestore() };
+}
+
+beforeEach(() => {
+  reduceMotionListeners = [];
+  removeReduceMotionListeners = [];
+  mockIsReduceMotionEnabled.mockReset().mockResolvedValue(false);
+  mockAddEventListener.mockReset().mockImplementation((event, listener) => {
+    expect(event).toBe('reduceMotionChanged');
+    reduceMotionListeners.push(listener as (enabled: boolean) => void);
+    const remove = jest.fn();
+    removeReduceMotionListeners.push(remove);
+    return { remove };
+  });
+});
 
 // Zero insets so useSafeAreaInsets() resolves without a SafeAreaProvider.
 jest.mock('react-native-safe-area-context', () => ({
@@ -440,5 +498,290 @@ describe('MessageActionsOverlay — Cancel / Remove (optimistic own message)', (
     await renderOverlay(makeSelected({ isFromMe: false, sendState: 'error', text: 'x' }));
     expect(screen.queryByText('Cancel Sending')).toBeNull();
     expect(screen.queryByText('Remove')).toBeNull();
+  });
+});
+
+describe('MessageActionsOverlay — Reduce Motion opening lifecycle', () => {
+  const ANCHOR = { x: 24, y: 180, width: 140, height: 44 };
+
+  function overlay(selected: SelectedMessage | null, h: ReturnType<typeof handlers>) {
+    return <MessageActionsOverlay selected={selected} {...h} />;
+  }
+
+  async function renderClosed(h: ReturnType<typeof handlers> = handlers()) {
+    const view = await renderWithTheme(overlay(null, h));
+    return { view, h };
+  }
+
+  it('keeps an unresolved anchored opening visible and consumed when false resolves later', async () => {
+    const query = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(query.promise);
+    const springs = spySprings();
+    const setValue = jest.spyOn(Animated.Value.prototype, 'setValue');
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+
+      expect(screen.getByText('Reply')).toBeTruthy();
+      expect(springs.handles).toHaveLength(0);
+      expect(setValue.mock.calls.at(-1)).toEqual([1]);
+
+      await act(async () => {
+        query.resolve(false);
+        await query.promise;
+      });
+      expect(springs.handles).toHaveLength(0);
+
+      await act(async () => view.unmount());
+    } finally {
+      setValue.mockRestore();
+      springs.restore();
+    }
+  });
+
+  it('keeps a known-true opening static and does not replay it when motion is enabled later', async () => {
+    mockIsReduceMotionEnabled.mockResolvedValue(true);
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+      expect(springs.handles).toHaveLength(0);
+
+      await act(async () => reduceMotionListeners[0]!(false));
+      expect(springs.handles).toHaveLength(0);
+      expect(screen.getByText('Reply')).toBeTruthy();
+
+      await act(async () => view.unmount());
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it('runs the existing spring once for a new anchored opening when motion is known false', async () => {
+    const springs = spySprings();
+    const setValue = jest.spyOn(Animated.Value.prototype, 'setValue');
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+
+      expect(springs.handles).toHaveLength(1);
+      expect(springs.handles[0]!.start).toHaveBeenCalledTimes(1);
+      expect(springs.spy.mock.calls[0]![1]).toEqual({
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 9,
+        tension: 90,
+      });
+      expect(setValue.mock.calls.at(-1)).toEqual([0]);
+
+      await act(async () => view.unmount());
+      expect(springs.handles[0]!.stop).toHaveBeenCalledTimes(1);
+      expect(removeReduceMotionListeners[0]).toHaveBeenCalledTimes(1);
+    } finally {
+      setValue.mockRestore();
+      springs.restore();
+    }
+  });
+
+  it('animates the next opening when the native query rejects while closed', async () => {
+    mockIsReduceMotionEnabled.mockRejectedValue(new Error('preference unavailable'));
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+
+      expect(springs.handles).toHaveLength(1);
+      expect(springs.handles[0]!.start).toHaveBeenCalledTimes(1);
+
+      await act(async () => view.unmount());
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it('does not reverse-pop an unresolved opening when its query later rejects', async () => {
+    const query = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(query.promise);
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+
+      await act(async () => {
+        query.reject(new Error('preference unavailable'));
+        await query.promise.catch(() => undefined);
+      });
+      expect(springs.handles).toHaveLength(0);
+      expect(screen.getByText('Reply')).toBeTruthy();
+
+      await act(async () => view.unmount());
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it('stops and snaps on live true without replaying or clearing the emoji draft later', async () => {
+    const springs = spySprings();
+    const setValue = jest.spyOn(Animated.Value.prototype, 'setValue');
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+      fireEvent.press(screen.getByLabelText('React with any emoji'));
+      const input = await screen.findByLabelText('Emoji reaction input');
+      fireEvent.changeText(input, '🔥');
+      await waitFor(() =>
+        expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥'),
+      );
+
+      await act(async () => reduceMotionListeners[0]!(true));
+      expect(springs.handles[0]!.stop).toHaveBeenCalledTimes(1);
+      expect(setValue.mock.calls.at(-1)).toEqual([1]);
+      expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥');
+
+      await act(async () => reduceMotionListeners[0]!(false));
+      expect(springs.handles).toHaveLength(1);
+      expect(springs.handles[0]!.stop).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥');
+
+      await act(async () => view.unmount());
+      expect(springs.handles[0]!.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      setValue.mockRestore();
+      springs.restore();
+    }
+  });
+
+  it('stops the old opening and starts one new spring for a different selected guid', async () => {
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ guid: 'm1', anchorRect: ANCHOR }), h));
+      await view.rerender(
+        overlay(makeSelected({ guid: 'm2', anchorRect: { ...ANCHOR, y: 240 } }), h),
+      );
+
+      expect(springs.handles).toHaveLength(2);
+      expect(springs.handles[0]!.stop).toHaveBeenCalledTimes(1);
+      expect(springs.handles[1]!.start).toHaveBeenCalledTimes(1);
+      expect(springs.handles[1]!.stop).not.toHaveBeenCalled();
+
+      await act(async () => view.unmount());
+      expect(springs.handles[1]!.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it('does not replay or reset input for a same-guid anchor object replacement', async () => {
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ guid: 'm1', anchorRect: ANCHOR }), h));
+      fireEvent.press(screen.getByLabelText('React with any emoji'));
+      const input = await screen.findByLabelText('Emoji reaction input');
+      fireEvent.changeText(input, '🔥');
+      await waitFor(() =>
+        expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥'),
+      );
+
+      await view.rerender(overlay(makeSelected({ guid: 'm1', anchorRect: { ...ANCHOR } }), h));
+      expect(springs.handles).toHaveLength(1);
+      expect(springs.handles[0]!.stop).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Emoji reaction input').props.value).toBe('🔥');
+
+      await act(async () => view.unmount());
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it('treats close then same-guid reopen as a fresh opening', async () => {
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      const selected = makeSelected({ guid: 'm1', anchorRect: ANCHOR });
+      await view.rerender(overlay(selected, h));
+      await view.rerender(overlay(null, h));
+      expect(springs.handles[0]!.stop).toHaveBeenCalledTimes(1);
+
+      await view.rerender(overlay(selected, h));
+      expect(springs.handles).toHaveLength(2);
+      expect(springs.handles[1]!.start).toHaveBeenCalledTimes(1);
+
+      await act(async () => view.unmount());
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it('consumes a fallback opening and only animates a later different-guid anchored opening', async () => {
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ guid: 'm1' }), h));
+      expect(springs.handles).toHaveLength(0);
+
+      await view.rerender(overlay(makeSelected({ guid: 'm1', anchorRect: ANCHOR }), h));
+      expect(springs.handles).toHaveLength(0);
+
+      await view.rerender(
+        overlay(makeSelected({ guid: 'm2', anchorRect: { ...ANCHOR, y: 240 } }), h),
+      );
+      expect(springs.handles).toHaveLength(1);
+      expect(springs.handles[0]!.start).toHaveBeenCalledTimes(1);
+
+      await act(async () => view.unmount());
+    } finally {
+      springs.restore();
+    }
+  });
+
+  it.each([
+    ['false event over stale true query', false, true, 1],
+    ['true event over stale false query', true, false, 0],
+  ] as const)(
+    'keeps a newer %s authoritative for the next opening',
+    async (_case, eventValue, staleQueryValue, expectedSprings) => {
+      const query = deferred<boolean>();
+      mockIsReduceMotionEnabled.mockReturnValue(query.promise);
+      const springs = spySprings();
+      try {
+        const { view, h } = await renderClosed();
+        await act(async () => reduceMotionListeners[0]!(eventValue));
+        await act(async () => {
+          query.resolve(staleQueryValue);
+          await query.promise;
+        });
+
+        await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+        expect(springs.handles).toHaveLength(expectedSprings);
+
+        await act(async () => view.unmount());
+      } finally {
+        springs.restore();
+      }
+    },
+  );
+
+  it('removes the listener and ignores its callback plus a late rejected query after unmount', async () => {
+    const query = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(query.promise);
+    const springs = spySprings();
+    try {
+      const { view, h } = await renderClosed();
+      await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
+      const removedListener = reduceMotionListeners[0]!;
+      await act(async () => view.unmount());
+
+      expect(removeReduceMotionListeners[0]).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        removedListener(false);
+        query.reject(new Error('late rejection'));
+        await query.promise.catch(() => undefined);
+      });
+      expect(springs.handles).toHaveLength(0);
+    } finally {
+      springs.restore();
+    }
   });
 });
