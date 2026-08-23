@@ -2,10 +2,11 @@
 
 > **Status (2026-08-23): PREPARED ONLY — NO VERSION-CODE-56 DEVICE OR PLAY RESULTS.** This
 > document does not authorize or prove an upload, submission, tester invitation, server deployment,
-> Play install, or device result. `DEVICE-01B1-NOTIFICATION-LIFECYCLE-MATRIX` has reconciled the
-> current notification/lifecycle guidance below, but every result remains open until the external
-> prerequisites and separate execution approvals exist. The old behavior matrix remains historical
-> and non-executable while `DEVICE-01B2` and `DEVICE-01B3` reconcile its remaining flows.
+> Play install, or device result. `DEVICE-01B1-NOTIFICATION-LIFECYCLE-MATRIX` and
+> `DEVICE-01B2-DATA-NATIVE-MATRIX` have reconciled the current notification/lifecycle and
+> data/native guidance below, but every result remains open until the external prerequisites and
+> separate execution approvals exist. The old behavior matrix remains historical and non-executable
+> while `DEVICE-01B3` reconciles its remaining flows.
 
 This is the evidence record for the exact Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
@@ -153,8 +154,8 @@ boxes below open until the approved session actually runs; this offline audit di
 
 ## Current matrix slice 1: notifications and lifecycle — PREPARED, NOT EXECUTED
 
-This section supersedes historical sections (b)–(e) and (i). Do not begin it until every applicable
-section (a) preflight is complete, `STORE-01G-TESTER-READINESS` records its approved owner inputs and
+This section supersedes historical sections (b)–(e), (g), and (i). Do not begin it until every
+applicable section (a) preflight is complete, `STORE-01G-TESTER-READINESS` records its approved owner inputs and
 dry runs, and the owner separately approves Play distribution and device execution. Use only the
 approved isolated server, synthetic identity, and versioned fixture. Stop on any production data,
 unexpected tester access, candidate mismatch, server/Firebase mismatch, or private evidence leak.
@@ -335,15 +336,251 @@ capability and the release/product owner has approved the `PLAY-02` eligibility 
 
 ---
 
-## Historical behavior matrix — DO NOT EXECUTE UNTIL `DEVICE-01B-CURRENT-FLOW-MATRIX`
+## Current matrix slice 2: data, files, and native storage — PREPARED, NOT EXECUTED
+
+This section supersedes historical section (f) as a candidate instruction, section (h), the media
+viewer and parallel-download rows of section (j), all of section (j.1), and the document/sticker
+rows of section (z). Section (f)'s checked DEV results remain supporting history only. Section (z)'s
+Redacted Mode rows are retired as removed-behavior history with no replacement test. Do not begin
+this slice until every applicable section (a) preflight is complete, `STORE-01G-TESTER-READINESS` has its
+approved owner inputs and dry runs, and the owner separately approves Play distribution, staged
+fixture use, and device execution.
+
+Use only bounded synthetic files and messages on the approved isolated server. Do not do any of the
+following: rebuild or sideload the frozen candidate; use `run-as`; inspect private DB, WAL, cache,
+ledger, or `.part` paths; fabricate private files; clear app data; uninstall apps to force a branch;
+or capture raw logs. Stop on any candidate/server mismatch, production data, uncontrolled transfer,
+unexpected tester access, private evidence leak, cleanup failure, or server activity outside the
+approved fixture.
+
+### 1. Candidate branch, fixtures, and applicability
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Reconfirm section (a), then record the clean-install or approved
+      prior-build Play-update branch, device/API/ABI, fixture-set alias, and private evidence
+      reference. Do not reuse a development install or the historical version-code-39 session.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Before transfers, have the server owner verify a
+      finite synthetic set: searchable text plus edit/delete variants, an optional attributed-body
+      message, small/large/slow downloads, three uploads, PDF, VCF, two images in one chat, video,
+      ordinary photo, and sticker. Record only fixture labels, size classes, expected request counts,
+      expiry, stop owner, and cleanup owner.
+      Missing delayed-transfer, observer, or sticker support is `BLOCKED/OPEN`, never silently `N/A`.
+
+| Branch or condition              | Current rule                                                                                                                                                                       | Result |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Clean Play install               | Exercise current-data persistence/search and current file flows. Record legacy DB/cache/shortcut upgrade as `N/A — clean-install branch selected`; that does not close update work | [ ]    |
+| Approved prior-build Play update | Name the exact Play-delivered baseline and its version code first. Populate only synthetic state, update through Play without uninstall/clear-data, and test visible continuity    | [ ]    |
+| No approved prior Play baseline  | Leave migration, legacy-layout, and old-shortcut continuity `BLOCKED/OPEN`. Do not substitute a sideloaded build, DEV fixture, or source inspection                                | [ ]    |
+| Android API 24/25                | Remains conditional and open until an arm64 Play-delivered device runs it. A newer test phone does not close the advertised minimum-SDK behavior                                   | [ ]    |
+
+### 2. Database persistence, search, and visible key-rotation continuity
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Receive a synthetic ordinary message containing
+      a unique non-secret search token. If the approved server fixture supports an attributed-body
+      message, receive that separately. Search each token and tap its result; the intended chat
+      opens centered on the matching message. Do not use a subject-only token as a positive case;
+      subjects are not indexed.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Have the owner edit one synthetic searchable
+      message and delete/unsend another. The replacement text becomes searchable, the old token
+      stops matching, and the deleted message disappears from search. Record only result aliases,
+      never the search text or message body.
+- [ ] **`EXACT PLAY CANDIDATE`:** Enter a synthetic chat draft and change one non-secret setting,
+      then background Gator and run only
+      `adb shell am kill com.bluegreengatorapps.messages`. Relaunch from the launcher and confirm
+      the conversations, messages, draft, and setting remain usable and rerunning the same searches
+      finds the expected synthetic results. Never use force-stop, clear storage, or uninstall for
+      persistence evidence.
+- [ ] **`EXACT PLAY CANDIDATE`:** From Settings, use **Rotate encryption key…**, require the visible
+      **Database key rotated.** result, ordinarily kill/relaunch, and reconfirm the same synthetic
+      state and search. Credit this only as visible rekey continuity; it does not prove ciphertext,
+      wrong-key rejection, key custody, or crash-at-each-rotation-step recovery.
+- [ ] **`STATIC/HOST` + `LOCAL-DEV SUPPORTING ONLY`:** Keep the fixed native DB contract, relaunch,
+      WAL-write-death, and active-migration-death harnesses in their disposable DEV lane. They
+      require a debuggable app, Metro/markers, and private fixed fixtures and cannot run on or award
+      credit to version code 56. Production-file continuity, wrong-key/integrity proof,
+      spontaneous death, power loss, torn writes, and release-candidate migration internals remain
+      open even when user-visible persistence passes.
+
+For an approved Play-update branch, additionally confirm the baseline's synthetic messages, search
+hits, drafts, settings, and downloaded-file affordances remain usable after the Play update. That is
+visible continuity only; it does not identify which internal migration, cache-ledger adoption, or
+legacy-shortcut cleanup path ran. A clean-install result must not be relabeled as update evidence.
+
+### 3. Attachment download policy, progress, interruption, and cache boundaries
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Record and later restore **Auto-download Attachments**, **Only on
+      Wi-Fi**, **Parallel Downloads**, and the **SAVE AUTO-DOWNLOADED IMAGES TO** choice. Start with
+      **App only**, auto-download on, Wi-Fi-only off, and parallel downloads set to two. Do not infer
+      these settings from an older account or build.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Receive a known-size ordinary image no larger
+      than 5 MiB and confirm it downloads automatically. Separately receive an image above 5 MiB
+      but within the manual ceiling and one with absent size metadata; neither starts automatically,
+      while a user tap may start the bounded manual path. Malformed or non-positive metadata fails
+      closed rather than starting either path. A sticker is checked separately below.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With **Only on Wi-Fi** enabled, use the approved
+      bounded image on Wi-Fi and away from Wi-Fi. Automatic work starts only on confirmed Wi-Fi;
+      an unknown network fails closed. Restore the approved network and setting afterward.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Manually fetch finite synthetic image, video,
+      audio, and document fixtures. Confirm visible progress or an indeterminate state and verified
+      completion. Image, video, and document failures show an explicit retry state; audio instead
+      returns to **Voice message · tap to load** without naming the failure, and a second tap retries.
+      Record that audio-label limitation rather than passing a universal error affordance. Confirm
+      cached reopen without a second request, but do not infer exact byte or deadline enforcement
+      from a successful visible transfer.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Set **Parallel downloads** to one, request three
+      fixtures, and require at most one observed transfer; repeat at two and require at most two.
+      Pair the visible state with sanitized aggregate server concurrency, not packet capture or raw
+      logs. Restore the original value.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Start the approved delayed download, background
+      Gator, run only `adb shell am kill com.bluegreengatorapps.messages`, and relaunch. The item
+      must not appear falsely complete; a tap retries and can finish. Do not inspect or claim exact
+      `.part`, reservation, ledger, or native-delete cleanup from this visible result.
+- [ ] **`EXACT PLAY CANDIDATE`:** If an ordinary, naturally missing completed file is encountered,
+      tap it and confirm the UI returns to a download/retry path instead of silent failure. Do not
+      clear Android cache—final attachments live in persistent app-private files—or manufacture a
+      missing path. Without a natural case, leave this branch `BLOCKED/OPEN`.
+- [ ] **`STATIC/HOST` + `LOCAL-DEV SUPPORTING ONLY`:** Retain exact-byte/time caps, `.part` cleanup,
+      ledger ownership, symlink/malformed/zero-byte rejection, two-generation recovery, 2 GiB /
+      4,096-file / 512 MiB-free quota enforcement, protected-reader/outgoing paths, and legacy
+      layout adoption as controlled evidence. Do not manufacture these on an ordinary tester
+      phone. API 24/25 persistent downloads remain an open product/device result; newer Android
+      behavior cannot close it.
+
+### 4. Multipart uploads, concurrency, and cancellation
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Send finite synthetic files selected once from
+      Photos and once from Files. Confirm the optimistic bubble and composer upload status. Media
+      bubbles show a progress ring/byte overlay; a generic file chip instead shows an activity
+      indicator plus byte/percent subtitle. Confirm the delivered result and removal of progress UI
+      after settlement. Native multipart progress requires this device result; host mocks do not
+      prove it.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Send the approved three-file batch. The server's
+      sanitized aggregate must observe no more than two simultaneous upload requests, matching the
+      fixed production upload gate. Record counts only, not URLs, headers, names, GUIDs, or bodies.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** During the delayed active upload, long-press its
+      bubble and confirm **Cancel Sending**. The bubble disappears, but that alone is not proof:
+      require the server owner to confirm request cancellation/connection close, or a stable byte
+      count across the approved bounded observation window plus no completion. A single “started,
+      not completed yet” snapshot is insufficient.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Occupy both upload slots, queue a third approved
+      fixture, then cancel the third before a slot opens. Require zero upload starts for that third
+      fixture in sanitized server evidence. Restore fixture/server state before another run.
+
+Foreground uploads intentionally have no transport timeout, and the documented large-batch retry
+interaction after roughly 60 seconds remains open. Do not turn “eventually finished” into timeout
+or retry-safety evidence. Keyboard, wallpaper, and TalkBack presentation of the upload bar belong to
+`DEVICE-01B3`.
+
+### 5. Document open, media viewer, outbound share, and Photos save
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** For an undownloaded synthetic PDF and VCF, the
+      first tap downloads; after completion, tap again. Expect an installed viewer/importer or the
+      Android share-sheet fallback—never silence. Record which branch occurred without changing
+      default handlers on a personal tester device.
+- [ ] **`EXACT PLAY CANDIDATE`:** If the approved controlled device naturally has no matching
+      viewer, confirm the share sheet opens or Gator shows **No app on this device can open …**. Do
+      not uninstall apps to force the branch. Otherwise leave exact-native no-handler proof open
+      and retain the host result.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Stage at least two downloaded images in one chat,
+      open one from its bubble, and confirm fullscreen gallery paging plus the conditional
+      current-item counter. Confirm a downloaded video plays inline from its chat bubble; then open
+      that video deterministically from Chat Settings → Shared Media and confirm fullscreen native
+      controls. Share the currently visible gallery item and confirm Android's outbound share sheet
+      opens. A returned share sheet counts as opened even when the user cancels it.
+- [ ] **`EXACT PLAY CANDIDATE`:** Save the current synthetic image to Photos and require the visible
+      success result plus the actual external copy. On Android 13+ record the expected no-prompt
+      branch when it occurs; test permission denied only on a platform/device that actually asks,
+      without altering unrelated media access. An exported copy is not app-private cleanup.
+- [ ] **`EXACT PLAY CANDIDATE`:** Exercise an unavailable or failed share/save result only when it
+      occurs naturally or on a separately approved controlled device. Require Gator's dialog/toast
+      rather than silence; do not infer the native failure from a button tap alone.
+
+### 6. Inbound-share containment and outbound preservation
+
+- [ ] **`STATIC/HOST`:** Retain exact source/packaged-boundary proof that Gator has no inbound
+      `SEND`/`SEND_MULTIPLE` filters, Direct Share target metadata/resource, `expo-share-intent`
+      dependency/autolinking, or active intake mount. Cleanup-only legacy shortcut code is not an
+      inbound capability.
+- [ ] **`EXACT PLAY CANDIDATE`:** From another app's Android share sheet, try bounded synthetic text,
+      one image, multiple images, and a PDF. Gator and Gator conversation chips must not appear as
+      destinations. Use fixture labels and a private evidence reference; never capture another
+      app's real content or contact suggestions.
+- [ ] **`EXACT PLAY CANDIDATE`:** Reconfirm ordinary outbound sharing from downloaded synthetic
+      media opens Android's share sheet. Positive inbound intake is not a test branch; it is
+      deliberately disabled until a new approved bounded design exists.
+
+### 7. Received stickers
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Deliver an approved synthetic sticker onto a
+      synthetic target message. It appears as a small overlay on that target, not as its own
+      separate message bubble. A temporary pending tile before attachment sync is allowed.
+- [ ] **`EXACT PLAY CANDIDATE`:** Tap the downloaded sticker to fade it and tap again to restore it;
+      long-press to hide it for the current screen session. Leave and reopen the chat and confirm
+      the session-only hide has reset.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Record whether the live sticker becomes visible
+      immediately or only after leaving/reopening the chat. This observation informs `STICKER-4`;
+      it does not close that decision automatically. The Craig DEV seed is supporting-only and
+      cannot replace this result.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With export-to-Photos/Gator enabled, receive one
+      ordinary synthetic photo and one sticker. The ordinary photo follows the selected export
+      behavior; the sticker creates no Photos/Gator copy and no “Downloaded 1 image” toast. Restore
+      the setting and delete the ordinary exported copy during cleanup.
+
+### 8. Storage disclosure, cleanup, and privacy-safe evidence
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Open Settings → **Storage & File Privacy** and confirm it clearly
+      separates the SQLCipher database from ordinary app-private files, states the cache/API limits,
+      and explains exported-copy and Disconnect boundaries. Treat the current “incoming-share
+      copies” wording as legacy-copy disclosure only; it is not evidence that inbound sharing is
+      enabled. Record any ambiguity as a candidate wording issue.
+- [ ] **`EXACT PLAY CANDIDATE`:** Close viewers/share sheets, finish or cancel every fixture
+      transfer, restore every download/export setting changed by this slice, and Disconnect. Confirm
+      Welcome, no prior-account UI, and a visible incomplete-cleanup error if cleanup cannot be
+      confirmed. Do not connect account B or claim full A→B isolation from this row;
+      `DEVICE-01B3` owns that combined transition.
+- [ ] **`EXACT PLAY CANDIDATE`:** Inventory every external copy actually created by this slice—such
+      as a Photos gallery/Gator album export or a receiving-app/Files/Drive copy. Confirm Disconnect
+      does not remove it, then delete each synthetic copy in its owning app. If an approved backup
+      copy exists, include it in the same cleanup. Uninstall/clear-data is not a substitute and does
+      not remove exported media.
+- [ ] **`STAGED-SERVER`:** Have the owner verify transfers are settled/cancelled, delete synthetic
+      messages/files and any remaining device row, retire credentials, and record only sanitized
+      aggregate outcomes plus a private cleanup reference. App-visible cleanup does not prove
+      server cleanup.
+- [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Record only branch/device labels, fixture aliases,
+      file class and size bucket, action/outcome, aggregate request/byte counts, elapsed-time bucket,
+      date, and private evidence reference. Never commit message/search text, filenames, paths,
+      identities, serials, raw logs, DB/WAL/cache files, screenshots with private suggestions, or
+      secrets. Delete approved private captures after review.
+
+### 9. Claims that remain outside ordinary candidate observation
+
+| Claim                                                                                        | Required evidence / current disposition                                                                                               |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Database ciphertext, wrong-key rejection, integrity, crash-step rekey, WAL/torn-write safety | Separate approved native design; fixed DEV fixtures are supporting only and visible candidate continuity cannot close it              |
+| Migration transaction internals, legacy cache adoption, old shortcut cleanup                 | Approved natural Play-update baseline plus host/native proof; clean install is session-N/A, not program completion                    |
+| `.part`/ledger/native-delete correctness, exact caps, quota/low-space pressure               | `STATIC/HOST` and separately approved disposable native evidence; never infer from a retry or manufacture on an ordinary tester phone |
+| Multipart byte progress, active byte-stop, queued zero-start, maximum two uploads            | `EXACT PLAY CANDIDATE` plus privacy-safe `STAGED-SERVER` aggregate evidence                                                           |
+| FileProvider/viewer/share/save bridge and natural missing-file recovery                      | Exact candidate observation when the branch is naturally reachable; host mocks alone do not prove it                                  |
+| API 24/25 persistent-download behavior                                                       | Arm64 Play-delivered API-24/25 device or an explicit product/minimum-SDK decision; a newer phone is not evidence                      |
+| Full account A → Disconnect → account B isolation                                            | `DEVICE-01B3`, coordinated with this slice's external-copy and server cleanup; Welcome-screen appearance alone is insufficient        |
+
+All rows above remain open. This offline reconciliation did not execute a Play install, database
+rotation, search, transfer, share, save, sticker, Disconnect, device command, or server action.
+`DL-01`, `SHARE-01`, `FILE-01A`, parent `DB-03`/its residual native work, `STICKER-4`, `PLAY-02`,
+`STORE-01G`, and `DEVICE-01` retain their existing open or blocked status.
+
+---
+
+## Historical behavior matrix — PERMANENTLY NON-EXECUTABLE
 
 Sections (b)–(z) are retained only as an inventory of past checks. They mix version-code-39 results,
 development-only harnesses, removed settings, real-account prompts, stale full-screen-intent claims,
 and evidence commands that may expose private data. Do not run, tick, or use them as tester
-instructions. The current slice above supersedes historical sections (b)–(e) and (i), but the text
-remains non-executable history. `DEVICE-01B2` and `DEVICE-01B3` must reconcile the remaining flows
-against the current app, synthetic-only staged environment, permission behavior, and safe evidence
-rules first.
+instructions. Current slices 1 and 2 supersede historical sections (b)–(i), the data/native rows of
+(j), all of (j.1), and the document/sticker rows of (z); the Redacted Mode rows in (z) are retired
+with no replacement test. That text remains non-executable history. `DEVICE-01B3` must reconcile
+the remaining UI, permission, accessibility, and account-transition flows against the current app,
+synthetic-only staged environment, permission behavior, and safe evidence rules first.
 
 ---
 
