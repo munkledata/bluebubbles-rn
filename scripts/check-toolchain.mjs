@@ -12,7 +12,7 @@ export const REQUIRED_EAS_CLI_VERSION = '21.5.0';
 export const REQUIRED_RELEASE_SCRIPTS = {
   'release:android': 'npm run release:android:local',
   'release:android:local':
-    "npm run check:toolchain && npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --output ./gator-release.aab'",
+    'npm run check:toolchain && GOOGLE_SERVICES_JSON="${GOOGLE_SERVICES_JSON:-$PWD/google-services.json}" && test -f "$GOOGLE_SERVICES_JSON" && export GOOGLE_SERVICES_JSON && EAS_LOCAL_BUILD_PLUGIN_PATH="$(npx --yes --ignore-scripts --package eas-cli-local-build-plugin@21.5.0 -c \'command -v eas-cli-local-build-plugin\')" && test -x "$EAS_LOCAL_BUILD_PLUGIN_PATH" && export EAS_LOCAL_BUILD_PLUGIN_PATH && npx --yes --ignore-scripts --package eas-cli@21.5.0 -c \'unset npm_config_ignore_scripts npm_config_call npm_config_package npm_config_yes; exec eas build -p android --profile production --local --output ./gator-release.aab\'',
 };
 const REVIEWED_RELEASE_SCRIPT_NAMES = new Set([
   'release:prepare:patch',
