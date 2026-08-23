@@ -1,5 +1,12 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Easing, StyleSheet, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import type { ScreenEffect } from '@core/effects';
 
 interface ScreenEffectOverlayProps {
@@ -20,6 +27,10 @@ interface Particle {
   color: string;
   radius: number;
   spin: number;
+}
+
+interface EffectCompletionState {
+  completed: boolean;
 }
 
 function buildParticles(effect: ScreenEffect, w: number, h: number): Particle[] {
@@ -74,18 +85,69 @@ function buildParticles(effect: ScreenEffect, w: number, h: number): Particle[] 
 
 /**
  * Full-screen iMessage send-effect, JS particles via a single Animated value
- * (one native animation drives all particles). Auto-dismisses; tap to skip.
+ * (one native animation drives all particles). Auto-dismisses without intercepting chat touches.
  * No Skia/Reanimated — a future high-fidelity renderer can swap in behind this.
  */
 export function ScreenEffectOverlay({
   effect,
   onDone,
-}: ScreenEffectOverlayProps): React.JSX.Element {
+}: ScreenEffectOverlayProps): React.JSX.Element | null {
   const { width, height } = useWindowDimensions();
   const t = useRef(new Animated.Value(0)).current;
-  const particles = useMemo(() => buildParticles(effect, width, height), [effect, width, height]);
+  const onDoneRef = useRef(onDone);
+  const completionRef = useRef<EffectCompletionState>({ completed: false });
+  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+
+  onDoneRef.current = onDone;
+
+  const completeEffect = useCallback((completion: EffectCompletionState) => {
+    if (completionRef.current !== completion || completion.completed) return;
+    completion.completed = true;
+    onDoneRef.current();
+  }, []);
+
+  useLayoutEffect(() => {
+    // Each prop transition is a new effect run, even when an earlier effect name repeats.
+    completionRef.current = { completed: false };
+  }, [effect]);
 
   useEffect(() => {
+    let mounted = true;
+    let receivedPreferenceEvent = false;
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+      receivedPreferenceEvent = true;
+      if (mounted) setReduceMotion(enabled);
+    });
+
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
+      },
+      () => {
+        // If the native query is unavailable, retain the existing animated behavior.
+        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  const particles = useMemo(
+    () => (reduceMotion === false ? buildParticles(effect, width, height) : []),
+    [effect, height, reduceMotion, width],
+  );
+
+  useEffect(() => {
+    if (reduceMotion === null) return;
+    const completion = completionRef.current;
+    if (reduceMotion) {
+      completeEffect(completion);
+      return;
+    }
+
     let cancelled = false;
     const anim = Animated.timing(t, {
       toValue: 1,
@@ -95,14 +157,15 @@ export function ScreenEffectOverlay({
     });
     anim.start(({ finished }) => {
       // Don't fire onDone for a superseded/stopped run (would clear a newer effect).
-      if (finished && !cancelled) onDone();
+      if (finished && !cancelled) completeEffect(completion);
     });
     return () => {
       cancelled = true;
       anim.stop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effect]);
+  }, [completeEffect, effect, reduceMotion, t]);
+
+  if (reduceMotion !== false) return null;
 
   // pointerEvents="none": particles float OVER the chat without blocking scroll/taps
   // (iMessage effects are non-interactive); it auto-dismisses after DURATION_MS.
