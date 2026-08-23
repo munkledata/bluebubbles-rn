@@ -2,9 +2,10 @@
 
 > **Status (2026-08-23): PREPARED ONLY — NO VERSION-CODE-56 DEVICE OR PLAY RESULTS.** This
 > document does not authorize or prove an upload, submission, tester invitation, server deployment,
-> Play install, or device result. The old behavior matrix below is quarantined as historical and
-> must not be executed until `DEVICE-01B-CURRENT-FLOW-MATRIX` reconciles it with the current app and
-> staged-data rules.
+> Play install, or device result. `DEVICE-01B1-NOTIFICATION-LIFECYCLE-MATRIX` has reconciled the
+> current notification/lifecycle guidance below, but every result remains open until the external
+> prerequisites and separate execution approvals exist. The old behavior matrix remains historical
+> and non-executable while `DEVICE-01B2` and `DEVICE-01B3` reconcile its remaining flows.
 
 This is the evidence record for the exact Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
@@ -135,13 +136,214 @@ GitHub Actions artifact.
 
 ---
 
+## Evidence classes for the current matrix
+
+- **`STATIC/HOST`:** Source, configuration, or automated host evidence. It can justify an expected
+  result but cannot prove Android or native behavior.
+- **`LOCAL-DEV SUPPORTING ONLY`:** A disposable local debug/dev-client observation. It cannot prove
+  the frozen AAB or Google Play delivery and must not run on either Play candidate branch.
+- **`STAGED-SERVER`:** A read-only or owner-triggered result from the approved isolated synthetic
+  server. Record only its non-secret label, aggregate result, date, and private evidence reference.
+- **`EXACT PLAY CANDIDATE`:** An observation on the exact Play-installed version code `56`, after the
+  package, installer, version, and Play delivery certificate have passed section (a). Only this class
+  can earn candidate device credit.
+
+No evidence class substitutes for another. A combined step must satisfy every named class. Keep all
+boxes below open until the approved session actually runs; this offline audit did not execute them.
+
+## Current matrix slice 1: notifications and lifecycle — PREPARED, NOT EXECUTED
+
+This section supersedes historical sections (b)–(e) and (i). Do not begin it until every applicable
+section (a) preflight is complete, `STORE-01G-TESTER-READINESS` records its approved owner inputs and
+dry runs, and the owner separately approves Play distribution and device execution. Use only the
+approved isolated server, synthetic identity, and versioned fixture. Stop on any production data,
+unexpected tester access, candidate mismatch, server/Firebase mismatch, or private evidence leak.
+
+### 1. Notification baseline and safe push probe
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Record the candidate/session ledger before testing. Confirm the
+      package, version code, Play install source, delivery certificate, permission baseline, device,
+      Android/API, navigation mode, and private evidence reference; do not rebuild or sideload.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Confirm the approved server version, synthetic
+      fixture label, Firebase label, credential expiry, halt owner, and cleanup owner. Do not record
+      endpoints, credentials, raw device rows/tokens, tester identities, or fixture content.
+- [ ] **`EXACT PLAY CANDIDATE`:** Establish the ordinary allowed baseline: Android notifications
+      allowed, **Message Notifications** on, **Filter Unknown Senders** off, synthetic chat unmuted,
+      and App Lock off. Clear only this fixture's old Gator notices before the first observation.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Have the server owner use the dashboard's push
+      self-test. Expect the fixed app-authored notification `Gator` / `Test notification received.`.
+      Record only sanitized sent/failed totals, the registered-device alias/count and last-active
+      date, and a private evidence reference. Never give a tester the server's local-auth command or
+      token and never copy a raw provider error into Git.
+- [ ] **`EXACT PLAY CANDIDATE`:** Exercise Android notification permission allowed and denied. When
+      denied, expect no system notice while socket/sync and in-app message access continue; record
+      the app's degraded guidance if shown. Restore the approved baseline through Android settings
+      without clearing candidate data.
+
+### 2. Detailed message presentation, taps, and actions
+
+- [ ] **`EXACT PLAY CANDIDATE`:** With the app backgrounded and unlocked, receive a synthetic
+      incoming message. Expect one detailed per-chat Android `MESSAGING` notification containing the
+      current line, conversation/sender presentation, and a contact avatar or Gator fallback. Do not
+      treat it as bounded multi-message history; that remains `NOTIF-03`.
+- [ ] **`EXACT PLAY CANDIDATE`:** Use four different synthetic incoming messages because each action
+      can clear the notice: body tap opens the intended chat at its newest message; inline **Reply**
+      becomes a durable outgoing message; **Mark as read** advances the unread state; and **Love**
+      applies to the intended message. A failed Reply before durable queue handoff must leave the
+      notice available to retry rather than lose the typed text.
+- [ ] **`EXACT PLAY CANDIDATE`:** Open the synthetic chat's notification settings from Gator and
+      confirm Android opens that conversation's channel. Record any changed sound/importance value
+      so cleanup can restore it.
+
+### 3. Message suppression and known open limitations
+
+Use a new fixture message for each branch and confirm the message still follows the DB/sync path when
+its system presentation is suppressed.
+
+| Branch                                                | Current expected result                                                                                           | Result |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------ |
+| Android permission allowed / denied                   | Detailed system notice when allowed; no system notice when denied                                                 | [ ]    |
+| **Message Notifications** on / off                    | Message notice when on; no message notice when off. Self-test, calls, and reminders are separate kinds            | [ ]    |
+| Known / unknown sender with filtering on              | Known sender notifies; unknown sender is stored but does not notify                                               | [ ]    |
+| Synthetic chat unmuted / muted                        | Unmuted chat notifies; muted chat is stored but does not notify                                                   | [ ]    |
+| Incoming / marked `isFromMe` by the approved fixture  | Incoming message notifies; own message does not                                                                   | [ ]    |
+| Currently visible chat                                | Presentation is not suppressed at source and may alert before the visible chat clears it; keep `NOTIF-01` open    | [ ]    |
+| Two unread lines, then read/delete/unsend in one chat | Only the current line is posted; cancellation can clear the whole chat notice. Record open `NOTIF-03`, not a pass | [ ]    |
+
+Do not test removed Hide Preview/Redacted Mode behavior. Normal notifications are detailed, Android
+owns lock-screen presentation, and App Lock's limited generic-new-delivery behavior is tested below.
+
+### 4. Foreground, background, killed-process, and reconnect paths
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Receive separate fixture messages while (1) viewing the synthetic
+      chat, (2) foregrounded on another screen/chat, and (3) alive but backgrounded. Record DB/UI
+      arrival, system presentation, sound/heads-up behavior, and whether a body tap opens the
+      intended chat at its newest message. A visible chat can clear the notice after DB/UI arrival,
+      but presentation is not suppressed at the source; record any sound/heads-up and keep
+      `NOTIF-01` open.
+- [ ] **`EXACT PLAY CANDIDATE`:** From the alive-background state, tap a message notice and confirm
+      the resumed app opens the intended chat at its newest message rather than the previously
+      visible screen.
+- [ ] **`EXACT PLAY CANDIDATE`:** Prove ordinary killed-process delivery only after Gator has opened,
+      connected to the approved staged server, and moved to the background. Run only
+      `adb shell am kill com.bluegreengatorapps.messages`, confirm that package has no running
+      process, have the staged-server owner trigger a fresh synthetic message, and record visible
+      receipt before relaunch. Tap a separate killed-process notification and confirm the cold start
+      opens the intended chat at its newest message. Never use `am force-stop`, `am kill-all`, or a
+      broad process kill for push evidence.
+- [ ] **`EXACT PLAY CANDIDATE`:** Foreground after background and killed-process cases and confirm
+      reconnect/sync catches up without losing the synthetic message. Record duplicate or stale
+      notices as failures; do not claim that a missing release log line proves success.
+
+### 5. App Lock behavior and its boundary
+
+- [ ] **`EXACT PLAY CANDIDATE`:** With App Lock enabled, confirm a resume inside the configured
+      grace period follows the unlocked path and a resume after expiry or a cold launch presents the
+      lock gate before private DB-backed UI.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Separate the push axes: App Lock disabled permits
+      detailed background and killed-process presentation; App Lock enabled in a still-live process
+      permits detail only within its unexpired grace period; and an expired live process uses the
+      generic path.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With persisted App Lock enabled, a fresh ordinary
+      killed-process wake has no trustworthy warm-process grace and must always use the generic path.
+      Expect one fixed `Gator` / `You have new messages` notice with no sender, chat title, body,
+      avatar, or private route; repeated locked deliveries update the same generic notice.
+- [ ] **`EXACT PLAY CANDIDATE`:** Tap the generic notice, unlock, and confirm sync makes the synthetic
+      message available in the app. Do not expect a detailed per-chat notice to replay after unlock.
+- [ ] **`EXACT PLAY CANDIDATE`:** Record the current boundary explicitly: enabling or expiring App
+      Lock does not retroactively rewrite a detailed notice or reminder trigger Android already
+      owns. App Lock is a UI/policy gate, not encryption-key custody; this observation does not close
+      `NOTIF-02`.
+- [ ] **`STATIC/HOST`:** Retain the fail-closed source/test evidence that an unknown stored lock state
+      posts only the generic notice and that the killed handler does not open the encrypted DB on
+      the locked path. Do not manufacture vault corruption on the Play candidate or present this as
+      device proof.
+
+### 6. Plaintext, encrypted, and unsupported push branches
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Run one approved plaintext message and one
+      `AEAD_GCM_V1` encrypted-message happy path in background and ordinary killed-process states.
+      Disable App Lock before each detailed killed-process branch. Both must show the correct
+      synthetic detail while App Lock is disabled; a fresh killed wake with persisted App Lock
+      enabled belongs to the generic branch above even if the prior live process was within grace.
+- [ ] **`STATIC/HOST`:** Keep malformed ciphertext, wrong-key/decrypt-failure, and unsupported
+      encryption branches as host/static evidence unless the staged-server owner separately approves
+      a harmless, finite synthetic fixture. Their current fallback is no live presentation followed
+      by later foreground sync; do not improvise hostile payloads during the tester round.
+- [ ] **`STATIC/HOST`:** Do not create an `imessage-aliases-removed` candidate test: the current
+      Gator server does not emit that event. Test an RCS status notice only if the staged server's
+      exact version exposes an approved synthetic route; visible text must stay app-authored and
+      generic.
+
+### 7. Reminders and best-effort background work
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Schedule a reminder for a synthetic message, background the app,
+      and allow it to fire. Expect detailed reminder text near, not exactly at, the requested time;
+      Gator uses an inexact Doze-capable alarm and requests no exact-alarm permission.
+- [ ] **`EXACT PLAY CANDIDATE`:** Tap the fired reminder and confirm it opens the correct
+      chat/message and removes that reminder from Gator. Repeat after an ordinary package kill if the
+      approved session has enough time; do not use force-stop.
+- [ ] **`EXACT PLAY CANDIDATE`:** If a detailed reminder was scheduled before App Lock engaged,
+      record that Android may still fire the existing detailed trigger. Do not claim App Lock
+      retroactively sanitizes it.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Record one observable, synthetic catch-up result
+      after the app has been backgrounded long enough for Android to choose whether to run work.
+      Disable App Lock before this branch: a fresh background worker with persisted App Lock enabled
+      stops before DB/sync work. Registration uses a 15-minute minimum interval, not an exact
+      schedule. Success must come from staged-server/UI state or an approved finite diagnostic,
+      never absence of free-form release logs.
+
+### 8. FaceTime — conditional on capability and `PLAY-02`
+
+Do not run this subsection unless the approved staged server advertises the required FaceTime helper
+capability and the release/product owner has approved the `PLAY-02` eligibility and test branches.
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** In foreground, receive a synthetic incoming-call
+      event and confirm the in-app overlay appears. Foreground **Answer** resolves the server
+      answer/link and presents Gator's external-browser handoff; foreground **Decline** stops the
+      overlay and makes a best-effort server leave request.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** In background and ordinary killed-process states,
+      receive the CALL-category notification with **Answer** and **Decline**. Full-screen presentation
+      is conditional; an actionable heads-up notice is the required fallback, not proof that the
+      build is broken. Record Android version and full-screen special-access allowed/denied state.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Notification **Answer** asks the server to answer,
+      opens only a validated FaceTime link through Android `Linking`, and clears the ring. Do not
+      promise a Chrome custom tab. Notification **Decline** clears only the local ring; unlike the
+      foreground overlay, it does not send server leave. Record this distinction for `PLAY-02`.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Confirm the server's ended status clears the
+      active ring. Keep Android 14/15/16 allowed/denied full-screen coverage and browser
+      camera/microphone hostile-navigation evidence open under `PLAY-02`/`DEVICE-01B3`.
+
+### 9. Cleanup and privacy-safe evidence
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Record only candidate/session fields, synthetic
+      aliases, action/outcome, aggregate counts, date, and approved private evidence references.
+      Never commit raw `logcat`, unredacted `dumpsys`, raw push payloads/errors/tokens, endpoints,
+      credentials, QR data, message content, filenames/paths, tester identities, serials, or private
+      screenshots.
+- [ ] **`EXACT PLAY CANDIDATE`:** Dismiss fixture notifications/calls/reminders, restore changed
+      Android permission/channel/full-screen settings, and Disconnect. Confirm the visible notices
+      are gone, Gator returns to Welcome with no prior-account UI, and any incomplete-cleanup error
+      remains visible.
+- [ ] **`STATIC/HOST`:** Retain source/test proof that Disconnect calls native notification/route
+      cleanup and Firebase `deleteToken()`. Those internal calls are not directly observable tester
+      evidence and must not be inferred from a clean-looking screen.
+- [ ] **`STAGED-SERVER`:** The app does not delete its server device row. Have the server owner
+      remove and verify that row separately, retire synthetic data/credentials, and record only a
+      private cleanup reference. Remove tester access and private captures under the approved
+      `STORE-01G` teardown procedure.
+
+---
+
 ## Historical behavior matrix — DO NOT EXECUTE UNTIL `DEVICE-01B-CURRENT-FLOW-MATRIX`
 
 Sections (b)–(z) are retained only as an inventory of past checks. They mix version-code-39 results,
 development-only harnesses, removed settings, real-account prompts, stale full-screen-intent claims,
 and evidence commands that may expose private data. Do not run, tick, or use them as tester
-instructions. `DEVICE-01B-CURRENT-FLOW-MATRIX` must reconcile each flow against the current app,
-synthetic-only staged environment, permission behavior, and safe evidence rules first.
+instructions. The current slice above supersedes historical sections (b)–(e) and (i), but the text
+remains non-executable history. `DEVICE-01B2` and `DEVICE-01B3` must reconcile the remaining flows
+against the current app, synthetic-only staged environment, permission behavior, and safe evidence
+rules first.
 
 ---
 
