@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
 import React, { useEffect, useRef } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
   type GestureResponderEvent,
   PanResponder,
@@ -40,8 +41,9 @@ function clamp(v: number, min: number, max: number): number {
  * no-op on Android, so fullscreen photos couldn't be zoomed at all on the target platform.
  *
  * Gestures: two fingers pinch to scale (1–4×); one finger pans ONLY while zoomed (so a one-finger
- * swipe at 1× falls through to the parent pager to change photos). Releasing below ~1× springs
- * back to fit. Double-tap-to-zoom is intentionally omitted (a nicety, not the core fix).
+ * swipe at 1× falls through to the parent pager to change photos). Releasing below ~1× returns to
+ * fit with the existing spring, or snaps immediately while Reduce Motion is unresolved/enabled.
+ * Double-tap-to-zoom is intentionally omitted (a nicety, not the core fix).
  *
  * NOTE: gesture feel needs on-device verification (jest can't exercise native touches).
  */
@@ -65,6 +67,8 @@ export function ZoomableImage({
   const liveTranslate = useRef({ x: 0, y: 0 });
   const initialDist = useRef(0);
   const zoomedRef = useRef(false);
+  const reduceMotion = useRef<boolean | null>(null);
+  const activeReset = useRef<Animated.CompositeAnimation | null>(null);
 
   const setZoomed = (z: boolean): void => {
     if (zoomedRef.current === z) return;
@@ -72,25 +76,68 @@ export function ZoomableImage({
     onZoomChange?.(z);
   };
 
+  const stopActiveReset = (): boolean => {
+    const animation = activeReset.current;
+    activeReset.current = null;
+    animation?.stop();
+    return animation != null;
+  };
+
+  const snapAnimatedValuesToFit = (): void => {
+    scale.setValue(1);
+    translateX.setValue(0);
+    translateY.setValue(0);
+  };
+
   const resetZoom = (animated: boolean): void => {
+    stopActiveReset();
     committedScale.current = 1;
     committedTranslate.current = { x: 0, y: 0 };
     liveScale.current = 1;
     liveTranslate.current = { x: 0, y: 0 };
     initialDist.current = 0;
-    if (animated) {
-      Animated.parallel([
+    if (animated && reduceMotion.current === false) {
+      const animation = Animated.parallel([
         Animated.spring(scale, { toValue: 1, useNativeDriver: true, bounciness: 0 }),
         Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 0 }),
         Animated.spring(translateY, { toValue: 0, useNativeDriver: true, bounciness: 0 }),
-      ]).start();
+      ]);
+      activeReset.current = animation;
+      animation.start(() => {
+        if (activeReset.current === animation) activeReset.current = null;
+      });
     } else {
-      scale.setValue(1);
-      translateX.setValue(0);
-      translateY.setValue(0);
+      snapAnimatedValuesToFit();
     }
     setZoomed(false);
   };
+
+  useEffect(() => {
+    let mounted = true;
+    let receivedPreferenceEvent = false;
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
+      if (!mounted) return;
+      receivedPreferenceEvent = true;
+      reduceMotion.current = enabled;
+      if (enabled && stopActiveReset()) snapAnimatedValuesToFit();
+    });
+
+    void AccessibilityInfo.isReduceMotionEnabled().then(
+      (enabled) => {
+        if (mounted && !receivedPreferenceEvent) reduceMotion.current = enabled;
+      },
+      () => {
+        // If the native query is unavailable, retain the existing spring for future resets.
+        if (mounted && !receivedPreferenceEvent) reduceMotion.current = false;
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+      stopActiveReset();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset when this page scrolls out of view so returning to it starts at fit.
   useEffect(() => {
@@ -106,6 +153,7 @@ export function ZoomableImage({
       onMoveShouldSetPanResponder: (e) =>
         e.nativeEvent.touches.length === 2 || committedScale.current > 1.01,
       onPanResponderGrant: (e) => {
+        stopActiveReset();
         initialDist.current = touchDistance(e);
         liveScale.current = committedScale.current;
         liveTranslate.current = { ...committedTranslate.current };
