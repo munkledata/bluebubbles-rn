@@ -7,14 +7,41 @@ interface TextFieldProps extends TextInputProps {
 }
 
 /** Labeled iOS-style text input bound to the theme. */
-export function TextField({ label, style, ...inputProps }: TextFieldProps): React.JSX.Element {
+export function TextField({
+  label,
+  style,
+  accessibilityLabel,
+  accessibilityLabelledBy,
+  'aria-label': ariaLabel,
+  'aria-labelledby': ariaLabelledBy,
+  ...inputProps
+}: TextFieldProps): React.JSX.Element {
   const theme = useTheme();
+  const generatedLabelId = React.useId();
+  const visualLabelId = label ? `text-field-label-${generatedLabelId}` : undefined;
+  const hasExplicitAccessibleName =
+    accessibilityLabel != null ||
+    accessibilityLabelledBy != null ||
+    ariaLabel != null ||
+    ariaLabelledBy != null;
+
   return (
     <View style={styles.wrap}>
       {label ? (
-        <Text style={[styles.label, { color: theme.color.secondaryLabel }]}>{label}</Text>
+        <Text
+          nativeID={visualLabelId}
+          style={[styles.label, { color: theme.color.secondaryLabel }]}
+        >
+          {label}
+        </Text>
       ) : null}
       <TextInput
+        accessibilityLabel={accessibilityLabel}
+        accessibilityLabelledBy={
+          accessibilityLabelledBy ?? (hasExplicitAccessibleName ? undefined : visualLabelId)
+        }
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
         placeholderTextColor={theme.color.tertiaryLabel}
         style={[
           styles.input,
