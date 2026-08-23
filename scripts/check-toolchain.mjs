@@ -4,11 +4,20 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 export const REQUIRED_NODE_VERSION = '24.19.0';
 export const REQUIRED_NODE_ENGINE = '>=24.19.0 <25';
 export const REQUIRED_NPM_VERSION = '11.17.0';
 export const REQUIRED_EAS_CLI_VERSION = '21.5.0';
+export const REQUIRED_EAS_SUBMIT_CONFIG = Object.freeze({
+  production: Object.freeze({
+    android: Object.freeze({
+      track: 'internal',
+      serviceAccountKeyPath: './play-service-account.json',
+    }),
+  }),
+});
 export const REQUIRED_RELEASE_SCRIPTS = {
   'release:android': 'npm run release:android:local',
   'release:android:local':
@@ -109,6 +118,12 @@ export function validateToolchain({
     }
   }
 
+  if (!isDeepStrictEqual(eas?.submit, REQUIRED_EAS_SUBMIT_CONFIG)) {
+    errors.push(
+      'EAS submit configuration must be exactly the reviewed production.android Internal Testing path',
+    );
+  }
+
   return errors;
 }
 
@@ -140,7 +155,12 @@ export function runToolchainCheck({ root = process.cwd() } = {}) {
   });
 
   if (errors.length > 0) throw new Error(`Toolchain drift:\n- ${errors.join('\n- ')}`);
-  return { node: actualNode, npm: childNpm, easCli: eas.cli.version };
+  return {
+    node: actualNode,
+    npm: childNpm,
+    easCli: eas.cli.version,
+    androidSubmitTrack: eas.submit.production.android.track,
+  };
 }
 
 const invokedDirectly =
@@ -149,7 +169,7 @@ if (invokedDirectly) {
   try {
     const result = runToolchainCheck();
     console.log(
-      `Toolchain guard passed: Node ${result.node}; npm ${result.npm}; EAS CLI ${result.easCli} pinned in config and release commands.`,
+      `Toolchain guard passed: Node ${result.node}; npm ${result.npm}; EAS CLI ${result.easCli} pinned in config and release commands; Android submission pinned to ${result.androidSubmitTrack}.`,
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

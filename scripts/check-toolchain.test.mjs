@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   REQUIRED_EAS_CLI_VERSION,
+  REQUIRED_EAS_SUBMIT_CONFIG,
   REQUIRED_NODE_ENGINE,
   REQUIRED_NODE_VERSION,
   REQUIRED_NPM_VERSION,
@@ -34,11 +35,12 @@ function validInput() {
           { extends: 'base', environment: profile },
         ]),
       ]),
+      submit: structuredClone(REQUIRED_EAS_SUBMIT_CONFIG),
     },
   };
 }
 
-test('accepts the reviewed Node, npm, EAS CLI, and named environments', () => {
+test('accepts the reviewed toolchain, environments, and Internal Testing submission', () => {
   assert.deepEqual(validateToolchain(validInput()), []);
 });
 
@@ -75,6 +77,14 @@ test('rejects drift in every executable and declarative toolchain boundary', () 
           env: { NODE_ENV: 'production' },
         },
       },
+      submit: {
+        production: {
+          android: {
+            ...REQUIRED_EAS_SUBMIT_CONFIG.production.android,
+            track: 'production',
+          },
+        },
+      },
     },
   });
 
@@ -93,12 +103,132 @@ test('rejects drift in every executable and declarative toolchain boundary', () 
     'preview profile must extend base',
     'preview profile must select the preview environment',
     'must not overload NODE_ENV',
+    'EAS submit configuration',
   ]) {
     assert.ok(
       errors.some((error) => error.includes(expected)),
       expected,
     );
   }
+});
+
+test('rejects any drift from the sole private Android Internal Testing submit profile', () => {
+  const variants = [
+    [
+      'missing submit configuration',
+      (input) => {
+        delete input.eas.submit;
+      },
+    ],
+    ['null submit configuration', (input) => (input.eas.submit = null)],
+    ['empty submit configuration', (input) => (input.eas.submit = {})],
+    ['array submit configuration', (input) => (input.eas.submit = [])],
+    ['string submit configuration', (input) => (input.eas.submit = 'internal')],
+    [
+      'renamed profile',
+      (input) => {
+        input.eas.submit = { internal: structuredClone(input.eas.submit.production) };
+      },
+    ],
+    [
+      'second submit profile',
+      (input) => {
+        input.eas.submit.preview = structuredClone(input.eas.submit.production);
+      },
+    ],
+    [
+      'iOS submit path',
+      (input) => {
+        input.eas.submit.production.ios = {};
+      },
+    ],
+    [
+      'profile inheritance',
+      (input) => {
+        input.eas.submit.production.extends = 'base';
+      },
+    ],
+    [
+      'missing Android path',
+      (input) => {
+        delete input.eas.submit.production.android;
+      },
+    ],
+    [
+      'missing explicit track',
+      (input) => {
+        delete input.eas.submit.production.android.track;
+      },
+    ],
+    [
+      'missing service-account path',
+      (input) => {
+        delete input.eas.submit.production.android.serviceAccountKeyPath;
+      },
+    ],
+    [
+      'different service-account path',
+      (input) => {
+        input.eas.submit.production.android.serviceAccountKeyPath = './other.json';
+      },
+    ],
+    [
+      'application override',
+      (input) => {
+        input.eas.submit.production.android.applicationId = 'com.example.other';
+      },
+    ],
+    [
+      'release status',
+      (input) => {
+        input.eas.submit.production.android.releaseStatus = 'draft';
+      },
+    ],
+    [
+      'rollout',
+      (input) => {
+        input.eas.submit.production.android.rollout = 0.1;
+      },
+    ],
+    [
+      'review behavior',
+      (input) => {
+        input.eas.submit.production.android.changesNotSentForReview = true;
+      },
+    ],
+    [
+      'unknown Android option',
+      (input) => {
+        input.eas.submit.production.android.unreviewed = true;
+      },
+    ],
+    ...['production', 'alpha', 'beta', 'qa', 'INTERNAL', '$EAS_BUILD_PROFILE'].map((track) => [
+      `track ${track}`,
+      (input) => {
+        input.eas.submit.production.android.track = track;
+      },
+    ]),
+  ];
+
+  for (const [name, mutate] of variants) {
+    const input = validInput();
+    mutate(input);
+    assert.ok(
+      validateToolchain(input).some((error) => error.includes('EAS submit configuration')),
+      name,
+    );
+  }
+
+  const reordered = validInput();
+  reordered.eas.submit = {
+    production: {
+      android: {
+        serviceAccountKeyPath: './play-service-account.json',
+        track: 'internal',
+      },
+    },
+  };
+  assert.deepEqual(validateToolchain(reordered), []);
 });
 
 test('reads npm versions from npm user-agent strings', () => {
@@ -160,7 +290,15 @@ test('rejects additional release names and EAS build or submit entry points', ()
   const variants = [
     ['release:android:cloud', 'npm run hidden-cloud-builder'],
     ['build:android:cloud', 'npx --yes eas-cli@21.5.0 build -p android'],
+    [
+      'build:android:auto-submit',
+      'npx --yes eas-cli@21.5.0 build -p android --local --auto-submit-with-profile=production',
+    ],
     ['submit:android', 'eas submit -p android --profile production'],
+    [
+      'deploy:android',
+      "npx --yes --package eas-cli@21.5.0 -c 'eas submit -p android --profile production'",
+    ],
   ];
 
   for (const [scriptName, script] of variants) {
