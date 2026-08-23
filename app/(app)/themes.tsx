@@ -22,6 +22,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { useThemeStore } from '@state/themeStore';
 import { Screen, ScreenHeader, ThemeStudio, useTheme } from '@ui';
+import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import {
   darkThemeOrFallback,
   isDarkThemeTokens,
@@ -30,9 +31,8 @@ import {
   type ThemeTokens,
 } from '@ui/theme/tokens';
 
-/** Which theme the studio is editing: a new one, or an existing row. */
-type Editing = { row: CustomThemeRow | null };
-
+/** Which theme the studio is editing, with motion policy captured for this exact opening. */
+type Editing = { row: CustomThemeRow | null; animationType: 'none' | 'slide' };
 type AccountTaskResult<T> = { owned: true; value: T } | { owned: false };
 
 /**
@@ -270,6 +270,15 @@ export default function ThemesScreen(): React.JSX.Element {
     })();
   };
 
+  const reduceMotion = useReduceMotionPreferenceRef();
+  const openEditor = (row: CustomThemeRow | null): void => {
+    if (!accountLease.isCurrent()) return;
+    const next = { row, animationType: modalAnimationFor(reduceMotion.current) };
+    // Keep the animation decision stable for this native dialog. A retained/double press or a
+    // live setting change must not recreate an editor that is already visible.
+    setEditing((current) => current ?? next);
+  };
+
   return (
     <Screen>
       <ScreenHeader
@@ -278,7 +287,7 @@ export default function ThemesScreen(): React.JSX.Element {
         right={
           <Pressable
             onPress={() => {
-              if (accountLease.isCurrent()) setEditing({ row: null });
+              openEditor(null);
             }}
             hitSlop={8}
           >
@@ -337,7 +346,7 @@ export default function ThemesScreen(): React.JSX.Element {
                 ) : null}
                 <Pressable
                   onPress={() => {
-                    if (accountLease.isCurrent()) setEditing({ row });
+                    openEditor(row);
                   }}
                   hitSlop={8}
                   style={styles.action}
@@ -364,7 +373,13 @@ export default function ThemesScreen(): React.JSX.Element {
       </ScrollView>
 
       {accountCurrent && editing ? (
-        <Modal visible transparent animationType="slide" onRequestClose={() => setEditing(null)}>
+        <Modal
+          visible
+          transparent
+          animationType={editing.animationType}
+          onRequestClose={() => setEditing(null)}
+          testID="global-theme-studio-modal"
+        >
           <ThemeStudio
             title={editing.row == null ? 'New Theme' : 'Edit Theme'}
             initialTokens={editorTokens()}
@@ -377,6 +392,10 @@ export default function ThemesScreen(): React.JSX.Element {
       ) : null}
     </Screen>
   );
+}
+
+function modalAnimationFor(reduceMotion: boolean | null): 'none' | 'slide' {
+  return reduceMotion === false ? 'slide' : 'none';
 }
 
 const styles = StyleSheet.create({

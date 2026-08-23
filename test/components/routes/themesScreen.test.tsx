@@ -1,4 +1,5 @@
 import React from 'react';
+import { AccessibilityInfo } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { ThemeTokens } from '@ui/theme/tokens';
 
@@ -11,6 +12,10 @@ const mockUpdateCustomTheme = jest.fn();
 const mockDeleteCustomTheme = jest.fn();
 const mockKvGet = jest.fn();
 const mockKvSetWithinTransaction = jest.fn();
+const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
+  typeof AccessibilityInfo.isReduceMotionEnabled
+>;
+const mockAddEventListener = AccessibilityInfo.addEventListener as jest.Mock;
 const mockTransactionContext = Object.freeze({ __transactionContext: true });
 const mockWithDbTransaction = jest.fn(
   async (
@@ -38,6 +43,24 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
+  const responder = node.props.onStartShouldSetResponder;
+  if (typeof responder !== 'function') {
+    throw new Error('Expected an accessible Pressable responder callback');
+  }
+  const readConfig = (
+    responder as typeof responder & {
+      testOnly_pressabilityConfig?: () => { onPress?: (event: object) => void };
+    }
+  ).testOnly_pressabilityConfig;
+  if (typeof readConfig !== 'function') {
+    throw new Error('Expected React Native test-only Pressability configuration');
+  }
+  const onPress = readConfig().onPress;
+  if (typeof onPress !== 'function') throw new Error('Expected configured Pressable onPress');
+  return () => onPress({ nativeEvent: {} });
+}
+
 jest.mock('@ui', () => {
   const React = jest.requireActual('react') as typeof import('react');
   const { Pressable, Text } = jest.requireActual('react-native') as typeof import('react-native');
@@ -49,19 +72,37 @@ jest.mock('@ui', () => {
     ...jest.requireActual('@ui/primitives'),
     ThemeStudio: ({
       onApply,
+      onCancel,
       initialName,
+      title,
     }: {
       onApply: (tokens: ThemeTokens, name: string) => Promise<void>;
+      onCancel: () => void;
       initialName: string;
+      title: string;
     }) =>
       React.createElement(
-        Pressable,
-        {
-          accessibilityRole: 'button',
-          accessibilityLabel: 'Save mock theme',
-          onPress: () => void onApply(gatorTheme, initialName),
-        },
-        React.createElement(Text, null, 'Save mock theme'),
+        React.Fragment,
+        null,
+        React.createElement(Text, { testID: 'mock-theme-identity' }, `${title}:${initialName}`),
+        React.createElement(
+          Pressable,
+          {
+            accessibilityRole: 'button',
+            accessibilityLabel: 'Cancel mock theme',
+            onPress: onCancel,
+          },
+          React.createElement(Text, null, 'Cancel mock theme'),
+        ),
+        React.createElement(
+          Pressable,
+          {
+            accessibilityRole: 'button',
+            accessibilityLabel: 'Save mock theme',
+            onPress: () => void onApply(gatorTheme, initialName),
+          },
+          React.createElement(Text, null, 'Save mock theme'),
+        ),
       ),
   };
 });
@@ -106,6 +147,8 @@ import {
 
 const mockShowDialog = showDialog as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
+let reduceMotionListener: ((enabled: boolean) => void) | undefined;
+let removeReduceMotionListener: jest.Mock;
 const ROW = {
   id: 7,
   name: 'Account A Theme',
@@ -116,6 +159,14 @@ const ROW = {
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
+  reduceMotionListener = undefined;
+  removeReduceMotionListener = jest.fn();
+  mockIsReduceMotionEnabled.mockReset().mockResolvedValue(false);
+  mockAddEventListener.mockReset().mockImplementation((event, listener) => {
+    expect(event).toBe('reduceMotionChanged');
+    reduceMotionListener = listener as (enabled: boolean) => void;
+    return { remove: removeReduceMotionListener };
+  });
   mockListCustomThemes.mockResolvedValue([ROW]);
   mockGetCustomThemeById.mockResolvedValue(ROW);
   mockCreateCustomTheme.mockResolvedValue(91);
@@ -129,6 +180,135 @@ beforeEach(() => {
 
 afterEach(() => {
   resumeRealtimeDeliveries();
+});
+
+async function settleMotionPreference(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+}
+
+async function emitReduceMotion(enabled: boolean): Promise<void> {
+  expect(reduceMotionListener).toBeDefined();
+  await act(async () => reduceMotionListener?.(enabled));
+}
+
+function editorModal() {
+  return screen.getByTestId('global-theme-studio-modal');
+}
+
+async function closeEditor(): Promise<void> {
+  const onRequestClose = editorModal().props.onRequestClose as () => void;
+  await act(async () => onRequestClose());
+}
+
+describe('ThemesScreen reduced motion', () => {
+  it('latches an unresolved opening at none and applies later false only after reopening', async () => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    const view = await renderWithTheme(<ThemesScreen />);
+    await screen.findByText('Account A Theme');
+
+    await fireEvent.press(screen.getByText('＋'));
+    expect(editorModal().props.animationType).toBe('none');
+
+    await act(async () => {
+      preference.resolve(false);
+      await preference.promise;
+    });
+    await view.rerender(<ThemesScreen />);
+    expect(editorModal().props.animationType).toBe('none');
+
+    await closeEditor();
+    await fireEvent.press(screen.getByText('＋'));
+    expect(editorModal().props.animationType).toBe('slide');
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a visible slide stable across live true and a visible none stable across live false', async () => {
+    const view = await renderWithTheme(<ThemesScreen />);
+    await screen.findByText('Account A Theme');
+    await settleMotionPreference();
+    const addText = screen.getByText('＋');
+    if (!addText.parent) throw new Error('Expected the add-theme Pressable');
+    const retainedNewTheme = retainConfiguredPress(addText.parent);
+
+    await fireEvent.press(screen.getByText('Edit'));
+    expect(editorModal().props.animationType).toBe('slide');
+    expect(screen.getByTestId('mock-theme-identity').props.children).toBe(
+      'Edit Theme:Account A Theme',
+    );
+    await emitReduceMotion(true);
+    await view.rerender(<ThemesScreen />);
+    expect(editorModal().props.animationType).toBe('slide');
+
+    // Invoke the exact opener captured before the live setting change. It cannot replace either
+    // the motion decision or the edit payload of the already-visible opening.
+    await act(async () => retainedNewTheme());
+    expect(editorModal().props.animationType).toBe('slide');
+    expect(screen.getByTestId('mock-theme-identity').props.children).toBe(
+      'Edit Theme:Account A Theme',
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Cancel mock theme' }));
+    expect(screen.queryByTestId('global-theme-studio-modal')).toBeNull();
+    await fireEvent.press(screen.getByText('Edit'));
+    expect(editorModal().props.animationType).toBe('none');
+
+    await emitReduceMotion(false);
+    await view.rerender(<ThemesScreen />);
+    expect(editorModal().props.animationType).toBe('none');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save mock theme' }));
+    await waitFor(() => expect(screen.queryByTestId('global-theme-studio-modal')).toBeNull());
+    expect(mockUpdateCustomTheme).toHaveBeenCalledTimes(1);
+
+    await fireEvent.press(screen.getByText('Edit'));
+    expect(editorModal().props.animationType).toBe('slide');
+  });
+
+  it.each([
+    ['enabled', true, 'none'],
+    ['query failure', new Error('motion preference unavailable'), 'slide'],
+  ] as const)('uses the expected opening after initial %s', async (_label, result, expected) => {
+    if (result instanceof Error) mockIsReduceMotionEnabled.mockRejectedValue(result);
+    else mockIsReduceMotionEnabled.mockResolvedValue(result);
+    mockListCustomThemes.mockResolvedValue([]);
+    await renderWithTheme(<ThemesScreen />);
+    await settleMotionPreference();
+
+    await fireEvent.press(screen.getByText('＋'));
+    expect(editorModal().props.animationType).toBe(expected);
+  });
+
+  it('lets a synchronous registration event beat a stale query and removes the owner once', async () => {
+    const staleQuery = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(staleQuery.promise);
+    mockAddEventListener.mockImplementation((event, listener) => {
+      expect(event).toBe('reduceMotionChanged');
+      reduceMotionListener = listener as (enabled: boolean) => void;
+      reduceMotionListener(true);
+      return { remove: removeReduceMotionListener };
+    });
+    mockListCustomThemes.mockResolvedValue([]);
+    const view = await renderWithTheme(<ThemesScreen />);
+
+    await act(async () => {
+      staleQuery.resolve(false);
+      await staleQuery.promise;
+    });
+    await fireEvent.press(screen.getByText('＋'));
+    expect(editorModal().props.animationType).toBe('none');
+
+    await closeEditor();
+    await emitReduceMotion(false);
+    await fireEvent.press(screen.getByText('＋'));
+    expect(editorModal().props.animationType).toBe('slide');
+
+    await view.unmount();
+    expect(removeReduceMotionListener).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ThemesScreen account ownership', () => {
