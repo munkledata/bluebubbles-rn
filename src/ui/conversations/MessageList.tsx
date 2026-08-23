@@ -1,7 +1,6 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -28,6 +27,10 @@ import {
   type BubbleRect,
   type ScrollPinState,
 } from '@utils';
+import {
+  useReduceMotionPreference,
+  useReduceMotionPreferenceRef,
+} from '../hooks/useReduceMotionPreference';
 import { usePullToRefresh } from '../primitives';
 import { readableTextOn, useTheme, withAlpha } from '../theme';
 import { MessageRow } from './MessageRow';
@@ -81,41 +84,6 @@ function distFromBottomOf(e: NativeSyntheticEvent<NativeScrollEvent>): number {
   return contentSize.height - contentOffset.y - layoutMeasurement.height;
 }
 
-function useReduceMotionPreference(): readonly [boolean | null, React.RefObject<boolean | null>] {
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-  const reduceMotionRef = useRef<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const applyPreference = (enabled: boolean): void => {
-      reduceMotionRef.current = enabled;
-      setReduceMotion(enabled);
-    };
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      receivedPreferenceEvent = true;
-      if (mounted) applyPreference(enabled);
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) applyPreference(enabled);
-      },
-      () => {
-        // If the native query is unavailable, retain the existing animated behavior.
-        if (mounted && !receivedPreferenceEvent) applyPreference(false);
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return [reduceMotion, reduceMotionRef];
-}
-
 // FlashList v2 has no `inverted`; render chronological (oldest→newest) and start
 // from the bottom so the newest message is visible and the list stays pinned
 // (the scrollPin convergence loop below is what "pinned" means).
@@ -139,7 +107,8 @@ export function MessageList({
   accountLease,
 }: MessageListProps): React.JSX.Element {
   const theme = useTheme();
-  const [reduceMotion, reduceMotionRef] = useReduceMotionPreference();
+  const reduceMotion = useReduceMotionPreference();
+  const reduceMotionRef = useReduceMotionPreferenceRef();
   const [screenLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
   // Hooks must run unconditionally; a no-op when no refresh action is wired. The element is
   // memoized inside the hook so FlashList's layout stays stable across the frequent re-renders.

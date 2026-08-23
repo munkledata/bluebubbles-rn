@@ -85,6 +85,8 @@ import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
 // eslint-disable-next-line import/first
 import { darkTheme } from '@ui/theme/tokens';
+// eslint-disable-next-line import/first
+import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 
 const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
   typeof AccessibilityInfo.isReduceMotionEnabled
@@ -198,6 +200,11 @@ function autoFollowAnimation(): unknown {
   return config?.animateAutoScrollToBottom;
 }
 
+function SharedMotionRefProbe(): null {
+  useReduceMotionPreferenceRef();
+  return null;
+}
+
 /** Mount with the initial rows, let the onLoad landing fire, and start from a clean mock. */
 async function mountAtBottom(
   msgs: EnrichedMessage[],
@@ -263,6 +270,88 @@ describe('MessageList — pinned-to-bottom convergence', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('joins an already-resolved ref owner immediately and leaves it alive when the list unmounts first', async () => {
+    mockIsReduceMotionEnabled.mockResolvedValue(true);
+    const msgs = initialWithReply();
+    const view = await renderWithTheme(
+      <>
+        <SharedMotionRefProbe />
+      </>,
+    );
+    await settleInitialMotionPreference();
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      view.rerender(
+        <>
+          <SharedMotionRefProbe />
+          <MessageList chatGuid={GUID} isGroup={false} messages={msgs} />
+        </>,
+      );
+    });
+    await waitFor(() => expect(mockJumpToReplyByMessage.get('reply')).toBeDefined());
+    expect(autoFollowAnimation()).toBe(false);
+    const jumpToReply = mockJumpToReplyByMessage.get('reply');
+    await act(async () => jumpToReply?.());
+    expect(mockScrollToIndex).toHaveBeenLastCalledWith({
+      index: 0,
+      animated: false,
+      viewPosition: 0.4,
+    });
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      view.rerender(
+        <>
+          <SharedMotionRefProbe />
+        </>,
+      );
+    });
+    expect(removeReduceMotionListener).not.toHaveBeenCalled();
+
+    await view.unmount();
+    expect(removeReduceMotionListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a synchronous true event authoritative for render and stable delayed paths', async () => {
+    const preference = deferred<boolean>();
+    mockIsReduceMotionEnabled.mockReturnValue(preference.promise);
+    mockAddEventListener.mockImplementationOnce((event, listener) => {
+      expect(event).toBe('reduceMotionChanged');
+      reduceMotionListener = listener as (enabled: boolean) => void;
+      listener(true);
+      return { remove: removeReduceMotionListener };
+    });
+    const msgs = initialWithReply();
+    await renderWithTheme(<MessageList chatGuid={GUID} isGroup={false} messages={msgs} />);
+    expect(mockAddEventListener).toHaveBeenCalledTimes(1);
+    expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
+    expect(autoFollowAnimation()).toBe(false);
+    await waitFor(() => expect(mockJumpToReplyByMessage.get('reply')).toBeDefined());
+    const stableJump = mockJumpToReplyByMessage.get('reply');
+    await act(async () => stableJump?.());
+    expect(mockScrollToIndex).toHaveBeenLastCalledWith({
+      index: 0,
+      animated: false,
+      viewPosition: 0.4,
+    });
+
+    await act(async () => {
+      preference.resolve(false);
+      await preference.promise;
+    });
+    expect(autoFollowAnimation()).toBe(false);
+    expect(mockJumpToReplyByMessage.get('reply')).toBe(stableJump);
+    mockScrollToIndex.mockClear();
+    await act(async () => stableJump?.());
+    expect(mockScrollToIndex).toHaveBeenLastCalledWith({
+      index: 0,
+      animated: false,
+      viewPosition: 0.4,
+    });
+  });
 
   it('keeps all four motion paths immediate while preference is unknown, without replaying them', async () => {
     const preference = deferred<boolean>();
