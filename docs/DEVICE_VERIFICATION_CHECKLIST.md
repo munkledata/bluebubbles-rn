@@ -5,8 +5,9 @@
 > Play install, or device result. `DEVICE-01B1-NOTIFICATION-LIFECYCLE-MATRIX` and
 > `DEVICE-01B2-DATA-NATIVE-MATRIX` have reconciled the current notification/lifecycle and
 > data/native guidance below, but every result remains open until the external prerequisites and
-> separate execution approvals exist. The old behavior matrix remains historical and non-executable
-> while `DEVICE-01B3` reconciles its remaining flows.
+> separate execution approvals exist. `DEVICE-01B3-UI-ACCESSIBILITY-MATRIX` has now reconciled the
+> remaining permission, UI, accessibility, browser, theme, and account-transition guidance. The old
+> behavior matrix remains historical and permanently non-executable.
 
 This is the evidence record for the exact Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
@@ -571,16 +572,247 @@ rotation, search, transfer, share, save, sticker, Disconnect, device command, or
 
 ---
 
+## Current matrix slice 3: permissions, UI, accessibility, and account transition — PREPARED, NOT EXECUTED
+
+This section supersedes the remaining UI rows of historical section (j), all of section (k), and
+stale permission, embedded-browser, theme, and account-switch instructions elsewhere in the old
+matrix. Functional transfer/viewer results remain owned by slice 2, and notification/App Lock/
+FaceTime-alert results remain owned by slice 1. Do not begin this slice until section (a) is complete,
+`STORE-01G-TESTER-READINESS` has approved owners and dry runs, and the release owner separately
+approves Play distribution, the device session, controlled OS-setting changes, and both synthetic
+server identities used for account isolation.
+
+Use only the frozen Play-installed candidate, controlled tester profiles, synthetic contacts,
+neutral media, non-sensitive coordinates, and bounded staged-server fixtures. Do not rebuild,
+sideload, clear app data/cache/defaults, uninstall or disable handler apps, use `run-as`, capture raw
+logs/QR payloads/private paths, install an interception certificate or proxy on a personal device,
+or manufacture cleanup, permission, storage, browser, or native failures. Stop on production data,
+an unexpected permission or intent, private evidence exposure, account-B admission after an
+incomplete cleanup, uncontrolled external traffic, or a setting that cannot be restored safely.
+
+### 1. Candidate state, fixtures, and Android applicability
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Reconfirm section (a), then record the clean/update branch,
+      Android/API, navigation mode, OS appearance, display/font/TalkBack state, permission baseline,
+      launcher state, and private evidence reference. Record existing grants rather than resetting
+      the app to force a first prompt.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Approve two isolated synthetic server identities
+      A and B, one shared synthetic participant identifier where practical, a synthetic device
+      contact, controlled URL observer, optional finite Find My/FaceTime/send-contact capabilities,
+      and cleanup owners. Record aliases and capability flags only—never endpoints, credentials,
+      QR data, contact details, coordinates, or message text.
+
+| Device/session condition                                              | Current rule                                                                                                                                                 | Result |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| Android 14/API 34+ selected-photo access                              | Exercise full, selected/limited, and denied media access only when the OS offers each branch; selected access must expose only approved synthetic items      | [ ]    |
+| Android 13/API 33 without the API-34 selected-photo branch            | Exercise its actual photo/video and notification behavior; a missing selected-photo choice is session-N/A, while B1 still owns notification candidate credit | [ ]    |
+| Android 12/API 32 or lower                                            | Legacy media/storage permission behavior remains `BLOCKED/OPEN` until such a supported device runs it; a newer phone cannot close `PERM-01`                  | [ ]    |
+| Missing optional Find My, FaceTime, or send-contact staged capability | Leave that positive result `BLOCKED/OPEN`, except send-contact may be session-N/A when the exact server truthfully advertises it unsupported                 | [ ]    |
+
+### 2. Runtime permissions and Android-owned settings
+
+- [ ] **`EXACT PLAY CANDIDATE`:** On the setup QR screen, denial leaves the camera rationale and
+      **Enter Manually** usable; an allowed branch scans only the approved synthetic QR. Do not
+      record, capture, or retain the raw QR payload in evidence; successful connection is expected
+      to persist the normalized server credentials in the secure vault. Never treat successful
+      manual entry as camera-permission proof.
+- [ ] **`EXACT PLAY CANDIDATE`:** Opening the attachment tray exercises the current photo/video
+      prompt. Full or selected/limited access shows only permitted synthetic media; denial shows
+      Settings recovery while Camera and Files remain usable. Record that the tray currently asks
+      without a separate in-app rationale as the open `ONBOARD-01` gap, not a pass. No Music/audio
+      library prompt is allowed.
+- [ ] **`EXACT PLAY CANDIDATE`:** Tapping the composer **Camera** requests camera only. Denial shows
+      inline Settings guidance; allowance opens the camera and may cancel or stage one neutral
+      photo without a microphone prompt. Camera-video capture is not a current requirement.
+- [ ] **`EXACT PLAY CANDIDATE`:** Tapping voice record requests microphone access. Denial or a native
+      request failure closes the recorder and shows the fixed recovery guidance; allowance records
+      only silence or a neutral tone and can cancel without sending private speech.
+- [ ] **`EXACT PLAY CANDIDATE`:** Merely connecting or resuming does not prompt for Contacts when no
+      grant exists. Explicit **Sync Contacts** may prompt; denial explains system-settings recovery,
+      while allowance reads the synthetic-only address book and reports bounded counts.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** When send-contact is advertised, its explicit
+      picker distinguishes cancellation from denial and sends only the approved synthetic card.
+      Cancellation sends nothing; denial explains recovery. Restore/remove the synthetic contact
+      afterward. A server without the capability must not show the Contact action.
+- [ ] **`EXACT PLAY CANDIDATE`:** Each chat-settings photo picker requests access only after its
+      explicit action, accepts the platform's allowed branch, and shows fixed denial/unavailable
+      guidance without a stale-account dialog. Use only neutral synthetic media.
+- [ ] **`EXACT PLAY CANDIDATE`:** The battery-reliability row opens Android's general battery list
+      or the OEM App-info fallback and never a direct-exemption prompt. Exit without changing the
+      battery policy. Notification permission remains slice 1; Photos save permission remains
+      slice 2; full-screen-call settings remain `PLAY-02`.
+
+An OS grant or denial persists across Disconnect by design. Restore only permission and Android
+settings changed by this slice. A missing platform branch is session-N/A only; it does not close
+the corresponding product/API task. Any Write Contacts, Music/audio-library, exact-alarm, overlay,
+or Do Not Disturb access prompt is an unexpected failure.
+
+### 3. External browser, Maps, and disabled embedded-WebView paths
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Mount a message containing an approved controlled
+      HTTPS URL. The target observer sees no HTML/image request merely from opening the chat, and
+      no remote preview artwork mounts. Only an explicit tap hands the URL to the system browser
+      and may produce the bounded target request. Do not add a personal-device interception proxy.
+- [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Retain scheme-allowlist proof and stage inert
+      `intent:`, `javascript:`, `file:`, and `content:` text. It must not become an in-app actionable
+      link or open another app. Do not attempt to make Android execute a rejected value.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With a finite synthetic Find My coordinate, the
+      route shows the privacy-disabled embedded-map placeholder and the observer sees no tile/script
+      request. Only **Open** may hand the synthetic point to the system Maps app. Gator requests no
+      device-location permission. Without a finite fixture, leave this result open.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** If the approved conditional FaceTime fixture
+      exists, answering/starting shows Gator's browser handoff and then a system-owned custom tab or
+      browser—never an embedded WebView. Do not require Chrome specifically. Any camera/microphone
+      prompt belongs to the browser, not Gator, and does not close `FACE-01` or `PLAY-02`.
+- [ ] **`STATIC/HOST`:** Retain proof that no production source mounts `react-native-webview`, Find
+      My uses a disabled placeholder, FaceTime validates its Apple link before external handoff, and
+      URL-preview lookup is cache-read-only. The dependency may remain installed; do not claim it is
+      absent or that visual inspection proves zero network traffic/hostile-navigation safety.
+
+Do not uninstall browsers, Maps, Contacts, or viewers to force no-handler behavior. A naturally
+missing-handler result may be recorded, but ordinary safe URL/Maps failures can currently be
+silent; record that limitation instead of turning a tap into a pass.
+
+### 4. Keyboard, navigation, chat layout, reactions, and effects
+
+- [ ] **`EXACT PLAY CANDIDATE`:** With gesture navigation and no wallpaper, repeatedly show/hide the
+      chat keyboard, send a synthetic line, and use Back. The composer stays above the keyboard,
+      Back dismisses the keyboard before leaving, and no navigation-bar-sized gap remains.
+- [ ] **`EXACT PLAY CANDIDATE`:** Repeat with three-button navigation and an approved synthetic
+      wallpaper while opening reply/edit, attachment tray, upload status, and multi-select states.
+      Keyboard and navigation-bar space form one union rather than a doubled gap; live wallpaper
+      arrival does not remount the composer, lose its draft/staged item, or strand messages behind
+      translucent bars.
+- [ ] **`EXACT PLAY CANDIDATE`:** Enter a long URL/password on manual setup at large font and open/
+      close the keyboard. Record any obscured Connect/insecure-HTTP controls as the current Android
+      keyboard gap; this screen does not yet use the chat's padding behavior and must not receive a
+      broad layout pass from chat evidence. Regardless of the visual outcome, record that this
+      Android route lacks the chat screen's padding keyboard behavior. This is a device-specific
+      findings record and cannot close the manual-keyboard or accessibility-layout gap.
+- [ ] **`EXACT PLAY CANDIDATE`:** Open a long synthetic chat, confirm chronological rendering begins
+      at the newest message, scroll to history, receive a new item while unpinned, use the newest-
+      message affordance, and reopen through search/reply navigation. Late preview/attachment growth
+      must not hide the tail, and Back returns to Messages rather than stacking prior chats.
+- [ ] **`EXACT PLAY CANDIDATE`:** Reuse slice 2's finite media/upload fixture only for presentation:
+      media rings, generic-file spinner/byte text, and the single aggregate upload progressbar remain
+      legible with wallpaper on/off, keyboard open/closed, both themes, and large text. Appearance/
+      removal must not strand the list. This does not duplicate transfer or byte-credit from B2.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Long-press synthetic sent/received bubbles at the
+      top, middle, and bottom under both navigation modes and large text. The lifted bubble, tapback
+      bar, scrollable action card, left/right alignment, arbitrary-emoji input, dismissal, and
+      reaction toggle remain on-screen. Do not adjust layout code or safe-area values during a run.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** A newly arriving synthetic screen-effect message
+      while its chat is open plays once, leaves scrolling and controls usable, auto-cleans, and does
+      not replay from history. Separately observe a bubble-effect row's mount/remount behavior:
+      current source starts the effect on mount and guarantees only that unmount stops it, so record
+      any replay rather than requiring a false history/remount one-shot result; verify no animation
+      bleeds into a recycled row. Screen effects are non-interactive; do not require tap-to-skip or
+      turn this into Reduce Motion evidence.
+
+The app is portrait-only and predictive Back is disabled. Record rotation and predictive-Back as
+outside this candidate's supported product, not as proof for `ANDROID-02` or `ANDROID-03A/B`.
+
+### 5. Dark themes and accessibility — record known gaps, never pass them
+
+| Enabled built-in preset | Exact candidate appearance matrix                                                                                                                  | Result |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| OLED Dark               | Cold launch and navigate representative setup/inbox/chat/settings/media screens with Android OS appearance set to light, then dark; app stays dark | [ ]    |
+| Gator                   | Repeat OS light/dark cold launch and navigation; app stays dark and uses Gator tokens rather than claiming a system/light theme                    | [ ]    |
+
+- [ ] **`EXACT PLAY CANDIDATE`:** Across the four branches above, inspect the black splash-to-first-
+      paint transition, status/navigation bars, adaptive launcher mask, and Android 13+ themed icon
+      where offered. No white flash or unreadable system bar is allowed; a missing themed-icon OS
+      branch is session-N/A only.
+- [ ] **`EXACT PLAY CANDIDATE`:** On both presets, run the approved screenshot/Accessibility Scanner
+      review at normal and maximum supported font/display size across setup, inbox, chat, Settings,
+      media/upload presentation, reaction/action menus, and Theme Studio. Record clipping, hidden
+      controls, contrast, touch-target, or focus-order defects individually; do not award a global
+      `UI-01`/`THEME-01A` pass from host ratios.
+- [ ] **`STATIC/HOST`:** Record the known `THEME-02` limitation: Theme Studio validates a name and
+      hex syntax but gives no contrast warning, affected-role explanation, confirmation, or
+      auto-fix. Never save an unreadable theme to demonstrate it. Legacy light-theme continuity
+      needs an approved natural Play-update baseline and otherwise remains `BLOCKED/OPEN`.
+- [ ] **`STATIC/HOST`:** Record the known `A11Y-01` gaps: visual `TextField` labels are not associated
+      with inputs, the manual HTTP switch lacks a programmatic label, and message bubbles expose no
+      TalkBack accessibility action for their long-press menu. These are findings, not candidate
+      passes even if an adjacent label is read incidentally.
+- [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** With Android Remove animations/Reduce Motion on,
+      record that Gator effects currently do not adapt. Preserve content/control behavior, but keep
+      `A11Y-02` open and do not describe the unchanged animation as a successful reduced-motion
+      branch.
+- [ ] **`EXACT PLAY CANDIDATE`:** Run separate TalkBack journeys for labeled inbox/header/composer/
+      tray/reaction/media controls and the aggregate upload progressbar, then record the known audio
+      load/retry, generic file chip, fullscreen zoom image, voice recorder, and Theme Studio semantic
+      gaps. Verify focus can escape every modal and system handoff. No single “TalkBack passes”
+      result may close `A11Y-01..03`; this row is a findings record.
+
+### 6. Synthetic account A → explicit Disconnect → account B
+
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** In A, create bounded identifiable state using
+      aliases only: a conversation/search hit, draft, pin/mute/custom chat name, per-chat theme/
+      wallpaper, reminder/schedule or queued item where safely supported, downloaded file, visible
+      notice, and optional finite delayed read. Record one benign device-global theme/feature
+      setting separately. Open the Disconnect confirmation, verify its permanent-deletion copy,
+      cancel once, and confirm A remains intact.
+- [ ] **`EXACT PLAY CANDIDATE`:** Confirm Disconnect, observe Welcome as an early UI transition only,
+      then connect B through ordinary setup without clearing data or navigating around the gate.
+      B validation must wait for cleanup or fail closed with fixed safe guidance; Welcome alone is
+      never isolation proof.
+- [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** If **Disconnect incomplete** or another cleanup
+      failure occurs naturally, B remains unauthorized; fully close/reopen for residual cleanup and
+      retry only after the fixed guidance. Do not induce a native/DB failure. Without a natural
+      candidate failure, leave this branch open and retain host proof.
+- [ ] **`EXACT PLAY CANDIDATE`:** In B, system Back and every visible route show no A server/account
+      details, chat/search result, draft, customization, media, reminder/schedule/queue, Find My/
+      FaceTime/RCS state, notice, dialog/toast, QR/log view, or delayed result. Device contacts,
+      runtime grants, App Lock, global feature/sync settings, and built-in/custom global themes may
+      persist by design; a device-contact name alone is not server-A leakage.
+- [ ] **`STAGED-SERVER`:** Sanitized aggregates show no unexpected A request/activity after teardown
+      and no A credential/content reaches B. The owner separately removes both accounts' synthetic
+      fixtures/device rows and expires credentials. This supports visible isolation but does not
+      prove each internal abort, DB/file deletion, FCM-token retirement, or server cleanup.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** If the synthetic server supports iMessage account
+      aliases, change **Start Chats Using** once and restore it. The same conversations/session stay
+      active: this is a server sender-alias setting, not account switching and never a substitute
+      for the A→Disconnect→B journey or `ALIAS-SEND-01`.
+
+### 7. Claims and cleanup boundaries
+
+| Claim or boundary                                             | Required evidence / current disposition                                                                                                                        |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native permission dialogs, limited media, IME/insets, intents | Exact Play-candidate observation on each applicable Android/API/navigation branch; host mocks cannot prove them                                                |
+| Theme readability and accessibility                           | Exact-device screenshots/Scanner/TalkBack plus host contrast/semantic evidence; known `THEME-02` and `A11Y-01..03` gaps prevent a universal pass               |
+| Embedded WebView/network absence                              | Static source plus controlled target/network observation; visual placeholder/browser handoff alone cannot prove traffic or hostile-navigation behavior         |
+| Account work cancellation and local wipe internals            | Host/native DB, file, notification, log, FCM, query, and lifecycle proof; visible B isolation cannot identify every deleted row/file or recalled native intent |
+| State that deliberately survives Disconnect                   | Device-wide themes/settings/contacts/App Lock/OS grants and user-created external copies; remove synthetic contacts/copies separately in their owning systems  |
+| Browser/Maps/share/native work already admitted               | Cannot be recalled after external handoff; close it before Disconnect and verify only the observable cleanup boundary                                          |
+
+At cleanup, close browser/Maps/settings/share/native surfaces; settle or cancel fixture work;
+restore only OS appearance, navigation, font/display/TalkBack, permission, theme, and feature
+settings changed by this slice; delete only the synthetic device contacts and external media/files
+actually created by this slice, in their owning apps; have the server owner remove A/B fixtures and
+device rows, retire credentials, and delete temporary captures after private review. Do not clear
+app data or uninstall as a substitute.
+
+All **40** result fields above remain open. This offline reconciliation did not run a Play install,
+permission prompt, OS-setting change, browser/Maps handoff, network observation, synthetic server
+event, effect, accessibility scan, Disconnect, account transition, device command, or cleanup.
+`PERM-01`, `ONBOARD-01`, `UI-01`, `THEME-01A/B`, `THEME-02`, `HANDLE-COLOR-01`, `A11Y-01..03`,
+`TEST-01`, `UISEC-01`, `ANDROID-02/03A/03B`, `WEB-01..03`, `FACE-01`, `PLAY-02/03`, `REL-003/004/
+005A/005B`, `SHARE-01`, `IPC-01`, `ALIAS-SEND-01`, `STORE-01G`, and `DEVICE-01` retain their
+existing open, conditional, in-progress, or blocked status.
+
+---
+
 ## Historical behavior matrix — PERMANENTLY NON-EXECUTABLE
 
 Sections (b)–(z) are retained only as an inventory of past checks. They mix version-code-39 results,
 development-only harnesses, removed settings, real-account prompts, stale full-screen-intent claims,
 and evidence commands that may expose private data. Do not run, tick, or use them as tester
-instructions. Current slices 1 and 2 supersede historical sections (b)–(i), the data/native rows of
-(j), all of (j.1), and the document/sticker rows of (z); the Redacted Mode rows in (z) are retired
-with no replacement test. That text remains non-executable history. `DEVICE-01B3` must reconcile
-the remaining UI, permission, accessibility, and account-transition flows against the current app,
-synthetic-only staged environment, permission behavior, and safe evidence rules first.
+instructions. Current slices 1–3 supersede historical sections (b)–(i), all currently reachable
+rows of (j), all of (j.1), all of (k), and the document/sticker rows of (z); the Redacted Mode rows
+in (z) are retired with no replacement test. The remaining text is permanently non-executable
+history and cannot regain candidate credit after a future feature or milestone.
 
 ---
 
