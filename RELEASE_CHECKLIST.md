@@ -9,10 +9,11 @@ Sections 1–7 remain the broader Closed/Open/Production release gate.
 
 Record the candidate before testing:
 
-- Version/build number: `__________`
-- Git commit: `__________`
-- AAB SHA-256: `__________`
-- EAS build URL or local build log: `__________`
+- Version/build number: `0.1.40 (versionCode 56)`
+- Git commit: `5d367eb58e38126258423f1cd9ce0da42b179f7f`
+- AAB SHA-256: `926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`
+- EAS build URL or local build log: local EAS production build on 2026-08-23; tracking ID
+  `0c5e82fe-e8d2-4dfa-ad94-38f9e805df7e`; Gradle `BUILD SUCCESSFUL` (1,227 tasks); no hosted build or submission
 - Tester/device/Android versions: `__________`
 - Test date: `__________`
 
@@ -116,16 +117,16 @@ cd ..
 npm run check:android-build
 ```
 
-- [ ] All three local Expo modules are discovered by autolinking and compile through Expo's aggregate
+- [x] All three local Expo modules are discovered by autolinking and compile through Expo's aggregate
       Android module during the app builds.
-- [ ] The candidate is a new signed native build; this project does not currently ship
+- [x] The candidate is a new signed native build; this project does not currently ship
       `expo-updates` or EAS update channels.
-- [ ] The release bundle/export completes with production behavior (`__DEV__` false).
-- [ ] The generated entry still registers FCM, notification, and background tasks before
+- [x] The release bundle/export completes with production behavior (`__DEV__` false).
+- [x] The generated entry still registers FCM, notification, and background tasks before
       `expo-router/entry`.
-- [ ] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
+- [x] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
       guard.
-- [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, and
+- [x] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, and
       `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
 - [ ] The AAB hash at the top of this file is computed after all checks and is the artifact uploaded
