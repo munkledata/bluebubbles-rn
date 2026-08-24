@@ -29,6 +29,16 @@ a different artifact that needs a new identity and verification record. Any futu
 name this exact local file and verify its digest immediately beforehand; never select an ambiguous
 “latest” build.
 
+### Current execution mode
+
+The owner has locked v56 for this Internal Testing round. Follow the authoritative `STORE-01` execution
+mode in `WORK_PLAN_2026-08-03.md`: do not fold later source work into this artifact's evidence, create
+more host-proof children, rebuild, or rerun broad host gates unless exact-AAB execution finds a real
+blocking defect. Documentation and live-evidence updates need only narrow format, diff, and exact-value
+checks. Use this runbook as the current handoff; future sessions should read only the Work Plan register
+and `STORE-01` section, `RELEASE_CHECKLIST.md` section 0, and this file unless a specific contradiction
+requires history. Put progress in the evidence ledger below and consolidate the parent update at closure.
+
 ## 2. Current proven state
 
 - `eas.json` has one Android submission target: Google Play track `internal`.
