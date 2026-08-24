@@ -69,21 +69,38 @@ Recommendation: use a dedicated Play email list named `gator-internal-testers` a
 feedback email or access-controlled form. A stable name makes the configuration auditable, while a
 private feedback destination avoids accidental disclosure through this public repository's Issues.
 
-| Decision                             | Safe value to record in Git                                        | Status |
-| ------------------------------------ | ------------------------------------------------------------------ | ------ |
-| Play tester list label               | `[OWNER INPUT — recommended: gator-internal-testers]`              | OPEN   |
-| Intended tester count                | `[OWNER INPUT — count only, maximum 100]`                          | OPEN   |
-| Membership administrator role        | `[OWNER INPUT — role, not tester addresses]`                       | OPEN   |
-| Opt-in-link custodian role           | `[OWNER INPUT — do not paste the link]`                            | OPEN   |
-| Private feedback channel label       | `[OWNER INPUT — do not record private address/token]`              | OPEN   |
-| Primary response owner role          | `[OWNER INPUT]`                                                    | OPEN   |
-| Backup response owner role           | `[OWNER INPUT]`                                                    | OPEN   |
-| Response target                      | `[OWNER INPUT — recommended: acknowledge within one business day]` | OPEN   |
-| Person/role allowed to halt the test | `[OWNER INPUT]`                                                    | OPEN   |
-| Staged-server maintenance owner role | `[OWNER INPUT]`                                                    | OPEN   |
-| Test window and credential expiry    | `[OWNER INPUT]`                                                    | OPEN   |
-| Approved device/Android matrix       | `[OWNER INPUT]`                                                    | OPEN   |
-| Prior-build update baseline          | `[OWNER INPUT — app version, version code, source label]`          | OPEN   |
+| Decision                             | Safe value to record in Git                                   | Status   |
+| ------------------------------------ | ------------------------------------------------------------- | -------- |
+| Play tester list label               | `gator-internal-testers`                                      | RECORDED |
+| Intended tester count                | `1`                                                           | RECORDED |
+| Membership administrator role        | `Project owner`                                               | RECORDED |
+| Opt-in-link custodian role           | `Project owner`                                               | RECORDED |
+| Private feedback channel label       | `Private feedback email`                                      | RECORDED |
+| Primary response owner role          | `Project owner`                                               | RECORDED |
+| Backup response owner role           | `None — halt test if project owner unavailable`               | RECORDED |
+| Response target                      | `Acknowledge within one business day`                         | RECORDED |
+| Person/role allowed to halt the test | `Project owner`                                               | RECORDED |
+| Staged-server maintenance owner role | `Project owner`                                               | RECORDED |
+| Test window and credential expiry    | `7 days from first Play install; expire within 24h after`     | RECORDED |
+| Approved device/Android matrix       | `Pixel 10 Pro XL / Android 17; Galaxy S25 Ultra / Android 16` | EXPECTED |
+| Prior-build update baseline          | `0.1.40 / code 53 / release commit 0564a80`                   | APPROVED |
+
+The device-matrix versions are current official expectations as of 2026-08-23: Google's
+[August 2026 Pixel update](https://support.google.com/pixelphone/thread/456979478/google-pixel-update-august-2026?hl=en-gb)
+places the Pixel 10 Pro XL on Android 17, while Samsung's current
+[U.S. Galaxy S25 Ultra update history](https://doc.samsungmobile.com/SM-S938U/035951251027/spa-us.html)
+lists Android 16 through its latest published entry. Carrier and rollout timing vary. Record each
+device's observed Android version and build during execution before awarding candidate evidence.
+
+The project owner deferred physical-phone inspection on 2026-08-23. All Play-install and
+device-dependent evidence remains open; no version-code-56 device result is claimed.
+
+The owner approved the update baseline on 2026-08-23. It is the most recent locally documented Play
+release with a defensible source label: commit `0564a80b572f16faf63c4d7b13c798a72451c845`
+records version `0.1.40` / code `53` as submitted to Internal Testing and verified through the
+Android Publisher API. Code `54` is documented only as a hosted EAS artifact, without a source label
+or Play-delivery proof. Execution evidence remains open until a selected device or live Play
+evidence confirms that the Play-delivered code-53 build is actually available or installed.
 
 Private custody may be Play Console, an approved password manager, or another owner-approved secure
 channel. It must not be a repository file, commit, issue, build log, screenshot, or tester handout.
@@ -103,21 +120,25 @@ that isolation cannot be provided, stop the test instead of treating a productio
 
 Record these non-secret facts after provisioning:
 
-| Server fact                                                    | Value                                | Status |
-| -------------------------------------------------------------- | ------------------------------------ | ------ |
-| Environment label                                              | `[OWNER INPUT — no hostname or URL]` | OPEN   |
-| Server repository commit/version                               | `[OWNER INPUT]`                      | OPEN   |
-| macOS/server compatibility owner                               | `[OWNER INPUT]`                      | OPEN   |
-| Stable HTTPS/tunnel method                                     | `[OWNER INPUT — method only]`        | OPEN   |
-| Dedicated synthetic identity confirmed                         | `[YES/NO + date]`                    | OPEN   |
-| No production chats, contacts, files, or credentials confirmed | `[YES/NO + reviewer]`                | OPEN   |
-| Synthetic fixture manifest label/version                       | `[OWNER INPUT — no private content]` | OPEN   |
-| FCM configured for the test environment                        | `[YES/NO + date; no key material]`   | OPEN   |
-| Credential rotation/expiry evidence location                   | `[PRIVATE REFERENCE LABEL]`          | OPEN   |
-| Reset and teardown owner                                       | `[OWNER INPUT]`                      | OPEN   |
+| Server fact                                                    | Value                                        | Status  |
+| -------------------------------------------------------------- | -------------------------------------------- | ------- |
+| Environment label                                              | `[OWNER INPUT — no hostname or URL]`         | OPEN    |
+| Server repository commit/version                               | `[OWNER INPUT]`                              | OPEN    |
+| macOS/server compatibility owner                               | `[OWNER INPUT]`                              | OPEN    |
+| Stable HTTPS/tunnel method                                     | `[OWNER INPUT — method only]`                | OPEN    |
+| Dedicated synthetic identity confirmed                         | `No — owner deferred isolation (2026-08-23)` | BLOCKED |
+| No production chats, contacts, files, or credentials confirmed | `[YES/NO + reviewer]`                        | OPEN    |
+| Synthetic fixture manifest label/version                       | `[OWNER INPUT — no private content]`         | OPEN    |
+| FCM configured for the test environment                        | `[YES/NO + date; no key material]`           | OPEN    |
+| Credential rotation/expiry evidence location                   | `[PRIVATE REFERENCE LABEL]`                  | OPEN    |
+| Reset and teardown owner                                       | `[OWNER INPUT]`                              | OPEN    |
 
 Before invitations, one owner must dry-run both QR and manual pairing, verify the origin is stable,
 and prove that disconnect/reset cannot affect a production server or identity.
+
+The project owner deferred creating a separate macOS user on 2026-08-23. This defers every
+staged-server-dependent checkpoint; it does not approve using the production Messages account or
+its data as test evidence.
 
 ## 5. Tester notice — draft v1
 
@@ -139,9 +160,9 @@ The owner must approve this versioned notice before it is sent:
 > private values. A response owner may request only separately reviewed, sanitized diagnostics that
 > contain none of those prohibited values.
 
-Notice owner: `[OWNER INPUT]`
+Notice owner: `Project owner`
 
-Approved version/date: `[OWNER INPUT]`
+Approved version/date: `v1 / 2026-08-23`
 
 ## 6. Staged tester journey
 
@@ -191,21 +212,21 @@ host test into device evidence.
 
 ## 7. Evidence ledger
 
-| Checkpoint                     | Owner/evidence alias | Date | Result | Private evidence reference |
-| ------------------------------ | -------------------- | ---- | ------ | -------------------------- |
-| Live track inventory           |                      |      | OPEN   |                            |
-| Play App Signing certificate   |                      |      | OPEN   |                            |
-| Tester list/count              |                      |      | OPEN   |                            |
-| Feedback path round-trip       |                      |      | OPEN   |                            |
-| Staged server dry-run          |                      |      | OPEN   |                            |
-| Synthetic fixture manifest     |                      |      | OPEN   |                            |
-| Non-admin opt-in/install       |                      |      | OPEN   |                            |
-| Clean install journey          |                      |      | OPEN   |                            |
-| Prior-build baseline           |                      |      | OPEN   |                            |
-| Prior-build update journey     |                      |      | OPEN   |                            |
-| Notification/lifecycle journey |                      |      | OPEN   |                            |
-| Disconnect/cleanup             |                      |      | OPEN   |                            |
-| Credential/tester revocation   |                      |      | OPEN   |                            |
+| Checkpoint                     | Owner/evidence alias | Date       | Result                             | Private evidence reference |
+| ------------------------------ | -------------------- | ---------- | ---------------------------------- | -------------------------- |
+| Live track inventory           | Project owner        | 2026-08-23 | DEFERRED — owner; not verified     |                            |
+| Play App Signing certificate   |                      |            | OPEN                               |                            |
+| Tester list/count              |                      |            | OPEN                               |                            |
+| Feedback path round-trip       | Project owner        | 2026-08-23 | PASS — owner-confirmed             | Owner-held email record    |
+| Staged server dry-run          | Project owner        | 2026-08-23 | BLOCKED — isolation owner-deferred |                            |
+| Synthetic fixture manifest     |                      |            | OPEN                               |                            |
+| Non-admin opt-in/install       |                      |            | OPEN                               |                            |
+| Clean install journey          |                      |            | OPEN                               |                            |
+| Prior-build baseline           | Project owner        | 2026-08-23 | APPROVED — execution unverified    |                            |
+| Prior-build update journey     |                      |            | OPEN                               |                            |
+| Notification/lifecycle journey |                      |            | OPEN                               |                            |
+| Disconnect/cleanup             |                      |            | OPEN                               |                            |
+| Credential/tester revocation   |                      |            | OPEN                               |                            |
 
 ## 8. Stop conditions and approval boundary
 
