@@ -1,8 +1,10 @@
 // `applyNewServerUrl` lives in realtimeControl, whose import graph pulls the whole realtime wiring
 // (ky, op-sqlite, expo-file-system, notify-kit). Stub only the leaf modules with native/ESM deps so
 // the function under test — and the real session store it mutates — stay REAL.
-jest.mock('@core/api', () => ({ serverApi: { ping: jest.fn() } }));
+jest.mock('@core/api', () => ({ serverApi: { ping: jest.fn(), serverInfo: jest.fn() } }));
 jest.mock('@core/secure', () => ({
+  ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE: 'Could not activate the saved server session.',
+  SERVER_SESSION_STATE: { writing: 'writing', active: 'active', forgotten: 'forgotten' },
   logger: {
     debug: jest.fn(),
     info: jest.fn(),
@@ -14,6 +16,8 @@ jest.mock('@db/database', () => ({ getDatabase: jest.fn(), ensureDatabase: jest.
 jest.mock('@/services/clients', () => ({
   http: { buildHeaders: () => ({}), usesHeaderAuth: () => true },
   vault: { set: jest.fn(async () => {}), get: jest.fn(async () => null) },
+  candidateClient: jest.fn(),
+  accountRevocationMarker: { clear: jest.fn() },
 }));
 jest.mock('@/services/backgrounds/syncedBackground', () => ({ ensureSyncedBackground: jest.fn() }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
@@ -34,6 +38,7 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { ServerUrlEventSink } from '@/services/realtime/serverUrlEventSink';
+import { serverRotationCoordinator } from '@/services/realtime/serverRotationCoordinator';
 import { DurableRealtimeDispatcher } from '@/services/realtime/incomingEventDispatcher';
 import {
   captureRealtimeDeliveryLease,
@@ -41,14 +46,26 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import {
   applyNewServerUrl,
+  approveNewServerUrl,
   dispatchRealtimeEvent,
+  pauseRealtime,
+  resumeRealtime,
   setSocket,
   shouldPresentMessageNotification,
 } from '@/services/realtimeControl';
 /* eslint-enable import/first */
 
-const { vault: mockVault } = jest.requireMock('@/services/clients') as {
+const { serverApi: mockServerApi } = jest.requireMock('@core/api') as {
+  serverApi: { serverInfo: jest.Mock };
+};
+const { vault: mockVault, accountRevocationMarker: mockRevocationMarker } = jest.requireMock(
+  '@/services/clients',
+) as {
   vault: { set: jest.Mock };
+  accountRevocationMarker: { clear: jest.Mock };
+};
+const { candidateClient: mockCandidateClient } = jest.requireMock('@/services/clients') as {
+  candidateClient: jest.Mock;
 };
 const { ensureDatabase: mockEnsureDatabase } = jest.requireMock('@/services/databaseControl') as {
   ensureDatabase: jest.Mock;
@@ -146,7 +163,7 @@ describe('ServerUrlEventSink', () => {
       ev({ type: 'new-server', url: 'https://rotated.example.com' }),
       'socket',
     );
-    expect(onNewUrl).toHaveBeenCalledWith('https://rotated.example.com');
+    expect(onNewUrl).toHaveBeenCalledWith('https://rotated.example.com', undefined);
     expect(inner.onEvent).not.toHaveBeenCalled();
   });
 
@@ -182,6 +199,7 @@ describe('applyNewServerUrl containment guard', () => {
   const ORIGINAL_ORIGIN = 'https://original.example.com';
 
   beforeEach(() => {
+    pauseRealtime();
     useSessionStore.setState({ origin: ORIGINAL_ORIGIN, password: null });
     mockVault.set.mockClear();
   });
@@ -230,6 +248,131 @@ describe('applyNewServerUrl containment guard', () => {
   it('rejects even an otherwise valid origin with leading/trailing whitespace', async () => {
     await applyNewServerUrl('   https://original.example.com   ');
     expect(useSessionStore.getState().origin).toBe(ORIGINAL_ORIGIN);
+    expect(mockVault.set).not.toHaveBeenCalled();
+  });
+});
+
+describe('new-server production admission', () => {
+  const ORIGINAL_ORIGIN = 'https://original.example.com';
+
+  async function activateForegroundSession(): Promise<void> {
+    pauseRealtime();
+    useLockStore.setState({ enabled: false, hydrated: true, locked: false });
+    useSessionStore.setState({
+      status: 'connected',
+      origin: ORIGINAL_ORIGIN,
+      password: null,
+      error: null,
+    });
+    // This establishes the real foreground authority bit without starting HTTP/socket work.
+    await resumeRealtime();
+    useSessionStore.setState({ password: 'current-password' });
+    mockEnsureDatabase.mockClear();
+    mockVault.set.mockReset().mockImplementation(async () => undefined);
+    mockCandidateClient.mockReset();
+    mockServerApi.serverInfo.mockReset();
+    mockRevocationMarker.clear.mockReset();
+  }
+
+  afterEach(() => {
+    pauseRealtime();
+    serverRotationCoordinator.cancel();
+  });
+
+  it.each([
+    ['malformed origin', 'https://evil.example/path'],
+    ['credential smuggling', 'https://user:secret@evil.example'],
+    ['HTTPS downgrade', 'http://original.example.com'],
+  ])('rejects %s before DB, candidate client, credential, or prompt use', async (_label, url) => {
+    await activateForegroundSession();
+
+    await dispatchRealtimeEvent('new-server', url, 'socket');
+
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCandidateClient).not.toHaveBeenCalled();
+    expect(mockVault.set).not.toHaveBeenCalled();
+    expect(serverRotationCoordinator.getSnapshot()).toBeNull();
+    expect(useSessionStore.getState().origin).toBe(ORIGINAL_ORIGIN);
+  });
+
+  it('offers a canonical foreign HTTPS origin without DB, request, Authorization, or persistence', async () => {
+    await activateForegroundSession();
+
+    await dispatchRealtimeEvent('new-server', 'HTTPS://NEXT.EXAMPLE:443/', 'socket');
+
+    expect(serverRotationCoordinator.getSnapshot()).toEqual(
+      expect.objectContaining({
+        currentOrigin: ORIGINAL_ORIGIN,
+        candidateOrigin: 'https://next.example',
+        requiresCleartextApproval: false,
+      }),
+    );
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCandidateClient).not.toHaveBeenCalled();
+    expect(mockVault.set).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().origin).toBe(ORIGINAL_ORIGIN);
+  });
+
+  it('wires approved validation into one correlated credential commit before publication', async () => {
+    await activateForegroundSession();
+    const candidate = { name: 'candidate-client' };
+    const info = { server_version: '1.9.0' };
+    mockCandidateClient.mockReturnValue(candidate);
+    mockServerApi.serverInfo.mockResolvedValue(info);
+    // Background after the durable tuple becomes active. This prevents unrelated socket startup
+    // while proving an already-approved commit may finish and publish coherently.
+    mockVault.set.mockImplementation(async (key: string, value: string) => {
+      if (key === 'serverSessionState' && value === 'active') pauseRealtime();
+    });
+
+    await dispatchRealtimeEvent('new-server', 'HTTPS://NEXT.EXAMPLE:443/', 'socket');
+    const requestId = serverRotationCoordinator.getSnapshot()!.id;
+
+    await expect(approveNewServerUrl(requestId, 'current-password', false)).resolves.toEqual({
+      ok: true,
+    });
+    expect(mockCandidateClient).toHaveBeenCalledWith('https://next.example', 'current-password');
+    expect(mockServerApi.serverInfo).toHaveBeenCalledWith(candidate);
+    expect(mockVault.set.mock.calls).toEqual([
+      ['serverSessionState', 'writing'],
+      ['serverAddress', 'https://next.example'],
+      ['serverPassword', 'current-password'],
+      ['serverSessionState', 'active'],
+    ]);
+    expect(mockRevocationMarker.clear).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState()).toEqual(
+      expect.objectContaining({
+        status: 'connected',
+        origin: 'https://next.example',
+        password: 'current-password',
+        serverInfo: info,
+      }),
+    );
+    expect(serverRotationCoordinator.getSnapshot()).toBeNull();
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+  });
+
+  it('drops a foreign event without durable deferral when foreground authority is absent', async () => {
+    await activateForegroundSession();
+    pauseRealtime();
+    mockEnsureDatabase.mockClear();
+
+    await dispatchRealtimeEvent('new-server', 'https://next.example', 'fcm');
+
+    expect(serverRotationCoordinator.getSnapshot()).toBeNull();
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCandidateClient).not.toHaveBeenCalled();
+    expect(mockVault.set).not.toHaveBeenCalled();
+  });
+
+  it('drops a same-origin spelling as a no-op before opening the database', async () => {
+    await activateForegroundSession();
+
+    await dispatchRealtimeEvent('new-server', 'HTTPS://ORIGINAL.EXAMPLE.COM:443/', 'socket');
+
+    expect(serverRotationCoordinator.getSnapshot()).toBeNull();
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCandidateClient).not.toHaveBeenCalled();
     expect(mockVault.set).not.toHaveBeenCalled();
   });
 });

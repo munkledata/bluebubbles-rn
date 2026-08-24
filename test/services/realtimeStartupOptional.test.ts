@@ -107,6 +107,16 @@ jest.mock('@core/realtime', () => ({
     eventName,
     rawData: JSON.parse(JSON.stringify(rawData)),
   }),
+  snapshotIncomingEvent: (eventName: string, rawData: unknown) =>
+    eventName === 'new-server'
+      ? {
+          type: 'new-server',
+          url:
+            typeof rawData === 'string'
+              ? rawData
+              : ((rawData as { url?: string } | null)?.url ?? ''),
+        }
+      : { type: eventName },
   EventRouter: class {
     async handle(): Promise<void> {}
   },
@@ -224,9 +234,6 @@ for (const moduleName of [
   }));
 }
 
-jest.mock('@/services/realtime/serverUrlResolver', () => ({
-  createServerUrlResolver: jest.fn(() => async () => null),
-}));
 jest.mock('@/services/realtime/incomingEventDrain', () => ({
   IncomingEventDrain: class {},
 }));

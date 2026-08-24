@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { SERVER_EVENTS, type ServerEventName } from '@core/config';
+import { MAX_SERVER_ORIGIN_INPUT_LENGTH, SERVER_EVENTS, type ServerEventName } from '@core/config';
 import {
   IncomingEventCodecError,
   canonicalizeIncomingEvent,
@@ -668,5 +668,11 @@ describe('realtime validation prerequisites', () => {
         server_address: 'https://rotated.example.com',
       }),
     ).toEqual({ type: 'new-server', url: 'https://rotated.example.com' });
+  });
+
+  it('rejects an oversized new-server value before canonical capture', () => {
+    const oversized = `https://${'a'.repeat(MAX_SERVER_ORIGIN_INPUT_LENGTH)}`;
+
+    expect(normalizeRealtimeEvent('new-server', { server_address: oversized })).toBeNull();
   });
 });

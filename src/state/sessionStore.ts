@@ -29,7 +29,7 @@ interface SessionState {
    * abort check went false again, letting its closing phases write the pre-wipe snapshot back over
    * the wipe. The counter never repeats, so both halves stay decided.
    *
-   * Deliberately NOT bumped by `setOrigin`: a `new-server` tunnel rotation re-points the SAME
+   * Deliberately NOT bumped by `rotateOrigin`: an approved `new-server` tunnel rotation re-points the SAME
    * session at a new URL, and treating that as a new session would needlessly disown the sync
    * already running against the same account and the same local DB.
    */
@@ -41,8 +41,8 @@ interface SessionState {
   connected: (origin: string, password: string, info: ServerInfo) => void;
   /** Refresh just the cached server info (e.g. on a hydrated boot, where `connected` never ran). */
   setServerInfo: (info: ServerInfo) => void;
-  /** Point the session at a new origin (e.g. the server's `new-server` tunnel-URL rotation). */
-  setOrigin: (origin: string) => void;
+  /** Publish an already-validated and durably committed origin rotation without replacing account. */
+  rotateOrigin: (origin: string, info: ServerInfo) => void;
   failed: (message: string) => void;
   /** Clear the session (logout / forget connection). */
   reset: () => void;
@@ -85,7 +85,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       epoch: s.epoch + 1,
     })),
   setServerInfo: (info) => set({ serverInfo: info }),
-  setOrigin: (origin) => set({ origin }),
+  rotateOrigin: (origin, info) => set({ origin, serverInfo: info }),
   failed: (message) => set({ status: 'error', error: message }),
   reset: () =>
     set((s) => ({

@@ -12,6 +12,8 @@ interface ButtonProps {
   loading?: boolean;
   destructive?: boolean;
   style?: ViewStyle;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 /** iOS-style button (filled / tinted / plain) using theme tint. */
@@ -23,6 +25,8 @@ export function Button({
   loading = false,
   destructive = false,
   style,
+  accessibilityLabel,
+  accessibilityHint,
 }: ButtonProps): React.JSX.Element {
   const theme = useTheme();
   const accent = destructive ? theme.color.destructive : theme.color.tint;
@@ -39,6 +43,9 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
       onPress={onPress}
       style={({ pressed }) => [

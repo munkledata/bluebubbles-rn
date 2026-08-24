@@ -6163,6 +6163,7 @@ function incomingIngressCertifiedNodes({
   const method = (path, className, name) => topLevelClassMethod(filesByPath, path, className, name);
   const dispatchRealtimeEvent = fn(controlPath, 'dispatchRealtimeEvent');
   const dispatchWithContext = fn(controlPath, 'dispatchWithContext');
+  const applyNewServerUrl = fn(controlPath, 'applyNewServerUrl');
   const resetRealtimeRuntime = fn(controlPath, 'resetRealtimeRuntime');
   const getRealtimeRuntime = fn(controlPath, 'getRealtimeRuntime');
   const realtimeSink = fn(controlPath, 'realtimeSink');
@@ -6270,6 +6271,7 @@ function incomingIngressCertifiedNodes({
   const required = [
     dispatchRealtimeEvent,
     dispatchWithContext,
+    applyNewServerUrl,
     resetRealtimeRuntime,
     getRealtimeRuntime,
     realtimeSink,
@@ -6358,6 +6360,10 @@ function incomingIngressCertifiedNodes({
       { name: 'context' },
       { name: 'occurrence', optional: true },
       { name: 'receivedAt', optional: true },
+    ]) &&
+    hasExactIdentifierParameters(applyNewServerUrl, [
+      { name: 'url' },
+      { name: 'context', optional: true },
     ]) &&
     hasExactIdentifierParameters(resetRealtimeRuntime, [{ name: 'expected', optional: true }]) &&
     hasExactIdentifierParameters(getRealtimeRuntime, [{ name: 'db' }, { name: 'context' }]) &&
@@ -6625,6 +6631,10 @@ function incomingIngressCertifiedNodes({
     '@core/security/lockTimeout',
     'isLockExpired',
   );
+  const maxServerOriginInputLength = topLevelVariable(
+    strictServerOrigin.getSourceFile(),
+    'MAX_SERVER_ORIGIN_INPUT_LENGTH',
+  );
   const lockExpiredCalls = lockExpiredBinding
     ? directCallsToBinding(lockGateFile, lockExpiredBinding, checker)
     : [];
@@ -6850,13 +6860,20 @@ function incomingIngressCertifiedNodes({
     isLockExpired.body.statements.length !== 2 ||
     statementText(isLockExpired, 0) !== 'if (lastBackgrounded == null) return false;' ||
     statementText(isLockExpired, 1) !== 'return now - lastBackgrounded >= timeoutMs;' ||
-    strictServerOrigin.body.statements.length !== 4 ||
+    !maxServerOriginInputLength ||
+    !(maxServerOriginInputLength.declarationList.flags & ts.NodeFlags.Const) ||
+    !maxServerOriginInputLength.declaration.initializer ||
+    !ts.isNumericLiteral(maxServerOriginInputLength.declaration.initializer) ||
+    maxServerOriginInputLength.declaration.initializer.text !== '2048' ||
+    strictServerOrigin.body.statements.length !== 5 ||
     statementText(strictServerOrigin, 0) !== 'if (!input || input !== input.trim()) return null;' ||
     statementText(strictServerOrigin, 1) !==
-      String.raw`if (/[\\\u0000-\u001f\u007f]/.test(input)) return null;` ||
+      'if (input.length > MAX_SERVER_ORIGIN_INPUT_LENGTH) return null;' ||
     statementText(strictServerOrigin, 2) !==
-      String.raw`if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;` ||
+      String.raw`if (/[\\\u0000-\u001f\u007f]/.test(input) || input.includes('@')) return null;` ||
     statementText(strictServerOrigin, 3) !==
+      String.raw`if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;` ||
+    statementText(strictServerOrigin, 4) !==
       "try { const url = new URL(input); if (url.protocol !== 'https:' && url.protocol !== 'http:') return null; if (url.username || url.password || !url.hostname) return null; return url.origin; } catch { return null; }" ||
     isDevServer.body.statements.length !== 3 ||
     statementText(isDevServer, 0) !==
@@ -7255,8 +7272,14 @@ function incomingIngressCertifiedNodes({
   }
 
   // Public admission captures payload, receipt time, and occurrence before either tracking call.
+  // A canonical `new-server` event takes one exact, awaited, ephemeral approval handoff before the
+  // database-opening branch; every other event retains the reviewed durable admission shape.
+  const rotationSnapshotCall = sole(
+    exactCallEdges(edges, dispatchRealtimeEvent, snapshotIncomingEvent),
+  );
+  const rotationApplyCall = sole(exactCallEdges(edges, dispatchRealtimeEvent, applyNewServerUrl));
   if (
-    dispatchRealtimeEvent.body.statements.length !== 7 ||
+    dispatchRealtimeEvent.body.statements.length !== 9 ||
     statementText(dispatchRealtimeEvent, 0) !==
       'const receivedAt = occurrence?.receivedAt ?? Date.now();' ||
     statementText(dispatchRealtimeEvent, 1) !==
@@ -7266,7 +7289,21 @@ function incomingIngressCertifiedNodes({
     statementText(dispatchRealtimeEvent, 3) !==
       "if (!captured) { logger.debug('[incomingEvents] dropped invalid realtime event', { event: eventName, source }); return; }" ||
     statementText(dispatchRealtimeEvent, 4) !==
-      'const capturedOccurrence = occurrence ? { serverEventId: occurrence.serverEventId, transportOccurrenceId: occurrence.transportOccurrenceId, } : undefined;'
+      'const capturedOccurrence = occurrence ? { serverEventId: occurrence.serverEventId, transportOccurrenceId: occurrence.transportOccurrenceId, } : undefined;' ||
+    statementText(dispatchRealtimeEvent, 5) !==
+      'const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);' ||
+    statementText(dispatchRealtimeEvent, 6) !==
+      "if (normalized?.type === 'new-server') { await applyNewServerUrl(normalized.url, context); return; }" ||
+    !rotationSnapshotCall ||
+    !nodeIsInside(rotationSnapshotCall.node, dispatchRealtimeEvent.body.statements[5]) ||
+    !snippetIs(
+      rotationSnapshotCall.node,
+      'snapshotIncomingEvent(captured.eventName, captured.rawData)',
+    ) ||
+    !rotationApplyCall ||
+    !nodeIsInside(rotationApplyCall.node, dispatchRealtimeEvent.body.statements[6]) ||
+    !ts.isAwaitExpression(unwrapExpression(rotationApplyCall.node.parent)) ||
+    !snippetIs(rotationApplyCall.node, 'applyNewServerUrl(normalized.url, context)')
   ) {
     return empty();
   }
@@ -7275,7 +7312,7 @@ function incomingIngressCertifiedNodes({
   const trackedDeliveryCalls = exactCallEdges(edges, dispatchRealtimeEvent, runTrackedDelivery);
   const dispatchCalls = nestedCallEdges(edges, dispatchRealtimeEvent, dispatchWithContext);
   const dispatchResultDeclaration = singleConstDeclaration(
-    dispatchRealtimeEvent.body.statements[5],
+    dispatchRealtimeEvent.body.statements[7],
     'result',
   );
   const dispatchResultConditional = dispatchResultDeclaration?.initializer
@@ -7312,8 +7349,8 @@ function incomingIngressCertifiedNodes({
     dispatchTrackedWorkBranch !== trackedWorkCalls[0].node ||
     dispatchTrackedDeliveryBranch !== trackedDeliveryCalls[0].node ||
     !nodeIsInside(captureCalls[0].node, dispatchRealtimeEvent.body.statements[2]) ||
-    !nodeIsInside(trackedWorkCalls[0].node, dispatchRealtimeEvent.body.statements[5]) ||
-    !nodeIsInside(trackedDeliveryCalls[0].node, dispatchRealtimeEvent.body.statements[5]) ||
+    !nodeIsInside(trackedWorkCalls[0].node, dispatchRealtimeEvent.body.statements[7]) ||
+    !nodeIsInside(trackedDeliveryCalls[0].node, dispatchRealtimeEvent.body.statements[7]) ||
     !coordinatorCallbackAdoptsInvocation(trackedWorkCalls[0].node, dispatchRealtimeEvent) ||
     !coordinatorCallbackAdoptsInvocation(trackedDeliveryCalls[0].node, dispatchRealtimeEvent) ||
     !snippetIs(
@@ -7605,35 +7642,6 @@ function incomingIngressCertifiedNodes({
   const lockStateCall = lockCall?.arguments[0] ? callExpression(lockCall.arguments[0]) : undefined;
   const lockStateAccess = lockStateCall ? callAccess(lockStateCall.expression) : undefined;
   const lockStoreBinding = namedImportBinding(controlFile, '@state/lockStore', 'useLockStore');
-  const currentOriginDeclaration = singleConstDeclaration(
-    canPersistRealtimeEvent.body.statements[2],
-    'current',
-  );
-  const currentOriginCall = currentOriginDeclaration?.initializer
-    ? callableCall(currentOriginDeclaration.initializer, strictServerOrigin, checker)
-    : undefined;
-  const currentOriginArgument = currentOriginCall?.arguments[0]
-    ? unwrapExpression(currentOriginCall.arguments[0])
-    : undefined;
-  const currentSessionCall =
-    currentOriginArgument && ts.isPropertyAccessExpression(currentOriginArgument)
-      ? callExpression(currentOriginArgument.expression)
-      : undefined;
-  const currentSessionAccess = currentSessionCall
-    ? callAccess(currentSessionCall.expression)
-    : undefined;
-  const sessionStoreBinding = namedImportBinding(
-    controlFile,
-    '@state/sessionStore',
-    'useSessionStore',
-  );
-  const nextOriginDeclaration = singleConstDeclaration(
-    canPersistRealtimeEvent.body.statements[3],
-    'next',
-  );
-  const nextOriginCall = nextOriginDeclaration?.initializer
-    ? callableCall(nextOriginDeclaration.initializer, strictServerOrigin, checker)
-    : undefined;
   if (
     !runtimeState ||
     !realtimeSinkState ||
@@ -7795,31 +7803,13 @@ function incomingIngressCertifiedNodes({
     !sameSymbol(lockStateAccess.receiver, lockStoreBinding, checker) ||
     lockStateCall.arguments.length !== 0 ||
     unwrapExpression(lockCall.arguments[1]).kind !== ts.SyntaxKind.FalseKeyword ||
-    canPersistRealtimeEvent.body.statements.length !== 7 ||
+    canPersistRealtimeEvent.body.statements.length !== 4 ||
     statementText(canPersistRealtimeEvent, 0) !==
       "if (realtimeIntakeLocked()) { logger.debug('[realtime] ignored private event while App Lock is active', { event: event.type, }); return false; }" ||
     statementText(canPersistRealtimeEvent, 1) !== "if (event.type !== 'new-server') return true;" ||
     statementText(canPersistRealtimeEvent, 2) !==
-      'const current = strictServerOrigin(useSessionStore.getState().origin);' ||
-    statementText(canPersistRealtimeEvent, 3) !== 'const next = strictServerOrigin(event.url);' ||
-    statementText(canPersistRealtimeEvent, 4) !== 'if (current && next === current) return true;' ||
-    statementText(canPersistRealtimeEvent, 5) !==
-      "logger.warn('[realtime] rejected untrusted new-server event before durable persistence');" ||
-    statementText(canPersistRealtimeEvent, 6) !== 'return false;' ||
-    !currentOriginCall ||
-    currentOriginCall.arguments.length !== 1 ||
-    !currentOriginArgument ||
-    !ts.isPropertyAccessExpression(currentOriginArgument) ||
-    currentOriginArgument.name.text !== 'origin' ||
-    !currentSessionCall ||
-    !currentSessionAccess ||
-    currentSessionAccess.method !== 'getState' ||
-    !sessionStoreBinding ||
-    !sameSymbol(currentSessionAccess.receiver, sessionStoreBinding, checker) ||
-    currentSessionCall.arguments.length !== 0 ||
-    !nextOriginCall ||
-    nextOriginCall.arguments.length !== 1 ||
-    !snippetIs(nextOriginCall.arguments[0], 'event.url') ||
+      "logger.warn('[realtime] kept new-server event out of durable persistence');" ||
+    statementText(canPersistRealtimeEvent, 3) !== 'return false;' ||
     !runtimeDbParameter ||
     !runtimeContextParameter ||
     !routerDeclaration ||
@@ -9387,16 +9377,14 @@ function incomingIngressCertifiedNodes({
     !ts.isTryStatement(socketEscalationTry) ||
     !socketEscalationTry.catchClause ||
     !socketEscalationTry.finallyBlock ||
-    socketEscalationStatements.length !== 5 ||
+    socketEscalationStatements.length !== 4 ||
     normalizedSnippet(socketEscalationStatements[0], socketFile) !==
-      "if (this.opts.refreshUrl) { const fresh = await this.opts.refreshUrl(this.origin); if (this.stopped || lifecycleGeneration !== this.lifecycleGeneration) return; if (fresh && fresh !== this.origin) { logger.info('[socket] server URL changed — reconnecting to the new origin'); this.origin = fresh; } }" ||
-    normalizedSnippet(socketEscalationStatements[1], socketFile) !==
       'this.lifecycleGeneration += 1;' ||
-    !socketLifecycleWrites.some((write) => nodeIsInside(write, socketEscalationStatements[1])) ||
-    normalizedSnippet(socketEscalationStatements[2], socketFile) !==
+    !socketLifecycleWrites.some((write) => nodeIsInside(write, socketEscalationStatements[0])) ||
+    normalizedSnippet(socketEscalationStatements[1], socketFile) !==
       'lifecycleGeneration = this.lifecycleGeneration;' ||
-    normalizedSnippet(socketEscalationStatements[3], socketFile) !== 'this.teardownSocket();' ||
-    normalizedSnippet(socketEscalationStatements[4], socketFile) !==
+    normalizedSnippet(socketEscalationStatements[2], socketFile) !== 'this.teardownSocket();' ||
+    normalizedSnippet(socketEscalationStatements[3], socketFile) !==
       'if (!this.stopped) this.openSocket();' ||
     socketEscalationTry.catchClause.block.statements.length !== 1 ||
     normalizedSnippet(socketEscalationTry.catchClause.block.statements[0], socketFile) !==
@@ -10357,7 +10345,7 @@ function incomingIngressCertifiedNodes({
     !snippetIs(startSocketConnectCall.arguments[1], 'transport.password') ||
     !snippetIs(
       startSocketConnectCall.arguments[2],
-      "{ headers: { ...transport.headers }, legacyQueryAuth: transport.authMode === 'legacy-query', refreshUrl: refreshServerUrl, }",
+      "{ headers: { ...transport.headers }, legacyQueryAuth: transport.authMode === 'legacy-query', }",
     ) ||
     startRuntimeCall.arguments.length !== 2 ||
     !snippetIs(startRuntimeCall.arguments[0], 'db') ||

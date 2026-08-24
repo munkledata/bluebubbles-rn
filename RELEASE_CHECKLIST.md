@@ -140,8 +140,11 @@ npm run check:android-build
 - [ ] Product copy is explicit that the app uses Android's normal TLS validation and does **not**
       claim certificate pinning. An inert legacy `certPins` SecureStore value on an upgraded install
       is harmless because no code reads it.
-- [ ] A forged `new-server` event cannot persist, contact, or send credentials to a different origin
-      or downgrade HTTPS. Any future rotation approval flow requires foreground user confirmation.
+- [ ] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
+      persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
+      rotation displays both origins and requires foreground confirmation, a freshly entered
+      password, and separate cleartext consent when applicable; interruption cannot mix old/new
+      credentials. The host flow is post-v56 and does not count as evidence for frozen v56.
 - [ ] URL previews make no automatic third-party request. Exercise the enabled preview fallback and
       record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device

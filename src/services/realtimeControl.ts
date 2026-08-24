@@ -4,6 +4,7 @@ import { strictServerOrigin } from '@core/config';
 import { logger } from '@core/secure';
 import {
   captureIncomingEvent,
+  snapshotIncomingEvent,
   type EventDeliveryContext,
   type EventOccurrenceMetadata,
   type EventSink,
@@ -23,7 +24,12 @@ import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { useSessionStore } from '@state/sessionStore';
 import { useTypingStore } from '@state/typingStore';
 import { isDevServer } from '@utils/isDev';
-import { http } from './clients';
+import { accountRevocationMarker, candidateClient, http, vault } from './clients';
+import {
+  persistServerConnection,
+  validateServerConnection,
+  type ConnectResult,
+} from './connection';
 import { ensureSyncedBackground } from './backgrounds/syncedBackground';
 import { ensureDatabase } from './databaseControl';
 import { ensureChatSynced, maybeResumeSync, startSync } from './syncControl';
@@ -42,7 +48,6 @@ import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
 import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
 import { RcsAlertEventSink } from './realtime/rcsAlertEventSink';
-import { createServerUrlResolver } from './realtime/serverUrlResolver';
 import { SocketService } from './realtime/socketService';
 import { IncomingEventDrain } from './realtime/incomingEventDrain';
 import { DurableRealtimeDispatcher } from './realtime/incomingEventDispatcher';
@@ -52,6 +57,11 @@ import {
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
 } from './realtime/deliveryCoordinator';
+import { serverRotationCoordinator } from './realtime/serverRotationCoordinator';
+import {
+  approveServerRotation,
+  type ServerRotationApprovalResult,
+} from './realtime/serverRotationExecutor';
 
 /**
  * Awaitable `postNotification` boundary that logs and contains native presentation failures.
@@ -189,7 +199,7 @@ function realtimeIntakeLocked(): boolean {
   return effectivelyLocked(useLockStore.getState(), false);
 }
 
-/** Reject locked intake and credential-bearing URL rotations before encrypted persistence. */
+/** Reject locked intake and keep every credential-bearing URL rotation out of SQLite. */
 function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
   if (realtimeIntakeLocked()) {
     logger.debug('[realtime] ignored private event while App Lock is active', {
@@ -198,10 +208,7 @@ function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
     return false;
   }
   if (event.type !== 'new-server') return true;
-  const current = strictServerOrigin(useSessionStore.getState().origin);
-  const next = strictServerOrigin(event.url);
-  if (current && next === current) return true;
-  logger.warn('[realtime] rejected untrusted new-server event before durable persistence');
+  logger.warn('[realtime] kept new-server event out of durable persistence');
   return false;
 }
 
@@ -294,7 +301,7 @@ function realtimeSink(db: AppDatabase): EventSink {
       ),
       (alertType) => useRcsHealthStore.getState().setAlert(alertType),
     ),
-    (url) => applyNewServerUrl(url),
+    (url, context) => applyNewServerUrl(url, context),
   );
   return realtimeSinkInstance;
 }
@@ -396,7 +403,10 @@ async function dispatchWithContext(
   );
 }
 
-/** Persist a raw event before routing any DB, UI, network, or notification effect. */
+/**
+ * Persist ordinary realtime events before effects. `new-server` is the deliberate ephemeral
+ * exception: validate it and offer foreground approval without ever placing it in SQLite.
+ */
 export async function dispatchRealtimeEvent(
   eventName: string,
   rawData: unknown,
@@ -417,6 +427,14 @@ export async function dispatchRealtimeEvent(
         transportOccurrenceId: occurrence.transportOccurrenceId,
       }
     : undefined;
+  const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);
+  // Rotation consent is deliberately ephemeral: validate + offer it before opening SQLite, and
+  // never put the candidate into the durable incoming-event queue. The coordinator binds the
+  // dormant prompt to this account generation without holding teardown open while the user reads.
+  if (normalized?.type === 'new-server') {
+    await applyNewServerUrl(normalized.url, context);
+    return;
+  }
   // A supplied lease proves which account owns the callback, but it does not prove that teardown
   // is waiting for this particular dispatch. Adopt it into the common drain here so every public
   // caller—including a retained DEV/UI callback—has the same admission and revocation contract.
@@ -563,15 +581,6 @@ export const devPush = {
   },
 };
 
-// Reconnect-escalation URL rediscovery: when the socket's capped retries are exhausted, ask
-// whether the server URL rotated while the socket was down. Today the one source is the session
-// store — `applyNewServerUrl` (a `new-server` event, possibly delivered over FCM while the socket
-// was dead) has already persisted the rotated origin there; a future Firebase-RTDB lookup can be
-// appended as another source without touching the socket.
-const refreshServerUrl = createServerUrlResolver([
-  { name: 'session', get: () => useSessionStore.getState().origin },
-]);
-
 /** Connect the live socket and route its events into the DB. */
 export async function startRealtime(options: StartRealtimeOptions = {}): Promise<void> {
   realtimeForegroundActive = true;
@@ -603,7 +612,6 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
   socket.connect(transport.origin, transport.password, {
     headers: { ...transport.headers },
     legacyQueryAuth: transport.authMode === 'legacy-query',
-    refreshUrl: refreshServerUrl,
   });
   // Recover any row left pending by a prior process death before waiting for another callback.
   void runTrackedRealtimeDelivery((lease) => runtime.dispatcher.resume(lease)).catch(
@@ -692,6 +700,7 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
 export function pauseRealtime(): void {
   realtimeForegroundActive = false;
   realtimeLifecycleEpoch += 1;
+  serverRotationCoordinator.cancel();
   socket?.disconnect();
   socket = null;
 }
@@ -718,26 +727,99 @@ export async function resumeRealtime(): Promise<void> {
 }
 
 /**
- * Contain the server's untrusted `new-server` event.
+ * Validate and, only with live foreground authority, offer an untrusted `new-server` event.
  *
- * A cross-origin event cannot safely re-point an Authorization password on its own: the transport
- * carrying the event is not proof that a different host is the same server. Until the foreground
- * approval + password-reconfirmation half of RT-01A exists, accept only canonical spellings of the
- * origin already trusted by the user. Every foreign host, port, or cleartext downgrade is ignored
- * before persistence, HTTP, or socket work. This intentionally trades automatic tunnel rotation
- * for credential safety; the user can still reconnect through the explicit setup flow.
+ * The event itself never persists and never contacts the candidate. Same-origin spellings are a
+ * no-op; malformed input and HTTPS-to-HTTP downgrades are rejected. A foreign eligible origin gets
+ * one process-memory-only prompt tied to the exact session epoch and realtime generation.
  */
-export async function applyNewServerUrl(url: string): Promise<void> {
-  const current = strictServerOrigin(useSessionStore.getState().origin);
-  const next = strictServerOrigin(url);
-  if (!current || !next) {
+export async function applyNewServerUrl(
+  url: string,
+  context?: EventDeliveryContext,
+): Promise<void> {
+  const session = useSessionStore.getState();
+  const current = strictServerOrigin(session.origin);
+  const lease = context ?? captureRealtimeDeliveryLease();
+  const expectedEpoch = session.epoch;
+  const isCurrentForegroundSession = (): boolean => {
+    const latest = useSessionStore.getState();
+    return (
+      realtimeForegroundActive &&
+      !realtimeIntakeLocked() &&
+      lease.isCurrent() &&
+      latest.status === 'connected' &&
+      !!latest.password &&
+      latest.epoch === expectedEpoch &&
+      strictServerOrigin(latest.origin) === current
+    );
+  };
+  const result = serverRotationCoordinator.offer(
+    url,
+    current,
+    expectedEpoch,
+    lease,
+    isCurrentForegroundSession,
+  );
+  if (result === 'invalid') {
     logger.warn('[realtime] ignoring malformed new-server origin');
     return;
   }
-  if (next !== current) {
-    logger.warn(
-      '[realtime] ignoring cross-origin new-server event until foreground approval is available',
-    );
-    return;
+  if (result === 'downgrade-rejected') {
+    logger.warn('[realtime] rejected cleartext new-server downgrade');
+  } else if (result === 'offered') {
+    logger.info('[realtime] server change is awaiting foreground approval');
   }
+}
+
+function cancelledRotationResult(): ConnectResult {
+  return {
+    ok: false,
+    kind: 'cancelled',
+    message: 'Connection attempt was cancelled.',
+  };
+}
+
+/** User-confirmed half of RT-01A; called only by the protected foreground prompt host. */
+export async function approveNewServerUrl(
+  requestId: number,
+  enteredPassword: string,
+  cleartextApproved: boolean,
+): Promise<ServerRotationApprovalResult> {
+  return approveServerRotation(requestId, enteredPassword, cleartextApproved, {
+    coordinator: serverRotationCoordinator,
+    getSession: () => {
+      const { origin, password, epoch } = useSessionStore.getState();
+      return { origin, password, epoch };
+    },
+    captureLease: captureRealtimeDeliveryLease,
+    validateCandidate: (origin, password, isCurrent) => {
+      const client = candidateClient(origin, password);
+      return validateServerConnection({
+        fetchServerInfo: () => serverApi.serverInfo(client),
+        isAttemptCurrent: isCurrent,
+      });
+    },
+    persistCandidate: async (origin, password, info, lease, isCurrent) => {
+      let result: ConnectResult = cancelledRotationResult();
+      const delivery = await runTrackedRealtimeWork(lease, async (activeLease) => {
+        const commitCurrent = (): boolean => activeLease.isCurrent() && isCurrent();
+        result = await persistServerConnection(origin, password, info, {
+          vault,
+          revocationMarker: accountRevocationMarker,
+          isAttemptCurrent: commitCurrent,
+        });
+      });
+      return delivery === 'paused' ? cancelledRotationResult() : result;
+    },
+    publishCandidate: (origin, info) => {
+      socket?.disconnect();
+      socket = null;
+      useSessionStore.getState().rotateOrigin(origin, info);
+    },
+    reconnect: async (_lease, isCurrent) => {
+      if (!isCurrent() || !realtimeForegroundActive || realtimeIntakeLocked()) return;
+      await startRealtime();
+      if (isCurrent()) maybeResumeSync();
+    },
+  });
 }

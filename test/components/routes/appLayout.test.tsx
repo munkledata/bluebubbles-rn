@@ -9,6 +9,7 @@
 import React from 'react';
 
 const mockRedirect = jest.fn((_props: { href: string }) => null);
+const mockServerRotationApprovalHost = jest.fn(() => null);
 jest.mock('expo-router', () => ({
   Stack: () => null,
   Redirect: (props: { href: string }) => {
@@ -39,6 +40,9 @@ jest.mock('@/services/notifications/pendingNav', () => ({
 jest.mock('@ui/facetime', () => ({
   FaceTimeCallOverlay: () => null,
   IncomingFaceTimeOverlay: () => null,
+}));
+jest.mock('@ui/server-rotation', () => ({
+  ServerRotationApprovalHost: () => mockServerRotationApprovalHost(),
 }));
 jest.mock('@ui/useChatNavigator', () => ({ useChatNavigator: () => jest.fn() }));
 
@@ -97,6 +101,7 @@ beforeEach(() => {
 
 async function mountLayout(): Promise<void> {
   await renderWithTheme(<AppLayout />);
+  expect(mockServerRotationApprovalHost).toHaveBeenCalledTimes(1);
   // One callback owns lock/realtime coordination; the other drains notification taps on resume.
   expect(appStateHandlers).toHaveLength(2);
 

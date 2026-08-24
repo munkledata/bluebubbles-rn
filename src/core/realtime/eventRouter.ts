@@ -1,4 +1,5 @@
 import { Message } from '@core/models';
+import { MAX_SERVER_ORIGIN_INPUT_LENGTH } from '@core/config';
 import { logger } from '@core/secure';
 import {
   AliasesRemovedPayload,
@@ -275,7 +276,11 @@ export function normalizeRealtimeEvent(
           : isRecord(data)
             ? (data.url ?? data.server ?? data.server_address)
             : undefined;
-      return typeof url === 'string' && url.length > 0 ? { type: 'new-server', url } : null;
+      return typeof url === 'string' &&
+        url.length > 0 &&
+        url.length <= MAX_SERVER_ORIGIN_INPUT_LENGTH
+        ? { type: 'new-server', url }
+        : null;
     }
     default:
       return null;

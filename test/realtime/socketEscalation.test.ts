@@ -42,7 +42,6 @@ const mockIo = jest.fn((..._args: unknown[]): FakeSocket => {
 jest.mock('socket.io-client', () => ({ io: mockIo }));
 
 import { logger } from '@core/secure';
-import { createServerUrlResolver } from '@/services/realtime/serverUrlResolver';
 import { SocketService, type RawRealtimeEventHandler } from '@/services/realtime/socketService';
 
 const handleRawEvent: RawRealtimeEventHandler = async () => null;
@@ -61,14 +60,12 @@ function fireSocketEvent(event: string, ...args: unknown[]): void {
 
 describe('SocketService reconnect escalation', () => {
   let warn: jest.SpyInstance;
-  let info: jest.SpyInstance;
 
   beforeEach(() => {
     jest.useFakeTimers();
     sockets = [];
     mockIo.mockClear();
     warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
-    info = jest.spyOn(logger, 'info').mockImplementation(() => {});
   });
   afterEach(() => {
     jest.clearAllTimers();
@@ -85,7 +82,6 @@ describe('SocketService reconnect escalation', () => {
     expect(opts.reconnectionAttempts as number).toBeGreaterThan(0);
     expect(Number.isFinite(opts.reconnectionAttempts as number)).toBe(true);
     expect(warn).not.toHaveBeenCalled();
-    expect(info).not.toHaveBeenCalled();
   });
 
   it('re-opens the socket (delayed) when the Manager reports reconnect_failed', () => {
@@ -100,13 +96,12 @@ describe('SocketService reconnect escalation', () => {
     // Advance past the first backoff (~1s + ≤10% jitter) → a fresh openSocket() runs.
     jest.advanceTimersByTime(1_200);
     expect(mockIo).toHaveBeenCalledTimes(2);
-    // The new socket targets the same origin (no refreshUrl hook wired).
+    // The new socket remains pinned to the already-approved origin.
     expect(mockIo.mock.calls[1]![0]).toBe('https://srv');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(/^\[socket\] reconnect attempts exhausted .+ restarting in \d+ms$/),
     );
-    expect(info).not.toHaveBeenCalled();
   });
 
   it('assigns a fresh occurrence namespace when escalation re-opens the socket', async () => {
@@ -163,7 +158,6 @@ describe('SocketService reconnect escalation', () => {
     // Only the original open; no re-open after teardown.
     expect(mockIo).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(info).not.toHaveBeenCalled();
   });
 
   it('does not report a late native connection error after disconnect()', () => {
@@ -177,143 +171,21 @@ describe('SocketService reconnect escalation', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
-  it('does not report a late URL-refresh rejection after disconnect()', async () => {
-    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-    let rejectRefresh!: (reason: Error) => void;
-    const refreshUrl = jest.fn(
-      () =>
-        new Promise<string | null>((_resolve, reject) => {
-          rejectRefresh = reject;
-        }),
-    );
-    const svc = new SocketService(handleRawEvent);
-    svc.connect('https://srv', 'pw', { refreshUrl });
-    fireReconnectFailed();
-    jest.advanceTimersByTime(1_200);
-    await Promise.resolve();
-
-    svc.disconnect();
-    rejectRefresh(new Error('account A URL refresh cancelled'));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(error).not.toHaveBeenCalled();
-  });
-
-  it('cannot let account A refresh tear down B or reopen A with B credentials', async () => {
-    let resolveAccountARefresh!: (origin: string | null) => void;
-    const accountARefresh = jest.fn(
-      () =>
-        new Promise<string | null>((resolve) => {
-          resolveAccountARefresh = resolve;
-        }),
-    );
-    const svc = new SocketService(handleRawEvent);
-    svc.connect('https://account-a.example', 'account-a-password', {
-      refreshUrl: accountARefresh,
-    });
-    fireReconnectFailed();
-    jest.advanceTimersByTime(1_200);
-    await Promise.resolve();
-    expect(accountARefresh).toHaveBeenCalledWith('https://account-a.example');
-
-    // B replaces the live socket while A's native/network URL refresh is still unresolved.
-    svc.connect('https://account-b.example', 'account-b-password', {});
-    const accountBSocket = sockets[1]!;
-    expect(mockIo).toHaveBeenCalledTimes(2);
-
-    resolveAccountARefresh('https://account-a-rotated.example');
-    await Promise.resolve();
-    await Promise.resolve();
-
-    // A's continuation is stale: it neither tears down B nor opens a third socket. In particular,
-    // there can be no request to A's rotated origin carrying the password now stored for B.
-    expect(accountBSocket.disconnect).not.toHaveBeenCalled();
-    expect(mockIo).toHaveBeenCalledTimes(2);
-    expect(mockIo.mock.calls[1]).toEqual([
-      'https://account-b.example',
-      expect.objectContaining({ auth: { password: 'account-b-password' } }),
-    ]);
-    expect(mockIo.mock.calls.some((call) => call[0] === 'https://account-a-rotated.example')).toBe(
-      false,
-    );
-  });
-
-  it('uses the refreshUrl hook to reconnect to a new origin', async () => {
-    const refreshUrl = jest.fn(async () => 'https://moved');
-    new SocketService(handleRawEvent).connect('https://srv', 'pw', { refreshUrl });
+  it('keeps repeated escalations pinned to the approved origin and password', () => {
+    new SocketService(handleRawEvent).connect('https://trusted.example', 'account-password', {});
 
     fireReconnectFailed();
     jest.advanceTimersByTime(1_200);
-    // runEscalation awaits refreshUrl(); flush the microtask queue so the re-open lands.
-    await Promise.resolve();
-    await Promise.resolve();
-
-    // The hook receives the origin the socket is currently trying (so a resolver can
-    // compare against the stored URL) and its answer becomes the new connect target.
-    expect(refreshUrl).toHaveBeenCalledWith('https://srv');
-    expect(mockIo).toHaveBeenCalledTimes(2);
-    expect(mockIo.mock.calls[1]![0]).toBe('https://moved');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(info).toHaveBeenCalledWith(
-      '[socket] server URL changed — reconnecting to the new origin',
-    );
-  });
-
-  it('retries the SAME origin when refreshUrl reports nothing new (null)', async () => {
-    const refreshUrl = jest.fn(async () => null);
-    new SocketService(handleRawEvent).connect('https://srv', 'pw', { refreshUrl });
-
     fireReconnectFailed();
-    jest.advanceTimersByTime(1_200);
-    await Promise.resolve();
-    await Promise.resolve();
+    jest.advanceTimersByTime(2_500);
 
-    expect(refreshUrl).toHaveBeenCalledWith('https://srv');
-    expect(mockIo).toHaveBeenCalledTimes(2);
-    expect(mockIo.mock.calls[1]![0]).toBe('https://srv');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(info).not.toHaveBeenCalled();
-  });
-
-  it('a second escalation asks about the UPDATED origin (not the original one)', async () => {
-    const refreshUrl = jest.fn(async () => 'https://moved');
-    new SocketService(handleRawEvent).connect('https://srv', 'pw', { refreshUrl });
-
-    fireReconnectFailed();
-    jest.advanceTimersByTime(1_200);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mockIo.mock.calls[1]![0]).toBe('https://moved');
-
-    // The moved origin fails too → the next escalation must pass 'https://moved'.
-    fireReconnectFailed();
-    jest.advanceTimersByTime(2_500); // attempt 1 backoff ≈ 2s + jitter
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(refreshUrl).toHaveBeenLastCalledWith('https://moved');
+    expect(mockIo).toHaveBeenCalledTimes(3);
+    for (const call of mockIo.mock.calls) {
+      expect(call).toEqual([
+        'https://trusted.example',
+        expect.objectContaining({ auth: { password: 'account-password' } }),
+      ]);
+    }
     expect(warn).toHaveBeenCalledTimes(2);
-    expect(info).toHaveBeenCalledTimes(1);
-  });
-
-  it('escalation + createServerUrlResolver picks up a store-side URL rotation', async () => {
-    // Simulates the real wiring (realtimeControl): a `new-server` event arrived over FCM
-    // while the socket was down and updated the store; the escalation re-reads it.
-    let storedOrigin = 'https://srv';
-    const refreshUrl = createServerUrlResolver([{ name: 'session', get: () => storedOrigin }]);
-    new SocketService(handleRawEvent).connect('https://srv', 'pw', { refreshUrl });
-
-    storedOrigin = 'https://rotated'; // tunnel rotated while the socket was down
-    fireReconnectFailed();
-    jest.advanceTimersByTime(1_200);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(mockIo).toHaveBeenCalledTimes(2);
-    expect(mockIo.mock.calls[1]![0]).toBe('https://rotated');
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(info).toHaveBeenCalledWith(
-      '[socket] server URL changed — reconnecting to the new origin',
-    );
   });
 });

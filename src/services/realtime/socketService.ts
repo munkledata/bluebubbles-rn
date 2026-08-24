@@ -24,18 +24,6 @@ export interface SocketAuthOptions {
    * so use it only against servers that don't support `handshake.auth`.
    */
   legacyQueryAuth?: boolean;
-  /**
-   * Optional URL-refresh hook for the reconnect escalation ladder. After socket.io's
-   * built-in retries are exhausted we call this with the origin the socket is currently
-   * trying; return a DIFFERENT valid origin to reconnect there, or null to retry the
-   * same one (the Flutter app does this via `fdb.fetchNewUrl()`).
-   *
-   * Wired at the composition root (`startRealtime` in `src/services/realtimeControl.ts`)
-   * to `createServerUrlResolver` over the session store — so a tunnel rotation delivered
-   * via FCM (`new-server` → `applyNewServerUrl`) is picked up even though the socket was
-   * down when it arrived. Omitting the hook is a clean no-op (same-origin retry).
-   */
-  refreshUrl?: (currentUrl: string) => Promise<string | null>;
 }
 
 /** Explicit raw-event handoff accepted by the socket transport. */
@@ -78,9 +66,11 @@ function makeSocketOccurrenceNamespace(): string {
 // socket.io does quick built-in retries, but we cap them (`reconnectionAttempts`) so it
 // SURRENDERS to our app-level ladder instead of retrying forever. ON TOP of socket.io,
 // once the manager reports `reconnect_failed` (i.e. those capped retries are exhausted),
-// we wait a capped-exponential backoff, optionally refresh the server URL, then restart
-// the socket. (With socket.io's default `reconnectionAttempts: Infinity`, that event
-// would never fire and this whole ladder would be dead code.)
+// we wait a capped-exponential backoff, then restart the same trusted origin. A server
+// rotation uses the separately approved, foreground-only rotation flow; reconnect must
+// never discover a foreign origin while it holds the account password. (With socket.io's
+// default `reconnectionAttempts: Infinity`, `reconnect_failed` would never fire and this
+// whole ladder would be dead code.)
 
 /**
  * How many built-in reconnect attempts socket.io makes before it gives up and emits
@@ -158,8 +148,8 @@ export function shouldLogSocketError(
  * foreground/open window.
  *
  * Robustness (Phase 1.1/1.2): on top of socket.io's quick built-in retries, an
- * app-level escalation refreshes the server URL and restarts the socket on a capped
- * exponential backoff, and duplicate error logs are throttled to one per minute.
+ * app-level escalation restarts the same approved origin on a capped exponential
+ * backoff, and duplicate error logs are throttled to one per minute.
  */
 export class SocketService {
   private socket: Socket | null = null;
@@ -335,8 +325,8 @@ export class SocketService {
 
   /** Log a socket error through the redacting logger, throttled by signature (60s window). */
   private logSocketError(err: unknown, lifecycleGeneration = this.lifecycleGeneration): void {
-    // Native callbacks and a rejected refreshUrl can settle after disconnect(). Those errors belong
-    // to the retired socket/account and must not enter the next session's uploadable diagnostics.
+    // Native callbacks can settle after disconnect(). Those errors belong to the retired
+    // socket/account and must not enter the next session's uploadable diagnostics.
     if (this.stopped || lifecycleGeneration !== this.lifecycleGeneration) return;
     const sig = this.errorSignature(err);
     const now = Date.now();
@@ -349,36 +339,26 @@ export class SocketService {
 
   /**
    * Schedule the app-level reconnect escalation after socket.io gave up: wait a capped
-   * exponential backoff, refresh the server URL, then restart the socket. Idempotent —
-   * a pending/in-progress escalation is not re-scheduled.
+   * exponential backoff, then restart the same trusted origin. Idempotent — a
+   * pending/in-progress escalation is not re-scheduled.
    */
   private scheduleEscalation(): void {
     if (this.stopped || this.escalationTimer != null || this.escalationInProgress) return;
     const delay = nextSocketBackoffMs(this.escalationAttempt);
     this.escalationAttempt += 1;
-    logger.warn(
-      `[socket] reconnect attempts exhausted — refreshing URL + restarting in ${delay}ms`,
-    );
+    logger.warn(`[socket] reconnect attempts exhausted — restarting in ${delay}ms`);
     this.escalationTimer = setTimeout(() => {
       this.escalationTimer = null;
-      void this.runEscalation();
+      this.runEscalation();
     }, delay);
   }
 
-  /** Refresh the server URL (if a hook is provided) and restart the socket. */
-  private async runEscalation(): Promise<void> {
+  /** Restart the socket against the same already-approved origin. */
+  private runEscalation(): void {
     if (this.stopped || this.socket?.connected) return;
     let lifecycleGeneration = this.lifecycleGeneration;
     this.escalationInProgress = true;
     try {
-      if (this.opts.refreshUrl) {
-        const fresh = await this.opts.refreshUrl(this.origin);
-        if (this.stopped || lifecycleGeneration !== this.lifecycleGeneration) return;
-        if (fresh && fresh !== this.origin) {
-          logger.info('[socket] server URL changed — reconnecting to the new origin');
-          this.origin = fresh;
-        }
-      }
       // Retire every native closure owned by the old Socket.IO instance before disconnecting it.
       // The replacement keeps the same account lease, but owns a new socket lifecycle.
       this.lifecycleGeneration += 1;

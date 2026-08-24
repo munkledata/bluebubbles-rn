@@ -19,6 +19,7 @@ import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
+import { ServerRotationApprovalHost } from '@ui/server-rotation';
 import { useChatNavigator } from '@ui/useChatNavigator';
 
 /** Catch every intentionally fire-and-forget notification task without logging payload content. */
@@ -163,6 +164,7 @@ function ConnectedAppLayout(): React.JSX.Element {
           takes over once answered (and is also used by dev call flows). */}
       <IncomingFaceTimeOverlay />
       <FaceTimeCallOverlay />
+      <ServerRotationApprovalHost />
     </>
   );
 }

@@ -2184,10 +2184,11 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/lock.ts#completeUnlock:mutator-call:97831ab6c576',
+      'src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b',
       'src/services/realtimeControl.ts#resumeRealtime:mutator-call:602dd63b9e5a',
     ].sort(),
   );
-  assert.equal(delegated.length, 31);
+  assert.equal(delegated.length, 32);
 
   for (const suffix of [
     '8c40f7e0add0',
@@ -4500,13 +4501,11 @@ fullOnlyTest(
           '      void this.lifecycleGeneration;\n      lifecycleGeneration = this.lifecycleGeneration;',
       },
       {
-        label: 'socket escalation ignores a stale URL refresh',
+        label: 'socket escalation silently changes the approved origin',
         path: 'src/services/realtime/socketService.ts',
-        transform: (source) =>
-          source.replace(
-            '        const fresh = await this.opts.refreshUrl(this.origin);\n        if (this.stopped || lifecycleGeneration !== this.lifecycleGeneration) return;',
-            '        const fresh = await this.opts.refreshUrl(this.origin);\n        if (this.stopped) return;',
-          ),
+        before: '      this.lifecycleGeneration += 1;',
+        after:
+          "      this.origin = 'https://unapproved.example';\n      this.lifecycleGeneration += 1;",
       },
       {
         label: 'socket fallback nonce uses a shadowed Date',
@@ -4802,6 +4801,24 @@ fullOnlyTest(
         path: 'app/(app)/chat/[guid].tsx',
         before: 'if (!isDevServer() || !accountLease.isCurrent()) return;',
         after: 'if (!accountLease.isCurrent()) return;',
+      },
+      {
+        label: 'rotation proposal bypasses the canonical snapshot',
+        path: 'src/services/realtimeControl.ts',
+        before: 'const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);',
+        after: 'const normalized = snapshotIncomingEvent(eventName, rawData);',
+      },
+      {
+        label: 'rotation approval handoff is detached',
+        path: 'src/services/realtimeControl.ts',
+        before: '    await applyNewServerUrl(normalized.url, context);',
+        after: '    void applyNewServerUrl(normalized.url, context);',
+      },
+      {
+        label: 'rotation event is allowed into durable persistence',
+        path: 'src/services/realtimeControl.ts',
+        before: "  if (event.type !== 'new-server') return true;",
+        after: '  return true;',
       },
       {
         label: 'escaped public dispatcher reference',

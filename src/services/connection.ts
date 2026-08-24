@@ -18,17 +18,25 @@ export type ConnectFailureKind =
 export type ConnectResult =
   { ok: true; serverInfo: ServerInfo } | { ok: false; kind: ConnectFailureKind; message: string };
 
-export interface ConnectionDeps {
-  /** Performs GET /server/info against the candidate origin (throws ApiError). */
-  fetchServerInfo: () => Promise<ServerInfo>;
-  vault: SecureVault;
-  revocationMarker: AccountRevocationMarker;
-  minServerVersion?: string;
+interface CurrentAttemptDeps {
   /** False once Disconnect revokes this candidate while network/SecureStore work is suspended. */
   isAttemptCurrent?: () => boolean;
 }
 
-function attemptIsCurrent(deps: ConnectionDeps): boolean {
+export interface ConnectionValidationDeps extends CurrentAttemptDeps {
+  /** Performs GET /server/info against the candidate origin (throws ApiError). */
+  fetchServerInfo: () => Promise<ServerInfo>;
+  minServerVersion?: string;
+}
+
+export interface CredentialPersistenceDeps extends CurrentAttemptDeps {
+  vault: SecureVault;
+  revocationMarker: AccountRevocationMarker;
+}
+
+export type ConnectionDeps = ConnectionValidationDeps & CredentialPersistenceDeps;
+
+function attemptIsCurrent(deps: CurrentAttemptDeps): boolean {
   return deps.isAttemptCurrent?.() !== false;
 }
 
@@ -54,6 +62,15 @@ export async function connectToServer(
   password: string,
   deps: ConnectionDeps,
 ): Promise<ConnectResult> {
+  const validation = await validateServerConnection(deps);
+  if (!validation.ok) return validation;
+  return persistServerConnection(origin, password, validation.serverInfo, deps);
+}
+
+/** Validate candidate credentials without changing any durable or live session state. */
+export async function validateServerConnection(
+  deps: ConnectionValidationDeps,
+): Promise<ConnectResult> {
   const minVersion = deps.minServerVersion ?? MIN_SERVER_VERSION;
 
   let info: ServerInfo;
@@ -76,6 +93,16 @@ export async function connectToServer(
     );
   }
 
+  return { ok: true, serverInfo: info };
+}
+
+/** Commit an already-validated candidate with the existing correlated-vault protocol. */
+export async function persistServerConnection(
+  origin: string,
+  password: string,
+  info: ServerInfo,
+  deps: CredentialPersistenceDeps,
+): Promise<ConnectResult> {
   // Correlate the two independent SecureStore keys. `writing` is durable BEFORE either credential
   // changes, so a crash/rejection between them cannot make a mixed old/new pair look connected.
   // `active` is the commit marker and is written only after both credential writes succeed.

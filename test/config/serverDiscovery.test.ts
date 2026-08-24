@@ -1,7 +1,8 @@
 import {
+  classifyServerRotation,
   isCleartext,
+  MAX_SERVER_ORIGIN_INPUT_LENGTH,
   sanitizeServerAddress,
-  ServerUrlResolver,
   strictServerOrigin,
 } from '@core/config';
 
@@ -47,6 +48,8 @@ describe('strictServerOrigin', () => {
     ' example.com',
     'example.com',
     'https://user:secret@example.com',
+    'https://@example.com',
+    'https://:@example.com',
     'https://example.com/api',
     'https://example.com?next=https://evil.example',
     'https://example.com#fragment',
@@ -58,32 +61,57 @@ describe('strictServerOrigin', () => {
   ])('rejects non-origin or parser-smuggling input %p', (input) => {
     expect(strictServerOrigin(input)).toBeNull();
   });
+
+  it('rejects an oversized untrusted origin before URL parsing', () => {
+    const input = `https://${'a'.repeat(MAX_SERVER_ORIGIN_INPUT_LENGTH)}.example`;
+    expect(strictServerOrigin(input)).toBeNull();
+  });
 });
 
-describe('ServerUrlResolver', () => {
-  it('saves a newly discovered origin when it differs from stored', async () => {
-    let stored: string | null = 'https://old.example';
-    const saveOrigin = jest.fn(async (o: string) => {
-      stored = o;
+describe('classifyServerRotation', () => {
+  it('recognizes canonical spellings of the trusted origin as a no-op', () => {
+    expect(classifyServerRotation('https://example.com', 'HTTPS://EXAMPLE.COM:443/')).toEqual({
+      kind: 'same-origin',
+      origin: 'https://example.com',
     });
-    const resolver = new ServerUrlResolver({
-      getStoredOrigin: () => stored,
-      fetchFromFirebase: async () => 'https://new.example',
-      saveOrigin,
-    });
-    const result = await resolver.refresh();
-    expect(result).toBe('https://new.example');
-    expect(saveOrigin).toHaveBeenCalledWith('https://new.example');
   });
 
-  it('does not re-save when the discovered origin is unchanged', async () => {
-    const saveOrigin = jest.fn();
-    const resolver = new ServerUrlResolver({
-      getStoredOrigin: () => 'https://same.example',
-      fetchFromFirebase: async () => 'same.example',
-      saveOrigin,
+  it('offers a foreign HTTPS origin without cleartext consent', () => {
+    expect(classifyServerRotation('https://old.example', 'https://new.example')).toEqual({
+      kind: 'candidate',
+      currentOrigin: 'https://old.example',
+      candidateOrigin: 'https://new.example',
+      requiresCleartextApproval: false,
     });
-    await resolver.refresh();
-    expect(saveOrigin).not.toHaveBeenCalled();
+  });
+
+  it('rejects an HTTPS-to-HTTP downgrade instead of offering it for approval', () => {
+    expect(classifyServerRotation('https://same.example', 'http://same.example')).toEqual({
+      kind: 'downgrade',
+      currentOrigin: 'https://same.example',
+      candidateOrigin: 'http://same.example',
+    });
+  });
+
+  it('requires fresh cleartext consent when an approved HTTP session changes origin', () => {
+    expect(classifyServerRotation('http://192.168.1.10:1234', 'http://192.168.1.11:1234')).toEqual({
+      kind: 'candidate',
+      currentOrigin: 'http://192.168.1.10:1234',
+      candidateOrigin: 'http://192.168.1.11:1234',
+      requiresCleartextApproval: true,
+    });
+  });
+
+  it.each([
+    ['missing current session', null, 'https://new.example'],
+    ['userinfo', 'https://old.example', 'https://user:secret@new.example'],
+    ['empty userinfo', 'https://old.example', 'https://@new.example'],
+    ['empty user/password', 'https://old.example', 'https://:@new.example'],
+    ['path', 'https://old.example', 'https://new.example/api'],
+    ['query', 'https://old.example', 'https://new.example?next=evil'],
+    ['fragment', 'https://old.example', 'https://new.example#target'],
+    ['whitespace', 'https://old.example', ' https://new.example'],
+  ])('rejects %s input', (_label, current, candidate) => {
+    expect(classifyServerRotation(current, candidate)).toEqual({ kind: 'invalid' });
   });
 });

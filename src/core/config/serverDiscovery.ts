@@ -1,9 +1,8 @@
 /**
- * Server address normalization + failover orchestration.
+ * Server address normalization and strict realtime-rotation classification.
  *
- * Ports `sanitizeServerAddress()` and the Firebase URL-refresh behaviour
- * (firebase_database_service.dart). The Firebase fetch itself is injected so the
- * core stays free of @react-native-firebase.
+ * Setup input is repaired for convenience, while server-supplied rotation input is
+ * deliberately fail-closed and cannot trigger persistence by itself.
  */
 
 /**
@@ -38,6 +37,9 @@ export function isCleartext(origin: string): boolean {
   return /^http:\/\//i.test(origin);
 }
 
+/** Bound attacker-controlled rotation text before it is copied or canonicalized. */
+export const MAX_SERVER_ORIGIN_INPUT_LENGTH = 2_048;
+
 /**
  * Parse an already-formed server ORIGIN without repairing it.
  *
@@ -47,7 +49,9 @@ export function isCleartext(origin: string): boolean {
  */
 export function strictServerOrigin(input: string | null | undefined): string | null {
   if (!input || input !== input.trim()) return null;
-  if (/[\\\u0000-\u001f\u007f]/.test(input)) return null;
+  if (input.length > MAX_SERVER_ORIGIN_INPUT_LENGTH) return null;
+  // Reject the raw user-info delimiter even when both parsed fields are empty (`https://@host`).
+  if (/[\\\u0000-\u001f\u007f]/.test(input) || input.includes('@')) return null;
   // Accept exactly an http(s) authority and an optional single trailing slash. Checking the raw
   // form first also rejects empty `?` / `#` delimiters that URL.search/hash normalize away.
   if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;
@@ -61,30 +65,47 @@ export function strictServerOrigin(input: string | null | undefined): string | n
   }
 }
 
-export interface ServerUrlResolverDeps {
-  /** Returns the current stored origin, if any. */
-  getStoredOrigin: () => string | null;
-  /** Fetches a fresh URL from Firebase RTDB/Firestore (config/serverUrl). */
-  fetchFromFirebase: () => Promise<string | null>;
-  /** Persists a newly discovered origin. */
-  saveOrigin: (origin: string) => Promise<void>;
-}
+export type ServerRotationClassification =
+  | { readonly kind: 'invalid' }
+  | { readonly kind: 'same-origin'; readonly origin: string }
+  | {
+      readonly kind: 'candidate';
+      readonly currentOrigin: string;
+      readonly candidateOrigin: string;
+      /** A current cleartext session needs a separate, explicit acknowledgement for its new host. */
+      readonly requiresCleartextApproval: boolean;
+    }
+  | {
+      readonly kind: 'downgrade';
+      readonly currentOrigin: string;
+      readonly candidateOrigin: string;
+    };
 
 /**
- * Resolves the server origin, refreshing from Firebase when the stored one is
- * missing or has changed. Mirrors the connection-error → fetchNewUrl path.
+ * Classify one untrusted `new-server` value without repairing it or performing any effect.
+ *
+ * A secure session can never rotate itself to plaintext. A user who truly intends that downgrade
+ * must leave the session and use setup's explicit cleartext path. An already-approved HTTP session
+ * may offer another HTTP origin, but the foreground prompt must ask for cleartext consent again.
  */
-export class ServerUrlResolver {
-  constructor(private readonly deps: ServerUrlResolverDeps) {}
+export function classifyServerRotation(
+  currentInput: string | null | undefined,
+  candidateInput: string | null | undefined,
+): ServerRotationClassification {
+  const currentOrigin = strictServerOrigin(currentInput);
+  const candidateOrigin = strictServerOrigin(candidateInput);
+  if (!currentOrigin || !candidateOrigin) return { kind: 'invalid' };
+  if (candidateOrigin === currentOrigin) return { kind: 'same-origin', origin: currentOrigin };
 
-  /** Force a Firebase refresh (called after a connection error). */
-  async refresh(): Promise<string | null> {
-    const fetched = sanitizeServerAddress(await this.deps.fetchFromFirebase());
-    if (!fetched) return this.deps.getStoredOrigin();
-    const current = this.deps.getStoredOrigin();
-    if (fetched !== current) {
-      await this.deps.saveOrigin(fetched);
-    }
-    return fetched;
+  const currentCleartext = isCleartext(currentOrigin);
+  const candidateCleartext = isCleartext(candidateOrigin);
+  if (!currentCleartext && candidateCleartext) {
+    return { kind: 'downgrade', currentOrigin, candidateOrigin };
   }
+  return {
+    kind: 'candidate',
+    currentOrigin,
+    candidateOrigin,
+    requiresCleartextApproval: candidateCleartext,
+  };
 }
