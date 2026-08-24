@@ -287,7 +287,7 @@ export async function resendOutgoingRow(
  * background task, and from the in-session drains (chat ticker / AppState active). Pure
  * orchestration (no RN imports — attachment I/O is injected) → runs in Node tests.
  */
-export async function runOutgoingQueue(
+async function runOutgoingQueueBody(
   db: AppDatabase,
   http: HttpClient,
   io: OutgoingQueueIO,
@@ -340,4 +340,38 @@ export async function runOutgoingQueue(
     if (outcome === 'paused') break;
   }
   return { eligible: rows.length, sent };
+}
+
+/**
+ * Run the complete automatic retry attempt inside the account teardown barrier when production
+ * supplies a lease. Short claim/outcome commits retain their narrower guards, while this outer
+ * slot also covers the HTTP/native interval between them. Unit callers without a lease keep the
+ * original standalone behavior.
+ */
+export async function runOutgoingQueue(
+  db: AppDatabase,
+  http: HttpClient,
+  io: OutgoingQueueIO,
+  now: number = Date.now(),
+  accountLease?: RealtimeDeliveryLease,
+  maxRows?: number,
+  attachmentTimeoutMs?: number,
+): Promise<{ eligible: number; sent: number }> {
+  if (!accountLease) {
+    return runOutgoingQueueBody(db, http, io, now, undefined, maxRows, attachmentTimeoutMs);
+  }
+
+  const completed: { value?: { eligible: number; sent: number } } = {};
+  const status = await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+    completed.value = await runOutgoingQueueBody(
+      db,
+      http,
+      io,
+      now,
+      activeLease,
+      maxRows,
+      attachmentTimeoutMs,
+    );
+  });
+  return status === 'delivered' && completed.value ? completed.value : { eligible: 0, sent: 0 };
 }

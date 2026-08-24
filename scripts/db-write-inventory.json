@@ -11080,7 +11080,7 @@
     {
       "id": "src/services/bootstrap.ts#resolveBootSession:mutator-call:4be60ae765e3",
       "path": "src/services/bootstrap.ts",
-      "line": 344,
+      "line": 346,
       "symbol": "resolveBootSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -11093,7 +11093,7 @@
     {
       "id": "src/services/bootstrap.ts#inspectForegroundBootSession:mutator-call:106ee7ea858e",
       "path": "src/services/bootstrap.ts",
-      "line": 408,
+      "line": 410,
       "symbol": "inspectForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -11106,7 +11106,7 @@
     {
       "id": "src/services/bootstrap.ts#openForegroundBootDatabase:mutator-call:aa0271b15f39",
       "path": "src/services/bootstrap.ts",
-      "line": 436,
+      "line": 438,
       "symbol": "openForegroundBootDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -11119,7 +11119,7 @@
     {
       "id": "src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:f0181c470642",
       "path": "src/services/bootstrap.ts",
-      "line": 618,
+      "line": 620,
       "symbol": "activateForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -11132,7 +11132,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02",
       "path": "src/services/bootstrap.ts",
-      "line": 641,
+      "line": 643,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#resolveBootSession",
@@ -11145,7 +11145,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:94dbfeb8fde6",
       "path": "src/services/bootstrap.ts",
-      "line": 650,
+      "line": 652,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -11158,7 +11158,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02:2",
       "path": "src/services/bootstrap.ts",
-      "line": 690,
+      "line": 692,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#resolveBootSession",
@@ -11171,7 +11171,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:c52a509eefea",
       "path": "src/services/bootstrap.ts",
-      "line": 724,
+      "line": 726,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -11184,7 +11184,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:21c31fa08724",
       "path": "src/services/bootstrap.ts",
-      "line": 781,
+      "line": 783,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -11197,7 +11197,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:a35e092f20bd",
       "path": "src/services/bootstrap.ts",
-      "line": 786,
+      "line": 788,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -11210,7 +11210,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:0215e207799e",
       "path": "src/services/bootstrap.ts",
-      "line": 884,
+      "line": 886,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -11223,7 +11223,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:f72fb8307767",
       "path": "src/services/bootstrap.ts",
-      "line": 981,
+      "line": 983,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -11236,7 +11236,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:e75fcdcefedc",
       "path": "src/services/bootstrap.ts",
-      "line": 1058,
+      "line": 1060,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -11249,7 +11249,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:bd0a1be3afa9",
       "path": "src/services/bootstrap.ts",
-      "line": 1133,
+      "line": 1135,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -11262,7 +11262,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:9c87d79ec275",
       "path": "src/services/bootstrap.ts",
-      "line": 1164,
+      "line": 1166,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#wipeLocalCache",
@@ -11275,7 +11275,7 @@
     {
       "id": "src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850",
       "path": "src/services/bootstrap.ts",
-      "line": 1444,
+      "line": 1461,
       "symbol": "runForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#cleanupAccountDatabase",
@@ -11288,7 +11288,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829",
       "path": "src/services/bootstrap.ts",
-      "line": 1552,
+      "line": 1570,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#clearLocalCache",
@@ -11301,7 +11301,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e",
       "path": "src/services/bootstrap.ts",
-      "line": 1556,
+      "line": 1574,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#localCacheDirty",
@@ -11314,7 +11314,7 @@
     {
       "id": "src/services/bootstrap.ts#startForget:mutator-call:976b6c7c71bc",
       "path": "src/services/bootstrap.ts",
-      "line": 1648,
+      "line": 1666,
       "symbol": "startForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runForget",
@@ -11327,7 +11327,7 @@
     {
       "id": "src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c",
       "path": "src/services/bootstrap.ts",
-      "line": 1658,
+      "line": 1676,
       "symbol": "forget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -11340,7 +11340,7 @@
     {
       "id": "src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906",
       "path": "src/services/bootstrap.ts",
-      "line": 1672,
+      "line": 1690,
       "symbol": "runOrAwaitForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -14822,10 +14822,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/realtime/serverRotationExecutor.test.ts; test/realtime/serverUrlEventSink.test.ts; test/services/realtimeStartupOptional.test.ts"
     },
     {
-      "id": "src/services/send/index.ts#sendImage.<callback:af124f15f3>:mutator-call:549ce532fbd8",
+      "id": "src/services/send/index.ts#sendImage.<callback:31b0f37642>:mutator-call:8dec7c5ae3d8",
       "path": "src/services/send/index.ts",
       "line": 138,
-      "symbol": "sendImage.<callback:af124f15f3>",
+      "symbol": "sendImage.<callback:31b0f37642>",
       "operation": "mutator-call",
       "target": "src/services/send/sendAttachmentService.ts#sendImageMessage",
       "detectedContext": "coordinated-delegation",
@@ -14835,10 +14835,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendAccountScope.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/scheduledAccountScope.test.ts; test/services/scheduledPrune.test.ts; test/services/discardMessage.test.ts; test/services/attachmentCacheCoordinator.test.ts"
     },
     {
-      "id": "src/services/send/index.ts#sendImages.<callback:30d85757bb>.<callback:267e1afc85>:mutator-call:8ba6ca49933c",
+      "id": "src/services/send/index.ts#sendImages.<callback:90e277421f>.<callback:eb183683de>:mutator-call:55198904a085",
       "path": "src/services/send/index.ts",
-      "line": 153,
-      "symbol": "sendImages.<callback:30d85757bb>.<callback:267e1afc85>",
+      "line": 155,
+      "symbol": "sendImages.<callback:90e277421f>.<callback:eb183683de>",
       "operation": "mutator-call",
       "target": "src/services/send/sendAttachmentService.ts#sendImageMessage",
       "detectedContext": "coordinated-delegation",
@@ -14850,7 +14850,7 @@
     {
       "id": "src/services/send/index.ts#send.<callback:063ef6d4b6>:mutator-call:dfe7fe49355a",
       "path": "src/services/send/index.ts",
-      "line": 178,
+      "line": 182,
       "symbol": "send.<callback:063ef6d4b6>",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -14863,7 +14863,7 @@
     {
       "id": "src/services/send/index.ts#sendContactCard.<callback:6e509086a3>:mutator-call:44912f380479",
       "path": "src/services/send/index.ts",
-      "line": 193,
+      "line": 197,
       "symbol": "sendContactCard.<callback:6e509086a3>",
       "operation": "mutator-call",
       "target": "src/services/send/sendContactService.ts#sendContactMessage",
@@ -14876,7 +14876,7 @@
     {
       "id": "src/services/send/index.ts#pickAndSendContact.<callback:5e98d736ac>:mutator-call:60f5a12a2f42",
       "path": "src/services/send/index.ts",
-      "line": 226,
+      "line": 230,
       "symbol": "pickAndSendContact.<callback:5e98d736ac>",
       "operation": "mutator-call",
       "target": "src/services/send/sendContactService.ts#sendContactMessage",
@@ -14889,7 +14889,7 @@
     {
       "id": "src/services/send/index.ts#react.<callback:8a2399a4aa>:mutator-call:6f4da78c5e79",
       "path": "src/services/send/index.ts",
-      "line": 235,
+      "line": 239,
       "symbol": "react.<callback:8a2399a4aa>",
       "operation": "mutator-call",
       "target": "src/services/send/sendReactionService.ts#sendReactionMessage",
@@ -14902,7 +14902,7 @@
     {
       "id": "src/services/send/index.ts#reply.<callback:65b243e81c>:mutator-call:1ed4724c0dd0",
       "path": "src/services/send/index.ts",
-      "line": 251,
+      "line": 255,
       "symbol": "reply.<callback:65b243e81c>",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -14915,7 +14915,7 @@
     {
       "id": "src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380",
       "path": "src/services/send/index.ts",
-      "line": 288,
+      "line": 292,
       "symbol": "schedule.<callback:ec99a4a3ef>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#scheduleTextMessage",
@@ -14928,7 +14928,7 @@
     {
       "id": "src/services/send/index.ts#cancelScheduled.<callback:b5bc8ae556>:mutator-call:5d28847b50ce",
       "path": "src/services/send/index.ts",
-      "line": 308,
+      "line": 312,
       "symbol": "cancelScheduled.<callback:b5bc8ae556>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#deleteScheduled",
@@ -14941,7 +14941,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4",
       "path": "src/services/send/index.ts",
-      "line": 338,
+      "line": 342,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -14954,7 +14954,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4:2",
       "path": "src/services/send/index.ts",
-      "line": 358,
+      "line": 362,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -14967,7 +14967,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:1150f343ed37",
       "path": "src/services/send/index.ts",
-      "line": 363,
+      "line": 367,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -14980,7 +14980,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:f82af7e4ba9c",
       "path": "src/services/send/index.ts",
-      "line": 367,
+      "line": 371,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -14993,7 +14993,7 @@
     {
       "id": "src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2",
       "path": "src/services/send/index.ts",
-      "line": 392,
+      "line": 396,
       "symbol": "syncScheduledFromServer.<callback:c129c31bd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#listServerScheduledPruneExposure",
@@ -15006,7 +15006,7 @@
     {
       "id": "src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae",
       "path": "src/services/send/index.ts",
-      "line": 420,
+      "line": 424,
       "symbol": "syncScheduledFromServer.<callback:c129c31bd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#reconcileServerScheduled",
@@ -15019,7 +15019,7 @@
     {
       "id": "src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861",
       "path": "src/services/send/index.ts",
-      "line": 439,
+      "line": 443,
       "symbol": "fireDueScheduled.<callback:0a6836762d>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled",
@@ -15032,7 +15032,7 @@
     {
       "id": "src/services/send/index.ts#retry.<callback:7c4158bf3d>:mutator-call:7d5ba2e65922",
       "path": "src/services/send/index.ts",
-      "line": 530,
+      "line": 534,
       "symbol": "retry.<callback:7c4158bf3d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry",
@@ -15045,7 +15045,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:4c9a61f6676e",
       "path": "src/services/send/index.ts",
-      "line": 600,
+      "line": 604,
       "symbol": "discardMessage.<callback:b508606691>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#discardOutgoingMessage",
@@ -15058,7 +15058,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:dfd6224740fb",
       "path": "src/services/send/index.ts",
-      "line": 603,
+      "line": 607,
       "symbol": "discardMessage.<callback:b508606691>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#deleteMessageLocal",
@@ -15071,7 +15071,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:816aa6c2269b",
       "path": "src/services/send/index.ts",
-      "line": 615,
+      "line": 619,
       "symbol": "discardMessage.<callback:b508606691>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -15084,7 +15084,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:e6873ba71ded",
       "path": "src/services/send/index.ts",
-      "line": 618,
+      "line": 622,
       "symbol": "discardMessage.<callback:b508606691>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -15147,14 +15147,14 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
     },
     {
-      "id": "src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:32b1142393>:mutator-call:f5eb0168b8ed",
+      "id": "src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:32b1142393>:mutator-call:a6f7181df803",
       "path": "src/services/send/outgoingQueueService.ts",
       "line": 326,
-      "symbol": "runOutgoingQueue.<callback:32b1142393>",
+      "symbol": "runOutgoingQueueBody.<callback:32b1142393>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimOutgoingForSend",
       "detectedContext": "coordinated-delegation",
-      "owner": "runOutgoingQueue",
+      "owner": "runOutgoingQueueBody",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
@@ -15318,7 +15318,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:481b423ba233",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 82,
+      "line": 83,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment",
@@ -15331,7 +15331,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:cce2ab93dad1",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 115,
+      "line": 121,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -15344,7 +15344,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e8d6115d0f4d",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 117,
+      "line": 124,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure",

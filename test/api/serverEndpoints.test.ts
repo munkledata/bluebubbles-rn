@@ -138,6 +138,27 @@ describe('serverStatTotals reads stats via the admin-command dispatcher', () => 
     mockKy.mockRejectedValue(new Error('server down'));
     await expect(serverApi.serverStatTotals(client())).rejects.toThrow();
   });
+
+  it('forwards one cancellation signal to all seven statistics requests', async () => {
+    const controller = new AbortController();
+    const post = jest.fn(
+      async (_path: string, _schema: unknown, options: { json: { channel: string } }) =>
+        options.json.channel.includes('attachment') ||
+        options.json.channel.includes('image') ||
+        options.json.channel.includes('video') ||
+        options.json.channel.includes('location')
+          ? []
+          : 0,
+    );
+    const http = { post } as unknown as HttpClient;
+
+    await serverApi.serverStatTotals(http, controller.signal);
+
+    expect(post).toHaveBeenCalledTimes(7);
+    for (const call of post.mock.calls) {
+      expect(call[2]).toMatchObject({ signal: controller.signal });
+    }
+  });
 });
 
 // A 404 on the dispatcher route means the server has no admin dispatcher at all (stock

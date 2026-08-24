@@ -128,6 +128,32 @@ function responseParseError(message: string, response: Response, cause?: unknown
   return new ApiError('parse_error', message, response.status, cause);
 }
 
+function callerCancellationError(signal: AbortSignal): ApiError {
+  return new ApiError('cancelled', 'Network request was cancelled', undefined, signal.reason);
+}
+
+/** Abort-aware retry delay so Disconnect cannot leave an old logical request parked in backoff. */
+function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  if (signal.aborted) return Promise.reject(callerCancellationError(signal));
+
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(callerCancellationError(signal));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', abort, { once: true });
+    // Close the check/listener race for injected AbortSignal implementations.
+    if (signal.aborted) abort();
+  });
+}
+
 function cancelRequestSafely(
   cancelRequest: ((reason: string) => void) | undefined,
   reason: string,
@@ -507,6 +533,7 @@ export class HttpClient {
     // old credential after revocation or the new credential with old-account work.
     let firstAttempt = true;
     const run = async (): Promise<z.infer<S>> => {
+      if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
       const request = firstAttempt ? initialRequest : this.snapshotRequest(path, opts.query);
       firstAttempt = false;
       if (!sameRequestSnapshot(initialRequest, request)) {
@@ -532,14 +559,20 @@ export class HttpClient {
             fetch: this.cfg.fetch,
           });
         } catch (err) {
+          if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
           if (err instanceof DOMException && err.name === 'TimeoutError') {
             throw new ApiError('timeout', 'Request timed out', undefined, err);
           }
           throw new ApiError('no_connection', 'Network request failed', undefined, err);
         }
-        return await this.parseResponse(response, method, path, schema, (reason) =>
-          requestController.abort(reason),
-        );
+        try {
+          return await this.parseResponse(response, method, path, schema, (reason) =>
+            requestController.abort(reason),
+          );
+        } catch (error) {
+          if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
+          throw error;
+        }
       } finally {
         opts.signal?.removeEventListener('abort', abortFromCaller);
       }
@@ -549,7 +582,9 @@ export class HttpClient {
     // `retry: false`.
     const wantsRetry = opts.retry !== false && (method === 'GET' || opts.retry !== undefined);
     return wantsRetry
-      ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined)
+      ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined, (ms) =>
+          waitForRetry(ms, opts.signal),
+        )
       : run();
   }
 
@@ -585,15 +620,21 @@ export class HttpClient {
           signal: requestController.signal,
         });
       } catch (err) {
+        if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
         // Development-only diagnosis. RN's network Error has no enumerable fields, so include its
         // cause/URL locally; release builds drop this free-form line before inspecting it.
         const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         logger.warn(`[http] multipart upload failed url=${fullUrl} err=${detail}`);
         throw new ApiError('no_connection', 'Upload request failed', undefined, err);
       }
-      return await this.parseResponse(response, method, path, schema, (reason) =>
-        requestController.abort(reason),
-      );
+      try {
+        return await this.parseResponse(response, method, path, schema, (reason) =>
+          requestController.abort(reason),
+        );
+      } catch (error) {
+        if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
+        throw error;
+      }
     } finally {
       opts.signal?.removeEventListener('abort', abortFromCaller);
     }

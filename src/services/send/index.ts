@@ -135,7 +135,9 @@ export function sendImage(
   tempGuid: string;
 } | null> {
   return runUiAccountOperation(accountLease, () =>
-    sendImageMessage(getDatabase(), http, args, expoAttachmentUploader),
+    sendImageMessage(getDatabase(), http, args, expoAttachmentUploader, Date.now(), () =>
+      accountLease.isCurrent(),
+    ),
   );
 }
 
@@ -155,6 +157,8 @@ export function sendImages(
           http,
           { chatGuid: args.chatGuid, image },
           expoAttachmentUploader,
+          Date.now(),
+          () => accountLease.isCurrent(),
         ),
       ),
     );

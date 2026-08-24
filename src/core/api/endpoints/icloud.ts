@@ -28,9 +28,9 @@ export const AccountInfo = z
 export type AccountInfo = z.infer<typeof AccountInfo>;
 
 /** GET /api/v1/icloud/account — the signed-in account + its aliases. */
-export async function getAccountInfo(http: HttpClient): Promise<AccountInfo> {
+export async function getAccountInfo(http: HttpClient, signal?: AbortSignal): Promise<AccountInfo> {
   try {
-    return await http.get('/icloud/account', AccountInfo);
+    return await http.get('/icloud/account', AccountInfo, { signal });
   } catch (e) {
     // Not every Gator server implements this route (it 404s). Surface that as "unsupported" so the
     // screen can show an honest message rather than blaming the Private API. A real auth/network

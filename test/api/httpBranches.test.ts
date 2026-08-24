@@ -120,6 +120,48 @@ describe('error mapping', () => {
     await expect(client.get('/p', z.unknown())).rejects.toMatchObject({ kind: 'no_connection' });
   });
 
+  it('maps an active caller abort to non-retryable cancellation', async () => {
+    const controller = new AbortController();
+    mockKy.mockImplementation(
+      async (_url: string, options: { signal: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          options.signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
+    const request = client.get('/account-read', okSchema, {
+      signal: controller.signal,
+      retry: { attempts: 3, baseMs: 60_000 },
+    });
+    await Promise.resolve();
+
+    controller.abort('Disconnect');
+
+    await expect(request).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels retry backoff without starting another old-account request', async () => {
+    const controller = new AbortController();
+    mockKy.mockRejectedValueOnce(new Error('socket hang up'));
+    const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
+    const request = client.get('/account-read', okSchema, {
+      signal: controller.signal,
+      retry: { attempts: 3, baseMs: 60_000, maxMs: 60_000, random: () => 0 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockKy).toHaveBeenCalledTimes(1);
+
+    controller.abort('Disconnect');
+
+    await expect(request).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
   it('maps a non-JSON body to a "parse_error"', async () => {
     mockKy.mockResolvedValue(
       new Response('<<not json>>', { status: 200, headers: { 'content-type': 'text/plain' } }),

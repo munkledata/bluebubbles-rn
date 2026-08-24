@@ -286,8 +286,9 @@ import { readFcmSessionState } from '@/services/notifications/fcmSessionGate';
 import { uploadRegistry } from '@/services/send/uploadControl';
 /* eslint-enable import/first */
 
-beforeEach(() => {
+beforeEach(async () => {
   uploadRegistry.cancelAll();
+  await uploadRegistry.awaitIdle();
   useDownloadStore.getState().reset();
   useUploadStore.getState().reset();
   vaultValues.clear();
@@ -2024,6 +2025,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       cancel: () => {
         reentered = forget();
       },
+      settled: Promise.resolve(),
     });
 
     const first = forget();
@@ -2552,7 +2554,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     );
 
     const run = forget();
-    for (let i = 0; i < 20 && awaitSyncIdle.mock.calls.length === 0; i += 1) {
+    for (let i = 0; i < 500 && awaitSyncIdle.mock.calls.length === 0; i += 1) {
       await Promise.resolve();
     }
     await Promise.resolve();
@@ -2572,7 +2574,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
 
     try {
       const run = forget();
-      for (let i = 0; i < 20 && awaitSyncIdle.mock.calls.length === 0; i += 1) {
+      for (let i = 0; i < 500 && awaitSyncIdle.mock.calls.length === 0; i += 1) {
         await Promise.resolve();
       }
       await jest.advanceTimersByTimeAsync(5_000);
@@ -2885,8 +2887,8 @@ describe('forget() — in-flight realtime delivery is drained before private sta
       throw new Error('native upload already released');
     });
     const second = jest.fn(() => order.push('second-cancelled'));
-    uploadRegistry.add('temp-first', { cancel: first });
-    uploadRegistry.add('temp-second', { cancel: second });
+    uploadRegistry.add('temp-first', { cancel: first, settled: Promise.resolve() });
+    uploadRegistry.add('temp-second', { cancel: second, settled: Promise.resolve() });
     useUploadStore.getState().start('attachment-first', {
       chatGuid: 'chat-old-account',
       name: 'private.jpg',
@@ -2908,6 +2910,65 @@ describe('forget() — in-flight realtime delivery is drained before private sta
 
     releaseRealtime();
     await expect(run).resolves.toBeUndefined();
+  });
+
+  it('holds the wipe behind an exact native upload tail after public cancellation', async () => {
+    let finishNative!: () => void;
+    const nativeSettled = new Promise<void>((resolve) => {
+      finishNative = resolve;
+    });
+    const cancel = jest.fn();
+    uploadRegistry.add('temp-native-tail', { cancel, settled: nativeSettled });
+
+    const run = forget();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+    expect(uploadRegistry.size).toBe(0);
+    expect(uploadRegistry.pending).toBe(1);
+    expect(clearLocalCache).not.toHaveBeenCalled();
+
+    finishNative();
+    await expect(run).resolves.toBeUndefined();
+    expect(uploadRegistry.pending).toBe(0);
+    expect(clearLocalCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps B blocked after an upload-tail deadline until that exact tail settles', async () => {
+    jest.useFakeTimers();
+    let finishNative!: () => void;
+    const nativeSettled = new Promise<void>((resolve) => {
+      finishNative = resolve;
+    });
+    uploadRegistry.add('temp-wedged-native-tail', {
+      cancel: jest.fn(),
+      settled: nativeSettled,
+    });
+
+    try {
+      const first = forget();
+      const firstRejected = expect(first).rejects.toThrow(/media uploads/i);
+      await jest.advanceTimersByTimeAsync(5_000);
+      await firstRejected;
+      expect(uploadRegistry.pending).toBe(1);
+      expect(clearLocalCache).toHaveBeenCalledTimes(1);
+
+      const retry = forget();
+      let retrySettled = false;
+      void retry.finally(() => {
+        retrySettled = true;
+      });
+      await Promise.resolve();
+      expect(retrySettled).toBe(false);
+
+      finishNative();
+      await expect(retry).resolves.toBeUndefined();
+      expect(uploadRegistry.pending).toBe(0);
+      expect(clearLocalCache).toHaveBeenCalledTimes(2);
+    } finally {
+      finishNative();
+      jest.useRealTimers();
+    }
   });
 
   it('does not cancel or wipe until a delivery admitted before Disconnect has stopped', async () => {

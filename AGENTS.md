@@ -38,6 +38,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 | ------------------------------------ | --------------------------------------------------------------- |
 | Active DB-02A handoff                | `docs/DB_02A_CURRENT.md`                                        |
 | Session late-result ownership        | `docs/REL_004_LATE_RESULT_INVENTORY.md`                         |
+| Session teardown barrier             | `docs/REL_005A_TEARDOWN_INVENTORY.md`                           |
 | Authoritative plan and audit history | `docs/WORK_PLAN_2026-08-03.md`, `AUDIT_REPORT.md`               |
 | Phase/release dependencies           | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`            |
 | App/server event and API parity      | `docs/APP_SERVER_PARITY.md`                                     |

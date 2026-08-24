@@ -45,10 +45,10 @@ export default function AccountScreen(): React.JSX.Element {
 
   const accountQuery = useQuery({
     queryKey: accountQueryKey,
-    queryFn: async (): Promise<AccountInfo | null> => {
+    queryFn: async ({ signal }): Promise<AccountInfo | null> => {
       if (!accountLease.isCurrent()) return null;
       try {
-        const account = await icloudApi.getAccountInfo(http);
+        const account = await icloudApi.getAccountInfo(http, signal);
         // A GET owns no durable mutation, so it deliberately does not hold Disconnect open. Its
         // generation-specific key isolates TanStack Query's later cache commit, and this check
         // discards the old response itself.

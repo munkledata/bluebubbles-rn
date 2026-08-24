@@ -156,7 +156,7 @@ describe('createUploadRegistry', () => {
   it('cancels the upload registered under a key', () => {
     const registry = createUploadRegistry();
     const cancel = jest.fn();
-    registry.add('temp-1', { cancel });
+    registry.add('temp-1', { cancel, settled: Promise.resolve() });
 
     expect(registry.cancel('temp-1')).toBe(true);
     expect(cancel).toHaveBeenCalledTimes(1);
@@ -173,7 +173,7 @@ describe('createUploadRegistry', () => {
   it('cancels only once — a second cancel finds nothing', () => {
     const registry = createUploadRegistry();
     const cancel = jest.fn();
-    registry.add('temp-1', { cancel });
+    registry.add('temp-1', { cancel, settled: Promise.resolve() });
 
     expect(registry.cancel('temp-1')).toBe(true);
     expect(registry.cancel('temp-1')).toBe(false);
@@ -186,6 +186,7 @@ describe('createUploadRegistry', () => {
       cancel: () => {
         throw new Error('already finished');
       },
+      settled: Promise.resolve(),
     });
     expect(() => registry.cancel('temp-1')).not.toThrow();
     expect(registry.size).toBe(0);
@@ -194,7 +195,7 @@ describe('createUploadRegistry', () => {
   it('release removes the handle it registered', () => {
     const registry = createUploadRegistry();
     const cancel = jest.fn();
-    const release = registry.add('temp-1', { cancel });
+    const release = registry.add('temp-1', { cancel, settled: Promise.resolve() });
 
     release();
     expect(registry.size).toBe(0);
@@ -210,8 +211,11 @@ describe('createUploadRegistry', () => {
     const staleCancel = jest.fn();
     const liveCancel = jest.fn();
 
-    const releaseStale = registry.add('temp-1', { cancel: staleCancel });
-    registry.add('temp-1', { cancel: liveCancel }); // the retry takes over the key
+    const releaseStale = registry.add('temp-1', {
+      cancel: staleCancel,
+      settled: Promise.resolve(),
+    });
+    registry.add('temp-1', { cancel: liveCancel, settled: Promise.resolve() }); // retry takes over
     releaseStale(); // the first attempt finally unwinds
 
     expect(registry.size).toBe(1);
@@ -224,8 +228,8 @@ describe('createUploadRegistry', () => {
     const registry = createUploadRegistry();
     const first = jest.fn();
     const retry = jest.fn();
-    registry.add('temp-1', { cancel: first });
-    registry.add('temp-1', { cancel: retry });
+    registry.add('temp-1', { cancel: first, settled: Promise.resolve() });
+    registry.add('temp-1', { cancel: retry, settled: Promise.resolve() });
 
     expect(registry.cancel('temp-1')).toBe(true);
 
@@ -238,8 +242,8 @@ describe('createUploadRegistry', () => {
     const registry = createUploadRegistry();
     const one = jest.fn();
     const two = jest.fn();
-    registry.add('temp-1', { cancel: one });
-    registry.add('temp-2', { cancel: two });
+    registry.add('temp-1', { cancel: one, settled: Promise.resolve() });
+    registry.add('temp-2', { cancel: two, settled: Promise.resolve() });
 
     expect(registry.size).toBe(2);
     registry.cancel('temp-1');
@@ -254,8 +258,8 @@ describe('createUploadRegistry', () => {
       throw new Error('native task already released');
     });
     const second = jest.fn();
-    registry.add('temp-1', { cancel: first });
-    registry.add('temp-2', { cancel: second });
+    registry.add('temp-1', { cancel: first, settled: Promise.resolve() });
+    registry.add('temp-2', { cancel: second, settled: Promise.resolve() });
 
     expect(registry.cancelAll()).toBe(2);
 
@@ -277,6 +281,7 @@ describe('createUploadRegistry', () => {
       cancel: () => {
         cancelled = true;
       },
+      settled: Promise.resolve(),
     });
     const queued = gate.run(async () => {
       // This is the same pre-native-task guard used by attachmentUpload after its gate wait.
@@ -297,5 +302,47 @@ describe('createUploadRegistry', () => {
     // The upload's ordinary finally may still release after cancelAll; identity checking makes it
     // harmless and, importantly, cannot remove a newer account's replacement handle.
     expect(release).not.toThrow();
+  });
+
+  it('retains a cancelled native tail until its exact terminal promise settles', async () => {
+    const registry = createUploadRegistry();
+    const terminal = deferred();
+    const cancel = jest.fn();
+    registry.add('temp-native', { cancel, settled: terminal.promise });
+
+    expect(registry.cancel('temp-native')).toBe(true);
+    expect(registry.size).toBe(0);
+    expect(registry.pending).toBe(1);
+    const idle = registry.awaitIdle();
+    let idleSettled = false;
+    void idle.then(() => {
+      idleSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(idleSettled).toBe(false);
+    terminal.resolve();
+    await expect(idle).resolves.toBeUndefined();
+    expect(registry.pending).toBe(0);
+  });
+
+  it('retries cancellation for an unsettled native tail on a later account sweep', async () => {
+    const registry = createUploadRegistry();
+    const terminal = deferred();
+    const cancel = jest.fn();
+    registry.add('temp-native', { cancel, settled: terminal.promise });
+
+    expect(registry.cancelAll()).toBe(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(registry.pending).toBe(1);
+
+    expect(registry.cancelAll()).toBe(1);
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(registry.pending).toBe(1);
+
+    terminal.resolve();
+    await expect(registry.awaitIdle()).resolves.toBeUndefined();
+    expect(registry.pending).toBe(0);
+    expect(registry.cancelAll()).toBe(0);
   });
 });

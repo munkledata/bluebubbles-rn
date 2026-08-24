@@ -18,18 +18,18 @@ write: the bubble vanished while the phone carried on streaming the entire file 
 
 ## The pieces
 
-| File | Role | Testable in Node? |
-|---|---|---|
-| [`src/utils/uploadProgress.ts`](../src/utils/uploadProgress.ts) | Ratio, byte labels, rollup, stall predicate, bar wording | yes |
-| [`src/state/uploadStore.ts`](../src/state/uploadStore.ts) | Presentation-only byte state, keyed by attachment guid | yes |
-| [`src/services/send/trackedUpload.ts`](../src/services/send/trackedUpload.ts) | Opens/forwards/settles a progress entry for one attempt | yes |
-| [`src/services/send/uploadControl.ts`](../src/services/send/uploadControl.ts) | Concurrency gate + cancel registry | yes |
-| [`src/services/send/attachmentUpload.ts`](../src/services/send/attachmentUpload.ts) | The expo wiring that binds all of the above | **no** |
-| [`src/ui/attachments/UploadProgressOverlay.tsx`](../src/ui/attachments/UploadProgressOverlay.tsx) | Ring + byte pill on the bubble | component project |
-| [`src/ui/conversations/UploadStatusBar.tsx`](../src/ui/conversations/UploadStatusBar.tsx) | Per-chat summary bar above the composer | component project |
+| File                                                                                              | Role                                                     | Testable in Node? |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------- |
+| [`src/utils/uploadProgress.ts`](../src/utils/uploadProgress.ts)                                   | Ratio, byte labels, rollup, stall predicate, bar wording | yes               |
+| [`src/state/uploadStore.ts`](../src/state/uploadStore.ts)                                         | Presentation-only byte state, keyed by attachment guid   | yes               |
+| [`src/services/send/trackedUpload.ts`](../src/services/send/trackedUpload.ts)                     | Opens/forwards/settles a progress entry for one attempt  | yes               |
+| [`src/services/send/uploadControl.ts`](../src/services/send/uploadControl.ts)                     | Concurrency gate + cancel registry                       | yes               |
+| [`src/services/send/attachmentUpload.ts`](../src/services/send/attachmentUpload.ts)               | The expo wiring that binds all of the above              | **no**            |
+| [`src/ui/attachments/UploadProgressOverlay.tsx`](../src/ui/attachments/UploadProgressOverlay.tsx) | Ring + byte pill on the bubble                           | component project |
+| [`src/ui/conversations/UploadStatusBar.tsx`](../src/ui/conversations/UploadStatusBar.tsx)         | Per-chat summary bar above the composer                  | component project |
 
 **Why so many small files.** `attachmentUpload.ts` imports `expo-file-system` and therefore cannot
-be loaded in the node jest project *at all*. Anything left inside it is permanently untestable, so
+be loaded in the node jest project _at all_. Anything left inside it is permanently untestable, so
 the logic worth proving lives outside it and the native bits are injected — the same split
 `uploadErrors.ts` already used.
 
@@ -63,8 +63,8 @@ the wrong choice here:
 1. It round-trips the source uri through `new URL()`, which mangles a non-special scheme — the trap
    already documented for shared-in `content://` uris. The legacy task hands the string to native
    untouched.
-2. Its own type docs warn: *"For multipart uploads, the reported bytes may include multipart framing
-   overhead."* The legacy Android path does not have that problem (see above).
+2. Its own type docs warn: _"For multipart uploads, the reported bytes may include multipart framing
+   overhead."_ The legacy Android path does not have that problem (see above).
 
 ---
 
@@ -82,7 +82,7 @@ but present at runtime and self-guards on an already-removed subscription, so
 `releaseProgressSubscription()` calls it in a `finally`. Bounded (one per failed attempt) but real.
 
 **The settle must be unconditional.** `runTrackedUpload` settles in a `finally`. A started-but-never-
-settled entry is not cosmetic: it draws the bubble spinner *and* keeps the composer bar on screen,
+settled entry is not cosmetic: it draws the bubble spinner _and_ keeps the composer bar on screen,
 so it is a permanent phantom "sending" for a message that failed minutes ago, with nothing left
 running to clear it.
 
@@ -94,7 +94,7 @@ forever. `uploadStore.progress` returns early when the key is absent.
 
 ## Two divergences from `downloadStore`
 
-1. **Settling REMOVES the entry** rather than parking it at `status: 'idle'`. The entry set *is* the
+1. **Settling REMOVES the entry** rather than parking it at `status: 'idle'`. The entry set _is_ the
    answer to "is anything uploading right now", which the composer bar reads directly, and a
    retained entry would leave a stale 100% ring on a recycled FlashList row. A failure needs no
    entry either — the message row's own `send_state = 'error'` already draws the red badge.
@@ -102,9 +102,9 @@ forever. `uploadStore.progress` returns early when the key is absent.
    to see.
 
 **Unknown totals are normal, not an error.** A voice memo is staged with `size: 0`, and the native
-uploader only reports the real content length on its *first* progress event. So every upload is
+uploader only reports the real content length on its _first_ progress event. So every upload is
 briefly indeterminate — `transferRatio` returns `null` and the UI shows a spinner rather than a bar
-sitting dead at 0% and then jumping. For a multi-file rollup, *any* unknown total makes the combined
+sitting dead at 0% and then jumping. For a multi-file rollup, _any_ unknown total makes the combined
 ratio null: a denominator that grows as each file reports in makes the bar march **backwards**,
 which reads as a broken upload.
 
@@ -126,12 +126,20 @@ immediately so every bubble appears at once, and only the network transfers queu
 (`discardMessage`) knows. Two non-obvious rules:
 
 - **Registered BEFORE entering the gate.** With a batch, only two files are transferring; a handle
-  that existed only for a running task would leave every *waiting* file uncancellable — exactly the
+  that existed only for a running task would leave every _waiting_ file uncancellable — exactly the
   big-batch case where the user most wants out. Cancelling while queued means no socket is ever
   opened.
-- **Releases are identity-checked.** A retry re-registers the *same* temp guid with a *new* task. A
+- **Releases are identity-checked.** A retry re-registers the _same_ temp guid with a _new_ task. A
   late release from the previous attempt deleting by key alone would silently make the running
   upload uncancellable, and the button would report success while nothing stopped.
+
+Every registered handle also supplies the exact terminal promise for its native attempt. Removing
+the temp-guid key makes another Cancel tap a no-op, but the account teardown registry retains that
+promise until Expo's real `uploadAsync()` tail settles. Disconnect cancels once at synchronous
+boundary closure, cancels again after admitted send work drains (catching a late registration), and
+waits up to 5 seconds for the retained tails. A timeout rejects cleanup and keeps account B blocked;
+the cancelled handle and unresolved promise remain registered so the next complete cleanup retry
+reissues native cancellation before joining the same exact tail.
 
 `discardMessage` cancels **first**, then tombstones. The late error path cannot undo it:
 `reconcileOutgoingError` is UPDATE-only and returns early when the queue row is gone, so it can
@@ -160,7 +168,7 @@ link still moves bytes.
 
 An entry that has never reported (`updatedAt === 0`) is **not** stalled; every upload passes through
 that state and flagging it would make each send flash a warning. The bar does not re-seed its clock
-when it becomes active, deliberately: a stale clock is always *earlier* than a fresh upload's
+when it becomes active, deliberately: a stale clock is always _earlier_ than a fresh upload's
 `updatedAt`, so the difference goes negative and can never read as a false stall.
 
 ---

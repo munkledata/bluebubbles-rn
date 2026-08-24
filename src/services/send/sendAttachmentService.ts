@@ -18,7 +18,7 @@ export interface PickedImage {
 /**
  * Streams the picked file to the server's multipart upload route and returns the send ack.
  * Injected so this module stays Node-testable (the production uploader uses a native streaming
- * upload — `expo-file-system`'s `uploadAsync` — which reads the file from disk and never buffers
+ * upload — `expo-file-system`'s legacy `createUploadTask` — which reads from disk and never buffers
  * it in JS memory, so a 1 GB video uploads with flat memory use). See `expoAttachmentUploader`.
  */
 export type AttachmentUploader = (args: {
@@ -56,6 +56,7 @@ export async function sendImageMessage(
   args: { chatGuid: string; image: PickedImage },
   upload: AttachmentUploader,
   now: number = Date.now(),
+  shouldContinue: () => boolean = () => true,
 ): Promise<{ tempGuid: string }> {
   // A forwarded download can share this exact cache file with its source message. Pin it before
   // the first DB await so a concurrent tombstone/quota pass cannot claim and unlink it between the
@@ -97,6 +98,10 @@ export async function sendImageMessage(
     sourceProtection?.release();
   }
 
+  // Disconnect can retire this operation while the optimistic DB insert is waiting. Do not let
+  // that old continuation register a brand-new native upload after the synchronous cancel sweep.
+  if (!shouldContinue()) return { tempGuid };
+
   try {
     // Stream the file to the server (native upload — never buffered in JS memory).
     const server = await upload({
@@ -109,12 +114,15 @@ export async function sendImageMessage(
       mimeType: args.image.mimeType,
       totalBytes: args.image.size,
     });
+    if (!shouldContinue()) return { tempGuid };
     // The server ack carries only the message GUID (no attachment guid) — the optimistic
     // attachment row keeps its local guid + local_path until the live socket `new-message`
     // echo reconciles the attachment guid in place (upsertAttachments).
     await reconcileSendOutcome(db, tempGuid, server, now);
   } catch (e) {
-    await handleSendFailure(db, tempGuid, e, 'send-attachment', args.chatGuid);
+    if (shouldContinue()) {
+      await handleSendFailure(db, tempGuid, e, 'send-attachment', args.chatGuid);
+    }
   }
 
   return { tempGuid };

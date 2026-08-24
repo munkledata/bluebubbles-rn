@@ -26,4 +26,15 @@ describe('getAccountInfo', () => {
     });
     await expect(getAccountInfo(http)).rejects.toBeInstanceOf(ApiError);
   });
+
+  it('forwards the query cancellation signal to HttpClient', async () => {
+    const http = mkHttp(async () => ({ appleId: 'me@icloud.com', aliases: [] }));
+    const controller = new AbortController();
+
+    await getAccountInfo(http, controller.signal);
+
+    expect(http.get).toHaveBeenCalledWith('/icloud/account', expect.anything(), {
+      signal: controller.signal,
+    });
+  });
 });

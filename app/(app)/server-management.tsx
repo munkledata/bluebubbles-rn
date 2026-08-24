@@ -141,10 +141,10 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // `staleTime: 0` makes every visit re-probe instead of showing a cached answer.
   const pingQuery = useQuery({
     queryKey: ['server', 'ping', accountLease.generation],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       readForAccount(accountLease, async () => {
         const t0 = Date.now();
-        await serverApi.ping(http);
+        await serverApi.ping(http, signal);
         return Date.now() - t0;
       }),
     retry: false,
@@ -164,7 +164,8 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // (some channels missing on an older server) still shows the numbers it could load.
   const statsQuery = useQuery({
     queryKey: ['server', 'stats', accountLease.generation],
-    queryFn: () => readForAccount(accountLease, () => serverApi.serverStatTotals(http)),
+    queryFn: ({ signal }) =>
+      readForAccount(accountLease, () => serverApi.serverStatTotals(http, signal)),
   });
   const totals = accountLease.isCurrent() ? (statsQuery.data ?? null) : null;
   const statsError = accountLease.isCurrent() && statsQuery.isError;
@@ -177,7 +178,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // fetching it here populates the STATUS section (and the app-wide `privateApiEnabled` gate).
   const infoQuery = useQuery({
     queryKey: ['server', 'info', accountLease.generation],
-    queryFn: () => readForAccount(accountLease, () => serverApi.serverInfo(http)),
+    queryFn: ({ signal }) => readForAccount(accountLease, () => serverApi.serverInfo(http, signal)),
   });
   const latestServerInfo = infoQuery.data;
   useEffect(() => {

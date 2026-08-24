@@ -38,8 +38,9 @@ import { uploadGate, uploadRegistry } from '@/services/send/uploadControl';
 
 let finishFileCheck!: (value: { exists: boolean }) => void;
 
-beforeEach(() => {
+beforeEach(async () => {
   uploadRegistry.cancelAll();
+  await uploadRegistry.awaitIdle();
   jest.clearAllMocks();
   jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
   mockGetInfoAsync.mockImplementation(
@@ -55,8 +56,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   uploadRegistry.cancelAll();
+  await uploadRegistry.awaitIdle();
   jest.restoreAllMocks();
 });
 
@@ -173,14 +175,24 @@ describe('native attachment upload account scope', () => {
       expect(uploadRegistry.size).toBe(1);
       expect(uploadRegistry.cancelAll()).toBe(1);
       expect(mockCancelAsync).toHaveBeenCalledTimes(2); // account sweep retries exact-task cancel
+      expect(uploadRegistry.pending).toBe(1);
+      const nativeIdle = uploadRegistry.awaitIdle();
+      let nativeIdleSettled = false;
+      void nativeIdle.then(() => {
+        nativeIdleSettled = true;
+      });
+      await flushMicrotasks();
+      expect(nativeIdleSettled).toBe(false);
 
       finishNativeUpload({
         status: 200,
         body: JSON.stringify({ status: 200, data: { guid: 'late-server-message' } }),
       });
       await flushMicrotasks();
+      await expect(nativeIdle).resolves.toBeUndefined();
       expect(mockRemoveSubscription).toHaveBeenCalledTimes(1);
       expect(uploadRegistry.size).toBe(0);
+      expect(uploadRegistry.pending).toBe(0);
     } finally {
       jest.useRealTimers();
     }

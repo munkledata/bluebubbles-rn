@@ -190,6 +190,37 @@ describe('resetSessionScopedState', () => {
     expect(queryClient.getQueryData(['server', 'deferred-private-account'])).toBeUndefined();
   });
 
+  it('synchronously aborts a signal-consuming query while removing its private cache entry', async () => {
+    let transportSignal!: AbortSignal;
+    let abortObserved = false;
+    const activeQuery = queryClient
+      .fetchQuery({
+        queryKey: ['server', 'abortable-private-account'],
+        queryFn: ({ signal }) => {
+          transportSignal = signal;
+          return new Promise<never>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                abortObserved = true;
+                reject(new Error('transport aborted'));
+              },
+              { once: true },
+            );
+          });
+        },
+      })
+      .catch(() => undefined);
+    expect(transportSignal.aborted).toBe(false);
+
+    resetSessionScopedState();
+
+    expect(transportSignal.aborted).toBe(true);
+    expect(abortObserved).toBe(true);
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+    await activeQuery;
+  });
+
   it('keeps account B data when account A settles late under the same query key', async () => {
     const key = ['server', 'same-query-key'] as const;
     let finishAccountA!: (value: { account: string }) => void;

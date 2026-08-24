@@ -274,6 +274,14 @@ describe('ServerManagementScreen — status queries', () => {
   it('shows Reachable + latency once the ping resolves', async () => {
     await renderScreen();
     expect(await screen.findByText(/Reachable · \d+ ms/)).toBeTruthy();
+    await waitFor(() => {
+      expect(mockPing).toHaveBeenCalledTimes(1);
+      expect(mockStats).toHaveBeenCalledTimes(1);
+      expect(mockInfo).toHaveBeenCalledTimes(1);
+    });
+    for (const endpoint of [mockPing, mockStats, mockInfo]) {
+      expect(endpoint.mock.calls[0]?.[1]).toMatchObject({ aborted: false });
+    }
   });
 
   it('shows Unreachable when the ping fails', async () => {

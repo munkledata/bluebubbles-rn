@@ -337,6 +337,9 @@ describe('ServerHealthScreen — query-backed cards', () => {
     expect(screen.getByText('1d 1h')).toBeTruthy();
     expect(screen.getByText('Imported ✓')).toBeTruthy();
     expect(screen.queryByText(/isn.t responding to health checks/)).toBeNull();
+    for (const endpoint of healthReadMocks) {
+      expect(endpoint.mock.calls[0]?.[1]).toMatchObject({ aborted: false });
+    }
   });
 
   it('degrades one failed channel to "—" without hiding the rest', async () => {

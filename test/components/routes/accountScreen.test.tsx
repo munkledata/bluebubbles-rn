@@ -123,6 +123,24 @@ afterEach(() => {
 });
 
 describe('AccountScreen — account query', () => {
+  it('forwards TanStack cancellation to the active account transport', async () => {
+    const response = deferred<typeof ACCOUNT>();
+    mockGetAccountInfo.mockReset().mockReturnValueOnce(response.promise);
+    const { client, view } = await renderScreen();
+    await waitFor(() => expect(mockGetAccountInfo).toHaveBeenCalledTimes(1));
+    const signal = mockGetAccountInfo.mock.calls[0]?.[1] as AbortSignal;
+    expect(signal).toMatchObject({ aborted: false });
+
+    await act(async () => {
+      client.clear();
+    });
+
+    expect(signal.aborted).toBe(true);
+    response.resolve(ACCOUNT);
+    await response.promise;
+    await view.unmount();
+  });
+
   it('renders the account rows and marks the active alias once the query resolves', async () => {
     await renderScreen();
     expect(await screen.findByText('user@icloud.com')).toBeTruthy();

@@ -95,59 +95,79 @@ export default function ServerHealthScreen(): React.JSX.Element {
     queries: [
       {
         queryKey: [...healthQueryPrefix, 'private-api'],
-        queryFn: () =>
+        queryFn: ({ signal }) =>
           readForAccount(
             accountLease,
-            async () => (await serverApi.privateApiStatus(http)) ?? null,
+            async () => (await serverApi.privateApiStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'env'],
-        queryFn: () =>
-          readForAccount(accountLease, async () => (await serverApi.serverEnv(http)) ?? null),
+        queryFn: ({ signal }) =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.serverEnv(http, signal)) ?? null,
+          ),
       },
       {
         queryKey: [...healthQueryPrefix, 'findmy-keys'],
-        queryFn: () =>
+        queryFn: ({ signal }) =>
           readForAccount(
             accountLease,
-            async () => (await serverApi.findMyKeysStatus(http)) ?? null,
+            async () => (await serverApi.findMyKeysStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'fcm'],
-        queryFn: () =>
-          readForAccount(accountLease, async () => (await serverApi.fcmStatus(http)) ?? null),
+        queryFn: ({ signal }) =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.fcmStatus(http, signal)) ?? null,
+          ),
       },
       {
         queryKey: [...healthQueryPrefix, 'zrok'],
-        queryFn: () =>
-          readForAccount(accountLease, async () => (await serverApi.zrokStatus(http)) ?? null),
+        queryFn: ({ signal }) =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.zrokStatus(http, signal)) ?? null,
+          ),
       },
       {
         queryKey: [...healthQueryPrefix, 'public-ip'],
-        queryFn: () => readForAccount(accountLease, () => serverApi.publicIp(http)),
+        queryFn: ({ signal }) =>
+          readForAccount(accountLease, () => serverApi.publicIp(http, signal)),
       },
       {
         queryKey: [...healthQueryPrefix, 'tls'],
-        queryFn: () =>
-          readForAccount(accountLease, async () => (await serverApi.tlsStatus(http)) ?? null),
+        queryFn: ({ signal }) =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.tlsStatus(http, signal)) ?? null,
+          ),
       },
       {
         queryKey: [...healthQueryPrefix, 'admin'],
-        queryFn: () =>
-          readForAccount(accountLease, async () => (await serverApi.adminStatus(http)) ?? null),
+        queryFn: ({ signal }) =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.adminStatus(http, signal)) ?? null,
+          ),
       },
       {
         queryKey: alertsQueryKey,
-        queryFn: () => readForAccount(accountLease, () => serverApi.serverAlerts(http)),
+        queryFn: ({ signal }) =>
+          readForAccount(accountLease, () => serverApi.serverAlerts(http, signal)),
       },
       // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
       // the query stays errored so the RCS row degrades to the capability-only signal.
       {
         queryKey: [...healthQueryPrefix, 'rcs'],
-        queryFn: () =>
-          readForAccount(accountLease, async () => (await serverApi.rcsStatus(http)) ?? null),
+        queryFn: ({ signal }) =>
+          readForAccount(
+            accountLease,
+            async () => (await serverApi.rcsStatus(http, signal)) ?? null,
+          ),
       },
     ],
   });

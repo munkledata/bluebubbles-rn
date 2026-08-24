@@ -25,7 +25,12 @@ import {
   runOutgoingQueue,
   type OutgoingQueueIO,
 } from '@/services/send/outgoingQueueService';
-import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
@@ -547,6 +552,61 @@ describe('runOutgoingQueue — attachment resend', () => {
 });
 
 describe('outgoing queue — account revocation while a DB commit waits', () => {
+  it('holds the account drain for the whole automatic retry POST', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, 'c1', 'temp-whole-retry', 1_000);
+    let finishPost!: (value: { guid: string }) => void;
+    const post = new Promise<{ guid: string }>((resolve) => {
+      finishPost = resolve;
+    });
+    let postStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      postStarted = resolve;
+    });
+    const accountA = captureRealtimeDeliveryLease();
+    const retry = runOutgoingQueue(
+      db,
+      fakeHttp(async () => {
+        postStarted();
+        return post;
+      }),
+      noAttachmentIo,
+      2_000_000,
+      accountA,
+    );
+    let drain: Promise<void> | undefined;
+
+    try {
+      await started;
+      drain = pauseRealtimeDeliveries();
+      let drainSettled = false;
+      void drain.then(() => {
+        drainSettled = true;
+      });
+      await Promise.resolve();
+      expect(drainSettled).toBe(false);
+      expect(accountA.isCurrent()).toBe(false);
+
+      resumeRealtimeDeliveries();
+      const accountB = captureRealtimeDeliveryLease();
+      expect(accountB.isCurrent()).toBe(true);
+      expect(accountA.isCurrent()).toBe(false);
+
+      finishPost({ guid: 'real-old-account' });
+      await expect(retry).resolves.toEqual({ eligible: 1, sent: 0 });
+      await expect(drain).resolves.toBeUndefined();
+      expect(stateOf(raw, 'temp-whole-retry')).toBe('sending');
+      expect(stateOf(raw, 'real-old-account')).toBeUndefined();
+      expect(queueCount(raw)).toBe(1);
+    } finally {
+      finishPost({ guid: 'real-old-account' });
+      await Promise.allSettled([retry, ...(drain ? [drain] : [])]);
+      await pauseRealtimeDeliveries();
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('does not claim a queued row after Disconnect revokes its admitted account lease', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
@@ -573,9 +633,9 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
       2_000_000,
       account.lease,
     );
-    // Four checks means the tracked claim was admitted and synchronously took its place behind the
-    // held mutex. This reproduces the callback that survives teardown's bounded drain.
-    await account.waitForChecks(4);
+    // The outer retry admission adds one check ahead of the body's existing entry checks; five
+    // means the inner tracked claim is admitted and synchronously waiting behind the held mutex.
+    await account.waitForChecks(5);
     account.revoke();
     held.release();
     await held.finished;

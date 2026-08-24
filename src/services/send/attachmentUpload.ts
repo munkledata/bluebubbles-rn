@@ -126,17 +126,24 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   const withinAttempt = <T>(operation: Promise<T>): Promise<T> =>
     Promise.race([operation, stopped]);
 
+  let resolveSettled!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve;
+  });
+
   // Register BEFORE the very first await, including the file pre-flight. Disconnect calls
   // `cancelAll()` synchronously; registering later let an old-account operation appear after the
   // sweep and start a native upload that teardown could no longer see.
   const releaseCancelHandle = uploadRegistry.add(tempGuid, {
     cancel: () => stopAttempt('cancelled'),
+    settled,
   });
   let handleReleased = false;
   const releaseHandleOnce = (): void => {
     if (handleReleased) return;
     handleReleased = true;
     releaseCancelHandle();
+    resolveSettled();
   };
   if (timeoutMs !== undefined) {
     // Starts before the first native stat and covers the uploader's own preflight, FIFO gate wait,

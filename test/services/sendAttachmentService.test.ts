@@ -121,6 +121,29 @@ describe('sendImageMessage', () => {
     protect.mockRestore();
   });
 
+  it('does not start a native upload when Disconnect retires the send during its DB insert', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+    const accountStillCurrent = jest.fn(() => false);
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid: 'c1', image: IMG },
+        up.upload,
+        1_000,
+        accountStillCurrent,
+      ),
+    ).resolves.toEqual({ tempGuid: expect.any(String) });
+
+    expect(accountStillCurrent).toHaveBeenCalledTimes(1);
+    expect(up.captured).toBeUndefined();
+    expect(one(raw, 'SELECT send_state FROM messages').send_state).toBe('sending');
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(1);
+  });
+
   it('atomically rejects a path already owned by crash-surviving retirement', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');

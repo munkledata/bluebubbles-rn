@@ -60,6 +60,8 @@ const SYNC_DRAIN_FAILURE_MESSAGE =
   'An in-flight sync from the previous connection did not stop in time.';
 const DOWNLOAD_DRAIN_FAILURE_MESSAGE =
   'In-flight media downloads from the previous connection did not stop in time.';
+const UPLOAD_DRAIN_FAILURE_MESSAGE =
+  'In-flight media uploads from the previous connection did not stop in time.';
 const NOTIFICATION_CLEANUP_FAILURE_MESSAGE =
   'Notifications from the previous connection could not be fully removed.';
 const DATABASE_CLEANUP_FAILURE_MESSAGE =
@@ -1364,6 +1366,21 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     // do not authorize B until a later retry proves every old slot idle and wipes once more.
     logger.warn('[forget] realtime delivery drain timed out — next connection remains blocked');
   }
+  // An admitted send can reach its uploader after the first synchronous sweep. Re-cancel after the
+  // account-work barrier, then join exact native tails that outlive their already-rejected public
+  // send promise. A timeout leaves those terminal promises registered so the next cleanup retry
+  // still blocks B until they settle.
+  let uploadsDrained = false;
+  try {
+    uploadRegistry.cancelAll();
+    uploadsDrained = await withDeadline(uploadRegistry.awaitIdle(), UPLOAD_DRAIN_DEADLINE_MS);
+  } catch (error) {
+    logger.warn('[forget] upload cancellation failed', error);
+  }
+  const uploadDrainFailure = uploadsDrained ? null : new Error(UPLOAD_DRAIN_FAILURE_MESSAGE);
+  if (!uploadsDrained) {
+    logger.warn('[forget] upload drain timed out — next connection remains blocked');
+  }
   // …then let that dying run actually finish before we delete anything. Bounded: if a request is
   // wedged we still owe the user the wipe, and by now it can't fetch anything new anyway.
   const syncDrained = await withDeadline(awaitSyncIdle(), SYNC_DRAIN_DEADLINE_MS);
@@ -1506,6 +1523,7 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     inMemoryCleanupFailure ??
     fcmTokenRetirementFailure ??
     realtimeDrainFailure ??
+    uploadDrainFailure ??
     syncDrainFailure ??
     downloadDrainFailure ??
     notificationCleanupFailure ??
@@ -1738,6 +1756,8 @@ const DATABASE_CLEANUP_DEADLINE_MS = 30_000;
 const REALTIME_DRAIN_DEADLINE_MS = 5_000;
 /** Native cancellation should be prompt; a wedged transfer keeps the next account blocked. */
 const DOWNLOAD_DRAIN_DEADLINE_MS = 5_000;
+/** Native upload cancellation can resolve publicly before Expo's exact transfer promise settles. */
+const UPLOAD_DRAIN_DEADLINE_MS = 5_000;
 /** Error capture uses a short DB transaction; a wedge must not make Disconnect wait forever. */
 const ERROR_REPORT_DRAIN_DEADLINE_MS = 5_000;
 /** Native notification work is ordered, but a wedged bridge must not block the local wipe forever. */

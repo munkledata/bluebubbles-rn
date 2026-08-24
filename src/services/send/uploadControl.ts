@@ -112,6 +112,8 @@ export function createConcurrencyGate(max: number): ConcurrencyGate {
 /** A live upload that can be stopped. Kept minimal so the registry needs no expo types. */
 export interface CancellableUpload {
   cancel(): void;
+  /** Exact terminal boundary for work that can outlive the public uploader promise after cancel. */
+  readonly settled: Promise<void>;
 }
 
 export interface UploadRegistry {
@@ -125,11 +127,16 @@ export interface UploadRegistry {
   /**
    * Stop every registered upload during an account transition.
    *
-   * The registry is cleared before invoking user/native handles so one throwing cancellation
-   * cannot leave the remaining uploads reachable, and a stale release cannot remove a later
-   * account's handle under the same temp guid.
+   * The live key registry is cleared before invoking user/native handles so one throwing
+   * cancellation cannot leave the remaining uploads reachable, and a stale release cannot remove
+   * a later account's handle under the same temp guid. Cancelled-but-unsettled handles remain
+   * separately reachable so a later cleanup sweep can retry native cancellation.
    */
   cancelAll(): number;
+  /** Wait for every cancelled handle's exact terminal boundary. */
+  awaitIdle(): Promise<void>;
+  /** Cancelled native tails still settling — for tests and diagnostics. */
+  readonly pending: number;
   /** In-flight count — for tests and diagnostics. */
   readonly size: number;
 }
@@ -139,6 +146,28 @@ export function createUploadRegistry(): UploadRegistry {
   // grace window while the retry drain starts another attempt). Keep EVERY handle: replacing by key
   // made both per-message cancel and account-wide teardown miss the older native upload.
   const byKey = new Map<string, Set<CancellableUpload>>();
+  const pendingSettlements = new Map<CancellableUpload, Promise<void>>();
+
+  const trackSettlement = (handle: CancellableUpload): void => {
+    if (pendingSettlements.has(handle)) return;
+    let tracked!: Promise<void>;
+    tracked = handle.settled
+      .catch(() => undefined)
+      .finally(() => pendingSettlements.delete(handle));
+    pendingSettlements.set(handle, tracked);
+  };
+
+  const cancelHandle = (handle: CancellableUpload): void => {
+    // Register the exact tail before invoking native/user code. A synchronous cancellation throw
+    // must not make teardown lose the still-settling operation it was trying to stop.
+    trackSettlement(handle);
+    try {
+      handle.cancel();
+    } catch {
+      // Racing its own completion. The terminal promise above remains authoritative when present.
+    }
+  };
+
   return {
     add(key, handle) {
       const handles = byKey.get(key) ?? new Set<CancellableUpload>();
@@ -156,28 +185,29 @@ export function createUploadRegistry(): UploadRegistry {
       const handles = byKey.get(key);
       if (!handles) return false;
       byKey.delete(key);
-      for (const handle of handles) {
-        try {
-          handle.cancel();
-        } catch {
-          // Racing its own completion — keep cancelling any sibling attempts under this key.
-        }
-      }
+      for (const handle of handles) cancelHandle(handle);
       return true;
     },
     cancelAll() {
-      const handles = [...byKey.values()].flatMap((set) => [...set]);
+      const handles = new Set([
+        ...pendingSettlements.keys(),
+        ...[...byKey.values()].flatMap((set) => [...set]),
+      ]);
       // Clear first. Besides making teardown synchronous from the caller's perspective, this keeps
       // a cancellation callback/release racing below from observing half-retired account state.
       byKey.clear();
-      for (const handle of handles) {
-        try {
-          handle.cancel();
-        } catch {
-          // One native task may already have completed. Keep cancelling every sibling regardless.
-        }
+      for (const handle of handles) cancelHandle(handle);
+      return handles.size;
+    },
+    async awaitIdle() {
+      // Loop because a second account sweep can add another cancelled tail while an earlier one is
+      // settling. `runForget` closes account admission and re-cancels immediately before joining.
+      while (pendingSettlements.size > 0) {
+        await Promise.all([...pendingSettlements.values()]);
       }
-      return handles.length;
+    },
+    get pending() {
+      return pendingSettlements.size;
     },
     get size() {
       let count = 0;

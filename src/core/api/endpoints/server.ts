@@ -7,13 +7,13 @@ import type { HttpClient } from '../http';
 const Pong = z.object({ pong: z.boolean() }).loose();
 export type Pong = z.infer<typeof Pong>;
 /** `retry: false` — a health/reachability probe must fail fast, not mask a down server by retrying. */
-export function ping(http: HttpClient): Promise<Pong> {
-  return http.get('/ping', Pong, { retry: false });
+export function ping(http: HttpClient, signal?: AbortSignal): Promise<Pong> {
+  return http.get('/ping', Pong, { retry: false, signal });
 }
 
 /** GET /api/v1/server/info — version, capabilities (used for min-version gating). */
-export function serverInfo(http: HttpClient): Promise<ServerInfo> {
-  return http.get('/server/info', ServerInfo);
+export function serverInfo(http: HttpClient, signal?: AbortSignal): Promise<ServerInfo> {
+  return http.get('/server/info', ServerInfo, { signal });
 }
 
 // ---- Server management (F-9) ----
@@ -33,9 +33,10 @@ export async function adminCommand<T>(
   channel: string,
   schema: z.ZodType<T>,
   data?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   try {
-    return await http.post('/admin/command', schema, { json: { channel, data } });
+    return await http.post('/admin/command', schema, { json: { channel, data }, signal });
   } catch (e) {
     // A 404 means the dispatcher route itself is unreachable — a server without it (stock
     // BlueBubbles / pre-dispatcher Gator) or a reverse proxy blocking /admin/*. Surface that as
@@ -108,7 +109,10 @@ const asCount = (v: number | unknown[] | null | undefined): number =>
  * handles, and attachment counts (all / image / video / location). These channels are NOT
  * admin-only, so a remote client can read them.
  */
-export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
+export async function serverStatTotals(
+  http: HttpClient,
+  signal?: AbortSignal,
+): Promise<StatTotals> {
   // Per-channel resilience: one failing count channel (e.g. an older server missing it) must NOT
   // blank the whole table. Each call is swallowed to null and coerced to 0 below. But if EVERY
   // channel fails, the server isn't answering at all — throw so the caller can show "unavailable"
@@ -121,18 +125,19 @@ export async function serverStatTotals(http: HttpClient): Promise<StatTotals> {
       anyOk = true;
       return v;
     } catch (e) {
+      if (signal?.aborted) throw e;
       if (!isUnimplementedEndpoint(e)) sawOtherError = true;
       return null;
     }
   };
   const [messages, chats, handles, attachments, images, videos, locations] = await Promise.all([
-    settle(adminCommand(http, 'get-message-count', CountNum)),
-    settle(adminCommand(http, 'get-chat-count', CountNum)),
-    settle(adminCommand(http, 'get-handle-count', CountNum)),
-    settle(adminCommand(http, 'get-chat-attachment-count', MediaCount)),
-    settle(adminCommand(http, 'get-chat-image-count', MediaCount)),
-    settle(adminCommand(http, 'get-chat-video-count', MediaCount)),
-    settle(adminCommand(http, 'get-chat-location-count', MediaCount)),
+    settle(adminCommand(http, 'get-message-count', CountNum, undefined, signal)),
+    settle(adminCommand(http, 'get-chat-count', CountNum, undefined, signal)),
+    settle(adminCommand(http, 'get-handle-count', CountNum, undefined, signal)),
+    settle(adminCommand(http, 'get-chat-attachment-count', MediaCount, undefined, signal)),
+    settle(adminCommand(http, 'get-chat-image-count', MediaCount, undefined, signal)),
+    settle(adminCommand(http, 'get-chat-video-count', MediaCount, undefined, signal)),
+    settle(adminCommand(http, 'get-chat-location-count', MediaCount, undefined, signal)),
   ]);
   // Every channel failed. If ALL failures were the dispatcher-404 remap, re-throw as
   // Unimplemented so the screen can say "unsupported" instead of "check your connection".
@@ -172,8 +177,11 @@ const PrivateApiStatus = z
   .loose()
   .nullish();
 export type PrivateApiStatus = z.infer<typeof PrivateApiStatus>;
-export const privateApiStatus = (http: HttpClient): Promise<PrivateApiStatus> =>
-  adminCommand(http, 'get-private-api-status', PrivateApiStatus);
+export const privateApiStatus = (
+  http: HttpClient,
+  signal?: AbortSignal,
+): Promise<PrivateApiStatus> =>
+  adminCommand(http, 'get-private-api-status', PrivateApiStatus, undefined, signal);
 
 /** Server environment: version, platform, node, and Find My / macOS capability flags. */
 const ServerEnv = z
@@ -187,8 +195,8 @@ const ServerEnv = z
   .loose()
   .nullish();
 export type ServerEnv = z.infer<typeof ServerEnv>;
-export const serverEnv = (http: HttpClient): Promise<ServerEnv> =>
-  adminCommand(http, 'get-env', ServerEnv);
+export const serverEnv = (http: HttpClient, signal?: AbortSignal): Promise<ServerEnv> =>
+  adminCommand(http, 'get-env', ServerEnv, undefined, signal);
 
 /** Find My decryption-key import status (per key: present + valid). */
 const KeyState = z.object({ present: z.boolean().nullish(), valid: z.boolean().nullish() }).loose();
@@ -197,8 +205,11 @@ const FindMyKeysStatus = z
   .loose()
   .nullish();
 export type FindMyKeysStatus = z.infer<typeof FindMyKeysStatus>;
-export const findMyKeysStatus = (http: HttpClient): Promise<FindMyKeysStatus> =>
-  adminCommand(http, 'get-findmy-keys-status', FindMyKeysStatus);
+export const findMyKeysStatus = (
+  http: HttpClient,
+  signal?: AbortSignal,
+): Promise<FindMyKeysStatus> =>
+  adminCommand(http, 'get-findmy-keys-status', FindMyKeysStatus, undefined, signal);
 
 /** FCM (push) configuration status. */
 const FcmStatus = z
@@ -211,8 +222,8 @@ const FcmStatus = z
   .loose()
   .nullish();
 export type FcmStatus = z.infer<typeof FcmStatus>;
-export const fcmStatus = (http: HttpClient): Promise<FcmStatus> =>
-  adminCommand(http, 'get-fcm-status', FcmStatus);
+export const fcmStatus = (http: HttpClient, signal?: AbortSignal): Promise<FcmStatus> =>
+  adminCommand(http, 'get-fcm-status', FcmStatus, undefined, signal);
 
 /** zrok tunnel status (running + public URL). */
 const ZrokStatus = z
@@ -224,8 +235,8 @@ const ZrokStatus = z
   .loose()
   .nullish();
 export type ZrokStatus = z.infer<typeof ZrokStatus>;
-export const zrokStatus = (http: HttpClient): Promise<ZrokStatus> =>
-  adminCommand(http, 'get-zrok-status', ZrokStatus);
+export const zrokStatus = (http: HttpClient, signal?: AbortSignal): Promise<ZrokStatus> =>
+  adminCommand(http, 'get-zrok-status', ZrokStatus, undefined, signal);
 
 /**
  * RCS bridge (Google Messages) live status via the NON-admin `get-rcs-status` channel (registered
@@ -251,8 +262,8 @@ const RcsStatus = z
   .loose()
   .nullish();
 export type RcsStatus = z.infer<typeof RcsStatus>;
-export const rcsStatus = (http: HttpClient): Promise<RcsStatus> =>
-  adminCommand(http, 'get-rcs-status', RcsStatus);
+export const rcsStatus = (http: HttpClient, signal?: AbortSignal): Promise<RcsStatus> =>
+  adminCommand(http, 'get-rcs-status', RcsStatus, undefined, signal);
 
 /** Result of asking the server to re-authenticate the RCS bridge with its own cookies. */
 const RcsReauthResult = z
@@ -280,14 +291,14 @@ export const rcsReauthNow = (http: HttpClient): Promise<RcsReauthResult> =>
 
 /** The server's detected public IP (or null). */
 const PublicIp = z.object({ ip: z.string().nullish() }).loose().nullish();
-export const publicIp = (http: HttpClient): Promise<string | null> =>
-  adminCommand(http, 'get-public-ip', PublicIp).then((r) => r?.ip ?? null);
+export const publicIp = (http: HttpClient, signal?: AbortSignal): Promise<string | null> =>
+  adminCommand(http, 'get-public-ip', PublicIp, undefined, signal).then((r) => r?.ip ?? null);
 
 /** Active TLS/cert info (loose — domain/expiry/issuer/mode vary by mode). */
 const TlsStatus = z.record(z.string(), z.unknown()).nullish();
 export type TlsStatus = z.infer<typeof TlsStatus>;
-export const tlsStatus = (http: HttpClient): Promise<TlsStatus> =>
-  adminCommand(http, 'get-tls-status', TlsStatus);
+export const tlsStatus = (http: HttpClient, signal?: AbortSignal): Promise<TlsStatus> =>
+  adminCommand(http, 'get-tls-status', TlsStatus, undefined, signal);
 
 /** In-memory server alert log. */
 const ServerAlert = z
@@ -301,8 +312,8 @@ const ServerAlert = z
   .loose();
 export type ServerAlert = z.infer<typeof ServerAlert>;
 const ServerAlerts = z.array(ServerAlert).nullish();
-export const serverAlerts = (http: HttpClient): Promise<ServerAlert[]> =>
-  adminCommand(http, 'get-alerts', ServerAlerts).then((a) => a ?? []);
+export const serverAlerts = (http: HttpClient, signal?: AbortSignal): Promise<ServerAlert[]> =>
+  adminCommand(http, 'get-alerts', ServerAlerts, undefined, signal).then((a) => a ?? []);
 export const clearServerAlerts = (http: HttpClient): Promise<unknown> =>
   adminCommand(http, 'clear-alerts', z.unknown());
 
@@ -312,9 +323,9 @@ const AdminStatus = z
   .loose()
   .nullish();
 export type AdminStatus = z.infer<typeof AdminStatus>;
-export async function adminStatus(http: HttpClient): Promise<AdminStatus> {
+export async function adminStatus(http: HttpClient, signal?: AbortSignal): Promise<AdminStatus> {
   try {
-    return await http.get('/admin/status', AdminStatus);
+    return await http.get('/admin/status', AdminStatus, { signal });
   } catch (e) {
     // Same remap as adminCommand: a 404 = route absent or proxy-blocked, i.e. "unsupported".
     if (e instanceof ApiError && e.status === 404) {
