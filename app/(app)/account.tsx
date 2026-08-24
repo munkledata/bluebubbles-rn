@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as icloudApi from '@core/api/endpoints/icloud';
 import type { AccountInfo } from '@core/api/endpoints/icloud';
@@ -9,6 +9,7 @@ import { http } from '@/services';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { CheckRow, InfoRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
@@ -27,6 +28,19 @@ export default function AccountScreen(): React.JSX.Element {
   // generation in the cache key prevents a late response from the old screen becoming initial data
   // (or an initial error) for the next account's screen.
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
+
+  // Lease currentness is synchronous but not reactive. Retire resolved account details as soon as
+  // Disconnect closes this generation instead of waiting for a query or navigation rerender.
+  useLayoutEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+        setAccountRetired(true);
+      }),
+    [accountLease],
+  );
+
+  const accountCurrent = !accountRetired && accountLease.isCurrent();
   const accountQueryKey = ['server', 'icloud-account', accountLease.generation] as const;
 
   const accountQuery = useQuery({
@@ -46,14 +60,12 @@ export default function AccountScreen(): React.JSX.Element {
       }
     },
   });
-  const info = accountQuery.data ?? null;
+  const info = accountCurrent ? (accountQuery.data ?? null) : null;
   // 'unsupported' = the server doesn't implement /icloud/account (a 404, remapped to
   // UnimplementedEndpointError) — a distinct, non-alarming state vs a real load 'error'.
   // 'loading' covers both the first fetch and the "Try again" refetch after an error.
   const status: 'loading' | 'ready' | 'error' | 'unsupported' =
-    !accountLease.isCurrent() ||
-    accountQuery.isPending ||
-    (accountQuery.isError && accountQuery.isFetching)
+    !accountCurrent || accountQuery.isPending || (accountQuery.isError && accountQuery.isFetching)
       ? 'loading'
       : accountQuery.isError
         ? isUnimplementedEndpoint(accountQuery.error)

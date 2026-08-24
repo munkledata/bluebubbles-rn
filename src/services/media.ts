@@ -26,7 +26,10 @@ export const GATOR_ALBUM = 'Gator';
  */
 
 /** Outcome of a share attempt. `ok: false` means the OS share sheet never opened. */
-export type ShareAttachmentResult = { ok: true } | { ok: false; reason: 'unavailable' | 'failed' };
+export type ShareAttachmentResult =
+  { ok: true } | { ok: false; reason: 'unavailable' | 'failed' | 'stale' };
+
+const alwaysCurrent = (): boolean => true;
 
 function acquirePathProtection(path: string): AttachmentCachePathProtection | null {
   try {
@@ -69,7 +72,9 @@ async function attachmentPathExists(path: string): Promise<boolean> {
 export async function shareAttachment(
   localPath: string,
   mimeType?: string | null,
+  isCurrent: () => boolean = alwaysCurrent,
 ): Promise<ShareAttachmentResult> {
+  if (!isCurrent()) return { ok: false, reason: 'stale' };
   if (!isLocalFileUri(localPath)) return { ok: false, reason: 'failed' };
   // `protect()` runs before the function's first await. Retirement therefore cannot claim this
   // exact source in the gap before expo-sharing opens it.
@@ -79,7 +84,10 @@ export async function shareAttachment(
     return { ok: false, reason: 'failed' };
   }
   try {
-    if (!(await attachmentPathExists(localPath))) {
+    if (!isCurrent()) return { ok: false, reason: 'stale' };
+    const exists = await attachmentPathExists(localPath);
+    if (!isCurrent()) return { ok: false, reason: 'stale' };
+    if (!exists) {
       logger.error('[media] share source is no longer available');
       return { ok: false, reason: 'failed' };
     }
@@ -87,10 +95,14 @@ export async function shareAttachment(
     // import itself can reject (`requireNativeModule` throws when the module isn't linked into
     // the running build), which is why it sits inside the try.
     const Sharing = await import('expo-sharing');
-    if (!(await Sharing.isAvailableAsync())) return { ok: false, reason: 'unavailable' };
+    if (!isCurrent()) return { ok: false, reason: 'stale' };
+    const available = await Sharing.isAvailableAsync();
+    if (!isCurrent()) return { ok: false, reason: 'stale' };
+    if (!available) return { ok: false, reason: 'unavailable' };
     await Sharing.shareAsync(localPath, { mimeType: mimeType ?? undefined });
-    return { ok: true };
+    return isCurrent() ? { ok: true } : { ok: false, reason: 'stale' };
   } catch (e) {
+    if (!isCurrent()) return { ok: false, reason: 'stale' };
     // `error`, not `warn`: ErrorReportSink only captures error-level lines, and this failure is
     // otherwise invisible — there is no other signal that the share sheet failed to open.
     logger.error('[media] share failed', e);
@@ -127,6 +139,7 @@ export type SaveToPhotosResult =
   | { status: 'saved'; saved: number }
   | { status: 'none' } // nothing downloaded yet
   | { status: 'denied' } // Photos permission refused
+  | { status: 'stale' }
   | { status: 'error' };
 
 /**
@@ -136,7 +149,9 @@ export type SaveToPhotosResult =
  */
 export async function saveAttachmentsToPhotos(
   paths: ReadonlyArray<string | null | undefined>,
+  isCurrent: () => boolean = alwaysCurrent,
 ): Promise<SaveToPhotosResult> {
+  if (!isCurrent()) return { status: 'stale' };
   const localPaths = paths.filter(isLocalFileUri);
   if (localPaths.length === 0) return { status: 'none' };
 
@@ -152,17 +167,24 @@ export async function saveAttachmentsToPhotos(
   try {
     const readablePaths: string[] = [];
     for (const { path } of protectedPaths) {
-      if (await attachmentPathExists(path)) readablePaths.push(path);
+      const exists = await attachmentPathExists(path);
+      if (!isCurrent()) return { status: 'stale' };
+      if (exists) readablePaths.push(path);
     }
     if (readablePaths.length === 0) return { status: 'error' };
-    if (!(await ensureSavePermission())) return { status: 'denied' };
+    const permitted = await ensureSavePermission();
+    if (!isCurrent()) return { status: 'stale' };
+    if (!permitted) return { status: 'denied' };
     let saved = 0;
     for (const path of readablePaths) {
+      if (!isCurrent()) return { status: 'stale' };
       await MediaLibrary.saveToLibraryAsync(path);
+      if (!isCurrent()) return { status: 'stale' };
       saved += 1;
     }
     return { status: 'saved', saved };
   } catch (e) {
+    if (!isCurrent()) return { status: 'stale' };
     logger.warn('[media] save to Photos failed', e);
     return { status: 'error' };
   } finally {

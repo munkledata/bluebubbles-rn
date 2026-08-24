@@ -90,6 +90,8 @@ function makeAtt(over: Partial<AttachmentRow> = {}): AttachmentRow {
 
 beforeEach(() => {
   mockDownload.mockClear();
+  mockAccountLease.isCurrent.mockReturnValue(true);
+  mockNextAccountLease.isCurrent.mockReturnValue(true);
   mockCaptureAccountLease
     .mockReset()
     .mockReturnValueOnce(mockAccountLease)
@@ -236,6 +238,7 @@ describe('FileChip — press dispatch', () => {
     expect(mockOpenAttachmentFile).toHaveBeenCalledWith(
       'file:///data/report.pdf',
       'application/pdf',
+      { isCurrent: mockAccountLease.isCurrent },
     );
     expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(mockDownload).not.toHaveBeenCalled();
@@ -281,6 +284,37 @@ describe('FileChip — press dispatch', () => {
     await waitFor(() => expect(mockOpenAttachmentFile).toHaveBeenCalled());
     expect(useToastStore.getState().current).toBeNull();
     expect(useToastStore.getState().queue).toHaveLength(0);
+  });
+
+  it('drops a delayed open result after the mounted account retires', async () => {
+    let resolveOpen!: (value: { status: 'missing' }) => void;
+    mockOpenAttachmentFile.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOpen = resolve;
+      }),
+    );
+    const att = makeAtt({ localPath: 'file:///data/report.pdf' });
+    await renderWithTheme(<FileChip att={att} isFromMe={false} />);
+    fireEvent.press(screen.getByText('report.pdf'));
+    await waitFor(() => expect(mockOpenAttachmentFile).toHaveBeenCalledTimes(1));
+
+    mockAccountLease.isCurrent.mockReturnValue(false);
+    resolveOpen({ status: 'missing' });
+    await Promise.resolve();
+
+    expect(mockDownload).not.toHaveBeenCalled();
+    expect(useToastStore.getState().current).toBeNull();
+  });
+
+  it('does not open or download from a callback retained by the old account', async () => {
+    const att = makeAtt({ localPath: 'file:///data/report.pdf' });
+    await renderWithTheme(<FileChip att={att} isFromMe={false} />);
+
+    mockAccountLease.isCurrent.mockReturnValue(false);
+    fireEvent.press(screen.getByText('report.pdf'));
+
+    expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
+    expect(mockDownload).not.toHaveBeenCalled();
   });
 });
 

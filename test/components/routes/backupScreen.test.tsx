@@ -1,9 +1,10 @@
 import React from 'react';
-import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
 
 const mockBack = jest.fn();
 let mockAccountCurrent = true;
+let mockInvalidateAccount: (() => void) | null = null;
 
 jest.mock('@ui', () => ({
   ...jest.requireActual('@ui/theme'),
@@ -13,11 +14,18 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack }) }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => ({
     generation: 7,
     isCurrent: () => mockAccountCurrent,
   }),
+  subscribeRealtimeGenerationInvalidation: (_generation: number, listener: () => void) => {
+    mockInvalidateAccount = listener;
+    return () => {
+      if (mockInvalidateAccount === listener) mockInvalidateAccount = null;
+    };
+  },
 }));
 jest.mock('@/services/backup/backupService', () => {
   class BackupPassphraseRejectedError extends Error {
@@ -37,16 +45,42 @@ jest.mock('@/services/backup/backupService', () => {
 });
 
 // eslint-disable-next-line import/first
-import BackupScreen from '../../../app/(app)/backup';
+import BackupScreen, { pickBackupFileForLease } from '../../../app/(app)/backup';
 // eslint-disable-next-line import/first
-import { exportEncryptedBackup } from '@/services/backup/backupService';
+import {
+  exportEncryptedBackup,
+  importBackupAuto,
+  readPickedBackupCopy,
+} from '@/services/backup/backupService';
+// eslint-disable-next-line import/first
+import { showDialog } from '@ui/dialog/dialogStore';
 
 const mockExport = exportEncryptedBackup as jest.Mock;
+const mockImport = importBackupAuto as jest.Mock;
+const mockReadPickedBackupCopy = readPickedBackupCopy as jest.Mock;
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockAccountCurrent = true;
+  mockInvalidateAccount = null;
   mockExport.mockResolvedValue(undefined);
+  mockReadPickedBackupCopy.mockResolvedValue('picked-backup');
 });
 
 describe('BackupScreen passphrase boundary', () => {
@@ -100,5 +134,88 @@ describe('BackupScreen passphrase boundary', () => {
     expect(screen.queryByDisplayValue('account-A-passphrase')).toBeNull();
     expect(screen.queryByDisplayValue('account-A-encrypted-backup')).toBeNull();
     expect(screen.queryByPlaceholderText('Passphrase')).toBeNull();
+  });
+
+  it('hides typed secrets immediately when the mounted account generation retires', async () => {
+    await renderWithTheme(<BackupScreen />);
+    await fireEvent.changeText(screen.getByPlaceholderText('Passphrase'), 'account-A-passphrase');
+    await fireEvent.changeText(
+      screen.getByPlaceholderText('…or paste backup contents here'),
+      'account-A-encrypted-backup',
+    );
+
+    expect(mockInvalidateAccount).not.toBeNull();
+    await act(async () => {
+      mockAccountCurrent = false;
+      mockInvalidateAccount?.();
+    });
+
+    expect(screen.queryByDisplayValue('account-A-passphrase')).toBeNull();
+    expect(screen.queryByDisplayValue('account-A-encrypted-backup')).toBeNull();
+    expect(screen.queryByPlaceholderText('Passphrase')).toBeNull();
+  });
+
+  it('keeps a delayed old-account export failure silent', async () => {
+    const result = deferred<void>();
+    mockExport.mockReturnValueOnce(result.promise);
+    await renderWithTheme(<BackupScreen />);
+    await fireEvent.changeText(screen.getByPlaceholderText('Passphrase'), 'river-lantern-orbit-92');
+    await fireEvent.changeText(
+      screen.getByPlaceholderText('Confirm passphrase'),
+      'river-lantern-orbit-92',
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Export encrypted backup' }));
+    await waitFor(() => expect(mockExport).toHaveBeenCalledTimes(1));
+
+    mockAccountCurrent = false;
+    await act(async () => {
+      result.reject(new Error('old export failed'));
+      await result.promise.catch(() => undefined);
+    });
+
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('keeps a delayed old-account restore failure silent', async () => {
+    const result = deferred<never>();
+    mockImport.mockReturnValueOnce(result.promise);
+    await renderWithTheme(<BackupScreen />);
+    await fireEvent.changeText(
+      screen.getByPlaceholderText('…or paste backup contents here'),
+      'account-A-encrypted-backup',
+    );
+    await fireEvent.press(screen.getByText('Restore from backup'));
+    await waitFor(() => expect(mockImport).toHaveBeenCalledTimes(1));
+
+    mockAccountCurrent = false;
+    await act(async () => {
+      result.reject(new Error('old restore failed'));
+      await result.promise.catch(() => undefined);
+    });
+
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('hands a delayed picker cache copy to cleanup after the account retires', async () => {
+    const pickerResult = deferred<{
+      canceled: false;
+      assets: Array<{ uri: string }>;
+    }>();
+    const getDocumentAsync = jest.fn(() => pickerResult.promise);
+    const lease = { generation: 7, isCurrent: () => mockAccountCurrent };
+    const pending = pickBackupFileForLease(lease, async () => ({ getDocumentAsync }));
+    await waitFor(() => expect(getDocumentAsync).toHaveBeenCalledTimes(1));
+
+    mockAccountCurrent = false;
+    pickerResult.resolve({
+      canceled: false,
+      assets: [{ uri: 'file:///cache/account-a.gatorbackup' }],
+    });
+
+    await expect(pending).resolves.toBeNull();
+    expect(mockReadPickedBackupCopy).toHaveBeenCalledWith(
+      'file:///cache/account-a.gatorbackup',
+      lease,
+    );
   });
 });

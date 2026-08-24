@@ -193,9 +193,53 @@ describe('shareAttachment', () => {
     await shareAttachment('file:///docs/a.jpg', 'image/jpeg');
     expect(console.error).toHaveBeenCalled();
   });
+
+  it('does not open the share sheet after ownership retires during file revalidation', async () => {
+    let resolveStat!: (value: { exists: boolean; bytes: number }) => void;
+    statAttachment.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStat = resolve;
+      }),
+    );
+    isAvailable.mockResolvedValue(true);
+    shareAsync.mockResolvedValue(undefined);
+    let current = true;
+    const pending = shareAttachment('file:///docs/a.jpg', 'image/jpeg', () => current);
+    expect(statAttachment).toHaveBeenCalledTimes(1);
+
+    current = false;
+    resolveStat({ exists: true, bytes: 100 });
+
+    await expect(pending).resolves.toEqual({ ok: false, reason: 'stale' });
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(shareAsync).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('saveAttachmentsToPhotos', () => {
+  it('does not write to Photos after ownership retires during file revalidation', async () => {
+    let resolveStat!: (value: { exists: boolean; bytes: number }) => void;
+    statAttachment.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStat = resolve;
+      }),
+    );
+    requestPerm.mockResolvedValue({ status: 'granted' });
+    saveToLibrary.mockResolvedValue(undefined);
+    let current = true;
+    const pending = saveAttachmentsToPhotos(['file:///docs/a.jpg'], () => current);
+    expect(statAttachment).toHaveBeenCalledTimes(1);
+
+    current = false;
+    resolveStat({ exists: true, bytes: 100 });
+
+    await expect(pending).resolves.toEqual({ status: 'stale' });
+    expect(requestPerm).not.toHaveBeenCalled();
+    expect(saveToLibrary).not.toHaveBeenCalled();
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+  });
+
   // THE REGRESSION GUARD for the music-permission trap. A bare requestPermissionsAsync() asks for
   // READ access to photos + video + AUDIO as one all-or-nothing bundle, so declining the separate
   // "Music and audio" dialog silently killed saving for good — and after the second decline Android

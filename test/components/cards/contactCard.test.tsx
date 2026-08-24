@@ -368,7 +368,9 @@ describe('ContactCard — tap contract', () => {
     );
     await screen.findByText('John Smith');
     await fireEvent.press(screen.getByLabelText('Contact: John Smith'));
-    expect(mockOpenAttachmentFile).toHaveBeenCalledWith('file:///c/contact.vcf', 'text/vcard');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith('file:///c/contact.vcf', 'text/vcard', {
+      isCurrent: expect.any(Function),
+    });
     expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
   });
@@ -465,7 +467,9 @@ describe('ContactCard — source and account ownership', () => {
       screen.getByRole('button', { name: `Contact: ${PRIVATE_NAME}` }),
     );
     await invokeConfiguredPress(localPress);
-    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard', {
+      isCurrent: expect.any(Function),
+    });
 
     const downloadPress = retainConfiguredPress(
       screen.getByRole('button', { name: `Contact: ${PRIVATE_TRANSFER_NAME}` }),
@@ -499,7 +503,9 @@ describe('ContactCard — source and account ownership', () => {
     );
     expect(mockFileText).toHaveBeenCalledWith(PRIVATE_PATH);
     await invokeConfiguredPress(freshPress);
-    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard', {
+      isCurrent: expect.any(Function),
+    });
   });
 
   it.each([
@@ -576,7 +582,9 @@ describe('ContactCard — source and account ownership', () => {
     expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
     await invokeConfiguredPress(freshAPress);
     expect(mockOpenAttachmentFile).toHaveBeenCalledTimes(1);
-    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard', {
+      isCurrent: expect.any(Function),
+    });
   });
 
   it('revokes no-path callbacks across A → B → A while fresh callbacks retain the exact lease', async () => {
@@ -638,7 +646,9 @@ describe('ContactCard — source and account ownership', () => {
       screen.getByRole('button', { name: `Contact: ${PRIVATE_TRANSFER_NAME}` }),
     );
     await invokeConfiguredPress(oldOpenPress);
-    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard');
+    expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard', {
+      isCurrent: expect.any(Function),
+    });
     mockOpenAttachmentFile.mockClear();
     await invokeConfiguredPress(oldDownloadPress);
     expect(download).toHaveBeenCalledWith(downloadAtt, 'manual', expect.any(Object));
@@ -763,7 +773,9 @@ describe('ContactCard — native open result ownership', () => {
         await screen.findByRole('button', { name: `Contact: ${PRIVATE_NAME}` }),
       );
       await invokeConfiguredPress(press);
-      expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard');
+      expect(mockOpenAttachmentFile).toHaveBeenCalledWith(PRIVATE_PATH, 'text/vcard', {
+        isCurrent: expect.any(Function),
+      });
 
       let freshButtonName: string;
       let freshPath: string;
@@ -821,7 +833,9 @@ describe('ContactCard — native open result ownership', () => {
       );
       await invokeConfiguredPress(freshPress);
       expect(mockOpenAttachmentFile).toHaveBeenCalledTimes(2);
-      expect(mockOpenAttachmentFile).toHaveBeenNthCalledWith(2, freshPath, 'text/vcard');
+      expect(mockOpenAttachmentFile).toHaveBeenNthCalledWith(2, freshPath, 'text/vcard', {
+        isCurrent: expect.any(Function),
+      });
       if (_outcome === 'missing') {
         await waitFor(() =>
           expect(download).toHaveBeenCalledWith(sourceA, 'manual', expect.any(Object)),
@@ -854,7 +868,9 @@ describe('ContactCard — native open result ownership', () => {
       await screen.findByRole('button', { name: `Contact: ${PRIVATE_NAME}` }),
     );
     await invokeConfiguredPress(freshAPress);
-    expect(mockOpenAttachmentFile).toHaveBeenNthCalledWith(2, PRIVATE_PATH, 'text/vcard');
+    expect(mockOpenAttachmentFile).toHaveBeenNthCalledWith(2, PRIVATE_PATH, 'text/vcard', {
+      isCurrent: expect.any(Function),
+    });
 
     await act(async () => {
       oldAOpen.resolve({ status: 'no_handler' });

@@ -17,6 +17,11 @@ import {
 } from '@/services/notifications/notificationOpen';
 import { logger } from '@core/secure';
 import { resolveNotificationData } from '@/services/notifications/notificationRouting';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 jest.mock('@/services/notifications/notificationRouting', () => ({
   resolveNotificationData: jest.fn(
@@ -25,6 +30,27 @@ jest.mock('@/services/notifications/notificationRouting', () => ({
 }));
 
 const mockResolveNotificationData = resolveNotificationData as jest.Mock;
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+beforeEach(() => {
+  resumeRealtimeDeliveries();
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
+});
 
 describe('notificationOpenTarget', () => {
   it('extracts chatGuid + messageGuid + numeric messageDate from a message notification', () => {
@@ -169,6 +195,26 @@ describe('openFromNotification', () => {
     ).resolves.toBe(false);
     expect(navigate).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith('[notif] notification route could not be opened', failure);
+  });
+
+  it('does not navigate when account A retires during local route resolution', async () => {
+    const resolved = deferred<Record<string, unknown> | null>();
+    mockResolveNotificationData.mockReturnValueOnce(resolved.promise);
+    const navigate = jest.fn();
+    const accountLease = captureRealtimeDeliveryLease();
+    const pending = openFromNotification(
+      { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'message', chatId: '7' },
+      navigate,
+      accountLease,
+    );
+    expect(mockResolveNotificationData).toHaveBeenCalledTimes(1);
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    resolved.resolve({ chatGuid: 'account-a-chat' });
+
+    await expect(pending).resolves.toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
 
@@ -365,5 +411,34 @@ describe('drainNotificationTap', () => {
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith('/chat/c2');
     expect(press).not.toHaveBeenCalled();
+  });
+
+  it('does not consume or navigate a tap when account A retires during the initial read', async () => {
+    const initial = deferred<typeof messageInitial | null>();
+    const getInitial = jest.fn(() => initial.promise);
+    const takePending = jest.fn(() => ({ chatGuid: 'account-b-chat' }));
+    const press = jest.fn();
+    const navigate = jest.fn();
+    const restorePending = jest.fn();
+    const accountLease = captureRealtimeDeliveryLease();
+    const pending = drainNotificationTap(
+      getInitial,
+      takePending,
+      press,
+      navigate,
+      restorePending,
+      accountLease,
+    );
+    expect(getInitial).toHaveBeenCalledTimes(1);
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    initial.resolve(messageInitial);
+    await pending;
+
+    expect(takePending).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(press).not.toHaveBeenCalled();
+    expect(restorePending).not.toHaveBeenCalled();
   });
 });

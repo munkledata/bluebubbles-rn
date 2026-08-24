@@ -134,6 +134,19 @@ describe('AccountScreen — account query', () => {
     ).toBeNull();
   });
 
+  it('retires already-resolved account details when their generation is revoked', async () => {
+    await renderScreen();
+    expect(await screen.findByText('user@icloud.com')).toBeTruthy();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+
+    expect(screen.queryByText('user@icloud.com')).toBeNull();
+    expect(screen.queryByText('Gator User')).toBeNull();
+    expect(screen.queryByText('Apple ID')).toBeNull();
+  });
+
   it('goes back from the header', async () => {
     await renderScreen();
     await screen.findByText('user@icloud.com');
@@ -187,7 +200,9 @@ describe('AccountScreen — account query', () => {
 
     // A read has no durable side effect, so it must not make Disconnect wait. The captured
     // generation and cache key are what make its eventual completion safe.
-    await pauseRealtimeDeliveries();
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
     resumeRealtimeDeliveries();
 
     await act(async () => {
@@ -228,7 +243,9 @@ describe('AccountScreen — account query', () => {
     const { view } = await renderScreen(client);
     await waitFor(() => expect(mockGetAccountInfo).toHaveBeenCalledTimes(1));
 
-    await pauseRealtimeDeliveries();
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
     resumeRealtimeDeliveries();
     await act(async () => {
       oldResponse.reject(new Error('old account helper failed'));
@@ -368,7 +385,9 @@ describe('AccountScreen — alias picker', () => {
     await screen.findByText('user@icloud.com');
     const oldAliasRow = screen.getByRole('button', { name: /b@icloud\.com/ });
 
-    await pauseRealtimeDeliveries();
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
     resumeRealtimeDeliveries();
     fireEvent.press(oldAliasRow);
 

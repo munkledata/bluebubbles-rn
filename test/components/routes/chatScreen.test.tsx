@@ -317,6 +317,19 @@ async function run(fn: () => void): Promise<void> {
   });
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 interface HostJsonNode {
   type?: unknown;
   props?: Record<string, unknown>;
@@ -978,7 +991,10 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
     await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
     await run(() => mockCaptured.overlay!.onSave());
     await waitFor(() =>
-      expect(saveAttachmentsToPhotos).toHaveBeenCalledWith(['file:///docs/a1.jpg']),
+      expect(saveAttachmentsToPhotos).toHaveBeenCalledWith(
+        ['file:///docs/a1.jpg'],
+        expect.any(Function),
+      ),
     );
     await waitFor(() => expect(showDialog).toHaveBeenCalledWith('Save', 'Saved 1 item to Photos.'));
   });
@@ -989,7 +1005,11 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
     await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
     await run(() => mockCaptured.overlay!.onShare());
     await waitFor(() =>
-      expect(shareAttachment).toHaveBeenCalledWith('file:///docs/a1.jpg', 'image/jpeg'),
+      expect(shareAttachment).toHaveBeenCalledWith(
+        'file:///docs/a1.jpg',
+        'image/jpeg',
+        expect.any(Function),
+      ),
     );
     // The sheet opened, so nothing else happens — no fallback text share, no dialog.
     expect(showDialog).not.toHaveBeenCalled();
@@ -1032,6 +1052,62 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
     await waitFor(() => expect(showDialog).toHaveBeenCalled());
     expect(rnShare).not.toHaveBeenCalled();
     rnShare.mockRestore();
+  });
+
+  it('drops a delayed attachment-share failure after the screen account retires', async () => {
+    const response = deferred<{ ok: false; reason: 'failed' }>();
+    (shareAttachment as jest.Mock).mockReturnValueOnce(response.promise);
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await run(() => mockCaptured.overlay!.onShare());
+    await waitFor(() => expect(shareAttachment).toHaveBeenCalledTimes(1));
+
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      response.resolve({ ok: false, reason: 'failed' });
+      await response.promise;
+    });
+
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('drops a delayed attachment-save result after the screen account retires', async () => {
+    const response = deferred<{ status: 'saved'; saved: number }>();
+    (saveAttachmentsToPhotos as jest.Mock).mockReturnValueOnce(response.promise);
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await run(() => mockCaptured.overlay!.onSave());
+    await waitFor(() => expect(saveAttachmentsToPhotos).toHaveBeenCalledTimes(1));
+
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+    await act(async () => {
+      response.resolve({ status: 'saved', saved: 1 });
+      await response.promise;
+    });
+
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('does not start attachment share or save from callbacks retained by the old account', async () => {
+    (shareAttachment as jest.Mock).mockResolvedValueOnce({ ok: true });
+    (saveAttachmentsToPhotos as jest.Mock).mockResolvedValueOnce({ status: 'saved', saved: 1 });
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    const oldShare = mockCaptured.overlay!.onShare as () => void;
+    const oldSave = mockCaptured.overlay!.onSave as () => void;
+
+    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
+    resumeRealtimeDeliveries();
+    await run(() => {
+      oldShare();
+      oldSave();
+    });
+
+    expect(shareAttachment).not.toHaveBeenCalled();
+    expect(saveAttachmentsToPhotos).not.toHaveBeenCalled();
+    expect(showDialog).not.toHaveBeenCalled();
   });
 });
 

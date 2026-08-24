@@ -175,7 +175,9 @@ export function ContactCard({ att, isFromMe }: ContactCardProps): React.JSX.Elem
     const operationOwnsOpenToken = (): boolean => opening.current?.token === openToken;
     void (async () => {
       try {
-        const res = await openAttachmentFile(localPath, att.mimeType);
+        const res = await openAttachmentFile(localPath, att.mimeType, {
+          isCurrent: operationIsCurrent,
+        });
         if (!operationOwnsOpenToken() || !operationIsCurrent()) return;
         // A 'missing' result here also explains an empty inline card (the effect above reads the
         // same file), so re-downloading is the right response to both.

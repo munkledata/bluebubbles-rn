@@ -46,6 +46,7 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   const opening = React.useRef(false);
 
   const onPress = (): void => {
+    if (!accountLease.isCurrent()) return;
     const path = att.localPath;
     if (!path) {
       void download(att, 'manual', accountLease);
@@ -55,7 +56,10 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
     opening.current = true;
     void (async () => {
       try {
-        const res = await openAttachmentFile(path, att.mimeType);
+        const res = await openAttachmentFile(path, att.mimeType, {
+          isCurrent: accountLease.isCurrent,
+        });
+        if (!accountLease.isCurrent()) return;
         // The result MUST be consumed here — a discarded one is exactly how "tapping the PDF
         // does nothing" shipped. NOTE there is deliberately no toast for 'shared': the share
         // sheet is a system window that appears immediately and IS the feedback, and AppToast

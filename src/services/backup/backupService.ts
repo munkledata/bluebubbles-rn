@@ -53,6 +53,18 @@ function assertCurrent(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw new BackupAccountChangedError();
 }
 
+/** Await non-cancellable native/crypto work while making account retirement the final authority. */
+async function awaitCurrent<T>(lease: RealtimeDeliveryLease, promise: Promise<T>): Promise<T> {
+  try {
+    const value = await promise;
+    assertCurrent(lease);
+    return value;
+  } catch (error) {
+    if (!lease.isCurrent()) throw new BackupAccountChangedError();
+    throw error;
+  }
+}
+
 /** Read account-owned rows in a short tracked slot, then disown the result if Disconnect won. */
 async function buildCurrentBackup(now: number, lease: RealtimeDeliveryLease): Promise<Backup> {
   const built: { value?: Backup } = {};
@@ -60,11 +72,13 @@ async function buildCurrentBackup(now: number, lease: RealtimeDeliveryLease): Pr
     assertCurrent(activeLease);
     const db = getDatabase();
     assertCurrent(activeLease);
-    const candidate = await buildBackup(db, {
-      exportedAt: now,
-      appVersion: Constants.expoConfig?.version,
-    });
-    assertCurrent(activeLease);
+    const candidate = await awaitCurrent(
+      activeLease,
+      buildBackup(db, {
+        exportedAt: now,
+        appVersion: Constants.expoConfig?.version,
+      }),
+    );
     built.value = candidate;
   });
   if (outcome === 'paused' || built.value === undefined) throw new BackupAccountChangedError();
@@ -129,8 +143,7 @@ export async function readPickedBackupCopy(
     // `File.text()` has no streaming/capped form. Stat the private picker copy first so a hostile
     // document cannot be materialized as an unbounded JS string.
     assertBackupFileSize(file.size);
-    const content = await file.text();
-    assertCurrent(lease);
+    const content = await awaitCurrent(lease, file.text());
     // Defend against a stale/inaccurate stat (or a file changed between stat and read).
     assertBackupSourceTextWithinLimit(content);
     return content.trim();
@@ -158,8 +171,7 @@ async function shareGeneratedFile(
     void sharePromise.catch(() => {});
   });
   if (outcome === 'paused' || sharePromise === undefined) throw new BackupAccountChangedError();
-  await sharePromise;
-  assertCurrent(lease);
+  await awaitCurrent(lease, sharePromise);
 }
 
 /**
@@ -172,8 +184,7 @@ export async function exportBackup(
 ): Promise<void> {
   const backup = await buildCurrentBackup(now, lease);
   const json = serializeBackup(backup, 2);
-  const sharingAvailable = await Sharing.isAvailableAsync();
-  assertCurrent(lease);
+  const sharingAvailable = await awaitCurrent(lease, Sharing.isAvailableAsync());
   if (!sharingAvailable) throw new Error('sharing-unavailable');
 
   const file = new File(Paths.cache, nextBackupFileName(now, lease, 'json'));
@@ -221,11 +232,9 @@ export async function exportEncryptedBackup(
   const passphraseIssue = getNewBackupPassphraseIssue(passphrase);
   if (passphraseIssue) throw new BackupPassphraseRejectedError(passphraseIssue);
   const backup = await buildCurrentBackup(now, lease);
-  const box = await getSecretBox();
-  const sealed = await sealBackup(box, backup, passphrase);
-  assertCurrent(lease);
-  const sharingAvailable = await Sharing.isAvailableAsync();
-  assertCurrent(lease);
+  const box = await awaitCurrent(lease, getSecretBox());
+  const sealed = await awaitCurrent(lease, sealBackup(box, backup, passphrase));
+  const sharingAvailable = await awaitCurrent(lease, Sharing.isAvailableAsync());
   if (!sharingAvailable) throw new Error('sharing-unavailable');
 
   const file = new File(Paths.cache, nextBackupFileName(now, lease, 'gatorbackup'));
@@ -255,9 +264,8 @@ export async function importEncryptedBackup(
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<RestoreResult> {
   assertCurrent(lease);
-  const box = await getSecretBox();
-  const backup = await openBackup(box, text.trim(), passphrase);
-  assertCurrent(lease);
+  const box = await awaitCurrent(lease, getSecretBox());
+  const backup = await awaitCurrent(lease, openBackup(box, text.trim(), passphrase));
   return restoreCurrentBackup(backup, lease);
 }
 

@@ -353,7 +353,7 @@ export default function MediaViewer(): React.JSX.Element {
       sharing.current?.token === operation.token && sourceGrantIsCurrent(operation.source);
     try {
       const result = await runMediaAccountTask(accountLease, () =>
-        shareAttachment(localPath, source.mimeType),
+        shareAttachment(localPath, source.mimeType, operationIsCurrent),
       );
       if (!result.owned || !operationIsCurrent() || result.value.ok) {
         return;
@@ -388,7 +388,7 @@ export default function MediaViewer(): React.JSX.Element {
       saving.current?.token === operation.token && sourceGrantIsCurrent(operation.source);
     try {
       const result = await runMediaAccountTask(accountLease, () =>
-        saveAttachmentsToPhotos([localPath]),
+        saveAttachmentsToPhotos([localPath], operationIsCurrent),
       );
       if (!result.owned || !operationIsCurrent()) return;
       if (result.value.status === 'saved') showToast('Saved to Photos');

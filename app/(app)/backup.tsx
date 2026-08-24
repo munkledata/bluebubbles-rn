@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import {
@@ -15,8 +15,44 @@ import {
   MIN_NEW_BACKUP_PASSPHRASE_LENGTH,
   type NewBackupPassphraseIssue,
 } from '@/services/backup/backupSchema';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+
+interface BackupDocumentPickerModule {
+  getDocumentAsync(options: { type: string[]; copyToCacheDirectory: boolean }): Promise<{
+    canceled: boolean;
+    assets: Array<{ uri: string }> | null;
+  }>;
+}
+
+type BackupDocumentPickerLoader = () => Promise<BackupDocumentPickerModule>;
+
+/**
+ * Open the account-neutral picker, then always clean up any private cache copy it returns. The
+ * loader is injectable solely to make the delayed Android return deterministic in Node tests.
+ */
+export async function pickBackupFileForLease(
+  lease: RealtimeDeliveryLease,
+  loadPicker: BackupDocumentPickerLoader = () => import('expo-document-picker'),
+): Promise<string | null> {
+  const DocumentPicker = await loadPicker();
+  if (!lease.isCurrent()) return null;
+  const result = await DocumentPicker.getDocumentAsync({
+    // .gatorbackup has no registered MIME, so allow any file and validate on restore.
+    type: ['application/json', 'application/octet-stream', '*/*'],
+    copyToCacheDirectory: true,
+  });
+  if (result.canceled || !result.assets?.[0]) return null;
+
+  // The picker created this private copy before returning control. Even if the lease retired while
+  // Android's UI was open, readPickedBackupCopy must receive it so its finally block deletes it.
+  const content = await readPickedBackupCopy(result.assets[0].uri, lease);
+  return lease.isCurrent() ? content : null;
+}
 
 function passphraseIssueMessage(issue: NewBackupPassphraseIssue): string {
   return issue === 'too-short'
@@ -35,10 +71,26 @@ export default function BackupScreen(): React.JSX.Element {
   const [restorePass, setRestorePass] = useState('');
   // A retained picker/dialog callback must never adopt credentials from a later connection.
   const [screenLease] = useState(captureRealtimeDeliveryLease);
+  const [accountRetired, setAccountRetired] = useState(() => !screenLease.isCurrent());
+
+  // Lease currentness is not reactive. Hide and clear secrets as soon as this mounted account is
+  // retired instead of waiting for navigation or an unrelated state update to cause a render.
+  useLayoutEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(screenLease.generation, () => {
+        setAccountRetired(true);
+        setPass('');
+        setPass2('');
+        setPaste('');
+        setRestorePass('');
+        setBusy(false);
+      }),
+    [screenLease],
+  );
 
   // Passphrases and pasted backup contents are secrets. The route can render once more while its
   // account is being replaced, so fail closed instead of repainting account-A input in B's tree.
-  if (!screenLease.isCurrent()) {
+  if (accountRetired || !screenLease.isCurrent()) {
     return (
       <Screen>
         <ScreenHeader title="Backup" onBack={() => router.back()} />
@@ -63,10 +115,11 @@ export default function BackupScreen(): React.JSX.Element {
     setBusy(true);
     try {
       await exportEncryptedBackup(pass, Date.now(), screenLease);
+      if (!screenLease.isCurrent()) return;
       setPass('');
       setPass2('');
     } catch (e) {
-      if (isBackupAccountChangedError(e)) return;
+      if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;
       if (e instanceof BackupPassphraseRejectedError) {
         showDialog('Backup', passphraseIssueMessage(e.issue));
         return;
@@ -78,7 +131,7 @@ export default function BackupScreen(): React.JSX.Element {
           : 'Export failed.',
       );
     } finally {
-      setBusy(false);
+      if (screenLease.isCurrent()) setBusy(false);
     }
   };
 
@@ -89,21 +142,13 @@ export default function BackupScreen(): React.JSX.Element {
     if (!screenLease.isCurrent()) return;
     setBusy(true);
     try {
-      const DocumentPicker = await import('expo-document-picker');
-      const res = await DocumentPicker.getDocumentAsync({
-        // .gatorbackup has no registered MIME, so allow any file and validate on restore.
-        type: ['application/json', 'application/octet-stream', '*/*'],
-        copyToCacheDirectory: true,
-      });
-      if (res.canceled || !res.assets[0]) return;
-      // copyToCacheDirectory guarantees this is our temporary copy, not the user's source file.
-      // Delete it after reading — including when the picker returns to a retired A screen.
-      setPaste(await readPickedBackupCopy(res.assets[0].uri, screenLease));
+      const content = await pickBackupFileForLease(screenLease);
+      if (content !== null && screenLease.isCurrent()) setPaste(content);
     } catch (e) {
-      if (isBackupAccountChangedError(e)) return;
+      if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;
       showDialog('Restore', 'Couldn’t open the backup file.');
     } finally {
-      setBusy(false);
+      if (screenLease.isCurrent()) setBusy(false);
     }
   };
 
@@ -113,6 +158,7 @@ export default function BackupScreen(): React.JSX.Element {
     setBusy(true);
     try {
       const r = await importBackupAuto(paste.trim(), restorePass, screenLease);
+      if (!screenLease.isCurrent()) return;
       setPaste('');
       setRestorePass('');
       showDialog(
@@ -120,13 +166,13 @@ export default function BackupScreen(): React.JSX.Element {
         `Settings: ${r.kv}, themes: ${r.themes}, chats: ${r.chatCustomizations}.`,
       );
     } catch (e) {
-      if (isBackupAccountChangedError(e)) return;
+      if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;
       showDialog(
         'Restore',
         'Couldn’t restore — check your passphrase and that the backup is valid.',
       );
     } finally {
-      setBusy(false);
+      if (screenLease.isCurrent()) setBusy(false);
     }
   };
 

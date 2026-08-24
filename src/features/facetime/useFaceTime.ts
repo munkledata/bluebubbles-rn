@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Linking } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import * as WebBrowser from 'expo-web-browser';
@@ -82,11 +82,16 @@ export function useFaceTime(): {
   startCallTo: (args: StartCallToArgs) => Promise<void>;
 } {
   const openIfCurrent = useFaceTimeStore((s) => s.openIfCurrent);
+  // These callbacks belong to the route/header instance that created them. Capturing here prevents
+  // a retained account-A callback from minting a fresh account-B lease when it is pressed later.
+  const [callScope] = useState(() => ({
+    generation: useFaceTimeStore.getState().generation,
+    accountLease: captureRealtimeDeliveryLease(),
+  }));
 
   const startCall = useCallback(
     async ({ chatGuid, video }: StartCallArgs): Promise<void> => {
-      const generation = useFaceTimeStore.getState().generation;
-      const accountLease = captureRealtimeDeliveryLease();
+      const { generation, accountLease } = callScope;
       const isCurrent = (): boolean => isCurrentCallSession(generation, accountLease);
       try {
         if (!isCurrent()) return;
@@ -117,19 +122,19 @@ export function useFaceTime(): {
         showDialog('FaceTime', 'Couldn’t start the call. Make sure your server is connected.');
       }
     },
-    [openIfCurrent],
+    [callScope, openIfCurrent],
   );
 
   const startCallTo = useCallback(
     async ({ addresses, video }: StartCallToArgs): Promise<void> => {
+      const { generation, accountLease } = callScope;
+      const isCurrent = (): boolean => isCurrentCallSession(generation, accountLease);
+      if (!isCurrent()) return;
       const clean = addresses.map((a) => a.trim()).filter((a) => a.length > 0);
       if (clean.length === 0) {
         showDialog('FaceTime', 'Enter a phone number or email to call.');
         return;
       }
-      const generation = useFaceTimeStore.getState().generation;
-      const accountLease = captureRealtimeDeliveryLease();
-      const isCurrent = (): boolean => isCurrentCallSession(generation, accountLease);
       try {
         if (!isCurrent()) return;
         if (isDevServer()) {
@@ -163,7 +168,7 @@ export function useFaceTime(): {
         showDialog('FaceTime', 'Couldn’t start the call. Make sure your server is connected.');
       }
     },
-    [openIfCurrent],
+    [callScope, openIfCurrent],
   );
 
   return { startCall, startCallTo };

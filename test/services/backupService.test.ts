@@ -105,14 +105,17 @@ const DRAFT_TEXT = 'half-typed and never sent';
 interface Deferred<T> {
   promise: Promise<T>;
   resolve(value: T): void;
+  reject(error: unknown): void;
 }
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
@@ -267,6 +270,29 @@ describe('exportBackup', () => {
     await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
   });
 
+  it('normalizes a picker read failure that arrives after account retirement', async () => {
+    let rejectRead!: (error: unknown) => void;
+    MockFile.textImpl = () =>
+      new Promise<string>((_resolve, reject) => {
+        rejectRead = reject;
+      });
+    const oldScreenLease = captureRealtimeDeliveryLease();
+
+    const pending = readPickedBackupCopy('file:///cache/picked.gatorbackup', oldScreenLease);
+    const outcome = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await waitUntil(() => MockFile.textCalls === 1);
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    rejectRead(new Error('old picker read failed'));
+
+    await expect(outcome).resolves.toBeInstanceOf(BackupAccountChangedError);
+    expect(theFile().exists).toBe(false);
+    expect(theFile().deletes).toBe(1);
+  });
+
   it('rejects an oversized picked file before reading it and deletes the private copy', async () => {
     MockFile.nextSize = BACKUP_LIMITS.fileBytes + 1;
 
@@ -323,6 +349,49 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
     mockShare.mockRejectedValueOnce(new Error('boom'));
     await expect(exportEncryptedBackup('river-lantern-orbit-92', 2_000)).rejects.toThrow('boom');
     expect(theFile().exists).toBe(false);
+  });
+
+  it('normalizes a native-share failure that arrives after account retirement', async () => {
+    await seedDb();
+    mockGetSecretBox.mockResolvedValueOnce({
+      seal: jest.fn(async () => 'sealed-backup'),
+    } as unknown as SecretBox);
+    const sheet = deferred<void>();
+    mockShare.mockReturnValueOnce(sheet.promise);
+    const oldScreenLease = captureRealtimeDeliveryLease();
+    const pending = exportEncryptedBackup('river-lantern-orbit-92', 2_001, oldScreenLease);
+    const outcome = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await waitUntil(() => mockShare.mock.calls.length === 1);
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    sheet.reject(new Error('old native share failed'));
+
+    await expect(outcome).resolves.toBeInstanceOf(BackupAccountChangedError);
+    expect(theFile().exists).toBe(false);
+  });
+
+  it('normalizes a crypto-loader failure that arrives after account retirement', async () => {
+    await seedDb();
+    const box = deferred<SecretBox>();
+    mockGetSecretBox.mockReturnValueOnce(box.promise);
+    const oldScreenLease = captureRealtimeDeliveryLease();
+    const pending = exportEncryptedBackup('river-lantern-orbit-92', 2_002, oldScreenLease);
+    const outcome = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await waitUntil(() => mockGetSecretBox.mock.calls.length === 1);
+
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    box.reject(new Error('old crypto loader failed'));
+
+    await expect(outcome).resolves.toBeInstanceOf(BackupAccountChangedError);
+    expect(MockFile.instances).toHaveLength(0);
   });
 
   it('does not hold Disconnect behind an already-open OS share sheet', async () => {

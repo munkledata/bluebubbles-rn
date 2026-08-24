@@ -56,6 +56,41 @@ afterEach(() => {
   resumeRealtimeDeliveries();
 });
 
+it('does not let a retained account-A chat callback adopt account B', async () => {
+  const { result } = await renderHook(() => useFaceTime());
+  const oldStartCall = result.current.startCall;
+
+  await act(async () => {
+    await pauseRealtimeDeliveries();
+    useFaceTimeStore.getState().reset();
+    resumeRealtimeDeliveries();
+    await oldStartCall({ chatGuid: 'account-a-chat', video: true });
+  });
+
+  expect(mockGetParticipants).not.toHaveBeenCalled();
+  expect(mockCreateLink).not.toHaveBeenCalled();
+  expect(mockSend).not.toHaveBeenCalled();
+  expect(mockOpenBrowser).not.toHaveBeenCalled();
+  expect(mockShowDialog).not.toHaveBeenCalled();
+});
+
+it('does not let a retained account-A dialer callback adopt account B', async () => {
+  const { result } = await renderHook(() => useFaceTime());
+  const oldStartCallTo = result.current.startCallTo;
+
+  await act(async () => {
+    await pauseRealtimeDeliveries();
+    useFaceTimeStore.getState().reset();
+    resumeRealtimeDeliveries();
+    await oldStartCallTo({ addresses: ['account-a@example.com'], video: false });
+  });
+
+  expect(mockCreateLink).not.toHaveBeenCalled();
+  expect(mockCreateNewChat).not.toHaveBeenCalled();
+  expect(mockOpenBrowser).not.toHaveBeenCalled();
+  expect(mockShowDialog).not.toHaveBeenCalled();
+});
+
 it('does not launch a browser when logout occurs while the FaceTime link message is sending', async () => {
   let finishSend!: () => void;
   mockSend.mockReturnValueOnce(

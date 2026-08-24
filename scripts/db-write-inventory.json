@@ -56,7 +56,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>:mutator-call:876edfb9b0ee",
       "path": "app/(app)/_layout.tsx",
-      "line": 74,
+      "line": 106,
       "symbol": "ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
@@ -69,7 +69,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>:mutator-call:76ab82360366",
       "path": "app/(app)/_layout.tsx",
-      "line": 86,
+      "line": 118,
       "symbol": "ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtime",
@@ -82,7 +82,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>:mutator-call:876edfb9b0ee:2",
       "path": "app/(app)/_layout.tsx",
-      "line": 89,
+      "line": 121,
       "symbol": "ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
@@ -95,7 +95,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5bd646a3ed>:mutator-call:4ffa3931c74a",
       "path": "app/(app)/_layout.tsx",
-      "line": 107,
+      "line": 139,
       "symbol": "ConnectedAppLayout.<callback:5bd646a3ed>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
@@ -10272,14 +10272,14 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/realtimeStartupOptional.test.ts; test/services/fcmMessagingLifecycle.test.ts; test/realtime/socketDispatchFailure.test.ts; test/realtime/socketEscalation.test.ts; test/features/conversations/devSeedAccountScope.test.ts; test/components/routes/chatScreen.test.tsx"
     },
     {
-      "id": "src/features/facetime/useFaceTime.ts#useFaceTime.<callback:6e437cf5bf>:mutator-call:e7c2d4225f13",
+      "id": "src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95",
       "path": "src/features/facetime/useFaceTime.ts",
-      "line": 152,
-      "symbol": "useFaceTime.<callback:6e437cf5bf>",
+      "line": 157,
+      "symbol": "useFaceTime.<callback:fff597c8bc>",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
       "detectedContext": "coordinated-delegation",
-      "owner": "useFaceTime.<callback:6e437cf5bf>",
+      "owner": "useFaceTime.<callback:fff597c8bc>",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
@@ -10443,7 +10443,7 @@
     {
       "id": "src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48",
       "path": "src/services/backup/backupService.ts",
-      "line": 89,
+      "line": 103,
       "symbol": "restoreCurrentBackup.<callback:bdb49d16ac>",
       "operation": "mutator-call",
       "target": "src/services/backup/backup.ts#restoreBackup",
@@ -16629,12 +16629,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:8cff34032627",
+      "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:825631505f95",
       "path": "src/ui/attachments/ContactCard.tsx",
       "line": 176,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
-      "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:7e05943cca>",
+      "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>",
       "detectedContext": "coordinated-delegation",
       "owner": "ContactCard.onPress",
       "transactionContext": "coordinated-delegation",
@@ -16642,10 +16642,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:7e05943cca>:mutator-call:146cb546ae54",
+      "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>:mutator-call:d7520b586d39",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 182,
-      "symbol": "ContactCard.onPress.<callback:7e05943cca>",
+      "line": 184,
+      "symbol": "ContactCard.onPress.<callback:c626cc26f6>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
       "detectedContext": "coordinated-delegation",
@@ -16657,7 +16657,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard:mutator-reference:6f03b1e5f758",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 222,
+      "line": 224,
       "symbol": "ContactCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress",
@@ -16670,7 +16670,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:fcf22eadb47f",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 51,
+      "line": 52,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -16681,12 +16681,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4e92d0a9dbcb",
+      "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4783aae969eb",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 56,
+      "line": 57,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
-      "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:ac414c7708>",
+      "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>",
       "detectedContext": "coordinated-delegation",
       "owner": "FileChip.onPress",
       "transactionContext": "coordinated-delegation",
@@ -16694,10 +16694,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:ac414c7708>:mutator-call:df77301145b2",
+      "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>:mutator-call:b00e65e1611c",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 63,
-      "symbol": "FileChip.onPress.<callback:ac414c7708>",
+      "line": 67,
+      "symbol": "FileChip.onPress.<callback:08fd24739a>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
       "detectedContext": "coordinated-delegation",
@@ -16709,7 +16709,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip:mutator-reference:8833b8ec6280",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 75,
+      "line": 79,
       "symbol": "FileChip",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress",

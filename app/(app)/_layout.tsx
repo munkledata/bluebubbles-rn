@@ -1,9 +1,9 @@
 import notifee, { EventType } from 'react-native-notify-kit';
 import { Redirect, Stack } from 'expo-router';
-import { useCallback, useEffect } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { AppState as NativeAppState, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
-import { logger } from '@core/secure';
+import { logger as secureLogger } from '@core/secure';
 import {
   handleNotificationAction,
   handleNotificationPress,
@@ -15,6 +15,10 @@ import {
 import { takePendingNotification } from '@/services/notifications/pendingNav';
 import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
 import { recoverOutgoing } from '@/services/send';
+import {
+  captureRealtimeDeliveryLease,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -23,15 +27,32 @@ import { ServerRotationApprovalHost } from '@ui/server-rotation';
 import { useChatNavigator } from '@ui/useChatNavigator';
 
 /** Catch every intentionally fire-and-forget notification task without logging payload content. */
-function runNotificationTask(label: string, task: () => Promise<unknown>): void {
+function runNotificationTask(
+  label: string,
+  accountLease: RealtimeDeliveryLease,
+  task: () => Promise<unknown>,
+): void {
   void Promise.resolve()
-    .then(task)
+    .then(() => (accountLease.isCurrent() ? task() : undefined))
     .catch((error: unknown) => {
-      logger.warn('[notif] foreground notification task failed', {
+      if (!accountLease.isCurrent()) return;
+      secureLogger.warn('[notif] foreground notification task failed', {
         task: label,
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
     });
+}
+
+/** Keep an unregistered native AppState callback from being replayed under a replacement account. */
+function createAccountOwnedAppState(
+  accountLease: RealtimeDeliveryLease,
+): Pick<typeof NativeAppState, 'addEventListener'> {
+  return {
+    addEventListener: (type, listener) =>
+      NativeAppState.addEventListener(type, (state) => {
+        if (accountLease.isCurrent()) listener(state);
+      }),
+  };
 }
 
 /**
@@ -60,6 +81,17 @@ function ConnectedAppLayout(): React.JSX.Element {
   // Opens a chat WITHOUT stacking one thread on another: a notification tapped while a thread is
   // already open swaps it (replace) instead of pushing, so Back from any thread → Messages.
   const openChat = useChatNavigator();
+  // Every listener/effect below belongs to this mounted account. Native/AppState callbacks may be
+  // queued past unmount, so they must not capture the replacement account when they finally run.
+  const [accountLease] = useState(captureRealtimeDeliveryLease);
+  const [AppState] = useState(() => createAccountOwnedAppState(accountLease));
+  // Preserve the exact certified AppState orchestration callback while making its asynchronous
+  // catch handlers obey the same mount lease as callback entry.
+  const [logger] = useState(() => ({
+    warn: (message: string, meta?: unknown): void => {
+      if (accountLease.isCurrent()) secureLogger.warn(message, meta);
+    },
+  }));
 
   // Coordinate App Lock and realtime in ONE listener. Two separate listeners introduced a race:
   // the first locked the UI after a long background interval, then the second immediately
@@ -98,7 +130,7 @@ function ConnectedAppLayout(): React.JSX.Element {
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [AppState, logger]);
 
   // Upload any buffered error reports once the connected app has mounted ("on start"). No-op unless
   // the server advertises support + the feature is enabled; the AppState listener above catches up
@@ -110,15 +142,17 @@ function ConnectedAppLayout(): React.JSX.Element {
   // Drain a pending notification tap and open its chat. Reads BOTH the notify-kit launch event
   // (getInitialNotification) and the pendingNav stash a background-alive tap leaves behind, once.
   const consumeNotificationTap = useCallback(() => {
-    runNotificationTask('tap-drain', () =>
+    runNotificationTask('tap-drain', accountLease, () =>
       drainNotificationTap(
         () => notifee.getInitialNotification(),
         takePendingNotification,
         handleNotificationPress,
         openChat,
+        undefined,
+        accountLease,
       ),
     );
-  }, [openChat]);
+  }, [accountLease, openChat]);
 
   // Foreground notification handling. Action buttons (reply / mark-read / love) run their
   // side-effects; a body tap (PRESS) while the app is VISIBLE runs its side-effects AND deep-links
@@ -127,16 +161,19 @@ function ConnectedAppLayout(): React.JSX.Element {
   useEffect(
     () =>
       notifee.onForegroundEvent(({ type, detail }) => {
+        if (!accountLease.isCurrent()) return;
         if (type === EventType.ACTION_PRESS) {
-          runNotificationTask('action', () => handleNotificationAction(detail));
+          runNotificationTask('action', accountLease, () => handleNotificationAction(detail));
         } else if (type === EventType.PRESS) {
-          runNotificationTask('press-side-effect', () => handleNotificationPress(detail));
-          runNotificationTask('press-navigation', () =>
-            openFromNotification(detail.notification?.data, openChat),
+          runNotificationTask('press-side-effect', accountLease, () =>
+            handleNotificationPress(detail),
+          );
+          runNotificationTask('press-navigation', accountLease, () =>
+            openFromNotification(detail.notification?.data, openChat, accountLease),
           );
         }
       }),
-    [openChat],
+    [accountLease, openChat],
   );
 
   // Cold start: a tap that LAUNCHED the app from killed isn't replayed as a foreground event —
@@ -155,7 +192,7 @@ function ConnectedAppLayout(): React.JSX.Element {
       if (state === 'active') consumeNotificationTap();
     });
     return () => sub.remove();
-  }, [consumeNotificationTap]);
+  }, [AppState, consumeNotificationTap]);
 
   return (
     <>

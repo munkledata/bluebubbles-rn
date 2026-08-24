@@ -3,7 +3,7 @@
  * a picture in a thread.
  *
  * THE BUG THIS LOCKS DOWN: both action pills used to `await` their helper and DISCARD the answer.
- * `saveAttachmentsToPhotos` returns a four-way result (saved | none | denied | error) and
+ * `saveAttachmentsToPhotos` returns a result (saved | none | denied | stale | error) and
  * `shareAttachment` reports whether the sheet opened at all — and every one of those outcomes,
  * INCLUDING complete success, rendered as absolutely nothing on screen. A save that worked was
  * pixel-identical to a dead button, which is exactly how it was reported.
@@ -346,7 +346,9 @@ describe('MediaViewer account ownership', () => {
     await renderViewer();
     const freshShare = retainConfiguredPress(screen.getByRole('button', { name: 'Share media' }));
     freshShare();
-    await waitFor(() => expect(share).toHaveBeenCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg'));
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg', expect.any(Function)),
+    );
   });
 
   it('makes a retained account-A Save callback inert after reconnect', async () => {
@@ -369,7 +371,9 @@ describe('MediaViewer account ownership', () => {
     await renderViewer();
     const freshSave = retainConfiguredPress(screen.getByRole('button', { name: 'Save media' }));
     freshSave();
-    await waitFor(() => expect(save).toHaveBeenCalledWith([PRIVATE_IMAGE_URI]));
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith([PRIVATE_IMAGE_URI], expect.any(Function)),
+    );
     await waitFor(() => expect(useToastStore.getState().current?.message).toBe('Saved to Photos'));
   });
 });
@@ -438,7 +442,11 @@ describe('MediaViewer route, page, and mount ownership', () => {
     share.mockResolvedValue({ ok: true });
     await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
     await waitFor(() =>
-      expect(share).toHaveBeenCalledWith(ROUTE_B_TARGET.localPath, ROUTE_B_TARGET.mimeType),
+      expect(share).toHaveBeenCalledWith(
+        ROUTE_B_TARGET.localPath,
+        ROUTE_B_TARGET.mimeType,
+        expect.any(Function),
+      ),
     );
   });
 
@@ -523,9 +531,13 @@ describe('MediaViewer route, page, and mount ownership', () => {
       freshPress();
       await waitFor(() => expect(nativeMock).toHaveBeenCalledTimes(2));
       if (button === 'Share media') {
-        expect(nativeMock).toHaveBeenLastCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg');
+        expect(nativeMock).toHaveBeenLastCalledWith(
+          PRIVATE_IMAGE_URI,
+          'image/jpeg',
+          expect.any(Function),
+        );
       } else {
-        expect(nativeMock).toHaveBeenLastCalledWith([PRIVATE_IMAGE_URI]);
+        expect(nativeMock).toHaveBeenLastCalledWith([PRIVATE_IMAGE_URI], expect.any(Function));
       }
     },
   );
@@ -563,7 +575,13 @@ describe('MediaViewer route, page, and mount ownership', () => {
     await scrollToPage(view, 99);
     expect(screen.getByText('2 of 2')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
-    await waitFor(() => expect(share).toHaveBeenCalledWith(PRIVATE_SECOND_IMAGE_URI, 'image/jpeg'));
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(
+        PRIVATE_SECOND_IMAGE_URI,
+        'image/jpeg',
+        expect.any(Function),
+      ),
+    );
 
     await scrollToPage(view, -99);
     expect(screen.getByText('1 of 2')).toBeTruthy();
@@ -643,10 +661,14 @@ describe('MediaViewer route, page, and mount ownership', () => {
       press();
       await waitFor(() => expect(nativeMock).toHaveBeenCalledTimes(2));
       if (action === 'Share') {
-        expect(nativeMock).toHaveBeenLastCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg');
+        expect(nativeMock).toHaveBeenLastCalledWith(
+          PRIVATE_IMAGE_URI,
+          'image/jpeg',
+          expect.any(Function),
+        );
         expect(useDialogStore.getState().current).toBeNull();
       } else {
-        expect(nativeMock).toHaveBeenLastCalledWith([PRIVATE_IMAGE_URI]);
+        expect(nativeMock).toHaveBeenLastCalledWith([PRIVATE_IMAGE_URI], expect.any(Function));
         await waitFor(() =>
           expect(useToastStore.getState().current?.message).toBe('Saved to Photos'),
         );
@@ -713,7 +735,7 @@ describe('MediaViewer save button', () => {
     fireEvent.press(pills()[1]!);
 
     await waitFor(() => expect(useToastStore.getState().current?.message).toBe('Saved to Photos'));
-    expect(save).toHaveBeenCalledWith([PRIVATE_IMAGE_URI]);
+    expect(save).toHaveBeenCalledWith([PRIVATE_IMAGE_URI], expect.any(Function));
   });
 
   it('explains a refused Photos permission instead of failing silently', async () => {
@@ -746,7 +768,9 @@ describe('MediaViewer share button', () => {
 
     fireEvent.press(pills()[0]!);
 
-    await waitFor(() => expect(share).toHaveBeenCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg'));
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg', expect.any(Function)),
+    );
     expect(useDialogStore.getState().current).toBeNull();
     expect(useToastStore.getState().current).toBeNull();
   });

@@ -299,11 +299,12 @@ export function useMessageActions({
   // it first (which triggers the download).
   const onShareSelected = (): void => {
     const sel = selected;
-    if (!sel) return;
+    if (!sel || !screenLease.isCurrent()) return;
     void (async () => {
       const att = sel.attachments.find((a) => isLocalFileUri(a.localPath));
       if (att?.localPath) {
-        const res = await shareAttachment(att.localPath, att.mimeType);
+        const res = await shareAttachment(att.localPath, att.mimeType, screenLease.isCurrent);
+        if (!screenLease.isCurrent()) return;
         if (res.ok) return;
         // Report it and STOP. The two tempting fall-throughs are both wrong here: the notice below
         // blames a missing download (the file was there), and sharing `sel.text` would quietly send
@@ -367,9 +368,13 @@ export function useMessageActions({
   // file; if none is downloaded yet, tells the user to open it first (which triggers the download).
   const onSaveSelected = (): void => {
     const atts = selected?.attachments ?? [];
-    if (atts.length === 0) return;
+    if (atts.length === 0 || !screenLease.isCurrent()) return;
     void (async () => {
-      const res = await saveAttachmentsToPhotos(atts.map((a) => a.localPath));
+      const res = await saveAttachmentsToPhotos(
+        atts.map((a) => a.localPath),
+        screenLease.isCurrent,
+      );
+      if (!screenLease.isCurrent()) return;
       if (res.status === 'denied') {
         showDialog('Save', 'Photos permission is required to save attachments.');
       } else if (res.status === 'error') {

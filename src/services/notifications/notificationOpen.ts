@@ -1,4 +1,8 @@
 import { logger } from '@core/secure';
+import {
+  captureRealtimeDeliveryLease,
+  type RealtimeDeliveryLease,
+} from '../realtime/deliveryCoordinator';
 import { stashPendingNotification } from './pendingNav';
 import { resolveNotificationData } from './notificationRouting';
 
@@ -83,12 +87,16 @@ export function chatDeepLink(target: NotificationOpenTarget): string {
 export async function openFromNotification(
   data: Record<string, unknown> | undefined,
   navigate: (path: string) => void,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<boolean> {
+  if (!accountLease.isCurrent()) return true;
   try {
     const target = notificationOpenTarget((await resolveNotificationData(data)) ?? undefined);
+    if (!accountLease.isCurrent()) return true;
     if (target) navigate(chatDeepLink(target));
     return true;
   } catch (error) {
+    if (!accountLease.isCurrent()) return true;
     // New native payloads need the encrypted DB to resolve local keys. A foreground caller invokes
     // this fire-and-forget, so contain a failed DB open here rather than creating an unhandled
     // rejection. Returning false lets the one-shot tap drain preserve its payload for a later retry.
@@ -147,17 +155,21 @@ export async function drainNotificationTap<T extends TappedNotification>(
   runPressSideEffects: (detail: T) => void | Promise<void>,
   navigate: (path: string) => void,
   restorePending: (data: Record<string, unknown>) => void = stashPendingNotification,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
+  if (!accountLease.isCurrent()) return;
   const raw = await getInitial();
+  if (!accountLease.isCurrent()) return;
   const initial = isRealPress(raw) ? raw : null;
   const pending = takePending();
   const tapData = initial?.notification?.data ?? pending ?? undefined;
-  const handled = await openFromNotification(tapData, navigate);
+  const handled = await openFromNotification(tapData, navigate, accountLease);
+  if (!accountLease.isCurrent()) return;
   // Both native launch state and the pending slot are destructive reads. Preserve ONE copy when
   // the encrypted route lookup failed so the next foreground drain can retry instead of silently
   // losing the tap. When both sources described the same press, `tapData` already chose one.
   if (!handled && tapData) restorePending(tapData);
   // A cleanup failure is still reported to the layout-level task boundary, but only after the
   // one-shot route either opened successfully or was preserved for a later retry.
-  if (initial) await runPressSideEffects(initial);
+  if (initial && accountLease.isCurrent()) await runPressSideEffects(initial);
 }

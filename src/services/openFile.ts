@@ -23,7 +23,7 @@ import { isLocalFileUri } from '@utils';
  * in the React-free ts-jest project and adds nothing to any startup path.
  */
 
-export type OpenFileStatus = 'opened' | 'shared' | 'missing' | 'no_handler' | 'error';
+export type OpenFileStatus = 'opened' | 'shared' | 'missing' | 'no_handler' | 'stale' | 'error';
 
 export interface OpenFileResult {
   status: OpenFileStatus;
@@ -36,6 +36,8 @@ interface OpenFileOptions {
    * read from the ABSENCE of an early rejection rather than from resolution. Tests pass a few ms.
    */
   settleMs?: number;
+  /** Original route/account ownership, rechecked before every external native launch. */
+  isCurrent?: () => boolean;
 }
 
 /**
@@ -65,19 +67,29 @@ const FLAG_GRANT_READ_URI_PERMISSION = 1;
  * it would silently be `undefined` — and a dataless VIEW intent fails in a way that looks like
  * "no app can open this".
  */
-async function resolveContentUri(localPath: string): Promise<string | null> {
+async function resolveContentUri(
+  localPath: string,
+  isCurrent: () => boolean,
+): Promise<string | null> {
+  if (!isCurrent()) return null;
   try {
     const { File } = await import('expo-file-system');
+    if (!isCurrent()) return null;
     const direct: unknown = new File(localPath).contentUri;
     if (typeof direct === 'string' && direct.startsWith('content://')) return direct;
   } catch (e) {
+    if (!isCurrent()) return null;
     logger.warn('[openFile] File.contentUri unavailable, trying the legacy resolver', e);
   }
+  if (!isCurrent()) return null;
   try {
     const legacy = await import('expo-file-system/legacy');
+    if (!isCurrent()) return null;
     const uri = await legacy.getContentUriAsync(localPath);
+    if (!isCurrent()) return null;
     if (typeof uri === 'string' && uri.startsWith('content://')) return uri;
   } catch (e) {
+    if (!isCurrent()) return null;
     logger.warn('[openFile] legacy getContentUriAsync failed', e);
   }
   return null;
@@ -95,6 +107,7 @@ async function resolveContentUri(localPath: string): Promise<string | null> {
  * - `shared`     — no viewer, but the share sheet opened (the user can pick a target).
  * - `missing`    — the local file is gone or the path was never a local file; caller should re-download.
  * - `no_handler` — nothing could open or share it.
+ * - `stale`      — the route/account that requested the open retired before native launch.
  * - `error`      — unexpected failure, already logged.
  */
 export async function openAttachmentFile(
@@ -102,7 +115,9 @@ export async function openAttachmentFile(
   mimeType?: string | null,
   opts?: OpenFileOptions,
 ): Promise<OpenFileResult> {
+  const isCurrent = opts?.isCurrent ?? (() => true);
   try {
+    if (!isCurrent()) return { status: 'stale' };
     // Not a local file at all (null, or an http/content uri) — nothing to open from disk.
     if (!isLocalFileUri(localPath)) return { status: 'missing' };
 
@@ -110,16 +125,20 @@ export async function openAttachmentFile(
     // instead of showing an error the user can do nothing about.
     try {
       const { File } = await import('expo-file-system');
+      if (!isCurrent()) return { status: 'stale' };
       if (!new File(localPath).exists) return { status: 'missing' };
     } catch (e) {
+      if (!isCurrent()) return { status: 'stale' };
       logger.warn('[openFile] could not stat the attachment, treating it as missing', e);
       return { status: 'missing' };
     }
 
-    const contentUri = await resolveContentUri(localPath);
+    const contentUri = await resolveContentUri(localPath, isCurrent);
+    if (!isCurrent()) return { status: 'stale' };
 
     if (contentUri) {
       const IntentLauncher = await import('expo-intent-launcher');
+      if (!isCurrent()) return { status: 'stale' };
       const launch = IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: contentUri,
         type: resolveViewType(mimeType),
@@ -137,6 +156,7 @@ export async function openAttachmentFile(
         ),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), opts?.settleMs ?? 600)),
       ]);
+      if (!isCurrent()) return { status: 'stale' };
       if (!failure) return { status: 'opened' };
       logger.warn(
         '[openFile] no viewer for this attachment, falling back to the share sheet',
@@ -147,9 +167,12 @@ export async function openAttachmentFile(
     // Share fallback. NOTE: the FILE path goes here, never the content uri — expo-sharing
     // rejects anything whose scheme is not `file`.
     const { shareAttachment } = await import('@/services/media');
-    const res = await shareAttachment(localPath, mimeType);
+    if (!isCurrent()) return { status: 'stale' };
+    const res = await shareAttachment(localPath, mimeType, isCurrent);
+    if (!isCurrent() || (!res.ok && res.reason === 'stale')) return { status: 'stale' };
     return { status: res.ok ? 'shared' : 'no_handler' };
   } catch (e) {
+    if (!isCurrent()) return { status: 'stale' };
     // `error`, not `warn`: only error-level lines reach ErrorReportSink, and this failure is
     // otherwise invisible to us.
     logger.error('[openFile] failed to open attachment', e);

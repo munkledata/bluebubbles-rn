@@ -98,7 +98,7 @@ describe('openAttachmentFile', () => {
 
     expect(res.status).toBe('shared');
     // expo-sharing rejects any scheme that is not `file` — the OPPOSITE of ACTION_VIEW.
-    expect(shareAttachment).toHaveBeenCalledWith(FILE, 'application/pdf');
+    expect(shareAttachment).toHaveBeenCalledWith(FILE, 'application/pdf', expect.any(Function));
     expect(shareAttachment.mock.calls[0]?.[0]).not.toMatch(/^content:/);
   });
 
@@ -166,5 +166,29 @@ describe('openAttachmentFile', () => {
     await expect(openAttachmentFile(FILE, 'application/pdf', OPTS)).resolves.toEqual({
       status: 'error',
     });
+  });
+
+  it('does not launch a viewer or share after ownership retires during URI resolution', async () => {
+    fileContentUri = undefined;
+    let resolveContentUri!: (uri: string) => void;
+    getContentUriAsync.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveContentUri = resolve;
+      }),
+    );
+    let current = true;
+    const guardedOptions = { ...OPTS, isCurrent: () => current };
+    const pending = openAttachmentFile(FILE, 'application/pdf', guardedOptions);
+    for (let i = 0; i < 20 && getContentUriAsync.mock.calls.length === 0; i += 1) {
+      await Promise.resolve();
+    }
+    expect(getContentUriAsync).toHaveBeenCalledTimes(1);
+
+    current = false;
+    resolveContentUri(CONTENT);
+
+    await expect(pending).resolves.toEqual({ status: 'stale' });
+    expect(startActivityAsync).not.toHaveBeenCalled();
+    expect(shareAttachment).not.toHaveBeenCalled();
   });
 });
