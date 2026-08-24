@@ -1,3 +1,4 @@
+/* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
 /**
  * SocketService auth-mode wiring. The secure default puts the password in the
  * handshake `auth` payload (never the URL); legacy mode falls back to a `?guid=`
@@ -49,6 +50,48 @@ describe('SocketService auth mode', () => {
   it('never places the password in the connection origin (URL)', () => {
     new SocketService(handleRawEvent).connect('https://srv', 'pw', { legacyQueryAuth: false });
     expect(mockIo.mock.calls[0]![0]).toBe('https://srv');
+  });
+
+  it('releases its retained credential snapshot on terminal disconnect', () => {
+    const svc = new SocketService(handleRawEvent);
+    svc.connect('https://account-a.example', 'account-a-password', {
+      headers: { Authorization: 'Bearer account-a-password' },
+    });
+
+    svc.disconnect();
+
+    const retained = svc as unknown as {
+      origin: string;
+      password: string;
+      opts: { headers?: Readonly<Record<string, string>> };
+    };
+    expect(retained.origin).toBe('');
+    expect(retained.password).toBe('');
+    expect(retained.opts).toEqual({});
+  });
+
+  it('releases the credential snapshot even when native disconnect throws', () => {
+    const svc = new SocketService(handleRawEvent);
+    svc.connect('https://account-a.example', 'account-a-password', {
+      headers: { Authorization: 'Bearer account-a-password' },
+    });
+    const socket = mockIo.mock.results[mockIo.mock.results.length - 1]!.value as {
+      disconnect: jest.Mock;
+    };
+    socket.disconnect.mockImplementationOnce(() => {
+      throw new Error('native disconnect sentinel');
+    });
+
+    expect(() => svc.disconnect()).toThrow('native disconnect sentinel');
+
+    const retained = svc as unknown as {
+      origin: string;
+      password: string;
+      opts: { headers?: Readonly<Record<string, string>> };
+    };
+    expect(retained.origin).toBe('');
+    expect(retained.password).toBe('');
+    expect(retained.opts).toEqual({});
   });
 
   it('emit() forwards to the socket; no-op before connect', () => {

@@ -2,6 +2,8 @@ import { logger } from '@core/secure';
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let reachable = true;
+/** Invalidates promise continuations created by every stopped or replaced watch. */
+let watchGeneration = 0;
 
 /**
  * Poll a lightweight `probe` on an interval; on a down→up transition (the server becomes reachable
@@ -16,10 +18,12 @@ export function startReachabilityWatch(
   intervalMs = 30_000,
 ): void {
   stopReachabilityWatch();
+  const generation = watchGeneration;
   reachable = true; // assume up at start; only resume on an observed down→up edge
   timer = setInterval(() => {
     void probe()
       .then(() => {
+        if (generation !== watchGeneration) return;
         if (!reachable) {
           reachable = true;
           logger.info('[reachability] server reachable again — resuming sync');
@@ -27,12 +31,14 @@ export function startReachabilityWatch(
         }
       })
       .catch(() => {
+        if (generation !== watchGeneration) return;
         reachable = false;
       });
   }, intervalMs);
 }
 
 export function stopReachabilityWatch(): void {
+  watchGeneration += 1;
   if (timer) clearInterval(timer);
   timer = null;
 }

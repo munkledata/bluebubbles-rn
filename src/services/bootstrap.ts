@@ -70,6 +70,8 @@ const SHORTCUT_CLEANUP_FAILURE_MESSAGE =
   'Direct Share shortcuts from the previous connection could not be fully removed.';
 const LOG_CLEANUP_FAILURE_MESSAGE =
   'Diagnostic logs from the previous connection could not be fully removed.';
+const IN_MEMORY_CLEANUP_FAILURE_MESSAGE =
+  'In-memory state from the previous connection could not be fully retired.';
 const SETTINGS_HYDRATION_FAILURE_MESSAGE =
   'Gator could not safely load local settings. Restart the app and try again.';
 const DATABASE_BOOT_FAILURE_MESSAGE =
@@ -1199,23 +1201,8 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   // Realtime DB writes and native presentation are short tracked commits. Long downloads carry
   // the revoked generation outside this drain and must discard their eventual file/DB commit.
   const realtimeIdle = pauseRealtimeDeliveries();
-  uploadRegistry.cancelAll();
-  const { errorReportsIdle } = resetSessionScopedState();
-  // Revoke live HTTP/socket credential reads synchronously too. SecureStore may hang or reject;
-  // neither can be allowed to keep the old account authorized in this JS context.
-  useSessionStore.getState().reset();
-  stopReachabilityWatch();
-  getSocket()?.disconnect();
-  setSocket(null);
-  // Close the authorization window BEFORE the wipe, not after. A sync started at boot can still be
-  // paging when the user taps Disconnect, and nothing cancels it — with the credentials still in
-  // place its remaining requests stay fully authorized, so `upsertChats`/`upsertMessages` land
-  // AFTER the deletes and `fullSync` then writes a non-null marker. Clearing the origin first makes
-  // every in-flight request fail immediately (a reset origin builds a relative URL), so the run
-  // unwinds in seconds instead of minutes, and it means a Disconnect is honoured even if
-  // everything below throws.
-  //
-  // First persist the independent, non-secret filesystem marker. Its native implementation uses a
+  // Persist the independent, non-secret filesystem marker before invoking any UI/store/native
+  // observer that could throw. Its native implementation uses a
   // synchronous app-private file operation: the attempt happens before the first vault mutation,
   // cannot wait on an unbounded promise, and remains readable when Android Keystore/SecureStore is
   // completely unavailable. A failure is recorded but never skips the local cleanup below.
@@ -1226,6 +1213,73 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   } catch (e) {
     logger.warn('[forget] independent account revocation marker write failed', e);
   }
+
+  // A Zustand subscriber or native teardown callback is application code and can throw
+  // synchronously. Isolate every volatile step so one broken observer cannot skip session
+  // revocation, socket retirement, or the durable cleanup below. Any such failure still blocks B;
+  // a later retry performs the whole idempotent sweep again in a fresh/unmounted UI context.
+  const failedInMemorySurfaces: string[] = [];
+  try {
+    uploadRegistry.cancelAll();
+  } catch {
+    failedInMemorySurfaces.push('upload-registry');
+  }
+  let errorReportsIdle = Promise.resolve();
+  try {
+    const resetResult = resetSessionScopedState();
+    errorReportsIdle = resetResult.errorReportsIdle;
+    failedInMemorySurfaces.push(...resetResult.failedSurfaces);
+  } catch {
+    // The coordinator isolates every registered adapter. Keep this outer boundary so a future
+    // regression in its own orchestration still cannot abort Disconnect.
+    failedInMemorySurfaces.push('session-reset-coordinator');
+  }
+  // Revoke live HTTP/socket credential reads synchronously too. SecureStore may hang or reject;
+  // neither can be allowed to keep the old account authorized in this JS context.
+  try {
+    useSessionStore.getState().reset();
+  } catch {
+    failedInMemorySurfaces.push('session-store');
+  }
+  try {
+    stopReachabilityWatch();
+  } catch {
+    failedInMemorySurfaces.push('reachability-watch');
+  }
+  let retiringSocket: ReturnType<typeof getSocket> = null;
+  try {
+    retiringSocket = getSocket();
+  } catch {
+    failedInMemorySurfaces.push('socket-reference');
+  }
+  try {
+    retiringSocket?.disconnect();
+  } catch {
+    failedInMemorySurfaces.push('socket-disconnect');
+  }
+  try {
+    setSocket(null);
+  } catch {
+    failedInMemorySurfaces.push('realtime-runtime');
+  }
+  const inMemoryCleanupFailure =
+    failedInMemorySurfaces.length > 0 ? new Error(IN_MEMORY_CLEANUP_FAILURE_MESSAGE) : null;
+  if (inMemoryCleanupFailure) {
+    try {
+      logger.warn('[forget] in-memory account cleanup steps failed', {
+        surfaces: failedInMemorySurfaces,
+      });
+    } catch {
+      // Logging is best-effort at this boundary; cleanup remains authoritative.
+    }
+  }
+  // Close the authorization window BEFORE the wipe, not after. A sync started at boot can still be
+  // paging when the user taps Disconnect, and nothing cancels it — with the credentials still in
+  // place its remaining requests stay fully authorized, so `upsertChats`/`upsertMessages` land
+  // AFTER the deletes and `fullSync` then writes a non-null marker. Clearing the origin first makes
+  // every in-flight request fail immediately (a reset origin builds a relative URL), so the run
+  // unwinds in seconds instead of minutes, and it means a Disconnect is honoured even if
+  // everything below throws.
 
   // A previous timed-out destructive chain may still be deleting credentials, a Firebase token,
   // or DB rows. Do not pile another sweep on top of it. The first run already continued all other
@@ -1449,6 +1503,7 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   const cleanupFailure =
     durableCredentialFailure ??
     candidateDrainFailure ??
+    inMemoryCleanupFailure ??
     fcmTokenRetirementFailure ??
     realtimeDrainFailure ??
     syncDrainFailure ??

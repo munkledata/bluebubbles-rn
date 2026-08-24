@@ -2844,6 +2844,32 @@ describe('forget() — the wipe is confirmed, not trusted', () => {
 });
 
 describe('forget() — in-flight realtime delivery is drained before private state is erased', () => {
+  it('keeps revocation and the wipe authoritative when a session subscriber throws', async () => {
+    const subscriberFailure = new Error('session subscriber sentinel');
+    const unsubscribe = useSessionStore.subscribe(() => {
+      throw subscriberFailure;
+    });
+
+    try {
+      await expect(forget()).rejects.toThrow(/in-memory state/i);
+
+      expect(markerMarkRevoked).toHaveBeenCalledTimes(1);
+      expect(useSessionStore.getState()).toMatchObject({
+        status: 'unauthenticated',
+        origin: null,
+        password: null,
+        serverInfo: null,
+      });
+      expect(clearLocalCache).toHaveBeenCalledTimes(1);
+      expect(localCacheDirty).toHaveBeenCalledTimes(1);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+      expect(clearShareShortcuts).toHaveBeenCalledTimes(1);
+      expect(clearFileLogs).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('synchronously cancels every upload and clears progress after closing realtime admission', async () => {
     let releaseRealtime!: () => void;
     const order: string[] = [];

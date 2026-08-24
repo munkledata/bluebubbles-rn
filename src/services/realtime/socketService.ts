@@ -382,8 +382,18 @@ export class SocketService {
 
   /** Tear down the current socket instance (without touching escalation state). */
   private teardownSocket(): void {
-    this.socket?.disconnect();
-    this.socket = null;
+    try {
+      this.socket?.disconnect();
+    } finally {
+      this.socket = null;
+      if (this.stopped) {
+        // Terminal disconnect/replacement is an account-memory boundary. Escalation leaves
+        // `stopped` false and therefore retains the current account's reconnect snapshot.
+        this.origin = '';
+        this.password = '';
+        this.opts = {};
+      }
+    }
   }
 
   /** Emit an event to the server (e.g. start-typing/stop-typing). No-op if disconnected. */

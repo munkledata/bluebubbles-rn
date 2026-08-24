@@ -45,6 +45,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 | Upload behavior                      | `docs/UPLOAD_PROGRESS.md`                                       |
 | Attachment cache                     | `docs/CACHE_ARCHITECTURE.md`                                    |
 | Share intake                         | `docs/SHARE_INTENT_RELIABILITY.md`                              |
+| Session/account isolation            | `docs/SESSION_SCOPED_STATE_INVENTORY.md`                        |
 | UI coverage/testing                  | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md` |
 
 ## Architecture contracts

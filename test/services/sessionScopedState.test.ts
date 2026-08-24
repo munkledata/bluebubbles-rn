@@ -190,6 +190,61 @@ describe('resetSessionScopedState', () => {
     expect(queryClient.getQueryData(['server', 'deferred-private-account'])).toBeUndefined();
   });
 
+  it('keeps account B data when account A settles late under the same query key', async () => {
+    const key = ['server', 'same-query-key'] as const;
+    let finishAccountA!: (value: { account: string }) => void;
+    const accountA = queryClient
+      .fetchQuery({
+        queryKey: key,
+        queryFn: () =>
+          new Promise<{ account: string }>((resolve) => {
+            finishAccountA = resolve;
+          }),
+      })
+      .catch(() => undefined);
+
+    resetSessionScopedState();
+
+    let finishAccountB!: (value: { account: string }) => void;
+    const accountB = queryClient.fetchQuery({
+      queryKey: key,
+      queryFn: () =>
+        new Promise<{ account: string }>((resolve) => {
+          finishAccountB = resolve;
+        }),
+    });
+    finishAccountB({ account: 'account-b@example.test' });
+    await expect(accountB).resolves.toEqual({ account: 'account-b@example.test' });
+
+    finishAccountA({ account: 'account-a@example.test' });
+    await accountA;
+
+    expect(queryClient.getQueryData(key)).toEqual({ account: 'account-b@example.test' });
+  });
+
+  it('runs every later reset and reports a throwing store subscriber', () => {
+    useDownloadStore.getState().start('old-download');
+    showDialog('Previous account', 'Private dialog copy');
+    showToast('Private toast copy');
+    queryClient.setQueryData(['server', 'old-private-query'], { private: true });
+    const unsubscribe = useDownloadStore.subscribe(() => {
+      throw new Error('download subscriber sentinel');
+    });
+
+    let result!: ReturnType<typeof resetSessionScopedState>;
+    try {
+      result = resetSessionScopedState();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(result.failedSurfaces).toEqual(['downloads']);
+    expect(useDownloadStore.getState()).toMatchObject({ progress: {}, status: {} });
+    expect(useDialogStore.getState()).toMatchObject({ current: null, queue: [] });
+    expect(useToastStore.getState()).toMatchObject({ current: null, queue: [] });
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+  });
+
   it('does not reset durable preferences or a share waiting at the auth gate', () => {
     useFeatureSettingsStore.setState({ compactChatList: true });
     useSyncSettingsStore.setState({ messagesPerChat: 25 });
