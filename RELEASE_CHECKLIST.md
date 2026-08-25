@@ -9,13 +9,21 @@ Sections 1–7 remain the broader Closed/Open/Production release gate.
 
 Record the candidate before testing:
 
-- Version/build number: `0.1.40 (versionCode 56)`
-- Git commit: `5d367eb58e38126258423f1cd9ce0da42b179f7f`
-- AAB SHA-256: `926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`
-- EAS build URL or local build log: local EAS production build on 2026-08-23; tracking ID
-  `0c5e82fe-e8d2-4dfa-ad94-38f9e805df7e`; Gradle `BUILD SUCCESSFUL` (1,227 tasks); no hosted build or submission
+- Version/build number: `0.1.41 (versionCode 57)`
+- Git commit: `8564b348d02c4e218e8a75a6a36e265ec5740772`
+- Local AAB: `gator-release-0.1.41-v57-8564b34.aab` — ignored; never commit it
+- AAB SHA-256: `3ad096fe474fb35b8f0619ca9b9ac337dc3613d16a1df1f98d638176ef25be2b`
+- Upload certificate SHA-256: `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
+- EAS build URL or local build log: local EAS production build on 2026-08-25; Gradle
+  `BUILD SUCCESSFUL` (1,227 tasks in 4m40s); no hosted build, Play upload, or submission
 - Tester/device/Android versions: `__________`
 - Test date: `__________`
+
+Retired historical candidate — static proof only: `0.1.40` / versionCode `56`, source
+`5d367eb58e38126258423f1cd9ce0da42b179f7f`, AAB
+`gator-release-0.1.40-v56-5d367eb.aab`, SHA-256
+`926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`. Its Play, tester,
+install/update, device, notification, and cleanup evidence never transfers to the current candidate.
 
 ## 0. Private Google Play Internal Testing gate
 
@@ -144,7 +152,8 @@ npm run check:android-build
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. The host flow is post-v56 and does not count as evidence for frozen v56.
+      credentials. The host flow is included in source commit `8564b34` and candidate versionCode
+      `57`; exact Android network and SecureStore behavior remains unproven.
 - [ ] URL previews make no automatic third-party request. Exercise the enabled preview fallback and
       record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
@@ -174,28 +183,37 @@ Complete the detailed device checklist using the exact AAB. At minimum:
       display sizes pass. The store listing makes no light/system-theme promise.
 - [ ] Permission denial, restricted battery settings handoff, offline/reconnect, low-storage, and
       process-death paths fail visibly and recover.
-- [x] The local API-35 arm64 DEV V3 lane passes the disposable SQLCipher/op-sqlite/Drizzle contract:
-      exact current production migrations `0001`–`0038`, per-migration `0030` rollback/retry over an
-      audited head-`0029` fixture, plus encrypted logical fixtures for the reviewed repository heads
-      `0024` and `0027`. The earlier fixtures close, reject the wrong key, verify read-only, and apply
-      their exact tails through `0038`; production FTS triggers, integrity/idempotency, all three
-      adapter routes, rekey/reopen, old-key rejection, and cleanup also pass.
-- [x] The local API-35 arm64 DEV relaunch lane proves one controlled process boundary on a separate
-      fixed throwaway database: process A is alive with its encrypted handle retained at READY, the
-      harness force-stops it and observes no process, process B has a different PID, and B verifies
-      the existing head-`0029` state read-only before applying `0030`–`0038` and cleaning up.
-- [x] The local API-35 arm64 DEV active-WAL lane proves one controlled ordinary-write crash on a third
-      fixed throwaway database: process A commits the baseline, checkpoints WAL, leaves a bounded
-      uncommitted transaction open, and emits READY; the host observes physical WAL growth, crashes
-      that exact process, and requires distinct process B to prove the exact baseline-only state
-      read-only before recovery commit, read-only reopen, and exact database/sidecar/marker cleanup.
-- [x] The local API-35 arm64 DEV active-migration lane proves one controlled post-statement crash on a
-      fourth fixed throwaway database: process A prepares exact head `0037` and an exact 133-row
-      fixture, then emits READY only after the exact production migration `0038` `UPDATE` resolves
-      inside its open transaction while the ledger remains at `0037` and before ledger insert/commit.
-      The host proves WAL beyond its header before and after crashing exact A; distinct B first proves
-      the exact original head-`0037` state read-only, then retries exact `[0038]`, verifies persistence,
-      and cleans all eight fixed paths. This is not statement-in-flight evidence.
+
+### Historical pre-v57 DEV host evidence
+
+These four DEV results stop at the then-current migration head `0038`; they do not include migration
+`0039_message_error_message` and give no current-v57 or exact-AAB credit.
+
+- The local API-35 arm64 DEV V3 lane passed the disposable SQLCipher/op-sqlite/Drizzle contract:
+  exact then-current production migrations `0001`–`0038`, per-migration `0030` rollback/retry over an
+  audited head-`0029` fixture, plus encrypted logical fixtures for the reviewed repository heads
+  `0024` and `0027`. The earlier fixtures close, reject the wrong key, verify read-only, and apply
+  their exact tails through `0038`; production FTS triggers, integrity/idempotency, all three
+  adapter routes, rekey/reopen, old-key rejection, and cleanup also pass.
+- The local API-35 arm64 DEV relaunch lane proved one controlled process boundary on a separate
+  fixed throwaway database: process A is alive with its encrypted handle retained at READY, the
+  harness force-stops it and observes no process, process B has a different PID, and B verifies
+  the existing head-`0029` state read-only before applying `0030`–`0038` and cleaning up.
+- The local API-35 arm64 DEV active-WAL lane proved one controlled ordinary-write crash on a third
+  fixed throwaway database: process A commits the baseline, checkpoints WAL, leaves a bounded
+  uncommitted transaction open, and emits READY; the host observes physical WAL growth, crashes
+  that exact process, and requires distinct process B to prove the exact baseline-only state
+  read-only before recovery commit, read-only reopen, and exact database/sidecar/marker cleanup.
+- The local API-35 arm64 DEV active-migration lane proved one controlled post-statement crash on a
+  fourth fixed throwaway database: process A prepares exact head `0037` and an exact 133-row
+  fixture, then emits READY only after the exact production migration `0038` `UPDATE` resolves
+  inside its open transaction while the ledger remains at `0037` and before ledger insert/commit.
+  The host proves WAL beyond its header before and after crashing exact A; distinct B first proves
+  the exact original head-`0037` state read-only, then retries exact `[0038]`, verifies persistence,
+  and cleans all eight fixed paths. This is not statement-in-flight evidence.
+
+### Current v57 native/device proof
+
 - [ ] The exact release candidate and a supported physical device repeat the native contract and
       pass the crypto self-test, fresh install plus an actual signed prior-build install-over,
       spontaneous process death, active-migration crash, power-loss/torn-write recovery, and
