@@ -8,52 +8,20 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@core": [
-        "./src/core/index.ts"
-      ],
-      "@core/*": [
-        "./src/core/*"
-      ],
-      "@db": [
-        "./src/db/schema.ts"
-      ],
-      "@db/*": [
-        "./src/db/*"
-      ],
-      "@ui": [
-        "./src/ui/index.ts"
-      ],
-      "@ui/*": [
-        "./src/ui/*"
-      ],
-      "@state/*": [
-        "./src/state/*"
-      ],
-      "@features/*": [
-        "./src/features/*"
-      ],
-      "@native/*": [
-        "./src/native/*"
-      ],
-      "@utils": [
-        "./src/utils/index.ts"
-      ],
-      "@utils/*": [
-        "./src/utils/*"
-      ]
+      "@/*": ["./src/*"],
+      "@core": ["./src/core/index.ts"],
+      "@core/*": ["./src/core/*"],
+      "@db": ["./src/db/schema.ts"],
+      "@db/*": ["./src/db/*"],
+      "@ui": ["./src/ui/index.ts"],
+      "@ui/*": ["./src/ui/*"],
+      "@state/*": ["./src/state/*"],
+      "@features/*": ["./src/features/*"],
+      "@native/*": ["./src/native/*"],
+      "@utils": ["./src/utils/index.ts"],
+      "@utils/*": ["./src/utils/*"]
     }
   },
-  "include": [
-    "src",
-    "app",
-    "*.ts",
-    "test/components"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src", "app", "*.ts", "test/components", "test/types"],
+  "exclude": ["node_modules", "dist"]
 }
