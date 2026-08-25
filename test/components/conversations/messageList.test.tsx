@@ -103,6 +103,7 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
     FailedMessageSheet: (props: {
       visible: boolean;
       isAttachment?: boolean;
+      errorDetail?: string | null;
       onRetry: () => void;
       onDelete: () => void;
       onClose: () => void;
@@ -117,6 +118,7 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
               { testID: 'sheet-attachment' },
               String(!!props.isAttachment),
             ),
+            ReactLib.createElement(Text, { testID: 'sheet-detail' }, props.errorDetail ?? ''),
             ReactLib.createElement(
               Pressable,
               { testID: 'sheet-retry', onPress: props.onRetry },
@@ -338,7 +340,16 @@ describe('MessageList — row callback binding', () => {
 
 describe('MessageList — failed-message flow', () => {
   it('opens the sheet on retry and Try Again re-sends via @/services/send', async () => {
-    const messages = [make({ id: 1, guid: 'x', text: 'oops', isFromMe: 1, sendState: 'error' })];
+    const messages = [
+      make({
+        id: 1,
+        guid: 'x',
+        text: 'oops',
+        isFromMe: 1,
+        sendState: 'error',
+        errorMessage: 'Messages rejected this send.',
+      }),
+    ];
     await renderWithTheme(
       <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
     );
@@ -349,6 +360,7 @@ describe('MessageList — failed-message flow', () => {
     expect(await screen.findByTestId('sheet')).toBeTruthy();
     // A plain text message → not flagged as an attachment.
     expect(screen.getByTestId('sheet-attachment').props.children).toBe('false');
+    expect(screen.getByTestId('sheet-detail').props.children).toBe('Messages rejected this send.');
 
     fireEvent.press(screen.getByTestId('sheet-retry'));
     // The GUID is the WHOLE argument. Passing the bubble's text/image made the service rebuild the

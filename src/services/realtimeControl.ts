@@ -22,6 +22,7 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { useSessionStore } from '@state/sessionStore';
+import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { isDevServer } from '@utils/isDev';
 import { accountRevocationMarker, candidateClient, http, vault } from './clients';
@@ -36,7 +37,12 @@ import { ensureChatSynced, maybeResumeSync, startSync } from './syncControl';
 import { autoDownloadMessageAttachments } from './download/autoDownloadAttachments';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
-import { startReachabilityWatch } from './reachability';
+import {
+  probeReachabilityNow,
+  startReachabilityWatch,
+  stopReachabilityWatch,
+} from './reachability';
+import { startDeviceNetworkWatch, stopDeviceNetworkWatch } from './networkReachability';
 import { buildMessageIntents } from './notifications/intents';
 import { postNotification, requestNotificationPermission } from './notifications/notifeeService';
 import { effectivelyLocked } from './notifications/lockGate';
@@ -56,6 +62,7 @@ import {
   runTrackedRealtimeDelivery,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
 import { serverRotationCoordinator } from './realtime/serverRotationCoordinator';
 import {
@@ -120,6 +127,7 @@ async function prepareMessageNotificationSettings(
 }
 
 let socket: SocketService | null = null;
+let stopSocketLifecycleObservation: (() => void) | null = null;
 // Guards the ONE-TIME realtime setup (notification/FCM permission + token registration) so it
 // runs on the FIRST connect only — never on a foreground reconnect. See startRealtime().
 let realtimeOneTimeSetupDone = false;
@@ -155,7 +163,22 @@ export function getSocket(): SocketService | null {
 export function setSocket(next: SocketService | null): void {
   socket = next;
   if (next === null) {
+    stopSocketLifecycleObservation?.();
+    stopSocketLifecycleObservation = null;
     resetRealtimeRuntime();
+  }
+}
+
+/** A native disconnect may throw after SocketService has already revoked its callbacks/secrets. */
+function retireForegroundSocket(): void {
+  const retiring = socket;
+  socket = null;
+  try {
+    retiring?.disconnect();
+  } catch (error) {
+    logger.warn('[socket] foreground retirement failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
   }
 }
 
@@ -329,6 +352,61 @@ let realtimeForegroundActive = false;
 let realtimeLifecycleEpoch = 0;
 let fallbackOccurrenceSequence = 0;
 const fallbackOccurrenceNamespace = Crypto.randomUUID();
+
+interface TransportHealthOwner {
+  readonly accountLease: RealtimeDeliveryLease;
+  readonly realtimeLifecycleEpoch: number;
+  readonly transportGeneration: number;
+}
+
+function beginTransportHealthLifecycle(): number {
+  try {
+    return useTransportHealthStore.getState().beginLifecycle();
+  } catch (error) {
+    logger.warn('[transport] begin-state observer failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return useTransportHealthStore.getState().generation;
+  }
+}
+
+function ownsTransportHealth(owner: TransportHealthOwner): boolean {
+  return (
+    realtimeForegroundActive &&
+    owner.realtimeLifecycleEpoch === realtimeLifecycleEpoch &&
+    owner.accountLease.isCurrent() &&
+    !realtimeIntakeLocked() &&
+    useTransportHealthStore.getState().generation === owner.transportGeneration
+  );
+}
+
+function publishTransportHealth(
+  owner: TransportHealthOwner,
+  surface: 'socket' | 'server' | 'network',
+  publish: () => void,
+): boolean {
+  if (!ownsTransportHealth(owner)) return false;
+  try {
+    publish();
+    return ownsTransportHealth(owner);
+  } catch (error) {
+    logger.warn('[transport] state observer failed', {
+      surface,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return false;
+  }
+}
+
+function pauseTransportHealth(): void {
+  try {
+    useTransportHealthStore.getState().pause();
+  } catch (error) {
+    logger.warn('[transport] pause-state observer failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}
 
 function resetRealtimeRuntime(expected?: RealtimeRuntime): void {
   const current = realtimeRuntimeInstance;
@@ -613,6 +691,33 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
     headers: { ...transport.headers },
     legacyQueryAuth: transport.authMode === 'legacy-query',
   });
+  // The durable-ingress constructor/connect sequence above is security-certified. Transport
+  // presentation observes the opened socket afterward and owns its own generation fence.
+  stopSocketLifecycleObservation?.();
+  stopSocketLifecycleObservation = null;
+  stopReachabilityWatch();
+  stopDeviceNetworkWatch();
+  const activeSocket = socket;
+  const transportGeneration = beginTransportHealthLifecycle();
+  const transportOwner: TransportHealthOwner = {
+    accountLease,
+    realtimeLifecycleEpoch: lifecycleEpoch,
+    transportGeneration,
+  };
+  // A synchronous Zustand observer can pause, lock, or replace the account. The certified socket
+  // open is synchronous, so pause retires it before any native callback can publish.
+  if (!ownsTransportHealth(transportOwner)) return;
+  const stopLifecycleObservation = activeSocket.observeLifecycle(({ phase, recovered }) => {
+    const published = publishTransportHealth(transportOwner, 'socket', () => {
+      useTransportHealthStore.getState().setSocketState(transportGeneration, phase);
+    });
+    if (published && phase === 'connected' && recovered) maybeResumeSync();
+  });
+  if (!ownsTransportHealth(transportOwner)) {
+    stopLifecycleObservation();
+    return;
+  }
+  stopSocketLifecycleObservation = stopLifecycleObservation;
   // Recover any row left pending by a prior process death before waiting for another callback.
   void runTrackedRealtimeDelivery((lease) => runtime.dispatcher.resume(lease)).catch(
     (error: unknown) => {
@@ -627,7 +732,24 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
   // reconnect covers the happy path, but for users who lose connectivity often (and whose websocket
   // frequently can't re-establish) this lightweight ping-on-a-timer is what actually brings sync
   // back without a manual pull. `ping` is non-retrying, so it detects "down" fast.
-  startReachabilityWatch(() => serverApi.ping(http), maybeResumeSync);
+  startReachabilityWatch((signal) => serverApi.ping(http, signal), {
+    onStateChange: (state) => {
+      publishTransportHealth(transportOwner, 'server', () => {
+        useTransportHealthStore.getState().setServerState(transportGeneration, state);
+      });
+    },
+    onRecovered: () => {
+      if (ownsTransportHealth(transportOwner)) maybeResumeSync();
+    },
+  });
+  startDeviceNetworkWatch((state) => {
+    if (!ownsTransportHealth(transportOwner)) return;
+    const previous = useTransportHealthStore.getState().network;
+    const published = publishTransportHealth(transportOwner, 'network', () => {
+      useTransportHealthStore.getState().setNetworkState(transportGeneration, state);
+    });
+    if (published && previous === 'offline' && state === 'online') probeReachabilityNow();
+  });
   // ONE-TIME: requesting notification permission (notifee + FCM) launches the system permission
   // dialog, and that dialog itself fires an AppState change → the foreground `resumeRealtime()`
   // listener → `startRealtime()` again. Doing it on EVERY (re)connect created an INFINITE
@@ -701,8 +823,12 @@ export function pauseRealtime(): void {
   realtimeForegroundActive = false;
   realtimeLifecycleEpoch += 1;
   serverRotationCoordinator.cancel();
-  socket?.disconnect();
-  socket = null;
+  pauseTransportHealth();
+  stopReachabilityWatch();
+  stopDeviceNetworkWatch();
+  stopSocketLifecycleObservation?.();
+  stopSocketLifecycleObservation = null;
+  retireForegroundSocket();
 }
 
 /**
@@ -712,9 +838,11 @@ export function pauseRealtime(): void {
  */
 export async function resumeRealtime(): Promise<void> {
   realtimeForegroundActive = true;
-  realtimeLifecycleEpoch += 1;
   const { origin, password } = useSessionStore.getState();
   if (!origin || !password) return;
+  // Do not invalidate a healthy foreground owner's callbacks merely because another `active`
+  // notification arrived (for example, after dismissing a system permission dialog). A genuine
+  // restart enters startRealtime(), which advances the epoch and replaces every observer itself.
   if (!socket || !socket.connected) await startRealtime();
   if (!realtimeForegroundActive || realtimeIntakeLocked()) return;
   // Even a healthy socket does not imply the prior process finished its durable queue.
@@ -822,4 +950,48 @@ export async function approveNewServerUrl(
       if (isCurrent()) maybeResumeSync();
     },
   });
+}
+
+/**
+ * User-requested foreground retry. Replace only the live socket against its already-approved
+ * transport, then immediately re-run the existing server probe. Authentication and the durable
+ * realtime runtime are deliberately untouched.
+ */
+export function retryRealtimeConnection(): boolean {
+  if (!realtimeForegroundActive || realtimeIntakeLocked()) return false;
+  const session = useSessionStore.getState();
+  const activeSocket = socket;
+  const health = useTransportHealthStore.getState();
+  if (
+    session.status !== 'connected' ||
+    !session.origin ||
+    !session.password ||
+    !activeSocket ||
+    !health.active
+  ) {
+    return false;
+  }
+
+  const transportGeneration = health.generation;
+  if (!activeSocket.retryConnection()) return false;
+  if (
+    !realtimeForegroundActive ||
+    activeSocket !== socket ||
+    realtimeIntakeLocked() ||
+    useTransportHealthStore.getState().generation !== transportGeneration
+  ) {
+    return false;
+  }
+
+  try {
+    // Clear the prior attempt's HTTP result so an online retry presents as connecting instead of
+    // continuing to display stale offline/error state while the fresh probes are in flight.
+    useTransportHealthStore.getState().retry(transportGeneration);
+  } catch (error) {
+    logger.warn('[transport] retry-state observer failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+  probeReachabilityNow();
+  return true;
 }

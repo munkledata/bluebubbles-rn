@@ -3,6 +3,7 @@
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
 import ky from 'ky';
+import { ApiError } from '@core/api/errors';
 import { DEFAULT_MAX_JSON_RESPONSE_BYTES, HttpClient } from '@core/api/http';
 import { z } from 'zod/v4';
 
@@ -255,5 +256,117 @@ describe('HttpClient bounded JSON responses', () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(text).not.toHaveBeenCalled();
     expect(json).not.toHaveBeenCalled();
+  });
+
+  it('captures only a bounded nested JSON error message when the endpoint opts in', async () => {
+    mockKy.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: 422,
+          message: 'outer envelope copy is ignored',
+          error: {
+            type: 'send_failed',
+            message: 'Recipient person@example.com was rejected by https://private.example.',
+          },
+        }),
+        { status: 422, headers: { 'content-type': 'application/problem+json; charset=utf-8' } },
+      ),
+    );
+
+    let caught: unknown;
+    try {
+      await client().post('/message/text', z.unknown(), {
+        retry: false,
+        captureErrorDetail: true,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({
+      kind: 'bad_request',
+      status: 422,
+    });
+    expect((caught as ApiError).serverDetail).toBe(
+      'Recipient [redacted] was rejected by [redacted URL]',
+    );
+  });
+
+  it('keeps HTTP status classification when an opted-in JSON error body is malformed or oversized', async () => {
+    mockKy.mockResolvedValueOnce(
+      new Response('{malformed', {
+        status: 502,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(
+      client().post('/message/text', z.unknown(), {
+        retry: false,
+        captureErrorDetail: true,
+      }),
+    ).rejects.toMatchObject({ kind: 'server_error', status: 502, serverDetail: undefined });
+
+    mockKy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: 'x'.repeat(300) } }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(
+      client(256).post('/message/text', z.unknown(), {
+        retry: false,
+        captureErrorDetail: true,
+      }),
+    ).rejects.toMatchObject({ kind: 'server_error', status: 503, serverDetail: undefined });
+    expect((mockKy.mock.calls[1]?.[1] as { signal: AbortSignal }).signal.aborted).toBe(true);
+  });
+
+  it('does not consume an opted-in non-JSON error page', async () => {
+    const cancel = jest.fn(async () => undefined);
+    const text = jest.fn(async () => 'proxy detail');
+    mockKy.mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: new Headers({ 'content-type': 'text/html' }),
+      body: { cancel },
+      text,
+    } as unknown as Response);
+
+    await expect(
+      client().post('/message/text', z.unknown(), {
+        retry: false,
+        captureErrorDetail: true,
+      }),
+    ).rejects.toMatchObject({ kind: 'server_error', status: 500, serverDetail: undefined });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('keeps HTTP status classification when an opted-in error body stalls', async () => {
+    jest.useFakeTimers();
+    const cancel = jest.fn(() => new Promise<void>(() => undefined));
+    mockKy.mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull: () => new Promise<void>(() => undefined),
+          cancel,
+        }),
+        { status: 504, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const result = client(256, 100).post('/message/text', z.unknown(), {
+      retry: false,
+      captureErrorDetail: true,
+    });
+    const rejection = expect(result).rejects.toMatchObject({
+      kind: 'server_error',
+      status: 504,
+      serverDetail: undefined,
+    });
+    await jest.advanceTimersByTimeAsync(100);
+    await rejection;
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });

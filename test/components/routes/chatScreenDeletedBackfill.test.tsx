@@ -22,10 +22,15 @@ import { act, renderWithTheme, waitFor } from '../support/renderWithTheme';
 
 const GUID = 'iMessage;-;+15551234567';
 
-jest.mock('expo-router', () => ({
-  useLocalSearchParams: () => ({ guid: GUID }),
-  useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
-}));
+jest.mock('expo-router', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const R = require('react');
+  return {
+    useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
+    useLocalSearchParams: () => ({ guid: GUID }),
+    useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
+  };
+});
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));

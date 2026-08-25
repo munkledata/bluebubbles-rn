@@ -1295,17 +1295,26 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
   // The v1 message DTO carries NO `error` field (send failures travel in the separate
   // `message-send-error` envelope), so `excluded.error` could only ever be the hard-coded 0 seed —
   // refreshing it on conflict erases rather than reflects.
-  it('a re-sync does not erase a stored send-error code', async () => {
+  it('a re-sync does not erase a stored send-error code or projected detail', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);
-    const state = (): { error: number; sendState: string } =>
-      raw.prepare('SELECT error, send_state sendState FROM messages WHERE guid = ?').get('m3') as {
+    const state = (): { error: number; errorMessage: string | null; sendState: string } =>
+      raw
+        .prepare(
+          'SELECT error, error_message errorMessage, send_state sendState FROM messages WHERE guid = ?',
+        )
+        .get('m3') as {
         error: number;
+        errorMessage: string | null;
         sendState: string;
       };
 
-    await markMessageSendError(db, 'm3', 22); // e.g. an RCS delivery failure keyed by its real guid
-    expect(state()).toEqual({ error: 22, sendState: 'error' });
+    await markMessageSendError(db, 'm3', 22, undefined, 'Messages rejected this send.');
+    expect(state()).toEqual({
+      error: 22,
+      errorMessage: 'Messages rejected this send.',
+      sendState: 'error',
+    });
 
     await upsertMessages(
       db,
@@ -1325,7 +1334,11 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
     expect(
       (raw.prepare('SELECT date_read v FROM messages WHERE guid = ?').get('m3') as { v: number }).v,
     ).toBe(9_500);
-    expect(state()).toEqual({ error: 22, sendState: 'error' }); // the specific code survives
+    expect(state()).toEqual({
+      error: 22,
+      errorMessage: 'Messages rejected this send.',
+      sendState: 'error',
+    });
   });
 });
 

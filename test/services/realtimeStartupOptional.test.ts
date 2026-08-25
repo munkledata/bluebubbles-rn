@@ -45,6 +45,59 @@ const mockEnsureSyncedBackground = jest.fn<Promise<void>, [unknown, unknown, str
   async () => undefined,
 );
 const mockSocketConnect = jest.fn();
+const mockSocketDisconnect = jest.fn();
+const mockSocketRetryConnection = jest.fn(() => true);
+const mockStopSocketLifecycleObservation = jest.fn();
+type MockSocketLifecycleEvent = {
+  phase: 'connecting' | 'connected' | 'reconnecting' | 'error';
+  recovered?: boolean;
+};
+let mockSocketLifecycleHandler: ((event: MockSocketLifecycleEvent) => void) | undefined;
+let mockReachabilityCallbacks:
+  | {
+      onStateChange: (state: 'reachable' | 'unreachable' | 'error') => void;
+      onRecovered: () => void;
+    }
+  | undefined;
+let mockNetworkStateHandler: ((state: 'unknown' | 'online' | 'offline') => void) | undefined;
+const mockStartReachabilityWatch = jest.fn(
+  (
+    _probe: (signal: AbortSignal) => Promise<unknown>,
+    callbacks: NonNullable<typeof mockReachabilityCallbacks>,
+  ) => {
+    mockReachabilityCallbacks = callbacks;
+  },
+);
+const mockStopReachabilityWatch = jest.fn();
+const mockProbeReachabilityNow = jest.fn();
+const mockStartDeviceNetworkWatch = jest.fn(
+  (handler: NonNullable<typeof mockNetworkStateHandler>) => {
+    mockNetworkStateHandler = handler;
+  },
+);
+const mockStopDeviceNetworkWatch = jest.fn();
+let mockTransportGeneration = 0;
+let mockTransportNetwork: 'unknown' | 'online' | 'offline' = 'unknown';
+let mockTransportActive = false;
+const mockBeginTransportLifecycle = jest.fn(() => {
+  mockTransportGeneration += 1;
+  mockTransportNetwork = 'unknown';
+  mockTransportActive = true;
+  return mockTransportGeneration;
+});
+const mockSetTransportSocket = jest.fn<void, [number, string]>();
+const mockSetTransportServer = jest.fn<void, [number, string]>();
+const mockSetTransportNetwork = jest.fn<void, [number, 'unknown' | 'online' | 'offline']>(
+  (_generation, state) => {
+    mockTransportNetwork = state;
+  },
+);
+const mockPauseTransport = jest.fn(() => {
+  mockTransportGeneration += 1;
+  mockTransportNetwork = 'unknown';
+  mockTransportActive = false;
+});
+const mockRetryTransport = jest.fn<void, [number]>();
 type MockSocketEventHandler = (
   eventName: string,
   rawData: unknown,
@@ -144,6 +197,21 @@ jest.mock('@state/sessionStore', () => ({
     }),
   },
 }));
+jest.mock('@state/transportHealthStore', () => ({
+  useTransportHealthStore: {
+    getState: () => ({
+      generation: mockTransportGeneration,
+      active: mockTransportActive,
+      network: mockTransportNetwork,
+      beginLifecycle: mockBeginTransportLifecycle,
+      setSocketState: mockSetTransportSocket,
+      setServerState: mockSetTransportServer,
+      setNetworkState: mockSetTransportNetwork,
+      retry: mockRetryTransport,
+      pause: mockPauseTransport,
+    }),
+  },
+}));
 jest.mock('@state/typingStore', () => ({
   useTypingStore: { getState: () => ({ setTyping: jest.fn() }) },
 }));
@@ -177,7 +245,15 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
     drainDueRetirements: mockDrainDueRetirements,
   },
 }));
-jest.mock('@/services/reachability', () => ({ startReachabilityWatch: jest.fn() }));
+jest.mock('@/services/reachability', () => ({
+  startReachabilityWatch: mockStartReachabilityWatch,
+  stopReachabilityWatch: mockStopReachabilityWatch,
+  probeReachabilityNow: mockProbeReachabilityNow,
+}));
+jest.mock('@/services/networkReachability', () => ({
+  startDeviceNetworkWatch: mockStartDeviceNetworkWatch,
+  stopDeviceNetworkWatch: mockStopDeviceNetworkWatch,
+}));
 jest.mock('@/services/notifications/intents', () => ({ buildMessageIntents: jest.fn() }));
 jest.mock('@/services/notifications/notifeeService', () => ({
   postNotification: mockPostNotification,
@@ -261,10 +337,15 @@ jest.mock('@/services/realtime/socketService', () => ({
   SocketService: class {
     connected = true;
     connect = mockSocketConnect;
+    disconnect = mockSocketDisconnect;
+    retryConnection = mockSocketRetryConnection;
     constructor(handler: MockSocketEventHandler) {
       mockSocketEventHandler = handler;
     }
-    disconnect(): void {}
+    observeLifecycle(handler: (event: MockSocketLifecycleEvent) => void): () => void {
+      mockSocketLifecycleHandler = handler;
+      return mockStopSocketLifecycleObservation;
+    }
   },
 }));
 
@@ -292,6 +373,26 @@ async function startFreshRealtime(): Promise<jest.Mock> {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSocketEventHandler = undefined;
+  mockSocketLifecycleHandler = undefined;
+  mockReachabilityCallbacks = undefined;
+  mockNetworkStateHandler = undefined;
+  mockTransportGeneration = 0;
+  mockTransportNetwork = 'unknown';
+  mockTransportActive = false;
+  mockBeginTransportLifecycle.mockClear();
+  mockSetTransportSocket.mockClear();
+  mockSetTransportServer.mockClear();
+  mockSetTransportNetwork.mockClear();
+  mockPauseTransport.mockClear();
+  mockRetryTransport.mockClear();
+  mockStartReachabilityWatch.mockClear();
+  mockStopReachabilityWatch.mockClear();
+  mockProbeReachabilityNow.mockClear();
+  mockStartDeviceNetworkWatch.mockClear();
+  mockStopDeviceNetworkWatch.mockClear();
+  mockSocketDisconnect.mockClear();
+  mockSocketRetryConnection.mockReset().mockReturnValue(true);
+  mockStopSocketLifecycleObservation.mockClear();
   mockRecoveryRequest = undefined;
   mockDispatcherOptions = undefined;
   mockNotifyIntent = undefined;
@@ -639,6 +740,177 @@ describe('startRealtime optional setup containment', () => {
 
     await expect(startup).resolves.toBeUndefined();
     expect(mockSocketConnect).not.toHaveBeenCalled();
+  });
+
+  it('retires the certified socket open when a transport observer pauses startup re-entrantly', async () => {
+    jest.resetModules();
+    const realtime = await import('@/services/realtimeControl');
+    mockBeginTransportLifecycle.mockImplementationOnce(() => {
+      mockTransportGeneration += 1;
+      realtime.pauseRealtime();
+      return mockTransportGeneration;
+    });
+
+    await expect(realtime.startRealtime()).resolves.toBeUndefined();
+
+    expect(mockSocketConnect).toHaveBeenCalledTimes(1);
+    expect(mockSocketDisconnect).toHaveBeenCalledTimes(1);
+    expect(mockStopReachabilityWatch).toHaveBeenCalled();
+    expect(mockStopDeviceNetworkWatch).toHaveBeenCalled();
+  });
+
+  it('publishes socket, server, and device-network signals under one transport generation', async () => {
+    jest.resetModules();
+    const { startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    await settle();
+    if (!mockSocketLifecycleHandler)
+      throw new Error('socket lifecycle observer was not registered');
+    if (!mockReachabilityCallbacks) throw new Error('reachability observer was not registered');
+    if (!mockNetworkStateHandler) throw new Error('network observer was not registered');
+
+    expect(mockBeginTransportLifecycle).toHaveBeenCalledTimes(1);
+    expect(mockStartReachabilityWatch).toHaveBeenCalledTimes(1);
+    expect(mockStartDeviceNetworkWatch).toHaveBeenCalledTimes(1);
+
+    mockSocketLifecycleHandler({ phase: 'connecting' });
+    mockReachabilityCallbacks.onStateChange('unreachable');
+    mockNetworkStateHandler('offline');
+    mockSocketLifecycleHandler({ phase: 'connected', recovered: true });
+
+    expect(mockSetTransportSocket.mock.calls).toEqual([
+      [1, 'connecting'],
+      [1, 'connected'],
+    ]);
+    expect(mockSetTransportServer).toHaveBeenCalledWith(1, 'unreachable');
+    expect(mockSetTransportNetwork).toHaveBeenCalledWith(1, 'offline');
+    expect(mockMaybeResumeSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('immediately re-probes the server when the native network recovers', async () => {
+    jest.resetModules();
+    const { startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    if (!mockNetworkStateHandler) throw new Error('network observer was not registered');
+
+    mockNetworkStateHandler('offline');
+    mockNetworkStateHandler('online');
+
+    expect(mockProbeReachabilityNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('manually retries only the current foreground transport and re-probes immediately', async () => {
+    jest.resetModules();
+    const { pauseRealtime, retryRealtimeConnection, startRealtime } =
+      await import('@/services/realtimeControl');
+    await startRealtime();
+    await settle();
+    mockEnsureDatabase.mockClear();
+    mockSocketRetryConnection.mockClear();
+    mockRetryTransport.mockClear();
+    mockProbeReachabilityNow.mockClear();
+
+    expect(retryRealtimeConnection()).toBe(true);
+    expect(mockSocketRetryConnection).toHaveBeenCalledTimes(1);
+    expect(mockRetryTransport).toHaveBeenCalledWith(1);
+    expect(mockProbeReachabilityNow).toHaveBeenCalledTimes(1);
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+
+    pauseRealtime();
+    mockSocketRetryConnection.mockClear();
+    expect(retryRealtimeConnection()).toBe(false);
+    expect(mockSocketRetryConnection).not.toHaveBeenCalled();
+    expect(mockProbeReachabilityNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not clear health or probe when the socket cannot accept a manual retry', async () => {
+    jest.resetModules();
+    const { retryRealtimeConnection, startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    mockSocketRetryConnection.mockReturnValueOnce(false);
+    mockRetryTransport.mockClear();
+    mockProbeReachabilityNow.mockClear();
+
+    expect(retryRealtimeConnection()).toBe(false);
+    expect(mockRetryTransport).not.toHaveBeenCalled();
+    expect(mockProbeReachabilityNow).not.toHaveBeenCalled();
+  });
+
+  it('keeps healthy transport observers current across a redundant foreground resume', async () => {
+    jest.resetModules();
+    const { resumeRealtime, startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    if (!mockSocketLifecycleHandler)
+      throw new Error('socket lifecycle observer was not registered');
+    if (!mockReachabilityCallbacks) throw new Error('reachability observer was not registered');
+    if (!mockNetworkStateHandler) throw new Error('network observer was not registered');
+    const retainedSocketObserver = mockSocketLifecycleHandler;
+    const retainedReachabilityObserver = mockReachabilityCallbacks.onStateChange;
+    const retainedNetworkObserver = mockNetworkStateHandler;
+    mockSetTransportSocket.mockClear();
+    mockSetTransportServer.mockClear();
+    mockSetTransportNetwork.mockClear();
+
+    await resumeRealtime();
+    retainedSocketObserver({ phase: 'reconnecting' });
+    retainedReachabilityObserver('unreachable');
+    retainedNetworkObserver('offline');
+
+    expect(mockBeginTransportLifecycle).toHaveBeenCalledTimes(1);
+    expect(mockSetTransportSocket).toHaveBeenCalledWith(1, 'reconnecting');
+    expect(mockSetTransportServer).toHaveBeenCalledWith(1, 'unreachable');
+    expect(mockSetTransportNetwork).toHaveBeenCalledWith(1, 'offline');
+  });
+
+  it('pauses health, stops both monitors, and rejects retained lifecycle callbacks', async () => {
+    jest.resetModules();
+    const { pauseRealtime, startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    if (!mockSocketLifecycleHandler)
+      throw new Error('socket lifecycle observer was not registered');
+    const retainedSocketObserver = mockSocketLifecycleHandler;
+    mockPauseTransport.mockClear();
+    mockStopReachabilityWatch.mockClear();
+    mockStopDeviceNetworkWatch.mockClear();
+    mockSocketDisconnect.mockClear();
+    mockSetTransportSocket.mockClear();
+
+    pauseRealtime();
+    retainedSocketObserver({ phase: 'error' });
+
+    expect(mockPauseTransport).toHaveBeenCalledTimes(1);
+    expect(mockStopReachabilityWatch).toHaveBeenCalledTimes(1);
+    expect(mockStopDeviceNetworkWatch).toHaveBeenCalledTimes(1);
+    expect(mockSocketDisconnect).toHaveBeenCalledTimes(1);
+    expect(mockPauseTransport.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockStopReachabilityWatch.mock.invocationCallOrder[0]!,
+    );
+    expect(mockStopReachabilityWatch.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockSocketDisconnect.mock.invocationCallOrder[0]!,
+    );
+    expect(mockStopDeviceNetworkWatch.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockSocketDisconnect.mock.invocationCallOrder[0]!,
+    );
+    expect(mockStopSocketLifecycleObservation).toHaveBeenCalledTimes(1);
+    expect(mockSetTransportSocket).not.toHaveBeenCalled();
+  });
+
+  it('finishes a foreground pause when native socket disconnect throws', async () => {
+    jest.resetModules();
+    const { pauseRealtime, startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    mockSocketDisconnect.mockImplementationOnce(() => {
+      throw new Error('native disconnect sentinel');
+    });
+
+    expect(() => pauseRealtime()).not.toThrow();
+
+    expect(mockPauseTransport).toHaveBeenCalled();
+    expect(mockStopReachabilityWatch).toHaveBeenCalled();
+    expect(mockStopDeviceNetworkWatch).toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith('[socket] foreground retirement failed', {
+      errorName: 'Error',
+    });
   });
 
   it('contains a native permission rejection and reports safe degraded copy', async () => {

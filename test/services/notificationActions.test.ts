@@ -134,14 +134,18 @@ const SAFE_ROUTE_TOKEN = '12345678-1234-4123-8123-123456789abc';
 /** Build the schema-2 shape production writes, while seeding its encrypted local-id lookup. */
 function safeChatDetail(
   pressActionId: string | undefined,
-  route: { chatGuid: string; messageGuid?: string; reminder?: true },
+  route: { chatGuid: string; messageGuid?: string; reminder?: true; sendFailure?: true },
   extra: { input?: string; id?: string } = {},
 ): EventDetail {
   mockDb.all.mockResolvedValueOnce([
     { chatGuid: route.chatGuid, messageGuid: route.messageGuid ?? null },
   ]);
-  const kind = route.reminder ? 'reminder' : 'message';
-  const defaultId = route.reminder ? 'gator-reminder-message-11-5000' : 'gator-message-7';
+  const kind = route.reminder ? 'reminder' : route.sendFailure ? 'send-failure' : 'message';
+  const defaultId = route.reminder
+    ? 'gator-reminder-message-11-5000'
+    : route.sendFailure
+      ? 'gator-send-failure-11'
+      : 'gator-message-7';
   return chatDetail(
     pressActionId,
     {
@@ -247,6 +251,34 @@ describe('handleNotificationAction — reply', () => {
     expect(mockSendText).not.toHaveBeenCalled();
     // Schema-2 route resolution opens the DB; the dev send path itself does not open it again.
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a later notification reaction behind an unsettled inline reply', async () => {
+    const replyResult = deferred<void>();
+    mockSendText.mockImplementationOnce(async (...args: unknown[]) => {
+      await (args[4] as (() => void | Promise<void>) | undefined)?.();
+      await replyResult.promise;
+    });
+
+    const replyAction = handleNotificationAction(
+      safeChatDetail(ACTION_REPLY, { chatGuid: 'ordered-chat' }, { input: 'first' }),
+    );
+    await waitForCalls(mockSendText, 1);
+    const loveAction = handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'ordered-chat',
+        messageGuid: 'ordered-message',
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockSendReaction).not.toHaveBeenCalled();
+
+    replyResult.resolve(undefined);
+    await replyAction;
+    await waitForCalls(mockSendReaction, 1);
+    await loveAction;
   });
 });
 
@@ -364,6 +396,28 @@ describe('handleNotificationAction — ignored / no-op cases', () => {
     await handleNotificationAction(chatDetail('some-unknown-action', { chatGuid: 'c4' }));
     expect(mockMarkRead).not.toHaveBeenCalled();
     expect(mockSendText).not.toHaveBeenCalled();
+    expect(mockNotifeeCancel).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed-send notice body-only even if Android reports an inline action id', async () => {
+    await handleNotificationAction(
+      chatDetail(
+        ACTION_REPLY,
+        {
+          gatorOwner: 'gator',
+          gatorSchema: '2',
+          gatorKind: 'send-failure',
+          chatId: '7',
+          messageId: '11',
+        },
+        { id: 'gator-send-failure-11', input: 'PRIVATE_INLINE_REPLY_CANARY' },
+      ),
+    );
+
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+    expect(mockMarkRead).not.toHaveBeenCalled();
+    expect(mockSendReaction).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
   });
 
@@ -535,6 +589,31 @@ describe('notification actions — account-switch containment', () => {
 
     expect(stash).toHaveBeenCalledTimes(1);
     expect(stash).toHaveBeenCalledWith(safe.notification?.data);
+  });
+
+  it('admits a schema-2 failed-send body tap using only its opaque local route', async () => {
+    const stash = jest.fn();
+    const safe = safeChatDetail(
+      PRESS_OPEN,
+      {
+        chatGuid: 'private-server-chat-guid',
+        messageGuid: 'private-server-message-guid',
+        sendFailure: true,
+      },
+      { id: 'gator-send-failure-11' },
+    );
+
+    await handleNotificationPress(safe, stash);
+
+    expect(stash).toHaveBeenCalledTimes(1);
+    expect(stash).toHaveBeenCalledWith(safe.notification?.data);
+    expect(JSON.stringify(safe.notification?.data)).not.toMatch(
+      /private-server-chat-guid|private-server-message-guid/,
+    );
+    expect(mockDeleteReminder).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+    expect(mockMarkRead).not.toHaveBeenCalled();
+    expect(mockSendReaction).not.toHaveBeenCalled();
   });
 
   it('does not send an inline reply through B when A is retired during the DB open', async () => {

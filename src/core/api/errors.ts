@@ -22,22 +22,55 @@ export type ApiErrorKind =
   | 'cancelled';
 
 export class ApiError extends Error {
+  /**
+   * Sanitized, bounded server prose suitable only for the failed-message detail UI.
+   * Installed as non-enumerable so generic Error serialization cannot copy it into diagnostics.
+   */
+  public readonly serverDetail?: string;
+
   constructor(
     public readonly kind: ApiErrorKind,
     message: string,
     public readonly status?: number,
     public override readonly cause?: unknown,
+    serverDetail?: string,
   ) {
     super(message);
     this.name = 'ApiError';
+    Object.defineProperty(this, 'serverDetail', {
+      value: serverDetail,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
   }
 
-  static fromStatus(status: number, message?: string): ApiError {
+  static fromStatus(status: number, message?: string, serverDetail?: string): ApiError {
     if (status === 401 || status === 403)
-      return new ApiError('unauthorized', message ?? 'Unauthorized', status);
-    if (status >= 500) return new ApiError('server_error', message ?? 'Server error', status);
-    if (status >= 400) return new ApiError('bad_request', message ?? 'Bad request', status);
-    return new ApiError('server_error', message ?? `Unexpected status ${status}`, status);
+      return new ApiError(
+        'unauthorized',
+        message ?? 'Unauthorized',
+        status,
+        undefined,
+        serverDetail,
+      );
+    if (status >= 500)
+      return new ApiError(
+        'server_error',
+        message ?? 'Server error',
+        status,
+        undefined,
+        serverDetail,
+      );
+    if (status >= 400)
+      return new ApiError('bad_request', message ?? 'Bad request', status, undefined, serverDetail);
+    return new ApiError(
+      'server_error',
+      message ?? `Unexpected status ${status}`,
+      status,
+      undefined,
+      serverDetail,
+    );
   }
 }
 

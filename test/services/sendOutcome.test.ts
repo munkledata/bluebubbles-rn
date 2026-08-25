@@ -5,8 +5,22 @@ import { logger } from '@core/secure';
 import { ClientErrorCode, sendErrorCode } from '@utils';
 import { getChatIdByGuid, insertOutgoingText, upsertChats, upsertHandles } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { clearFailedSendNotice, notifyFailedSend } from '@/services/send/sendFailureNotice';
 import { handleSendFailure, reconcileSendOutcome } from '@/services/send/sendOutcome';
 import { createTestDb } from '../support/testDb';
+
+jest.mock('@/services/send/sendFailureNotice', () => ({
+  clearFailedSendNotice: jest.fn(async () => undefined),
+  notifyFailedSend: jest.fn(async () => undefined),
+}));
+
+const mockClearFailedSendNotice = clearFailedSendNotice as jest.Mock;
+const mockNotifyFailedSend = notifyFailedSend as jest.Mock;
+
+beforeEach(() => {
+  mockClearFailedSendNotice.mockClear();
+  mockNotifyFailedSend.mockClear();
+});
 
 async function seedOutgoing(db: AppDatabase, tempGuid: string, now: number): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
@@ -20,8 +34,9 @@ async function seedOutgoing(db: AppDatabase, tempGuid: string, now: number): Pro
 }
 
 const msgRow = (raw: Database.Database, guid: string) =>
-  raw.prepare('SELECT guid, send_state s, error e FROM messages WHERE guid = ?').get(guid) as
-    { guid: string; s: string; e: number } | undefined;
+  raw
+    .prepare('SELECT guid, send_state s, error e, error_message d FROM messages WHERE guid = ?')
+    .get(guid) as { guid: string; s: string; e: number; d: string | null } | undefined;
 const msgCount = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM messages').get() as { c: number }).c;
 const queueCount = (raw: Database.Database): number =>
@@ -31,19 +46,29 @@ describe('reconcileSendOutcome', () => {
   it('promotes temp→real and clears the queue when the ack carries a guid', async () => {
     const { db, raw } = await createTestDb();
     await seedOutgoing(db, 'temp-aaaa0000', 1000);
+    raw
+      .prepare("UPDATE messages SET error_message = 'stale detail' WHERE guid = 'temp-aaaa0000'")
+      .run();
     await reconcileSendOutcome(db, 'temp-aaaa0000', { guid: 'real-1' }, 1000);
     expect(msgCount(raw)).toBe(1);
     expect(msgRow(raw, 'real-1')?.s).toBe('sent');
+    expect(msgRow(raw, 'real-1')?.d).toBeNull();
     expect(queueCount(raw)).toBe(0);
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'real-1', undefined);
   });
 
   it('marks sent-no-guid (row keeps its temp guid) when the ack has NO guid', async () => {
     const { db, raw } = await createTestDb();
     await seedOutgoing(db, 'temp-bbbb0000', 1000);
+    raw
+      .prepare("UPDATE messages SET error_message = 'stale detail' WHERE guid = 'temp-bbbb0000'")
+      .run();
     await reconcileSendOutcome(db, 'temp-bbbb0000', {}, 1000);
     expect(msgCount(raw)).toBe(1);
     expect(msgRow(raw, 'temp-bbbb0000')?.s).toBe('sent');
+    expect(msgRow(raw, 'temp-bbbb0000')?.d).toBeNull();
     expect(queueCount(raw)).toBe(0);
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'temp-bbbb0000', undefined);
   });
 
   it('treats an RCS ack echoing our OWN tempGuid as guid-absent (row survives)', async () => {
@@ -55,6 +80,7 @@ describe('reconcileSendOutcome', () => {
     expect(msgCount(raw)).toBe(1);
     expect(msgRow(raw, 'temp-cccc0000')?.s).toBe('sent');
     expect(queueCount(raw)).toBe(0);
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'temp-cccc0000', undefined);
   });
 });
 
@@ -79,6 +105,30 @@ describe('handleSendFailure', () => {
     expect(
       (raw.prepare('SELECT attempts FROM outgoing_queue').get() as { attempts: number }).attempts,
     ).toBe(1);
+    expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', 'temp-dddd0000', undefined);
+  });
+
+  it('persists sanitized server detail without adding it to the diagnostic log', async () => {
+    const { db, raw } = await createTestDb();
+    await seedOutgoing(db, 'temp-detail0000', 1000);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const detail = 'Messages rejected this send for the selected recipient.';
+
+    await handleSendFailure(
+      db,
+      'temp-detail0000',
+      ApiError.fromStatus(422, 'POST /message/text failed', detail),
+      'send',
+      'c1',
+    );
+
+    expect(msgRow(raw, 'temp-detail0000')?.d).toBe(detail);
+    expect(warn).toHaveBeenCalledWith(
+      '[send] failed for chat c1 (code 422, HTTP 422): POST /message/text failed',
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(detail);
+    expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', 'temp-detail0000', undefined);
+    expect(mockNotifyFailedSend.mock.calls[0]?.slice(1)).not.toContain(detail);
   });
 
   it('maps a local-file ApiError to "Attachment Unavailable", NOT the connection code', async () => {
@@ -127,5 +177,15 @@ describe('handleSendFailure', () => {
     expect(
       (raw.prepare('SELECT next_retry_at n FROM outgoing_queue').get() as { n: number }).n,
     ).toBe(5000 + 30_000);
+  });
+
+  it('does not post a failure notice when no durable outgoing row was reconciled', async () => {
+    const { db, raw } = await createTestDb();
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await handleSendFailure(db, 'temp-missing0000', new Error('gone'), 'queue', 'c1', 5000);
+
+    expect(msgCount(raw)).toBe(0);
+    expect(mockNotifyFailedSend).not.toHaveBeenCalled();
   });
 });

@@ -20,6 +20,7 @@ export {
   startRealtime,
   pauseRealtime,
   resumeRealtime,
+  retryRealtimeConnection,
   applyNewServerUrl,
 } from './realtimeControl';
 export { connect, forget, disconnectFailureMessage } from './bootstrap';

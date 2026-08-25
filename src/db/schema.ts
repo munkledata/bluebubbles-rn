@@ -157,6 +157,8 @@ export const messages = sqliteTable(
     groupTitle: text('group_title'),
     otherHandle: integer('other_handle'),
     error: integer('error').default(0),
+    /** Bounded/redacted server prose for the failed-message action sheet only. */
+    errorMessage: text('error_message'),
     /** Local send lifecycle for optimistic outgoing messages. */
     sendState: text('send_state').default('sent'),
     /** Apple delivery tiers: delivered without notifying ("Delivered Quietly")
@@ -188,6 +190,10 @@ export const messages = sqliteTable(
     chatDateIdx: index('messages_chat_date_idx').on(t.chatId, t.dateCreated),
     rowIdIdx: index('messages_row_id_idx').on(t.originalRowId),
     assocIdx: index('messages_assoc_idx').on(t.associatedMessageGuid),
+    errorMessageBounded: check(
+      'messages_error_message_bounded',
+      sql`${t.errorMessage} IS NULL OR (length(${t.errorMessage}) BETWEEN 1 AND 240 AND length(CAST(${t.errorMessage} AS BLOB)) <= 512)`,
+    ),
   }),
 );
 

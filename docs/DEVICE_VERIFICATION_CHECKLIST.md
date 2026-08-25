@@ -212,15 +212,30 @@ unexpected tester access, candidate mismatch, server/Firebase mismatch, or priva
 Use a new fixture message for each branch and confirm the message still follows the DB/sync path when
 its system presentation is suppressed.
 
-| Branch                                                | Current expected result                                                                                           | Result |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------ |
-| Android permission allowed / denied                   | Detailed system notice when allowed; no system notice when denied                                                 | [ ]    |
-| **Message Notifications** on / off                    | Message notice when on; no message notice when off. Self-test, calls, and reminders are separate kinds            | [ ]    |
-| Known / unknown sender with filtering on              | Known sender notifies; unknown sender is stored but does not notify                                               | [ ]    |
-| Synthetic chat unmuted / muted                        | Unmuted chat notifies; muted chat is stored but does not notify                                                   | [ ]    |
-| Incoming / marked `isFromMe` by the approved fixture  | Incoming message notifies; own message does not                                                                   | [ ]    |
-| Currently visible chat                                | Presentation is not suppressed at source and may alert before the visible chat clears it; keep `NOTIF-01` open    | [ ]    |
-| Two unread lines, then read/delete/unsend in one chat | Only the current line is posted; cancellation can clear the whole chat notice. Record open `NOTIF-03`, not a pass | [ ]    |
+| Branch                                                | Current expected result                                                                                                                           | Result |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Android permission allowed / denied                   | Detailed system notice when allowed; no system notice when denied                                                                                 | [ ]    |
+| **Message Notifications** on / off                    | Message notice when on; no message notice when off. Self-test, calls, and reminders are separate kinds                                            | [ ]    |
+| Known / unknown sender with filtering on              | Known sender notifies; unknown sender is stored but does not notify                                                                               | [ ]    |
+| Synthetic chat unmuted / muted                        | Unmuted chat notifies; muted chat is stored but does not notify                                                                                   | [ ]    |
+| Incoming / marked `isFromMe` by the approved fixture  | Incoming message notifies; own message does not                                                                                                   | [ ]    |
+| Currently visible chat                                | Frozen v56 may still alert; post-v56 source suppresses the exact focused/foreground/unlocked chat. No credit until a future candidate contains it | [ ]    |
+| Two unread lines, then read/delete/unsend in one chat | Only the current line is posted; cancellation can clear the whole chat notice. Record open `NOTIF-03`, not a pass                                 | [ ]    |
+
+#### Post-v56 failed-send notice — FUTURE CANDIDATE ONLY
+
+Do not run or credit these rows against frozen v56; it predates `SEND-01C`. Once a separately frozen candidate
+contains the post-v56 source, use only an approved synthetic staged-server failure:
+
+- [ ] While viewing the exact chat in the foreground and unlocked, cause one outgoing row to become durably failed.
+      Expect the in-chat error state but no system sound, vibration, heads-up, or tray notice.
+- [ ] From another screen and from the background, cause separate failures. Expect one fixed `Message not sent` /
+      `Open Gator to review and retry.` notice per failed local message, with no message/contact/server-error text;
+      body tap opens the owning chat and no inline Reply/Read/Love action is offered. Repeated delivery of the same
+      failure must update the same native record without a second alert.
+- [ ] Confirm a success/echo or failed-bubble deletion removes the matching notice, a sticky RCS failure is not cleared
+      by a late acknowledgement, and an expired App Lock produces only the existing generic `Gator` /
+      `You have new messages` notice. Record any stale or duplicate notice as a failure.
 
 Do not test removed Hide Preview/Redacted Mode behavior. Normal notifications are detailed, Android
 owns lock-screen presentation, and App Lock's limited generic-new-delivery behavior is tested below.
@@ -230,9 +245,11 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
 - [ ] **`EXACT PLAY CANDIDATE`:** Receive separate fixture messages while (1) viewing the synthetic
       chat, (2) foregrounded on another screen/chat, and (3) alive but backgrounded. Record DB/UI
       arrival, system presentation, sound/heads-up behavior, and whether a body tap opens the
-      intended chat at its newest message. A visible chat can clear the notice after DB/UI arrival,
-      but presentation is not suppressed at the source; record any sound/heads-up and keep
-      `NOTIF-01` open.
+      intended chat at its newest message. For frozen v56, a visible chat can clear the notice only
+      after DB/UI arrival and may still alert. Post-v56 source instead suppresses native presentation
+      for the exact focused, foreground, unlocked chat while preserving the other-screen/chat and
+      background branches. Keep `NOTIF-01` open until this is run on a future candidate that includes
+      that source; do not award the post-v56 behavior to v56.
 - [ ] **`EXACT PLAY CANDIDATE`:** From the alive-background state, tap a message notice and confirm
       the resumed app opens the intended chat at its newest message rather than the previously
       visible screen.

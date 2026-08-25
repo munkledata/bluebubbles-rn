@@ -9,6 +9,7 @@ import {
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { stripAttachmentPlaceholder } from '@utils';
+import { localFailedMessageRoute } from './notificationRouting';
 
 /**
  * Pure projection: a normalized event → the notifications to show/clear. Reads
@@ -23,7 +24,16 @@ export async function buildMessageIntents(
   switch (event.type) {
     case 'new-message': {
       const m = event.message;
-      if (m.isFromMe) return []; // never notify for our own messages
+      if (m.isFromMe) {
+        // Never RAISE a notice for our own message. A successful live echo may, however, be the
+        // first proof that an earlier client-side failure actually landed. Withdraw its fixed-copy
+        // failure notice using the reconciled row's stable local id.
+        const chatGuid =
+          resolveMessageChatGuid(m) ?? (m.guid ? await getChatGuidByMessageGuid(db, m.guid) : null);
+        return chatGuid && m.guid
+          ? [{ kind: 'send-failure-cancel', chatGuid, messageGuid: m.guid }]
+          : [];
+      }
       // Prefer the hydrated chats[0].guid, falling back to the top-level chatGuid a live event
       // may carry — without this a chats-less event would build no notification.
       const chatGuid = resolveMessageChatGuid(m);
@@ -179,6 +189,34 @@ export async function buildMessageIntents(
         : [];
       if (aliases.length === 0) return [];
       return [{ kind: 'alias-removed', aliases }];
+    }
+    case 'message-send-error': {
+      // DbEventSink has already committed the failure. Resolve only a row that is STILL an
+      // undeleted outgoing error so durable notification retries cannot resurrect stale state.
+      const payload = event.payload;
+      const embedded = (payload.message ?? {}) as Record<string, unknown>;
+      const candidates = [
+        payload.tempGuid,
+        payload.messageGuid,
+        payload.guid,
+        embedded.guid,
+      ].filter(
+        (value, index, all): value is string =>
+          typeof value === 'string' && value.length > 0 && all.indexOf(value) === index,
+      );
+      for (const candidate of candidates) {
+        const target = await localFailedMessageRoute(candidate, db);
+        if (target) {
+          return [
+            {
+              kind: 'send-failure',
+              chatGuid: target.chatGuid,
+              messageGuid: target.messageGuid,
+            },
+          ];
+        }
+      }
+      return [];
     }
     case 'rcs-bridge-down': {
       // Server-fired bridge-down push. Show the server's title/body verbatim as a status notice —

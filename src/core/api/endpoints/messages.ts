@@ -83,6 +83,7 @@ export interface SendTextParams {
  */
 export function sendText(http: HttpClient, params: SendTextParams): Promise<SendAck> {
   return http.post('/message/text', SendAck, {
+    captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
@@ -134,6 +135,7 @@ export interface SendContactParams {
  */
 export function sendContact(http: HttpClient, params: SendContactParams): Promise<SendAck> {
   return http.post('/message/contact', SendAck, {
+    captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
@@ -245,6 +247,7 @@ export interface SendReactionParams {
  */
 export function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
   return http.post('/message/react', SendAck, {
+    captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
       messageGuid: params.selectedMessageGuid,

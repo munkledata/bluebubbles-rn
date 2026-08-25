@@ -12,11 +12,17 @@ export const NOTIFICATION_DATA_OWNER = 'gator';
 export const NOTIFICATION_DATA_SCHEMA = '2';
 
 export type NotificationRouteKind =
-  'message' | 'reminder' | 'facetime' | 'locked' | 'rcs' | 'test' | 'alias';
+  'message' | 'send-failure' | 'reminder' | 'facetime' | 'locked' | 'rcs' | 'test' | 'alias';
 
 export interface LocalNotificationRoute {
   chatId: number;
   messageId?: number;
+}
+
+export interface FailedMessageNotificationRoute {
+  chatGuid: string;
+  messageGuid: string;
+  route: LocalNotificationRoute & { messageId: number };
 }
 
 /**
@@ -51,6 +57,7 @@ export interface ResolvedNotificationData {
 
 const FACE_TIME_ROUTE_PREFIX = NOTIFICATION_ROUTE_KV_PREFIX;
 const SAFE_CHAT_NOTIFICATION_PREFIX = 'gator-message-';
+const SAFE_SEND_FAILURE_NOTIFICATION_PREFIX = 'gator-send-failure-';
 const SAFE_REMINDER_NOTIFICATION_PREFIX = 'gator-reminder-';
 const SAFE_FACETIME_NOTIFICATION_PREFIX = 'gator-facetime-';
 const RANDOM_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -96,6 +103,68 @@ export async function localRouteForGuids(
   return { chatId, ...(messageId == null ? {} : { messageId }) };
 }
 
+/** Resolve one message to opaque local keys without requiring its chat GUID at the call site. */
+export async function localRouteForMessageGuid(
+  messageGuid: string,
+  db?: AppDatabase,
+): Promise<(LocalNotificationRoute & { messageId: number }) | null> {
+  const database = db ?? (await notificationDatabase());
+  const rows = await database.all<{ chatId: number; messageId: number }>(sql`
+    SELECT c.id AS chatId, m.id AS messageId
+      FROM messages m JOIN chats c ON c.id = m.chat_id
+     WHERE m.guid = ${messageGuid}
+        OR m.guid = (
+          SELECT canonical_guid
+            FROM message_guid_aliases
+           WHERE alias_guid = ${messageGuid}
+           LIMIT 1
+        )
+     ORDER BY CASE WHEN m.guid = ${messageGuid} THEN 0 ELSE 1 END
+     LIMIT 1
+  `);
+  const chatId = positiveInteger(rows[0]?.chatId);
+  const messageId = positiveInteger(rows[0]?.messageId);
+  return chatId == null || messageId == null ? null : { chatId, messageId };
+}
+
+/**
+ * Re-check current encrypted-DB truth immediately before a failed-send notice is derived or posted.
+ * A durable retry must not resurrect a notice after success, retry admission, or local deletion.
+ */
+export async function localFailedMessageRoute(
+  messageGuid: string,
+  db?: AppDatabase,
+): Promise<FailedMessageNotificationRoute | null> {
+  const database = db ?? (await notificationDatabase());
+  const rows = await database.all<{
+    chatGuid: string;
+    messageGuid: string;
+    chatId: number;
+    messageId: number;
+  }>(sql`
+    SELECT c.guid AS chatGuid, m.guid AS messageGuid,
+           c.id AS chatId, m.id AS messageId
+      FROM messages m JOIN chats c ON c.id = m.chat_id
+     WHERE m.guid = ${messageGuid}
+       AND m.is_from_me = 1
+       AND m.send_state = 'error'
+       AND m.date_deleted IS NULL
+       AND m.date_retracted IS NULL
+     LIMIT 1
+  `);
+  const row = rows[0];
+  const chatGuid = stringValue(row?.chatGuid);
+  const resolvedMessageGuid = stringValue(row?.messageGuid);
+  const chatId = positiveInteger(row?.chatId);
+  const messageId = positiveInteger(row?.messageId);
+  if (!chatGuid || !resolvedMessageGuid || chatId == null || messageId == null) return null;
+  return {
+    chatGuid,
+    messageGuid: resolvedMessageGuid,
+    route: { chatId, messageId },
+  };
+}
+
 /** Resolve local route keys back to server identifiers only after the app owns the press. */
 async function guidsForLocalRoute(
   chatId: number,
@@ -118,6 +187,11 @@ async function guidsForLocalRoute(
 
 export function chatNotificationId(chatId: number): string {
   return `${SAFE_CHAT_NOTIFICATION_PREFIX}${chatId}`;
+}
+
+/** Stable per-message id; duplicate delivery updates one notice and alerts only once. */
+export function sendFailureNotificationId(messageId: number): string {
+  return `${SAFE_SEND_FAILURE_NOTIFICATION_PREFIX}${messageId}`;
 }
 
 export function chatChannelIdForLocalId(chatId: number): string {
@@ -323,7 +397,7 @@ export async function resolveNotificationData(
     const faceTimeUuid = await resolveFaceTimeToken(token);
     return faceTimeUuid ? { faceTimeUuid } : null;
   }
-  if (kind !== 'message' && kind !== 'reminder') return null;
+  if (kind !== 'message' && kind !== 'send-failure' && kind !== 'reminder') return null;
   const chatId = positiveInteger(data.chatId);
   if (chatId == null) return null;
   const messageId = positiveInteger(data.messageId);

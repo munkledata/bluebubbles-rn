@@ -161,6 +161,33 @@ describe('incoming event envelope codec', () => {
     expect(encoded.envelope.orderingKey).not.toContain('codec-chat');
   });
 
+  it('projects optional send-error prose before durable canonical encoding', async () => {
+    const rawCanary = 'raw-path-canary';
+    const event = normalized('message-send-error', {
+      guid: 'codec-send-error',
+      error: 22,
+      // A malformed optional top-level field must not reject the authoritative failure or mask a
+      // valid nested detail used by older/newer bridge shapes.
+      errorMessage: { malformed: true },
+      message: {
+        guid: 'codec-send-error',
+        errorMessage: `Helper rejected person@example.com at https://private.example/${rawCanary}`,
+      },
+    });
+    const encoded = await encodeIncomingEvent(event, metadata(), digest);
+
+    expect(event.type).toBe('message-send-error');
+    if (event.type !== 'message-send-error') throw new Error('unexpected event type');
+    expect(event.payload.error).toBe(22);
+    expect(event.payload.errorMessage).toBeUndefined();
+    expect(event.payload.message?.errorMessage).toBe(
+      'Helper rejected [redacted] at [redacted URL]',
+    );
+    expect(encoded.envelope.payload).not.toContain(rawCanary);
+    expect(encoded.envelope.payload).not.toContain('person@example.com');
+    expect(encoded.envelope.payload).toContain('[redacted URL]');
+  });
+
   it('does not let transport source alter payload digest, event identity, or ordering', async () => {
     const event = normalized('new-message');
     const socket = await encodeIncomingEvent(event, metadata('socket', 'socket-copy'), digest);

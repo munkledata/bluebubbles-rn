@@ -127,7 +127,6 @@ describe('SocketService event dispatch failures', () => {
   });
 
   it('assigns ordered occurrence ids and resets the sequence on a built-in reconnect', async () => {
-    const sink: EventSink = { onEvent: jest.fn(async () => {}) };
     const handle = jest.fn(async (..._args: Parameters<RawRealtimeEventHandler>) => null);
     const rawHandler: RawRealtimeEventHandler = handle;
     const namespaces = ['socket:test-open', 'socket:test-reconnect'];
@@ -160,7 +159,6 @@ describe('SocketService event dispatch failures', () => {
   });
 
   it('uses a fresh namespace for a new open and rejects its retired native callback', async () => {
-    const sink: EventSink = { onEvent: jest.fn(async () => {}) };
     const handle = jest.fn(async (..._args: Parameters<RawRealtimeEventHandler>) => null);
     const rawHandler: RawRealtimeEventHandler = handle;
     const namespaces = ['socket:first-open', 'socket:second-open'];

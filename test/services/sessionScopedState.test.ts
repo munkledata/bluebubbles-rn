@@ -4,6 +4,7 @@ import {
   stashPendingNotification,
   takePendingNotification,
 } from '@/services/notifications/pendingNav';
+import { claimActiveChat, isActiveChat } from '@/services/notifications/activeChat';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFaceTimeStore } from '@state/faceTimeStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -15,6 +16,7 @@ import { useShareIntentStore } from '@state/shareIntentStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useSyncStore } from '@state/syncStore';
 import { useThemeStore } from '@state/themeStore';
+import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { useUploadStore } from '@state/uploadStore';
 import { showDialog, useDialogStore } from '@ui/dialog/dialogStore';
@@ -92,6 +94,8 @@ describe('resetSessionScopedState', () => {
     });
     useTypingStore.getState().setTyping('old-chat', true);
     useRcsHealthStore.getState().setAlert('PHONE_NOT_RESPONDING');
+    const transportGeneration = useTransportHealthStore.getState().beginLifecycle();
+    useTransportHealthStore.getState().setSocketState(transportGeneration, 'connected');
     useSyncStore.getState().begin();
     useSyncStore.getState().progress({ chats: 12, messages: 345 });
     useSyncStore.getState().fail('Previous server failed');
@@ -136,6 +140,11 @@ describe('resetSessionScopedState', () => {
       lastAlertType: null,
       lastAlertAt: null,
     });
+    expect(useTransportHealthStore.getState()).toMatchObject({
+      active: false,
+      status: 'idle',
+      hasConnected: false,
+    });
     expect(useSyncStore.getState()).toMatchObject({
       status: 'idle',
       chats: 0,
@@ -165,6 +174,17 @@ describe('resetSessionScopedState', () => {
     jest.advanceTimersByTime(12_000);
 
     expect(useTypingStore.getState().typing['same-guid-on-both-servers']).toBe(true);
+  });
+
+  it('invalidates an active-chat claim so the old account cannot suppress notifications', () => {
+    const oldAccountClaim = claimActiveChat('same-guid-on-both-servers');
+    oldAccountClaim.setVisible(true);
+    expect(isActiveChat('same-guid-on-both-servers')).toBe(true);
+
+    resetSessionScopedState();
+    oldAccountClaim.setVisible(true);
+
+    expect(isActiveChat('same-guid-on-both-servers')).toBe(false);
   });
 
   it('keeps a deferred TanStack query from restoring its cache entry after reset', async () => {

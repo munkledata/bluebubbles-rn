@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -33,6 +33,7 @@ import {
 } from '@/services';
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
+import { claimActiveChat, type ActiveChatClaim } from '@/services/notifications/activeChat';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -41,6 +42,7 @@ import {
 import {
   editText,
   fireDueScheduled,
+  hasLogicalSendCapacity,
   isContactsPermissionDeniedError,
   pickAndSendContact,
   recoverOutgoing,
@@ -321,14 +323,42 @@ function ChatScreenInner({
   // underneath the app-lock overlay (the gate is an absolute-fill overlay at the ROOT layout, not a
   // route swap), and FCM keeps writing incoming messages in both states — which flushes the
   // reactive query and re-renders this screen. The live read marker below must not run then.
-  // `AppState.currentState` is null until the native module has reported in, and a chat screen only
-  // ever mounts because the user navigated to it, so "unknown" counts as on screen.
-  const [appActive, setAppActive] = useState(() => AppState.currentState !== 'background');
+  // Unknown native state fails closed: an extra alert is safer than suppressing a background wake.
+  const activeChatClaim = useRef<ActiveChatClaim | null>(null);
+  const [screenFocused, setScreenFocused] = useState(false);
+  const [appActive, setAppActive] = useState(() => AppState.currentState === 'active');
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
+    const sub = AppState.addEventListener('change', (state) => {
+      const active = state === 'active';
+      // Publish synchronously at the native boundary. Waiting for React's state/effect cycle leaves
+      // a small background transition window where a real alert can be incorrectly suppressed.
+      activeChatClaim.current?.setVisible(active && !useLockStore.getState().locked);
+      setAppActive(active);
+    });
     return () => sub.remove();
   }, []);
   const locked = useLockStore((s) => s.locked);
+
+  // Navigation focus is distinct from mount: Expo keeps this chat mounted underneath routes such
+  // as Chat Settings. Publish only the focused route, and use an owner token so a late cleanup from
+  // chat A cannot clear a newly focused chat B. AppState/App Lock are folded in below.
+  useFocusEffect(
+    useCallback(() => {
+      const claim = claimActiveChat(guid);
+      activeChatClaim.current = claim;
+      claim.setVisible(AppState.currentState === 'active' && !useLockStore.getState().locked);
+      setScreenFocused(true);
+      return () => {
+        claim.release();
+        if (activeChatClaim.current === claim) activeChatClaim.current = null;
+        setScreenFocused(false);
+      };
+    }, [guid]),
+  );
+
+  useEffect(() => {
+    activeChatClaim.current?.setVisible(screenFocused && appActive && !locked);
+  }, [appActive, locked, screenFocused]);
 
   // Gates the live read-marker effect below. The open-time effect MUST read the old marker before
   // anything advances it (that's how firstUnread is computed), so live tracking stays disarmed
@@ -409,7 +439,7 @@ function ChatScreenInner({
     // pocket. `appActive`/`locked` are deps, so coming back / unlocking re-runs this and marks the
     // message read the moment the thread is genuinely on screen again — nothing is lost, only
     // deferred.
-    if (!appActive || locked) return;
+    if (!screenFocused || !appActive || locked) return;
     markedThroughGuid.current = newestReceivedGuid;
     void markRead(guid, accountLease);
     clearChatNotification(guid, accountLease);
@@ -419,6 +449,7 @@ function ChatScreenInner({
     readTrackingArmed,
     messagesResolved,
     newestReceivedGuid,
+    screenFocused,
     appActive,
     locked,
   ]);
@@ -765,6 +796,8 @@ function ChatScreenInner({
         }
         onSend={onSend}
         onSendAttachments={onSendAttachments}
+        canSubmit={hasLogicalSendCapacity}
+        isSubmitOwnerCurrent={accountLease.isCurrent}
         onPickFiles={pickFiles}
         onPickContact={supportsSendContact ? onPickContact : undefined}
         replyTo={replyTo}

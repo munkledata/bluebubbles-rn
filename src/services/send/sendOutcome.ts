@@ -9,6 +9,7 @@ import {
 } from '@db/repositories';
 import type { DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { clearFailedSendNotice, notifyFailedSend } from './sendFailureNotice';
 
 /**
  * Reconcile a send ack by tempGuid — the shared tail of every optimistic send
@@ -41,6 +42,11 @@ export async function reconcileSendOutcome(
   } else {
     await markOutgoingSentNoGuid(db, tempGuid, commitGuard);
   }
+  await clearFailedSendNotice(
+    db,
+    ack.guid && ack.guid !== tempGuid ? ack.guid : tempGuid,
+    commitGuard,
+  );
 }
 
 /**
@@ -74,5 +80,13 @@ export async function handleSendFailure(
       err instanceof Error ? err.message : String(err)
     }`,
   );
-  await reconcileOutgoingError(db, tempGuid, code, now, commitGuard);
+  const reconciled = await reconcileOutgoingError(
+    db,
+    tempGuid,
+    code,
+    now,
+    commitGuard,
+    err instanceof ApiError ? err.serverDetail : undefined,
+  );
+  if (reconciled) await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
 }

@@ -495,6 +495,7 @@ export function MessageList({
       <FailedMessageSheet
         visible={stillFailed}
         isAttachment={failedImage !== undefined}
+        errorDetail={failed?.errorMessage}
         onClose={() => setFailedGuid(null)}
         onRetry={() => {
           // The GUID is all `retry` needs — it re-POSTs the queue payload under the same temp id.

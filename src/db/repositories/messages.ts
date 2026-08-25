@@ -551,6 +551,8 @@ export interface MessageRow {
   // it; the SELECT below always provides it at runtime.
   payloadData?: string | null;
   error: number;
+  /** Already-bounded/redacted server detail for the failed-message sheet. */
+  errorMessage?: string | null;
   sendState: string;
   wasDeliveredQuietly: number;
   didNotifyRecipient: number;
@@ -590,7 +592,8 @@ const MESSAGE_ROW_SELECT = sql`
     m.is_sent AS isSent,
     m.message_summary_info AS messageSummaryInfo,
     m.payload_data AS payloadData,
-    m.has_attachments AS hasAttachments, m.error, m.send_state AS sendState,
+    m.has_attachments AS hasAttachments, m.error, m.error_message AS errorMessage,
+    m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
     m.did_notify_recipient AS didNotifyRecipient,
     m.associated_message_guid AS associatedMessageGuid,

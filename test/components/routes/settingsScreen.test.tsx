@@ -97,6 +97,8 @@ import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useThemeStore } from '@state/themeStore';
 // eslint-disable-next-line import/first
+import { useTransportHealthStore } from '@state/transportHealthStore';
+// eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
 import { PRESET_ORDER, PRESETS, DEFAULT_PRESET } from '@ui/theme/tokens';
@@ -168,6 +170,9 @@ beforeEach(() => {
   useLockStore.setState({ enabled: false, locked: false, hydrated: true });
   useSyncSettingsStore.setState({ messagesPerChat: 0, hydrated: true });
   useSessionStore.setState({ origin: null, serverInfo: null });
+  useTransportHealthStore.getState().reset();
+  const transportGeneration = useTransportHealthStore.getState().beginLifecycle();
+  useTransportHealthStore.getState().setSocketState(transportGeneration, 'connected');
   useDialogStore.setState({ current: null, queue: [] });
   mockIsBiometricAvailable.mockResolvedValue(true);
   mockForget.mockResolvedValue(undefined);
@@ -519,6 +524,29 @@ describe('SettingsScreen — navigation rows', () => {
       fireEvent.press(screen.getByText('‹ Back'));
     });
     expect(mockBack).toHaveBeenCalled();
+  });
+});
+
+describe('SettingsScreen — live transport truth', () => {
+  it('reads Live Updates from transport health and makes degraded status searchable', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText('Live Updates')).toBeTruthy();
+    expect(screen.getByText('Connected')).toBeTruthy();
+
+    const generation = useTransportHealthStore.getState().generation;
+    await act(async () => {
+      useTransportHealthStore.getState().setSocketState(generation, 'reconnecting');
+      useTransportHealthStore.getState().setServerState(generation, 'unreachable');
+    });
+    expect(screen.getByText('Offline')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Search settings'), 'offline');
+    });
+    expect(screen.getByText('SERVER')).toBeTruthy();
+    expect(screen.getByText('Live Updates')).toBeTruthy();
+    expect(screen.getByText('Offline')).toBeTruthy();
+    expect(screen.queryByText('THEME')).toBeNull();
   });
 });
 

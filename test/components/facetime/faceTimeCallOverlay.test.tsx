@@ -12,7 +12,7 @@
  * In-file mock: `react-native-safe-area-context` — the overlay calls useSafeAreaInsets; zero insets.
  */
 import React from 'react';
-import { Linking } from 'react-native';
+import { Linking, StyleSheet } from 'react-native';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import { FaceTimeCallOverlay } from '@ui/facetime/FaceTimeCallOverlay';
 import { useFaceTimeStore } from '@state/faceTimeStore';
@@ -45,6 +45,18 @@ describe('FaceTimeCallOverlay — active call chrome', () => {
     await renderWithTheme(<FaceTimeCallOverlay />);
     expect(screen.getByText('FaceTime')).toBeTruthy();
     expect(screen.getByLabelText('End FaceTime call')).toBeTruthy();
+  });
+
+  it('owns a higher Android layer than the global connection banner', async () => {
+    useFaceTimeStore.setState({ call: CALL });
+    await renderWithTheme(<FaceTimeCallOverlay />);
+
+    const root = screen.root;
+    if (!root) throw new Error('FaceTimeCallOverlay rendered nothing for an active call');
+    expect(StyleSheet.flatten(root.props.style)).toMatchObject({
+      elevation: 16,
+      zIndex: 100,
+    });
   });
 
   it('End calls the store close, clearing the active call and hiding the overlay', async () => {

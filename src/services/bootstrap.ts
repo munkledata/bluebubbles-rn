@@ -27,6 +27,7 @@ import {
   type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
 import { getSocket, setSocket, startRealtime } from './realtimeControl';
+import { stopDeviceNetworkWatch } from './networkReachability';
 import { stopReachabilityWatch } from './reachability';
 import { uploadRegistry } from './send/uploadControl';
 import { resetSessionScopedState } from './sessionScopedState';
@@ -1247,6 +1248,11 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     stopReachabilityWatch();
   } catch {
     failedInMemorySurfaces.push('reachability-watch');
+  }
+  try {
+    stopDeviceNetworkWatch();
+  } catch {
+    failedInMemorySurfaces.push('network-watch');
   }
   let retiringSocket: ReturnType<typeof getSocket> = null;
   try {

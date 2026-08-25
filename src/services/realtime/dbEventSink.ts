@@ -1,3 +1,4 @@
+import { projectServerErrorDetail } from '@core/api/serverErrorDetail';
 import { Chat, resolveMessageChatGuid } from '@core/models';
 import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 import { logger } from '@core/secure';
@@ -428,6 +429,7 @@ export class DbEventSink implements EventSink {
         );
         if (candidates.length === 0) break;
         const code = Number(p.error ?? embedded.error ?? 1) || 1;
+        const errorMessage = projectServerErrorDetail(p.errorMessage ?? p.message?.errorMessage);
         // `retryable: true` = a SEND-PHASE bridge failure (nothing reached Google) — safe to
         // re-arm the automatic retry ladder even though the immediate ack already consumed the
         // queue row. Absent/false (older servers, delivery-phase failures) → bubble-only.
@@ -446,6 +448,7 @@ export class DbEventSink implements EventSink {
                 now,
                 retryable,
                 context?.generation ?? 'direct',
+                errorMessage,
               );
               if (result.matched) {
                 commitEffect = result.onCommitted;

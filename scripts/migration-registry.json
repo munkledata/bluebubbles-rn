@@ -90,6 +90,16 @@
       "upgradeTest": "test/db/migrations/0038_scrub_reaction_selected_message_text.test.ts",
       "schemaEvidence": "N/A: one-time outgoing-queue payload repair; schema unchanged",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 39,
+      "name": "0039_message_error_message",
+      "task": "SEND-01B",
+      "branchPr": "security/rel-005a-teardown",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0039_message_error_message.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

@@ -24,6 +24,7 @@ import { MESSAGES_PER_CHAT_OPTIONS, useSyncSettingsStore } from '@state/syncSett
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { useThemeStore } from '@state/themeStore';
+import { useTransportHealthStore } from '@state/transportHealthStore';
 import {
   CheckRow,
   InfoRow,
@@ -36,6 +37,7 @@ import {
   SwitchRow,
   useTheme,
 } from '@ui';
+import { transportHealthStatusLabel } from '@ui/connection';
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
 
 /** Where auto-downloaded images are additionally saved (the picker in the DOWNLOADS section). */
@@ -85,6 +87,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const mpcIndex = Math.max(0, mpcOptions.indexOf(messagesPerChat));
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  const transportStatus = useTransportHealthStore((s) => s.status);
   // Lease currentness revokes callbacks immediately but is not reactive. Commit a monotonic
   // retired state so account-A server values and routes disappear without waiting for an
   // incidental session-store rerender. Cleanup only unsubscribes; React StrictMode's probe must
@@ -118,7 +121,7 @@ export default function SettingsScreen(): React.JSX.Element {
     privacy:
       'privacy encryption key rotate security storage files plaintext attachments cache logs wallpaper backups app private error reports crashes diagnostics consent share',
     server:
-      'server management restart logs statistics health diagnostics private api find my keys push uptime alerts account alias apple id imessage start chats using',
+      'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics private api find my keys push uptime alerts account alias apple id imessage start chats using',
     about:
       'about app version build server version macos private api disconnect forget app logs debug diagnostics',
   } as const;
@@ -513,6 +516,10 @@ export default function SettingsScreen(): React.JSX.Element {
 
         {match(SECTIONS.server) && (
           <SettingsSection label="SERVER" style={styles.gap}>
+            <InfoRow
+              label="Live Updates"
+              value={accountCurrent ? transportHealthStatusLabel(transportStatus) : '—'}
+            />
             {/* Only when the server advertises the icloud/account endpoints (Private API on). The
                 account screen keeps its own 404 fallback for a deep link / stale serverInfo. */}
             {visibleServerInfo?.supports_icloud_account && (

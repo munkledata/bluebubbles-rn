@@ -18,6 +18,7 @@ import notifee from 'react-native-notify-kit';
 import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
 import { logger } from '@core/secure';
 import { useLockStore } from '@state/lockStore';
+import { claimActiveChat, resetActiveChat } from '@/services/notifications/activeChat';
 import {
   getOrCreateFaceTimeRoute,
   listFutureReminderTriggerRoutes,
@@ -116,6 +117,7 @@ jest.mock('@/services/notifications/notificationRouting', () => {
     chatChannelIdForLocalId: (id: number) =>
       `com.bluegreengatorapps.messages.new_messages.chat.route_${id}`,
     chatNotificationId: (id: number) => `gator-message-${id}`,
+    sendFailureNotificationId: (id: number) => `gator-send-failure-${id}`,
     faceTimeNotificationId: (token: string) => `gator-facetime-${token}`,
     reminderNotificationId: (key: string | number, time: number) => `gator-reminder-${key}-${time}`,
     isSafeReminderNotificationId: (id?: string) =>
@@ -125,6 +127,21 @@ jest.mock('@/services/notifications/notificationRouting', () => {
       chatId: chatIds[chatGuid] ?? 99,
       ...(messageGuid ? { messageId: messageIds[messageGuid] ?? 199 } : {}),
     })),
+    localRouteForMessageGuid: jest.fn(async (messageGuid: string) => ({
+      chatId: messageGuid === 'msg-other' ? 3 : 1,
+      messageId: messageIds[messageGuid] ?? 199,
+    })),
+    localFailedMessageRoute: jest.fn(async (messageGuid: string) => {
+      const chatGuid = messageGuid === 'msg-other' ? 'chat-3' : 'chat-1';
+      return {
+        chatGuid,
+        messageGuid,
+        route: {
+          chatId: chatIds[chatGuid] ?? 99,
+          messageId: messageIds[messageGuid] ?? 199,
+        },
+      };
+    }),
     nativeRouteData: (
       kind: string,
       route: { chatId: number; messageId?: number },
@@ -155,7 +172,12 @@ jest.mock('@/services/notifications/notificationRouting', () => {
       if (data.gatorOwner !== 'gator') return data;
       if (data.gatorSchema !== '2') return null;
       if (data.gatorKind === 'facetime') return { faceTimeUuid: 'opaque-call-uuid' };
-      if (data.gatorKind !== 'message' && data.gatorKind !== 'reminder') return null;
+      if (
+        data.gatorKind !== 'message' &&
+        data.gatorKind !== 'send-failure' &&
+        data.gatorKind !== 'reminder'
+      )
+        return null;
       return {
         chatGuid: chatGuids[Number(data.chatId)],
         ...(data.messageId == null ? {} : { messageGuid: messageGuids[Number(data.messageId)] }),
@@ -186,11 +208,13 @@ const mockListFutureReminderTriggerRoutes = listFutureReminderTriggerRoutes as j
 const {
   clearNotificationRoutes: mockClearNotificationRoutes,
   deleteFaceTimeRoute: mockDeleteFaceTimeRoute,
+  localFailedMessageRoute: mockLocalFailedMessageRoute,
   localRouteForGuids: mockLocalRouteForGuids,
   migrateReminderNotificationId: mockMigrateReminderNotificationId,
 } = jest.requireMock('@/services/notifications/notificationRouting') as {
   clearNotificationRoutes: jest.Mock;
   deleteFaceTimeRoute: jest.Mock;
+  localFailedMessageRoute: jest.Mock;
   localRouteForGuids: jest.Mock;
   migrateReminderNotificationId: jest.Mock;
 };
@@ -229,6 +253,7 @@ const messageIntent = (over: Partial<Extract<NotificationIntent, { kind: 'messag
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
+  resetActiveChat();
   useLockStore.setState({
     enabled: false,
     locked: false,
@@ -240,6 +265,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resumeRealtimeDeliveries();
+  resetActiveChat();
   jest.restoreAllMocks();
 });
 
@@ -314,6 +340,14 @@ describe('postNotification — detailed message', () => {
         uuid: 'LOCKED_FACETIME_UUID_CANARY',
         callerName: 'LOCKED_FACETIME_CALLER_CANARY',
         isAudio: false,
+      } as NotificationIntent,
+    ],
+    [
+      'failed send',
+      {
+        kind: 'send-failure',
+        chatGuid: 'LOCKED_FAILURE_CHAT_CANARY',
+        messageGuid: 'LOCKED_FAILURE_MESSAGE_CANARY',
       } as NotificationIntent,
     ],
     [
@@ -461,6 +495,117 @@ describe('postNotification — detailed message', () => {
   it('marks the MESSAGING style as a group for a group chat', async () => {
     await postNotification(messageIntent({ isGroup: true }));
     expect(lastNotif().android?.style.group).toBe(true);
+  });
+
+  it('suppresses only the exact visible chat at the native presentation boundary', async () => {
+    const active = claimActiveChat('chat-1');
+    active.setVisible(true);
+
+    await postNotification(messageIntent());
+    expect(mockDisplay).not.toHaveBeenCalled();
+
+    await postNotification(
+      messageIntent({ chatGuid: 'chat-3', messageGuid: 'msg-other', body: 'another chat' }),
+    );
+    expect(mockDisplay).toHaveBeenCalledTimes(1);
+
+    active.setVisible(false);
+    await postNotification(messageIntent());
+    expect(mockDisplay).toHaveBeenCalledTimes(2);
+  });
+
+  it('rechecks visibility when the chat becomes active during native channel lookup', async () => {
+    let releaseChannel!: () => void;
+    mockGetChannel.mockImplementationOnce(
+      () =>
+        new Promise<null>((resolve) => {
+          releaseChannel = () => resolve(null);
+        }),
+    );
+    const pending = postNotification(messageIntent());
+    for (let i = 0; i < 20 && mockGetChannel.mock.calls.length === 0; i += 1) {
+      await Promise.resolve();
+    }
+
+    const active = claimActiveChat('chat-1');
+    active.setVisible(true);
+    releaseChannel();
+    await pending;
+
+    expect(mockDisplay).not.toHaveBeenCalled();
+  });
+});
+
+describe('postNotification — failed send', () => {
+  const failureIntent: Extract<NotificationIntent, { kind: 'send-failure' }> = {
+    kind: 'send-failure',
+    chatGuid: 'chat-1',
+    messageGuid: 'msg-1',
+  };
+
+  it('uses fixed generic copy, an opaque stable id, and no inline actions', async () => {
+    await postNotification(failureIntent);
+
+    const n = lastNotif();
+    expect(n).toEqual(
+      expect.objectContaining({
+        id: 'gator-send-failure-101',
+        title: 'Message not sent',
+        body: 'Open Gator to review and retry.',
+        data: {
+          gatorOwner: 'gator',
+          gatorSchema: '2',
+          gatorKind: 'send-failure',
+          chatId: '1',
+          messageId: '101',
+        },
+      }),
+    );
+    expect(n.android).toEqual(
+      expect.objectContaining({
+        channelId: CHANNEL_NEW_MESSAGE,
+        onlyAlertOnce: true,
+        pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
+      }),
+    );
+    expect(n.android).not.toHaveProperty('actions');
+    expect(n.android).not.toHaveProperty('style');
+    expect(JSON.stringify(n)).not.toMatch(/chat-1|msg-1|server detail|recipient|secret plans/);
+  });
+
+  it('suppresses the exact visible chat but posts after it is no longer visible', async () => {
+    const active = claimActiveChat('chat-1');
+    active.setVisible(true);
+
+    await postNotification(failureIntent);
+    expect(mockDisplay).not.toHaveBeenCalled();
+
+    active.setVisible(false);
+    await postNotification(failureIntent);
+    expect(lastNotif().id).toBe('gator-send-failure-101');
+  });
+
+  it('cancels the exact stable failed-send notice after success', async () => {
+    mockLocalFailedMessageRoute.mockResolvedValueOnce(null);
+    await postNotification({
+      kind: 'send-failure-cancel',
+      chatGuid: 'chat-1',
+      messageGuid: 'msg-1',
+    });
+
+    expect(mockCancel).toHaveBeenCalledWith('gator-send-failure-101');
+    expect(mockDisplay).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel when a late acknowledgement leaves the DB failure sticky', async () => {
+    await postNotification({
+      kind: 'send-failure-cancel',
+      chatGuid: 'chat-1',
+      messageGuid: 'msg-1',
+    });
+
+    expect(mockLocalFailedMessageRoute).toHaveBeenCalledWith('msg-1', undefined);
+    expect(mockCancel).not.toHaveBeenCalled();
   });
 });
 

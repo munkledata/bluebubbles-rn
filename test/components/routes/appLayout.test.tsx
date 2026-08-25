@@ -10,6 +10,7 @@ import React from 'react';
 
 const mockRedirect = jest.fn((_props: { href: string }) => null);
 const mockServerRotationApprovalHost = jest.fn(() => null);
+const mockConnectionBanner = jest.fn((_props: { onRetry: () => unknown }) => null);
 const mockOpenChat = jest.fn();
 const mockLoggerWarn = jest.fn();
 const mockForegroundHandlers: Array<
@@ -40,6 +41,7 @@ jest.mock('@/services', () => ({
   flushErrorReports: jest.fn(() => Promise.resolve()),
   pauseRealtime: jest.fn(),
   resumeRealtime: jest.fn(() => Promise.resolve()),
+  retryRealtimeConnection: jest.fn(() => true),
 }));
 jest.mock('@/services/send', () => ({
   recoverOutgoing: jest.fn(() => Promise.resolve({ eligible: 0, sent: 0 })),
@@ -60,6 +62,9 @@ jest.mock('@ui/facetime', () => ({
   FaceTimeCallOverlay: () => null,
   IncomingFaceTimeOverlay: () => null,
 }));
+jest.mock('@ui/connection', () => ({
+  ConnectionBanner: (props: { onRetry: () => unknown }) => mockConnectionBanner(props),
+}));
 jest.mock('@ui/server-rotation', () => ({
   ServerRotationApprovalHost: () => mockServerRotationApprovalHost(),
 }));
@@ -79,7 +84,12 @@ import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { act, renderWithTheme, waitFor } from '../support/renderWithTheme';
 // eslint-disable-next-line import/first
-import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
+import {
+  flushErrorReports,
+  pauseRealtime,
+  resumeRealtime,
+  retryRealtimeConnection,
+} from '@/services';
 // eslint-disable-next-line import/first
 import { recoverOutgoing } from '@/services/send';
 // eslint-disable-next-line import/first
@@ -100,6 +110,9 @@ import {
 
 const mockPauseRealtime = pauseRealtime as jest.MockedFunction<typeof pauseRealtime>;
 const mockResumeRealtime = resumeRealtime as jest.MockedFunction<typeof resumeRealtime>;
+const mockRetryRealtime = retryRealtimeConnection as jest.MockedFunction<
+  typeof retryRealtimeConnection
+>;
 const mockFlushErrorReports = flushErrorReports as jest.MockedFunction<typeof flushErrorReports>;
 const mockRecoverOutgoing = recoverOutgoing as jest.MockedFunction<typeof recoverOutgoing>;
 const mockHandleNotificationAction = handleNotificationAction as jest.Mock;
@@ -220,6 +233,13 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockResumeRealtime).toHaveBeenCalledTimes(1);
     expect(mockFlushErrorReports).toHaveBeenCalledTimes(1);
     expect(mockRecoverOutgoing).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounts the shared connection banner with the service-owned Retry action', async () => {
+    await mountLayout();
+
+    expect(mockConnectionBanner).toHaveBeenCalledTimes(1);
+    expect(mockConnectionBanner.mock.calls[0]?.[0].onRetry).toBe(mockRetryRealtime);
   });
 
   it('keeps in-flight account-A recovery rejections silent after account B connects', async () => {

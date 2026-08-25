@@ -8,6 +8,8 @@ import { Chat, Message } from '@core/models';
 import {
   applyServerSendError,
   cancelOutgoing,
+  claimFailedOutgoingForRetry,
+  claimOutgoingForSend,
   deleteChatLocal,
   discardOutgoingMessage,
   getChatIdByGuid,
@@ -1664,6 +1666,61 @@ describe('reconcileOutgoingError — attempts + backoff', () => {
     expect(q.n).toBe(1_000 + 30_000); // first backoff = 30s
   });
 
+  it('persists one detail, preserves it across duplicate fanout, and clears it on manual retry', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c-detail');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-detail',
+      chatId,
+      chatGuid: 'c-detail',
+      text: 'hi',
+      now: 1,
+    });
+
+    await reconcileOutgoingError(db, 'temp-detail', 42, 1_000, undefined, 'Useful detail');
+    await reconcileOutgoingError(db, 'temp-detail', 42, 1_001);
+    expect(
+      raw
+        .prepare('SELECT error_message AS detail, send_state AS state FROM messages WHERE guid = ?')
+        .get('temp-detail'),
+    ).toEqual({ detail: 'Useful detail', state: 'error' });
+    expect(
+      raw.prepare('SELECT attempts FROM outgoing_queue WHERE temp_guid = ?').get('temp-detail'),
+    ).toEqual({ attempts: 1 });
+
+    await expect(
+      claimFailedOutgoingForRetry(db, 'temp-detail', () => 2_000),
+    ).resolves.toMatchObject({ claim: 'claimed' });
+    expect(
+      raw.prepare('SELECT error_message AS detail FROM messages WHERE guid = ?').get('temp-detail'),
+    ).toEqual({ detail: null });
+  });
+
+  it('clears stale detail when the automatic retry worker claims the next attempt', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c-auto-detail');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-auto-detail',
+      chatId,
+      chatGuid: 'c-auto-detail',
+      text: 'hi',
+      now: 1,
+    });
+    await reconcileOutgoingError(db, 'temp-auto-detail', 42, 1_000, undefined, 'Stale detail');
+    const row = raw
+      .prepare('SELECT id FROM outgoing_queue WHERE temp_guid = ?')
+      .get('temp-auto-detail') as { id: number };
+
+    await expect(claimOutgoingForSend(db, row.id, () => 40_000)).resolves.toBe(true);
+    expect(
+      raw
+        .prepare(
+          'SELECT error_message AS detail, send_state AS state, error FROM messages WHERE guid = ?',
+        )
+        .get('temp-auto-detail'),
+    ).toEqual({ detail: null, state: 'sending', error: 0 });
+  });
+
   it('reports FALSE when no queue row owns the guid (so a caller can fall through)', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
@@ -2328,12 +2385,18 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
       totalBytes: 10,
       now: 100,
     });
+    raw
+      .prepare("UPDATE messages SET error_message = 'stale detail' WHERE guid = 'temp-att1'")
+      .run();
     await reconcileOutgoingAttachmentByContent(
       db,
       { guid: 'rcs-real-1', isFromMe: true, text: null, dateCreated: 100 },
       chatId,
     );
     expect(msgState(raw, 'rcs-real-1')?.s).toBe('sent');
+    expect(
+      raw.prepare('SELECT error_message AS detail FROM messages WHERE guid = ?').get('rcs-real-1'),
+    ).toEqual({ detail: null });
     const id = (
       raw.prepare('SELECT id FROM messages WHERE guid = ?').get('rcs-real-1') as { id: number }
     ).id;

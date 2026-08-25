@@ -60,10 +60,15 @@ jest.mock('react', () => {
   };
 });
 
-jest.mock('expo-router', () => ({
-  useLocalSearchParams: () => ({ guid: mockGuid }),
-  useRouter: () => ({ push: mockPush }),
-}));
+jest.mock('expo-router', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const R = require('react');
+  return {
+    useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
+    useLocalSearchParams: () => ({ guid: mockGuid }),
+    useRouter: () => ({ push: mockPush }),
+  };
+});
 
 // Zero by default (what the rest of the suite wants); mutable so the keyboard-inset test can hand
 // the selection bar a realistic navigation bar.
@@ -199,6 +204,7 @@ jest.mock('@/services/send', () => ({
   cancelOutgoing: jest.fn(),
   editText: jest.fn(),
   fireDueScheduled: jest.fn(),
+  hasLogicalSendCapacity: jest.fn(() => true),
   isContactsPermissionDeniedError: jest.fn(
     (error: unknown) => error instanceof Error && error.name === 'ContactsPermissionDeniedError',
   ),
@@ -230,6 +236,7 @@ import { dispatchRealtimeEvent, ensureChatSynced, markRead, sendTyping } from '@
 import {
   editText,
   fireDueScheduled,
+  hasLogicalSendCapacity,
   pickAndSendContact,
   react,
   reply,
@@ -561,6 +568,17 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
 });
 
 describe('ChatScreen — send routing', () => {
+  it('gives the composer synchronous capacity and account-owner guards', async () => {
+    await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer!.canSubmit).toBe(hasLogicalSendCapacity);
+    const isSubmitOwnerCurrent = mockCaptured.composer!.isSubmitOwnerCurrent as () => boolean;
+    expect(isSubmitOwnerCurrent()).toBe(true);
+
+    await pauseRealtimeDeliveries();
+    expect(isSubmitOwnerCurrent()).toBe(false);
+    resumeRealtimeDeliveries();
+  });
+
   it('routes plain composer text to send() with no effect', async () => {
     await renderWithTheme(<ChatScreen />);
     await run(() => mockCaptured.composer!.onSend('hello'));

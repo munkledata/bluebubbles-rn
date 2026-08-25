@@ -12,12 +12,14 @@ import notifee, {
 } from 'react-native-notify-kit';
 import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
 import { logger } from '@core/secure';
+import type { AppDatabase } from '@db/types';
 import { useLockStore } from '@state/lockStore';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
 } from '../realtime/deliveryCoordinator';
 import { effectivelyLocked } from './lockGate';
+import { isActiveChat } from './activeChat';
 import {
   NOTIFICATION_DATA_OWNER,
   NOTIFICATION_DATA_SCHEMA,
@@ -30,13 +32,16 @@ import {
   getOrCreateFaceTimeRoute,
   isSafeReminderNotificationId,
   listFutureReminderTriggerRoutes,
+  localFailedMessageRoute,
   localRouteForGuids,
+  localRouteForMessageGuid,
   migrateReminderNotificationId,
   nativeFaceTimeData,
   nativeRouteData,
   nativeStatusData,
   replacementReminderNotificationId,
   resolveNotificationData,
+  sendFailureNotificationId,
 } from './notificationRouting';
 
 export const CHANNEL_NEW_MESSAGE = 'com.bluegreengatorapps.messages.new_messages';
@@ -73,6 +78,8 @@ const STATUS_LOCKED_ID = 'bb-locked-messages';
 const STATUS_RCS_ID = 'bb-rcs-bridge-down';
 const STATUS_TEST_ID = 'bb-test-notification';
 const STATUS_ALIAS_ID = 'bb-aliases-removed';
+const SEND_FAILURE_TITLE = 'Message not sent';
+const SEND_FAILURE_BODY = 'Open Gator to review and retry.';
 
 function dataString(data: Notification['data'], key: string): string | undefined {
   const value = data?.[key];
@@ -154,6 +161,33 @@ async function sanitizedMessageNotification(source: Notification): Promise<Notif
       actions: messageActions(route.messageId != null),
     },
   };
+}
+
+function fixedSendFailureNotification(
+  route: NonNullable<Awaited<ReturnType<typeof localFailedMessageRoute>>>['route'],
+): Notification {
+  return {
+    id: sendFailureNotificationId(route.messageId),
+    title: SEND_FAILURE_TITLE,
+    body: SEND_FAILURE_BODY,
+    data: nativeRouteData('send-failure', route),
+    android: {
+      channelId: CHANNEL_NEW_MESSAGE,
+      smallIcon: 'ic_stat_gator',
+      onlyAlertOnce: true,
+      pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
+    },
+  };
+}
+
+async function sanitizedSendFailureNotification(
+  source: Notification,
+): Promise<Notification | null> {
+  const resolved = await resolveNotificationData(source.data);
+  if (!resolved?.chatGuid || !resolved.messageGuid) return null;
+  const target = await localFailedMessageRoute(resolved.messageGuid);
+  if (!target || target.chatGuid !== resolved.chatGuid) return null;
+  return fixedSendFailureNotification(target.route);
 }
 
 async function sanitizedFaceTimeNotification(
@@ -332,6 +366,7 @@ async function sanitizedNotification(
       ? await sanitizedFaceTimeNotification(source, context)
       : null;
   if (faceTime) return faceTime;
+  if (kind === 'send-failure') return sanitizedSendFailureNotification(source);
   return sanitizedMessageNotification(source);
 }
 
@@ -943,6 +978,7 @@ export function postNotification(
 async function postNotificationNow(
   intent: NotificationIntent,
   context?: EventDeliveryContext,
+  routeDb?: AppDatabase,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
   // Defense in depth for the common socket/FCM pipeline. The AppState coordinator normally keeps
@@ -951,6 +987,7 @@ async function postNotificationNow(
   // before the UI listener has flipped `locked` on a warm resume.
   if (
     (intent.kind === 'message' ||
+      intent.kind === 'send-failure' ||
       intent.kind === 'facetime-call' ||
       intent.kind === 'alias-removed') &&
     privateNotificationMustBeHidden()
@@ -974,6 +1011,14 @@ async function postNotificationNow(
   }
   if (intent.kind === 'facetime-call') {
     await postFaceTimeNotification(intent, context);
+    return;
+  }
+  if (intent.kind === 'send-failure-cancel') {
+    await cancelSendFailureNotificationNow(intent.messageGuid, context, routeDb);
+    return;
+  }
+  if (intent.kind === 'send-failure') {
+    await postSendFailureNotificationNow(intent, context, routeDb);
     return;
   }
   if (intent.kind === 'rcs-bridge-down') {
@@ -1007,13 +1052,19 @@ async function postNotificationNow(
     await postStatusNotification(STATUS_ALIAS_ID, 'alias', 'iMessage', body, context, true);
     return;
   }
+  // Suppress at the native boundary, not while deriving the intent: another-chat/background and
+  // headless delivery still post, while a route that became visible during queued DB work stays
+  // quiet. Re-check after every native/DB await below because focus can change between them.
+  if (isActiveChat(intent.chatGuid)) return;
   if (!deliveryIsCurrent(context)) return;
   await ensureChannel();
   if (!deliveryIsCurrent(context)) return;
   if (await containPrivateNotificationIfLocked(context)) return;
+  if (isActiveChat(intent.chatGuid)) return;
   const route = await localRouteForGuids(intent.chatGuid, intent.messageGuid);
   if (!deliveryIsCurrent(context)) return;
   if (await containPrivateNotificationIfLocked(context)) return;
+  if (isActiveChat(intent.chatGuid)) return;
   if (!route) throw new Error('cannot post a notification for an unknown conversation');
   // Route to this chat's OWN channel if the user has customized it (created via
   // openChatNotificationSettings); else the shared "New Messages" channel. getChannel returns null
@@ -1022,6 +1073,7 @@ async function postNotificationNow(
   const customChannel = await notifee.getChannel(perChatId).catch(() => null);
   if (!deliveryIsCurrent(context)) return;
   if (await containPrivateNotificationIfLocked(context)) return;
+  if (isActiveChat(intent.chatGuid)) return;
   if (customChannel) {
     // Updating a channel's name preserves the user's sound/importance settings while keeping the
     // current conversation title accurate.
@@ -1032,12 +1084,14 @@ async function postNotificationNow(
     });
     if (!deliveryIsCurrent(context)) return;
     if (await containPrivateNotificationIfLocked(context)) return;
+    if (isActiveChat(intent.chatGuid)) return;
   }
   const channelId = customChannel ? perChatId : CHANNEL_NEW_MESSAGE;
   const body = intent.body;
   const title = intent.chatTitle;
   const senderName = intent.senderName;
   if (!deliveryIsCurrent(context)) return;
+  if (isActiveChat(intent.chatGuid)) return;
   await notifee.displayNotification({
     id: chatNotificationId(route.chatId),
     title,
@@ -1079,6 +1133,62 @@ async function postNotificationNow(
       actions: messageActions(route.messageId != null),
     },
   });
+}
+
+async function postSendFailureNotificationNow(
+  intent: Extract<NotificationIntent, { kind: 'send-failure' }>,
+  context?: EventDeliveryContext,
+  db?: AppDatabase,
+): Promise<void> {
+  if (!deliveryIsCurrent(context) || isActiveChat(intent.chatGuid)) return;
+  await ensureChannel();
+  if (!deliveryIsCurrent(context)) return;
+  if (await containPrivateNotificationIfLocked(context)) return;
+  if (isActiveChat(intent.chatGuid)) return;
+  const target = await localFailedMessageRoute(intent.messageGuid, db);
+  if (!deliveryIsCurrent(context)) return;
+  if (await containPrivateNotificationIfLocked(context)) return;
+  if (!target || target.chatGuid !== intent.chatGuid || isActiveChat(intent.chatGuid)) return;
+  await notifee.displayNotification(fixedSendFailureNotification(target.route));
+}
+
+async function cancelSendFailureNotificationNow(
+  messageGuid: string,
+  context?: EventDeliveryContext,
+  db?: AppDatabase,
+): Promise<void> {
+  if (!deliveryIsCurrent(context)) return;
+  // An RCS bridge can acknowledge with the temp guid just after a server error. The repository
+  // deliberately keeps that error sticky, so the acknowledgement is not sufficient evidence to
+  // withdraw the notice: current encrypted-DB truth must no longer be failed.
+  if (await localFailedMessageRoute(messageGuid, db)) return;
+  if (!deliveryIsCurrent(context)) return;
+  const route = await localRouteForMessageGuid(messageGuid, db);
+  if (!deliveryIsCurrent(context) || !route) return;
+  await notifee.cancelNotification(sendFailureNotificationId(route.messageId));
+}
+
+/** Post fixed app-authored failure copy only after the supplied DB contains a current error row. */
+export function postSendFailureNotification(
+  db: AppDatabase,
+  chatGuid: string,
+  messageGuid: string,
+  context?: EventDeliveryContext,
+): Promise<void> {
+  return enqueueNotificationOperation(() =>
+    postNotificationNow({ kind: 'send-failure', chatGuid, messageGuid }, context, db),
+  );
+}
+
+/** Best-effort exact withdrawal after a retry/ack settles the same local message row. */
+export function cancelSendFailureNotification(
+  db: AppDatabase,
+  messageGuid: string,
+  context?: EventDeliveryContext,
+): Promise<void> {
+  return enqueueNotificationOperation(() =>
+    cancelSendFailureNotificationNow(messageGuid, context, db),
+  );
 }
 
 export function cancelForChat(chatGuid: string, context?: EventDeliveryContext): Promise<void> {

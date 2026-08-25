@@ -61,7 +61,7 @@ export function FaceTimeCallOverlay(): React.JSX.Element | null {
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#000', zIndex: 100 },
+  container: { backgroundColor: '#000', elevation: 16, zIndex: 100 },
   topBar: {
     position: 'absolute',
     top: 0,

@@ -12,6 +12,8 @@ interface FailedMessageSheetProps {
   onDelete: () => void;
   /** True when the failed message carries an attachment (tweaks the copy). */
   isAttachment?: boolean;
+  /** Bounded/redacted server detail read from the encrypted failed-message row. */
+  errorDetail?: string | null;
 }
 
 /**
@@ -25,6 +27,7 @@ export function FailedMessageSheet({
   onRetry,
   onDelete,
   isAttachment,
+  errorDetail,
 }: FailedMessageSheetProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -47,6 +50,11 @@ export function FailedMessageSheet({
                 ? 'Your attachment couldn’t be sent.'
                 : 'Your message couldn’t be sent.'}
             </Text>
+            {errorDetail ? (
+              <Text style={[styles.detail, { color: theme.color.secondaryLabel }]}>
+                {errorDetail}
+              </Text>
+            ) : null}
           </View>
           <Pressable
             style={[styles.action, { borderTopColor: theme.color.separator }]}
@@ -93,6 +101,7 @@ const styles = StyleSheet.create({
   header: { paddingVertical: 16, alignItems: 'center', gap: 4 },
   title: { fontSize: 17, fontWeight: '700' },
   subtitle: { fontSize: 13, textAlign: 'center' },
+  detail: { fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 4 },
   action: { paddingVertical: 14, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
   actionText: { fontSize: 17, fontWeight: '500' },
   cancel: { marginTop: 8, borderTopWidth: 0, borderRadius: 12 },

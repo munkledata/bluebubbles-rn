@@ -103,8 +103,8 @@ const mockRunDbDriverSelfTest = jest.fn(async () => ({
   schema: 3 as const,
   suite: 'android-db-contract' as const,
   status: 'pass' as const,
-  migrationCount: 38 as const,
-  migrationHead: '0038_scrub_reaction_selected_message_text' as const,
+  migrationCount: 39 as const,
+  migrationHead: '0039_message_error_message' as const,
   checks: {
     encryptedOpen: true,
     wrongKeyRejected: true,
@@ -140,8 +140,8 @@ const mockDbDriverInternalFailure = {
   schema: 3 as const,
   suite: 'android-db-contract' as const,
   status: 'fail' as const,
-  migrationCount: 38 as const,
-  migrationHead: '0038_scrub_reaction_selected_message_text' as const,
+  migrationCount: 39 as const,
+  migrationHead: '0039_message_error_message' as const,
   checks: {
     encryptedOpen: false,
     wrongKeyRejected: false,

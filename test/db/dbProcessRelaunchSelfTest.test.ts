@@ -470,10 +470,11 @@ beforeEach(() => {
 
 describe('DB-03B1 fixed process-relaunch database contract', () => {
   it('pins the exact production migration boundary used across process death', () => {
-    expect(migrationNames).toHaveLength(38);
+    expect(migrationNames).toHaveLength(39);
     expect(migrationNames[28]).toBe('0029_chats_deleted_at');
     expect(migrationNames[29]).toBe('0030_attachment_cache_entries');
     expect(migrationNames[37]).toBe('0038_scrub_reaction_selected_message_text');
+    expect(migrationNames[38]).toBe('0039_message_error_message');
   });
 
   it('prepares exact 0001-0029 state and keeps the encrypted handle open while READY waits', async () => {
@@ -569,8 +570,8 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
 
     await expect(resumeDbProcessRelaunchSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 38,
-      migrationHead: '0038_scrub_reaction_selected_message_text',
+      migrationCount: 39,
+      migrationHead: '0039_message_error_message',
       checks: {
         readOnlyContinuityOpen: true,
         sameFileState: true,
@@ -932,7 +933,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
   it('pins the exact single-statement 0038 production migration boundary', () => {
     const migrations = (jest.requireActual('@db/migrations') as typeof import('@db/migrations'))
       .MIGRATIONS;
-    expect(migrations).toHaveLength(38);
+    expect(migrations).toHaveLength(39);
     expect(migrations[36]?.name).toBe('0037_purge_legacy_redacted_mode_setting');
     expect(migrations[37]).toEqual({
       name: '0038_scrub_reaction_selected_message_text',
@@ -947,6 +948,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
               END`,
       ],
     });
+    expect(migrations[38]?.name).toBe('0039_message_error_message');
   });
 
   it('runs the real migration boundary, enters READY before ledger COMMIT, then rolls back on callback rejection', async () => {
@@ -1046,7 +1048,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
     expect(onPrepared).not.toHaveBeenCalled();
   });
 
-  it('opens read-only first, proves exact rollback, retries only 0038, and retires sidecars', async () => {
+  it('opens read-only first, proves exact rollback, retries 0038 plus the current tail, and retires sidecars', async () => {
     const state = stateAtPrefix();
     const readOnly = activeMigrationHandle(state);
     const reopened = activeMigrationHandle(state);
@@ -1066,8 +1068,8 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
 
     await expect(resumeDbActiveMigrationDeathSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 38,
-      migrationHead: '0038_scrub_reaction_selected_message_text',
+      migrationCount: 39,
+      migrationHead: '0039_message_error_message',
       checks: {
         readOnlyRecoveryOpen: true,
         walMode: true,

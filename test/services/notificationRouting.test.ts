@@ -20,13 +20,16 @@ import {
   getOrCreateFaceTimeRoute,
   isSafeReminderNotificationId,
   listFutureReminderTriggerRoutes,
+  localFailedMessageRoute,
   localRouteForGuids,
+  localRouteForMessageGuid,
   migrateReminderNotificationId,
   nativeFaceTimeData,
   nativeRouteData,
   newReminderNotificationId,
   replacementReminderNotificationId,
   resolveNotificationData,
+  sendFailureNotificationId,
 } from '@/services/notifications/notificationRouting';
 import { cancelAllNotifications } from '@/services/notifications/notifeeService';
 import { createTestDb } from '../support/testDb';
@@ -170,6 +173,80 @@ describe('notificationRouting — native privacy boundary', () => {
       messageGuid: 'p:0/private-message-guid',
       messageDate: '123',
     });
+  });
+
+  it('round-trips a failed send through local integer keys without exposing message or chat identifiers', async () => {
+    mockRaw
+      .prepare(
+        `UPDATE messages
+            SET is_from_me = 1, send_state = 'error'
+          WHERE guid = ?`,
+      )
+      .run('p:0/private-message-guid');
+
+    const localRoute = await localRouteForMessageGuid('p:0/private-message-guid', mockDb);
+    const failed = await localFailedMessageRoute('p:0/private-message-guid', mockDb);
+    expect(failed).toEqual({
+      chatGuid: 'iMessage;-;+15551234567',
+      messageGuid: 'p:0/private-message-guid',
+      route: localRoute,
+    });
+
+    const data = nativeRouteData('send-failure', failed!.route);
+    const id = sendFailureNotificationId(failed!.route.messageId);
+    expect(JSON.stringify({ id, data })).not.toMatch(/15551234567|private-message-guid|iMessage/);
+    expect(data).toEqual({
+      gatorOwner: 'gator',
+      gatorSchema: '2',
+      gatorKind: 'send-failure',
+      chatId: String(failed!.route.chatId),
+      messageId: String(failed!.route.messageId),
+    });
+    await expect(resolveNotificationData(data)).resolves.toEqual({
+      chatGuid: 'iMessage;-;+15551234567',
+      messageGuid: 'p:0/private-message-guid',
+    });
+  });
+
+  it('resolves a failed-send route only while current DB truth is an undeleted outgoing error', async () => {
+    const setState = mockRaw.prepare(
+      `UPDATE messages
+          SET is_from_me = ?, send_state = ?, date_deleted = ?, date_retracted = ?
+        WHERE guid = ?`,
+    );
+
+    setState.run(0, 'error', null, null, 'p:0/private-message-guid');
+    await expect(localFailedMessageRoute('p:0/private-message-guid', mockDb)).resolves.toBeNull();
+
+    setState.run(1, 'error', null, null, 'p:0/private-message-guid');
+    await expect(localFailedMessageRoute('p:0/private-message-guid', mockDb)).resolves.toEqual(
+      expect.objectContaining({
+        chatGuid: 'iMessage;-;+15551234567',
+        messageGuid: 'p:0/private-message-guid',
+      }),
+    );
+
+    setState.run(1, 'sending', null, null, 'p:0/private-message-guid');
+    await expect(localFailedMessageRoute('p:0/private-message-guid', mockDb)).resolves.toBeNull();
+
+    setState.run(1, 'error', 200, null, 'p:0/private-message-guid');
+    await expect(localFailedMessageRoute('p:0/private-message-guid', mockDb)).resolves.toBeNull();
+
+    setState.run(1, 'error', null, 300, 'p:0/private-message-guid');
+    await expect(localFailedMessageRoute('p:0/private-message-guid', mockDb)).resolves.toBeNull();
+  });
+
+  it('retains the same local failure-notice id when a stale temp guid resolves through its alias', async () => {
+    mockRaw
+      .prepare(
+        `INSERT INTO message_guid_aliases (alias_guid, canonical_guid)
+         VALUES (?, ?)`,
+      )
+      .run('temp-stale-failure-guid', 'p:0/private-message-guid');
+
+    await expect(localRouteForMessageGuid('temp-stale-failure-guid', mockDb)).resolves.toEqual(
+      await localRouteForMessageGuid('p:0/private-message-guid', mockDb),
+    );
   });
 
   it('stores a server-controlled FaceTime UUID behind a random encrypted-DB token', async () => {

@@ -15,6 +15,7 @@ import {
 } from '../realtime/deliveryCoordinator';
 import { sendTextMessage } from '@/services/send/sendService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
+import { logicalSendQueue } from '@/services/send/logicalSendQueue';
 import {
   ACTION_ANSWER_FACETIME,
   ACTION_DECLINE_FACETIME,
@@ -222,7 +223,7 @@ async function handleNotificationPressForAccount(
   // A foreground non-reminder caller has no DB side-effect to run. The background callback passes
   // `onCurrentChatPress`, so it still resolves the safe local route before stashing navigation.
   if (!isReminderPress && !onCurrentChatPress) return;
-  if (!hasPrivateRouteSchema(data, ['message', 'reminder'])) return;
+  if (!hasPrivateRouteSchema(data, ['message', 'send-failure', 'reminder'])) return;
 
   let route: Awaited<ReturnType<typeof resolveNotificationData>>;
   try {
@@ -309,21 +310,26 @@ async function replyTo(
   onQueued: () => void,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  // DEV: simulate the round-trip locally so the reply shows Delivered without a server.
-  if (isDevServer()) {
-    const { devSendFake } = await import('@features/conversations/devSeed');
+  const turn = await logicalSendQueue.acquire(accountLease);
+  try {
+    // DEV: simulate the round-trip locally so the reply shows Delivered without a server.
+    if (isDevServer()) {
+      const { devSendFake } = await import('@features/conversations/devSeed');
+      assertCurrentAccount(accountLease);
+      await devSendFake(chatGuid, text, undefined, accountLease);
+      assertCurrentAccount(accountLease);
+      onQueued(); // the fake write IS the durable point in dev
+      return;
+    }
+    // ensureDatabase: a killed-app inline-reply runs headless with no prior DB open.
     assertCurrentAccount(accountLease);
-    await devSendFake(chatGuid, text, undefined, accountLease);
+    const db = await ensureDatabase();
     assertCurrentAccount(accountLease);
-    onQueued(); // the fake write IS the durable point in dev
-    return;
+    await sendTextMessage(db, http, { chatGuid, text }, Date.now(), onQueued);
+    assertCurrentAccount(accountLease);
+  } finally {
+    turn.release();
   }
-  // ensureDatabase: a killed-app inline-reply runs headless with no prior DB open.
-  assertCurrentAccount(accountLease);
-  const db = await ensureDatabase();
-  assertCurrentAccount(accountLease);
-  await sendTextMessage(db, http, { chatGuid, text }, Date.now(), onQueued);
-  assertCurrentAccount(accountLease);
 }
 
 /** Send a 'love' tapback for the notification's message (mirrors the in-app react path). */
@@ -332,22 +338,27 @@ async function loveMessage(
   messageGuid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  // DEV: simulate the reaction round-trip locally without a server.
-  if (isDevServer()) {
-    const { devSendFakeReaction } = await import('@features/conversations/devSeed');
+  const turn = await logicalSendQueue.acquire(accountLease);
+  try {
+    // DEV: simulate the reaction round-trip locally without a server.
+    if (isDevServer()) {
+      const { devSendFakeReaction } = await import('@features/conversations/devSeed');
+      assertCurrentAccount(accountLease);
+      await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, accountLease);
+      assertCurrentAccount(accountLease);
+      return;
+    }
+    // ensureDatabase: a killed-app action runs headless with no prior DB open.
     assertCurrentAccount(accountLease);
-    await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, accountLease);
+    const db = await ensureDatabase();
     assertCurrentAccount(accountLease);
-    return;
+    await sendReactionMessage(db, http, {
+      chatGuid,
+      targetGuid: messageGuid,
+      reaction: 'love',
+    });
+    assertCurrentAccount(accountLease);
+  } finally {
+    turn.release();
   }
-  // ensureDatabase: a killed-app action runs headless with no prior DB open.
-  assertCurrentAccount(accountLease);
-  const db = await ensureDatabase();
-  assertCurrentAccount(accountLease);
-  await sendReactionMessage(db, http, {
-    chatGuid,
-    targetGuid: messageGuid,
-    reaction: 'love',
-  });
-  assertCurrentAccount(accountLease);
 }

@@ -337,8 +337,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       expect(mockFiles.get(RESUMING)).toBe(0);
       return {
         status: 'pass',
-        migrationCount: 38,
-        migrationHead: '0038_scrub_reaction_selected_message_text',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
         checks: resumeChecks,
       };
     });
@@ -364,8 +364,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-relaunch',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 38,
-        migrationHead: '0038_scrub_reaction_selected_message_text',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -428,8 +428,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         expect(mockFiles.get(ACTIVE_MIGRATION_DEATH_RESUMING)).toBe(0);
         return {
           status: 'pass',
-          migrationCount: 38,
-          migrationHead: '0038_scrub_reaction_selected_message_text',
+          migrationCount: 39,
+          migrationHead: '0039_message_error_message',
           checks: activeMigrationDeathResumeChecks,
         };
       },
@@ -458,8 +458,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-active-migration-death',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 38,
-        migrationHead: '0038_scrub_reaction_selected_message_text',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -599,8 +599,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'fail',
-        migrationCount: 38,
-        migrationHead: '0038_scrub_reaction_selected_message_text',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
         checks: { ...resumeChecks, databaseCleanup: false },
         failureCode: 'database-cleanup',
       };
@@ -633,8 +633,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'pass',
-        migrationCount: 38,
-        migrationHead: '0038_scrub_reaction_selected_message_text',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
         checks: resumeChecks,
       };
     });

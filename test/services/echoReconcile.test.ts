@@ -86,7 +86,9 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
     });
     // Simulate handleSendFailure: bubble errored, attempts bumped, backoff armed.
     raw
-      .prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-err11111'")
+      .prepare(
+        "UPDATE messages SET send_state='error', error=502, error_message='stale detail' WHERE guid='temp-err11111'",
+      )
       .run();
     raw
       .prepare(
@@ -103,10 +105,15 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
     });
     await router.handle('new-message', JSON.stringify(echo), 'socket');
 
-    const msgs = (await listMessages(db, chatId)) as Array<{ guid: string; sendState: string }>;
+    const msgs = (await listMessages(db, chatId)) as Array<{
+      guid: string;
+      sendState: string;
+      errorMessage: string | null;
+    }>;
     expect(msgs).toHaveLength(1); // no duplicate bubble
     expect(msgs[0]!.guid).toBe('real-recovered');
     expect(msgs[0]!.sendState).toBe('sent');
+    expect(msgs[0]!.errorMessage).toBeNull();
     expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-err11111')).toBe(0); // ladder stopped
   });
 

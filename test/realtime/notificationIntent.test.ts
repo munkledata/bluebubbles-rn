@@ -370,7 +370,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents).toHaveLength(1);
   });
 
-  it('does not notify for our own messages', async () => {
+  it('does not raise a message notice for our own message and only withdraws a prior failure notice', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
     await router.handle(
@@ -378,7 +378,48 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       { guid: 'mine', text: 'sent', isFromMe: true, dateCreated: 1, chats: [{ guid: 'cMe' }] },
       'socket',
     );
-    expect(intents).toHaveLength(0);
+    expect(intents).toEqual([
+      { kind: 'send-failure-cancel', chatGuid: 'cMe', messageGuid: 'mine' },
+    ]);
+  });
+
+  it('derives a generic failed-send intent only after the server error is committed to the DB', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'outgoing-server-error',
+        text: 'PRIVATE_MESSAGE_BODY_CANARY',
+        isFromMe: true,
+        dateCreated: 1,
+        chats: [{ guid: 'private-server-chat-guid' }],
+      },
+      'socket',
+    );
+    intents.length = 0;
+
+    await router.handle(
+      'message-send-error',
+      {
+        tempGuid: 'missing-first-candidate',
+        guid: 'outgoing-server-error',
+        error: 22,
+        errorMessage: 'PRIVATE_SERVER_ERROR_DETAIL_CANARY',
+      },
+      'socket',
+    );
+
+    expect(intents).toEqual([
+      {
+        kind: 'send-failure',
+        chatGuid: 'private-server-chat-guid',
+        messageGuid: 'outgoing-server-error',
+      },
+    ]);
+    expect(JSON.stringify(intents)).not.toMatch(
+      /PRIVATE_MESSAGE_BODY_CANARY|PRIVATE_SERVER_ERROR_DETAIL_CANARY/,
+    );
   });
 
   it('emits a cancel intent on remote read', async () => {

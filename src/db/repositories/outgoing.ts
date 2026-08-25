@@ -497,7 +497,7 @@ export async function claimFailedOutgoingForRetry(
       const row = queued[0];
       if (!row) return { claim: 'unsendable' };
       const taken = await db.all<{ id: number }>(sql`
-        UPDATE messages SET send_state = 'sending', error = 0
+        UPDATE messages SET send_state = 'sending', error = 0, error_message = NULL
          WHERE guid = ${tempGuid} AND send_state = 'error'
         RETURNING id`);
       if (taken.length === 0) {
@@ -603,6 +603,7 @@ export async function reconcileOutgoingSuccess(
             isFromMe: true,
             sendState: 'sent',
             error: 0,
+            errorMessage: null,
           })
           .where(eq(messages.guid, tempGuid));
       }
@@ -645,7 +646,7 @@ export async function markOutgoingSentNoGuid(
       // and the message showed as sent with no error badge and no retry row — silently never
       // delivered. Same shape as `retireOutgoing` / `claimOutgoingForSend`.
       const promoted = await db.all<{ id: number }>(sql`
-      UPDATE messages SET send_state = 'sent', error = 0
+      UPDATE messages SET send_state = 'sent', error = 0, error_message = NULL
        WHERE guid = ${tempGuid} AND (send_state IS NULL OR send_state <> 'error')
       RETURNING id`);
       if (promoted.length > 0) {
@@ -752,7 +753,7 @@ export async function reconcileEchoByContent(
     await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
     await db
       .update(messages)
-      .set({ guid: m.guid, sendState: 'sent', error: 0 })
+      .set({ guid: m.guid, sendState: 'sent', error: 0, errorMessage: null })
       .where(eq(messages.guid, temp.guid));
   });
 }
@@ -827,7 +828,7 @@ export async function reconcileOutgoingAttachmentByContent(
       await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
       await db
         .update(messages)
-        .set({ guid: m.guid, sendState: 'sent', error: 0 })
+        .set({ guid: m.guid, sendState: 'sent', error: 0, errorMessage: null })
         .where(eq(messages.guid, temp.guid));
     },
     commitGuard,
@@ -854,7 +855,7 @@ export async function retireOutgoing(
       .where(eq(outgoingQueue.tempGuid, tempGuid));
     await db
       .update(messages)
-      .set({ sendState: 'error', error: errorCode })
+      .set({ sendState: 'error', error: errorCode, errorMessage: null })
       .where(and(eq(messages.guid, tempGuid), ne(messages.sendState, 'sent')));
   };
   // The optional guard authorizes this commit; it never decides whether these two writes own the
@@ -868,7 +869,7 @@ export async function retireOutgoing(
 export const OUTGOING_MAX_ATTEMPTS = 5;
 // A freshly-inserted row is assumed in-flight (the UI send owns it) for this long, so
 // the retry processor won't double-send it; past this, an un-deleted row is stranded.
-const OUTGOING_GRACE_MS = 60_000;
+export const OUTGOING_GRACE_MS = 60_000;
 // Lease set on a row while a retry attempt is in flight (prevents concurrent runners).
 const OUTGOING_LEASE_MS = 120_000;
 
@@ -894,14 +895,17 @@ export async function reconcileOutgoingErrorWithinTransaction(
   tempGuid: string,
   errorCode: number,
   now: number = Date.now(),
+  errorMessage?: string | null,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const cur = await db.all<{
       attempts: number;
       sendState: string | null;
       currentError: number | null;
+      currentErrorMessage: string | null;
     }>(sql`
-        SELECT q.attempts, m.send_state AS sendState, m.error AS currentError
+        SELECT q.attempts, m.send_state AS sendState, m.error AS currentError,
+               m.error_message AS currentErrorMessage
           FROM outgoing_queue q LEFT JOIN messages m ON m.guid = q.temp_guid
          WHERE q.temp_guid = ${tempGuid} LIMIT 1`);
     const current = cur[0];
@@ -909,7 +913,11 @@ export async function reconcileOutgoingErrorWithinTransaction(
     if (prior == null) {
       await db
         .update(messages)
-        .set({ sendState: 'error', error: errorCode })
+        .set({
+          sendState: 'error',
+          error: errorCode,
+          ...(errorMessage === undefined ? {} : { errorMessage }),
+        })
         .where(eq(messages.guid, tempGuid));
       return false;
     }
@@ -918,11 +926,19 @@ export async function reconcileOutgoingErrorWithinTransaction(
     // treating the second copy as success prevents one server failure from consuming two attempts.
     // A genuine later retry first flips the bubble back to `sending`/error=0, so its next failure is
     // still distinguishable and advances normally.
-    if (prior > 0 && current.sendState === 'error' && current.currentError === errorCode)
+    if (prior > 0 && current.sendState === 'error' && current.currentError === errorCode) {
+      if (errorMessage !== undefined && current.currentErrorMessage !== errorMessage) {
+        await db.update(messages).set({ errorMessage }).where(eq(messages.guid, tempGuid));
+      }
       return true;
+    }
     await db
       .update(messages)
-      .set({ sendState: 'error', error: errorCode })
+      .set({
+        sendState: 'error',
+        error: errorCode,
+        ...(errorMessage === undefined ? {} : { errorMessage }),
+      })
       .where(eq(messages.guid, tempGuid));
     const attempts = prior + 1;
     const bumped = await db.all<{ id: number }>(sql`
@@ -940,10 +956,12 @@ export async function reconcileOutgoingError(
   errorCode: number,
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
+  errorMessage?: string | null,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => reconcileOutgoingErrorWithinTransaction(context, tempGuid, errorCode, now),
+    (context) =>
+      reconcileOutgoingErrorWithinTransaction(context, tempGuid, errorCode, now, errorMessage),
     commitGuard,
   );
 }
@@ -959,11 +977,16 @@ export function markMessageSendErrorWithinTransaction(
   context: DbTransactionContext,
   guid: string,
   errorCode = 1,
+  errorMessage?: string | null,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const updated = await db
       .update(messages)
-      .set({ sendState: 'error', error: errorCode })
+      .set({
+        sendState: 'error',
+        error: errorCode,
+        ...(errorMessage === undefined ? {} : { errorMessage }),
+      })
       .where(eq(messages.guid, guid))
       .returning({ id: messages.id });
     return updated.length > 0;
@@ -976,10 +999,11 @@ export async function markMessageSendError(
   guid: string,
   errorCode = 1,
   commitGuard?: DbCommitGuard,
+  errorMessage?: string | null,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => markMessageSendErrorWithinTransaction(context, guid, errorCode),
+    (context) => markMessageSendErrorWithinTransaction(context, guid, errorCode, errorMessage),
     commitGuard,
   );
 }
@@ -1122,13 +1146,16 @@ export async function applyServerSendErrorWithinTransaction(
   now: number = Date.now(),
   retryable = false,
   requeueScope: string | number = 'process',
+  errorMessage?: string | null,
 ): Promise<ServerSendErrorTransactionResult> {
   return runInTransactionContext(context, async (_db) => {
     // The bump IS the "is a ladder still alive?" test. Asking first with a SELECT and then
     // committing to that branch lost the whole retryable path when the ack deleted the queue row in
     // between (three awaits wide): the UPDATE matched nothing, reported nothing, and the re-enqueue
     // below was never reached — the one case this machinery exists for, downgraded to bubble-only.
-    if (await reconcileOutgoingErrorWithinTransaction(context, guid, errorCode, now)) {
+    if (
+      await reconcileOutgoingErrorWithinTransaction(context, guid, errorCode, now, errorMessage)
+    ) {
       return { matched: true, onCommitted: null };
     }
     const onCommitted = retryable
@@ -1136,7 +1163,7 @@ export async function applyServerSendErrorWithinTransaction(
       : null;
     return {
       matched:
-        (await markMessageSendErrorWithinTransaction(context, guid, errorCode)) ||
+        (await markMessageSendErrorWithinTransaction(context, guid, errorCode, errorMessage)) ||
         onCommitted != null,
       onCommitted,
     };
@@ -1151,9 +1178,18 @@ export async function applyServerSendError(
   now: number = Date.now(),
   retryable = false,
   requeueScope: string | number = 'process',
+  errorMessage?: string | null,
 ): Promise<boolean> {
   const result = await withDbTransaction(db, (context) =>
-    applyServerSendErrorWithinTransaction(context, guid, errorCode, now, retryable, requeueScope),
+    applyServerSendErrorWithinTransaction(
+      context,
+      guid,
+      errorCode,
+      now,
+      retryable,
+      requeueScope,
+      errorMessage,
+    ),
   );
   result.onCommitted?.();
   return result.matched;
@@ -1223,7 +1259,7 @@ export async function claimOutgoingForSend(
       if (!claimed) return false;
       await db
         .update(messages)
-        .set({ sendState: 'sending', error: 0 })
+        .set({ sendState: 'sending', error: 0, errorMessage: null })
         .where(and(eq(messages.guid, claimed.tempGuid), eq(messages.sendState, 'error')));
       return true;
     },

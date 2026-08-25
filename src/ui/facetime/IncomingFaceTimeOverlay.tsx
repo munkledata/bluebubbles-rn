@@ -71,7 +71,12 @@ export function IncomingFaceTimeOverlay(): React.JSX.Element | null {
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#1C1C1E', zIndex: 110, justifyContent: 'space-between' },
+  container: {
+    backgroundColor: '#1C1C1E',
+    elevation: 16,
+    zIndex: 110,
+    justifyContent: 'space-between',
+  },
   info: { alignItems: 'center', gap: 8 },
   name: { color: '#fff', fontSize: 30, fontWeight: '600', maxWidth: '90%' },
   subtitle: { color: '#EBEBF599', fontSize: 17 },

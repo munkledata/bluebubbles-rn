@@ -14,26 +14,40 @@ type Handler = (...args: unknown[]) => void;
 /** A fake socket whose Manager (`io`) we can drive `reconnect_failed` through. */
 interface FakeSocket {
   on: jest.Mock;
+  off: jest.Mock;
   emit: jest.Mock;
   disconnect: jest.Mock;
   connected: boolean;
-  handlers: Map<string, Handler>;
-  io: { on: jest.Mock; handlers: Map<string, Handler> };
+  active: boolean;
+  handlers: Map<string, Handler[]>;
+  io: { on: jest.Mock; off: jest.Mock; handlers: Map<string, Handler[]> };
 }
 
 let sockets: FakeSocket[] = [];
 const mockIo = jest.fn((..._args: unknown[]): FakeSocket => {
-  const managerHandlers = new Map<string, Handler>();
-  const handlers = new Map<string, Handler>();
+  const managerHandlers = new Map<string, Handler[]>();
+  const handlers = new Map<string, Handler[]>();
+  const addHandler = (target: Map<string, Handler[]>, event: string, handler: Handler): void => {
+    target.set(event, [...(target.get(event) ?? []), handler]);
+  };
+  const removeHandler = (target: Map<string, Handler[]>, event: string, handler: Handler): void => {
+    target.set(
+      event,
+      (target.get(event) ?? []).filter((candidate) => candidate !== handler),
+    );
+  };
   const socket: FakeSocket = {
-    on: jest.fn((event: string, cb: Handler) => handlers.set(event, cb)),
+    on: jest.fn((event: string, cb: Handler) => addHandler(handlers, event, cb)),
+    off: jest.fn((event: string, cb: Handler) => removeHandler(handlers, event, cb)),
     emit: jest.fn(),
     disconnect: jest.fn(),
     connected: false,
+    active: true,
     handlers,
     io: {
       handlers: managerHandlers,
-      on: jest.fn((event: string, cb: Handler) => managerHandlers.set(event, cb)),
+      on: jest.fn((event: string, cb: Handler) => addHandler(managerHandlers, event, cb)),
+      off: jest.fn((event: string, cb: Handler) => removeHandler(managerHandlers, event, cb)),
     },
   };
   sockets.push(socket);
@@ -49,13 +63,18 @@ const handleRawEvent: RawRealtimeEventHandler = async () => null;
 /** Fire the Manager-level `reconnect_failed` on the most-recently-opened socket. */
 function fireReconnectFailed(): void {
   const socket = sockets[sockets.length - 1]!;
-  socket.io.handlers.get('reconnect_failed')?.();
+  for (const handler of socket.io.handlers.get('reconnect_failed') ?? []) handler();
+}
+
+function fireManagerEvent(event: string, ...args: unknown[]): void {
+  const socket = sockets[sockets.length - 1]!;
+  for (const handler of socket.io.handlers.get(event) ?? []) handler(...args);
 }
 
 /** Fire a Socket-level native callback on the most-recently-opened socket. */
 function fireSocketEvent(event: string, ...args: unknown[]): void {
   const socket = sockets[sockets.length - 1]!;
-  socket.handlers.get(event)?.(...args);
+  for (const handler of socket.handlers.get(event) ?? []) handler(...args);
 }
 
 describe('SocketService reconnect escalation', () => {
@@ -84,6 +103,40 @@ describe('SocketService reconnect escalation', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('publishes the finite connect, drop, retry, and recovery lifecycle', () => {
+    const onLifecycleEvent = jest.fn();
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(onLifecycleEvent);
+
+    fireSocketEvent('connect');
+    fireSocketEvent('disconnect', 'transport close');
+    fireManagerEvent('reconnect_attempt', 1);
+    fireSocketEvent('connect');
+
+    expect(onLifecycleEvent.mock.calls.map(([event]) => event)).toEqual([
+      { phase: 'connecting' },
+      { phase: 'connected', recovered: false },
+      { phase: 'reconnecting' },
+      { phase: 'reconnecting' },
+      { phase: 'connected', recovered: true },
+    ]);
+  });
+
+  it('keeps an intentional terminal disconnect silent', () => {
+    const onLifecycleEvent = jest.fn();
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(onLifecycleEvent);
+    fireSocketEvent('connect');
+    onLifecycleEvent.mockClear();
+
+    service.disconnect();
+    fireSocketEvent('disconnect', 'io client disconnect');
+
+    expect(onLifecycleEvent).not.toHaveBeenCalled();
+  });
+
   it('re-opens the socket (delayed) when the Manager reports reconnect_failed', () => {
     new SocketService(handleRawEvent).connect('https://srv', 'pw', {});
     expect(mockIo).toHaveBeenCalledTimes(1);
@@ -102,6 +155,132 @@ describe('SocketService reconnect escalation', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(/^\[socket\] reconnect attempts exhausted .+ restarting in \d+ms$/),
     );
+  });
+
+  it('manually retries immediately with the same approved transport and a fresh event namespace', async () => {
+    const handle = jest.fn(async (..._args: Parameters<RawRealtimeEventHandler>) => null);
+    const namespaces = ['socket:before-manual-retry', 'socket:after-manual-retry'];
+    const makeNamespace = jest.fn(() => namespaces.shift()!);
+    const onLifecycleEvent = jest.fn();
+    const service = new SocketService(handle, makeNamespace);
+    service.connect('https://trusted.example', 'account-password', {
+      headers: { 'X-Client': 'gator' },
+    });
+    const stopObserving = service.observeLifecycle(onLifecycleEvent);
+    const retiredSocket = sockets[0]!;
+    const retiredEvent = retiredSocket.handlers.get('new-message')![0]!;
+    retiredSocket.disconnect.mockImplementationOnce(() => {
+      // Some native bridges can synchronously flush one final event from disconnect(). Retry must
+      // fence that callback before crossing the native boundary, not only after disconnect returns.
+      retiredEvent({ guid: 'retired-during-disconnect' });
+    });
+    fireSocketEvent('connect');
+    onLifecycleEvent.mockClear();
+
+    expect(service.retryConnection()).toBe(true);
+
+    expect(retiredSocket.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockIo).toHaveBeenCalledTimes(2);
+    expect(mockIo.mock.calls[1]).toEqual([
+      'https://trusted.example',
+      expect.objectContaining({
+        auth: { password: 'account-password' },
+        extraHeaders: { 'X-Client': 'gator' },
+      }),
+    ]);
+    expect(onLifecycleEvent).toHaveBeenCalledWith({ phase: 'reconnecting' });
+
+    retiredEvent({ guid: 'retired' });
+    fireSocketEvent('new-message', { guid: 'current' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handle).toHaveBeenCalledTimes(1);
+    expect(handle.mock.calls[0]?.[1]).toEqual({ guid: 'current' });
+    expect(handle.mock.calls[0]?.[4]).toEqual({
+      transportOccurrenceId: 'socket:after-manual-retry:1',
+    });
+    expect(makeNamespace).toHaveBeenCalledTimes(2);
+
+    const callsBeforeStop = onLifecycleEvent.mock.calls.length;
+    stopObserving();
+    fireSocketEvent('connect');
+    expect(onLifecycleEvent).toHaveBeenCalledTimes(callsBeforeStop);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('refuses a manual retry after terminal disconnect', () => {
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.disconnect();
+
+    expect(service.retryConnection()).toBe(false);
+    expect(mockIo).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes error while retries are exhausted, then reconnecting when escalation opens', () => {
+    const onLifecycleEvent = jest.fn();
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(onLifecycleEvent);
+    fireSocketEvent('connect');
+    onLifecycleEvent.mockClear();
+
+    fireReconnectFailed();
+    expect(onLifecycleEvent).toHaveBeenLastCalledWith({ phase: 'error' });
+
+    jest.advanceTimersByTime(1_200);
+    expect(onLifecycleEvent).toHaveBeenLastCalledWith({ phase: 'reconnecting' });
+
+    fireSocketEvent('connect');
+    expect(onLifecycleEvent).toHaveBeenLastCalledWith({ phase: 'connected', recovered: true });
+  });
+
+  it('escalates a server-forced disconnect that Socket.IO will not retry itself', () => {
+    const onLifecycleEvent = jest.fn();
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(onLifecycleEvent);
+    const opened = sockets[0]!;
+    opened.active = false;
+    onLifecycleEvent.mockClear();
+
+    fireSocketEvent('disconnect', 'io server disconnect');
+    expect(onLifecycleEvent).toHaveBeenCalledWith({ phase: 'reconnecting' });
+    expect(mockIo).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(1_200);
+    expect(mockIo).toHaveBeenCalledTimes(2);
+  });
+
+  it('contains a throwing lifecycle observer without breaking the socket', () => {
+    const onLifecycleEvent = jest.fn(() => {
+      throw new Error('observer sentinel');
+    });
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+
+    expect(() => service.observeLifecycle(onLifecycleEvent)).not.toThrow();
+    expect(mockIo).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[socket] lifecycle observer failed', {
+      phase: 'connecting',
+      errorName: 'Error',
+    });
+  });
+
+  it('does not reopen if a reconnecting observer terminally stops the service', () => {
+    let service!: SocketService;
+    const onLifecycleEvent = jest.fn(({ phase }: { phase: string }) => {
+      if (phase === 'reconnecting') service.disconnect();
+    });
+    service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(onLifecycleEvent);
+
+    fireReconnectFailed();
+    jest.advanceTimersByTime(1_200);
+
+    expect(mockIo).toHaveBeenCalledTimes(1);
   });
 
   it('assigns a fresh occurrence namespace when escalation re-opens the socket', async () => {
@@ -128,17 +307,17 @@ describe('SocketService reconnect escalation', () => {
     const handle = jest.fn(async (..._args: Parameters<RawRealtimeEventHandler>) => null);
     new SocketService(handle).connect('https://srv', 'pw', {});
     const retiredSocket = sockets[0]!;
-    const retiredEvent = retiredSocket.handlers.get('new-message')!;
-    const retiredReconnect = retiredSocket.io.handlers.get('reconnect_failed')!;
+    const retiredEvent = retiredSocket.handlers.get('new-message')![0]!;
+    const retiredReconnect = [...retiredSocket.io.handlers.get('reconnect_failed')!];
 
-    retiredReconnect();
+    for (const handler of retiredReconnect) handler();
     jest.advanceTimersByTime(1_200);
     expect(mockIo).toHaveBeenCalledTimes(2);
 
     // Native callbacks already queued by the retired instance must not reach durable intake or
     // schedule a second escalation against its replacement.
     retiredEvent({ guid: 'stale' });
-    retiredReconnect();
+    for (const handler of retiredReconnect) handler();
     jest.advanceTimersByTime(5_000);
     fireSocketEvent('new-message', { guid: 'current' });
     await Promise.resolve();

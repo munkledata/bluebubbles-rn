@@ -23,6 +23,7 @@ import {
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
+import { notifyFailedSend } from './sendFailureNotice';
 import type { AttachmentUploader } from './sendAttachmentService';
 
 interface TextPayload {
@@ -229,9 +230,10 @@ export async function resendOutgoingRow(
         // succeed. Retire now instead of burning attempts; the bubble keeps its error badge
         // and the sheet's Delete still works.
         logger.warn(`[queue] attachment retry has no local file — retiring`);
-        return (await runAccountCommit(accountLease, (guard) =>
-          retireOutgoing(db, row.tempGuid, 1, guard),
-        ))
+        return (await runAccountCommit(accountLease, async (guard) => {
+          await retireOutgoing(db, row.tempGuid, 1, guard);
+          await notifyFailedSend(db, row.chatGuid, row.tempGuid, guard);
+        }))
           ? 'unsendable'
           : 'paused';
       }
@@ -255,9 +257,10 @@ export async function resendOutgoingRow(
       // Unknown kind: retire rather than skip, or the row is claimed-and-skipped on every
       // drain forever (the old zombie behavior attachments used to have).
       logger.warn(`[queue] unknown outgoing kind '${row.kind}' — retiring`);
-      return (await runAccountCommit(accountLease, (guard) =>
-        retireOutgoing(db, row.tempGuid, 1, guard),
-      ))
+      return (await runAccountCommit(accountLease, async (guard) => {
+        await retireOutgoing(db, row.tempGuid, 1, guard);
+        await notifyFailedSend(db, row.chatGuid, row.tempGuid, guard);
+      }))
         ? 'unsendable'
         : 'paused';
     }

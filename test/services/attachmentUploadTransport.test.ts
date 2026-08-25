@@ -28,6 +28,8 @@ jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
 
 // Mocks must be registered before these modules evaluate their native imports.
 // eslint-disable-next-line import/first
+import { ApiError } from '@core/api/errors';
+// eslint-disable-next-line import/first
 import { HttpClient } from '@core/api/http';
 // eslint-disable-next-line import/first
 import { logger } from '@core/secure';
@@ -84,6 +86,60 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
+  it('projects a bounded server rejection detail without logging the raw body', async () => {
+    const privateDetail = 'Recipient person@example.com could not be reached.';
+    mockUploadAsync.mockResolvedValueOnce({
+      status: 422,
+      body: JSON.stringify({ error: { type: 'send_failed', message: privateDetail } }),
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+
+    const run = upload(http);
+    finishFileCheck({ exists: true });
+    let caught: unknown;
+    try {
+      await run;
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({
+      kind: 'bad_request',
+      status: 422,
+    });
+    expect((caught as ApiError).serverDetail).toBe('Recipient [redacted] could not be reached.');
+    expect(logger.warn).toHaveBeenCalledWith('[upload] server rejected status=422');
+    expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).not.toContain(privateDetail);
+  });
+
+  it('rejects an oversized native error body without scanning or retaining its prose', async () => {
+    const canary = 'native-body-canary';
+    mockUploadAsync.mockResolvedValueOnce({
+      status: 502,
+      body: JSON.stringify({ error: { message: `${canary}${'x'.repeat(5_000)}` } }),
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+
+    const run = upload(http);
+    finishFileCheck({ exists: true });
+    let caught: unknown;
+    try {
+      await run;
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({ kind: 'server_error', status: 502 });
+    expect((caught as ApiError).serverDetail).toBeUndefined();
+    expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).not.toContain(canary);
+  });
+
   it('keeps the original URL and credential when the live account changes during preflight', async () => {
     let origin = 'https://old.example';
     let password = 'old-password';

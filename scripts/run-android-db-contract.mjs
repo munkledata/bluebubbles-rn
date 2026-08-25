@@ -12,8 +12,8 @@ export const APP_ACTIVITY = `${APP_PACKAGE}/.MainActivity`;
 export const CONTRACT_MARKER_PREFIX = 'GATOR_DB_CONTRACT_V3 ';
 export const CONTRACT_SUITE = 'android-db-contract';
 export const CONTRACT_SCHEMA = 3;
-export const CONTRACT_MIGRATION_COUNT = 38;
-export const CONTRACT_MIGRATION_HEAD = '0038_scrub_reaction_selected_message_text';
+export const CONTRACT_MIGRATION_COUNT = 39;
+export const CONTRACT_MIGRATION_HEAD = '0039_message_error_message';
 const LEGACY_CONTRACT_MARKER_PREFIXES = Object.freeze([
   'GATOR_DB_CONTRACT_V1 ',
   'GATOR_DB_CONTRACT_V2 ',

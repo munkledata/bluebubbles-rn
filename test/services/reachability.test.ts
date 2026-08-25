@@ -1,5 +1,11 @@
+import { ApiError } from '@core/api/errors';
 import { logger } from '@core/secure';
-import { startReachabilityWatch, stopReachabilityWatch } from '@/services/reachability';
+import {
+  classifyReachabilityFailure,
+  probeReachabilityNow,
+  startReachabilityWatch,
+  stopReachabilityWatch,
+} from '@/services/reachability';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -30,41 +36,118 @@ describe('reachability watch account ownership', () => {
     jest.restoreAllMocks();
   });
 
-  it('reports an observed down-to-up transition', async () => {
+  async function settle(): Promise<void> {
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  }
+
+  it('runs immediately, publishes down/up, and reports one observed recovery', async () => {
     const probe = jest
-      .fn<Promise<unknown>, []>()
+      .fn<Promise<unknown>, [AbortSignal]>()
       .mockRejectedValueOnce(new Error('temporarily unreachable'))
       .mockResolvedValue(undefined);
-    const onReachable = jest.fn();
-    startReachabilityWatch(probe, onReachable, 1_000);
+    const onStateChange = jest.fn();
+    const onRecovered = jest.fn();
+    startReachabilityWatch(probe, { onStateChange, onRecovered }, 1_000);
+
+    expect(probe).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(onStateChange).toHaveBeenLastCalledWith('unreachable');
+    expect(onRecovered).not.toHaveBeenCalled();
 
     await jest.advanceTimersByTimeAsync(1_000);
-    expect(onReachable).not.toHaveBeenCalled();
+    await settle();
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['unreachable', 'reachable']);
+    expect(onRecovered).toHaveBeenCalledTimes(1);
+  });
 
-    await jest.advanceTimersByTimeAsync(1_000);
-    expect(onReachable).toHaveBeenCalledTimes(1);
+  it('classifies transport failures separately from server/auth/schema errors', () => {
+    expect(classifyReachabilityFailure(new ApiError('no_connection', 'down'))).toBe('unreachable');
+    expect(classifyReachabilityFailure(new ApiError('timeout', 'slow'))).toBe('unreachable');
+    expect(classifyReachabilityFailure(new ApiError('unauthorized', 'denied', 401))).toBe('error');
+    expect(classifyReachabilityFailure(new ApiError('server_error', 'broken', 500))).toBe('error');
+  });
+
+  it('contains a synchronous probe throw as an unreachable result', async () => {
+    const onStateChange = jest.fn();
+    const probe = jest.fn((_signal: AbortSignal): Promise<unknown> => {
+      throw new Error('synchronous probe sentinel');
+    });
+
+    expect(() =>
+      startReachabilityWatch(probe, { onStateChange, onRecovered: jest.fn() }, 1_000),
+    ).not.toThrow();
+    await settle();
+
+    expect(onStateChange).toHaveBeenCalledWith('unreachable');
+  });
+
+  it('serializes manual probes instead of overlapping or publishing out of order', async () => {
+    const first = deferred<unknown>();
+    const probe = jest
+      .fn<Promise<unknown>, [AbortSignal]>()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue(undefined);
+    const onStateChange = jest.fn();
+    startReachabilityWatch(probe, { onStateChange, onRecovered: jest.fn() }, 1_000);
+
+    probeReachabilityNow();
+    probeReachabilityNow();
+    expect(probe).toHaveBeenCalledTimes(1);
+
+    first.reject(new Error('first probe down'));
+    await settle();
+
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['unreachable', 'reachable']);
+  });
+
+  it('aborts a stopped probe and ignores its late result', async () => {
+    const result = deferred<unknown>();
+    let signal!: AbortSignal;
+    const probe = jest.fn((nextSignal: AbortSignal) => {
+      signal = nextSignal;
+      return result.promise;
+    });
+    const onStateChange = jest.fn();
+    startReachabilityWatch(probe, { onStateChange, onRecovered: jest.fn() }, 1_000);
+
+    stopReachabilityWatch();
+    expect(signal.aborted).toBe(true);
+    result.resolve(undefined);
+    await settle();
+
+    expect(onStateChange).not.toHaveBeenCalled();
   });
 
   it('ignores an account-A probe that rejects after account B starts', async () => {
     const accountAResult = deferred<unknown>();
-    const accountAProbe = jest.fn(() => accountAResult.promise);
-    const accountBProbe = jest.fn().mockResolvedValue(undefined);
-    const onAccountAReachable = jest.fn();
-    const onAccountBReachable = jest.fn();
+    let accountASignal!: AbortSignal;
+    const accountAProbe = jest.fn((signal: AbortSignal) => {
+      accountASignal = signal;
+      return accountAResult.promise;
+    });
+    const accountBProbe = jest.fn<Promise<unknown>, [AbortSignal]>().mockResolvedValue(undefined);
+    const onAccountAState = jest.fn();
+    const onAccountBState = jest.fn();
 
-    startReachabilityWatch(accountAProbe, onAccountAReachable, 1_000);
-    await jest.advanceTimersByTimeAsync(1_000);
+    startReachabilityWatch(
+      accountAProbe,
+      { onStateChange: onAccountAState, onRecovered: jest.fn() },
+      1_000,
+    );
     expect(accountAProbe).toHaveBeenCalledTimes(1);
 
-    stopReachabilityWatch();
-    startReachabilityWatch(accountBProbe, onAccountBReachable, 1_000);
+    startReachabilityWatch(
+      accountBProbe,
+      { onStateChange: onAccountBState, onRecovered: jest.fn() },
+      1_000,
+    );
+    expect(accountASignal.aborted).toBe(true);
     accountAResult.reject(new Error('late account-A failure'));
-    await Promise.resolve();
-
-    await jest.advanceTimersByTimeAsync(1_000);
+    await settle();
 
     expect(accountBProbe).toHaveBeenCalledTimes(1);
-    expect(onAccountAReachable).not.toHaveBeenCalled();
-    expect(onAccountBReachable).not.toHaveBeenCalled();
+    expect(onAccountAState).not.toHaveBeenCalled();
+    expect(onAccountBState).toHaveBeenCalledWith('reachable');
   });
 });

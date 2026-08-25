@@ -1636,6 +1636,7 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
       'src/services/notifications/notifeeService.ts#postNotification.<callback:3a468d9c93>:mutator-call:12d78e0bda2f',
       'src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:3715d5ebf0b8',
       'src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:a1fe19482506',
+      'src/services/notifications/notifeeService.ts#postSendFailureNotification.<callback:733692bd31>:mutator-call:69ad00d25654',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationState.<callback:2d26413326>.<callback:aaa5db8dfb>:mutator-call:49cfa621c037',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:636ff0e2c483',
       'src/services/notifications/notifeeService.ts#repairMissingFutureReminderTriggers:mutator-call:2e4db01772b0',
@@ -1733,17 +1734,17 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#loveMessage:mutator-call:19cbbee6bf1d',
       'src/services/notifications/actions.ts#replyTo:mutator-call:57759651fda6',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:181ea993ff>:mutator-call:fcca55f5e353',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:4ed82ef856>:mutator-call:6e6766809f6d',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:4ed82ef856>:mutator-call:6e6766809f6d:2',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:a72544944c>:mutator-call:5be93ff1a7bb',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:a72544944c>:mutator-call:5be93ff1a7bb:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e6daa15e91>:mutator-call:a1862003ebf3',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:32b1142393>:mutator-call:f5eb0168b8ed',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:32b1142393>:mutator-call:a6f7181df803',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:481b423ba233',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:cce2ab93dad1',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e8d6115d0f4d',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:5fc264dfd1d6',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:9aa99d652d1b',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:a9d507013959',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:c8b8278c1c65',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:88ba7584a85f',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:7d4ffb0ff6ea',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c4f357471236',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:2bab059bd512',
@@ -1811,24 +1812,24 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
     delegated.map((finding) => finding.id).sort(),
     [
       'src/services/send/index.ts#cancelScheduled.<callback:b5bc8ae556>:mutator-call:5d28847b50ce',
-      'src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:4c9a61f6676e',
-      'src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:816aa6c2269b',
-      'src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:dfd6224740fb',
-      'src/services/send/index.ts#discardMessage.<callback:b508606691>:mutator-call:e6873ba71ded',
+      'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:3468a73fa274',
+      'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:7d834803b3c6',
+      'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:a403d6c21cdd',
+      'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:f2bd0f75b027',
       'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:1150f343ed37',
       'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4',
       'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4:2',
       'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:f82af7e4ba9c',
       'src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861',
-      'src/services/send/index.ts#pickAndSendContact.<callback:5e98d736ac>:mutator-call:60f5a12a2f42',
-      'src/services/send/index.ts#react.<callback:8a2399a4aa>:mutator-call:6f4da78c5e79',
-      'src/services/send/index.ts#reply.<callback:65b243e81c>:mutator-call:1ed4724c0dd0',
+      'src/services/send/index.ts#pickAndSendContact.<callback:3fd5bf1484>:mutator-call:3251b567a0af',
+      'src/services/send/index.ts#react.<callback:e9a95c26f3>:mutator-call:c35237e6478b',
+      'src/services/send/index.ts#reply.<callback:2f53931556>:mutator-call:d5b02e6e0ad7',
       'src/services/send/index.ts#retry.<callback:7c4158bf3d>:mutator-call:7d5ba2e65922',
       'src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380',
-      'src/services/send/index.ts#send.<callback:063ef6d4b6>:mutator-call:dfe7fe49355a',
-      'src/services/send/index.ts#sendContactCard.<callback:6e509086a3>:mutator-call:44912f380479',
-      'src/services/send/index.ts#sendImage.<callback:af124f15f3>:mutator-call:549ce532fbd8',
-      'src/services/send/index.ts#sendImages.<callback:30d85757bb>.<callback:267e1afc85>:mutator-call:8ba6ca49933c',
+      'src/services/send/index.ts#send.<callback:263848fd04>:mutator-call:949d3a0d0b96',
+      'src/services/send/index.ts#sendContactCard.<callback:274da970ec>:mutator-call:9ea3b488cbd0',
+      'src/services/send/index.ts#sendImage.<callback:6bf1f06052>:mutator-call:2489950bc375',
+      'src/services/send/index.ts#sendImages.<callback:cf01fabadb>.<callback:ed40d2cae2>:mutator-call:2a4b64de5b86',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
     ].sort(),
@@ -2154,7 +2155,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>:mutator-call:76ab82360366',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:7e6190c78f>.<callback:d4acdc9f71>:mutator-call:fca9d9775500',
       'app/(app)/home.tsx#Home.<callback:8a86953568>.<callback:b23736ce91>.<callback:30afe351c6>:mutator-call:f50a8b54a2d0',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
@@ -3449,14 +3450,16 @@ fullOnlyTest(
           '      });',
       },
       {
-        label: '0038 retry accepts an inexact migration result',
+        label: '0038+0039 retry accepts an inexact migration result',
         path: 'src/db/database.ts',
         before:
-          '          retriedMigrations.length === 1 &&\n' +
-          '            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET,',
+          '          retriedMigrations.length === 2 &&\n' +
+          '            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET &&\n' +
+          '            retriedMigrations[1] === DB_ACTIVE_MIGRATION_DEATH_HEAD,',
         after:
-          '          retriedMigrations.length >= 1 &&\n' +
-          '            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET,',
+          '          retriedMigrations.length >= 2 &&\n' +
+          '            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET &&\n' +
+          '            retriedMigrations[1] === DB_ACTIVE_MIGRATION_DEATH_HEAD,',
       },
       {
         label: 'post-persistence active-migration retirement is bypassed',
@@ -3782,8 +3785,8 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0038_scrub_reaction_selected_message_text' as const;",
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0037_purge_legacy_redacted_mode_setting' as const;",
         );
       },
     },

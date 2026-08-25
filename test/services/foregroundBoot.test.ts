@@ -28,8 +28,8 @@ const mockDbDriverPass = {
   schema: 3,
   suite: 'android-db-contract',
   status: 'pass',
-  migrationCount: 38,
-  migrationHead: '0038_scrub_reaction_selected_message_text',
+  migrationCount: 39,
+  migrationHead: '0039_message_error_message',
   checks: {
     encryptedOpen: true,
     wrongKeyRejected: true,
@@ -65,8 +65,8 @@ const mockDbDriverInternalFailure = {
   schema: 3,
   suite: 'android-db-contract',
   status: 'fail',
-  migrationCount: 38,
-  migrationHead: '0038_scrub_reaction_selected_message_text',
+  migrationCount: 39,
+  migrationHead: '0039_message_error_message',
   checks: {
     encryptedOpen: false,
     wrongKeyRejected: false,

@@ -42,10 +42,16 @@ jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(),
   expoFileExists: jest.fn(async () => true),
 }));
+jest.mock('@/services/send/sendFailureNotice', () => ({
+  clearFailedSendNotice: jest.fn(async () => undefined),
+  notifyFailedSend: jest.fn(async () => undefined),
+}));
 jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
 
 // eslint-disable-next-line import/first
 import { discardMessage } from '@/services/send';
+// eslint-disable-next-line import/first
+import { clearFailedSendNotice } from '@/services/send/sendFailureNotice';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
@@ -166,6 +172,37 @@ describe('discardMessage — the two guarded steps together', () => {
     expect(count(raw, '1 = 1')).toBe(1);
     expect(count(raw, 'guid = ? AND date_deleted IS NOT NULL', 'real-live')).toBe(1);
     expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
+  });
+
+  it('withdraws an existing failed-send notice only after the row is durably tombstoned', async () => {
+    const { db, raw } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const chatId = await seedChat(db);
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-failed-notice',
+      chatId,
+      chatGuid: 'c1',
+      text: 'remove this failed send',
+      now: 100,
+    });
+    raw
+      .prepare("UPDATE messages SET send_state='error', error=500 WHERE guid='temp-failed-notice'")
+      .run();
+    (clearFailedSendNotice as jest.Mock).mockImplementationOnce(
+      async (_db: AppDatabase, guid: string, guard?: () => boolean) => {
+        expect(guid).toBe('temp-failed-notice');
+        expect(guard?.()).toBe(true);
+        expect(deletionDate(raw, guid)).toBe(6_000);
+      },
+    );
+
+    await discardMessage('temp-failed-notice', 6_000);
+
+    expect(clearFailedSendNotice).toHaveBeenCalledWith(
+      db,
+      'temp-failed-notice',
+      expect.any(Function),
+    );
   });
 
   it('still deletes when a stranded queue row survives next to an already-sent bubble', async () => {

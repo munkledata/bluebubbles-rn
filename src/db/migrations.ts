@@ -702,4 +702,20 @@ export const MIGRATIONS: Migration[] = [
               END`,
     ],
   },
+  {
+    // Retain only the already-projected server failure detail beside the failed message. Both
+    // Unicode code points and encoded bytes are bounded because JavaScript and SQLite otherwise
+    // measure non-ASCII text differently. Existing rows intentionally start with no detail.
+    name: '0039_message_error_message',
+    statements: [
+      `ALTER TABLE messages ADD COLUMN error_message TEXT
+        CONSTRAINT messages_error_message_bounded
+        CHECK (
+          error_message IS NULL OR (
+            length(error_message) BETWEEN 1 AND 240
+            AND length(CAST(error_message AS BLOB)) <= 512
+          )
+        )`,
+    ],
+  },
 ];

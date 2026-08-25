@@ -172,6 +172,26 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await waitFor(() => expect(screen.queryByLabelText('Send message')).toBeNull());
   });
 
+  it('keeps the draft when its captured account owner is no longer current', async () => {
+    const onSend = jest.fn();
+    const canSubmit = jest.fn(() => true);
+    const isSubmitOwnerCurrent = jest.fn(() => false);
+    await renderWithTheme(
+      <Composer
+        onSend={onSend}
+        canSubmit={canSubmit}
+        isSubmitOwnerCurrent={isSubmitOwnerCurrent}
+      />,
+    );
+    await fireEvent.changeText(input(), 'keep this stale-screen draft');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+
+    expect(isSubmitOwnerCurrent).toHaveBeenCalledTimes(1);
+    expect(canSubmit).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('keep this stale-screen draft');
+  });
+
   it('uses a custom placeholder when provided', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} placeholder="Text Message" />);
     expect(screen.getByPlaceholderText('Text Message')).toBeTruthy();
@@ -420,9 +440,72 @@ describe('Composer — edit mode', () => {
     await waitFor(() => expect(input().props.value).toBe('draft text'));
     expect(onDraftChange).not.toHaveBeenCalledWith('');
   });
+
+  it('preserves attachments staged before an edit without sending them with the edit', async () => {
+    const onSend = jest.fn();
+    const onSendAttachments = jest.fn();
+    const canSubmit = jest.fn(() => false);
+    const { rerender } = await renderWithTheme(
+      <Composer onSend={onSend} onSendAttachments={onSendAttachments} canSubmit={canSubmit} />,
+    );
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-a'));
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
+
+    await rerender(
+      <Composer
+        onSend={onSend}
+        onSendAttachments={onSendAttachments}
+        canSubmit={canSubmit}
+        editingText="original"
+        onCancelEdit={jest.fn()}
+      />,
+    );
+    await screen.findByDisplayValue('original');
+    await fireEvent.changeText(input(), 'edited body');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+
+    expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
+    expect(onSendAttachments).not.toHaveBeenCalled();
+    expect(canSubmit).not.toHaveBeenCalled();
+    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
+
+    await rerender(
+      <Composer onSend={onSend} onSendAttachments={onSendAttachments} canSubmit={canSubmit} />,
+    );
+    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
+  });
 });
 
 describe('Composer — staged attachments', () => {
+  it('keeps combined authored text and attachments when capacity preflight refuses both jobs', async () => {
+    const canSubmit = jest.fn(() => false);
+    const onSendAttachments = jest.fn();
+    const onSend = jest.fn();
+    const onDraftChange = jest.fn();
+    await renderWithTheme(
+      <Composer
+        onSend={onSend}
+        onSendAttachments={onSendAttachments}
+        canSubmit={canSubmit}
+        onDraftChange={onDraftChange}
+      />,
+    );
+    await fireEvent.changeText(input(), 'keep this exact draft');
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-a'));
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
+
+    await fireEvent.press(screen.getByLabelText('Send message'));
+
+    expect(canSubmit).toHaveBeenCalledWith(2);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSendAttachments).not.toHaveBeenCalled();
+    expect(onDraftChange).not.toHaveBeenCalledWith('');
+    expect(input().props.value).toBe('keep this exact draft');
+    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
+  });
+
   it('stages two items as chips, enables send with empty text, and sends the attachments only', async () => {
     const onSendAttachments = jest.fn();
     const onSend = jest.fn();

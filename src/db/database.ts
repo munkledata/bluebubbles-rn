@@ -157,8 +157,8 @@ export function getRawDatabase(): RawDb {
 const DRIVER_SELF_TEST_DB_NAME = 'driver-selftest.db';
 const DRIVER_SELF_TEST_KEY_BYTES = 32;
 const DRIVER_SELF_TEST_REACTIVE_TIMEOUT_MS = 5_000;
-const DRIVER_SELF_TEST_MIGRATION_COUNT = 38 as const;
-const DRIVER_SELF_TEST_MIGRATION_HEAD = '0038_scrub_reaction_selected_message_text' as const;
+const DRIVER_SELF_TEST_MIGRATION_COUNT = 39 as const;
+const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;
 const DRIVER_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DRIVER_HISTORY_SELF_TEST_DB_NAME = 'driver-history-selftest.db';
 const DRIVER_HISTORY_SELF_TEST_KEY = 'db-03b2a-public-throwaway-key-v1';
@@ -1750,9 +1750,8 @@ const DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL = 'driver-relaunch-continuity-v1';
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD = '0029_chats_deleted_at';
 const DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START = '0030_attachment_cache_entries';
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 38 as const;
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD =
-  '0038_scrub_reaction_selected_message_text' as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 39 as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;
 
 export interface DbProcessRelaunchPrepareChecks {
   preCleanup: boolean;
@@ -2596,7 +2595,8 @@ const DB_ACTIVE_MIGRATION_DEATH_SELF_TEST_KEY = 'db-03b2b2-public-throwaway-key-
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT = 37;
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD = '0037_purge_legacy_redacted_mode_setting' as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET = '0038_scrub_reaction_selected_message_text' as const;
-const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 38 as const;
+const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0039_message_error_message' as const;
+const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 39 as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT = 128;
 const DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH = 8_192;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_SQL = `UPDATE outgoing_queue
@@ -2675,13 +2675,13 @@ export type DbActiveMigrationDeathResumeResult =
   | {
       status: 'pass';
       migrationCount: typeof DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT;
-      migrationHead: typeof DB_ACTIVE_MIGRATION_DEATH_TARGET;
+      migrationHead: typeof DB_ACTIVE_MIGRATION_DEATH_HEAD;
       checks: DbActiveMigrationDeathResumeChecks;
     }
   | {
       status: 'fail';
       migrationCount: typeof DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT;
-      migrationHead: typeof DB_ACTIVE_MIGRATION_DEATH_TARGET;
+      migrationHead: typeof DB_ACTIVE_MIGRATION_DEATH_HEAD;
       checks: DbActiveMigrationDeathResumeChecks;
       failureCode: DbActiveMigrationDeathResumeFailureCode;
     };
@@ -2739,6 +2739,7 @@ function dbActiveMigrationNames(): string[] {
       names[0] === '0001_init' &&
       names[DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT - 1] === DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD &&
       names[DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT] === DB_ACTIVE_MIGRATION_DEATH_TARGET &&
+      names[DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT - 1] === DB_ACTIVE_MIGRATION_DEATH_HEAD &&
       target?.statements.length === 1 &&
       target.statements[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET_SQL,
   );
@@ -3182,8 +3183,9 @@ export async function resumeDbActiveMigrationDeathSelfTest(
         phase = 'migration-retry';
         const retriedMigrations = await runMigrations(opRunner(reopened));
         requireDriverContract(
-          retriedMigrations.length === 1 &&
-            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET,
+          retriedMigrations.length === 2 &&
+            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET &&
+            retriedMigrations[1] === DB_ACTIVE_MIGRATION_DEATH_HEAD,
         );
         checks.migrationRetry = true;
 
@@ -3252,14 +3254,14 @@ export async function resumeDbActiveMigrationDeathSelfTest(
     return {
       status: 'pass',
       migrationCount: DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT,
-      migrationHead: DB_ACTIVE_MIGRATION_DEATH_TARGET,
+      migrationHead: DB_ACTIVE_MIGRATION_DEATH_HEAD,
       checks,
     };
   }
   return {
     status: 'fail',
     migrationCount: DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT,
-    migrationHead: DB_ACTIVE_MIGRATION_DEATH_TARGET,
+    migrationHead: DB_ACTIVE_MIGRATION_DEATH_HEAD,
     checks,
     failureCode: failureCode ?? 'internal',
   };

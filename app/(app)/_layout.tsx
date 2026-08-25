@@ -1,7 +1,7 @@
 import notifee, { EventType } from 'react-native-notify-kit';
 import { Redirect, Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState as NativeAppState, type AppStateStatus } from 'react-native';
+import { AppState as NativeAppState, StyleSheet, View, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
 import { logger as secureLogger } from '@core/secure';
 import {
@@ -13,7 +13,12 @@ import {
   openFromNotification,
 } from '@/services/notifications/notificationOpen';
 import { takePendingNotification } from '@/services/notifications/pendingNav';
-import { flushErrorReports, pauseRealtime, resumeRealtime } from '@/services';
+import {
+  flushErrorReports,
+  pauseRealtime,
+  resumeRealtime,
+  retryRealtimeConnection,
+} from '@/services';
 import { recoverOutgoing } from '@/services/send';
 import {
   captureRealtimeDeliveryLease,
@@ -23,6 +28,7 @@ import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
+import { ConnectionBanner } from '@ui/connection';
 import { ServerRotationApprovalHost } from '@ui/server-rotation';
 import { useChatNavigator } from '@ui/useChatNavigator';
 
@@ -87,7 +93,7 @@ function ConnectedAppLayout(): React.JSX.Element {
   const [AppState] = useState(() => createAccountOwnedAppState(accountLease));
   // Preserve the exact certified AppState orchestration callback while making its asynchronous
   // catch handlers obey the same mount lease as callback entry.
-  const [logger] = useState(() => ({
+  const [leaseLogger] = useState(() => ({
     warn: (message: string, meta?: unknown): void => {
       if (accountLease.isCurrent()) secureLogger.warn(message, meta);
     },
@@ -116,7 +122,7 @@ function ConnectedAppLayout(): React.JSX.Element {
           return;
         }
         void resumeRealtime().catch((error: unknown) => {
-          logger.warn('[realtime] foreground resume failed', error);
+          leaseLogger.warn('[realtime] foreground resume failed', error);
         });
         void flushErrorReports();
         // Drain the outgoing retry queue on resume — a send that failed mid-session otherwise
@@ -124,13 +130,13 @@ function ConnectedAppLayout(): React.JSX.Element {
         // actual re-sends, so this is one cheap SELECT when nothing is pending.
         if (!isDevServer()) {
           void recoverOutgoing().catch((error: unknown) => {
-            logger.warn('[send] foreground recovery failed', error);
+            leaseLogger.warn('[send] foreground recovery failed', error);
           });
         }
       }
     });
     return () => sub.remove();
-  }, [AppState, logger]);
+  }, [AppState, leaseLogger]);
 
   // Upload any buffered error reports once the connected app has mounted ("on start"). No-op unless
   // the server advertises support + the feature is enabled; the AppState listener above catches up
@@ -195,13 +201,18 @@ function ConnectedAppLayout(): React.JSX.Element {
   }, [AppState, consumeNotificationTap]);
 
   return (
-    <>
+    <View style={styles.root}>
       <Stack screenOptions={{ headerShown: false }} />
+      <ConnectionBanner onRetry={retryRealtimeConnection} />
       {/* App-wide so an incoming call rings on any screen; the safe external-browser handoff
           takes over once answered (and is also used by dev call flows). */}
       <IncomingFaceTimeOverlay />
       <FaceTimeCallOverlay />
       <ServerRotationApprovalHost />
-    </>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+});

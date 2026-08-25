@@ -18,6 +18,7 @@
  *     return zero insets so it resolves without one.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
 import { IncomingFaceTimeOverlay } from '@ui/facetime/IncomingFaceTimeOverlay';
 import { useFaceTimeStore, type IncomingFaceTimeCall } from '@state/faceTimeStore';
@@ -106,6 +107,18 @@ describe('IncomingFaceTimeOverlay — visibility gating', () => {
 });
 
 describe('IncomingFaceTimeOverlay — ring content', () => {
+  it('owns a higher Android layer than the global connection banner', async () => {
+    useFaceTimeStore.setState({ incoming: INCOMING });
+    await renderWithTheme(<IncomingFaceTimeOverlay />);
+
+    const root = screen.root;
+    if (!root) throw new Error('IncomingFaceTimeOverlay rendered nothing for a ringing call');
+    expect(StyleSheet.flatten(root.props.style)).toMatchObject({
+      elevation: 16,
+      zIndex: 110,
+    });
+  });
+
   it('shows the caller name and the video subtitle for a video call', async () => {
     useFaceTimeStore.setState({ incoming: INCOMING });
     const view = await renderWithTheme(<IncomingFaceTimeOverlay />);

@@ -20,6 +20,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { notifyFailedSend } from '@/services/send/sendFailureNotice';
 import {
   resendOutgoingRow,
   runOutgoingQueue,
@@ -32,6 +33,17 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+
+jest.mock('@/services/send/sendFailureNotice', () => ({
+  clearFailedSendNotice: jest.fn(async () => undefined),
+  notifyFailedSend: jest.fn(async () => undefined),
+}));
+
+const mockNotifyFailedSend = notifyFailedSend as jest.Mock;
+
+beforeEach(() => {
+  mockNotifyFailedSend.mockClear();
+});
 
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
   return {
@@ -526,6 +538,7 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect(queueCount(raw)).toBe(1); // row kept (cancellable / visible to diagnostics)
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('[queue] attachment retry has no local file — retiring');
+    expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', 'temp-gone', undefined);
     warn.mockRestore();
   });
 
@@ -547,6 +560,7 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect((await listRetryableOutgoing(db, 9_999_999_999)).length).toBe(0);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("[queue] unknown outgoing kind 'wormhole' — retiring");
+    expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', 'temp-z', undefined);
     warn.mockRestore();
   });
 });
@@ -753,6 +767,7 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
     await expect(pending).resolves.toBe('paused');
     expect(stateOf(raw, 'temp-guard-missing')).toBe('error');
     expect(attemptsOf(raw, 'temp-guard-missing')).toBe(1);
+    expect(mockNotifyFailedSend).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 
@@ -786,6 +801,7 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
     await expect(pending).resolves.toBe('paused');
     expect(stateOf(raw, 'temp-guard-unknown')).toBe('sending');
     expect(attemptsOf(raw, 'temp-guard-unknown')).toBe(1);
+    expect(mockNotifyFailedSend).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 

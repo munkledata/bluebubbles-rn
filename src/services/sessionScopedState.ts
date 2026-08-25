@@ -4,12 +4,14 @@ import { useFindMyStore } from '@state/findmyStore';
 import { queryClient } from '@state/queryClient';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { useSyncStore } from '@state/syncStore';
+import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { useUploadStore } from '@state/uploadStore';
 import { useDialogStore } from '@ui/dialog/dialogStore';
 import { useToastStore } from '@ui/toast/toastStore';
 import { resetAutoDownloadToastBatch } from './download/autoDownloadAttachments';
 import { errorReportSink } from './errors/errorReportSink';
+import { resetActiveChat } from './notifications/activeChat';
 import { resetPendingNotification } from './notifications/pendingNav';
 
 export interface SessionScopedResetResult {
@@ -23,10 +25,12 @@ export type SessionScopedResetSurface =
   | 'error-reports'
   | 'find-my'
   | 'typing'
+  | 'active-chat'
   | 'pending-notification'
   | 'auto-download-toast'
   | 'facetime'
   | 'rcs-health'
+  | 'transport-health'
   | 'sync'
   | 'uploads'
   | 'downloads'
@@ -63,6 +67,11 @@ export function resetSessionScopedState(): SessionScopedResetResult {
     failedSurfaces.push('typing');
   }
   try {
+    resetActiveChat();
+  } catch {
+    failedSurfaces.push('active-chat');
+  }
+  try {
     resetPendingNotification();
   } catch {
     failedSurfaces.push('pending-notification');
@@ -82,6 +91,11 @@ export function resetSessionScopedState(): SessionScopedResetResult {
     useRcsHealthStore.getState().reset();
   } catch {
     failedSurfaces.push('rcs-health');
+  }
+  try {
+    useTransportHealthStore.getState().reset();
+  } catch {
+    failedSurfaces.push('transport-health');
   }
   try {
     useSyncStore.getState().reset();

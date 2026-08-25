@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { projectServerErrorDetail } from '@core/api/serverErrorDetail';
 import { Message, epochMillis } from '@core/models';
 import type { ServerEventName } from '@core/config/constants';
 
@@ -94,11 +95,16 @@ export const FaceTimeStatusPayload = z
 export const AliasesRemovedPayload = z.object({ aliases: z.array(z.string()) }).loose();
 
 const OptionalSendErrorId = z.string().min(1).nullish();
+// Optional prose must never invalidate the authoritative send failure. Project it during
+// normalization so durable incoming-event payloads cannot retain the raw server string.
+const OptionalServerErrorDetail = z.preprocess(projectServerErrorDetail, z.string().optional());
 
 const SendErrorMessagePayload = z
   .object({
     guid: OptionalSendErrorId,
     error: z.union([z.number(), z.string()]).nullish(),
+    /** Additive prose projected before durable intake; the DB sink repeats the projection. */
+    errorMessage: OptionalServerErrorDetail,
     retryable: z.boolean().nullish(),
   })
   .loose();
@@ -116,6 +122,8 @@ export const MessageSendErrorPayload = z
     tempGuid: OptionalSendErrorId,
     messageGuid: OptionalSendErrorId,
     error: z.union([z.number(), z.string()]).nullish(),
+    /** Explicit projected prose; never inferred from the numeric/string `error` code. */
+    errorMessage: OptionalServerErrorDetail,
     retryable: z.boolean().nullish(),
     message: SendErrorMessagePayload.nullish(),
   })
@@ -179,6 +187,10 @@ export type NotificationIntent =
       isGroup: boolean;
       avatarUri?: string;
     }
+  /** Fixed-copy local notice for an outgoing row that is durably in the error state. */
+  | { kind: 'send-failure'; chatGuid: string; messageGuid: string }
+  /** Withdraw that fixed-copy notice after success/echo reconciliation. */
+  | { kind: 'send-failure-cancel'; chatGuid: string; messageGuid: string }
   | { kind: 'cancel'; chatGuid: string }
   | {
       kind: 'facetime-call';

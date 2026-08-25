@@ -160,7 +160,28 @@ describe('DbEventSink (live path)', () => {
     );
     await router.handle(
       'message-send-error',
+      JSON.stringify({
+        guid: 'send-fail-1',
+        tempGuid: 'temp-no-local-row',
+        error: 22,
+        errorMessage: 'Helper rejected person@example.com on https://private.example.',
+      }),
+      'socket',
+    );
+    // A second fanout without prose must preserve the useful first detail.
+    await router.handle(
+      'message-send-error',
       JSON.stringify({ guid: 'send-fail-1', tempGuid: 'temp-no-local-row', error: 22 }),
+      'fcm',
+    );
+    // Oversized decorative prose is omitted without erasing the already-projected detail.
+    await router.handle(
+      'message-send-error',
+      JSON.stringify({
+        guid: 'send-fail-1',
+        error: 22,
+        errorMessage: `oversized-canary-${'x'.repeat(5_000)}`,
+      }),
       'socket',
     );
 
@@ -169,10 +190,12 @@ describe('DbEventSink (live path)', () => {
     const msgs = (await listMessages(db, chat.id)) as Array<{
       guid: string;
       error: number;
+      errorMessage: string | null;
       sendState: string;
     }>;
     const m = msgs.find((x) => x.guid === 'send-fail-1')!;
     expect(m.error).toBe(22);
+    expect(m.errorMessage).toBe('Helper rejected [redacted] on [redacted URL]');
     expect(m.sendState).toBe('error');
   });
 

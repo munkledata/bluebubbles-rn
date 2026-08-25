@@ -37,9 +37,39 @@ import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './out
 import { showToast } from '@ui/toast/toastStore';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
+import { logicalSendQueue, LogicalSendQueueCapacityError } from './logicalSendQueue';
+import { clearFailedSendNotice } from './sendFailureNotice';
 
 export { isContactsPermissionDeniedError } from '../contacts/contactsService';
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
+
+function snapshotPickedImage(image: PickedImage): PickedImage {
+  return { ...image };
+}
+
+function snapshotContactCard(contact: ContactCard): ContactCard {
+  return {
+    ...contact,
+    phones: contact.phones?.map((phone) => ({ ...phone })),
+    emails: contact.emails?.map((email) => ({ ...email })),
+  };
+}
+
+function snapshotSendTextArgs(args: SendTextArgs): SendTextArgs {
+  return {
+    ...args,
+    mentions: args.mentions?.map((mention) => ({ ...mention })),
+  };
+}
+
+/**
+ * Composer preflight for one synchronous submit turn. The composer checks the whole attachment +
+ * text submission before it clears the authored draft, then immediately calls the send front
+ * doors, whose queue admission is synchronous.
+ */
+export function hasLogicalSendCapacity(logicalSendCount = 1): boolean {
+  return logicalSendQueue.canRetain(logicalSendCount);
+}
 
 function assertScheduledLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw new ScheduledSessionChangedError();
@@ -88,13 +118,14 @@ async function runScheduledAccountOperation<T>(
 async function runUiAccountOperation<T>(
   lease: RealtimeDeliveryLease,
   task: () => Promise<T>,
+  mode: 'immediate' | 'logical-send' = 'immediate',
 ): Promise<T | null> {
   let completed = false;
   let result!: T;
   try {
     const status = await runTrackedRealtimeWork(lease, async () => {
       if (!lease.isCurrent()) return;
-      result = await task();
+      result = await (mode === 'logical-send' ? logicalSendQueue.run(lease, task) : task());
       if (!lease.isCurrent()) return;
       completed = true;
     });
@@ -102,6 +133,10 @@ async function runUiAccountOperation<T>(
     return result;
   } catch (error) {
     if (!lease.isCurrent()) return null;
+    if (error instanceof LogicalSendQueueCapacityError) {
+      showToast('Too many messages are waiting—try again in a moment');
+      return null;
+    }
     throw error;
   }
 }
@@ -134,10 +169,17 @@ export function sendImage(
 ): Promise<{
   tempGuid: string;
 } | null> {
-  return runUiAccountOperation(accountLease, () =>
-    sendImageMessage(getDatabase(), http, args, expoAttachmentUploader, Date.now(), () =>
-      accountLease.isCurrent(),
-    ),
+  const snapshot = {
+    chatGuid: args.chatGuid,
+    image: snapshotPickedImage(args.image),
+  };
+  return runUiAccountOperation(
+    accountLease,
+    () =>
+      sendImageMessage(getDatabase(), http, snapshot, expoAttachmentUploader, Date.now(), () =>
+        accountLease.isCurrent(),
+      ),
+    'logical-send',
   );
 }
 
@@ -149,29 +191,37 @@ export function sendImages(
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ tempGuid: string }[] | null> {
-  return runUiAccountOperation(accountLease, async () => {
-    const settled = await Promise.allSettled(
-      args.images.map((image) =>
-        sendImageMessage(
-          getDatabase(),
-          http,
-          { chatGuid: args.chatGuid, image },
-          expoAttachmentUploader,
-          Date.now(),
-          () => accountLease.isCurrent(),
+  const snapshot = {
+    chatGuid: args.chatGuid,
+    images: args.images.map(snapshotPickedImage),
+  };
+  return runUiAccountOperation(
+    accountLease,
+    async () => {
+      const settled = await Promise.allSettled(
+        snapshot.images.map((image) =>
+          sendImageMessage(
+            getDatabase(),
+            http,
+            { chatGuid: snapshot.chatGuid, image },
+            expoAttachmentUploader,
+            Date.now(),
+            () => accountLease.isCurrent(),
+          ),
         ),
-      ),
-    );
-    // Promise.all rejects as soon as ONE item fails and would release the account drain while the
-    // other native uploads keep running. Wait for every operation we started, then preserve the
-    // original current-account failure behavior.
-    const sent: { tempGuid: string }[] = [];
-    for (const outcome of settled) {
-      if (outcome.status === 'rejected') throw outcome.reason;
-      sent.push(outcome.value);
-    }
-    return sent;
-  });
+      );
+      // Promise.all rejects as soon as ONE item fails and would release the account drain while the
+      // other native uploads keep running. Wait for every operation we started, then preserve the
+      // original current-account failure behavior.
+      const sent: { tempGuid: string }[] = [];
+      for (const outcome of settled) {
+        if (outcome.status === 'rejected') throw outcome.reason;
+        sent.push(outcome.value);
+      }
+      return sent;
+    },
+    'logical-send',
+  );
 }
 
 /** UI-facing send: bound to the composition-root DB + HttpClient. */
@@ -179,7 +229,12 @@ export function send(
   args: SendTextArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ tempGuid: string } | null> {
-  return runUiAccountOperation(accountLease, () => sendTextMessage(getDatabase(), http, args));
+  const snapshot = snapshotSendTextArgs(args);
+  return runUiAccountOperation(
+    accountLease,
+    () => sendTextMessage(getDatabase(), http, snapshot),
+    'logical-send',
+  );
 }
 
 /** UI-facing contact-card send: bound to the composition-root DB + HttpClient. */
@@ -193,12 +248,20 @@ export function sendContactCard(
 ): Promise<{
   tempGuid: string;
 } | null> {
-  return runUiAccountOperation(accountLease, () =>
-    sendContactMessage(getDatabase(), http, {
-      chatGuid: args.chatGuid,
-      contact: args.contact,
-      selectedMessageGuid: args.replyToGuid,
-    }),
+  const snapshot = {
+    chatGuid: args.chatGuid,
+    contact: snapshotContactCard(args.contact),
+    replyToGuid: args.replyToGuid,
+  };
+  return runUiAccountOperation(
+    accountLease,
+    () =>
+      sendContactMessage(getDatabase(), http, {
+        chatGuid: snapshot.chatGuid,
+        contact: snapshot.contact,
+        selectedMessageGuid: snapshot.replyToGuid,
+      }),
+    'logical-send',
   );
 }
 
@@ -226,8 +289,11 @@ export async function pickAndSendContact(
     throw error;
   }
   if (!accountLease.isCurrent() || !contact || !hasContactContent(contact)) return null;
-  return runUiAccountOperation(accountLease, () =>
-    sendContactMessage(getDatabase(), http, { chatGuid, contact }),
+  const snapshot = snapshotContactCard(contact);
+  return runUiAccountOperation(
+    accountLease,
+    () => sendContactMessage(getDatabase(), http, { chatGuid, contact: snapshot }),
+    'logical-send',
   );
 }
 
@@ -236,7 +302,12 @@ export function react(
   args: SendReactionArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ tempGuid: string } | null> {
-  return runUiAccountOperation(accountLease, () => sendReactionMessage(getDatabase(), http, args));
+  const snapshot = { ...args };
+  return runUiAccountOperation(
+    accountLease,
+    () => sendReactionMessage(getDatabase(), http, snapshot),
+    'logical-send',
+  );
 }
 
 /** UI-facing threaded reply: a text send whose reply target is `replyToGuid`. */
@@ -251,13 +322,17 @@ export function reply(
 ): Promise<{
   tempGuid: string;
 } | null> {
-  return runUiAccountOperation(accountLease, () =>
-    sendTextMessage(getDatabase(), http, {
-      chatGuid: args.chatGuid,
-      text: args.text,
-      selectedMessageGuid: args.replyToGuid,
-      effectId: args.effectId,
-    }),
+  const snapshot = { ...args };
+  return runUiAccountOperation(
+    accountLease,
+    () =>
+      sendTextMessage(getDatabase(), http, {
+        chatGuid: snapshot.chatGuid,
+        text: snapshot.text,
+        selectedMessageGuid: snapshot.replyToGuid,
+        effectId: snapshot.effectId,
+      }),
+    'logical-send',
   );
 }
 
@@ -613,6 +688,10 @@ export async function discardMessage(
         showToast('Message changed—select it again');
       }
     }
+    if (!accountLease.isCurrent()) return;
+    // The tombstone commits before native mutation. Failed-send notices are keyed by the retained
+    // local message id, so removing the bubble must also withdraw its already-posted tray record.
+    await clearFailedSendNotice(db, guid, () => accountLease.isCurrent());
     if (!accountLease.isCurrent()) return;
     // Tombstone + ledger/ref changes committed above. Exact native deletion stays outside their DB
     // transaction and inside this account-scoped operation, so Disconnect drains it before wipe.

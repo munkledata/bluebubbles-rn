@@ -1639,7 +1639,7 @@ function dbProcessRelaunchCertificateCandidate({
       'emptyDbActiveMigrationDeathResumeChecks',
       '4dece3fe4635db49bba36dfab20731a9281fba52b6615e36a36fd95ad73461f0',
     ],
-    ['dbActiveMigrationNames', 'ad5e9b91e98e738c054b3d3b0caec43ce63d67d270504f2932c0edffde8f0111'],
+    ['dbActiveMigrationNames', '1d49a04507ff167b222d9be33facff708972eec3ac1ca9ee4c8715c29fd3f146'],
     [
       'dbActiveMigrationFixtureRows',
       '303abf81c3d7373d48802a6d0b0a9fcd6724c1e91713975a3eee43e51c356ebd',
@@ -1686,7 +1686,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'resumeDbActiveMigrationDeathSelfTest',
-      '7f8c3bfdd0f0db9e0d516a340a72bdbc06b5091bfc54755b957ea79880c0bc7d',
+      '45508ad877417fcaebe756986a93d83096aa361d3198790fbf47df107068128b',
     ],
   ]);
   for (const [name, expected] of expectedDatabaseFingerprints) {
@@ -1914,11 +1914,8 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-resuming-v1'"],
     ],
-    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '38 as const']],
-    [
-      'DB_RELAUNCH_MIGRATION_HEAD',
-      [ts.NodeFlags.Const, "'0038_scrub_reaction_selected_message_text' as const"],
-    ],
+    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '39 as const']],
+    ['DB_RELAUNCH_MIGRATION_HEAD', [ts.NodeFlags.Const, "'0039_message_error_message' as const"]],
     ['WAIT_FOR_HOST_PROCESS_KILL', [ts.NodeFlags.Const, 'new Promise<never>(() => undefined)']],
     ['activeDbRelaunchContract', [ts.NodeFlags.Let, undefined]],
     ['ordinaryBootClaimedProcess', [ts.NodeFlags.Let, 'false']],
@@ -1952,11 +1949,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT', '29'],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD', "'0029_chats_deleted_at'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START', "'0030_attachment_cache_entries'"],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '38 as const'],
-    [
-      'DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD',
-      "'0038_scrub_reaction_selected_message_text' as const",
-    ],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '39 as const'],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0039_message_error_message' as const"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_NAME', "'driver-wal-write-death-selftest.db'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_KEY', "'db-03b2b1-public-throwaway-key-v1'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_BASELINE', "'db-03b2b1-baseline-v1'"],
@@ -1968,7 +1962,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT', '37'],
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD', "'0037_purge_legacy_redacted_mode_setting' as const"],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET', "'0038_scrub_reaction_selected_message_text' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '38 as const'],
+    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0039_message_error_message' as const"],
+    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '39 as const'],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT', '128'],
     ['DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH', '8_192'],
     [
@@ -3380,10 +3375,10 @@ function driverSelfTestCertificateCandidate({
     nameState.declaration.initializer.text !== 'driver-selftest.db' ||
     !(migrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationCountState.declaration.initializer, databaseFile) !==
-      '38 as const' ||
+      '39 as const' ||
     !(migrationHeadState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationHeadState.declaration.initializer, databaseFile) !==
-      "'0038_scrub_reaction_selected_message_text' as const" ||
+      "'0039_message_error_message' as const" ||
     !(partialMigrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(partialMigrationCountState.declaration.initializer, databaseFile) !== '29' ||
     !(internalFailureState.declarationList.flags & ts.NodeFlags.Const) ||
@@ -11113,7 +11108,7 @@ function foregroundBootLifecycleDelegationNodes({
  * as unresolved for review.
  */
 function errorReportLifecycleDelegationNodes({ root, edges }) {
-  const appStateOwner = 'ConnectedAppLayout.<callback:5868dad209>.<callback:df706645f4>';
+  const appStateOwner = 'ConnectedAppLayout.<callback:7e6190c78f>.<callback:d4acdc9f71>';
   const appStateTarget = 'src/services/errors/index.ts#flushErrorReports';
   const appStateKey = `app/(app)/_layout.tsx|${appStateOwner}|${appStateTarget}`;
   const expectations = new Map([

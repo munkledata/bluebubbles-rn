@@ -10,11 +10,13 @@ import { apiResponse } from '@core/models/common';
 import { logger } from '@core/secure';
 import { ApiError } from './errors';
 import { withRetry, type RetryPolicy } from './retry';
+import { MAX_SERVER_ERROR_BODY_BYTES, parseServerErrorDetailBody } from './serverErrorDetail';
 
 /** Hard default for every JSON/envelope response before it is decoded or passed to Zod. */
 export const DEFAULT_MAX_JSON_RESPONSE_BYTES = 16 * 1024 * 1024; // 16 MiB
 
 const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+const MAX_SERVER_ERROR_BODY_TIMEOUT_MS = 2_000;
 const MAX_TIMER_MS = 2_147_483_647;
 // Coalescing bounds string metadata to <=257 pieces at the 16 MiB cap. The chunk ceiling is much
 // more generous than Expo's normal native network chunks while still bounding hostile microtasks.
@@ -54,6 +56,12 @@ export interface RequestOptions {
   /** Multipart form body for attachment uploads. */
   form?: FormData;
   signal?: AbortSignal;
+  /**
+   * Read only the bounded JSON `error.message` field on a non-success response. This is opt-in for
+   * send endpoints whose failed optimistic row can surface the detail; ordinary APIs remain
+   * status-only and cancel their error body without reading it.
+   */
+  captureErrorDetail?: true;
   /**
    * Retry transient failures (dropped connection / timeout / 5xx) with backoff. Defaults ON for
    * GET (idempotent reads), OFF for writes — a retried POST could double-send (the outgoing-queue
@@ -566,8 +574,13 @@ export class HttpClient {
           throw new ApiError('no_connection', 'Network request failed', undefined, err);
         }
         try {
-          return await this.parseResponse(response, method, path, schema, (reason) =>
-            requestController.abort(reason),
+          return await this.parseResponse(
+            response,
+            method,
+            path,
+            schema,
+            (reason) => requestController.abort(reason),
+            opts.captureErrorDetail === true,
           );
         } catch (error) {
           if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
@@ -628,8 +641,13 @@ export class HttpClient {
         throw new ApiError('no_connection', 'Upload request failed', undefined, err);
       }
       try {
-        return await this.parseResponse(response, method, path, schema, (reason) =>
-          requestController.abort(reason),
+        return await this.parseResponse(
+          response,
+          method,
+          path,
+          schema,
+          (reason) => requestController.abort(reason),
+          opts.captureErrorDetail === true,
         );
       } catch (error) {
         if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
@@ -647,11 +665,33 @@ export class HttpClient {
     path: string,
     schema: S,
     cancelRequest?: (reason: string) => void,
+    captureErrorDetail = false,
   ): Promise<z.infer<S>> {
     if (!response.ok) {
-      // Never read an attacker-controlled error page merely to produce a nicer snippet.
-      cancelResponseBody(response, 'HTTP error response is not consumed', cancelRequest);
-      throw ApiError.fromStatus(response.status, `${method} ${path} failed`);
+      let serverDetail: string | undefined;
+      const mediaType = response.headers
+        .get('content-type')
+        ?.split(';', 1)[0]
+        ?.trim()
+        .toLowerCase();
+      const isJson = mediaType === 'application/json' || mediaType?.endsWith('+json') === true;
+      if (captureErrorDetail && isJson) {
+        try {
+          const errorBody = await readBoundedResponseText(
+            response,
+            Math.min(this.responseByteLimit, MAX_SERVER_ERROR_BODY_BYTES),
+            Math.min(this.timeoutMs, MAX_SERVER_ERROR_BODY_TIMEOUT_MS),
+            cancelRequest,
+          );
+          serverDetail = parseServerErrorDetailBody(errorBody);
+        } catch {
+          // Status classification remains authoritative for malformed, oversized, or stalled
+          // untrusted error bodies. The bounded reader has already canceled failed reads.
+        }
+      } else {
+        cancelResponseBody(response, 'HTTP error response is not consumed', cancelRequest);
+      }
+      throw ApiError.fromStatus(response.status, `${method} ${path} failed`, serverDetail);
     }
 
     // 204/205 and HEAD intentionally have no envelope. Validate `undefined` against the endpoint's

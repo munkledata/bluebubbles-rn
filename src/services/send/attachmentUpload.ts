@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
+import { parseServerErrorDetailBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import { logger } from '@core/secure';
 import { uploadStoreSink } from '@state/uploadStore';
@@ -240,12 +241,14 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   }
 
   if (result.status < 200 || result.status >= 300) {
-    // Development-only diagnosis: distinguish helper/bridge failures while working locally.
-    // Release builds drop this free-form status/body line before every sink.
-    logger.warn(
-      `[upload] server rejected status=${result.status} body=${(result.body ?? '').slice(0, 300)}`,
+    // Status only: server prose is untrusted and must never enter diagnostics. The projector keeps
+    // the reviewed nested error message solely on the typed failure for encrypted-row/UI handling.
+    logger.warn(`[upload] server rejected status=${result.status}`);
+    throw ApiError.fromStatus(
+      result.status,
+      'attachment upload failed',
+      parseServerErrorDetailBody(result.body ?? ''),
     );
-    throw ApiError.fromStatus(result.status, 'attachment upload failed');
   }
 
   let json: unknown;

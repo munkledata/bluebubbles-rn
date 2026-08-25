@@ -37,6 +37,14 @@ export type RawRealtimeEventHandler = (
 
 export type SocketOccurrenceNamespaceFactory = () => string;
 
+export type SocketLifecyclePhase = 'connecting' | 'connected' | 'reconnecting' | 'error';
+
+export interface SocketLifecycleEvent {
+  readonly phase: SocketLifecyclePhase;
+  /** True only when this service had a prior live handshake before this `connect` event. */
+  readonly recovered?: boolean;
+}
+
 let processSocketOpenSequence = 0;
 
 function makeProcessSocketOccurrenceNonce(): string {
@@ -154,6 +162,11 @@ export function shouldLogSocketError(
 export class SocketService {
   private socket: Socket | null = null;
   private readonly handleRawEvent: RawRealtimeEventHandler;
+  private lifecycleObserver: ((event: SocketLifecycleEvent) => void) | null = null;
+  private lifecycleObserverGeneration = 0;
+  private lifecycleObserverCleanup: (() => void) | null = null;
+  private lifecycleHasConnected = false;
+  private lifecycleIsReconnecting = false;
 
   // Escalation state.
   private origin = '';
@@ -300,6 +313,141 @@ export class SocketService {
     });
   }
 
+  /**
+   * Observe the already-open socket without changing the certified durable-ingress constructor or
+   * connection path. App-level escalation reattaches this observer to its replacement socket.
+   */
+  observeLifecycle(observer: (event: SocketLifecycleEvent) => void): () => void {
+    this.clearLifecycleObserver();
+    this.lifecycleObserver = observer;
+    const observerGeneration = this.lifecycleObserverGeneration;
+    this.attachLifecycleObserver();
+    return () => {
+      if (observerGeneration !== this.lifecycleObserverGeneration) return;
+      this.clearLifecycleObserver();
+    };
+  }
+
+  private publishObservedLifecycle(event: SocketLifecycleEvent): boolean {
+    const observerGeneration = this.lifecycleObserverGeneration;
+    if (this.stopped || !this.accountLease?.isCurrent() || !this.lifecycleObserver) {
+      return false;
+    }
+    try {
+      this.lifecycleObserver(event);
+    } catch (error) {
+      logger.warn('[socket] lifecycle observer failed', {
+        phase: event.phase,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+    return (
+      observerGeneration === this.lifecycleObserverGeneration &&
+      !this.stopped &&
+      Boolean(this.accountLease?.isCurrent())
+    );
+  }
+
+  private attachLifecycleObserver(): void {
+    this.detachLifecycleObserver();
+    const openedSocket = this.socket;
+    const observerGeneration = this.lifecycleObserverGeneration;
+    const lifecycleGeneration = this.lifecycleGeneration;
+    if (!openedSocket || !this.lifecycleObserver || this.stopped) return;
+
+    const ownsSocket = (): boolean =>
+      observerGeneration === this.lifecycleObserverGeneration &&
+      lifecycleGeneration === this.lifecycleGeneration &&
+      openedSocket === this.socket &&
+      !this.stopped;
+    const onConnect = (): void => {
+      if (!ownsSocket()) return;
+      const recovered = this.lifecycleHasConnected;
+      this.lifecycleHasConnected = true;
+      this.lifecycleIsReconnecting = false;
+      this.publishObservedLifecycle({ phase: 'connected', recovered });
+    };
+    const onDisconnect = (): void => {
+      if (!ownsSocket()) return;
+      this.lifecycleIsReconnecting = true;
+      const current = this.publishObservedLifecycle({ phase: 'reconnecting' });
+      // Socket.IO will not retry an `io server disconnect`; reuse the existing trusted-origin
+      // escalation ladder whenever the native socket says no automatic attempt is active.
+      if (current && !openedSocket.active) this.scheduleEscalation('server-disconnect');
+    };
+    const onConnectError = (): void => {
+      if (!ownsSocket()) return;
+      this.publishObservedLifecycle({
+        phase:
+          this.lifecycleHasConnected || this.lifecycleIsReconnecting
+            ? 'reconnecting'
+            : 'connecting',
+      });
+    };
+    const onReconnectAttempt = (): void => {
+      if (!ownsSocket()) return;
+      this.lifecycleIsReconnecting = true;
+      this.publishObservedLifecycle({ phase: 'reconnecting' });
+    };
+    const onReconnectFailed = (): void => {
+      if (!ownsSocket()) return;
+      this.lifecycleIsReconnecting = true;
+      this.publishObservedLifecycle({ phase: 'error' });
+    };
+    const onError = (): void => {
+      if (ownsSocket()) this.publishObservedLifecycle({ phase: 'error' });
+    };
+    const manager = openedSocket.io as {
+      on?: (event: string, callback: (...args: unknown[]) => void) => void;
+      off?: (event: string, callback: (...args: unknown[]) => void) => void;
+    };
+
+    openedSocket.on('connect', onConnect);
+    openedSocket.on('disconnect', onDisconnect);
+    openedSocket.on('connect_error', onConnectError);
+    openedSocket.on('error', onError);
+    manager.on?.('reconnect_attempt', onReconnectAttempt);
+    manager.on?.('reconnect_failed', onReconnectFailed);
+    this.lifecycleObserverCleanup = () => {
+      openedSocket.off?.('connect', onConnect);
+      openedSocket.off?.('disconnect', onDisconnect);
+      openedSocket.off?.('connect_error', onConnectError);
+      openedSocket.off?.('error', onError);
+      manager.off?.('reconnect_attempt', onReconnectAttempt);
+      manager.off?.('reconnect_failed', onReconnectFailed);
+    };
+
+    if (openedSocket.connected) onConnect();
+    else {
+      this.publishObservedLifecycle({
+        phase:
+          this.lifecycleHasConnected || this.lifecycleIsReconnecting
+            ? 'reconnecting'
+            : 'connecting',
+      });
+    }
+  }
+
+  private detachLifecycleObserver(): void {
+    const cleanup = this.lifecycleObserverCleanup;
+    this.lifecycleObserverCleanup = null;
+    try {
+      cleanup?.();
+    } catch (error) {
+      logger.warn('[socket] lifecycle observer teardown failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  }
+
+  private clearLifecycleObserver(): void {
+    this.lifecycleObserverGeneration += 1;
+    this.lifecycleObserver = null;
+    this.lifecycleHasConnected = false;
+    this.lifecycleIsReconnecting = false;
+    this.detachLifecycleObserver();
+  }
+
   /** Build a (host, code, message) signature from an arbitrary socket error value. */
   private errorSignature(err: unknown): SocketErrorSignature {
     let host = '';
@@ -342,14 +490,26 @@ export class SocketService {
    * exponential backoff, then restart the same trusted origin. Idempotent — a
    * pending/in-progress escalation is not re-scheduled.
    */
-  private scheduleEscalation(): void {
+  private scheduleEscalation(
+    reason: 'retries-exhausted' | 'server-disconnect' = 'retries-exhausted',
+  ): void {
     if (this.stopped || this.escalationTimer != null || this.escalationInProgress) return;
     const delay = nextSocketBackoffMs(this.escalationAttempt);
     this.escalationAttempt += 1;
-    logger.warn(`[socket] reconnect attempts exhausted — restarting in ${delay}ms`);
+    logger.warn(
+      reason === 'retries-exhausted'
+        ? `[socket] reconnect attempts exhausted — restarting in ${delay}ms`
+        : `[socket] server ended the connection — restarting in ${delay}ms`,
+    );
     this.escalationTimer = setTimeout(() => {
       this.escalationTimer = null;
+      if (this.lifecycleObserver && !this.publishObservedLifecycle({ phase: 'reconnecting' })) {
+        return;
+      }
+      if (this.stopped) return;
+      this.lifecycleIsReconnecting = true;
       this.runEscalation();
+      this.attachLifecycleObserver();
     }, delay);
   }
 
@@ -392,8 +552,71 @@ export class SocketService {
         this.origin = '';
         this.password = '';
         this.opts = {};
+        this.clearLifecycleObserver();
       }
     }
+  }
+
+  /**
+   * Immediately replace the current native socket against the same already-approved transport.
+   * This is the manual Retry seam: it preserves the account lease and lifecycle observer, while
+   * `runEscalation` advances the socket generation so callbacks from the retired instance cannot
+   * enter durable intake.
+   */
+  retryConnection(): boolean {
+    const accountLease = this.accountLease;
+    const retiringSocket = this.socket;
+    if (
+      this.stopped ||
+      !retiringSocket ||
+      !this.origin ||
+      !this.password ||
+      !accountLease?.isCurrent()
+    ) {
+      return false;
+    }
+
+    this.cancelEscalation();
+    this.escalationAttempt = 0;
+    this.escalationInProgress = false;
+    // Keep the observer itself (and its returned stop callback) current, but remove its listeners
+    // before native disconnect so a synchronous callback cannot re-enter the outer lifecycle.
+    this.detachLifecycleObserver();
+    // Native disconnect may synchronously deliver a final server event. Fence the retired socket
+    // before crossing that native boundary; runEscalation advances the certified lifecycle
+    // generation before callbacks can run again.
+    this.stopped = true;
+    try {
+      retiringSocket.disconnect();
+    } catch (error) {
+      logger.warn('[socket] manual retry retirement failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    } finally {
+      // Do not erase a newer connection if account teardown/replacement re-entered synchronously.
+      if (this.socket === retiringSocket) this.socket = null;
+    }
+
+    if (this.accountLease !== accountLease) return false;
+    if (!accountLease.isCurrent()) {
+      this.retireCurrentConnection();
+      return false;
+    }
+
+    // A disconnect callback outside our observer may have scheduled escalation synchronously.
+    this.cancelEscalation();
+    this.escalationAttempt = 0;
+    this.stopped = false;
+    this.runEscalation();
+    this.attachLifecycleObserver();
+
+    const replaced =
+      !this.stopped &&
+      this.socket !== null &&
+      this.accountLease === accountLease &&
+      accountLease.isCurrent();
+    if (!replaced) this.publishObservedLifecycle({ phase: 'error' });
+    return replaced;
   }
 
   /** Emit an event to the server (e.g. start-typing/stop-typing). No-op if disconnected. */

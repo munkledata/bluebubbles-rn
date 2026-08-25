@@ -37,6 +37,14 @@ describe('FailedMessageSheet — header copy', () => {
     expect(screen.getByText('Your attachment couldn’t be sent.')).toBeTruthy();
     expect(screen.queryByText('Your message couldn’t be sent.')).toBeNull();
   });
+
+  it('shows projected server detail only when the row provides it', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible errorDetail="Messages rejected this send." {...h} />,
+    );
+    expect(screen.getByText('Messages rejected this send.')).toBeTruthy();
+  });
 });
 
 describe('FailedMessageSheet — actions', () => {

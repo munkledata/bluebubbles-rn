@@ -36,6 +36,13 @@ interface ComposerProps {
   onSend: (text: string, effectId?: string, subject?: string, mentions?: MentionRange[]) => void;
   /** Send photo/video/file attachments staged in the inline tray. */
   onSendAttachments?: (items: PendingAttachment[]) => void;
+  /**
+   * Synchronous all-or-none preflight for the logical jobs created by one submit. Returning false
+   * leaves the authored text and attachments in place.
+   */
+  canSubmit?: (logicalSendCount: number) => boolean;
+  /** Captured account owner must still be current before any submit consumes authored state. */
+  isSubmitOwnerCurrent?: () => boolean;
   /** Open the document picker (the tray's "Files" button); returns picked items to stage. */
   onPickFiles?: () => Promise<PendingAttachment[]>;
   /** Pick a device contact and send it as a card (tray's "Contact" button). Provided only when the
@@ -79,6 +86,8 @@ interface ComposerProps {
 export const Composer = React.memo(function Composer({
   onSend,
   onSendAttachments,
+  canSubmit,
+  isSubmitOwnerCurrent,
   onPickFiles,
   onPickContact,
   replyTo,
@@ -123,7 +132,7 @@ export const Composer = React.memo(function Composer({
   const trimmed = text.trim();
   const isEditing = editingText != null;
   const attachEnabled = !!onSendAttachments && !isEditing;
-  const canSend = trimmed.length > 0 || pending.length > 0;
+  const canSend = trimmed.length > 0 || (!isEditing && pending.length > 0);
 
   // @mention autocomplete: the query being typed at the cursor and the participants it matches.
   const mentionQ =
@@ -282,24 +291,19 @@ export const Composer = React.memo(function Composer({
     const capturedSubject = subject.trim();
     // Resolve mentions against the trimmed text that's actually sent, so the spans line up.
     const finalMentions = mentions.length > 0 ? computeMentionRanges(captured, mentions) : [];
-    const atts = pending;
+    // Attachments staged before an edit belong to the draft, not to the edited message. Keep them
+    // untouched until edit mode ends instead of sending or discarding them with the edit.
+    const atts = isEditing ? [] : pending;
     if (!captured && atts.length === 0) return;
-    // After a normal send the draft is consumed → empty. After an edit send the draft was never
-    // consumed → put back whatever the edit displaced, so editing doesn't eat an in-progress draft.
-    const postText = isEditing ? preEditRef.current : '';
-    setText(postText);
-    setSubject('');
-    setMentions([]);
-    setPending([]);
-    setTrayOpen(false);
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    // Sent → the draft is consumed; clear it immediately (skip the debounce). Also sync the
-    // unmount-flush ref NOW — setText lands async, so backing out right after sending would
-    // otherwise re-persist the stale text from the ref.
-    if (draftTimer.current) clearTimeout(draftTimer.current);
-    if (!isEditing) onDraftChange?.('');
-    draftStateRef.current = { ...draftStateRef.current, text: postText };
-    emitTyping(false);
+    if (isSubmitOwnerCurrent && !isSubmitOwnerCurrent()) return;
+    const logicalSendCount = (atts.length > 0 ? 1 : 0) + (captured ? 1 : 0);
+    if (!isEditing && canSubmit && !canSubmit(logicalSendCount)) {
+      showToast('Too many messages are waiting—try again in a moment');
+      return;
+    }
+
+    // Queue admission happens synchronously inside these callbacks. Start every job covered by the
+    // all-or-none capacity preflight before clearing the only user-authored copy below.
     if (atts.length > 0) onSendAttachments?.(atts);
     if (captured) {
       onSend(
@@ -309,6 +313,23 @@ export const Composer = React.memo(function Composer({
         finalMentions.length > 0 ? finalMentions : undefined,
       );
     }
+
+    // After a normal send the draft is consumed → empty. After an edit send the draft was never
+    // consumed → put back whatever the edit displaced, so editing doesn't eat an in-progress draft.
+    const postText = isEditing ? preEditRef.current : '';
+    setText(postText);
+    setSubject('');
+    setMentions([]);
+    if (!isEditing) setPending([]);
+    setTrayOpen(false);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    // Sent → the draft is consumed; clear it immediately (skip the debounce). Also sync the
+    // unmount-flush ref NOW — setText lands async, so backing out right after sending would
+    // otherwise re-persist the stale text from the ref.
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    if (!isEditing) onDraftChange?.('');
+    draftStateRef.current = { ...draftStateRef.current, text: postText };
+    emitTyping(false);
   };
 
   const cancelEdit = (): void => {

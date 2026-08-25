@@ -6,7 +6,7 @@
  * a bold unread badge on the inbox when you pressed Back, and left its heads-up notification
  * sitting in the tray. A second effect now re-marks as new RECEIVED messages render.
  *
- * Four things this pins that are easy to break:
+ * Five things this pins that are easy to break:
  *   - it fires on the newest RECEIVED guid, not on `messages`, so the in-place ticks that rebuild
  *     the array on every reactive flush (delivery receipts, localPath writes, reaction joins) and
  *     the user's OWN sends don't spam markRead / the server read receipt;
@@ -21,6 +21,8 @@
  *     backgrounded and underneath the app-lock overlay, and FCM keeps writing messages into the DB
  *     in both states — marking read there cancels the tray notification for a message the user
  *     never saw. Coming back / unlocking re-runs the effect, so the mark is deferred, not lost.
+ *   - it marks only while this route has NAVIGATION FOCUS. Expo can keep the chat mounted under
+ *     another route, so a message arriving behind Chat Settings must wait until the chat refocuses.
  *
  * The mock preamble mirrors test/components/routes/chatScreen.test.tsx: every child is a probe and
  * the data hooks / service surface are jest.fns, so the assertions are about the ROUTE's logic.
@@ -29,11 +31,18 @@ import React from 'react';
 
 const GUID = 'iMessage;-;+15551234567';
 let mockGuid = GUID;
+let mockRouteFocused = true;
 
-jest.mock('expo-router', () => ({
-  useLocalSearchParams: () => ({ guid: mockGuid }),
-  useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
-}));
+jest.mock('expo-router', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const R = require('react');
+  return {
+    useFocusEffect: (callback: () => void | (() => void)) =>
+      R.useEffect(() => (mockRouteFocused ? callback() : undefined), [callback, mockRouteFocused]),
+    useLocalSearchParams: () => ({ guid: mockGuid }),
+    useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
+  };
+});
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -158,6 +167,8 @@ import { markRead } from '@/services';
 // eslint-disable-next-line import/first
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 // eslint-disable-next-line import/first
+import { isActiveChat, resetActiveChat } from '@/services/notifications/activeChat';
+// eslint-disable-next-line import/first
 import { useLockStore } from '@state/lockStore';
 // eslint-disable-next-line import/first
 import type { EnrichedMessage } from '@features/conversations/useMessages';
@@ -190,6 +201,9 @@ const appStateHandlers: AppStateHandler[] = [];
 beforeEach(() => {
   jest.clearAllMocks();
   mockGuid = GUID;
+  mockRouteFocused = true;
+  resetActiveChat();
+  AppState.currentState = 'active';
   appStateHandlers.length = 0;
   jest.spyOn(AppState, 'addEventListener').mockImplementation(((
     _type: string,
@@ -337,5 +351,46 @@ describe('ChatScreen — live read marker while the thread is open', () => {
       GUID,
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
+  });
+
+  it('does not mark behind another route, and catches up when the chat regains focus', async () => {
+    const { rerender } = await openChat();
+
+    mockRouteFocused = false;
+    await act(async () => {
+      rerender(<ChatScreen />);
+    });
+    await flush(rerender, [INCOMING_2, INCOMING_1]);
+    expect(markRead).not.toHaveBeenCalled();
+    expect(clearChatNotification).not.toHaveBeenCalled();
+
+    mockRouteFocused = true;
+    await act(async () => {
+      rerender(<ChatScreen />);
+    });
+    expect(markRead).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    expect(clearChatNotification).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+  });
+
+  it('stops suppressing synchronously when Android reports background', async () => {
+    await openChat();
+    const handler = appStateHandlers[0];
+    if (!handler) throw new Error('expected the chat AppState listener');
+
+    await act(async () => {
+      handler('active');
+      expect(isActiveChat(GUID)).toBe(true);
+    });
+    await act(async () => {
+      handler('background');
+      // This assertion runs inside the callback turn, before React flushes the state update.
+      expect(isActiveChat(GUID)).toBe(false);
+    });
   });
 });
