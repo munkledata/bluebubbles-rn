@@ -1068,13 +1068,17 @@ export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise
  * the caller with an id that never committed. The fixed error copy deliberately omits the GUID.
  */
 export async function requireChatIdByGuidWithinTransaction(
-  db: AppDatabase,
+  context: DbTransactionContext,
   guid: string,
 ): Promise<number> {
-  const rows = await db.all<{ id: number }>(sql`SELECT id FROM chats WHERE guid = ${guid} LIMIT 1`);
-  const chatId = rows[0]?.id;
-  if (chatId == null) throw new Error('unknown chat');
-  return chatId;
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<{ id: number }>(
+      sql`SELECT id FROM chats WHERE guid = ${guid} LIMIT 1`,
+    );
+    const chatId = rows[0]?.id;
+    if (chatId == null) throw new Error('unknown chat');
+    return chatId;
+  });
 }
 
 /** Resolve a chat's local integer id from its server guid. */

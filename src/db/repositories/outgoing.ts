@@ -202,7 +202,7 @@ export async function insertOutgoingTextWithinTransaction(
   args: InsertOutgoingTextArgs,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
-    const chatId = await requireChatIdByGuidWithinTransaction(db, args.chatGuid);
+    const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
       tempGuid: args.tempGuid,
       chatGuid: args.chatGuid,
@@ -283,8 +283,8 @@ export async function insertOutgoingContact(
   },
 ): Promise<void> {
   // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  await withDbTransaction(db, async () => {
-    const chatId = await requireChatIdByGuidWithinTransaction(db, args.chatGuid);
+  await withDbTransaction(db, async (context) => {
+    const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
       tempGuid: args.tempGuid,
       chatGuid: args.chatGuid,
@@ -338,8 +338,8 @@ export async function insertOutgoingReaction(
   },
 ): Promise<void> {
   // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  await withDbTransaction(db, async () => {
-    const chatId = await requireChatIdByGuidWithinTransaction(db, args.chatGuid);
+  await withDbTransaction(db, async (context) => {
+    const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
       tempGuid: args.tempGuid,
       chatGuid: args.chatGuid,

@@ -467,8 +467,8 @@ export async function insertOutgoingAttachment(
   db: AppDatabase,
   args: InsertOutgoingAttachmentArgs,
 ): Promise<void> {
-  await withDbTransaction(db, async () => {
-    const chatId = await requireChatIdByGuidWithinTransaction(db, args.chatGuid);
+  await withDbTransaction(db, async (context) => {
+    const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(messages).values({
       guid: args.tempGuid,
       chatId,

@@ -1,3 +1,4 @@
+import { requireChatIdByGuidWithinTransaction } from '@db/repositories/chats';
 import { kvSet, kvSetWithinTransaction } from '@db/repositories/kv';
 import {
   runInTransactionContext,
@@ -19,6 +20,7 @@ export async function verifyDbTransactionApiContract(db: AppDatabase): Promise<v
 
     await kvSetWithinTransaction(brandedContext, 'inside-owner', 'allowed');
     await runInTransactionContext(brandedContext, async () => undefined);
+    await requireChatIdByGuidWithinTransaction(brandedContext, 'inside-owner');
 
     // @ts-expect-error A transaction token is not a raw DB and cannot call a self-transacting helper.
     await kvSet(brandedContext, 'nested-owner', 'rejected');
@@ -29,6 +31,9 @@ export async function verifyDbTransactionApiContract(db: AppDatabase): Promise<v
 
   // @ts-expect-error A raw DB is not proof that its caller owns the active transaction.
   await kvSetWithinTransaction(db, 'raw-db', 'rejected');
+
+  // @ts-expect-error A raw DB cannot invoke the transaction-only chat identity resolver.
+  await requireChatIdByGuidWithinTransaction(db, 'raw-db');
 
   // @ts-expect-error An arbitrary object cannot forge the opaque transaction token.
   await kvSetWithinTransaction({}, 'forged-context', 'rejected');
