@@ -12,6 +12,7 @@ import {
   handleMapKey,
   handlesNeedingAvatar,
   markAllChatsReadLocal,
+  markAllChatsReadLocalWithinTransaction,
   persistServerChat,
   searchContactAddresses,
   setChatUnreadLocal,
@@ -22,7 +23,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 
 describe('persistServerChat + findChatByParticipantAddresses', () => {
@@ -250,6 +251,42 @@ describe('local read / unread markers', () => {
       (raw.prepare("SELECT marked_unread_at t FROM chats WHERE guid='g1'").get() as { t: number })
         .t,
     ).toBeNull();
+  });
+
+  it('rolls back every Mark All Read update when its account guard is revoked mid-statement', async () => {
+    const { db, raw } = await seedChatWithMessage();
+    await setChatUnreadLocal(db, 'g1', 4000);
+
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_mark_all_read_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_guard_after_mark_all_read
+      AFTER UPDATE OF last_read_message_guid ON chats
+      WHEN OLD.guid = 'g1' AND NEW.last_read_message_guid = 'm1'
+      BEGIN
+        SELECT revoke_mark_all_read_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        db,
+        (context) => markAllChatsReadLocalWithinTransaction(context),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(readGuid(raw)).toBeNull();
+    expect(
+      (raw.prepare("SELECT marked_unread_at t FROM chats WHERE guid='g1'").get() as { t: number })
+        .t,
+    ).toBe(4000);
   });
 
   it('queues behind a neighbouring transaction and survives that transaction rolling back', async () => {

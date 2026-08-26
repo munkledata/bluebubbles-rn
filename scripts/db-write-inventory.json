@@ -5683,9 +5683,35 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/chatsContactsBranches.test.ts; test/db/readReconcile.test.ts"
     },
     {
-      "id": "src/db/repositories/chats.ts#markAllChatsReadLocal:mutator-call:909633435773",
+      "id": "src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6",
       "path": "src/db/repositories/chats.ts",
-      "line": 1301,
+      "line": 1304,
+      "symbol": "markAllChatsReadLocalWithinTransaction",
+      "operation": "sql-update",
+      "target": "chats",
+      "detectedContext": "withDbTransaction",
+      "owner": "markAllChatsReadLocalWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/chats.ts#markAllChatsReadLocal:mutator-call:1226b50c2b31",
+      "path": "src/db/repositories/chats.ts",
+      "line": 1319,
+      "symbol": "markAllChatsReadLocal",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/chats.ts#markAllChatsReadLocal.<callback:408993bad6>",
+      "detectedContext": "withDbTransaction",
+      "owner": "markAllChatsReadLocal",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/chats.ts#markAllChatsReadLocal:mutator-call:4985f9afc988",
+      "path": "src/db/repositories/chats.ts",
+      "line": 1319,
       "symbol": "markAllChatsReadLocal",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5693,33 +5719,20 @@
       "owner": "markAllChatsReadLocal",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/chats.ts#markAllChatsReadLocal:mutator-call:bdd19a4e7edf",
+      "id": "src/db/repositories/chats.ts#markAllChatsReadLocal.<callback:408993bad6>:mutator-call:b6e69b0f4ef1",
       "path": "src/db/repositories/chats.ts",
-      "line": 1301,
-      "symbol": "markAllChatsReadLocal",
+      "line": 1319,
+      "symbol": "markAllChatsReadLocal.<callback:408993bad6>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/chats.ts#markAllChatsReadLocal.<callback:051c55c871>",
+      "target": "src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "markAllChatsReadLocal",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts"
-    },
-    {
-      "id": "src/db/repositories/chats.ts#markAllChatsReadLocal:sql-update:2149ab6383d7",
-      "path": "src/db/repositories/chats.ts",
-      "line": 1302,
-      "symbol": "markAllChatsReadLocal",
-      "operation": "sql-update",
-      "target": "chats",
-      "detectedContext": "withDbTransaction",
-      "owner": "markAllChatsReadLocal",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/db/repositories/contacts.ts#upsertContacts.<callback:d109e0d101>:mutator-call:44b8cdb98f65",
@@ -17305,17 +17318,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
     },
     {
-      "id": "src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:1af5790b07>.onPress.<callback:4d6e5d9d24>:mutator-call:4a1bcbb1c22f",
+      "id": "src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>:mutator-call:64dcea224823",
       "path": "src/ui/conversations/ConversationListScreen.tsx",
-      "line": 87,
-      "symbol": "ConversationListScreen.<callback:1af5790b07>.onPress.<callback:4d6e5d9d24>",
+      "line": 89,
+      "symbol": "ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/chats.ts#markAllChatsReadLocal",
-      "detectedContext": "coordinated-delegation",
+      "target": "src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>.<callback:408993bad6>",
+      "detectedContext": "withDbTransaction",
       "owner": "ConversationListScreen mark all read",
-      "transactionContext": "coordinated-delegation",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/conversations/conversationListScreen.test.tsx; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>:mutator-call:d64ee82fedf5",
+      "path": "src/ui/conversations/ConversationListScreen.tsx",
+      "line": 89,
+      "symbol": "ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "ConversationListScreen mark all read",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/conversations/conversationListScreen.test.tsx; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>.<callback:408993bad6>:mutator-call:cb0097bc8e7b",
+      "path": "src/ui/conversations/ConversationListScreen.tsx",
+      "line": 91,
+      "symbol": "ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>.<callback:408993bad6>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "ConversationListScreen mark all read",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/conversations/conversationListScreen.test.tsx; test/db/chatsContactsBranches.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:5b7035b070>:mutator-call:e8b55608b6d2",

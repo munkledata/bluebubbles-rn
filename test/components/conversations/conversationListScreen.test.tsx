@@ -132,13 +132,14 @@ jest.mock('@ui/hooks/useKeyboardVisible', () => ({
   useKeyboardVisible: () => mockKbVisible,
 }));
 jest.mock('@/services', () => ({ refreshInbox: jest.fn() }));
+jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 // "Mark all read" is the one header action that WRITES — and it writes to EVERY chat. Stub just
 // that repository fn, keeping the rest of the real barrel. It MUST be mocked at the barrel
 // (`@db/repositories`), not at `@db/repositories/chats`: mocking the submodule does NOT reach
 // the barrel's `export *` re-export, so the screen would still get the real function.
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
-  markAllChatsReadLocal: jest.fn(),
+  markAllChatsReadLocalWithinTransaction: jest.fn(),
 }));
 
 jest.mock('@ui/conversations/ConversationTile', () => {
@@ -210,7 +211,9 @@ import { ConversationListScreen } from '@ui/conversations/ConversationListScreen
 // eslint-disable-next-line import/first
 import { useChats } from '@features/conversations/useChats';
 // eslint-disable-next-line import/first
-import { markAllChatsReadLocal } from '@db/repositories';
+import { getDatabase } from '@db/database';
+// eslint-disable-next-line import/first
+import { markAllChatsReadLocalWithinTransaction } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
@@ -220,7 +223,44 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const useChatsMock = useChats as jest.Mock;
-const markAllReadMock = markAllChatsReadLocal as jest.Mock;
+const mockGetDatabase = getDatabase as jest.Mock;
+const markAllReadWithinTransactionMock = markAllChatsReadLocalWithinTransaction as jest.Mock;
+const ACCOUNT_A_DATABASE = {
+  kind: 'conversation-list-account-a-db',
+  run: jest.fn(async (_statement: unknown) => undefined),
+};
+const ACCOUNT_B_DATABASE = {
+  kind: 'conversation-list-account-b-db',
+  run: jest.fn(async (_statement: unknown) => undefined),
+};
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function sqlStatementText(value: unknown): string {
+  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
+  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  return chunks
+    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
+    .filter((part): part is string => typeof part === 'string')
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
+  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
+}
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
@@ -232,7 +272,10 @@ beforeEach(() => {
   mockFocusCallbacks.length = 0;
   mockInsetBottom = 0;
   mockKbVisible = false;
-  markAllReadMock.mockClear();
+  mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DATABASE);
+  markAllReadWithinTransactionMock.mockReset().mockResolvedValue(undefined);
+  ACCOUNT_A_DATABASE.run.mockReset().mockResolvedValue(undefined);
+  ACCOUNT_B_DATABASE.run.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -376,19 +419,21 @@ describe('ConversationListScreen — navigation & actions', () => {
     expect(dlg.buttons.map((b) => b.text)).toEqual(['Cancel', 'Mark All Read']);
     // Opening the confirm must not touch the DB — the handler runs synchronously, so a missing
     // gate would already show up here.
-    expect(markAllReadMock).not.toHaveBeenCalled();
+    expect(markAllReadWithinTransactionMock).not.toHaveBeenCalled();
 
     // Cancel is a pure no-op (no handler at all).
     await act(async () => {
       dlg.buttons.find((b) => b.text === 'Cancel')?.onPress?.();
     });
-    expect(markAllReadMock).not.toHaveBeenCalled();
+    expect(markAllReadWithinTransactionMock).not.toHaveBeenCalled();
 
     // The destructive-ish confirm is what actually clears every badge.
     await act(async () => {
       dlg.buttons.find((b) => b.text === 'Mark All Read')?.onPress?.();
     });
-    expect(markAllReadMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(markAllReadWithinTransactionMock).toHaveBeenCalledTimes(1));
+    expect(markAllReadWithinTransactionMock).toHaveBeenCalledWith(expect.any(Object));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('drops a delayed Mark All Read callback retained from the previous account', async () => {
@@ -402,11 +447,55 @@ describe('ConversationListScreen — navigation & actions', () => {
 
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
+    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
     await act(async () => {
       retainedConfirm?.();
     });
 
-    expect(markAllReadMock).not.toHaveBeenCalled();
+    expect(markAllReadWithinTransactionMock).not.toHaveBeenCalled();
+    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
+    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+  });
+
+  it('rolls back admitted Mark All Read when Disconnect retires its account mid-write', async () => {
+    const write = deferred<void>();
+    markAllReadWithinTransactionMock.mockReturnValueOnce(write.promise);
+    setChats({ data: [makeRow({ guid: 'same-guid' })] });
+    await renderWithTheme(<ConversationListScreen />);
+    fireEvent.press(screen.getByLabelText('Mark all read'));
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Mark All Read'));
+    const confirm = useDialogStore
+      .getState()
+      .current?.buttons.find((button) => button.text === 'Mark All Read')?.onPress;
+
+    let drain: Promise<void> | undefined;
+    try {
+      await act(async () => {
+        confirm?.();
+      });
+      await waitFor(() => expect(markAllReadWithinTransactionMock).toHaveBeenCalledTimes(1));
+
+      let drained = false;
+      drain = pauseRealtimeDeliveries().then(() => {
+        drained = true;
+      });
+      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
+      await Promise.resolve();
+      expect(drained).toBe(false);
+
+      await act(async () => {
+        write.resolve(undefined);
+        await drain;
+      });
+      expect(drained).toBe(true);
+      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    } finally {
+      write.resolve(undefined);
+      drain ??= pauseRealtimeDeliveries();
+      await Promise.allSettled([drain]);
+      resumeRealtimeDeliveries();
+    }
   });
 
   it('opens a chat (encoded guid) when a tile is tapped', async () => {

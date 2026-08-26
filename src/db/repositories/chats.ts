@@ -1297,9 +1297,11 @@ export async function setChatUnreadLocal(
  * The outer guard is narrowed the same way so a chat with no received messages isn't set to NULL
  * (which would be the same "everything unread" outcome, arrived at from the other direction).
  */
-export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
-  await withDbTransaction(db, () =>
-    db.run(sql`
+export function markAllChatsReadLocalWithinTransaction(
+  context: DbTransactionContext,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.run(sql`
       UPDATE chats SET last_read_message_guid = (
         SELECT m.guid FROM messages m
          WHERE m.chat_id = chats.id AND m.is_from_me = 0 AND m.date_deleted IS NULL
@@ -1309,6 +1311,10 @@ export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
         SELECT 1 FROM messages m2
          WHERE m2.chat_id = chats.id AND m2.is_from_me = 0 AND m2.date_deleted IS NULL
       )
-    `),
-  );
+    `);
+  });
+}
+
+export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
+  await withDbTransaction(db, (context) => markAllChatsReadLocalWithinTransaction(context));
 }

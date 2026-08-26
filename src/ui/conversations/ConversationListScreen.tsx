@@ -21,7 +21,8 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { useChats } from '@features/conversations/useChats';
 import { getDatabase } from '@db/database';
-import { markAllChatsReadLocal, type InboxRow } from '@db/repositories';
+import { markAllChatsReadLocalWithinTransaction, type InboxRow } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
@@ -83,9 +84,14 @@ export function ConversationListScreen(): React.JSX.Element {
       {
         text: 'Mark All Read',
         onPress: () =>
-          void runAccountScopedLocalMutation(accountLease, () =>
-            markAllChatsReadLocal(getDatabase()),
-          ),
+          void runAccountScopedLocalMutation(accountLease, async () => {
+            const db = getDatabase();
+            await withDbTransaction(
+              db,
+              (context) => markAllChatsReadLocalWithinTransaction(context),
+              () => accountLease.isCurrent(),
+            );
+          }),
       },
     ]);
   }, [accountLease]);
