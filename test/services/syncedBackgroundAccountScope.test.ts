@@ -1,6 +1,7 @@
 /* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
 const getChat = jest.fn(async () => ({ guid: 'chat-1' }));
-const persistServerChat = jest.fn(async () => undefined);
+const persistServerChatWithinTransaction = jest.fn(async () => undefined);
+const linkHandlesToContacts = jest.fn(async () => 0);
 const getSyncedBackgroundState = jest.fn(
   async (): Promise<{ channel: string; uri: string | null }> => ({
     channel: 'channel-1',
@@ -49,7 +50,8 @@ jest.mock('@core/api', () => ({
   },
 }));
 jest.mock('@db/repositories', () => ({
-  persistServerChat,
+  persistServerChatWithinTransaction,
+  linkHandlesToContacts,
   getSyncedBackgroundState,
   setSyncedBackgroundUriIfCurrentWithinTransaction: setSyncedBackgroundUriIfCurrent,
   getChatTheme,
@@ -177,7 +179,7 @@ afterEach(async () => {
 });
 
 async function takePendingDownload(): Promise<(typeof mockPendingDownloads)[number]> {
-  for (let i = 0; i < 20 && mockPendingDownloads.length === 0; i += 1) {
+  for (let i = 0; i < 100 && mockPendingDownloads.length === 0; i += 1) {
     await Promise.resolve();
   }
   const pending = mockPendingDownloads.shift();
@@ -186,7 +188,7 @@ async function takePendingDownload(): Promise<(typeof mockPendingDownloads)[numb
 }
 
 async function waitForPendingDownloads(count: number): Promise<void> {
-  for (let i = 0; i < 50 && mockPendingDownloads.length < count; i += 1) {
+  for (let i = 0; i < 150 && mockPendingDownloads.length < count; i += 1) {
     await Promise.resolve();
   }
   expect(mockPendingDownloads).toHaveLength(count);
@@ -198,7 +200,7 @@ function backgroundUri(generation: number, channel = 'channel-1'): string {
 }
 
 describe('account-scoped synced backgrounds', () => {
-  it('coalesces one chat and lets only the latest request persist refreshed metadata', async () => {
+  it('coalesces one chat and lets only the latest request persist metadata before contacts', async () => {
     const oldChat = { guid: 'chat-1' };
     const latestChat = { guid: 'chat-1' };
     let resolveOld!: (chat: typeof oldChat) => void;
@@ -236,9 +238,38 @@ describe('account-scoped synced backgrounds', () => {
     await Promise.all([first, latest]);
 
     expect(getChat).toHaveBeenCalledTimes(2);
-    expect(persistServerChat).toHaveBeenCalledTimes(1);
-    const persisted = persistServerChat.mock.calls as unknown as Array<[AppDatabase, unknown]>;
+    expect(persistServerChatWithinTransaction).toHaveBeenCalledTimes(1);
+    const persisted = persistServerChatWithinTransaction.mock.calls as unknown as Array<
+      [object, unknown]
+    >;
     expect(persisted[0]?.[1]).toBe(latestChat);
+    expect(linkHandlesToContacts).toHaveBeenCalledWith(
+      expect.anything(),
+      [],
+      undefined,
+      expect.any(Function),
+    );
+    expect(persistServerChatWithinTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      linkHandlesToContacts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it('keeps using local background state when presentation-only contact linking fails', async () => {
+    linkHandlesToContacts.mockRejectedValueOnce(new Error('contact index unavailable'));
+    getSyncedBackgroundState.mockResolvedValueOnce({ channel: '', uri: null });
+
+    await ensureSyncedBackground(
+      {
+        snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+      } as never,
+      {} as AppDatabase,
+      'chat-1',
+      { generation: 1, isCurrent: () => true },
+    );
+
+    expect(persistServerChatWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(linkHandlesToContacts).toHaveBeenCalledTimes(1);
+    expect(getSyncedBackgroundState).toHaveBeenCalledWith(expect.anything(), 'chat-1');
   });
 
   it('collapses repeated same-chat triggers to one latest rerun and cleans superseded bytes', async () => {

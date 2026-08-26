@@ -10857,22 +10857,48 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:02b0bbee44>:mutator-call:f80d09a7f178",
+      "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:7428789aa7d4",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 188,
-      "symbol": "runSyncedBackgroundRequest.<callback:02b0bbee44>",
+      "line": 192,
+      "symbol": "runSyncedBackgroundRequest.<callback:6ea5277294>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/chats.ts#persistServerChat",
-      "detectedContext": "coordinated-delegation",
-      "owner": "runSyncedBackgroundRequest",
-      "transactionContext": "coordinated-delegation",
+      "target": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>.<callback:7387e3781d>",
+      "detectedContext": "withDbTransaction",
+      "owner": "synced-background metadata settlement",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/syncControlTracking.test.ts; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/services/syncedBackgroundAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncedBackgroundAccountScope.test.ts; test/services/syncedBackgroundTransaction.test.ts; test/db/chatsContactsBranches.test.ts; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:e6f6b158199c",
+      "path": "src/services/backgrounds/syncedBackground.ts",
+      "line": 192,
+      "symbol": "runSyncedBackgroundRequest.<callback:6ea5277294>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "synced-background metadata settlement",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncedBackgroundAccountScope.test.ts; test/services/syncedBackgroundTransaction.test.ts; test/db/chatsContactsBranches.test.ts; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>.<callback:7387e3781d>:mutator-call:6bcf163c0bcb",
+      "path": "src/services/backgrounds/syncedBackground.ts",
+      "line": 194,
+      "symbol": "runSyncedBackgroundRequest.<callback:6ea5277294>.<callback:7387e3781d>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/chats.ts#persistServerChatWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "synced-background metadata settlement",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncedBackgroundAccountScope.test.ts; test/services/syncedBackgroundTransaction.test.ts; test/db/chatsContactsBranches.test.ts; test/db/contactsRepo.test.ts"
     },
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:65c8511e514c",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 214,
+      "line": 241,
       "symbol": "runSyncedBackgroundRequest.<callback:80d8fc6d66>",
       "operation": "mutator-call",
       "target": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>",
@@ -10885,7 +10911,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:bc9bdf219775",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 214,
+      "line": 241,
       "symbol": "runSyncedBackgroundRequest.<callback:80d8fc6d66>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -10898,7 +10924,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>:mutator-call:0ea9aab320ef",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 217,
+      "line": 244,
       "symbol": "runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setSyncedBackgroundUriIfCurrentWithinTransaction",
@@ -10911,7 +10937,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:17a5f7a01d73",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 272,
+      "line": 299,
       "symbol": "runSyncedBackgroundRequest.<callback:399e3e6480>",
       "operation": "mutator-call",
       "target": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>",
@@ -10924,7 +10950,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:e796b0707ded",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 272,
+      "line": 299,
       "symbol": "runSyncedBackgroundRequest.<callback:399e3e6480>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -10937,7 +10963,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>:mutator-call:b90babad5788",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 275,
+      "line": 302,
       "symbol": "runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setSyncedBackgroundUriIfCurrentWithinTransaction",
@@ -10950,7 +10976,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:331132e4ce88",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 321,
+      "line": 348,
       "symbol": "runSyncedBackgroundRequest.<callback:ad4898f757>",
       "operation": "mutator-call",
       "target": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>",
@@ -10963,7 +10989,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:fcfa941fe19e",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 321,
+      "line": 348,
       "symbol": "runSyncedBackgroundRequest.<callback:ad4898f757>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -10976,7 +11002,7 @@
     {
       "id": "src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>:mutator-call:ac2d0c7e4da7",
       "path": "src/services/backgrounds/syncedBackground.ts",
-      "line": 324,
+      "line": 351,
       "symbol": "runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setSyncedBackgroundLuminanceIfCurrentWithinTransaction",

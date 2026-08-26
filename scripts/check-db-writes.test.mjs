@@ -2175,7 +2175,6 @@ test('certifies exactly the reviewed sync delegation edges', () => {
     [
       'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:23a950f7cc3a',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:c05c5f67e9>:mutator-call:d0fa0a16f072',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:02b0bbee44>:mutator-call:f80d09a7f178',
       'src/services/sync/engine.ts#fullSync:mutator-call:7505c95ec9fe',
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
@@ -2195,6 +2194,9 @@ test('certifies exactly the reviewed sync delegation edges', () => {
   assert.deepEqual(
     syncedBackgroundTransactions.map((finding) => finding.id).sort(),
     [
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>.<callback:7387e3781d>:mutator-call:6bcf163c0bcb',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:7428789aa7d4',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:e6f6b158199c',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>:mutator-call:b90babad5788',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:17a5f7a01d73',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:e796b0707ded',

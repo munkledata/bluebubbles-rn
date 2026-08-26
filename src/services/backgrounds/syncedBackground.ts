@@ -5,7 +5,8 @@ import { logger } from '@core/secure';
 import {
   getChatTheme,
   getSyncedBackgroundState,
-  persistServerChat,
+  linkHandlesToContacts,
+  persistServerChatWithinTransaction,
   setSyncedBackgroundLuminanceIfCurrentWithinTransaction,
   setSyncedBackgroundUriIfCurrentWithinTransaction,
 } from '@db/repositories';
@@ -185,7 +186,33 @@ async function runSyncedBackgroundRequest(
     // one small GET refreshes it; the `alreadyCurrent` check still skips a redundant re-download.
     try {
       const chat = await chatsApi.getChat(http, guid);
-      if (!ownsRequest() || !(await commit(() => persistServerChat(db, chat)))) return;
+      if (
+        !ownsRequest() ||
+        !(await commit(() =>
+          withDbTransaction(
+            db,
+            (context) => persistServerChatWithinTransaction(context, chat),
+            ownsRequest,
+          ),
+        ))
+      ) {
+        return;
+      }
+      // Contact names/photos are presentation-only and may scan the full local address book, so
+      // keep them out of the authoritative metadata transaction. The enclosing tracked phase keeps
+      // every read attached to teardown; each possible row update owns its own guarded transaction.
+      if (
+        !(await commit(() =>
+          linkHandlesToContacts(
+            db,
+            (chat.participants ?? []).map((participant) => participant.address),
+            undefined,
+            ownsRequest,
+          ),
+        ))
+      ) {
+        return;
+      }
     } catch {
       // best-effort: proceed with whatever channel we already have if the refresh fails.
     }
