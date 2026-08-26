@@ -220,4 +220,123 @@ describe('syncChatMessages — on-demand backfill', () => {
     expect(atts[0]!.guid).toBe('rcs-real-att');
     expect(atts[0]!.localPath).toBe('file:///rcs.jpg'); // on-disk image kept, no re-download
   });
+
+  it('rolls back an RCS picture reconcile retired mid-owner, then lets a fresh sync retry', async () => {
+    const { db, raw } = await createTestDb();
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cGuardedRcs', participants: [{ address: 'a@x.com' }] })],
+      hm,
+    );
+    const chatId = (await getChatIdByGuid(db, 'cGuardedRcs'))!;
+    const tempGuid = 'temp-guarded-rcs';
+    const realGuid = 'rcs-real-guarded';
+    await insertOutgoingAttachment(db, {
+      tempGuid,
+      attachmentGuid: `${tempGuid}-att`,
+      chatId,
+      chatGuid: 'cGuardedRcs',
+      localPath: 'file:///guarded-rcs.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'guarded-rcs.jpg',
+      totalBytes: 20,
+      now: 1000,
+    });
+    const original = (await listMessages(db, chatId)) as Array<{ id: number; guid: string }>;
+    const echo = Message.parse({
+      guid: realGuid,
+      isFromMe: true,
+      dateCreated: 1000,
+      attachments: [{ guid: `${realGuid}-att`, mimeType: 'image/jpeg' }],
+    });
+    const syncApi = api({
+      fetchChatMessages: async (_guid, offset) => (offset === 0 ? [echo] : []),
+    });
+    const queueCount = (): number =>
+      (
+        raw
+          .prepare('SELECT COUNT(*) AS count FROM outgoing_queue WHERE temp_guid = ?')
+          .get(tempGuid) as { count: number }
+      ).count;
+    const aliasTarget = (): string | undefined =>
+      (
+        raw
+          .prepare(
+            'SELECT canonical_guid AS canonicalGuid FROM message_guid_aliases WHERE alias_guid = ?',
+          )
+          .get(tempGuid) as { canonicalGuid: string } | undefined
+      )?.canonicalGuid;
+
+    let retired = false;
+    let triggerRan = false;
+    raw.function('retire_sync_chat_attachment', () => {
+      triggerRan = true;
+      retired = true;
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER retire_sync_chat_attachment
+      AFTER DELETE ON outgoing_queue
+      WHEN OLD.temp_guid = '${tempGuid}'
+      BEGIN SELECT retire_sync_chat_attachment(); END`);
+
+    try {
+      await expect(
+        syncChatMessages(db, syncApi, 'cGuardedRcs', { shouldAbort: () => retired }),
+      ).resolves.toBe(0);
+
+      expect(triggerRan).toBe(true);
+      expect(raw.inTransaction).toBe(false);
+      expect(queueCount()).toBe(1);
+      expect(aliasTarget()).toBeUndefined();
+      const rolledBack = (await listMessages(db, chatId)) as Array<{
+        id: number;
+        guid: string;
+        sendState: string | null;
+      }>;
+      expect(rolledBack).toHaveLength(1);
+      expect(rolledBack[0]).toMatchObject({
+        id: original[0]!.id,
+        guid: tempGuid,
+        sendState: 'sending',
+      });
+      const rolledBackAttachments = (await listAttachmentsByMessageIds(db, [original[0]!.id])).get(
+        original[0]!.id,
+      )!;
+      expect(rolledBackAttachments).toEqual([
+        expect.objectContaining({ guid: `${tempGuid}-att`, localPath: 'file:///guarded-rcs.jpg' }),
+      ]);
+
+      raw.exec('DROP TRIGGER retire_sync_chat_attachment');
+      retired = false;
+      await expect(
+        syncChatMessages(db, syncApi, 'cGuardedRcs', { shouldAbort: () => retired }),
+      ).resolves.toBe(1);
+
+      expect(queueCount()).toBe(0);
+      expect(aliasTarget()).toBe(realGuid);
+      const committed = (await listMessages(db, chatId)) as Array<{
+        id: number;
+        guid: string;
+        sendState: string | null;
+      }>;
+      expect(committed).toHaveLength(1);
+      expect(committed[0]).toMatchObject({
+        id: original[0]!.id,
+        guid: realGuid,
+        sendState: 'sent',
+      });
+      const committedAttachments = (await listAttachmentsByMessageIds(db, [original[0]!.id])).get(
+        original[0]!.id,
+      )!;
+      expect(committedAttachments).toEqual([
+        expect.objectContaining({
+          guid: `${realGuid}-att`,
+          localPath: 'file:///guarded-rcs.jpg',
+        }),
+      ]);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS retire_sync_chat_attachment');
+    }
+  });
 });
