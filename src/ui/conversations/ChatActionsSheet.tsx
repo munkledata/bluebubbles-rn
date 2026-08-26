@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
 import {
   setChatArchiveWithinTransaction,
-  setChatMute,
+  setChatMuteWithinTransaction,
   setChatPinWithinTransaction,
   type InboxRow,
 } from '@db/repositories';
@@ -133,9 +133,16 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 sep={theme.color.separator}
                 onPress={() =>
                   run(() =>
-                    runAccountScopedLocalMutation(accountLease, () =>
-                      setChatMute(getDatabase(), target.guid, target.muted ? null : 'mute'),
-                    ),
+                    runAccountScopedLocalMutation(accountLease, async () => {
+                      const db = getDatabase();
+                      const guid = target.guid;
+                      const muteType = target.muted ? null : 'mute';
+                      await withDbTransaction(
+                        db,
+                        (context) => setChatMuteWithinTransaction(context, guid, muteType),
+                        () => accountLease.isCurrent(),
+                      );
+                    }),
                   )
                 }
               />

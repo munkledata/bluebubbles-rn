@@ -2,7 +2,11 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
-import { setChatArchiveWithinTransaction, setChatMute, type InboxRow } from '@db/repositories';
+import {
+  setChatArchiveWithinTransaction,
+  setChatMuteWithinTransaction,
+  type InboxRow,
+} from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { deleteChat, markRead, markUnread } from '@/services';
 import {
@@ -103,9 +107,16 @@ export const ConversationTile = React.memo(function ConversationTile({
       icon: muted ? 'notifications-outline' : 'notifications-off-outline',
       color: '#FF9500',
       onPress: () =>
-        void runAccountScopedLocalMutation(accountLease, () =>
-          setChatMute(getDatabase(), row.guid, muted ? null : 'mute'),
-        ),
+        void runAccountScopedLocalMutation(accountLease, async () => {
+          const db = getDatabase();
+          const guid = row.guid;
+          const muteType = muted ? null : 'mute';
+          await withDbTransaction(
+            db,
+            (context) => setChatMuteWithinTransaction(context, guid, muteType),
+            () => accountLease.isCurrent(),
+          );
+        }),
     },
     {
       key: 'archive',

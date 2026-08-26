@@ -281,7 +281,17 @@ export async function setChatMute(
   guid: string,
   muteType: string | null,
 ): Promise<void> {
-  await withDbTransaction(db, () => db.update(chats).set({ muteType }).where(eq(chats.guid, guid)));
+  await withDbTransaction(db, (context) => setChatMuteWithinTransaction(context, guid, muteType));
+}
+
+export function setChatMuteWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  muteType: string | null,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.update(chats).set({ muteType }).where(eq(chats.guid, guid));
+  });
 }
 
 /**

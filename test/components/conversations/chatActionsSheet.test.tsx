@@ -16,8 +16,8 @@
  *   - a null target renders no rows.
  *
  * In-file mocks:
- *   - `@db/repositories`: Pin/Archive use context-only helpers inside a guarded transaction;
- *     Mute remains a public repository mutation. Stub each as a jest.fn resolving void.
+ *   - `@db/repositories`: Pin/Mute/Archive use context-only helpers inside guarded transactions.
+ *     Stub each as a jest.fn resolving void.
  *   - `@/services`: `markRead`/`markUnread`/`deleteChat` are referenced; its barrel loads native
  *     modules at import.
  *   - `@ui/dialog/dialogStore`: spy `showDialog` so the Delete-confirm can be asserted without
@@ -33,7 +33,7 @@ import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/ren
 import { ChatActionsSheet, type ChatActionTarget } from '@ui/conversations/ChatActionsSheet';
 import {
   setChatArchiveWithinTransaction,
-  setChatMute,
+  setChatMuteWithinTransaction,
   setChatPinWithinTransaction,
 } from '@db/repositories';
 import { getDatabase } from '@db/database';
@@ -51,7 +51,7 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('@db/repositories', () => ({
   setChatPinWithinTransaction: jest.fn(() => Promise.resolve()),
-  setChatMute: jest.fn(() => Promise.resolve()),
+  setChatMuteWithinTransaction: jest.fn(() => Promise.resolve()),
   setChatArchiveWithinTransaction: jest.fn(() => Promise.resolve()),
 }));
 
@@ -65,7 +65,7 @@ jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockSetChatPinWithinTransaction = setChatPinWithinTransaction as jest.Mock;
-const mockSetChatMute = setChatMute as jest.Mock;
+const mockSetChatMuteWithinTransaction = setChatMuteWithinTransaction as jest.Mock;
 const mockSetChatArchiveWithinTransaction = setChatArchiveWithinTransaction as jest.Mock;
 const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
@@ -157,7 +157,7 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DATABASE);
   mockSetChatPinWithinTransaction.mockReset().mockResolvedValue(undefined);
-  mockSetChatMute.mockReset().mockResolvedValue(undefined);
+  mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatArchiveWithinTransaction.mockReset().mockResolvedValue(undefined);
   ACCOUNT_A_DATABASE.run.mockReset().mockResolvedValue(undefined);
   ACCOUNT_B_DATABASE.run.mockReset().mockResolvedValue(undefined);
@@ -265,16 +265,55 @@ describe('ChatActionsSheet — Mute', () => {
     const t = makeTarget({ muted: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Mute'));
-    expect(mockSetChatMute).toHaveBeenCalledWith(ACCOUNT_A_DATABASE, t.guid, 'mute');
+    await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
+    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      t.guid,
+      'mute',
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('shows "Unmute" and clears the muteType (null) on press', async () => {
     const t = makeTarget({ muted: true });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Unmute'));
-    expect(mockSetChatMute).toHaveBeenCalledWith(ACCOUNT_A_DATABASE, t.guid, null);
+    await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
+    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(expect.any(Object), t.guid, null);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
+  });
+
+  it('waits for an admitted A-account Mute and rolls it back without touching B', async () => {
+    const gate = deferred();
+    mockSetChatMuteWithinTransaction.mockReturnValueOnce(gate.promise);
+    const onClose = await renderSheet(makeTarget({ muted: false }));
+
+    let pause: Promise<void> | undefined;
+    try {
+      fireEvent.press(screen.getByText('Mute'));
+      await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
+      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE']);
+      let pauseSettled = false;
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseSettled = true;
+      });
+      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
+      await Promise.resolve();
+      expect(pauseSettled).toBe(false);
+
+      gate.resolve();
+      await pause;
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      pause ??= pauseRealtimeDeliveries();
+      await Promise.allSettled([pause]);
+      resumeRealtimeDeliveries();
+    }
   });
 });
 
@@ -325,7 +364,7 @@ describe('ChatActionsSheet — Archive', () => {
     await waitFor(() => expect(oldClose).toHaveBeenCalledTimes(1));
     await invokeConfiguredPress(oldArchive);
     await waitFor(() => expect(oldClose).toHaveBeenCalledTimes(2));
-    expect(mockSetChatMute).not.toHaveBeenCalled();
+    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
     expect(mockSetChatArchiveWithinTransaction).not.toHaveBeenCalled();
     expect(mockGetDatabase).not.toHaveBeenCalled();
     expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
@@ -340,13 +379,22 @@ describe('ChatActionsSheet — Archive', () => {
     await invokeConfiguredPress(freshArchive);
     await waitFor(() => expect(freshClose).toHaveBeenCalledTimes(2));
 
-    expect(mockSetChatMute).toHaveBeenCalledWith(ACCOUNT_B_DATABASE, target.guid, 'mute');
+    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      target.guid,
+      'mute',
+    );
     expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
       expect.any(Object),
       target.guid,
       true,
     );
-    expectDbRunSequence(ACCOUNT_B_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
+    expectDbRunSequence(ACCOUNT_B_DATABASE, [
+      'BEGIN IMMEDIATE',
+      'COMMIT',
+      'BEGIN IMMEDIATE',
+      'COMMIT',
+    ]);
   });
 });
 

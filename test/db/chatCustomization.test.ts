@@ -4,10 +4,11 @@ import {
   listChatsForInbox,
   setChatCustomization,
   setChatMute,
+  setChatMuteWithinTransaction,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { isHexColor, resolveBubbleColor } from '@utils';
 import { createTestDb } from '../support/testDb';
 
@@ -77,6 +78,37 @@ describe('chat customization repo', () => {
     await setChatMute(t.db, 'c1', 'mute');
     expect((await getChatHeader(t.db, 'c1'))?.muteType).toBe('mute');
     await setChatMute(t.db, 'c1', null);
+    expect((await getChatHeader(t.db, 'c1'))?.muteType).toBeNull();
+  });
+
+  it('rolls back mute when its account guard is revoked mid-update', async () => {
+    const t = await createTestDb();
+    await seed(t, 'c1', 'Server');
+
+    let current = true;
+    let triggerRan = false;
+    t.raw.function('revoke_chat_mute_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_chat_mute_guard
+      AFTER UPDATE OF mute_type ON chats
+      WHEN OLD.guid = 'c1' AND NEW.mute_type = 'mute'
+      BEGIN
+        SELECT revoke_chat_mute_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        t.db,
+        (context) => setChatMuteWithinTransaction(context, 'c1', 'mute'),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(triggerRan).toBe(true);
     expect((await getChatHeader(t.db, 'c1'))?.muteType).toBeNull();
   });
 
