@@ -10,18 +10,22 @@ import {
   ACTIVE_MIGRATION_DEATH_RESUME_CHECKS,
   buildActiveMigrationDeathPrivacySafeArtifact,
   buildPrivacySafeArtifact,
+  buildRuntimeConcurrencyPrivacySafeArtifact,
   buildWalWriteDeathPrivacySafeArtifact,
   CLEANUP_RELAUNCH_STATE_ADB_ARGS,
   createCrashAppAdbArgs,
   createPrivateFileAbsenceAdbArgs,
   CREATE_ACTIVE_MIGRATION_DEATH_REQUEST_ADB_ARGS,
   CREATE_RELAUNCH_REQUEST_ADB_ARGS,
+  CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS,
   CREATE_WAL_WRITE_DEATH_REQUEST_ADB_ARGS,
   executeActiveMigrationDeathSequence,
   executeRelaunchSequence,
+  executeRuntimeConcurrencySequence,
   executeWalWriteDeathSequence,
   extractActiveMigrationDeathMarkers,
   extractRelaunchMarkers,
+  extractRuntimeConcurrencyMarkers,
   extractWalWriteDeathMarkers,
   isMissingProcessResult,
   LAUNCH_APP_ADB_ARGS,
@@ -38,8 +42,16 @@ import {
   RELAUNCH_MIGRATION_HEAD,
   RELAUNCH_PRIVATE_TEST_FILES,
   RESUME_CHECKS,
+  RUNTIME_CONCURRENCY_CHECKS,
+  RUNTIME_CONCURRENCY_FAILURE_CODES,
+  RUNTIME_CONCURRENCY_HOST_CHECKS,
+  RUNTIME_CONCURRENCY_MARKER_PREFIX,
+  RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES,
+  RUNTIME_CONCURRENCY_SCHEMA,
+  RUNTIME_CONCURRENCY_SUITE,
   validateActiveMigrationDeathMarker,
   validateRelaunchMarker,
+  validateRuntimeConcurrencyMarker,
   validateWalWriteDeathMarker,
   WAL_WRITE_DEATH_FAILURE_CODES,
   WAL_WRITE_DEATH_HOST_CHECKS,
@@ -212,6 +224,35 @@ function failingActiveMigrationDeathFinal(overrides = {}) {
   });
 }
 
+function runtimeConcurrencyResult(overrides = {}) {
+  return {
+    schema: RUNTIME_CONCURRENCY_SCHEMA,
+    suite: RUNTIME_CONCURRENCY_SUITE,
+    status: 'pass',
+    migrationCount: RELAUNCH_MIGRATION_COUNT,
+    migrationHead: RELAUNCH_MIGRATION_HEAD,
+    checks: checks(RUNTIME_CONCURRENCY_CHECKS),
+    ...overrides,
+  };
+}
+
+function failingRuntimeConcurrencyResult(overrides = {}) {
+  return runtimeConcurrencyResult({
+    status: 'fail',
+    checks: checks(RUNTIME_CONCURRENCY_CHECKS, { queuedWritersBlocked: false }),
+    failureCode: 'queued-writers-blocked',
+    ...overrides,
+  });
+}
+
+function runtimeConcurrencyMarker(value) {
+  return `${RUNTIME_CONCURRENCY_MARKER_PREFIX}${JSON.stringify(value)}`;
+}
+
+function loggedRuntimeConcurrencyMarker(value, pid = '101') {
+  return logMessage(runtimeConcurrencyMarker(value), pid);
+}
+
 const target = {
   versionName: '0.1.40',
   versionCode: 52,
@@ -250,12 +291,21 @@ test('pins zero-byte request creation and exact non-glob cleanup targets', () =>
     'databases/driver-active-migration-death-selftest.db-wal',
     'databases/driver-active-migration-death-selftest.db-shm',
   ]);
+  assert.deepEqual(RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES, [
+    'files/.gator-db-runtime-concurrency-request-v1',
+    'files/.gator-db-runtime-concurrency-running-v1',
+    'databases/driver-runtime-concurrency-selftest.db',
+    'databases/driver-runtime-concurrency-selftest.db-journal',
+    'databases/driver-runtime-concurrency-selftest.db-wal',
+    'databases/driver-runtime-concurrency-selftest.db-shm',
+  ]);
   assert.deepEqual(RELAUNCH_PRIVATE_TEST_FILES, [
     ...MIGRATION_RELAUNCH_PRIVATE_TEST_FILES,
     ...WAL_WRITE_DEATH_PRIVATE_TEST_FILES,
     ...ACTIVE_MIGRATION_DEATH_PRIVATE_TEST_FILES,
+    ...RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES,
   ]);
-  assert.equal(RELAUNCH_PRIVATE_TEST_FILES.length, 24);
+  assert.equal(RELAUNCH_PRIVATE_TEST_FILES.length, 30);
   assert.deepEqual(CREATE_RELAUNCH_REQUEST_ADB_ARGS, [
     'shell',
     'run-as',
@@ -277,6 +327,13 @@ test('pins zero-byte request creation and exact non-glob cleanup targets', () =>
     'touch',
     'files/.gator-db-active-migration-death-request-v1',
   ]);
+  assert.deepEqual(CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS, [
+    'shell',
+    'run-as',
+    APP_PACKAGE,
+    'touch',
+    'files/.gator-db-runtime-concurrency-request-v1',
+  ]);
   assert.deepEqual(CLEANUP_RELAUNCH_STATE_ADB_ARGS, [
     'shell',
     'run-as',
@@ -288,6 +345,7 @@ test('pins zero-byte request creation and exact non-glob cleanup targets', () =>
   assert.equal(CREATE_RELAUNCH_REQUEST_ADB_ARGS.includes('sh'), false);
   assert.equal(CREATE_WAL_WRITE_DEATH_REQUEST_ADB_ARGS.includes('sh'), false);
   assert.equal(CREATE_ACTIVE_MIGRATION_DEATH_REQUEST_ADB_ARGS.includes('sh'), false);
+  assert.equal(CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS.includes('sh'), false);
   assert.equal(CLEANUP_RELAUNCH_STATE_ADB_ARGS.includes('sh'), false);
   assert.equal(CLEANUP_RELAUNCH_STATE_ADB_ARGS.includes('*'), false);
   assert.equal(CLEANUP_RELAUNCH_STATE_ADB_ARGS.includes('gator.db'), false);
@@ -347,6 +405,18 @@ test('pins exact WAL stat, process crash, and private-file absence argv', () => 
       '!',
       '-e',
       'databases/driver-active-migration-death-selftest.db-shm',
+    ],
+  );
+  assert.deepEqual(
+    createPrivateFileAbsenceAdbArgs('databases/driver-runtime-concurrency-selftest.db-shm'),
+    [
+      'shell',
+      'run-as',
+      APP_PACKAGE,
+      'test',
+      '!',
+      '-e',
+      'databases/driver-runtime-concurrency-selftest.db-shm',
     ],
   );
   assert.throws(() => createCrashAppAdbArgs('101 202'), /one exact numeric/);
@@ -620,6 +690,118 @@ test('pins the exact active-migration 11/15/6 schemas and failure-code allowlist
   ]);
 });
 
+test('pins the exact terminal runtime-concurrency schema and finite contracts', () => {
+  assert.deepEqual(RUNTIME_CONCURRENCY_CHECKS, [
+    'requestValid',
+    'runStatePersisted',
+    'preCleanup',
+    'encryptedOpen',
+    'migrationLedger',
+    'rollbackIsolation',
+    'syncChunks',
+    'liveMessages',
+    'attachmentConstruction',
+    'uploadOutsideDbOwner',
+    'rekeyExclusive',
+    'queuedWritersBlocked',
+    'rekeyApplied',
+    'queuedWritersResumed',
+    'uploadSettlement',
+    'queueDrained',
+    'sentinelCommit',
+    'newKeyReopen',
+    'oldKeyRejected',
+    'integrity',
+    'databaseCleanup',
+    'stateCleanup',
+  ]);
+  assert.deepEqual(RUNTIME_CONCURRENCY_FAILURE_CODES, [
+    'request-invalid',
+    'phase-invalid',
+    'interrupted-run',
+    'orphaned-state',
+    'run-state',
+    'pre-cleanup',
+    'encrypted-open',
+    'migration-ledger',
+    'rollback-isolation',
+    'sync-chunks',
+    'live-messages',
+    'attachment-construction',
+    'upload-outside-db-owner',
+    'rekey-exclusive',
+    'queued-writers-blocked',
+    'rekey-applied',
+    'queued-writers-resumed',
+    'upload-settlement',
+    'queue-drained',
+    'sentinel-commit',
+    'new-key-reopen',
+    'old-key-rejected',
+    'integrity',
+    'database-cleanup',
+    'state-cleanup',
+    'internal',
+  ]);
+  assert.deepEqual(RUNTIME_CONCURRENCY_HOST_CHECKS, [
+    'processAlive',
+    'processStopped',
+    'privateStateClean',
+  ]);
+  assert.deepEqual(
+    validateRuntimeConcurrencyMarker(runtimeConcurrencyResult()),
+    runtimeConcurrencyResult(),
+  );
+  assert.deepEqual(
+    validateRuntimeConcurrencyMarker(failingRuntimeConcurrencyResult()),
+    failingRuntimeConcurrencyResult(),
+  );
+  assert.throws(
+    () =>
+      validateRuntimeConcurrencyMarker({
+        ...runtimeConcurrencyResult(),
+        rawLog: 'private',
+      }),
+    /finite contract/,
+  );
+  const missingCheck = checks(RUNTIME_CONCURRENCY_CHECKS);
+  delete missingCheck.rekeyApplied;
+  assert.throws(
+    () => validateRuntimeConcurrencyMarker(runtimeConcurrencyResult({ checks: missingCheck })),
+    /finite contract/,
+  );
+  assert.throws(
+    () =>
+      validateRuntimeConcurrencyMarker(
+        runtimeConcurrencyResult({
+          checks: { ...checks(RUNTIME_CONCURRENCY_CHECKS), rekeyApplied: 'yes' },
+        }),
+      ),
+    /must be boolean/,
+  );
+  assert.throws(
+    () =>
+      validateRuntimeConcurrencyMarker(
+        runtimeConcurrencyResult({
+          checks: checks(RUNTIME_CONCURRENCY_CHECKS, { queuedWritersBlocked: false }),
+        }),
+      ),
+    (error) =>
+      error instanceof HarnessError && error.code === 'inconsistent-runtime-concurrency-marker',
+  );
+  assert.throws(
+    () => validateRuntimeConcurrencyMarker(runtimeConcurrencyResult({ migrationCount: 38 })),
+    /count or head/,
+  );
+  assert.throws(
+    () =>
+      validateRuntimeConcurrencyMarker(
+        failingRuntimeConcurrencyResult({ failureCode: 'raw native failure' }),
+      ),
+    /finite contract/,
+  );
+});
+
 test('extracts active-WAL markers only from their exact process sequence', () => {
   assert.deepEqual(
     extractWalWriteDeathMarkers(loggedWalWriteDeathMarker(walWriteDeathReady()), ['101']),
@@ -698,6 +880,61 @@ test('extracts PID-bound active-migration markers and rejects every cross-lane p
       extractWalWriteDeathMarkers(loggedActiveMigrationDeathMarker(activeMigrationDeathReady())),
     (error) => error instanceof HarnessError && error.code === 'wrong-db-contract-marker',
   );
+});
+
+test('extracts one PID-bound runtime-concurrency marker and rejects every cross-lane prefix', () => {
+  const runtimeLog = loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult(), '101');
+  assert.deepEqual(extractRuntimeConcurrencyMarkers(runtimeLog, ['101']), [
+    runtimeConcurrencyResult(),
+  ]);
+  assert.throws(
+    () => extractRuntimeConcurrencyMarkers(runtimeLog, ['999']),
+    (error) => error instanceof HarnessError && error.code === 'wrong-marker-process',
+  );
+  assert.throws(
+    () => extractRuntimeConcurrencyMarkers(runtimeConcurrencyMarker(runtimeConcurrencyResult())),
+    (error) => error instanceof HarnessError && error.code === 'invalid-marker-process',
+  );
+  assert.throws(
+    () => extractRuntimeConcurrencyMarkers(`${runtimeLog}\n${runtimeLog}`, ['101']),
+    (error) =>
+      error instanceof HarnessError && error.code === 'duplicate-runtime-concurrency-marker',
+  );
+  for (const invalidPayload of ['', '{not-json}', JSON.stringify({ value: 'x'.repeat(4_096) })]) {
+    assert.throws(
+      () =>
+        extractRuntimeConcurrencyMarkers(
+          logMessage(`${RUNTIME_CONCURRENCY_MARKER_PREFIX}${invalidPayload}`),
+          ['101'],
+        ),
+      (error) =>
+        error instanceof HarnessError && error.code === 'invalid-runtime-concurrency-marker',
+    );
+  }
+
+  for (const forbiddenLog of [
+    loggedMarker(ready()),
+    loggedWalWriteDeathMarker(walWriteDeathReady()),
+    loggedActiveMigrationDeathMarker(activeMigrationDeathReady()),
+    ...['GATOR_DB_CONTRACT_V1 ', 'GATOR_DB_CONTRACT_V2 ', 'GATOR_DB_CONTRACT_V3 '].map((prefix) =>
+      logMessage(`${prefix}{}`),
+    ),
+  ]) {
+    assert.throws(
+      () => extractRuntimeConcurrencyMarkers(forbiddenLog),
+      (error) => error instanceof HarnessError && error.code === 'wrong-db-contract-marker',
+    );
+  }
+  for (const extractMarkers of [
+    extractRelaunchMarkers,
+    extractWalWriteDeathMarkers,
+    extractActiveMigrationDeathMarkers,
+  ]) {
+    assert.throws(
+      () => extractMarkers(runtimeLog),
+      (error) => error instanceof HarnessError && error.code === 'wrong-db-contract-marker',
+    );
+  }
 });
 
 test('extracts only exact READY then final marker sequences', () => {
@@ -1168,6 +1405,167 @@ test('rechecks process identity immediately when accepting READY', async () => {
   assert.equal(resets, 2);
 });
 
+test('runs one runtime-concurrency launch, rechecks its process, and proves pre-fallback cleanup', async () => {
+  const calls = [];
+  const processIdentity = { pid: '101', startTicks: '1001' };
+  let resetCount = 0;
+  let identityChecks = 0;
+  const outcome = await executeRuntimeConcurrencySequence({
+    resetTestState: async () => {
+      resetCount += 1;
+      calls.push(`reset-${String(resetCount)}`);
+    },
+    createRequest: async () => calls.push('request'),
+    launchApp: async () => calls.push('launch'),
+    stopApp: async () => calls.push('stop'),
+    readLogs: async () => {
+      calls.push('logs');
+      return loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult(), '101');
+    },
+    getProcessIdentity: async () => {
+      identityChecks += 1;
+      calls.push(`identity-${String(identityChecks)}`);
+      return identityChecks < 3 ? processIdentity : undefined;
+    },
+    verifyPrivateStateClean: async () => {
+      calls.push('private-state');
+      return true;
+    },
+  });
+
+  assert.deepEqual(outcome, {
+    result: runtimeConcurrencyResult(),
+    hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+  });
+  assert.deepEqual(calls, [
+    'reset-1',
+    'request',
+    'launch',
+    'identity-1',
+    'logs',
+    'identity-2',
+    'private-state',
+    'stop',
+    'identity-3',
+    'logs',
+    'reset-2',
+  ]);
+});
+
+test('runtime-concurrency rejects late duplicate and cross-lane markers after sealing logs', async () => {
+  for (const [lateMarker, expectedCode] of [
+    [
+      loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult(), '101'),
+      'duplicate-runtime-concurrency-marker',
+    ],
+    [loggedMarker(ready(), '101'), 'wrong-db-contract-marker'],
+  ]) {
+    const calls = [];
+    let logRead = 0;
+    let identityRead = 0;
+    await assert.rejects(
+      executeRuntimeConcurrencySequence({
+        resetTestState: async () => calls.push('reset'),
+        createRequest: async () => calls.push('request'),
+        launchApp: async () => calls.push('launch'),
+        stopApp: async () => calls.push('stop'),
+        readLogs: async () => {
+          logRead += 1;
+          const first = loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult(), '101');
+          return logRead === 1 ? first : `${first}\n${lateMarker}`;
+        },
+        getProcessIdentity: async () => {
+          identityRead += 1;
+          return identityRead < 3 ? { pid: '101', startTicks: '1001' } : undefined;
+        },
+        verifyPrivateStateClean: async () => true,
+      }),
+      (error) => error instanceof HarnessError && error.code === expectedCode,
+    );
+    assert.deepEqual(calls, ['reset', 'request', 'launch', 'stop', 'reset']);
+  }
+});
+
+test('runtime-concurrency marker timeout still force-stops and resets exact state', async () => {
+  const calls = [];
+  let now = 0;
+  let resetCount = 0;
+  await assert.rejects(
+    executeRuntimeConcurrencySequence(
+      {
+        resetTestState: async () => {
+          resetCount += 1;
+          calls.push(`reset-${String(resetCount)}`);
+        },
+        createRequest: async () => calls.push('request'),
+        launchApp: async () => calls.push('launch'),
+        stopApp: async () => calls.push('stop'),
+        readLogs: async () => '',
+        getProcessIdentity: async () => ({ pid: '101', startTicks: '1001' }),
+        verifyPrivateStateClean: async () => {
+          calls.push('private-state');
+          return true;
+        },
+      },
+      {
+        timeoutMs: 2,
+        pollMs: 1,
+        now: () => now,
+        sleep: async (ms) => {
+          now += ms;
+        },
+      },
+    ),
+    (error) => error instanceof HarnessError && error.code === 'runtime-concurrency-result-timeout',
+  );
+  assert.deepEqual(calls.slice(0, 3), ['reset-1', 'request', 'launch']);
+  assert.deepEqual(calls.slice(-2), ['stop', 'reset-2']);
+  assert.equal(calls.includes('private-state'), false);
+});
+
+test('runtime-concurrency rejects a changed process and still performs fallback cleanup', async () => {
+  const calls = [];
+  let identityRead = 0;
+  await assert.rejects(
+    executeRuntimeConcurrencySequence({
+      resetTestState: async () => calls.push('reset'),
+      createRequest: async () => calls.push('request'),
+      launchApp: async () => calls.push('launch'),
+      stopApp: async () => calls.push('stop'),
+      readLogs: async () => loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult(), '101'),
+      getProcessIdentity: async () => {
+        identityRead += 1;
+        return identityRead === 1
+          ? { pid: '101', startTicks: '1001' }
+          : { pid: '202', startTicks: '2002' };
+      },
+      verifyPrivateStateClean: async () => true,
+    }),
+    (error) => error instanceof HarnessError && error.code === 'app-process-exited',
+  );
+  assert.deepEqual(calls, ['reset', 'request', 'launch', 'stop', 'reset']);
+});
+
+test('runtime-concurrency rejects remaining private state before fallback cleanup', async () => {
+  const calls = [];
+  await assert.rejects(
+    executeRuntimeConcurrencySequence({
+      resetTestState: async () => calls.push('reset'),
+      createRequest: async () => calls.push('request'),
+      launchApp: async () => calls.push('launch'),
+      stopApp: async () => calls.push('stop'),
+      readLogs: async () => loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult(), '101'),
+      getProcessIdentity: async () => ({ pid: '101', startTicks: '1001' }),
+      verifyPrivateStateClean: async () => {
+        calls.push('private-state');
+        return false;
+      },
+    }),
+    (error) => error instanceof HarnessError && error.code === 'runtime-concurrency-state-remained',
+  );
+  assert.deepEqual(calls, ['reset', 'request', 'launch', 'private-state', 'stop', 'reset']);
+});
+
 test('bounded no-process polling fails closed', async () => {
   let clock = 0;
   await assert.rejects(
@@ -1224,6 +1622,58 @@ test('retained artifact is a finite allowlist with no process, serial, token, pa
     RELAUNCH_MARKER_PREFIX,
   ]) {
     assert.equal(retained.includes(forbidden), false);
+  }
+});
+
+test('runtime-concurrency artifact retains only finite target, checks, and host booleans', () => {
+  const artifact = buildRuntimeConcurrencyPrivacySafeArtifact(
+    {
+      result: runtimeConcurrencyResult(),
+      hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+      serial: 'private-device',
+      pid: '101',
+      key: 'private-key',
+      path: '/private/path',
+      rawLogs: runtimeConcurrencyMarker(runtimeConcurrencyResult()),
+    },
+    { ...target, serial: 'private-device', model: 'private-model' },
+    new Date('2026-08-26T12:34:56.000Z'),
+  );
+  assert.deepEqual(artifact, {
+    schema: 1,
+    suite: 'android-db-runtime-concurrency',
+    recordedAt: '2026-08-26T12:34:56.000Z',
+    package: APP_PACKAGE,
+    target,
+    status: 'pass',
+    migrationCount: RELAUNCH_MIGRATION_COUNT,
+    migrationHead: RELAUNCH_MIGRATION_HEAD,
+    checks: checks(RUNTIME_CONCURRENCY_CHECKS),
+    hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+  });
+  const retained = JSON.stringify(artifact);
+  for (const forbidden of [
+    'private-device',
+    'private-model',
+    '101',
+    'private-key',
+    '/private/path',
+    RUNTIME_CONCURRENCY_MARKER_PREFIX,
+  ]) {
+    assert.equal(retained.includes(forbidden), false);
+  }
+  for (const falseCheck of RUNTIME_CONCURRENCY_HOST_CHECKS) {
+    assert.throws(
+      () =>
+        buildRuntimeConcurrencyPrivacySafeArtifact(
+          {
+            result: failingRuntimeConcurrencyResult(),
+            hostChecks: checks(RUNTIME_CONCURRENCY_HOST_CHECKS, { [falseCheck]: false }),
+          },
+          target,
+        ),
+      /host checks do not prove/i,
+    );
   }
 });
 

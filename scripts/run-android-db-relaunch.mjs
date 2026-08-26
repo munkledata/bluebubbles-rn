@@ -192,6 +192,66 @@ export const ACTIVE_MIGRATION_DEATH_FAILURE_CODES = Object.freeze([
   'state-cleanup',
   'internal',
 ]);
+export const RUNTIME_CONCURRENCY_MARKER_PREFIX = 'GATOR_DB_RUNTIME_CONCURRENCY_V1 ';
+export const RUNTIME_CONCURRENCY_SUITE = 'android-db-runtime-concurrency';
+export const RUNTIME_CONCURRENCY_SCHEMA = 1;
+export const RUNTIME_CONCURRENCY_CHECKS = Object.freeze([
+  'requestValid',
+  'runStatePersisted',
+  'preCleanup',
+  'encryptedOpen',
+  'migrationLedger',
+  'rollbackIsolation',
+  'syncChunks',
+  'liveMessages',
+  'attachmentConstruction',
+  'uploadOutsideDbOwner',
+  'rekeyExclusive',
+  'queuedWritersBlocked',
+  'rekeyApplied',
+  'queuedWritersResumed',
+  'uploadSettlement',
+  'queueDrained',
+  'sentinelCommit',
+  'newKeyReopen',
+  'oldKeyRejected',
+  'integrity',
+  'databaseCleanup',
+  'stateCleanup',
+]);
+export const RUNTIME_CONCURRENCY_HOST_CHECKS = Object.freeze([
+  'processAlive',
+  'processStopped',
+  'privateStateClean',
+]);
+export const RUNTIME_CONCURRENCY_FAILURE_CODES = Object.freeze([
+  'request-invalid',
+  'phase-invalid',
+  'interrupted-run',
+  'orphaned-state',
+  'run-state',
+  'pre-cleanup',
+  'encrypted-open',
+  'migration-ledger',
+  'rollback-isolation',
+  'sync-chunks',
+  'live-messages',
+  'attachment-construction',
+  'upload-outside-db-owner',
+  'rekey-exclusive',
+  'queued-writers-blocked',
+  'rekey-applied',
+  'queued-writers-resumed',
+  'upload-settlement',
+  'queue-drained',
+  'sentinel-commit',
+  'new-key-reopen',
+  'old-key-rejected',
+  'integrity',
+  'database-cleanup',
+  'state-cleanup',
+  'internal',
+]);
 
 const DEV_CLIENT_URL =
   'exp+bluegreengatorappsmessages://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081';
@@ -206,6 +266,7 @@ const ACTIVE_MIGRATION_DEATH_REPORT_DIR = resolve(
 const REQUEST_FILE = 'files/.gator-db-relaunch-request-v1';
 const WAL_WRITE_DEATH_REQUEST_FILE = 'files/.gator-db-wal-write-death-request-v1';
 const ACTIVE_MIGRATION_DEATH_REQUEST_FILE = 'files/.gator-db-active-migration-death-request-v1';
+const RUNTIME_CONCURRENCY_REQUEST_FILE = 'files/.gator-db-runtime-concurrency-request-v1';
 export const MIGRATION_RELAUNCH_PRIVATE_TEST_FILES = Object.freeze([
   REQUEST_FILE,
   'files/.gator-db-relaunch-preparing-v1',
@@ -236,10 +297,19 @@ export const ACTIVE_MIGRATION_DEATH_PRIVATE_TEST_FILES = Object.freeze([
   'databases/driver-active-migration-death-selftest.db-wal',
   'databases/driver-active-migration-death-selftest.db-shm',
 ]);
+export const RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES = Object.freeze([
+  RUNTIME_CONCURRENCY_REQUEST_FILE,
+  'files/.gator-db-runtime-concurrency-running-v1',
+  'databases/driver-runtime-concurrency-selftest.db',
+  'databases/driver-runtime-concurrency-selftest.db-journal',
+  'databases/driver-runtime-concurrency-selftest.db-wal',
+  'databases/driver-runtime-concurrency-selftest.db-shm',
+]);
 export const RELAUNCH_PRIVATE_TEST_FILES = Object.freeze([
   ...MIGRATION_RELAUNCH_PRIVATE_TEST_FILES,
   ...WAL_WRITE_DEATH_PRIVATE_TEST_FILES,
   ...ACTIVE_MIGRATION_DEATH_PRIVATE_TEST_FILES,
+  ...RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES,
 ]);
 export const CREATE_RELAUNCH_REQUEST_ADB_ARGS = Object.freeze([
   'shell',
@@ -261,6 +331,13 @@ export const CREATE_ACTIVE_MIGRATION_DEATH_REQUEST_ADB_ARGS = Object.freeze([
   APP_PACKAGE,
   'touch',
   ACTIVE_MIGRATION_DEATH_REQUEST_FILE,
+]);
+export const CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS = Object.freeze([
+  'shell',
+  'run-as',
+  APP_PACKAGE,
+  'touch',
+  RUNTIME_CONCURRENCY_REQUEST_FILE,
 ]);
 export const READ_WAL_WRITE_DEATH_SIZE_ADB_ARGS = Object.freeze([
   'shell',
@@ -316,16 +393,25 @@ const FORBIDDEN_RELAUNCH_MARKER_PREFIXES = Object.freeze([
   ...SINGLE_PROCESS_MARKER_PREFIXES,
   WAL_WRITE_DEATH_MARKER_PREFIX,
   ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
+  RUNTIME_CONCURRENCY_MARKER_PREFIX,
 ]);
 const FORBIDDEN_WAL_WRITE_DEATH_MARKER_PREFIXES = Object.freeze([
   ...SINGLE_PROCESS_MARKER_PREFIXES,
   RELAUNCH_MARKER_PREFIX,
   ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
+  RUNTIME_CONCURRENCY_MARKER_PREFIX,
 ]);
 const FORBIDDEN_ACTIVE_MIGRATION_DEATH_MARKER_PREFIXES = Object.freeze([
   ...SINGLE_PROCESS_MARKER_PREFIXES,
   RELAUNCH_MARKER_PREFIX,
   WAL_WRITE_DEATH_MARKER_PREFIX,
+  RUNTIME_CONCURRENCY_MARKER_PREFIX,
+]);
+const FORBIDDEN_RUNTIME_CONCURRENCY_MARKER_PREFIXES = Object.freeze([
+  ...SINGLE_PROCESS_MARKER_PREFIXES,
+  RELAUNCH_MARKER_PREFIX,
+  WAL_WRITE_DEATH_MARKER_PREFIX,
+  ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
 ]);
 
 function compactToolOutput(value, serial) {
@@ -741,6 +827,107 @@ export function validateActiveMigrationDeathMarker(value) {
   };
 }
 
+function assertRuntimeConcurrencyPlainObject(
+  value,
+  label,
+  code = 'invalid-runtime-concurrency-marker',
+) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new HarnessError(code, `${label} must be an object.`);
+  }
+}
+
+function assertRuntimeConcurrencyExactKeys(
+  value,
+  expected,
+  label,
+  code = 'invalid-runtime-concurrency-marker',
+) {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    throw new HarnessError(code, `${label} fields do not match the finite contract.`);
+  }
+}
+
+function validateRuntimeConcurrencyFailureCode(value) {
+  if (!RUNTIME_CONCURRENCY_FAILURE_CODES.includes(value)) {
+    throw new HarnessError(
+      'invalid-runtime-concurrency-marker',
+      'Runtime-concurrency failureCode is not part of the finite contract.',
+    );
+  }
+  return value;
+}
+
+/** Validate one terminal, privacy-bounded runtime-concurrency marker. */
+export function validateRuntimeConcurrencyMarker(value) {
+  assertRuntimeConcurrencyPlainObject(value, 'Runtime-concurrency marker');
+  if (value.schema !== RUNTIME_CONCURRENCY_SCHEMA || value.suite !== RUNTIME_CONCURRENCY_SUITE) {
+    throw new HarnessError(
+      'invalid-runtime-concurrency-marker',
+      'Runtime-concurrency marker identity is invalid.',
+    );
+  }
+  if (value.status !== 'pass' && value.status !== 'fail') {
+    throw new HarnessError(
+      'invalid-runtime-concurrency-marker',
+      'Runtime-concurrency status must be pass or fail.',
+    );
+  }
+  assertRuntimeConcurrencyExactKeys(
+    value,
+    value.status === 'pass'
+      ? ['schema', 'suite', 'status', 'migrationCount', 'migrationHead', 'checks']
+      : ['schema', 'suite', 'status', 'migrationCount', 'migrationHead', 'checks', 'failureCode'],
+    'Runtime-concurrency marker',
+  );
+  if (
+    value.migrationCount !== RELAUNCH_MIGRATION_COUNT ||
+    value.migrationHead !== RELAUNCH_MIGRATION_HEAD
+  ) {
+    throw new HarnessError(
+      'invalid-runtime-concurrency-marker',
+      'Runtime-concurrency migration count or head does not match the reviewed contract.',
+    );
+  }
+  assertRuntimeConcurrencyPlainObject(value.checks, 'Runtime-concurrency checks');
+  assertRuntimeConcurrencyExactKeys(
+    value.checks,
+    RUNTIME_CONCURRENCY_CHECKS,
+    'Runtime-concurrency checks',
+  );
+  const checks = Object.fromEntries(
+    RUNTIME_CONCURRENCY_CHECKS.map((name) => {
+      if (typeof value.checks[name] !== 'boolean') {
+        throw new HarnessError(
+          'invalid-runtime-concurrency-marker',
+          `Runtime-concurrency check ${name} must be boolean.`,
+        );
+      }
+      return [name, value.checks[name]];
+    }),
+  );
+  const allPassed = Object.values(checks).every(Boolean);
+  if ((value.status === 'pass') !== allPassed) {
+    throw new HarnessError(
+      'inconsistent-runtime-concurrency-marker',
+      'Runtime-concurrency status does not agree with its check booleans.',
+    );
+  }
+  return {
+    schema: RUNTIME_CONCURRENCY_SCHEMA,
+    suite: RUNTIME_CONCURRENCY_SUITE,
+    status: value.status,
+    migrationCount: RELAUNCH_MIGRATION_COUNT,
+    migrationHead: RELAUNCH_MIGRATION_HEAD,
+    checks,
+    ...(value.status === 'fail'
+      ? { failureCode: validateRuntimeConcurrencyFailureCode(value.failureCode) }
+      : {}),
+  };
+}
+
 function parseThreadtimeLine(line) {
   const match =
     /^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+[VDIWEF]\s+[^:]+:\s?(.*)$/.exec(line);
@@ -982,6 +1169,63 @@ export function extractActiveMigrationDeathMarkers(logText, expectedPids = []) {
   return markers;
 }
 
+/** Extract one terminal runtime-concurrency marker from its exclusive process lane. */
+export function extractRuntimeConcurrencyMarkers(logText, expectedPids = []) {
+  const payloads = [];
+  for (const line of String(logText).split(/\r?\n/)) {
+    if (FORBIDDEN_RUNTIME_CONCURRENCY_MARKER_PREFIXES.some((prefix) => line.includes(prefix))) {
+      throw new HarnessError(
+        'wrong-db-contract-marker',
+        'Another DB contract ran during the exclusive runtime-concurrency lane.',
+      );
+    }
+    if (!line.includes(RUNTIME_CONCURRENCY_MARKER_PREFIX)) continue;
+    const parsedLine = parseThreadtimeLine(line);
+    if (!parsedLine) {
+      throw new HarnessError(
+        'invalid-marker-process',
+        'Runtime-concurrency marker did not include a valid threadtime process identity.',
+      );
+    }
+    const markerIndex = parsedLine.message.indexOf(RUNTIME_CONCURRENCY_MARKER_PREFIX);
+    if (markerIndex < 0) continue;
+    const expectedPid = expectedPids[payloads.length];
+    if (expectedPid !== undefined && parsedLine.pid !== expectedPid) {
+      throw new HarnessError(
+        'wrong-marker-process',
+        'Runtime-concurrency marker was emitted by the wrong app process.',
+      );
+    }
+    const payload = parsedLine.message
+      .slice(markerIndex + RUNTIME_CONCURRENCY_MARKER_PREFIX.length)
+      .trim();
+    if (!payload || payload.length > MAX_MARKER_JSON_CHARS) {
+      throw new HarnessError(
+        'invalid-runtime-concurrency-marker',
+        'Runtime-concurrency marker payload is empty or too large.',
+      );
+    }
+    payloads.push(payload);
+  }
+  if (payloads.length > 1) {
+    throw new HarnessError(
+      'duplicate-runtime-concurrency-marker',
+      'Too many runtime-concurrency markers were emitted.',
+    );
+  }
+  return payloads.map((payload) => {
+    try {
+      return validateRuntimeConcurrencyMarker(JSON.parse(payload));
+    } catch (error) {
+      if (error instanceof HarnessError) throw error;
+      throw new HarnessError(
+        'invalid-runtime-concurrency-marker',
+        'Runtime-concurrency marker is not valid JSON.',
+      );
+    }
+  });
+}
+
 export function logsAfterRelaunchBoundary(logText, boundary) {
   if (!boundary.startsWith(LOGCAT_BOUNDARY_PREFIX)) {
     throw new HarnessError('invalid-log-boundary', 'The DB relaunch log boundary is invalid.');
@@ -1112,6 +1356,33 @@ async function waitForMarkerCount({
   throw new HarnessError(
     'relaunch-result-timeout',
     `No expected DB relaunch marker arrived within ${String(timeoutMs)} ms.`,
+  );
+}
+
+async function waitForRuntimeConcurrencyMarker({
+  readLogs,
+  getProcessIdentity,
+  expectedIdentity,
+  timeoutMs = MARKER_TIMEOUT_MS,
+  pollMs = POLL_MS,
+  now = Date.now,
+  sleep = delay,
+}) {
+  const deadline = now() + timeoutMs;
+  while (now() <= deadline) {
+    const markers = extractRuntimeConcurrencyMarkers(await readLogs(), [expectedIdentity.pid]);
+    if (markers.length === 1) return markers[0];
+    if (!sameProcessIdentity(await getProcessIdentity(), expectedIdentity)) {
+      throw new HarnessError(
+        'app-process-exited',
+        'The Gator process changed before emitting its runtime-concurrency marker.',
+      );
+    }
+    await sleep(pollMs);
+  }
+  throw new HarnessError(
+    'runtime-concurrency-result-timeout',
+    `No runtime-concurrency marker arrived within ${String(timeoutMs)} ms.`,
   );
 }
 
@@ -1437,6 +1708,77 @@ export async function executeActiveMigrationDeathSequence(operations, timing = {
   }
 }
 
+/** Dependency-injected one-launch runtime-concurrency proof; host tests never need adb. */
+export async function executeRuntimeConcurrencySequence(operations, timing = {}) {
+  const {
+    resetTestState,
+    createRequest,
+    launchApp,
+    stopApp,
+    readLogs,
+    getProcessIdentity,
+    verifyPrivateStateClean,
+  } = operations;
+  let primaryError;
+  let processStopped = false;
+  try {
+    await resetTestState();
+    await createRequest();
+    await launchApp();
+    const processIdentity = await waitForProcess(getProcessIdentity, timing);
+    const result = await waitForRuntimeConcurrencyMarker({
+      readLogs,
+      getProcessIdentity,
+      expectedIdentity: processIdentity,
+      ...timing,
+    });
+    if (!sameProcessIdentity(await getProcessIdentity(), processIdentity)) {
+      throw new HarnessError(
+        'app-process-exited',
+        'The Gator process changed while emitting its runtime-concurrency marker.',
+      );
+    }
+    if ((await verifyPrivateStateClean()) !== true) {
+      throw new HarnessError(
+        'runtime-concurrency-state-remained',
+        'Disposable runtime-concurrency state remained before fallback cleanup.',
+      );
+    }
+    await stopApp();
+    await waitForNoProcess(getProcessIdentity, timing);
+    processStopped = true;
+    const finalMarkers = extractRuntimeConcurrencyMarkers(await readLogs(), [processIdentity.pid]);
+    if (finalMarkers.length !== 1 || JSON.stringify(finalMarkers[0]) !== JSON.stringify(result)) {
+      throw new HarnessError(
+        'runtime-concurrency-result-changed',
+        'The sealed runtime-concurrency log did not retain exactly one matching result.',
+      );
+    }
+    return {
+      result,
+      hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+    };
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    let finalizationError;
+    if (!processStopped) {
+      try {
+        await stopApp();
+      } catch (error) {
+        finalizationError = error;
+      }
+    }
+    try {
+      await resetTestState();
+    } catch (error) {
+      finalizationError ??= error;
+    }
+    if (!primaryError && finalizationError) throw finalizationError;
+  }
+}
+
 export function buildPrivacySafeArtifact(outcome, target, recordedAt = new Date()) {
   const ready = validateRelaunchMarker(outcome.ready);
   const final = outcome.final ? validateRelaunchMarker(outcome.final) : undefined;
@@ -1633,6 +1975,60 @@ export function buildActiveMigrationDeathPrivacySafeArtifact(
       : {}),
     hostChecks,
     ...(terminal.status === 'fail' ? { failureCode: terminal.failureCode } : {}),
+  };
+}
+
+export function buildRuntimeConcurrencyPrivacySafeArtifact(
+  outcome,
+  target,
+  recordedAt = new Date(),
+) {
+  const result = validateRuntimeConcurrencyMarker(outcome.result);
+  assertRuntimeConcurrencyPlainObject(
+    outcome.hostChecks,
+    'Runtime-concurrency host checks',
+    'invalid-runtime-concurrency-artifact',
+  );
+  assertRuntimeConcurrencyExactKeys(
+    outcome.hostChecks,
+    RUNTIME_CONCURRENCY_HOST_CHECKS,
+    'Runtime-concurrency host checks',
+    'invalid-runtime-concurrency-artifact',
+  );
+  const hostChecks = Object.fromEntries(
+    RUNTIME_CONCURRENCY_HOST_CHECKS.map((name) => {
+      if (typeof outcome.hostChecks[name] !== 'boolean') {
+        throw new HarnessError(
+          'invalid-runtime-concurrency-artifact',
+          `Runtime-concurrency host check ${name} must be boolean.`,
+        );
+      }
+      return [name, outcome.hostChecks[name]];
+    }),
+  );
+  if (RUNTIME_CONCURRENCY_HOST_CHECKS.some((name) => hostChecks[name] !== true)) {
+    throw new HarnessError(
+      'invalid-runtime-concurrency-artifact',
+      'Runtime-concurrency host checks do not prove the terminal one-launch sequence.',
+    );
+  }
+  const safeTarget = parseTargetMetadata({
+    packageDump: `versionCode=${String(target.versionCode)}\nversionName=${target.versionName}`,
+    androidApi: target.androidApi,
+    abi: target.abi,
+  });
+  return {
+    schema: RUNTIME_CONCURRENCY_SCHEMA,
+    suite: RUNTIME_CONCURRENCY_SUITE,
+    recordedAt: recordedAt.toISOString(),
+    package: APP_PACKAGE,
+    target: safeTarget,
+    status: result.status,
+    migrationCount: result.migrationCount,
+    migrationHead: result.migrationHead,
+    checks: result.checks,
+    hostChecks,
+    ...(result.status === 'fail' ? { failureCode: result.failureCode } : {}),
   };
 }
 
