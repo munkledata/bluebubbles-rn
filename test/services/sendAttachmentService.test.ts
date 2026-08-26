@@ -11,10 +11,16 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendAttachmentService';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+  runTrackedRealtimeWork,
+} from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
 const dummyHttp = {} as unknown as HttpClient;
@@ -121,27 +127,133 @@ describe('sendImageMessage', () => {
     protect.mockRestore();
   });
 
-  it('does not start a native upload when Disconnect retires the send during its DB insert', async () => {
+  it('rolls back a retired attachment insert before upload and lets a fresh lease send', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
-    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
-    const accountStillCurrent = jest.fn(() => false);
+    raw.prepare("UPDATE chats SET latest_message_date = 321 WHERE guid = 'c1'").run();
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_attachment_during_chat_update', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER pause_attachment_during_chat_update
+      AFTER UPDATE OF latest_message_date ON chats
+      WHEN NEW.guid = 'c1' AND NEW.latest_message_date = 1000
+      BEGIN SELECT pause_attachment_during_chat_update(); END`);
 
-    await expect(
-      sendImageMessage(
-        db,
-        dummyHttp,
-        { chatGuid: 'c1', image: IMG },
-        up.upload,
-        1_000,
-        accountStillCurrent,
-      ),
-    ).resolves.toEqual({ tempGuid: expect.any(String) });
+    const oldRelease = jest.fn();
+    const freshRelease = jest.fn();
+    const protect = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockReturnValueOnce({ path: IMG.uri, release: oldRelease })
+      .mockReturnValueOnce({ path: IMG.uri, release: freshRelease });
+    let uploadCount = 0;
+    let uploadRanInsideTransaction = true;
+    let provisionalState: Record<string, unknown> | undefined;
+    const up = fakeUploader(async () => {
+      uploadCount += 1;
+      uploadRanInsideTransaction = raw.inTransaction;
+      expect(freshRelease).toHaveBeenCalledTimes(1);
+      provisionalState = one(
+        raw,
+        `SELECT m.guid AS messageGuid, m.send_state AS sendState,
+                m.has_attachments AS hasAttachments, m.date_created AS created,
+                a.guid AS attachmentGuid, a.local_path AS localPath,
+                a.mime_type AS mimeType, a.transfer_name AS transferName,
+                a.total_bytes AS totalBytes, a.width, a.height,
+                q.temp_guid AS queueGuid, q.kind, q.payload,
+                c.latest_message_date AS chatDate
+           FROM messages m
+           JOIN attachments a ON a.message_id = m.id
+           JOIN outgoing_queue q ON q.temp_guid = m.guid
+           JOIN chats c ON c.id = m.chat_id`,
+      );
+      return { guid: 'real-image-after-retirement', viaPrivateApi: true };
+    });
 
-    expect(accountStillCurrent).toHaveBeenCalledTimes(1);
-    expect(up.captured).toBeUndefined();
-    expect(one(raw, 'SELECT send_state FROM messages').send_state).toBe('sending');
-    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(1);
+    resumeRealtimeDeliveries();
+    const oldLease = captureRealtimeDeliveryLease();
+    try {
+      const oldSend = runTrackedRealtimeWork(oldLease, (lease) =>
+        sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image: IMG }, up.upload, 1_000, () =>
+          lease.isCurrent(),
+        ),
+      );
+
+      await expect(oldSend).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+      if (!drain) throw new Error('attachment insert did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(oldRelease).toHaveBeenCalledTimes(1);
+      expect(uploadCount).toBe(0);
+      expect(up.captured).toBeUndefined();
+      expect(raw.inTransaction).toBe(false);
+      expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+      expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(0);
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(321);
+
+      raw.exec('DROP TRIGGER pause_attachment_during_chat_update');
+      resumeRealtimeDeliveries();
+      const freshLease = captureRealtimeDeliveryLease();
+      let result: { tempGuid: string } | undefined;
+      await expect(
+        runTrackedRealtimeWork(freshLease, async (lease) => {
+          result = await sendImageMessage(
+            db,
+            dummyHttp,
+            { chatGuid: 'c1', image: IMG },
+            up.upload,
+            2_000,
+            () => lease.isCurrent(),
+          );
+        }),
+      ).resolves.toBe('delivered');
+
+      expect(uploadCount).toBe(1);
+      expect(uploadRanInsideTransaction).toBe(false);
+      expect(freshRelease).toHaveBeenCalledTimes(1);
+      expect(provisionalState).toMatchObject({
+        messageGuid: result?.tempGuid,
+        sendState: 'sending',
+        hasAttachments: 1,
+        created: 2_000,
+        attachmentGuid: `${result?.tempGuid}-att`,
+        localPath: IMG.uri,
+        mimeType: IMG.mimeType,
+        transferName: IMG.name,
+        totalBytes: IMG.size,
+        width: IMG.width,
+        height: IMG.height,
+        queueGuid: result?.tempGuid,
+        kind: 'attachment',
+        chatDate: 2_000,
+      });
+      expect(JSON.parse(String(provisionalState?.payload))).toEqual({
+        attachmentGuid: `${result?.tempGuid}-att`,
+        localPath: IMG.uri,
+      });
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+      expect(
+        one(
+          raw,
+          "SELECT send_state s, has_attachments h FROM messages WHERE guid='real-image-after-retirement'",
+        ),
+      ).toEqual({ s: 'sent', h: 1 });
+      expect(one(raw, 'SELECT guid, local_path p FROM attachments')).toEqual({
+        guid: `${result?.tempGuid}-att`,
+        p: IMG.uri,
+      });
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_attachment_during_chat_update');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      protect.mockRestore();
+      raw.close();
+    }
   });
 
   it('atomically rejects a path already owned by crash-surviving retirement', async () => {

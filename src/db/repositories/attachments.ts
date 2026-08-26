@@ -463,11 +463,12 @@ export interface InsertOutgoingAttachmentArgs {
   now: number;
 }
 
-export async function insertOutgoingAttachment(
-  db: AppDatabase,
+/** Transaction-only body for one optimistic outgoing attachment insert. */
+export function insertOutgoingAttachmentWithinTransaction(
+  context: DbTransactionContext,
   args: InsertOutgoingAttachmentArgs,
 ): Promise<void> {
-  await withDbTransaction(db, async (context) => {
+  return runInTransactionContext(context, async (db) => {
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(messages).values({
       guid: args.tempGuid,
@@ -506,6 +507,16 @@ export async function insertOutgoingAttachment(
       })
       .where(eq(chats.id, chatId));
   });
+}
+
+/** Standalone optimistic attachment owner; composing services use the transaction-only body. */
+export async function insertOutgoingAttachment(
+  db: AppDatabase,
+  args: InsertOutgoingAttachmentArgs,
+): Promise<void> {
+  await withDbTransaction(db, (context) =>
+    insertOutgoingAttachmentWithinTransaction(context, args),
+  );
 }
 
 /**

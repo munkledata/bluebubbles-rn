@@ -1,6 +1,7 @@
 import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { insertOutgoingAttachment } from '@db/repositories';
+import { insertOutgoingAttachmentWithinTransaction } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
@@ -56,7 +57,7 @@ export async function sendImageMessage(
   args: { chatGuid: string; image: PickedImage },
   upload: AttachmentUploader,
   now: number = Date.now(),
-  shouldContinue: () => boolean = () => true,
+  commitGuard?: DbCommitGuard,
 ): Promise<{ tempGuid: string }> {
   // A forwarded download can share this exact cache file with its source message. Pin it before
   // the first DB await so a concurrent tombstone/quota pass cannot claim and unlink it between the
@@ -80,27 +81,32 @@ export async function sendImageMessage(
   try {
     tempGuid = generateTempGuid();
     attachmentGuid = `${tempGuid}-att`;
-    await insertOutgoingAttachment(db, {
-      tempGuid,
-      attachmentGuid,
-      chatGuid: args.chatGuid,
-      localPath: args.image.uri,
-      mimeType: args.image.mimeType,
-      transferName: args.image.name,
-      totalBytes: args.image.size,
-      width: args.image.width,
-      height: args.image.height,
-      now,
-    });
+    await withDbTransaction(
+      db,
+      (context) =>
+        insertOutgoingAttachmentWithinTransaction(context, {
+          tempGuid,
+          attachmentGuid,
+          chatGuid: args.chatGuid,
+          localPath: args.image.uri,
+          mimeType: args.image.mimeType,
+          transferName: args.image.name,
+          totalBytes: args.image.size,
+          width: args.image.width,
+          height: args.image.height,
+          now,
+        }),
+      commitGuard,
+    );
   } finally {
     // The queue row plus attachment local_path now provide durable ownership. Releasing earlier
     // would reopen the deletion race; retaining it through the network upload would pin needlessly.
     sourceProtection?.release();
   }
 
-  // Disconnect can retire this operation while the optimistic DB insert is waiting. Do not let
-  // that old continuation register a brand-new native upload after the synchronous cancel sweep.
-  if (!shouldContinue()) return { tempGuid };
+  // Disconnect can retire this operation immediately after COMMIT. Do not let that old
+  // continuation register a brand-new native upload after the synchronous cancel sweep.
+  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
 
   try {
     // Stream the file to the server (native upload — never buffered in JS memory).
@@ -114,15 +120,25 @@ export async function sendImageMessage(
       mimeType: args.image.mimeType,
       totalBytes: args.image.size,
     });
-    if (!shouldContinue()) return { tempGuid };
+    if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     // The server ack carries only the message GUID (no attachment guid) — the optimistic
     // attachment row keeps its local guid + local_path until the live socket `new-message`
     // echo reconciles the attachment guid in place (upsertAttachments).
-    await reconcileSendOutcome(db, tempGuid, server, now);
+    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
   } catch (e) {
-    if (shouldContinue()) {
-      await handleSendFailure(db, tempGuid, e, 'send-attachment', args.chatGuid);
-    }
+    // Ownership loss is not a transport failure. Leave the durable queue row for the current
+    // account's recovery path instead of logging or starting a second stale-account owner.
+    if (e instanceof DbCommitGuardRejectedError) throw e;
+    if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+    await handleSendFailure(
+      db,
+      tempGuid,
+      e,
+      'send-attachment',
+      args.chatGuid,
+      undefined,
+      commitGuard,
+    );
   }
 
   return { tempGuid };

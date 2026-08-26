@@ -363,6 +363,57 @@ describe('UI send account lease', () => {
     resumeRealtimeDeliveries();
   });
 
+  it('passes single and multi-image persistence guards tied to their captured leases', async () => {
+    const singleLease = captureRealtimeDeliveryLease();
+    await expect(
+      sendImage(
+        {
+          chatGuid: 'chat-a',
+          image: { uri: 'file:///a.jpg', name: 'a.jpg', mimeType: 'image/jpeg', size: 10 },
+        },
+        singleLease,
+      ),
+    ).resolves.toEqual({ tempGuid: 'temp-image' });
+
+    const batchLease = captureRealtimeDeliveryLease();
+    await expect(
+      sendImages(
+        {
+          chatGuid: 'chat-b',
+          images: [
+            { uri: 'file:///b.jpg', name: 'b.jpg', mimeType: 'image/jpeg', size: 20 },
+            { uri: 'file:///c.jpg', name: 'c.jpg', mimeType: 'image/jpeg', size: 30 },
+          ],
+        },
+        batchLease,
+      ),
+    ).resolves.toEqual([{ tempGuid: 'temp-image' }, { tempGuid: 'temp-image' }]);
+
+    expect(mockSendImage).toHaveBeenCalledTimes(3);
+    for (const call of mockSendImage.mock.calls) {
+      expect(call).toEqual([
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ chatGuid: expect.stringMatching(/^chat-[ab]$/) }),
+        expect.anything(),
+        expect.any(Number),
+        expect.any(Function),
+      ]);
+    }
+    const singleGuard = mockSendImage.mock.calls[0]?.[5] as (() => boolean) | undefined;
+    const firstBatchGuard = mockSendImage.mock.calls[1]?.[5] as (() => boolean) | undefined;
+    const secondBatchGuard = mockSendImage.mock.calls[2]?.[5] as (() => boolean) | undefined;
+    expect(singleGuard?.()).toBe(true);
+    expect(firstBatchGuard?.()).toBe(true);
+    expect(secondBatchGuard?.()).toBe(true);
+
+    await pauseRealtimeDeliveries();
+    expect(singleGuard?.()).toBe(false);
+    expect(firstBatchGuard?.()).toBe(false);
+    expect(secondBatchGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
+  });
+
   it('passes React persistence a commit guard tied to the captured screen lease', async () => {
     const screenLease = captureRealtimeDeliveryLease();
     await expect(
