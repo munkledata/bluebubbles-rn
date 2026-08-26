@@ -877,7 +877,14 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
       text: 'hi',
       now: 1,
     });
-    await reconcileOutgoingSuccess(db, 'temp-1', { guid: '', dateCreated: 1, dateDelivered: null });
+    await expect(
+      reconcileOutgoingSuccess(
+        db,
+        'temp-1',
+        { guid: '', dateCreated: 1, dateDelivered: null },
+        () => false,
+      ),
+    ).resolves.toBeUndefined();
     // Row untouched: still the temp guid, still sending, queue row intact.
     expect(msgState(raw, 'temp-1')?.s).toBe('sending');
     expect(queueCount(raw, 'temp-1')).toBe(1);

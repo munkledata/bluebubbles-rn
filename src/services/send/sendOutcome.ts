@@ -5,7 +5,7 @@ import { ClientErrorCode, sendErrorCode } from '@utils';
 import {
   markOutgoingSentNoGuidWithinTransaction,
   reconcileOutgoingErrorWithinTransaction,
-  reconcileOutgoingSuccess,
+  reconcileOutgoingSuccessWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -28,15 +28,16 @@ export async function reconcileSendOutcome(
   now: number,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
-  if (ack.guid) {
-    await reconcileOutgoingSuccess(
+  const ackGuid = ack.guid;
+  if (ackGuid && ackGuid !== tempGuid) {
+    await withDbTransaction(
       db,
-      tempGuid,
-      {
-        guid: ack.guid,
-        dateCreated: now,
-        dateDelivered: null,
-      },
+      (context) =>
+        reconcileOutgoingSuccessWithinTransaction(context, tempGuid, {
+          guid: ackGuid,
+          dateCreated: now,
+          dateDelivered: null,
+        }),
       commitGuard,
     );
   } else {
@@ -48,7 +49,7 @@ export async function reconcileSendOutcome(
   }
   await clearFailedSendNotice(
     db,
-    ack.guid && ack.guid !== tempGuid ? ack.guid : tempGuid,
+    ackGuid && ackGuid !== tempGuid ? ackGuid : tempGuid,
     commitGuard,
   );
 }

@@ -3,7 +3,13 @@ import { ApiError } from '@core/api/errors';
 import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import { ClientErrorCode, sendErrorCode } from '@utils';
-import { getChatIdByGuid, insertOutgoingText, upsertChats, upsertHandles } from '@db/repositories';
+import {
+  getChatIdByGuid,
+  insertOutgoingText,
+  markMessageDeleted,
+  upsertChats,
+  upsertHandles,
+} from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { clearFailedSendNotice, notifyFailedSend } from '@/services/send/sendFailureNotice';
@@ -42,6 +48,20 @@ const msgCount = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM messages').get() as { c: number }).c;
 const queueCount = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM outgoing_queue').get() as { c: number }).c;
+const aliasTarget = (raw: Database.Database, aliasGuid: string): string | undefined =>
+  (
+    raw
+      .prepare(
+        'SELECT canonical_guid AS canonicalGuid FROM message_guid_aliases WHERE alias_guid=?',
+      )
+      .get(aliasGuid) as { canonicalGuid: string } | undefined
+  )?.canonicalGuid;
+const ledgerDate = (raw: Database.Database, guid: string): number | undefined =>
+  (
+    raw
+      .prepare('SELECT date_deleted AS dateDeleted FROM message_deletion_ledger WHERE guid=?')
+      .get(guid) as { dateDeleted: number } | undefined
+  )?.dateDeleted;
 
 describe('reconcileSendOutcome', () => {
   it('promotes temp→real and clears the queue when the ack carries a guid', async () => {
@@ -109,6 +129,55 @@ describe('reconcileSendOutcome', () => {
     expect(msgRow(raw, tempGuid)?.s).toBe('sent');
     expect(queueCount(raw)).toBe(0);
     expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, tempGuid, expect.any(Function));
+  });
+
+  it('rolls back a real-guid promotion when its commit guard is revoked mid-owner', async () => {
+    const { db, raw } = await createTestDb();
+    const tempGuid = 'temp-real-guid-guard-revoked';
+    const realGuid = 'real-guid-after-retry';
+    await seedOutgoing(db, tempGuid, 1000);
+    await markMessageDeleted(db, tempGuid, 900);
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_real_guid_ack_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_real_guid_ack_guard
+      AFTER UPDATE OF guid ON messages
+      WHEN OLD.guid = '${tempGuid}' AND NEW.guid = '${realGuid}'
+      BEGIN
+        SELECT revoke_real_guid_ack_guard();
+      END
+    `);
+
+    await expect(
+      reconcileSendOutcome(db, tempGuid, { guid: realGuid }, 1000, () => current),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(msgRow(raw, tempGuid)?.s).toBe('sending');
+    expect(msgRow(raw, realGuid)).toBeUndefined();
+    expect(aliasTarget(raw, tempGuid)).toBeUndefined();
+    expect(ledgerDate(raw, tempGuid)).toBe(900);
+    expect(ledgerDate(raw, realGuid)).toBeUndefined();
+    expect(queueCount(raw)).toBe(1);
+    expect(mockClearFailedSendNotice).not.toHaveBeenCalled();
+
+    raw.exec('DROP TRIGGER revoke_real_guid_ack_guard');
+    current = true;
+    await expect(
+      reconcileSendOutcome(db, tempGuid, { guid: realGuid }, 1000, () => current),
+    ).resolves.toBeUndefined();
+    expect(msgRow(raw, tempGuid)).toBeUndefined();
+    expect(msgRow(raw, realGuid)?.s).toBe('sent');
+    expect(aliasTarget(raw, tempGuid)).toBe(realGuid);
+    expect(ledgerDate(raw, tempGuid)).toBeUndefined();
+    expect(ledgerDate(raw, realGuid)).toBe(900);
+    expect(queueCount(raw)).toBe(0);
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, realGuid, expect.any(Function));
   });
 
   it('treats an RCS ack echoing our OWN tempGuid as guid-absent (row survives)', async () => {

@@ -541,18 +541,9 @@ export async function reconcileOutgoingSuccess(
   server: ServerMsgFields,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
-  // Backstop: never promote a row to an undefined/empty guid. The AppleScript send path
-  // returns no GUID ack, so callers leave reconciliation to the socket `new-message`
-  // echo (which carries tempGuid); if a caller slips through, no-op rather than corrupt
-  // the optimistic row's guid to NULL.
+  // Preserve the standalone helper's exact historical backstops before it opens an owner. A false
+  // guard must not turn an invalid empty-GUID input from a quiet no-op into a rejection.
   if (!server.guid) return;
-  // Backstop: an RCS (bridge) send acks back the SAME tempGuid we passed as its correlation
-  // token — NOT a real message guid (the real one, `rcs-<id>`, only arrives on the live
-  // `new-message` fanout). Promoting a row to its OWN temp guid is meaningless AND destructive:
-  // the dup-branch below would find the temp row as its own "duplicate" and DELETE it, taking a
-  // just-sent image's on-disk local_path with it (the picture then re-appears from the fanout with
-  // no local file → a download/reload button). Treat it exactly like the guid-absent AppleScript
-  // fallback: flip to 'sent', drop the queue row, and let the fanout reconcile by content.
   if (server.guid === tempGuid) {
     await withDbTransaction(
       db,
@@ -563,58 +554,77 @@ export async function reconcileOutgoingSuccess(
   }
   await withDbTransaction(
     db,
-    async (context) => {
-      const dup = await db.all<{ id: number }>(
-        sql`SELECT id FROM messages WHERE guid = ${server.guid} LIMIT 1`,
-      );
-      if (dup[0]) {
-        // The live echo already inserted the real message (it beat this ack, and content-match
-        // didn't promote our temp row — e.g. an edge where the text differs). Carry any on-disk
-        // local_path from the temp row's attachment onto the real row's attachment BEFORE the
-        // cascade-delete, so a just-sent image isn't lost to a re-download. (One attachment per
-        // outgoing message in this app.)
-        const tempAtt = await db.all<{ localPath: string | null }>(
-          sql`SELECT ta.local_path AS localPath FROM attachments ta
-              JOIN messages tm ON tm.id = ta.message_id
-              WHERE tm.guid = ${tempGuid} AND ta.local_path IS NOT NULL LIMIT 1`,
-        );
-        const lp = tempAtt[0]?.localPath;
-        if (lp) {
-          // db.run (not db.all) — a non-returning UPDATE; db.all throws "use run()" on better-sqlite3.
-          await db.run(
-            sql`UPDATE attachments SET local_path = ${lp} WHERE message_id = ${dup[0].id} AND local_path IS NULL`,
-          );
-        }
-        // Carry a local DELETION across too. This is the ONE path that destroys the temp row instead
-        // of promoting it, and the row may already be gone after a chat purge. Move the durable
-        // ledger key first, then tombstone the real row from that retained timestamp.
-        const dateDeleted = await handoverOutgoingIdentityWithinTransaction(
-          context,
-          tempGuid,
-          server.guid,
-        );
-        if (dateDeleted != null)
-          await markMessageDeletedWithinTransaction(context, server.guid, dateDeleted);
-        await db.delete(messages).where(eq(messages.guid, tempGuid));
-      } else {
-        await handoverOutgoingIdentityWithinTransaction(context, tempGuid, server.guid);
-        await db
-          .update(messages)
-          .set({
-            guid: server.guid,
-            dateCreated: server.dateCreated ?? undefined,
-            dateDelivered: server.dateDelivered ?? null,
-            isFromMe: true,
-            sendState: 'sent',
-            error: 0,
-            errorMessage: null,
-          })
-          .where(eq(messages.guid, tempGuid));
-      }
-      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
-    },
+    (context) => reconcileOutgoingSuccessWithinTransaction(context, tempGuid, server),
     commitGuard,
   );
+}
+
+/**
+ * Transaction-only body for one successful-send identity handoff.
+ *
+ * The shared send-outcome service uses this form so its account lease guards the exact final
+ * promotion/dequeue owner. Standalone repository callers must use {@link reconcileOutgoingSuccess}
+ * so the identity handoff and queue-row removal cannot split across commits.
+ */
+export function reconcileOutgoingSuccessWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+  server: ServerMsgFields,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    // Backstop transaction-context callers too: only a distinct server identity belongs in this
+    // body. The public wrapper and shared send-outcome service route absent/self GUIDs through the
+    // no-GUID settlement instead.
+    if (!server.guid || server.guid === tempGuid) return;
+    const dup = await db.all<{ id: number }>(
+      sql`SELECT id FROM messages WHERE guid = ${server.guid} LIMIT 1`,
+    );
+    if (dup[0]) {
+      // The live echo already inserted the real message (it beat this ack, and content-match
+      // didn't promote our temp row — e.g. an edge where the text differs). Carry any on-disk
+      // local_path from the temp row's attachment onto the real row's attachment BEFORE the
+      // cascade-delete, so a just-sent image isn't lost to a re-download. (One attachment per
+      // outgoing message in this app.)
+      const tempAtt = await db.all<{ localPath: string | null }>(
+        sql`SELECT ta.local_path AS localPath FROM attachments ta
+              JOIN messages tm ON tm.id = ta.message_id
+              WHERE tm.guid = ${tempGuid} AND ta.local_path IS NOT NULL LIMIT 1`,
+      );
+      const lp = tempAtt[0]?.localPath;
+      if (lp) {
+        // db.run (not db.all) — a non-returning UPDATE; db.all throws "use run()" on better-sqlite3.
+        await db.run(
+          sql`UPDATE attachments SET local_path = ${lp} WHERE message_id = ${dup[0].id} AND local_path IS NULL`,
+        );
+      }
+      // Carry a local DELETION across too. This is the ONE path that destroys the temp row instead
+      // of promoting it, and the row may already be gone after a chat purge. Move the durable
+      // ledger key first, then tombstone the real row from that retained timestamp.
+      const dateDeleted = await handoverOutgoingIdentityWithinTransaction(
+        context,
+        tempGuid,
+        server.guid,
+      );
+      if (dateDeleted != null)
+        await markMessageDeletedWithinTransaction(context, server.guid, dateDeleted);
+      await db.delete(messages).where(eq(messages.guid, tempGuid));
+    } else {
+      await handoverOutgoingIdentityWithinTransaction(context, tempGuid, server.guid);
+      await db
+        .update(messages)
+        .set({
+          guid: server.guid,
+          dateCreated: server.dateCreated ?? undefined,
+          dateDelivered: server.dateDelivered ?? null,
+          isFromMe: true,
+          sendState: 'sent',
+          error: 0,
+          errorMessage: null,
+        })
+        .where(eq(messages.guid, tempGuid));
+    }
+    await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+  });
 }
 
 /**
