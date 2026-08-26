@@ -1,10 +1,11 @@
 import {
   createReminder,
-  deleteReminder,
+  deleteReminderWithinTransaction,
   getMessageDateByGuid,
   getReminderByMessageGuid,
   updateReminderTime,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import type { Reminder } from '@core/models';
 import { logger } from '@core/secure';
@@ -268,11 +269,10 @@ export async function cancelReminder(
       assertReminderLease(accountLease);
       await scheduler.cancel(reminder.notificationId);
       assertReminderLease(accountLease);
-      const deleted = await deleteReminder(
+      const deleted = await withDbTransaction(
         db,
-        reminder.id,
+        (context) => deleteReminderWithinTransaction(context, reminder.id, reminder.notificationId),
         () => accountLease.isCurrent(),
-        reminder.notificationId,
       );
       assertReminderLease(accountLease);
       if (!deleted) throw new Error('reminder no longer matches');

@@ -56,6 +56,24 @@ export async function getReminderByMessageGuid(
   return rows[0] ?? null;
 }
 
+export function deleteReminderWithinTransaction(
+  context: DbTransactionContext,
+  id: number,
+  expectedNotificationId?: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const deleted = await db
+      .delete(reminders)
+      .where(
+        expectedNotificationId == null
+          ? eq(reminders.id, id)
+          : and(eq(reminders.id, id), eq(reminders.notificationId, expectedNotificationId)),
+      )
+      .returning({ id: reminders.id });
+    return deleted.length > 0;
+  });
+}
+
 export async function deleteReminder(
   db: AppDatabase,
   id: number,
@@ -64,17 +82,7 @@ export async function deleteReminder(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
-      const deleted = await db
-        .delete(reminders)
-        .where(
-          expectedNotificationId == null
-            ? eq(reminders.id, id)
-            : and(eq(reminders.id, id), eq(reminders.notificationId, expectedNotificationId)),
-        )
-        .returning({ id: reminders.id });
-      return deleted.length > 0;
-    },
+    (context) => deleteReminderWithinTransaction(context, id, expectedNotificationId),
     commitGuard,
   );
 }

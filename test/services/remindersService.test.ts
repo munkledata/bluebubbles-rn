@@ -4,6 +4,7 @@ import {
   deleteReminder,
   deleteReminderByNotificationId,
   deleteReminderByNotificationIdWithinTransaction,
+  deleteReminderWithinTransaction,
   getReminderByMessageGuid,
   listReminders,
   updateReminderTime,
@@ -370,6 +371,64 @@ describe('cancelReminder', () => {
     expect(cancelled).toContain(reminderId(5000));
   });
 
+  it('rolls back the post-native row delete when the account retires, then lets a fresh cancel retry', async () => {
+    const { db, raw } = await createTestDb();
+    const initial = fakeScheduler();
+    const notificationId = reminderId(5000);
+    const id = await scheduleReminder(db, { ...base, scheduledFor: 5000 }, initial.scheduler);
+
+    const cancelled: string[] = [];
+    let nativeCancelRanInsideTransaction = false;
+    const scheduler: ReminderScheduler = {
+      schedule: async () => undefined,
+      cancel: async (candidate) => {
+        nativeCancelRanInsideTransaction = raw.inTransaction;
+        cancelled.push(candidate);
+      },
+    };
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    let nativeWasCancelledFirst = false;
+    raw.function('pause_direct_reminder_cancel_during_delete', () => {
+      triggerRan = true;
+      nativeWasCancelledFirst = cancelled.includes(notificationId);
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_direct_reminder_cancel_during_delete
+      AFTER DELETE ON reminders
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT pause_direct_reminder_cancel_during_delete();
+      END
+    `);
+
+    try {
+      await expect(cancelReminder(db, { id, notificationId }, scheduler)).rejects.toThrow(
+        'account session changed',
+      );
+      if (!drain) throw new Error('direct reminder delete did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(nativeCancelRanInsideTransaction).toBe(false);
+      expect(nativeWasCancelledFirst).toBe(true);
+      expect(await getReminderByMessageGuid(db, 'm1')).toMatchObject({ id, notificationId });
+
+      raw.exec('DROP TRIGGER pause_direct_reminder_cancel_during_delete');
+      resumeRealtimeDeliveries();
+      await cancelReminder(db, { id, notificationId }, scheduler);
+
+      expect(cancelled).toEqual([notificationId, notificationId]);
+      expect(await getReminderByMessageGuid(db, 'm1')).toBeNull();
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_direct_reminder_cancel_during_delete');
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('does not delete the durable row when A’s native cancel completes after B', async () => {
     const { db } = await createTestDb();
     const initial = fakeScheduler();
@@ -592,6 +651,52 @@ describe('reminder repository serialization', () => {
     senderName: null,
     scheduledFor,
     notificationId,
+  });
+
+  it('rolls back the context-only exact reminder delete when its commit guard is revoked', async () => {
+    const { db, raw } = await createTestDb();
+    const notificationId = 'exact-delete';
+    const id = await createReminder(db, reminder('exact-delete', notificationId, 1000));
+
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_exact_reminder_delete_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_exact_reminder_delete_guard
+      AFTER DELETE ON reminders
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT revoke_exact_reminder_delete_guard();
+      END
+    `);
+
+    try {
+      await expect(
+        withDbTransaction(
+          db,
+          (context) => deleteReminderWithinTransaction(context, id, notificationId),
+          () => current,
+        ),
+      ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+      expect(triggerRan).toBe(true);
+      expect(await getReminderByMessageGuid(db, 'exact-delete')).toMatchObject({ id });
+
+      raw.exec('DROP TRIGGER revoke_exact_reminder_delete_guard');
+      current = true;
+      await expect(
+        withDbTransaction(db, (context) =>
+          deleteReminderWithinTransaction(context, id, notificationId),
+        ),
+      ).resolves.toBe(true);
+      expect(await getReminderByMessageGuid(db, 'exact-delete')).toBeNull();
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS revoke_exact_reminder_delete_guard');
+    }
   });
 
   it('rolls back the context-only notification-id delete when its commit guard is revoked', async () => {
