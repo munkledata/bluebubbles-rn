@@ -12235,17 +12235,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
     },
     {
-      "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:5334a286426a",
+      "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:1837e71127eb",
       "path": "src/services/chatActions.ts",
       "line": 507,
       "symbol": "cancelServerScheduledForChat",
       "operation": "mutator-call",
-      "target": "src/db/repositories/scheduled.ts#deleteScheduled",
-      "detectedContext": "coordinated-delegation",
-      "owner": "cancelServerScheduledForChat",
-      "transactionContext": "coordinated-delegation",
+      "target": "src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>",
+      "detectedContext": "withDbTransaction",
+      "owner": "cancelServerScheduledForChat scheduled-row finalization",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/scheduledAccountScope.test.ts; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:716a5525b26b",
+      "path": "src/services/chatActions.ts",
+      "line": 507,
+      "symbol": "cancelServerScheduledForChat",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "cancelServerScheduledForChat scheduled-row finalization",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/scheduledAccountScope.test.ts; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>:mutator-call:0d29d38fd70c",
+      "path": "src/services/chatActions.ts",
+      "line": 509,
+      "symbol": "cancelServerScheduledForChat.<callback:dc7ea326bb>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "cancelServerScheduledForChat scheduled-row finalization",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/scheduledAccountScope.test.ts; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:478f5d06d71e",

@@ -466,6 +466,65 @@ describe('deleteChat', () => {
     expect(await listScheduledByChat(db, 'c2')).toHaveLength(1);
   });
 
+  it('rolls back the post-server scheduled-row delete when the account retires, then lets a fresh delete retry', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'server already cancelled; retain the local retry handle',
+      scheduledFor: 9_000,
+      serverId: 'srv-1',
+    });
+
+    let serverDeleteCompleted = false;
+    let serverDeleteRanInsideTransaction = false;
+    mockDeleteScheduled.mockImplementation(async () => {
+      serverDeleteRanInsideTransaction = raw.inTransaction;
+      serverDeleteCompleted = true;
+      return { removed: true };
+    });
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    let serverWasDeletedFirst = false;
+    raw.function('pause_chat_delete_scheduled_during_delete', () => {
+      triggerRan = true;
+      serverWasDeletedFirst = serverDeleteCompleted;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_chat_delete_scheduled_during_delete
+      AFTER DELETE ON scheduled_messages
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT pause_chat_delete_scheduled_during_delete();
+      END
+    `);
+
+    try {
+      await expect(deleteChat('c1', captureRealtimeDeliveryLease())).resolves.toBeUndefined();
+      if (!drain) throw new Error('scheduled-row delete did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(serverDeleteRanInsideTransaction).toBe(false);
+      expect(serverWasDeletedFirst).toBe(true);
+      expect((await listScheduledByChat(db, 'c1')).map((row) => row.id)).toEqual([id]);
+
+      raw.exec('DROP TRIGGER pause_chat_delete_scheduled_during_delete');
+      resumeRealtimeDeliveries();
+      await deleteChat('c1');
+
+      expect(mockDeleteScheduled.mock.calls.map((call) => call[1])).toEqual(['srv-1', 'srv-1']);
+      expect(await listScheduledByChat(db, 'c1')).toHaveLength(0);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_chat_delete_scheduled_during_delete');
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('KEEPS a server-backed scheduled row the server refused to cancel, and still deletes the chat', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db } = await createTestDb();

@@ -2059,6 +2059,12 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       finding.symbol.startsWith('markUnread.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const cancelServerScheduledTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('cancelServerScheduledForChat') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2083,7 +2089,6 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
       'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:101f68c1cbb2',
-      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:5334a286426a',
       'src/services/chatActions.ts#deleteChat.<callback:f472676191>:mutator-call:7a4702559112',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:3c4dc28c8ea2',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:3c4dc28c8ea2:2',
@@ -2109,6 +2114,14 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>.<callback:add0a7f05b>:mutator-call:d8cbd79b8427',
       'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>:mutator-call:01f6d1879a3c',
       'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>:mutator-call:6019b26b2128',
+    ].sort(),
+  );
+  assert.deepEqual(
+    cancelServerScheduledTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>:mutator-call:0d29d38fd70c',
+      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:1837e71127eb',
+      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:716a5525b26b',
     ].sort(),
   );
 });

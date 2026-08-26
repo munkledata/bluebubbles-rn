@@ -4,7 +4,7 @@ import {
   clearChatTombstoneWithinTransaction,
   deleteChatLocal,
   deleteReminderByNotificationId,
-  deleteScheduled,
+  deleteScheduledWithinTransaction,
   getChatIdByGuid,
   getNewestReceivedGuid,
   linkHandlesToContacts,
@@ -504,7 +504,11 @@ async function cancelServerScheduledForChat(
     try {
       await scheduledApi.deleteScheduled(http, serverId);
       assertChatActionLease(accountLease);
-      await deleteScheduled(db, row.id);
+      await withDbTransaction(
+        db,
+        (context) => deleteScheduledWithinTransaction(context, row.id),
+        () => accountLease.isCurrent(),
+      );
       assertChatActionLease(accountLease);
     } catch (e) {
       if (e === STALE_CHAT_ACTION || !accountLease.isCurrent()) throw STALE_CHAT_ACTION;
