@@ -526,6 +526,68 @@ describe('backfillServerAvatars', () => {
     expect(avatar).toBeNull();
   });
 
+  it('rolls back an admitted avatar commit and drains its downloaded-file cleanup', async () => {
+    const t = await seedNeedy();
+    mockQuery.mockResolvedValue([contactWithPhoto]);
+    let current = true;
+    let pausePromise: Promise<void> | undefined;
+    let pauseSettled = false;
+    let pauseSettledAtTrigger: boolean | undefined;
+    t.raw.function('retire_during_server_avatar_commit', () => {
+      current = false;
+      pausePromise = pauseRealtimeDeliveries().then(() => {
+        pauseSettled = true;
+      });
+      pauseSettledAtTrigger = pauseSettled;
+      return 1;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER retire_during_server_avatar_commit
+      AFTER UPDATE OF avatar ON handles
+      WHEN OLD.avatar IS NULL
+        AND NEW.avatar LIKE 'file:///doc/server-contact-avatars/%'
+      BEGIN
+        SELECT retire_during_server_avatar_commit();
+      END
+    `);
+    const lease = { generation: 417, isCurrent: () => current };
+
+    try {
+      await expect(backfillServerAvatars(t.db, http, lease)).resolves.toBe(0);
+      expect(pauseSettledAtTrigger).toBe(false);
+      expect(pausePromise).toBeDefined();
+      await pausePromise;
+      expect(pauseSettled).toBe(true);
+      expect(
+        (
+          t.raw.prepare("SELECT avatar FROM handles WHERE address='+15551234567'").get() as {
+            avatar: string | null;
+          }
+        ).avatar,
+      ).toBeNull();
+      expect(
+        MockFile.mockDeletes.some((uri) => uri.endsWith(`/${avatarFileName('c1', 'e1')}`)),
+      ).toBe(true);
+      expect(
+        [...MockFile.mockDisk.keys()].some((uri) => uri.endsWith(`/${avatarFileName('c1', 'e1')}`)),
+      ).toBe(false);
+    } finally {
+      await pausePromise;
+      resumeRealtimeDeliveries();
+    }
+  });
+
+  it('starts no server-avatar work for an initially stale account lease', async () => {
+    const t = await seedNeedy();
+    const staleLease = { generation: 418, isCurrent: () => false };
+
+    await expect(backfillServerAvatars(t.db, http, staleLease)).resolves.toBe(0);
+
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(MockDirectory).not.toHaveBeenCalled();
+    expect(MockFile.createDownloadTask).not.toHaveBeenCalled();
+  });
+
   it('disowns an old delayed server-contact response after the next account opens', async () => {
     const t = await seedNeedy();
     let finishQuery!: (contacts: (typeof contactWithPhoto)[]) => void;

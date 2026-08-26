@@ -17,6 +17,7 @@ import {
   searchContactAddresses,
   setChatUnreadLocal,
   setHandleServerAvatar,
+  setHandleServerAvatarWithinTransaction,
   setLastReadMessageGuid,
   upsertChats,
   upsertContacts,
@@ -351,6 +352,45 @@ describe('server-avatar helpers', () => {
         .avatar,
     ).toBe('file:///doc/a.img');
     expect(await getChatIdByGuid(db, 'nope')).toBeNull(); // (unrelated null-guid path)
+  });
+
+  it('rolls back a server-avatar compare-and-swap when its account guard is revoked', async () => {
+    const { db, raw } = await createTestDb();
+    const ids = await upsertHandles(db, [{ address: '+15551112222' }]);
+    const handleId = ids.get(handleMapKey({ address: '+15551112222' }))!;
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_server_avatar_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_server_avatar_guard
+      AFTER UPDATE OF avatar ON handles
+      WHEN OLD.id = ${handleId} AND NEW.avatar = 'file:///doc/rollback.img'
+      BEGIN
+        SELECT revoke_server_avatar_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        db,
+        (context) =>
+          setHandleServerAvatarWithinTransaction(context, handleId, 'file:///doc/rollback.img'),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(
+      (
+        raw.prepare('SELECT avatar FROM handles WHERE id = ?').get(handleId) as {
+          avatar: string | null;
+        }
+      ).avatar,
+    ).toBeNull();
   });
 
   it('queues the server-avatar compare-and-swap behind a rolling-back neighbour', async () => {

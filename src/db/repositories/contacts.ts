@@ -433,7 +433,17 @@ export async function setHandleServerAvatar(
   handleId: number,
   uri: string,
 ): Promise<boolean> {
-  return withDbTransaction(db, async () => {
+  return withDbTransaction(db, (context) =>
+    setHandleServerAvatarWithinTransaction(context, handleId, uri),
+  );
+}
+
+export function setHandleServerAvatarWithinTransaction(
+  context: DbTransactionContext,
+  handleId: number,
+  uri: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
     const rows = await db
       .update(handles)
       .set({ avatar: uri })

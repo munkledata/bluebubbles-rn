@@ -4475,6 +4475,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'setChatMuteWithinTransaction',
     'setChatPinWithinTransaction',
     'setChatUnreadLocalWithinTransaction',
+    'setHandleServerAvatarWithinTransaction',
     'setSyncMarkerWithinTransaction',
     'updateSearchTextBatch',
     'upsertHandlesWithinTransaction',
@@ -4509,6 +4510,18 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:'))),
   );
+  const serverAvatarTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/contacts/serverAvatars.ts' &&
+      finding.symbol.startsWith('backfillServerAvatars') &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
@@ -4523,6 +4536,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
       'src/db/repositories/chats.ts#setChatPinWithinTransaction:drizzle-update:90be45ecc8db',
+      'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
@@ -4537,7 +4551,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48',
       'src/services/chat/groupManagement.ts#renameGroupChat.<callback:c13ecdb63a>:mutator-call:2e89e3325c50',
       'src/services/chat/groupManagement.ts#updateGroupParticipant.<callback:50428f1bde>:mutator-call:4e81064f65bb',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:870e5de2f4>:mutator-call:995e5213ffdd',
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
@@ -4564,6 +4577,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>.<callback:a80ea9b156>:mutator-call:83902feadfb3',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>:mutator-call:1eb11ff329b4',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>:mutator-call:440ae4dc518b',
+    ].sort(),
+  );
+  assert.deepEqual(
+    serverAvatarTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>.<callback:77cdb8c804>:mutator-call:300095ddd30c',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:478f5d06d71e',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:9f5be45386f3',
     ].sort(),
   );
   assert.equal(

@@ -2,7 +2,8 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { contactsApi } from '@core/api';
 import { logger } from '@core/secure';
 import { emailKey, handleKey, phoneKey } from '@utils/contactMatch';
-import { handlesNeedingAvatar, setHandleServerAvatar } from '@db/repositories';
+import { handlesNeedingAvatar, setHandleServerAvatarWithinTransaction } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import type { HttpClient } from '@core/api';
 import {
@@ -112,8 +113,22 @@ export async function backfillServerAvatars(
         return written;
       }
       let avatarWritten = false;
-      const commitStatus = await runTrackedRealtimeWork(lease, async () => {
-        avatarWritten = await setHandleServerAvatar(db, h.id, dest.uri);
+      const commitStatus = await runTrackedRealtimeWork(lease, async (activeLease) => {
+        if (!activeLease.isCurrent()) return;
+        const handleId = h.id;
+        const avatarUri = dest.uri;
+        try {
+          avatarWritten = await withDbTransaction(
+            db,
+            (context) => setHandleServerAvatarWithinTransaction(context, handleId, avatarUri),
+            () => activeLease.isCurrent(),
+          );
+        } catch (error) {
+          // Keep stale-file cleanup inside the tracked lifetime so Disconnect cannot finish
+          // between rolling back the old account's pointer and discarding this run's download.
+          if (!activeLease.isCurrent() && downloadedNow) discardFile(dest);
+          throw error;
+        }
       });
       if (commitStatus === 'paused' || !lease.isCurrent()) {
         if (downloadedNow) discardFile(dest);

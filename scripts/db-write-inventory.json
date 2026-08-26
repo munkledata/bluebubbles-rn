@@ -6047,7 +6047,20 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:025c1f830c62",
+      "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:5488c0f447f3",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 436,
+      "symbol": "setHandleServerAvatar",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>",
+      "detectedContext": "withDbTransaction",
+      "owner": "setHandleServerAvatar",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:d300dc33591f",
       "path": "src/db/repositories/contacts.ts",
       "line": 436,
       "symbol": "setHandleServerAvatar",
@@ -6057,33 +6070,33 @@
       "owner": "setHandleServerAvatar",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:720123792c05",
+      "id": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>:mutator-call:07b1b7ff630f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 436,
-      "symbol": "setHandleServerAvatar",
+      "line": 437,
+      "symbol": "setHandleServerAvatar.<callback:d9c2c56773>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:4456325193>",
+      "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "setHandleServerAvatar",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:drizzle-update:8a5205e738d5",
+      "id": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c",
       "path": "src/db/repositories/contacts.ts",
-      "line": 437,
-      "symbol": "setHandleServerAvatar",
+      "line": 447,
+      "symbol": "setHandleServerAvatarWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",
       "detectedContext": "withDbTransaction",
-      "owner": "setHandleServerAvatar",
+      "owner": "setHandleServerAvatarWithinTransaction",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts"
     },
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReportsWithinTransaction:drizzle-insert:d00f2ee94ed5",
@@ -12040,17 +12053,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
     },
     {
-      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:870e5de2f4>:mutator-call:995e5213ffdd",
+      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:478f5d06d71e",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 116,
-      "symbol": "backfillServerAvatars.<callback:870e5de2f4>",
+      "line": 121,
+      "symbol": "backfillServerAvatars.<callback:ce605bb71a>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/contacts.ts#setHandleServerAvatar",
-      "detectedContext": "coordinated-delegation",
-      "owner": "backfillServerAvatars.<callback:870e5de2f4>",
-      "transactionContext": "coordinated-delegation",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "backfillServerAvatars final avatar commit",
+      "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:9f5be45386f3",
+      "path": "src/services/contacts/serverAvatars.ts",
+      "line": 121,
+      "symbol": "backfillServerAvatars.<callback:ce605bb71a>",
+      "operation": "mutator-call",
+      "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>.<callback:77cdb8c804>",
+      "detectedContext": "withDbTransaction",
+      "owner": "backfillServerAvatars final avatar commit",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>.<callback:77cdb8c804>:mutator-call:300095ddd30c",
+      "path": "src/services/contacts/serverAvatars.ts",
+      "line": 123,
+      "symbol": "backfillServerAvatars.<callback:ce605bb71a>.<callback:77cdb8c804>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "backfillServerAvatars final avatar commit",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/services/databaseControl.ts#startDatabaseOpen:mutator-call:d37edc282604",
