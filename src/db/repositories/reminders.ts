@@ -131,6 +131,28 @@ export async function deleteReminderByNotificationId(
  * can't show or cancel it. Disconnect broadly clears native notifications as a final backstop;
  * this result lets the live caller cancel the half that succeeded immediately.
  */
+export function updateReminderTimeWithinTransaction(
+  context: DbTransactionContext,
+  id: number,
+  scheduledFor: number,
+  notificationId: string,
+  expectedNotificationId?: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db
+      .update(reminders)
+      .set({ scheduledFor, notificationId })
+      .where(
+        expectedNotificationId == null
+          ? eq(reminders.id, id)
+          : and(eq(reminders.id, id), eq(reminders.notificationId, expectedNotificationId)),
+      )
+      .returning({ id: reminders.id });
+    return rows.length > 0;
+  });
+}
+
+/** Standalone reminder-move owner; composing services use the transaction-only body. */
 export async function updateReminderTime(
   db: AppDatabase,
   id: number,
@@ -141,18 +163,14 @@ export async function updateReminderTime(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
-      const rows = await db
-        .update(reminders)
-        .set({ scheduledFor, notificationId })
-        .where(
-          expectedNotificationId == null
-            ? eq(reminders.id, id)
-            : and(eq(reminders.id, id), eq(reminders.notificationId, expectedNotificationId)),
-        )
-        .returning({ id: reminders.id });
-      return rows.length > 0;
-    },
+    (context) =>
+      updateReminderTimeWithinTransaction(
+        context,
+        id,
+        scheduledFor,
+        notificationId,
+        expectedNotificationId,
+      ),
     commitGuard,
   );
 }

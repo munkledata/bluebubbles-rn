@@ -703,6 +703,115 @@ describe('rescheduleReminder', () => {
   });
 });
 
+describe('guarded reminder move ownership', () => {
+  it.each(['schedule', 'reschedule'] as const)(
+    'rolls back a %s move retired during UPDATE, cleans its alarm, and lets B retry',
+    async (mode) => {
+      const { db, raw } = await createTestDb();
+      const initial = fakeScheduler();
+      const id = await scheduleReminder(
+        db,
+        { ...base, scheduledFor: 5000, now: 1 },
+        initial.scheduler,
+      );
+      const snapshot = (await getReminderByMessageGuid(db, 'm1'))!;
+      const attemptedTime = mode === 'schedule' ? 9000 : 12000;
+      const retryTime = attemptedTime + 1000;
+      const triggerName = `pause_${mode}_reminder_move`;
+      let drain: Promise<void> | undefined;
+      let triggerRan = false;
+      raw.function(triggerName, () => {
+        triggerRan = true;
+        drain = pauseRealtimeDeliveries();
+        return 0;
+      });
+      raw.exec(`CREATE TRIGGER ${triggerName}
+        AFTER UPDATE OF scheduled_for, notification_id ON reminders
+        WHEN OLD.id = ${id} AND NEW.scheduled_for = ${attemptedTime}
+        BEGIN SELECT ${triggerName}(); END`);
+
+      const attempted = fakeScheduler();
+      const attemptedNativeStates: Array<{ operation: 'schedule' | 'cancel'; open: boolean }> = [];
+      const attemptedScheduler: ReminderScheduler = {
+        schedule: async (args) => {
+          attemptedNativeStates.push({ operation: 'schedule', open: raw.inTransaction });
+          await attempted.scheduler.schedule(args);
+        },
+        cancel: async (notificationId) => {
+          attemptedNativeStates.push({ operation: 'cancel', open: raw.inTransaction });
+          await attempted.scheduler.cancel(notificationId);
+        },
+      };
+
+      try {
+        const operation =
+          mode === 'schedule'
+            ? scheduleReminder(
+                db,
+                { ...base, scheduledFor: attemptedTime, now: 2 },
+                attemptedScheduler,
+              )
+            : rescheduleReminder(db, snapshot, attemptedTime, attemptedScheduler);
+        await expect(operation).rejects.toThrow('account session changed');
+        if (!drain) throw new Error('reminder update did not retire the account lease');
+        await drain;
+
+        expect(triggerRan).toBe(true);
+        expect(raw.inTransaction).toBe(false);
+        expect(attemptedNativeStates.length).toBeGreaterThan(1);
+        expect(attemptedNativeStates.every(({ open }) => !open)).toBe(true);
+        expect(attempted.scheduled).toEqual([reminderId(attemptedTime)]);
+        expect(attempted.cancelled.length).toBeGreaterThan(0);
+        expect(new Set(attempted.cancelled)).toEqual(new Set([reminderId(attemptedTime)]));
+        expect(await getReminderByMessageGuid(db, 'm1')).toMatchObject({
+          id,
+          scheduledFor: 5000,
+          notificationId: reminderId(5000),
+        });
+
+        raw.exec(`DROP TRIGGER ${triggerName}`);
+        resumeRealtimeDeliveries();
+        const fresh = fakeScheduler();
+        const freshNativeStates: boolean[] = [];
+        const freshScheduler: ReminderScheduler = {
+          schedule: async (args) => {
+            freshNativeStates.push(raw.inTransaction);
+            await fresh.scheduler.schedule(args);
+          },
+          cancel: async (notificationId) => {
+            freshNativeStates.push(raw.inTransaction);
+            await fresh.scheduler.cancel(notificationId);
+          },
+        };
+        const result =
+          mode === 'schedule'
+            ? await scheduleReminder(
+                db,
+                { ...base, scheduledFor: retryTime, now: 3 },
+                freshScheduler,
+              )
+            : await rescheduleReminder(db, snapshot, retryTime, freshScheduler);
+
+        expect(result).toBe(mode === 'schedule' ? id : reminderId(retryTime));
+        expect(freshNativeStates.length).toBeGreaterThan(1);
+        expect(freshNativeStates.every((open) => !open)).toBe(true);
+        expect(fresh.scheduled).toEqual([reminderId(retryTime)]);
+        expect(fresh.cancelled).toEqual([reminderId(5000)]);
+        expect(await getReminderByMessageGuid(db, 'm1')).toMatchObject({
+          id,
+          scheduledFor: retryTime,
+          notificationId: reminderId(retryTime),
+        });
+      } finally {
+        raw.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+        if (drain) await drain;
+        resumeRealtimeDeliveries();
+        raw.close();
+      }
+    },
+  );
+});
+
 describe('updateReminderTime (compare-and-set)', () => {
   it('reports true when it moved a row and false when the id no longer exists', async () => {
     const { db } = await createTestDb();

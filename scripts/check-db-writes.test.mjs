@@ -1647,12 +1647,21 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
       finding.path === 'src/services/notifications/remindersService.ts' &&
       finding.symbol.startsWith('scheduleReminder.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/reminders.ts#createReminderWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/services/notifications/remindersService.ts#scheduleReminder.<callback:',
-          ))),
+      finding.snippet.includes('createReminderWithinTransaction'),
+  );
+  const scheduleReminderMoveTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/notifications/remindersService.ts' &&
+      finding.symbol.startsWith('scheduleReminder.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      finding.snippet.includes('updateReminderTimeWithinTransaction'),
+  );
+  const rescheduleReminderMoveTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/notifications/remindersService.ts' &&
+      finding.symbol.startsWith('rescheduleReminder.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      finding.snippet.includes('updateReminderTimeWithinTransaction'),
   );
 
   assert.deepEqual(
@@ -1679,16 +1688,30 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
       'src/services/notifications/notifeeService.ts#sanitizeTriggerNotifications:mutator-call:fd918617393f',
       'src/services/notifications/notifeeService.ts#sanitizedFaceTimeNotification:mutator-call:89a00ac79465',
       'src/services/notifications/notifeeService.ts#sanitizedNotification:mutator-call:0c7b1862fc9e',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:553bb233c3>:mutator-call:b7af4e5a91ce',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:2909308093>:mutator-call:aba357b3bf14',
     ].sort(),
   );
   assert.deepEqual(
     createReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:2909308093>.<callback:8aa1abdd3a>:mutator-call:c214533ab484',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:2909308093>:mutator-call:aa387f86f21c',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:2909308093>:mutator-call:c41c11e48ed4',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>.<callback:8aa1abdd3a>:mutator-call:74ab19e0d1ee',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:331f4ed00ce9',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:516c0ff5660a',
+    ].sort(),
+  );
+  assert.deepEqual(
+    scheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>.<callback:63ddd06ef2>:mutator-call:bcd082c58a78',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:2192dc48d599',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:e9106648ae6e',
+    ].sort(),
+  );
+  assert.deepEqual(
+    rescheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:d65374144e>.<callback:e57c656026>:mutator-call:fc889821acbc',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:d65374144e>:mutator-call:40f7376d4664',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:d65374144e>:mutator-call:50c902933fef',
     ].sort(),
   );
   assert.deepEqual(
@@ -4839,6 +4862,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'setSyncedBackgroundLuminanceIfCurrentWithinTransaction',
     'setSyncedBackgroundUriIfCurrentWithinTransaction',
     'setSyncMarkerWithinTransaction',
+    'updateReminderTimeWithinTransaction',
     'updateSearchTextBatch',
     'upsertHandlesWithinTransaction',
   ]);
@@ -4894,6 +4918,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
         finding.target === 'src/db/repositories/reminders.ts#createReminderWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('src/db/repositories/reminders.ts#createReminder.<callback:'))),
+  );
+  const updateReminderTimeTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/reminders.ts' &&
+      finding.symbol.startsWith('updateReminderTime') &&
+      !finding.symbol.startsWith('updateReminderTimeWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      finding.snippet.includes('updateReminderTimeWithinTransaction'),
   );
   const sendSuccessOwnerTransactions = findings.filter(
     (finding) =>
@@ -5089,6 +5121,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/reminders.ts#createReminderWithinTransaction:drizzle-insert:3f7e289128b3',
       'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf',
+      'src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction:drizzle-update:69b01aa5bda9',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
@@ -5139,7 +5172,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 66);
+  assert.equal(selected.length, 67);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -5178,6 +5211,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/reminders.ts#createReminder.<callback:93ad5d4304>:mutator-call:a479b4f12b8b',
       'src/db/repositories/reminders.ts#createReminder:mutator-call:237141e4ef46',
       'src/db/repositories/reminders.ts#createReminder:mutator-call:9cec12455bc4',
+    ].sort(),
+  );
+  assert.deepEqual(
+    updateReminderTimeTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/reminders.ts#updateReminderTime.<callback:01f3a3c07f>:mutator-call:861aece00d05',
+      'src/db/repositories/reminders.ts#updateReminderTime:mutator-call:1516cdcafef5',
+      'src/db/repositories/reminders.ts#updateReminderTime:mutator-call:920049d903c2',
     ].sort(),
   );
   assert.deepEqual(

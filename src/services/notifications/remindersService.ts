@@ -3,7 +3,7 @@ import {
   deleteReminderWithinTransaction,
   getMessageDateByGuid,
   getReminderByMessageGuid,
-  updateReminderTime,
+  updateReminderTimeWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -212,13 +212,17 @@ export async function scheduleReminder(
         // (The moved row keeps its original preview text; the notification body the user actually sees
         // was just re-baked from the fresh preview above.)
         if (existing) {
-          const moved = await updateReminderTime(
+          const moved = await withDbTransaction(
             db,
-            existing.id,
-            args.scheduledFor,
-            notificationId,
+            (context) =>
+              updateReminderTimeWithinTransaction(
+                context,
+                existing.id,
+                args.scheduledFor,
+                notificationId,
+                existing.notificationId,
+              ),
             () => accountLease.isCurrent(),
-            existing.notificationId,
           );
           if (!moved) throw new Error('reminder no longer matches');
           id = existing.id;
@@ -329,13 +333,17 @@ export async function rescheduleReminder(
 
       let moved: boolean;
       try {
-        moved = await updateReminderTime(
+        moved = await withDbTransaction(
           db,
-          reminder.id,
-          scheduledFor,
-          notificationId,
+          (context) =>
+            updateReminderTimeWithinTransaction(
+              context,
+              reminder.id,
+              scheduledFor,
+              notificationId,
+              reminder.notificationId,
+            ),
           () => accountLease.isCurrent(),
-          reminder.notificationId,
         );
         assertReminderLease(accountLease);
       } catch (e) {
