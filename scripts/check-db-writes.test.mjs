@@ -1909,7 +1909,6 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessages:mutator-call:aed16e5f8245',
-      'src/services/sync/engine.ts#syncDeletedMessages:mutator-call:1d1eaf0cc48f',
       'src/services/syncControl.ts#ensureChatSynced.<callback:910670867e>:mutator-call:c1b6e98cef19',
       'src/services/syncControl.ts#runSync:mutator-call:0f68cade8370',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',

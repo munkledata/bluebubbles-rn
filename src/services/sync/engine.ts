@@ -9,7 +9,7 @@ import {
   kvGet,
   kvSetWithinTransaction,
   linkHandlesToContacts,
-  markMessageDeleted,
+  markMessageDeletedWithinTransaction,
   maxMessageMarker,
   reconcileOutgoingAttachmentByContent,
   setSyncMarkerWithinTransaction,
@@ -569,8 +569,8 @@ export interface DeletionSyncOptions {
  * R1 deletion catch-up sync: apply `message-deleted` events the app MISSED while dead or
  * app-locked (the locked FCM path never touches the DB, so a live-only deletion is lost and the
  * deleted message lingers forever). Pages `GET /message/deleted?after=<watermark>` and re-applies
- * each row through the SAME `markMessageDeleted` tombstone the live event uses (idempotent — rows
- * sharing the watermark's exact ms may legitimately re-emit).
+ * each row through the SAME transaction-only tombstone helper the live event uses (idempotent —
+ * rows sharing the watermark's exact ms may legitimately re-emit).
  *
  * Watermark (`sync.deletionsSyncedAt`, kv): the max `dateDeleted` already applied. FIRST RUN seeds
  * it to now() WITHOUT fetching to avoid replaying unbounded deletion history for rows this install
@@ -639,7 +639,13 @@ export async function syncDeletedMessages(
       if (!shouldContinue()) return applied;
       // Unknown / hard-gone rows still leave a durable ledger marker so later backfill is born
       // hidden. Keep that marker, the message tombstone, and chat sort-key recompute together.
-      await markMessageDeleted(db, row.guid, row.dateDeleted ?? now(), commitGuard);
+      const dateDeleted = row.dateDeleted ?? now();
+      await withDbTransaction(
+        db,
+        (transactionContext) =>
+          markMessageDeletedWithinTransaction(transactionContext, row.guid, dateDeleted),
+        commitGuard,
+      );
       applied++;
     }
 

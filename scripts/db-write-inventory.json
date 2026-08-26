@@ -16096,22 +16096,48 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts"
     },
     {
-      "id": "src/services/sync/engine.ts#syncDeletedMessages:mutator-call:1d1eaf0cc48f",
+      "id": "src/services/sync/engine.ts#syncDeletedMessages:mutator-call:6c9055460ab9",
       "path": "src/services/sync/engine.ts",
-      "line": 642,
+      "line": 643,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
-      "target": "src/db/repositories/messages.ts#markMessageDeleted",
-      "detectedContext": "coordinated-delegation",
+      "target": "src/services/sync/engine.ts#syncDeletedMessages.<callback:45ede47ded>",
+      "detectedContext": "withDbTransaction",
       "owner": "syncDeletedMessages",
-      "transactionContext": "coordinated-delegation",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/syncControlTracking.test.ts; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/services/syncedBackgroundAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/sync/engine.ts#syncDeletedMessages:mutator-call:6f05f71cd560",
+      "path": "src/services/sync/engine.ts",
+      "line": 643,
+      "symbol": "syncDeletedMessages",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "syncDeletedMessages",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/sync/engine.ts#syncDeletedMessages.<callback:45ede47ded>:mutator-call:c27ef2b7bdd9",
+      "path": "src/services/sync/engine.ts",
+      "line": 646,
+      "symbol": "syncDeletedMessages.<callback:45ede47ded>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "syncDeletedMessages",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/services/sync/engine.ts#syncDeletedMessages:mutator-call:06f177582253",
       "path": "src/services/sync/engine.ts",
-      "line": 651,
+      "line": 657,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16124,7 +16150,7 @@
     {
       "id": "src/services/sync/engine.ts#syncDeletedMessages:mutator-call:91e6ba679762",
       "path": "src/services/sync/engine.ts",
-      "line": 651,
+      "line": 657,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncDeletedMessages.<callback:cea645a778>",
@@ -16137,7 +16163,7 @@
     {
       "id": "src/services/sync/engine.ts#syncDeletedMessages.<callback:cea645a778>:mutator-call:a9d66205d6b9",
       "path": "src/services/sync/engine.ts",
-      "line": 654,
+      "line": 660,
       "symbol": "syncDeletedMessages.<callback:cea645a778>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -16150,7 +16176,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync:mutator-call:5595e2da2ebf",
       "path": "src/services/sync/engine.ts",
-      "line": 781,
+      "line": 787,
       "symbol": "incrementalSync",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync.<callback:4b23ff0d5c>",
@@ -16163,7 +16189,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync:mutator-call:81a1872832da",
       "path": "src/services/sync/engine.ts",
-      "line": 781,
+      "line": 787,
       "symbol": "incrementalSync",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16176,7 +16202,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync.<callback:4b23ff0d5c>:mutator-call:59dff705d51e",
       "path": "src/services/sync/engine.ts",
-      "line": 783,
+      "line": 789,
       "symbol": "incrementalSync.<callback:4b23ff0d5c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/sync.ts#setSyncMarkerWithinTransaction",
@@ -16189,7 +16215,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync:mutator-call:0cb9b9159fc5",
       "path": "src/services/sync/engine.ts",
-      "line": 795,
+      "line": 801,
       "symbol": "incrementalSync",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16202,7 +16228,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync:mutator-call:f5aa06426dbb",
       "path": "src/services/sync/engine.ts",
-      "line": 795,
+      "line": 801,
       "symbol": "incrementalSync",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync.<callback:ded7803c9d>",
@@ -16215,7 +16241,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync.<callback:ded7803c9d>:mutator-call:d2222350a2c2",
       "path": "src/services/sync/engine.ts",
-      "line": 798,
+      "line": 804,
       "symbol": "incrementalSync.<callback:ded7803c9d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandlesWithinTransaction",
@@ -16228,7 +16254,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync.<callback:ded7803c9d>:mutator-call:9f27ddc2eaef",
       "path": "src/services/sync/engine.ts",
-      "line": 802,
+      "line": 808,
       "symbol": "incrementalSync.<callback:ded7803c9d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChatsWithinTransaction",
@@ -16241,7 +16267,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync.<callback:ded7803c9d>:mutator-call:d64eb7eea50b",
       "path": "src/services/sync/engine.ts",
-      "line": 807,
+      "line": 813,
       "symbol": "incrementalSync.<callback:ded7803c9d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessagesWithinTransaction",
@@ -16254,7 +16280,7 @@
     {
       "id": "src/services/sync/engine.ts#incrementalSync.<callback:ded7803c9d>:mutator-call:de98cca0c490",
       "path": "src/services/sync/engine.ts",
-      "line": 831,
+      "line": 837,
       "symbol": "incrementalSync.<callback:ded7803c9d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/sync.ts#setSyncMarkerWithinTransaction",
