@@ -2,7 +2,8 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { logSinks } from '@core/secure';
 import { getDatabase } from '@db/database';
-import { clearErrorReports } from '@db/repositories';
+import { clearErrorReportsWithinTransaction } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { hasErrorReportingConsent, useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -53,7 +54,11 @@ function revokeErrorReporting(): Promise<void> {
       if (previousPurge) await previousPurge;
       await reportsIdle;
       if (!db || !accountLease.isCurrent()) return;
-      await clearErrorReports(db, () => accountLease.isCurrent());
+      await withDbTransaction(
+        db,
+        (context) => clearErrorReportsWithinTransaction(context),
+        () => accountLease.isCurrent(),
+      );
       if (accountLease.isCurrent() && purgeRequiredGeneration === generation) {
         purgeRequiredGeneration = null;
       }

@@ -1491,7 +1491,7 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
     (finding) => finding.detectedContext === 'error-report-lifecycle-delegation',
   );
 
-  assert.equal(local.length, 21);
+  assert.equal(local.length, 20);
   assert.deepEqual(
     local.map((finding) => finding.id).sort(),
     [
@@ -1514,8 +1514,21 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
       'src/services/errors/index.ts#flushErrorReports:mutator-call:4c82a62c3bba',
       'src/services/errors/index.ts#flushErrorReports:mutator-call:a82e15453f42',
       'src/services/errors/index.ts#initErrorReporting:mutator-call:e859266a73cf',
-      'src/services/errors/index.ts#revokeErrorReporting.<callback:5b0dff7bab>:mutator-call:d38995bd513f',
-      'src/services/errors/index.ts#revokeErrorReporting:mutator-call:d5d69bbe1227',
+      'src/services/errors/index.ts#revokeErrorReporting:mutator-call:df9a116f1f15',
+    ].sort(),
+  );
+  const revokeTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/errors/index.ts' &&
+      finding.symbol.startsWith('revokeErrorReporting.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
+  assert.deepEqual(
+    revokeTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:00b329553e04',
+      'src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:3cd60f103698',
+      'src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>:mutator-call:0af467bde68f',
     ].sort(),
   );
   assert.equal(outer.length, 7);
