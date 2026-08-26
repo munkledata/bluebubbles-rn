@@ -4,10 +4,10 @@ import { logger } from '@core/secure';
 import { ClientErrorCode, sendErrorCode } from '@utils';
 import {
   markOutgoingSentNoGuid,
-  reconcileOutgoingError,
+  reconcileOutgoingErrorWithinTransaction,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
-import type { DbCommitGuard } from '@db/transaction';
+import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { clearFailedSendNotice, notifyFailedSend } from './sendFailureNotice';
 
@@ -52,7 +52,7 @@ export async function reconcileSendOutcome(
 /**
  * Flip a failed optimistic send to the error bubble. A development-only warning records the error
  * code/status/message for local diagnosis; release builds drop that free-form line before every
- * sink. `now` seeds the retry backoff (defaults to Date.now() in the repo).
+ * sink. `now` seeds the retry backoff (defaults to Date.now() before writer-queue admission).
  */
 export async function handleSendFailure(
   db: AppDatabase,
@@ -80,13 +80,13 @@ export async function handleSendFailure(
       err instanceof Error ? err.message : String(err)
     }`,
   );
-  const reconciled = await reconcileOutgoingError(
+  const failedAt = now === undefined ? Date.now() : now;
+  const serverDetail = err instanceof ApiError ? err.serverDetail : undefined;
+  const reconciled = await withDbTransaction(
     db,
-    tempGuid,
-    code,
-    now,
+    (context) =>
+      reconcileOutgoingErrorWithinTransaction(context, tempGuid, code, failedAt, serverDetail),
     commitGuard,
-    err instanceof ApiError ? err.serverDetail : undefined,
   );
   if (reconciled) await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
 }

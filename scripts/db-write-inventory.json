@@ -15615,17 +15615,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
     },
     {
-      "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:88ba7584a85f",
+      "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:95eb83c8fd28",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 83,
+      "line": 85,
       "symbol": "handleSendFailure",
       "operation": "mutator-call",
-      "target": "src/db/repositories/outgoing.ts#reconcileOutgoingError",
-      "detectedContext": "coordinated-delegation",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
       "owner": "handleSendFailure",
-      "transactionContext": "coordinated-delegation",
+      "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts"
+    },
+    {
+      "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:adfe95b7e2a5",
+      "path": "src/services/send/sendOutcome.ts",
+      "line": 85,
+      "symbol": "handleSendFailure",
+      "operation": "mutator-call",
+      "target": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>",
+      "detectedContext": "withDbTransaction",
+      "owner": "handleSendFailure",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts"
+    },
+    {
+      "id": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>:mutator-call:59fd0e1ac2a7",
+      "path": "src/services/send/sendOutcome.ts",
+      "line": 88,
+      "symbol": "handleSendFailure.<callback:8a7e90a9b5>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "handleSendFailure",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts"
     },
     {
       "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:2bab059bd512",

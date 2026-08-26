@@ -1737,6 +1737,12 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const failureTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendOutcome.ts' &&
+      finding.symbol.startsWith('handleSendFailure') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1757,7 +1763,6 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:5fc264dfd1d6',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:9aa99d652d1b',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:a9d507013959',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:88ba7584a85f',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:7d4ffb0ff6ea',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c4f357471236',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:2bab059bd512',
@@ -1767,6 +1772,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:1c5a38f08f20',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8d029d29cd2e',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:dc87ff322759',
+    ].sort(),
+  );
+  assert.deepEqual(
+    failureTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>:mutator-call:59fd0e1ac2a7',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:95eb83c8fd28',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:adfe95b7e2a5',
     ].sort(),
   );
 });
