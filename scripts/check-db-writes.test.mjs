@@ -1487,21 +1487,39 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
     (finding) =>
       localPaths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const repositoryOwnerSymbols = new Set([
+    'claimErrorReports',
+    'claimErrorReportsWithinTransaction',
+    'deleteErrorReports',
+    'deleteErrorReportsWithinTransaction',
+    'listRetryableErrorReports',
+    'listRetryableErrorReportsWithinTransaction',
+    'markErrorReportsFailed',
+    'markErrorReportsFailedWithinTransaction',
+  ]);
+  const repositoryTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/errorReports.ts' &&
+      repositoryOwnerSymbols.has(finding.symbol.split('.<callback:')[0]) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
+  const queueTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/errors/errorReportQueueService.ts' &&
+      finding.symbol.startsWith('runQueueBody') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
   const outer = findings.filter(
     (finding) => finding.detectedContext === 'error-report-lifecycle-delegation',
   );
 
-  assert.equal(local.length, 20);
+  assert.equal(local.length, 16);
   assert.deepEqual(
     local.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
       'src/services/errors/errorReportQueueService.ts#runErrorReportQueue.<callback:1146394e6d>:mutator-call:94a3c2f0ecbf',
       'src/services/errors/errorReportQueueService.ts#runErrorReportQueue:mutator-call:6ab4a7e8d484',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:91b592da90>:mutator-call:b93334f0174a',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:9dd9c4efba>:mutator-call:d6ecd449108b',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:b94db237dd>:mutator-call:017639acfdf8',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:f50377d16a5c',
       'src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb:mutator-call:e3fd2f80780c',
       'src/services/errors/errorReportSink.ts#ErrorReportSink.scheduleDrain.<callback:1067ca9296>:mutator-call:c0f2f41e3a9e',
       'src/services/errors/errorReportSink.ts#captureError:mutator-call:a8184e42b9cb',
@@ -1517,6 +1535,47 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
       'src/services/errors/index.ts#revokeErrorReporting:mutator-call:df9a116f1f15',
     ].sort(),
   );
+  assert.deepEqual(
+    repositoryTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/errorReports.ts#claimErrorReports.<callback:c9aa239408>:mutator-call:80199932a94d',
+      'src/db/repositories/errorReports.ts#claimErrorReports:mutator-call:25becb5bc7ba',
+      'src/db/repositories/errorReports.ts#claimErrorReports:mutator-call:c48fe530c9bc',
+      'src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction:sql-update:a6cadd1370ec',
+      'src/db/repositories/errorReports.ts#deleteErrorReports.<callback:5ff1fe5664>:mutator-call:95b001f7a2ae',
+      'src/db/repositories/errorReports.ts#deleteErrorReports:mutator-call:317f3471e7da',
+      'src/db/repositories/errorReports.ts#deleteErrorReports:mutator-call:f0097ddea70a',
+      'src/db/repositories/errorReports.ts#deleteErrorReportsWithinTransaction:sql-delete:bb847c13001b',
+      'src/db/repositories/errorReports.ts#listRetryableErrorReports.<callback:34ae7037fb>:mutator-call:fa1851fb1552',
+      'src/db/repositories/errorReports.ts#listRetryableErrorReports:mutator-call:231b4b71f6c6',
+      'src/db/repositories/errorReports.ts#listRetryableErrorReports:mutator-call:2538e5c2e5d3',
+      'src/db/repositories/errorReports.ts#listRetryableErrorReportsWithinTransaction.<callback:6d0d0f76a3>:mutator-call:38305fef3c77',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailed.<callback:de20fdbd27>:mutator-call:1f1e7f013451',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailed:mutator-call:8312ba5644a2',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailed:mutator-call:ba127dd07f32',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-delete:b6a752ef4ffa',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-update:fafc5a007c8e',
+    ].sort(),
+  );
+  assert.equal(repositoryTransactions.length, 17);
+  assert.deepEqual(
+    queueTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:0a89819f93>.<callback:c04c1aca31>:mutator-call:4c8e5e7f7a7a',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:0a89819f93>:mutator-call:d14964c68db3',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:0a89819f93>:mutator-call:e8da34c8d417',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:1c51f3e183>.<callback:46d8afbc49>:mutator-call:d889281ba3b1',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:1c51f3e183>:mutator-call:06c0f41534b8',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:1c51f3e183>:mutator-call:c1ba7ef65fda',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:5d7016c73c>.<callback:e0e11b4c8c>:mutator-call:fa0394c809cc',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:5d7016c73c>:mutator-call:819af640a00c',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:5d7016c73c>:mutator-call:a360ea2bc00f',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:3beb70afb0>:mutator-call:42846afff5c3',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:4d7d77b3c92a',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:9aa37e5faf01',
+    ].sort(),
+  );
+  assert.equal(queueTransactions.length, 12);
   const revokeTransaction = findings.filter(
     (finding) =>
       finding.path === 'src/services/errors/index.ts' &&
@@ -4831,7 +4890,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   const leafSymbols = new Set([
     'applyLocalEditWithinTransaction',
     'applyLocalUnsendWithinTransaction',
+    'claimErrorReportsWithinTransaction',
     'createReminderWithinTransaction',
+    'deleteErrorReportsWithinTransaction',
     'deleteReminderByNotificationIdWithinTransaction',
     'deleteReminderWithinTransaction',
     'deleteMessageLocalWithinTransaction',
@@ -4847,6 +4908,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'insertOutgoingAttachmentWithinTransaction',
     'insertOutgoingContactWithinTransaction',
     'insertOutgoingReactionWithinTransaction',
+    'listRetryableErrorReportsWithinTransaction',
+    'markErrorReportsFailedWithinTransaction',
     'retireOutgoingWithinTransaction',
     'revertLocalEditWithinTransaction',
     'revertLocalUnsendWithinTransaction',
@@ -5118,6 +5181,11 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setSyncedBackgroundLuminanceIfCurrentWithinTransaction:drizzle-update:076320f3beec',
       'src/db/repositories/chats.ts#setSyncedBackgroundUriIfCurrentWithinTransaction:drizzle-update:653f97744cea',
       'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
+      'src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction:sql-update:a6cadd1370ec',
+      'src/db/repositories/errorReports.ts#deleteErrorReportsWithinTransaction:sql-delete:bb847c13001b',
+      'src/db/repositories/errorReports.ts#listRetryableErrorReportsWithinTransaction.<callback:6d0d0f76a3>:mutator-call:38305fef3c77',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-delete:b6a752ef4ffa',
+      'src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-update:fafc5a007c8e',
       'src/db/repositories/reminders.ts#createReminderWithinTransaction:drizzle-insert:3f7e289128b3',
       'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf',
@@ -5172,7 +5240,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 67);
+  assert.equal(selected.length, 72);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

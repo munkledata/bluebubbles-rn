@@ -234,6 +234,26 @@ export interface RetryableErrorReport {
   attempts: number;
 }
 
+/** Transaction-only cleanup plus selection of reports eligible for one upload attempt. */
+export function listRetryableErrorReportsWithinTransaction(
+  context: DbTransactionContext,
+  clock: ErrorReportClock = Date.now,
+  limit = ERROR_REPORT_UPLOAD_BATCH_SIZE,
+): Promise<RetryableErrorReport[]> {
+  return runInTransactionContext(context, async (db) => {
+    const now = sampleErrorReportClock(clock);
+    await trimErrorReportsWithinTransaction(context, ERROR_REPORT_CAPACITY, now);
+    return db.all<RetryableErrorReport>(sql`
+      SELECT id, level, message, stack, tag, meta, created_at AS createdAt, attempts
+      FROM error_reports
+      WHERE attempts < ${ERROR_REPORT_MAX_ATTEMPTS}
+        AND created_at >= ${now - ERROR_REPORT_MAX_DURABLE_AGE_MS}
+        AND next_retry_at <= ${now}
+      ORDER BY created_at ASC
+      LIMIT ${limit}`);
+  });
+}
+
 /** Reports eligible for an upload attempt: under the attempt cap and past their backoff. */
 export async function listRetryableErrorReports(
   db: AppDatabase,
@@ -247,20 +267,32 @@ export async function listRetryableErrorReports(
   // be undone by its rollback. Callers must therefore never invoke this helper inside a transaction.
   return withDbTransaction(
     db,
-    async (context) => {
-      const now = sampleErrorReportClock(clock);
-      await trimErrorReportsWithinTransaction(context, ERROR_REPORT_CAPACITY, now);
-      return db.all<RetryableErrorReport>(sql`
-        SELECT id, level, message, stack, tag, meta, created_at AS createdAt, attempts
-        FROM error_reports
-        WHERE attempts < ${ERROR_REPORT_MAX_ATTEMPTS}
-          AND created_at >= ${now - ERROR_REPORT_MAX_DURABLE_AGE_MS}
-          AND next_retry_at <= ${now}
-        ORDER BY created_at ASC
-        LIMIT ${limit}`);
-    },
+    (context) => listRetryableErrorReportsWithinTransaction(context, clock, limit),
     commitGuard,
   );
+}
+
+/** Transaction-only lease claim for one bounded upload batch. */
+export function claimErrorReportsWithinTransaction(
+  context: DbTransactionContext,
+  ids: number[],
+  clock: ErrorReportClock = Date.now,
+): Promise<number[]> {
+  return runInTransactionContext(context, async (db) => {
+    const uniqueIds = boundedErrorReportIds(ids);
+    if (uniqueIds.length === 0) return [];
+    const inList = sql.join(
+      uniqueIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    // Sample only after this writer owns the shared connection. A value captured before a long
+    // queue wait can make the two-minute lease already expired at the instant it commits.
+    const now = clock();
+    const rows = await db.all<{ id: number }>(sql`
+      UPDATE error_reports SET next_retry_at = ${now + ERROR_REPORT_LEASE_MS}
+      WHERE id IN (${inList}) AND next_retry_at <= ${now} RETURNING id`);
+    return rows.map((row: { id: number }) => row.id);
+  });
 }
 
 /**
@@ -278,23 +310,45 @@ export async function claimErrorReports(
 ): Promise<number[]> {
   const uniqueIds = boundedErrorReportIds(ids);
   if (uniqueIds.length === 0) return [];
-  const inList = sql.join(
-    uniqueIds.map((id) => sql`${id}`),
-    sql`, `,
-  );
-  const rows = await withDbTransaction<{ id: number }[]>(
+  return withDbTransaction(
     db,
-    () => {
-      // Sample only after this writer owns the shared connection. A value captured before a long
-      // queue wait can make the two-minute lease already expired at the instant it commits.
-      const now = clock();
-      return db.all<{ id: number }>(sql`
-        UPDATE error_reports SET next_retry_at = ${now + ERROR_REPORT_LEASE_MS}
-        WHERE id IN (${inList}) AND next_retry_at <= ${now} RETURNING id`);
-    },
+    (context) => claimErrorReportsWithinTransaction(context, uniqueIds, clock),
     commitGuard,
   );
-  return rows.map((row) => row.id);
+}
+
+/** Transaction-only failed-attempt settlement for one bounded upload batch. */
+export function markErrorReportsFailedWithinTransaction(
+  context: DbTransactionContext,
+  ids: number[],
+  clock: ErrorReportClock = Date.now,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    const uniqueIds = boundedErrorReportIds(ids);
+    if (uniqueIds.length === 0) return;
+    const inList = sql.join(
+      uniqueIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const now = sampleErrorReportClock(clock);
+    // The uploader batch is <=100 ids. Advance it in one bounded UPDATE and retire capped rows
+    // in one DELETE, keeping the process-wide mutex to two statements rather than up to 200
+    // encrypted round-trips.
+    await db.run(sql`
+      UPDATE error_reports
+      SET attempts = attempts + 1,
+          next_retry_at = ${now} + CASE attempts + 1
+            WHEN 1 THEN 30000
+            WHEN 2 THEN 60000
+            WHEN 3 THEN 120000
+            WHEN 4 THEN 240000
+            ELSE 480000
+          END
+      WHERE id IN (${inList})`);
+    await db.run(sql`
+      DELETE FROM error_reports
+      WHERE id IN (${inList}) AND attempts >= ${ERROR_REPORT_MAX_ATTEMPTS}`);
+  });
 }
 
 /**
@@ -310,34 +364,27 @@ export async function markErrorReportsFailed(
 ): Promise<void> {
   const uniqueIds = boundedErrorReportIds(ids);
   if (uniqueIds.length === 0) return;
-  const inList = sql.join(
-    uniqueIds.map((id) => sql`${id}`),
-    sql`, `,
-  );
   await withDbTransaction(
     db,
-    async () => {
-      const now = sampleErrorReportClock(clock);
-      // The uploader batch is <=100 ids. Advance it in one bounded UPDATE and retire capped rows
-      // in one DELETE, keeping the process-wide mutex to two statements rather than up to 200
-      // encrypted round-trips.
-      await db.run(sql`
-        UPDATE error_reports
-        SET attempts = attempts + 1,
-            next_retry_at = ${now} + CASE attempts + 1
-              WHEN 1 THEN 30000
-              WHEN 2 THEN 60000
-              WHEN 3 THEN 120000
-              WHEN 4 THEN 240000
-              ELSE 480000
-            END
-        WHERE id IN (${inList})`);
-      await db.run(sql`
-        DELETE FROM error_reports
-        WHERE id IN (${inList}) AND attempts >= ${ERROR_REPORT_MAX_ATTEMPTS}`);
-    },
+    (context) => markErrorReportsFailedWithinTransaction(context, uniqueIds, clock),
     commitGuard,
   );
+}
+
+/** Transaction-only successful deletion for one bounded upload batch. */
+export function deleteErrorReportsWithinTransaction(
+  context: DbTransactionContext,
+  ids: number[],
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    const uniqueIds = boundedErrorReportIds(ids);
+    if (uniqueIds.length === 0) return;
+    const inList = sql.join(
+      uniqueIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    await db.run(sql`DELETE FROM error_reports WHERE id IN (${inList})`);
+  });
 }
 
 /** Delete the given rows (after a successful upload). */
@@ -348,13 +395,9 @@ export async function deleteErrorReports(
 ): Promise<void> {
   const uniqueIds = boundedErrorReportIds(ids);
   if (uniqueIds.length === 0) return;
-  const inList = sql.join(
-    uniqueIds.map((id) => sql`${id}`),
-    sql`, `,
-  );
   await withDbTransaction(
     db,
-    () => db.run(sql`DELETE FROM error_reports WHERE id IN (${inList})`),
+    (context) => deleteErrorReportsWithinTransaction(context, uniqueIds),
     commitGuard,
   );
 }

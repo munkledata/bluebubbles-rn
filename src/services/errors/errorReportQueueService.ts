@@ -7,13 +7,13 @@ import {
   projectStoredErrorReport,
 } from '@core/secure';
 import {
-  claimErrorReports,
-  deleteErrorReports,
-  listRetryableErrorReports,
-  markErrorReportsFailed,
+  claimErrorReportsWithinTransaction,
+  deleteErrorReportsWithinTransaction,
+  listRetryableErrorReportsWithinTransaction,
+  markErrorReportsFailedWithinTransaction,
   type RetryableErrorReport,
 } from '@db/repositories';
-import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   runTrackedRealtimeWork,
@@ -96,10 +96,9 @@ async function runQueueBody(
   if (!accountIsCurrent(accountLease) || !policyAllowsUpload(policy)) return EMPTY_RESULT;
   let rows: RetryableErrorReport[];
   try {
-    rows = await listRetryableErrorReports(
+    rows = await withDbTransaction(
       db,
-      Date.now,
-      UPLOAD_BATCH_SIZE,
+      (context) => listRetryableErrorReportsWithinTransaction(context, Date.now, UPLOAD_BATCH_SIZE),
       accountLease || policy
         ? () => accountIsCurrent(accountLease) && policyAllowsUpload(policy)
         : undefined,
@@ -114,10 +113,14 @@ async function runQueueBody(
   if (rows.length === 0) return EMPTY_RESULT;
   let claimed: number[] = [];
   const claimCommitted = await runAccountCommit(accountLease, policy, async (guard) => {
-    claimed = await claimErrorReports(
+    claimed = await withDbTransaction(
       db,
-      rows.map((r) => r.id),
-      Date.now,
+      (context) =>
+        claimErrorReportsWithinTransaction(
+          context,
+          rows.map((r) => r.id),
+          Date.now,
+        ),
       guard,
     );
   });
@@ -149,7 +152,11 @@ async function runQueueBody(
       throw new Error('error report batch was not fully ingested');
     }
     const deleted = await runAccountCommit(accountLease, policy, (guard) =>
-      deleteErrorReports(db, claimed, guard),
+      withDbTransaction(
+        db,
+        (context) => deleteErrorReportsWithinTransaction(context, claimed),
+        guard,
+      ),
     );
     return {
       eligible: rows.length,
@@ -162,7 +169,11 @@ async function runQueueBody(
       return { eligible: rows.length, uploaded: 0 };
     }
     const marked = await runAccountCommit(accountLease, policy, (guard) =>
-      markErrorReportsFailed(db, claimed, Date.now, guard),
+      withDbTransaction(
+        db,
+        (context) => markErrorReportsFailedWithinTransaction(context, claimed, Date.now),
+        guard,
+      ),
     );
     if (marked) logger.warn('[errorReport] upload failed', e);
     return { eligible: rows.length, uploaded: 0 };

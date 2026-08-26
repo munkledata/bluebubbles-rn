@@ -188,6 +188,7 @@ describe('runErrorReportQueue', () => {
       await seed(db, 3, uploadNow);
       let sent: Record<string, unknown> | undefined;
       const http = fakeHttp(async (json) => {
+        expect(raw.inTransaction).toBe(false);
         sent = json as Record<string, unknown>;
         return { ingested: 3 };
       });
@@ -320,6 +321,7 @@ describe('runErrorReportQueue', () => {
     const response = deferred<never>();
     let postStarted = false;
     const fail = fakeHttp(async () => {
+      expect(raw.inTransaction).toBe(false);
       postStarted = true;
       return response.promise;
     });
