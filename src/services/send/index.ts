@@ -306,7 +306,10 @@ export function react(
   const snapshot = { ...args };
   return runUiAccountOperation(
     accountLease,
-    () => sendReactionMessage(getDatabase(), http, snapshot),
+    () =>
+      sendReactionMessage(getDatabase(), http, snapshot, Date.now(), () =>
+        accountLease.isCurrent(),
+      ),
     'logical-send',
   );
 }

@@ -352,11 +352,17 @@ async function loveMessage(
     assertCurrentAccount(accountLease);
     const db = await ensureDatabase();
     assertCurrentAccount(accountLease);
-    await sendReactionMessage(db, http, {
-      chatGuid,
-      targetGuid: messageGuid,
-      reaction: 'love',
-    });
+    await sendReactionMessage(
+      db,
+      http,
+      {
+        chatGuid,
+        targetGuid: messageGuid,
+        reaction: 'love',
+      },
+      Date.now(),
+      () => accountLease.isCurrent(),
+    );
     assertCurrentAccount(accountLease);
   } finally {
     turn.release();

@@ -1,6 +1,7 @@
 import { sendReaction } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { insertOutgoingReaction } from '@db/repositories';
+import { insertOutgoingReactionWithinTransaction } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
@@ -26,17 +27,27 @@ export async function sendReactionMessage(
   http: HttpClient,
   args: SendReactionArgs,
   now: number = Date.now(),
+  commitGuard?: DbCommitGuard,
 ): Promise<{ tempGuid: string }> {
   const tempGuid = generateTempGuid();
-  await insertOutgoingReaction(db, {
-    tempGuid,
-    chatGuid: args.chatGuid,
-    targetGuid: args.targetGuid,
-    reaction: args.reaction,
-    emoji: args.emoji,
-    selectedMessageText: args.selectedMessageText,
-    now,
-  });
+  await withDbTransaction(
+    db,
+    (context) =>
+      insertOutgoingReactionWithinTransaction(context, {
+        tempGuid,
+        chatGuid: args.chatGuid,
+        targetGuid: args.targetGuid,
+        reaction: args.reaction,
+        emoji: args.emoji,
+        selectedMessageText: args.selectedMessageText,
+        now,
+      }),
+    commitGuard,
+  );
+
+  // The owner may have committed just before Disconnect retired this account. Do not let that old
+  // continuation start a request with the next account's live credential boundary.
+  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
 
   try {
     const server = await sendReaction(http, {
@@ -46,9 +57,17 @@ export async function sendReactionMessage(
       emoji: args.emoji,
     });
     // Reactions require the Private API, so the ack carries the real GUID on success.
-    await reconcileSendOutcome(db, tempGuid, server, now);
+    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
   } catch (e) {
-    await handleSendFailure(db, tempGuid, e, 'send-reaction', args.chatGuid);
+    await handleSendFailure(
+      db,
+      tempGuid,
+      e,
+      'send-reaction',
+      args.chatGuid,
+      undefined,
+      commitGuard,
+    );
   }
 
   return { tempGuid };

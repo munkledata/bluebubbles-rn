@@ -322,23 +322,25 @@ export async function insertOutgoingContact(
  * queue row. Unlike a text send this does NOT bump latestMessageDate — a tapback
  * must not reorder the inbox. `reaction` is e.g. 'love' or '-love' (removal).
  */
-export async function insertOutgoingReaction(
-  db: AppDatabase,
-  args: {
-    tempGuid: string;
-    /** @deprecated Ignored. The transaction resolves `chatGuid` to its committed local id. */
-    chatId?: number;
-    chatGuid: string;
-    targetGuid: string;
-    reaction: string;
-    /** Glyph for an 'emoji'/'-emoji' tapback; persisted so the optimistic badge renders it. */
-    emoji?: string;
-    selectedMessageText?: string;
-    now: number;
-  },
+export interface InsertOutgoingReactionArgs {
+  tempGuid: string;
+  /** @deprecated Ignored. The transaction resolves `chatGuid` to its committed local id. */
+  chatId?: number;
+  chatGuid: string;
+  targetGuid: string;
+  reaction: string;
+  /** Glyph for an 'emoji'/'-emoji' tapback; persisted so the optimistic badge renders it. */
+  emoji?: string;
+  selectedMessageText?: string;
+  now: number;
+}
+
+/** Transaction-only body for an optimistic reaction insert. */
+export function insertOutgoingReactionWithinTransaction(
+  context: DbTransactionContext,
+  args: InsertOutgoingReactionArgs,
 ): Promise<void> {
-  // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  await withDbTransaction(db, async (context) => {
+  return runInTransactionContext(context, async (db) => {
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
       tempGuid: args.tempGuid,
@@ -363,6 +365,15 @@ export async function insertOutgoingReaction(
       associatedMessageEmoji: args.emoji ?? null,
     });
   });
+}
+
+/** Standalone optimistic-reaction owner; composing services use the transaction-only body. */
+export async function insertOutgoingReaction(
+  db: AppDatabase,
+  args: InsertOutgoingReactionArgs,
+): Promise<void> {
+  // ONE transaction — see the insert-atomicity note above insertOutgoingText.
+  await withDbTransaction(db, (context) => insertOutgoingReactionWithinTransaction(context, args));
 }
 
 /**

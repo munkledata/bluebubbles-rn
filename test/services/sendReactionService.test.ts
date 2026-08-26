@@ -9,9 +9,16 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { DbCommitGuardRejectedError } from '@db/transaction';
 import { Message } from '@core/models';
 import type { AppDatabase } from '@db/types';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+  runTrackedRealtimeWork,
+} from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
 function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
@@ -63,6 +70,135 @@ describe('sendReactionMessage', () => {
     expect(row.t).toBe('love');
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
     expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt')).toHaveLength(1);
+  });
+
+  it('rolls back a mid-insert account change before HTTP and lets a fresh lease send', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const initialChatDate = one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d;
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_reaction_during_message_insert', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_reaction_during_message_insert
+      AFTER INSERT ON messages
+      WHEN NEW.associated_message_guid = 'mt' AND NEW.associated_message_type = 'emoji'
+      BEGIN
+        SELECT pause_reaction_during_message_insert();
+      END
+    `);
+
+    let posts = 0;
+    const oldLease = captureRealtimeDeliveryLease();
+    try {
+      const oldSend = runTrackedRealtimeWork(oldLease, (lease) =>
+        sendReactionMessage(
+          db,
+          fakeHttp(async () => {
+            posts += 1;
+            return { guid: 'must-not-send' };
+          }),
+          {
+            chatGuid: 'c1',
+            targetGuid: 'mt',
+            reaction: 'emoji',
+            emoji: '🫡',
+            selectedMessageText: 'private quoted body',
+          },
+          1_000,
+          () => lease.isCurrent(),
+        ),
+      );
+
+      await expect(oldSend).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+      if (!drain) throw new Error('reaction insert did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(posts).toBe(0);
+      expect(raw.inTransaction).toBe(false);
+      expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(0);
+      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE associated_message_guid='mt'").c).toBe(
+        0,
+      );
+      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='mt'").c).toBe(1);
+      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(
+        initialChatDate,
+      );
+
+      raw.exec('DROP TRIGGER pause_reaction_during_message_insert');
+      resumeRealtimeDeliveries();
+      const freshLease = captureRealtimeDeliveryLease();
+      let result: { tempGuid: string } | undefined;
+      let postRanInsideTransaction = true;
+      let localState:
+        { messageGuid: string; queueGuid: string; kind: string; payload: string } | undefined;
+      let requestBody: Record<string, unknown> | undefined;
+      await expect(
+        runTrackedRealtimeWork(freshLease, async (lease) => {
+          result = await sendReactionMessage(
+            db,
+            fakeHttp(async (json) => {
+              postRanInsideTransaction = raw.inTransaction;
+              requestBody = json as Record<string, unknown>;
+              localState = raw
+                .prepare(
+                  `SELECT m.guid AS messageGuid, q.temp_guid AS queueGuid, q.kind, q.payload
+                     FROM messages m
+                     JOIN outgoing_queue q ON q.temp_guid = m.guid
+                    WHERE m.associated_message_guid = 'mt'`,
+                )
+                .get() as typeof localState;
+              return { guid: 'real-reaction-after-retirement', dateCreated: 2_000 };
+            }),
+            {
+              chatGuid: 'c1',
+              targetGuid: 'mt',
+              reaction: 'emoji',
+              emoji: '🫡',
+              selectedMessageText: 'private quoted body',
+            },
+            2_000,
+            () => lease.isCurrent(),
+          );
+        }),
+      ).resolves.toBe('delivered');
+
+      expect(postRanInsideTransaction).toBe(false);
+      expect(localState).toMatchObject({
+        messageGuid: result?.tempGuid,
+        queueGuid: result?.tempGuid,
+        kind: 'reaction',
+      });
+      expect(JSON.parse(localState?.payload ?? '{}')).toEqual({
+        selectedMessageGuid: 'mt',
+        reaction: 'emoji',
+        emoji: '🫡',
+      });
+      expect(localState?.payload).not.toContain('private quoted body');
+      expect(requestBody).toMatchObject({
+        messageGuid: 'mt',
+        reactionType: 'emoji',
+        reactionEmoji: '🫡',
+      });
+      expect(requestBody).not.toHaveProperty('tempGuid');
+      expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(0);
+      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='mt'").c).toBe(1);
+      expect(
+        one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='real-reaction-after-retirement'").c,
+      ).toBe(1);
+      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(
+        initialChatDate,
+      );
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_reaction_during_message_insert');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+    }
   });
 
   it('toggles off when the same type is sent then removed', async () => {

@@ -8569,9 +8569,35 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:1d14272d7d4a",
+      "id": "src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:8ad15d9f2163",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 341,
+      "line": 345,
+      "symbol": "insertOutgoingReactionWithinTransaction",
+      "operation": "drizzle-insert",
+      "target": "outgoingQueue",
+      "detectedContext": "withDbTransaction",
+      "owner": "insertOutgoingReactionWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/echoReconcileEmoji.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:60b18ede0ce6",
+      "path": "src/db/repositories/outgoing.ts",
+      "line": 355,
+      "symbol": "insertOutgoingReactionWithinTransaction",
+      "operation": "drizzle-insert",
+      "target": "messages",
+      "detectedContext": "withDbTransaction",
+      "owner": "insertOutgoingReactionWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/echoReconcileEmoji.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:64518fc230a9",
+      "path": "src/db/repositories/outgoing.ts",
+      "line": 376,
       "symbol": "insertOutgoingReaction",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8582,12 +8608,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/echoReconcileEmoji.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:9dd64b79f229",
+      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:9142aa33dfcf",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 341,
+      "line": 376,
       "symbol": "insertOutgoingReaction",
       "operation": "mutator-call",
-      "target": "src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:68c10e821a>",
+      "target": "src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:f1bafaf13b>",
       "detectedContext": "withDbTransaction",
       "owner": "insertOutgoingReaction",
       "transactionContext": "withDbTransaction",
@@ -8595,35 +8621,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/echoReconcileEmoji.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction:drizzle-insert:db1a559ab2f4",
+      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:f1bafaf13b>:mutator-call:72bc76227c21",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 343,
-      "symbol": "insertOutgoingReaction",
-      "operation": "drizzle-insert",
-      "target": "outgoingQueue",
+      "line": 376,
+      "symbol": "insertOutgoingReaction.<callback:f1bafaf13b>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "insertOutgoingReaction",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/db/repositories/outgoing.ts#insertOutgoingReaction:drizzle-insert:bc47389eaa50",
-      "path": "src/db/repositories/outgoing.ts",
-      "line": 353,
-      "symbol": "insertOutgoingReaction",
-      "operation": "drizzle-insert",
-      "target": "messages",
-      "detectedContext": "withDbTransaction",
-      "owner": "insertOutgoingReaction",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/echoReconcileEmoji.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:sql-update:1320d8a402de",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 405,
+      "line": 416,
       "symbol": "discardOutgoingMessageWithinTransaction",
       "operation": "sql-update",
       "target": "messages",
@@ -8636,7 +8649,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:drizzle-delete:2cde35e0f6d4",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 409,
+      "line": 420,
       "symbol": "discardOutgoingMessageWithinTransaction",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -8649,7 +8662,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction.<callback:a1e7b9de6b>:mutator-call:d5204e46c499",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 415,
+      "line": 426,
       "symbol": "discardOutgoingMessageWithinTransaction.<callback:a1e7b9de6b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
@@ -8662,7 +8675,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:6218930bffa9",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 430,
+      "line": 441,
       "symbol": "discardOutgoingMessage",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8675,7 +8688,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:d96cda348479",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 430,
+      "line": 441,
       "symbol": "discardOutgoingMessage",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:8d83cb9fc1>",
@@ -8688,7 +8701,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:8d83cb9fc1>:mutator-call:0be1e09bf5c4",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 431,
+      "line": 442,
       "symbol": "discardOutgoingMessage.<callback:8d83cb9fc1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction",
@@ -8701,7 +8714,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 511,
+      "line": 522,
       "symbol": "claimFailedOutgoingForRetryWithinTransaction",
       "operation": "sql-update",
       "target": "messages",
@@ -8714,7 +8727,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 523,
+      "line": 534,
       "symbol": "claimFailedOutgoingForRetryWithinTransaction",
       "operation": "sql-update",
       "target": "outgoing_queue",
@@ -8727,7 +8740,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:0ef007da403c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 540,
+      "line": 551,
       "symbol": "claimFailedOutgoingForRetry",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:e9bf331847>",
@@ -8740,7 +8753,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:abe11442dbc6",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 540,
+      "line": 551,
       "symbol": "claimFailedOutgoingForRetry",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8753,7 +8766,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:e9bf331847>:mutator-call:4b8448a9e2d5",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 542,
+      "line": 553,
       "symbol": "claimFailedOutgoingForRetry.<callback:e9bf331847>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction",
@@ -8766,7 +8779,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9efd07b3e6a8",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 575,
+      "line": 586,
       "symbol": "reconcileOutgoingSuccess",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8779,7 +8792,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:dc16ee7659f0",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 575,
+      "line": 586,
       "symbol": "reconcileOutgoingSuccess",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>",
@@ -8792,7 +8805,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 577,
+      "line": 588,
       "symbol": "reconcileOutgoingSuccess.<callback:a142c06cb1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction",
@@ -8805,7 +8818,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:43b965ef483f",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 582,
+      "line": 593,
       "symbol": "reconcileOutgoingSuccess",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8818,7 +8831,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:7cffdc80344c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 582,
+      "line": 593,
       "symbol": "reconcileOutgoingSuccess",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:350f3c11ce>",
@@ -8831,7 +8844,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:350f3c11ce>:mutator-call:466aed95663c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 584,
+      "line": 595,
       "symbol": "reconcileOutgoingSuccess.<callback:350f3c11ce>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction",
@@ -8844,7 +8857,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 623,
+      "line": 634,
       "symbol": "reconcileOutgoingSuccessWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -8857,7 +8870,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:53202ca06801",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 630,
+      "line": 641,
       "symbol": "reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#handoverOutgoingIdentityWithinTransaction",
@@ -8870,7 +8883,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:17a4a16e0a8e",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 636,
+      "line": 647,
       "symbol": "reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
@@ -8883,7 +8896,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:0bd89180f0e1",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 637,
+      "line": 648,
       "symbol": "reconcileOutgoingSuccessWithinTransaction",
       "operation": "drizzle-delete",
       "target": "messages",
@@ -8896,7 +8909,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:4f9ad23d68e9",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 639,
+      "line": 650,
       "symbol": "reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#handoverOutgoingIdentityWithinTransaction",
@@ -8909,7 +8922,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-update:caa13f78f819",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 640,
+      "line": 651,
       "symbol": "reconcileOutgoingSuccessWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -8922,7 +8935,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:3374b727a87f",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 653,
+      "line": 664,
       "symbol": "reconcileOutgoingSuccessWithinTransaction",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -8935,7 +8948,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:7b31765b5cbe",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 677,
+      "line": 688,
       "symbol": "markOutgoingSentNoGuid",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:a142c06cb1>",
@@ -8948,7 +8961,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:9e7cb9dc1fb3",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 677,
+      "line": 688,
       "symbol": "markOutgoingSentNoGuid",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8961,7 +8974,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:a142c06cb1>:mutator-call:c476b9568e57",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 679,
+      "line": 690,
       "symbol": "markOutgoingSentNoGuid.<callback:a142c06cb1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction",
@@ -8974,7 +8987,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:21d3ccc056b3",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 698,
+      "line": 709,
       "symbol": "markOutgoingSentNoGuidWithinTransaction",
       "operation": "sql-update",
       "target": "messages",
@@ -8987,7 +9000,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 703,
+      "line": 714,
       "symbol": "markOutgoingSentNoGuidWithinTransaction",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -9000,7 +9013,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86:2",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 713,
+      "line": 724,
       "symbol": "markOutgoingSentNoGuidWithinTransaction",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -9013,7 +9026,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileEchoByContent.<callback:f4a8591c86>:mutator-call:e3ba3753849b",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 798,
+      "line": 809,
       "symbol": "reconcileEchoByContent.<callback:f4a8591c86>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#handoverOutgoingIdentityWithinTransaction",
@@ -9026,7 +9039,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileEchoByContent:drizzle-delete:514ffc154107",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 801,
+      "line": 812,
       "symbol": "reconcileEchoByContent",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -9039,7 +9052,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileEchoByContent:drizzle-update:05256758409a",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 802,
+      "line": 813,
       "symbol": "reconcileEchoByContent",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9052,7 +9065,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:mutator-call:ba32ab8e8663",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 838,
+      "line": 849,
       "symbol": "reconcileOutgoingAttachmentByContent",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9065,7 +9078,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:mutator-call:e763023860a3",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 838,
+      "line": 849,
       "symbol": "reconcileOutgoingAttachmentByContent",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:8389765d09>",
@@ -9078,7 +9091,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:8389765d09>:mutator-call:d6d04e900b9d",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 875,
+      "line": 886,
       "symbol": "reconcileOutgoingAttachmentByContent.<callback:8389765d09>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#handoverOutgoingIdentityWithinTransaction",
@@ -9091,7 +9104,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:drizzle-delete:c99168cb464c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 876,
+      "line": 887,
       "symbol": "reconcileOutgoingAttachmentByContent",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -9104,7 +9117,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:drizzle-update:33d442635256",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 877,
+      "line": 888,
       "symbol": "reconcileOutgoingAttachmentByContent",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9117,7 +9130,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 893,
+      "line": 904,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "outgoingQueue",
@@ -9130,7 +9143,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 897,
+      "line": 908,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9143,7 +9156,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:bc4e8c366140",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 920,
+      "line": 931,
       "symbol": "retireOutgoing",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9156,7 +9169,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:c3043ae321f5",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 920,
+      "line": 931,
       "symbol": "retireOutgoing",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#retireOutgoing.<callback:f2328120f0>",
@@ -9169,7 +9182,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoing.<callback:f2328120f0>:mutator-call:298962d2933f",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 922,
+      "line": 933,
       "symbol": "retireOutgoing.<callback:f2328120f0>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction",
@@ -9182,7 +9195,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction:drizzle-update:7cc8721b9922",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 973,
+      "line": 984,
       "symbol": "reconcileOutgoingErrorWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9195,7 +9208,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction:drizzle-update:235da0b0f412",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 990,
+      "line": 1001,
       "symbol": "reconcileOutgoingErrorWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9208,7 +9221,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction:drizzle-update:7cc8721b9922:2",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 994,
+      "line": 1005,
       "symbol": "reconcileOutgoingErrorWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9221,7 +9234,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction:sql-update:185f64627b09",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1003,
+      "line": 1014,
       "symbol": "reconcileOutgoingErrorWithinTransaction",
       "operation": "sql-update",
       "target": "outgoing_queue",
@@ -9234,7 +9247,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingError:mutator-call:3ed0ccffe7e8",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1020,
+      "line": 1031,
       "symbol": "reconcileOutgoingError",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingError.<callback:19a5c01360>",
@@ -9247,7 +9260,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingError:mutator-call:a8e80fcd067c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1020,
+      "line": 1031,
       "symbol": "reconcileOutgoingError",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9260,7 +9273,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingError.<callback:19a5c01360>:mutator-call:e131af17b367",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1023,
+      "line": 1034,
       "symbol": "reconcileOutgoingError.<callback:19a5c01360>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction",
@@ -9273,7 +9286,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1042,
+      "line": 1053,
       "symbol": "markMessageSendErrorWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9286,7 +9299,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markMessageSendError:mutator-call:3cb7f16ec796",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1063,
+      "line": 1074,
       "symbol": "markMessageSendError",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markMessageSendError.<callback:b7d6fcb818>",
@@ -9299,7 +9312,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markMessageSendError:mutator-call:753ffb850f16",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1063,
+      "line": 1074,
       "symbol": "markMessageSendError",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9312,7 +9325,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#markMessageSendError.<callback:b7d6fcb818>:mutator-call:02fdbd0504de",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1065,
+      "line": 1076,
       "symbol": "markMessageSendError.<callback:b7d6fcb818>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction",
@@ -9325,7 +9338,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reEnqueueOutgoingFromMessageWithinTransaction:drizzle-insert:7d1229e8c2be",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1154,
+      "line": 1165,
       "symbol": "reEnqueueOutgoingFromMessageWithinTransaction",
       "operation": "drizzle-insert",
       "target": "outgoingQueue",
@@ -9338,7 +9351,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#applyServerSendErrorWithinTransaction.<callback:58a81e8f9e>:mutator-call:5760383cfff4",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1216,
+      "line": 1227,
       "symbol": "applyServerSendErrorWithinTransaction.<callback:58a81e8f9e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction",
@@ -9351,7 +9364,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#applyServerSendErrorWithinTransaction.<callback:58a81e8f9e>:mutator-call:0609db99fb6f",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1221,
+      "line": 1232,
       "symbol": "applyServerSendErrorWithinTransaction.<callback:58a81e8f9e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reEnqueueOutgoingFromMessageWithinTransaction",
@@ -9364,7 +9377,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#applyServerSendErrorWithinTransaction.<callback:58a81e8f9e>:mutator-call:dd88c42b90e9",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1225,
+      "line": 1236,
       "symbol": "applyServerSendErrorWithinTransaction.<callback:58a81e8f9e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction",
@@ -9377,7 +9390,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#applyServerSendError:mutator-call:4c294f1fb7a7",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1242,
+      "line": 1253,
       "symbol": "applyServerSendError",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#applyServerSendError.<callback:d84f7ae407>",
@@ -9390,7 +9403,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#applyServerSendError:mutator-call:db06234f2d13",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1242,
+      "line": 1253,
       "symbol": "applyServerSendError",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9403,7 +9416,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#applyServerSendError.<callback:d84f7ae407>:mutator-call:db626d4bcd5a",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1243,
+      "line": 1254,
       "symbol": "applyServerSendError.<callback:d84f7ae407>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#applyServerSendErrorWithinTransaction",
@@ -9416,7 +9429,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:sql-update:a0d6d4f1bcbc",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1310,
+      "line": 1321,
       "symbol": "claimOutgoingForSendWithinTransaction",
       "operation": "sql-update",
       "target": "outgoing_queue",
@@ -9429,7 +9442,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:drizzle-update:fef9b2b45b05",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1316,
+      "line": 1327,
       "symbol": "claimOutgoingForSendWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -9442,7 +9455,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimOutgoingForSend:mutator-call:68730b3fe11a",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1335,
+      "line": 1346,
       "symbol": "claimOutgoingForSend",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimOutgoingForSend.<callback:8b54a95643>",
@@ -9455,7 +9468,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimOutgoingForSend:mutator-call:d7146317172c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1335,
+      "line": 1346,
       "symbol": "claimOutgoingForSend",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9468,7 +9481,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#claimOutgoingForSend.<callback:8b54a95643>:mutator-call:aebe0c09810d",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 1337,
+      "line": 1348,
       "symbol": "claimOutgoingForSend.<callback:8b54a95643>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction",
@@ -14328,7 +14341,7 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:19cbbee6bf1d",
+      "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:83b1671c589d",
       "path": "src/services/notifications/actions.ts",
       "line": 355,
       "symbol": "loveMessage",
@@ -15797,10 +15810,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendAccountScope.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/scheduledAccountScope.test.ts; test/services/scheduledPrune.test.ts; test/services/discardMessage.test.ts; test/services/attachmentCacheCoordinator.test.ts"
     },
     {
-      "id": "src/services/send/index.ts#react.<callback:e9a95c26f3>:mutator-call:c35237e6478b",
+      "id": "src/services/send/index.ts#react.<callback:2a9e50aa06>:mutator-call:51ae9ba2c80c",
       "path": "src/services/send/index.ts",
-      "line": 309,
-      "symbol": "react.<callback:e9a95c26f3>",
+      "line": 310,
+      "symbol": "react.<callback:2a9e50aa06>",
       "operation": "mutator-call",
       "target": "src/services/send/sendReactionService.ts#sendReactionMessage",
       "detectedContext": "coordinated-delegation",
@@ -15812,7 +15825,7 @@
     {
       "id": "src/services/send/index.ts#reply.<callback:2f53931556>:mutator-call:d5b02e6e0ad7",
       "path": "src/services/send/index.ts",
-      "line": 330,
+      "line": 333,
       "symbol": "reply.<callback:2f53931556>",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -15825,7 +15838,7 @@
     {
       "id": "src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380",
       "path": "src/services/send/index.ts",
-      "line": 368,
+      "line": 371,
       "symbol": "schedule.<callback:ec99a4a3ef>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#scheduleTextMessage",
@@ -15838,7 +15851,7 @@
     {
       "id": "src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:0b12396b320f",
       "path": "src/services/send/index.ts",
-      "line": 390,
+      "line": 393,
       "symbol": "cancelScheduled.<callback:65476a8afb>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -15851,7 +15864,7 @@
     {
       "id": "src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:ac5ab63b2745",
       "path": "src/services/send/index.ts",
-      "line": 390,
+      "line": 393,
       "symbol": "cancelScheduled.<callback:65476a8afb>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>.<callback:a851d931f6>",
@@ -15864,7 +15877,7 @@
     {
       "id": "src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>.<callback:a851d931f6>:mutator-call:3c7e71894c98",
       "path": "src/services/send/index.ts",
-      "line": 392,
+      "line": 395,
       "symbol": "cancelScheduled.<callback:65476a8afb>.<callback:a851d931f6>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction",
@@ -15877,7 +15890,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4",
       "path": "src/services/send/index.ts",
-      "line": 424,
+      "line": 427,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -15890,7 +15903,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4:2",
       "path": "src/services/send/index.ts",
-      "line": 444,
+      "line": 447,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -15903,7 +15916,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:1150f343ed37",
       "path": "src/services/send/index.ts",
-      "line": 449,
+      "line": 452,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -15916,7 +15929,7 @@
     {
       "id": "src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:f82af7e4ba9c",
       "path": "src/services/send/index.ts",
-      "line": 453,
+      "line": 456,
       "symbol": "editScheduled.<callback:b8b1abf4f1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled",
@@ -15929,7 +15942,7 @@
     {
       "id": "src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2",
       "path": "src/services/send/index.ts",
-      "line": 478,
+      "line": 481,
       "symbol": "syncScheduledFromServer.<callback:c129c31bd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#listServerScheduledPruneExposure",
@@ -15942,7 +15955,7 @@
     {
       "id": "src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae",
       "path": "src/services/send/index.ts",
-      "line": 506,
+      "line": 509,
       "symbol": "syncScheduledFromServer.<callback:c129c31bd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#reconcileServerScheduled",
@@ -15955,7 +15968,7 @@
     {
       "id": "src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861",
       "path": "src/services/send/index.ts",
-      "line": 525,
+      "line": 528,
       "symbol": "fireDueScheduled.<callback:0a6836762d>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled",
@@ -15968,7 +15981,7 @@
     {
       "id": "src/services/send/index.ts#retry.<callback:d6c267db00>:mutator-call:0e58141daeb9",
       "path": "src/services/send/index.ts",
-      "line": 616,
+      "line": 619,
       "symbol": "retry.<callback:d6c267db00>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#retry.<callback:d6c267db00>.<callback:4478d45b13>",
@@ -15981,7 +15994,7 @@
     {
       "id": "src/services/send/index.ts#retry.<callback:d6c267db00>:mutator-call:20c356da5ff4",
       "path": "src/services/send/index.ts",
-      "line": 616,
+      "line": 619,
       "symbol": "retry.<callback:d6c267db00>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -15994,7 +16007,7 @@
     {
       "id": "src/services/send/index.ts#retry.<callback:d6c267db00>.<callback:4478d45b13>:mutator-call:79c21958dac0",
       "path": "src/services/send/index.ts",
-      "line": 618,
+      "line": 621,
       "symbol": "retry.<callback:d6c267db00>.<callback:4478d45b13>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction",
@@ -16007,7 +16020,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:661ea9e4ed57",
       "path": "src/services/send/index.ts",
-      "line": 688,
+      "line": 691,
       "symbol": "discardMessage.<callback:9332f399c0>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>",
@@ -16020,7 +16033,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:c673563accd3",
       "path": "src/services/send/index.ts",
-      "line": 688,
+      "line": 691,
       "symbol": "discardMessage.<callback:9332f399c0>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16033,7 +16046,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>:mutator-call:1f31b2d9fe97",
       "path": "src/services/send/index.ts",
-      "line": 691,
+      "line": 694,
       "symbol": "discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction",
@@ -16046,7 +16059,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>:mutator-call:1f44a4de7c48",
       "path": "src/services/send/index.ts",
-      "line": 692,
+      "line": 695,
       "symbol": "discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction",
@@ -16059,7 +16072,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:3cd21b60f497",
       "path": "src/services/send/index.ts",
-      "line": 710,
+      "line": 713,
       "symbol": "discardMessage.<callback:9332f399c0>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -16072,7 +16085,7 @@
     {
       "id": "src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:a287fba2e403",
       "path": "src/services/send/index.ts",
-      "line": 713,
+      "line": 716,
       "symbol": "discardMessage.<callback:9332f399c0>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -16694,22 +16707,48 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts"
     },
     {
-      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:2bab059bd512",
+      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:affc16f291fa",
       "path": "src/services/send/sendReactionService.ts",
-      "line": 31,
+      "line": 33,
       "symbol": "sendReactionMessage",
       "operation": "mutator-call",
-      "target": "src/db/repositories/outgoing.ts#insertOutgoingReaction",
-      "detectedContext": "coordinated-delegation",
+      "target": "src/services/send/sendReactionService.ts#sendReactionMessage.<callback:bb2f03f995>",
+      "detectedContext": "withDbTransaction",
       "owner": "sendReactionMessage",
-      "transactionContext": "coordinated-delegation",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/db/outgoingBranches.test.ts; test/services/sendAccountScope.test.ts; test/services/sendChatIdentity.test.ts"
     },
     {
-      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:de2a3f8267de",
+      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:b3e3fdaf9d7a",
       "path": "src/services/send/sendReactionService.ts",
-      "line": 49,
+      "line": 33,
+      "symbol": "sendReactionMessage",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "sendReactionMessage",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/db/outgoingBranches.test.ts; test/services/sendAccountScope.test.ts; test/services/sendChatIdentity.test.ts"
+    },
+    {
+      "id": "src/services/send/sendReactionService.ts#sendReactionMessage.<callback:bb2f03f995>:mutator-call:d61ca293f0db",
+      "path": "src/services/send/sendReactionService.ts",
+      "line": 36,
+      "symbol": "sendReactionMessage.<callback:bb2f03f995>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "sendReactionMessage",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendReactionService.test.ts; test/services/sendReactionEmoji.test.ts; test/db/outgoingBranches.test.ts; test/services/sendAccountScope.test.ts; test/services/sendChatIdentity.test.ts"
+    },
+    {
+      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e8547c9b8ebc",
+      "path": "src/services/send/sendReactionService.ts",
+      "line": 60,
       "symbol": "sendReactionMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -16720,9 +16759,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
     },
     {
-      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:fa733c1c2d93",
+      "id": "src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506",
       "path": "src/services/send/sendReactionService.ts",
-      "line": 51,
+      "line": 62,
       "symbol": "sendReactionMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure",

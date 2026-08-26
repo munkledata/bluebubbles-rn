@@ -300,11 +300,22 @@ describe('handleNotificationAction — love (tapback)', () => {
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
     );
-    expect(mockSendReaction).toHaveBeenCalledWith(mockDb, expect.anything(), {
-      chatGuid: 'c2',
-      targetGuid: 'm2',
-      reaction: 'love',
-    });
+    expect(mockSendReaction).toHaveBeenCalledWith(
+      mockDb,
+      expect.anything(),
+      {
+        chatGuid: 'c2',
+        targetGuid: 'm2',
+        reaction: 'love',
+      },
+      expect.any(Number),
+      expect.any(Function),
+    );
+    const commitGuard = mockSendReaction.mock.calls[0]?.[4] as (() => boolean) | undefined;
+    expect(commitGuard?.()).toBe(true);
+    await pauseRealtimeDeliveries();
+    expect(commitGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
 
