@@ -4,9 +4,9 @@
  * This suite locks in the SCREEN'S wiring to the real stores + services, not the
  * store internals (those have their own node tests):
  *   - toggles flip the REAL kv-backed stores optimistically AND invoke the persist
- *     path (`kvSet`) — @db/database is mocked in the shared setup so the real persist
- *     is swallowed; here `@db/repositories` keeps every real export but swaps `kvSet`
- *     for a spy so we can OBSERVE the persist call;
+ *     path (`kvSetWithinTransaction`) — @db/database is mocked in the shared setup so the real
+ *     persist is swallowed; here `@db/repositories` keeps every real export but swaps the scoped
+ *     helper for a spy so we can OBSERVE the persist call;
  *   - App Lock enable is gated on `isBiometricAvailable()` (mocked): no biometric →
  *     a "Biometrics required" dialog and `setAppLockEnabled` is NOT called;
  *   - theme-preset rows drive `useThemeStore.setPreset`;
@@ -199,7 +199,9 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(false);
     await waitFor(() =>
       expect(
-        mockKvSet.mock.calls.some((c) => c[1] === 'privateApi.sendReadReceipts' && c[2] === '0'),
+        mockKvSetWithinTransaction.mock.calls.some(
+          (c) => c[1] === 'privateApi.sendReadReceipts' && c[2] === '0',
+        ),
       ).toBe(true),
     );
   });
