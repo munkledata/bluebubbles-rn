@@ -1,5 +1,5 @@
 import {
-  createReminder,
+  createReminderWithinTransaction,
   deleteReminderWithinTransaction,
   getMessageDateByGuid,
   getReminderByMessageGuid,
@@ -225,17 +225,18 @@ export async function scheduleReminder(
         }
         assertReminderLease(accountLease);
         if (id == null) {
-          id = await createReminder(
+          id = await withDbTransaction(
             db,
-            {
-              messageGuid: args.messageGuid,
-              chatGuid: args.chatGuid,
-              messagePreview: args.messagePreview,
-              senderName: args.senderName,
-              scheduledFor: args.scheduledFor,
-              notificationId,
-              createdAt: args.now ?? null,
-            },
+            (context) =>
+              createReminderWithinTransaction(context, {
+                messageGuid: args.messageGuid,
+                chatGuid: args.chatGuid,
+                messagePreview: args.messagePreview,
+                senderName: args.senderName,
+                scheduledFor: args.scheduledFor,
+                notificationId,
+                createdAt: args.now ?? null,
+              }),
             () => accountLease.isCurrent(),
           );
           assertReminderLease(accountLease);

@@ -359,6 +359,81 @@ describe('scheduleReminder', () => {
     expect(await listReminders(db)).toEqual([]);
     expect(cancelled).toContain(reminderId(5000));
   });
+
+  it('rolls back creation retired during the insert, cleans its alarm, and lets B retry', async () => {
+    const { db, raw } = await createTestDb();
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_new_reminder_during_insert', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER pause_new_reminder_during_insert
+      AFTER INSERT ON reminders
+      WHEN NEW.message_guid = 'm1' AND NEW.scheduled_for = 5000
+      BEGIN SELECT pause_new_reminder_during_insert(); END`);
+
+    const old = fakeScheduler();
+    const oldNativeTransactionStates: boolean[] = [];
+    const oldScheduler: ReminderScheduler = {
+      schedule: async (args) => {
+        oldNativeTransactionStates.push(raw.inTransaction);
+        await old.scheduler.schedule(args);
+      },
+      cancel: old.scheduler.cancel,
+    };
+
+    try {
+      await expect(
+        scheduleReminder(db, { ...base, scheduledFor: 5000, now: 1 }, oldScheduler),
+      ).rejects.toThrow('account session changed');
+      if (!drain) throw new Error('reminder insert did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(oldNativeTransactionStates).toEqual([false]);
+      expect(raw.inTransaction).toBe(false);
+      expect(await listReminders(db)).toEqual([]);
+      expect(old.scheduled).toEqual([reminderId(5000)]);
+      expect(old.cancelled.length).toBeGreaterThan(0);
+      expect(new Set(old.cancelled)).toEqual(new Set([reminderId(5000)]));
+
+      raw.exec('DROP TRIGGER pause_new_reminder_during_insert');
+      resumeRealtimeDeliveries();
+      const fresh = fakeScheduler();
+      const freshNativeTransactionStates: boolean[] = [];
+      const freshScheduler: ReminderScheduler = {
+        schedule: async (args) => {
+          freshNativeTransactionStates.push(raw.inTransaction);
+          await fresh.scheduler.schedule(args);
+        },
+        cancel: fresh.scheduler.cancel,
+      };
+      const id = await scheduleReminder(
+        db,
+        { ...base, scheduledFor: 6000, now: 2 },
+        freshScheduler,
+      );
+
+      expect(freshNativeTransactionStates).toEqual([false]);
+      expect(fresh.cancelled).toEqual([]);
+      expect(await getReminderByMessageGuid(db, 'm1')).toMatchObject({
+        id,
+        chatGuid: 'c1',
+        messagePreview: base.messagePreview,
+        senderName: base.senderName,
+        scheduledFor: 6000,
+        notificationId: reminderId(6000),
+        createdAt: 2,
+      });
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_new_reminder_during_insert');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      raw.close();
+    }
+  });
 });
 
 describe('cancelReminder', () => {

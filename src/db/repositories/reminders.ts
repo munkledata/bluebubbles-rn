@@ -11,28 +11,41 @@ import type { AppDatabase } from '../types';
 
 // ---- Reminders -------------------------------------------------------------
 
+export type CreateReminderArgs = Omit<Reminder, 'id' | 'createdAt'> & {
+  createdAt?: number | null;
+};
+
+/** Transaction-only body for one new durable reminder row. */
+export function createReminderWithinTransaction(
+  context: DbTransactionContext,
+  r: CreateReminderArgs,
+): Promise<number> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db
+      .insert(reminders)
+      .values({
+        messageGuid: r.messageGuid,
+        chatGuid: r.chatGuid,
+        messagePreview: r.messagePreview,
+        senderName: r.senderName,
+        scheduledFor: r.scheduledFor,
+        notificationId: r.notificationId,
+        createdAt: r.createdAt ?? null,
+      })
+      .returning({ id: reminders.id });
+    return rows[0]!.id;
+  });
+}
+
+/** Standalone reminder-creation owner; composing services use the transaction-only body. */
 export async function createReminder(
   db: AppDatabase,
-  r: Omit<Reminder, 'id' | 'createdAt'> & { createdAt?: number | null },
+  r: CreateReminderArgs,
   commitGuard?: DbCommitGuard,
 ): Promise<number> {
   return withDbTransaction(
     db,
-    async () => {
-      const rows = await db
-        .insert(reminders)
-        .values({
-          messageGuid: r.messageGuid,
-          chatGuid: r.chatGuid,
-          messagePreview: r.messagePreview,
-          senderName: r.senderName,
-          scheduledFor: r.scheduledFor,
-          notificationId: r.notificationId,
-          createdAt: r.createdAt ?? null,
-        })
-        .returning({ id: reminders.id });
-      return rows[0]!.id;
-    },
+    (context) => createReminderWithinTransaction(context, r),
     commitGuard,
   );
 }
