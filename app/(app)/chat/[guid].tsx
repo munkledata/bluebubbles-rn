@@ -19,9 +19,10 @@ import {
   getFirstUnreadInChat,
   isChatHiddenByDeletion,
   kvGet,
-  kvSet,
+  kvSetWithinTransaction,
   type MessagePreview,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import {
   dispatchRealtimeEvent,
@@ -623,8 +624,14 @@ function ChatScreenInner({
       // over the real kv draft. The Composer's unmount flush calls this before it unmounts, so
       // `draft` is fresh by the time it remounts.
       setDraft(text);
-      void runTrackedRealtimeWork(accountLease, async () => {
-        await kvSet(getDatabase(), `draft.${guid}`, text);
+      void runTrackedRealtimeWork(accountLease, async (activeLease) => {
+        const db = getDatabase();
+        const key = `draft.${guid}`;
+        await withDbTransaction(
+          db,
+          (context) => kvSetWithinTransaction(context, key, text),
+          () => activeLease.isCurrent(),
+        );
       }).catch(() => {
         // Best-effort while this account is live — losing a draft persist is not worth surfacing.
       });

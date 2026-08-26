@@ -183,7 +183,7 @@ jest.mock('@db/repositories', () => ({
   getFirstUnreadInChat: jest.fn(async () => null),
   isChatHiddenByDeletion: jest.fn(async () => false),
   kvGet: jest.fn(async () => null),
-  kvSet: jest.fn(async () => undefined),
+  kvSetWithinTransaction: jest.fn(async () => undefined),
 }));
 
 jest.mock('@/services', () => ({
@@ -255,7 +255,9 @@ import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useTypingStore } from '@state/typingStore';
 // eslint-disable-next-line import/first
-import { isChatHiddenByDeletion, kvSet } from '@db/repositories';
+import { getDatabase } from '@db/database';
+// eslint-disable-next-line import/first
+import { isChatHiddenByDeletion, kvSetWithinTransaction } from '@db/repositories';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -267,6 +269,8 @@ const useMessagesMock = useMessages as jest.Mock;
 const useChatHeaderMock = useChatHeader as jest.Mock;
 const useNewScreenEffectMock = useNewScreenEffect as jest.Mock;
 const useChatBackgroundUriMock = useChatBackgroundUri as jest.Mock;
+const mockGetDatabase = getDatabase as jest.Mock;
+const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
 
 /** A received text message; only the fields onLongPressMessage reads need to be right. */
 function makeMsg(overrides: Partial<EnrichedMessage> = {}): EnrichedMessage {
@@ -301,6 +305,8 @@ function reactionRow(over: Record<string, unknown>): any {
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
+  mockGetDatabase.mockReset().mockReturnValue(undefined);
+  mockKvSetWithinTransaction.mockResolvedValue(undefined);
   mockIsDevServer.mockReturnValue(false);
   mockGuid = GUID;
   mockInsetBottom = 0;
@@ -394,6 +400,17 @@ function overlayStyleCounts(tree: unknown): { top: number; bottom: number } {
     if (style.bottom === 0) bottom += 1;
   });
   return { top, bottom };
+}
+
+function sqlStatementText(value: unknown): string {
+  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
+  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  return chunks
+    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
+    .filter((part): part is string => typeof part === 'string')
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function expectWallpaperPresentation(tree: unknown, uri: string | null): void {
@@ -952,11 +969,59 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     await expect(picked).resolves.toEqual([]);
   });
 
+  it('rolls back an admitted draft write when its screen account retires mid-owner', async () => {
+    const accountADb = { run: jest.fn(async (_statement: unknown) => undefined) };
+    const accountBDb = { run: jest.fn(async (_statement: unknown) => undefined) };
+    mockGetDatabase.mockReturnValue(accountADb);
+    let releasePersist!: () => void;
+    const persistHeld = new Promise<void>((resolve) => {
+      releasePersist = resolve;
+    });
+    mockKvSetWithinTransaction.mockImplementationOnce(async () => persistHeld);
+
+    await renderWithTheme(<ChatScreen />);
+    const flushDraft = mockCaptured.composer!.onDraftChange as (text: string) => void;
+    let pause: Promise<void> | undefined;
+    try {
+      await run(() => flushDraft('A-only admitted draft'));
+      await waitFor(() => expect(mockKvSetWithinTransaction).toHaveBeenCalledTimes(1));
+
+      expect(mockCaptured.composer!.initialText).toBe('A-only admitted draft');
+      expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        `draft.${GUID}`,
+        'A-only admitted draft',
+      );
+
+      let pauseSettled = false;
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseSettled = true;
+      });
+      mockGetDatabase.mockReturnValue(accountBDb);
+      await Promise.resolve();
+      expect(pauseSettled).toBe(false);
+
+      releasePersist();
+      await pause;
+
+      expect(accountADb.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual([
+        'BEGIN IMMEDIATE',
+        'ROLLBACK',
+      ]);
+      expect(accountBDb.run).not.toHaveBeenCalled();
+    } finally {
+      releasePersist();
+      pause ??= pauseRealtimeDeliveries();
+      await Promise.allSettled([pause]);
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('drops draft-flush and typing callbacks after their screen account retires', async () => {
     await renderWithTheme(<ChatScreen />);
     const flushDraft = mockCaptured.composer!.onDraftChange as (text: string) => void;
     const emitTyping = mockCaptured.composer!.onTyping as (active: boolean) => void;
-    (kvSet as jest.Mock).mockClear();
+    mockKvSetWithinTransaction.mockClear();
     (sendTyping as jest.Mock).mockClear();
 
     await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
@@ -966,7 +1031,7 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     flushDraft('A-only draft');
     emitTyping(false);
 
-    expect(kvSet).not.toHaveBeenCalled();
+    expect(mockKvSetWithinTransaction).not.toHaveBeenCalled();
     expect(sendTyping).not.toHaveBeenCalled();
   });
 

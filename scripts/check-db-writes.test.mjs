@@ -4402,11 +4402,18 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/maintenance.ts#clearLocalCache.<callback:',
           ))),
   );
+  const chatDraftTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'app/(app)/chat/[guid].tsx' &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/kv.ts#kvSetWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith('app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:'))),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:de15aaf14d>.<callback:67d0a1d0fc>:mutator-call:a7e84c09e305',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:ea34ea031e>.tick.<callback:30afe351c6>:mutator-call:cc2cb67d4f22',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:4838a450d3a7',
@@ -4429,7 +4436,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 21);
+  assert.equal(selected.length, 20);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -4444,6 +4451,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/maintenance.ts#clearLocalCache.<callback:f5b3fd4c12>:mutator-call:7571dbda310a',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:2ffb1910cfce',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:7ff9694f91da',
+    ].sort(),
+  );
+  assert.deepEqual(
+    chatDraftTransaction.map((finding) => finding.id).sort(),
+    [
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>.<callback:a80ea9b156>:mutator-call:83902feadfb3',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>:mutator-call:1eb11ff329b4',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>:mutator-call:440ae4dc518b',
     ].sort(),
   );
   assert.equal(
