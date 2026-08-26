@@ -14,10 +14,11 @@ const mockLeaveGroupChat = jest.fn();
 const mockRenameGroupChat = jest.fn();
 const mockUpdateGroupParticipant = jest.fn();
 const mockOpenNotificationSettings = jest.fn();
-const mockSetChatTheme = jest.fn();
-const mockSetBackgroundIsLight = jest.fn();
+const mockSetChatAppearanceWithinTransaction = jest.fn();
 const mockSetChatCustomizationWithinTransaction = jest.fn();
 const mockSetChatMuteWithinTransaction = jest.fn();
+const mockComputeBackgroundIsLight = jest.fn();
+const mockAdaptiveTokensFromImage = jest.fn();
 const mockSafeOpenUrl = jest.fn();
 const mockSubscribeGenerationInvalidation = jest.fn();
 const mockUseChatHeader = jest.fn();
@@ -241,11 +242,11 @@ jest.mock('@db/repositories', () => ({
   getChatParticipants: jest.fn(),
   getChatTheme: jest.fn(),
   listChatAttachmentsByKind: jest.fn(),
-  setBackgroundIsLight: (...args: unknown[]) => mockSetBackgroundIsLight(...args),
+  setChatAppearanceWithinTransaction: (...args: unknown[]) =>
+    mockSetChatAppearanceWithinTransaction(...args),
   setChatCustomizationWithinTransaction: (...args: unknown[]) =>
     mockSetChatCustomizationWithinTransaction(...args),
   setChatMuteWithinTransaction: (...args: unknown[]) => mockSetChatMuteWithinTransaction(...args),
-  setChatTheme: (...args: unknown[]) => mockSetChatTheme(...args),
 }));
 
 jest.mock('@db/useReactiveQuery', () => ({
@@ -326,7 +327,9 @@ jest.mock('@utils', () => ({
   safeOpenUrl: (...args: unknown[]) => mockSafeOpenUrl(...args),
 }));
 
-jest.mock('@/services', () => ({ computeBackgroundIsLight: jest.fn().mockResolvedValue(false) }));
+jest.mock('@/services', () => ({
+  computeBackgroundIsLight: (...args: unknown[]) => mockComputeBackgroundIsLight(...args),
+}));
 
 jest.mock('@/services/notifications/notifeeService', () => ({
   openChatNotificationSettings: (...args: unknown[]) => mockOpenNotificationSettings(...args),
@@ -364,7 +367,7 @@ jest.mock('@ui/permissions/photoLibraryPermission', () => ({
 }));
 
 jest.mock('@ui/theme/adaptiveFromImage', () => ({
-  adaptiveTokensFromImage: jest.fn().mockResolvedValue(null),
+  adaptiveTokensFromImage: (...args: unknown[]) => mockAdaptiveTokensFromImage(...args),
 }));
 
 jest.mock('expo-image', () => {
@@ -521,10 +524,11 @@ beforeEach(() => {
   mockRenameGroupChat.mockResolvedValue(true);
   mockUpdateGroupParticipant.mockResolvedValue(true);
   mockOpenNotificationSettings.mockResolvedValue(undefined);
-  mockSetChatTheme.mockResolvedValue(undefined);
-  mockSetBackgroundIsLight.mockResolvedValue(undefined);
+  mockSetChatAppearanceWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatCustomizationWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
+  mockComputeBackgroundIsLight.mockReset().mockResolvedValue(false);
+  mockAdaptiveTokensFromImage.mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -596,7 +600,7 @@ describe('ChatSettingsScreen reduced motion', () => {
 
     await requestCloseStudio();
     expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull();
-    expect(mockSetChatTheme).not.toHaveBeenCalled();
+    expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByText('Chat Theme…'));
     expect(studioModal().props.animationType).toBe('slide');
     expect(mockAddEventListener).toHaveBeenCalledTimes(1);
@@ -632,7 +636,7 @@ describe('ChatSettingsScreen reduced motion', () => {
 
     await fireEvent.press(screen.getByRole('button', { name: 'Close theme editor' }));
     expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull();
-    expect(mockSetChatTheme).not.toHaveBeenCalled();
+    expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByText('Chat Theme…'));
     expect(studioModal().props.animationType).toBe('none');
 
@@ -642,10 +646,15 @@ describe('ChatSettingsScreen reduced motion', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Apply test theme' }));
     await waitFor(() => expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull());
     await waitFor(() =>
-      expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
-        themeTokens: JSON.stringify({ mode: 'dark', canary: PRIVATE_THEME_TOKEN }),
-      }),
+      expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        {
+          themeTokens: JSON.stringify({ mode: 'dark', canary: PRIVATE_THEME_TOKEN }),
+        },
+      ),
     );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
 
     await fireEvent.press(screen.getByText('Chat Theme…'));
     expect(studioModal().props.animationType).toBe('slide');
@@ -746,7 +755,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
       await Promise.resolve();
     });
     expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull();
-    expect(mockSetChatTheme).not.toHaveBeenCalled();
+    expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
 
     mockPendingReactiveGuid = null;
     await view.rerender(<ChatSettingsScreen />);
@@ -758,9 +767,13 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(studioModal().props.animationType).toBe('none');
     await fireEvent.press(screen.getByRole('button', { name: 'Apply test theme' }));
     await waitFor(() =>
-      expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID_B, {
-        themeTokens: JSON.stringify({ mode: 'dark', canary: PRIVATE_THEME_TOKEN }),
-      }),
+      expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID_B,
+        {
+          themeTokens: JSON.stringify({ mode: 'dark', canary: PRIVATE_THEME_TOKEN }),
+        },
+      ),
     );
 
     mockPendingReactiveGuid = CHAT_GUID;
@@ -812,6 +825,9 @@ describe('ChatSettingsScreen source and account ownership', () => {
     const oldApplyTheme = retainConfiguredPress(
       screen.getByRole('button', { name: 'Apply test theme' }),
     );
+    const oldClearTheme = retainConfiguredPress(
+      screen.getByText('Clear chat theme / background').parent!,
+    );
 
     await retireLease(oldLease);
 
@@ -824,9 +840,10 @@ describe('ChatSettingsScreen source and account ownership', () => {
     oldMedia();
     oldLink();
     oldApplyTheme();
+    oldClearTheme();
     expect(mockPush).not.toHaveBeenCalled();
     expect(mockSafeOpenUrl).not.toHaveBeenCalled();
-    expect(mockSetChatTheme).not.toHaveBeenCalled();
+    expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
 
     await act(async () => view.unmount());
     mockGuid = CHAT_GUID_B;
@@ -871,7 +888,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
         await Promise.resolve();
       });
       expect(mockSetGroupPhoto).not.toHaveBeenCalled();
-      expect(mockSetChatTheme).not.toHaveBeenCalled();
+      expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
       expect(mockShowDialog).not.toHaveBeenCalled();
       expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
 
@@ -890,10 +907,16 @@ describe('ChatSettingsScreen source and account ownership', () => {
         );
       } else {
         await waitFor(() =>
-          expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID_B, {
-            backgroundUri: 'file:///documents/copied-background.jpg',
-          }),
+          expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+            expect.any(Object),
+            CHAT_GUID_B,
+            {
+              backgroundUri: 'file:///documents/copied-background.jpg',
+              backgroundIsLight: false,
+            },
+          ),
         );
+        await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
       }
       expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(2);
     },
@@ -930,7 +953,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
         expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
       }
       expect(mockSetGroupPhoto).not.toHaveBeenCalled();
-      expect(mockSetChatTheme).not.toHaveBeenCalled();
+      expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
 
       await fireEvent.press(screen.getByText(control));
       if (control === 'Change Photo…') {
@@ -947,9 +970,14 @@ describe('ChatSettingsScreen source and account ownership', () => {
         );
       } else {
         await waitFor(() =>
-          expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
-            backgroundUri: 'file:///documents/copied-background.jpg',
-          }),
+          expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+            expect.any(Object),
+            CHAT_GUID,
+            {
+              backgroundUri: 'file:///documents/copied-background.jpg',
+              backgroundIsLight: false,
+            },
+          ),
         );
       }
       expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(2);
@@ -968,7 +996,9 @@ describe('ChatSettingsScreen source and account ownership', () => {
     async (control, title, copy) => {
       const rawError = `raw-${title}-error-canary`;
       mockLaunchImageLibrary.mockResolvedValue(pickedAsset('file:///picked-background.jpg'));
-      mockSetChatTheme.mockRejectedValueOnce(new Error(rawError)).mockResolvedValueOnce(undefined);
+      mockSetChatAppearanceWithinTransaction
+        .mockRejectedValueOnce(new Error(rawError))
+        .mockResolvedValueOnce(undefined);
       await renderWithTheme(<ChatSettingsScreen />);
 
       await fireEvent.press(screen.getByText(control));
@@ -976,12 +1006,24 @@ describe('ChatSettingsScreen source and account ownership', () => {
       expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
 
       await fireEvent.press(screen.getByText(control));
-      await waitFor(() => expect(mockSetChatTheme).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledTimes(2));
       expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(2);
-      expect(mockSetChatTheme).toHaveBeenLastCalledWith(mockDatabase, CHAT_GUID, {
-        backgroundUri: 'file:///documents/copied-background.jpg',
-      });
-      expect(mockSetBackgroundIsLight).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, false);
+      expect(mockSetChatAppearanceWithinTransaction).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        {
+          backgroundUri: 'file:///documents/copied-background.jpg',
+          backgroundIsLight: false,
+        },
+      );
+      await waitFor(() =>
+        expectDbRunSequence(mockDatabase, [
+          'BEGIN IMMEDIATE',
+          'ROLLBACK',
+          'BEGIN IMMEDIATE',
+          'COMMIT',
+        ]),
+      );
     },
   );
 
@@ -991,14 +1033,21 @@ describe('ChatSettingsScreen source and account ownership', () => {
       const pendingWrite = deferred<void>();
       const rawError = `raw-stale-${control}-write-error-b803`;
       mockLaunchImageLibrary.mockResolvedValue(pickedAsset('file:///picked-stale-write.jpg'));
-      mockSetChatTheme.mockReturnValueOnce(pendingWrite.promise).mockResolvedValueOnce(undefined);
+      mockSetChatAppearanceWithinTransaction
+        .mockReturnValueOnce(pendingWrite.promise)
+        .mockResolvedValueOnce(undefined);
       const view = await renderWithTheme(<ChatSettingsScreen />);
 
       await fireEvent.press(screen.getByText(control));
       await waitFor(() =>
-        expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
-          backgroundUri: 'file:///documents/copied-background.jpg',
-        }),
+        expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID,
+          {
+            backgroundUri: 'file:///documents/copied-background.jpg',
+            backgroundIsLight: false,
+          },
+        ),
       );
 
       mockGuid = CHAT_GUID_B;
@@ -1016,13 +1065,168 @@ describe('ChatSettingsScreen source and account ownership', () => {
 
       await fireEvent.press(screen.getByText(control));
       await waitFor(() =>
-        expect(mockSetChatTheme).toHaveBeenCalledWith(mockDatabase, CHAT_GUID_B, {
-          backgroundUri: 'file:///documents/copied-background.jpg',
-        }),
+        expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID_B,
+          {
+            backgroundUri: 'file:///documents/copied-background.jpg',
+            backgroundIsLight: false,
+          },
+        ),
       );
       expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(2);
     },
   );
+
+  it('commits generated tokens, copied background, and luminance in one owner', async () => {
+    const generatedTokens = { mode: 'dark', color: { tint: '#123456' } };
+    mockLaunchImageLibrary.mockResolvedValue(pickedAsset('file:///picked-generated.jpg'));
+    mockAdaptiveTokensFromImage.mockResolvedValue(generatedTokens);
+    mockComputeBackgroundIsLight.mockResolvedValue(true);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Generate theme from background'));
+
+    await waitFor(() =>
+      expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        {
+          themeTokens: JSON.stringify(generatedTokens),
+          backgroundUri: 'file:///documents/copied-background.jpg',
+          backgroundIsLight: true,
+        },
+      ),
+    );
+    expect(mockAdaptiveTokensFromImage).toHaveBeenCalledWith(
+      'file:///picked-generated.jpg',
+      'dark',
+    );
+    expect(mockComputeBackgroundIsLight).toHaveBeenCalledWith(
+      'file:///documents/copied-background.jpg',
+    );
+    expect(mockAdaptiveTokensFromImage.mock.invocationCallOrder[0]).toBeLessThan(
+      mockComputeBackgroundIsLight.mock.invocationCallOrder[0]!,
+    );
+    expect(mockComputeBackgroundIsLight.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetChatAppearanceWithinTransaction.mock.invocationCallOrder[0]!,
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+    expect(mockShowDialog).not.toHaveBeenCalledWith(
+      'Background set',
+      expect.stringContaining('Adaptive theming'),
+    );
+  });
+
+  it('clears tokens, background, and luminance in one guarded owner', async () => {
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Clear chat theme / background'));
+
+    await waitFor(() =>
+      expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { themeTokens: null, backgroundUri: null, backgroundIsLight: null },
+      ),
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+    expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(mockDatabaseB.run).not.toHaveBeenCalled();
+  });
+
+  it('finishes admitted luminance work outside SQLite and starts no owner after retirement', async () => {
+    const oldLease = mockAccountLease;
+    const luminance = deferred<boolean | null>();
+    mockLaunchImageLibrary.mockResolvedValue(pickedAsset('file:///picked-delayed-luminance.jpg'));
+    mockComputeBackgroundIsLight.mockReturnValue(luminance.promise);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Set Background…'));
+    await waitFor(() =>
+      expect(mockComputeBackgroundIsLight).toHaveBeenCalledWith(
+        'file:///documents/copied-background.jpg',
+      ),
+    );
+    expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
+    expect(mockDatabase.run).not.toHaveBeenCalled();
+
+    mockGetDatabase.mockClear().mockReturnValue(mockDatabaseB);
+    let pauseSettled = false;
+    const pausePromise = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    try {
+      await retireLease(oldLease);
+      expect(pauseSettled).toBe(false);
+
+      await act(async () => {
+        luminance.resolve(false);
+        await luminance.promise;
+      });
+      await pausePromise;
+      expect(pauseSettled).toBe(true);
+      expect(mockGetDatabase).not.toHaveBeenCalled();
+      expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
+      expect(mockDatabase.run).not.toHaveBeenCalled();
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+      expect(mockShowDialog).not.toHaveBeenCalled();
+      expect(JSON.stringify(view.toJSON())).not.toContain('database commit guard rejected');
+    } finally {
+      await act(async () => {
+        luminance.resolve(false);
+        await luminance.promise;
+        await pausePromise;
+      });
+      resumeRealtimeDeliveries();
+    }
+  });
+
+  it('drains an admitted Clear owner and rolls all appearance fields back after retirement', async () => {
+    const oldLease = mockAccountLease;
+    const pendingAppearance = deferred<void>();
+    mockSetChatAppearanceWithinTransaction.mockReturnValueOnce(pendingAppearance.promise);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Clear chat theme / background'));
+    await waitFor(() =>
+      expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { themeTokens: null, backgroundUri: null, backgroundIsLight: null },
+      ),
+    );
+    expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']);
+
+    mockGetDatabase.mockClear().mockReturnValue(mockDatabaseB);
+    let pauseSettled = false;
+    const pausePromise = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    try {
+      await retireLease(oldLease);
+      expect(pauseSettled).toBe(false);
+
+      await act(async () => {
+        pendingAppearance.resolve();
+        await pendingAppearance.promise;
+      });
+      await pausePromise;
+      expect(pauseSettled).toBe(true);
+      expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+      expect(mockGetDatabase).not.toHaveBeenCalled();
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+      expect(mockShowDialog).not.toHaveBeenCalled();
+      expect(JSON.stringify(view.toJSON())).not.toContain('database commit guard rejected');
+    } finally {
+      await act(async () => {
+        pendingAppearance.resolve();
+        await pendingAppearance.promise;
+        await pausePromise;
+      });
+      resumeRealtimeDeliveries();
+    }
+  });
 
   it('revokes an old A removal confirmation and binds a fresh exact B confirmation', async () => {
     const view = await renderWithTheme(<ChatSettingsScreen />);

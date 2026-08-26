@@ -822,6 +822,20 @@ export function setChatCustomizationWithinTransaction(
   });
 }
 
+export interface ChatAppearancePatch {
+  themeTokens?: string | null;
+  backgroundUri?: string | null;
+  backgroundIsLight?: boolean | null;
+}
+
+function normalizeChatAppearancePatch(patch: ChatAppearancePatch): ChatAppearancePatch {
+  const set: ChatAppearancePatch = {};
+  if (patch.themeTokens !== undefined) set.themeTokens = patch.themeTokens;
+  if (patch.backgroundUri !== undefined) set.backgroundUri = patch.backgroundUri;
+  if (patch.backgroundIsLight !== undefined) set.backgroundIsLight = patch.backgroundIsLight;
+  return set;
+}
+
 /**
  * Set a chat's per-chat theme override and/or chat-background image. Pass a field
  * as `undefined` to leave it unchanged, or `null` to clear it (revert to the global
@@ -830,13 +844,23 @@ export function setChatCustomizationWithinTransaction(
 export async function setChatTheme(
   db: AppDatabase,
   guid: string,
-  patch: { themeTokens?: string | null; backgroundUri?: string | null },
+  patch: Pick<ChatAppearancePatch, 'themeTokens' | 'backgroundUri'>,
 ): Promise<void> {
-  const set: { themeTokens?: string | null; backgroundUri?: string | null } = {};
-  if (patch.themeTokens !== undefined) set.themeTokens = patch.themeTokens;
-  if (patch.backgroundUri !== undefined) set.backgroundUri = patch.backgroundUri;
+  const set = normalizeChatAppearancePatch(patch);
   if (Object.keys(set).length === 0) return;
-  await withDbTransaction(db, () => db.update(chats).set(set).where(eq(chats.guid, guid)));
+  await withDbTransaction(db, (context) => setChatAppearanceWithinTransaction(context, guid, set));
+}
+
+export function setChatAppearanceWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  patch: ChatAppearancePatch,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    const set = normalizeChatAppearancePatch(patch);
+    if (Object.keys(set).length === 0) return;
+    await db.update(chats).set(set).where(eq(chats.guid, guid));
+  });
 }
 
 /**
@@ -874,8 +898,8 @@ export async function setBackgroundIsLight(
   guid: string,
   isLight: boolean | null,
 ): Promise<void> {
-  await withDbTransaction(db, () =>
-    db.update(chats).set({ backgroundIsLight: isLight }).where(eq(chats.guid, guid)),
+  await withDbTransaction(db, (context) =>
+    setChatAppearanceWithinTransaction(context, guid, { backgroundIsLight: isLight }),
   );
 }
 

@@ -1751,18 +1751,38 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
   );
+  const chatAppearanceTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'app/(app)/chat-settings/[guid].tsx' &&
+      [
+        '.applyChatTheme',
+        '.pickBackground',
+        '.generateThemeFromBackground',
+        '.clearChatTheme',
+      ].some((symbol) => finding.symbol.includes(symbol)) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/chats.ts#setChatAppearanceWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
+  );
 
+  assert.deepEqual(delegated.map((finding) => finding.id).sort(), []);
   assert.deepEqual(
-    delegated.map((finding) => finding.id).sort(),
+    chatAppearanceTransactions.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:db9406682a>:mutator-call:d793dbd83e0b',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:18ed6f9fbe>:mutator-call:846f572038eb',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:18ed6f9fbe>:mutator-call:d2790530293a',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:111bca0857ff',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:8641071be5dc',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:c44c588780a6',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:63a3594d82df',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:f372826d2ddd',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:81aecf5e35>.<callback:6b01fc7e2b>:mutator-call:14fed4ae1a29',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:81aecf5e35>:mutator-call:84affc8a5f51',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:81aecf5e35>:mutator-call:cbf9700c70c0',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:e3f0749c7c>.<callback:6b01fc7e2b>:mutator-call:a83c37875f34',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:e3f0749c7c>:mutator-call:3f2c1290c4d4',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:e3f0749c7c>:mutator-call:ef2087c1c54c',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:d83e3424ef>.<callback:e7c50ac4bd>.<callback:6b01fc7e2b>:mutator-call:2db48f1a23c5',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:d83e3424ef>.<callback:e7c50ac4bd>:mutator-call:187683c88c89',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:d83e3424ef>.<callback:e7c50ac4bd>:mutator-call:3cd8197f2073',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:3fa069faab>.<callback:e408448774>.<callback:6b01fc7e2b>:mutator-call:10192214cce8',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:3fa069faab>.<callback:e408448774>:mutator-call:5d0dc88e2de2',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:3fa069faab>.<callback:e408448774>:mutator-call:f06f4f9d1722',
     ].sort(),
   );
   assert.deepEqual(
@@ -4501,6 +4521,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markMessageSendErrorWithinTransaction',
     'markOutgoingSentNoGuidWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
+    'setChatAppearanceWithinTransaction',
     'setChatArchiveWithinTransaction',
     'setChatCustomizationWithinTransaction',
     'setChatMuteWithinTransaction',
@@ -4581,6 +4602,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
+      'src/db/repositories/chats.ts#setChatAppearanceWithinTransaction:drizzle-update:1f23b5c32ece',
       'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
       'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction:drizzle-update:eb8d843c171a',
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
@@ -4605,7 +4627,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 29);
+  assert.equal(selected.length, 30);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

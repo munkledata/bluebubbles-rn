@@ -19,10 +19,9 @@ import {
   getChatParticipants,
   getChatTheme,
   listChatAttachmentsByKind,
-  setBackgroundIsLight,
+  setChatAppearanceWithinTransaction,
   setChatCustomizationWithinTransaction,
   setChatMuteWithinTransaction,
-  setChatTheme,
   type ChatMediaByKind,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
@@ -332,9 +331,16 @@ function ChatSettingsScreen({
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
     setStudioAnimation(null);
-    queueScreenAccountTask(operationGrant, () =>
-      setChatTheme(getDatabase(), guid, { themeTokens: JSON.stringify(tokens) }),
-    );
+    const appearance = { themeTokens: JSON.stringify(tokens) };
+    queueScreenAccountTask(operationGrant, async (activeLease) => {
+      const db = getDatabase();
+      const chatGuid = operationGrant.chatGuid;
+      await withDbTransaction(
+        db,
+        (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
+        () => activeLease.isCurrent(),
+      );
+    });
   };
 
   const pickBackground = (): void => {
@@ -355,19 +361,24 @@ function ChatSettingsScreen({
           return null;
         });
         if (!res || res.canceled || res.assets.length === 0 || !pickerIsCurrent()) return;
+        const pickedUri = res.assets[0]!.uri;
         try {
-          await runScreenAccountTask(pickerGrant, async () => {
+          await runScreenAccountTask(pickerGrant, async (activeLease) => {
+            const db = getDatabase();
+            const chatGuid = pickerGrant.chatGuid;
             // Copy out of the purgeable ImagePicker cache into a stable app dir before storing.
             // The tracked task drains for its exact chat once admitted; only later UI publication
             // is revoked if this keyed screen is replaced.
-            const stableUri = await persistBackground(guid, res.assets[0]!.uri);
-            if (!accountLease.isCurrent()) return;
-            await setChatTheme(getDatabase(), guid, { backgroundUri: stableUri });
+            const stableUri = await persistBackground(chatGuid, pickedUri);
+            if (!activeLease.isCurrent()) return;
             // Record the wallpaper's luminance so overlay text stays legible on it.
-            await setBackgroundIsLight(
-              getDatabase(),
-              guid,
-              await computeBackgroundIsLight(stableUri),
+            const backgroundIsLight = await computeBackgroundIsLight(stableUri);
+            if (!activeLease.isCurrent()) return;
+            const appearance = { backgroundUri: stableUri, backgroundIsLight };
+            await withDbTransaction(
+              db,
+              (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
+              () => activeLease.isCurrent(),
             );
           });
         } catch {
@@ -406,24 +417,28 @@ function ChatSettingsScreen({
         const pickedUri = res.assets[0]!.uri;
         let generated = false;
         try {
-          const completed = await runScreenAccountTask(pickerGrant, async () => {
+          const completed = await runScreenAccountTask(pickerGrant, async (activeLease) => {
+            const db = getDatabase();
+            const chatGuid = pickerGrant.chatGuid;
             // Extract the seed colour from the picked asset, THEN copy it into a stable dir
             // (the ImagePicker cache path is purgeable) and persist that path.
             const tokens = await adaptiveTokensFromImage(pickedUri, 'dark');
-            if (!accountLease.isCurrent()) return;
-            const uri = await persistBackground(guid, pickedUri);
-            if (!accountLease.isCurrent()) return;
+            if (!activeLease.isCurrent()) return;
+            const uri = await persistBackground(chatGuid, pickedUri);
+            if (!activeLease.isCurrent()) return;
+            const backgroundIsLight = await computeBackgroundIsLight(uri);
+            if (!activeLease.isCurrent()) return;
             generated = tokens != null;
-            if (tokens) {
-              await setChatTheme(getDatabase(), guid, {
-                themeTokens: JSON.stringify(tokens),
-                backgroundUri: uri,
-              });
-            } else {
-              await setChatTheme(getDatabase(), guid, { backgroundUri: uri });
-            }
-            // Record the wallpaper's luminance so overlay text stays legible on it.
-            await setBackgroundIsLight(getDatabase(), guid, await computeBackgroundIsLight(uri));
+            const appearance = {
+              ...(tokens ? { themeTokens: JSON.stringify(tokens) } : {}),
+              backgroundUri: uri,
+              backgroundIsLight,
+            };
+            await withDbTransaction(
+              db,
+              (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
+              () => activeLease.isCurrent(),
+            );
           });
           if (completed && !generated && pickerIsCurrent()) {
             showDialog(
@@ -445,11 +460,17 @@ function ChatSettingsScreen({
   const clearChatTheme = (): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
-    queueScreenAccountTask(operationGrant, async () => {
-      await setChatTheme(getDatabase(), guid, { themeTokens: null, backgroundUri: null });
+    const appearance = { themeTokens: null, backgroundUri: null, backgroundIsLight: null };
+    queueScreenAccountTask(operationGrant, async (activeLease) => {
+      const db = getDatabase();
+      const chatGuid = operationGrant.chatGuid;
       // Cleared the local override → drop its luminance; the synced background (if any) recomputes
       // its own on the next chat open (ensureSyncedBackground).
-      await setBackgroundIsLight(getDatabase(), guid, null);
+      await withDbTransaction(
+        db,
+        (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
+        () => activeLease.isCurrent(),
+      );
     });
   };
 

@@ -3,13 +3,14 @@ import {
   getChatTheme,
   getSyncedBackgroundState,
   setBackgroundIsLight,
+  setChatAppearanceWithinTransaction,
   setChatTheme,
   setSyncedBackgroundLuminanceIfCurrent,
   setSyncedBackgroundUri,
   setSyncedBackgroundUriIfCurrent,
   upsertChats,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 
 /** Seed one chat row so the theme update has a target. */
@@ -131,6 +132,71 @@ describe('setChatTheme / getChatTheme', () => {
     expect(await getChatTheme(t.db, 'g1')).toMatchObject({
       backgroundUri: 'file:///queued.jpg',
       backgroundIsLight: 1,
+    });
+  });
+
+  it('rolls back tokens, background, and luminance together when the owner guard is revoked', async () => {
+    const t = await createTestDb();
+    await seedChat(t.db);
+    await setChatTheme(t.db, 'g1', {
+      themeTokens: '{"old":1}',
+      backgroundUri: 'file:///old.jpg',
+    });
+    await setBackgroundIsLight(t.db, 'g1', true);
+    let current = true;
+    let triggerRan = false;
+    t.raw.function('revoke_chat_appearance_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_chat_appearance_guard
+      AFTER UPDATE OF theme_tokens, background_uri, background_is_light ON chats
+      WHEN OLD.guid = 'g1' AND NEW.background_uri = 'file:///next.jpg'
+      BEGIN
+        SELECT revoke_chat_appearance_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        t.db,
+        (context) =>
+          setChatAppearanceWithinTransaction(context, 'g1', {
+            themeTokens: '{"next":1}',
+            backgroundUri: 'file:///next.jpg',
+            backgroundIsLight: false,
+          }),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(await getChatTheme(t.db, 'g1')).toEqual({
+      themeTokens: '{"old":1}',
+      backgroundUri: 'file:///old.jpg',
+      syncedBackgroundUri: null,
+      backgroundIsLight: 1,
+    });
+
+    t.raw.exec('DROP TRIGGER revoke_chat_appearance_guard');
+    current = true;
+    await withDbTransaction(
+      t.db,
+      (context) =>
+        setChatAppearanceWithinTransaction(context, 'g1', {
+          themeTokens: '{"next":1}',
+          backgroundUri: 'file:///next.jpg',
+          backgroundIsLight: false,
+        }),
+      () => current,
+    );
+    expect(await getChatTheme(t.db, 'g1')).toEqual({
+      themeTokens: '{"next":1}',
+      backgroundUri: 'file:///next.jpg',
+      syncedBackgroundUri: null,
+      backgroundIsLight: 0,
     });
   });
 });
