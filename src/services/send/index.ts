@@ -351,7 +351,9 @@ export function editText(
 ): Promise<{
   ok: boolean;
 } | null> {
-  return runUiAccountOperation(accountLease, () => sendEdit(getDatabase(), http, args));
+  return runUiAccountOperation(accountLease, () =>
+    sendEdit(getDatabase(), http, args, Date.now(), () => accountLease.isCurrent()),
+  );
 }
 
 /** UI-facing unsend/retract of a sent message. */

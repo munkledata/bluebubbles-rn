@@ -2,7 +2,13 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
-import { revertLocalUnsend, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import {
+  revertLocalEdit,
+  revertLocalUnsend,
+  upsertChats,
+  upsertHandles,
+  upsertMessages,
+} from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
@@ -138,6 +144,205 @@ describe('sendEdit / sendUnsend', () => {
       partIndex: 0,
     });
     expect((cap.body() as Record<string, unknown>).backwardsCompatText).toContain('edited!');
+  });
+
+  it('edit: rolls back a retired optimistic apply before HTTP and lets a fresh lease revert', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const originalBody = attributedBody('birthday decoded body');
+    raw
+      .prepare(
+        "UPDATE messages SET text = 'birthday original', attributed_body = ?, date_edited = 4321 WHERE guid = 'm1'",
+      )
+      .run(originalBody);
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_edit_during_apply', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER pause_edit_during_apply
+      AFTER UPDATE OF text, attributed_body, date_edited ON messages
+      WHEN NEW.date_edited = 5000
+      BEGIN SELECT pause_edit_during_apply(); END`);
+
+    let posts = 0;
+    const oldLease = captureRealtimeDeliveryLease();
+    try {
+      const oldEdit = runTrackedRealtimeWork(oldLease, (lease) =>
+        sendEdit(
+          db,
+          {
+            post: async () => {
+              posts += 1;
+              return { guid: 'must-not-edit' };
+            },
+          } as unknown as HttpClient,
+          { messageGuid: 'm1', newText: 'optimistic retired' },
+          5_000,
+          () => lease.isCurrent(),
+        ),
+      );
+
+      await expect(oldEdit).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+      if (!drain) throw new Error('edit apply did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(posts).toBe(0);
+      expect(raw.inTransaction).toBe(false);
+      expect(
+        one(
+          raw,
+          "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+        ),
+      ).toEqual({ text: 'birthday original', body: originalBody, edited: 4_321 });
+      expect(ftsHits(raw, 'birthday')).toBe(1);
+      expect(ftsHits(raw, 'optimistic')).toBe(0);
+
+      raw.exec('DROP TRIGGER pause_edit_during_apply');
+      resumeRealtimeDeliveries();
+      raw
+        .prepare("UPDATE messages SET text = '', attributed_body = ? WHERE guid = 'm1'")
+        .run(originalBody);
+      const freshLease = captureRealtimeDeliveryLease();
+      let freshResult: { ok: boolean } | undefined;
+      let postRanInsideTransaction = true;
+      let optimisticRow: Record<string, unknown> | undefined;
+      await expect(
+        runTrackedRealtimeWork(freshLease, async (lease) => {
+          freshResult = await sendEdit(
+            db,
+            {
+              post: async () => {
+                posts += 1;
+                postRanInsideTransaction = raw.inTransaction;
+                optimisticRow = one(
+                  raw,
+                  "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+                );
+                return {};
+              },
+            } as unknown as HttpClient,
+            { messageGuid: 'm1', newText: 'optimistic searchable' },
+            6_000,
+            () => lease.isCurrent(),
+          );
+        }),
+      ).resolves.toBe('delivered');
+
+      expect(freshResult).toEqual({ ok: false });
+      expect(posts).toBe(1);
+      expect(postRanInsideTransaction).toBe(false);
+      expect(optimisticRow).toEqual({
+        text: 'optimistic searchable',
+        body: null,
+        edited: 6_000,
+      });
+      expect(raw.inTransaction).toBe(false);
+      expect(
+        one(
+          raw,
+          "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+        ),
+      ).toEqual({ text: 'birthday decoded body', body: originalBody, edited: 4_321 });
+      expect(ftsHits(raw, 'birthday')).toBe(1);
+      expect(ftsHits(raw, 'optimistic')).toBe(0);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_edit_during_apply');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      raw.close();
+    }
+  });
+
+  it('edit: attempts a failed local revert once and permits an exact public retry', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const previousBody = attributedBody('birthday previous body');
+    raw
+      .prepare(
+        "UPDATE messages SET text = '', attributed_body = ?, date_edited = 4321 WHERE guid = 'm1'",
+      )
+      .run(previousBody);
+    let revertAttempts = 0;
+    raw.function('record_edit_revert', () => {
+      revertAttempts += 1;
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER fail_edit_revert
+      BEFORE UPDATE OF text, attributed_body, date_edited ON messages
+      WHEN OLD.date_edited = 5000
+        AND OLD.text = 'optimistic searchable'
+        AND OLD.attributed_body IS NULL
+      BEGIN
+        SELECT record_edit_revert();
+        SELECT RAISE(ABORT, 'EDIT_REVERT_CANARY');
+      END`);
+
+    let posts = 0;
+    try {
+      const attempt = await observe(
+        sendEdit(
+          db,
+          {
+            post: async () => {
+              posts += 1;
+              return {};
+            },
+          } as unknown as HttpClient,
+          { messageGuid: 'm1', newText: 'optimistic searchable' },
+          5_000,
+        ),
+      ).outcome;
+
+      expect({
+        outcome: attempt.kind,
+        posts,
+        revertAttempts,
+        inTransaction: raw.inTransaction,
+        row: one(
+          raw,
+          "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+        ),
+      }).toEqual({
+        outcome: 'rejected',
+        posts: 1,
+        revertAttempts: 1,
+        inTransaction: false,
+        row: { text: 'optimistic searchable', body: null, edited: 5_000 },
+      });
+      if (attempt.kind === 'rejected') {
+        expect(errorMessages(attempt.error)).toContain('EDIT_REVERT_CANARY');
+      }
+      expect(ftsHits(raw, 'optimistic')).toBe(1);
+      expect(ftsHits(raw, 'birthday')).toBe(0);
+
+      raw.exec('DROP TRIGGER fail_edit_revert');
+      await expect(
+        revertLocalEdit(
+          db,
+          'm1',
+          'birthday previous body',
+          4_321,
+          5_000,
+          previousBody,
+          'optimistic searchable',
+        ),
+      ).resolves.toBe(true);
+      expect(
+        one(
+          raw,
+          "SELECT text, attributed_body AS body, date_edited AS edited FROM messages WHERE guid='m1'",
+        ),
+      ).toEqual({ text: 'birthday previous body', body: previousBody, edited: 4_321 });
+      expect(ftsHits(raw, 'birthday')).toBe(1);
+      expect(ftsHits(raw, 'optimistic')).toBe(0);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS fail_edit_revert');
+      raw.close();
+    }
   });
 
   it('unsend: posts the server-required body {chatGuid} (F-5)', async () => {

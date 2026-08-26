@@ -909,13 +909,13 @@ export interface LocalEditSnapshot {
  * This owner returns the raw body rather than decoding it while every DB writer is blocked; the
  * service derives the searchable restore text after this short transaction commits.
  */
-export async function applyLocalEdit(
-  db: AppDatabase,
+export function applyLocalEditWithinTransaction(
+  context: DbTransactionContext,
   guid: string,
   newText: string,
   now: number,
 ): Promise<LocalEditSnapshot | null> {
-  return withDbTransaction(db, async () => {
+  return runInTransactionContext(context, async (db) => {
     const rows = await db.all<{
       id: number;
       text: string | null;
@@ -944,6 +944,18 @@ export async function applyLocalEdit(
       chatGuid: previous.chatGuid,
     };
   });
+}
+
+/** Standalone optimistic-edit owner; composing services use the transaction-only body. */
+export async function applyLocalEdit(
+  db: AppDatabase,
+  guid: string,
+  newText: string,
+  now: number,
+): Promise<LocalEditSnapshot | null> {
+  return withDbTransaction(db, (context) =>
+    applyLocalEditWithinTransaction(context, guid, newText, now),
+  );
 }
 
 export interface LocalUnsendSnapshot {
@@ -1015,8 +1027,8 @@ export async function applyLocalUnsend(
  * Returns whether the revert actually applied; false means someone else owns the row now, which the
  * caller must respect (there is nothing to repair — the newer value is the true one).
  */
-export async function revertLocalEdit(
-  db: AppDatabase,
+export function revertLocalEditWithinTransaction(
+  context: DbTransactionContext,
   guid: string,
   prevText: string | null,
   prevDateEdited: number | null,
@@ -1024,7 +1036,7 @@ export async function revertLocalEdit(
   prevAttributedBody?: string | null,
   expectedOptimisticText?: string,
 ): Promise<boolean> {
-  return withDbTransaction(db, async () => {
+  return runInTransactionContext(context, async (db) => {
     const restoreAttributedBody = prevAttributedBody === undefined ? 0 : 1;
     const enforceOptimisticState = expectedOptimisticText === undefined ? 0 : 1;
     const rows = await db.all<{ id: number }>(
@@ -1044,6 +1056,29 @@ export async function revertLocalEdit(
     );
     return rows.length > 0;
   });
+}
+
+/** Standalone optimistic-edit revert owner; composing services use the transaction-only body. */
+export async function revertLocalEdit(
+  db: AppDatabase,
+  guid: string,
+  prevText: string | null,
+  prevDateEdited: number | null,
+  appliedAt: number,
+  prevAttributedBody?: string | null,
+  expectedOptimisticText?: string,
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    revertLocalEditWithinTransaction(
+      context,
+      guid,
+      prevText,
+      prevDateEdited,
+      appliedAt,
+      prevAttributedBody,
+      expectedOptimisticText,
+    ),
+  );
 }
 
 /**

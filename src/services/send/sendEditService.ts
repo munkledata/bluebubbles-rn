@@ -2,9 +2,9 @@ import { editMessage, unsendMessage } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import {
-  applyLocalEdit,
+  applyLocalEditWithinTransaction,
   applyLocalUnsendWithinTransaction,
-  revertLocalEdit,
+  revertLocalEditWithinTransaction,
   revertLocalUnsendWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
@@ -56,6 +56,33 @@ function queueMessageMutation<T>(
   return result;
 }
 
+/** One short guarded owner for every full-state compare-and-set edit rollback. */
+function revertOptimisticEdit(
+  db: AppDatabase,
+  messageGuid: string,
+  restoreText: string | null,
+  previousDateEdited: number | null,
+  appliedAt: number,
+  previousAttributedBody: string | null,
+  expectedOptimisticText: string,
+  commitGuard?: DbCommitGuard,
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    (context) =>
+      revertLocalEditWithinTransaction(
+        context,
+        messageGuid,
+        restoreText,
+        previousDateEdited,
+        appliedAt,
+        previousAttributedBody,
+        expectedOptimisticText,
+      ),
+    commitGuard,
+  );
+}
+
 /**
  * Optimistic edit: snapshot the prior text, apply locally (UI shows the new text
  * + "Edited"), POST, and revert on failure so the bubble never lies. Pure
@@ -66,11 +93,21 @@ async function sendEditOnce(
   http: HttpClient,
   args: SendEditArgs,
   now: number,
+  commitGuard?: DbCommitGuard,
 ): Promise<{ ok: boolean }> {
   // Snapshot + optimistic write share one DB owner. This prevents a bare shared-connection read
   // from capturing another transaction's uncommitted value before the write queues behind it.
-  const prev = await applyLocalEdit(db, args.messageGuid, args.newText, now);
+  const prev = await withDbTransaction(
+    db,
+    (context) => applyLocalEditWithinTransaction(context, args.messageGuid, args.newText, now),
+    commitGuard,
+  );
   if (!prev) return { ok: false };
+
+  // Disconnect can retire this account immediately after COMMIT. Avoid both stale rich-body work
+  // and an old-account request through a successor account's credential boundary.
+  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+
   // Rich bodies can be arbitrarily large. Decode after the short DB owner commits so parsing never
   // blocks the process-wide write mutex used by every message, sync, and settings mutation.
   const restoreText =
@@ -79,7 +116,7 @@ async function sendEditOnce(
       : plainTextFromAttributedBody(prev.attributedBody) || prev.storedText;
   const chatGuid = args.chatGuid ?? prev.chatGuid;
   if (!chatGuid) {
-    await revertLocalEdit(
+    await revertOptimisticEdit(
       db,
       args.messageGuid,
       restoreText,
@@ -87,9 +124,12 @@ async function sendEditOnce(
       now,
       prev.attributedBody,
       args.newText,
+      commitGuard,
     );
     return { ok: false };
   }
+
+  let accepted = false;
   try {
     // The server returns the sender's send ack `{ guid? }`. A present guid is the
     // Private-API confirmation that the edit went through; treat its absence as a
@@ -101,36 +141,27 @@ async function sendEditOnce(
       backwardsCompatibilityMessage: `Edited to: “${args.newText}”`,
       partIndex: 0,
     });
-    if (!ack.guid) {
-      // Compare-and-set, not a blind write: an edit the server DID apply whose response was lost
-      // still echoes over the socket, and that echo lands FIRST. Reverting blindly would overwrite
-      // it, leaving the message reading the old wording to you and the new one to everyone else.
-      // `prev.dateEdited` is passed through rather than `?? 0` — a literal 0 is not "never edited".
-      await revertLocalEdit(
-        db,
-        args.messageGuid,
-        restoreText,
-        prev.dateEdited,
-        now,
-        prev.attributedBody,
-        args.newText,
-      );
-      return { ok: false };
-    }
-    return { ok: true };
+    accepted = Boolean(ack.guid);
   } catch {
-    // Same compare-and-set as above: a transport failure does NOT prove the edit wasn't applied.
-    await revertLocalEdit(
-      db,
-      args.messageGuid,
-      restoreText,
-      prev.dateEdited,
-      now,
-      prev.attributedBody,
-      args.newText,
-    );
-    return { ok: false };
+    // A transport failure follows the same single guarded revert as a soft negative response.
   }
+
+  if (accepted) return { ok: true };
+
+  // Compare-and-set, not a blind write: a lost response can still be followed by a server echo.
+  // Keeping this outside the HTTP catch makes DB/guard failure propagate after exactly one attempt.
+  // `prev.dateEdited` is passed through rather than `?? 0` — literal 0 is a real predecessor.
+  await revertOptimisticEdit(
+    db,
+    args.messageGuid,
+    restoreText,
+    prev.dateEdited,
+    now,
+    prev.attributedBody,
+    args.newText,
+    commitGuard,
+  );
+  return { ok: false };
 }
 
 export function sendEdit(
@@ -138,12 +169,15 @@ export function sendEdit(
   http: HttpClient,
   args: SendEditArgs,
   now: number = Date.now(),
+  commitGuard?: DbCommitGuard,
 ): Promise<{ ok: boolean }> {
   // Capture the key synchronously. Callers own their argument object and may mutate/reuse it after
   // admission; queue cleanup must still address the exact slot this operation claimed.
   const messageGuid = args.messageGuid;
   const queuedArgs = { ...args, messageGuid };
-  return queueMessageMutation(db, messageGuid, () => sendEditOnce(db, http, queuedArgs, now));
+  return queueMessageMutation(db, messageGuid, () =>
+    sendEditOnce(db, http, queuedArgs, now, commitGuard),
+  );
 }
 
 export interface SendUnsendArgs {

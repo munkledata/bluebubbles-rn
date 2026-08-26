@@ -344,6 +344,29 @@ describe('UI send account lease', () => {
     resumeRealtimeDeliveries();
   });
 
+  it('passes edit persistence a commit guard tied to the captured screen lease', async () => {
+    const screenLease = captureRealtimeDeliveryLease();
+    await expect(
+      editText(
+        { messageGuid: 'message-a', newText: 'updated text', chatGuid: 'chat-a' },
+        screenLease,
+      ),
+    ).resolves.toEqual({ ok: true });
+
+    expect(mockSendEdit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { messageGuid: 'message-a', newText: 'updated text', chatGuid: 'chat-a' },
+      expect.any(Number),
+      expect.any(Function),
+    );
+    const commitGuard = mockSendEdit.mock.calls[0]?.[4] as (() => boolean) | undefined;
+    expect(commitGuard?.()).toBe(true);
+    await pauseRealtimeDeliveries();
+    expect(commitGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
+  });
+
   it('passes unsend persistence a commit guard tied to the captured screen lease', async () => {
     const screenLease = captureRealtimeDeliveryLease();
     await expect(
