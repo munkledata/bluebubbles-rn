@@ -279,6 +279,73 @@ describe('scheduled-message account ownership', () => {
     expect(await getScheduledById(db, id)).not.toBeNull();
   });
 
+  it('keeps the local row when the server refuses its cancellation', async () => {
+    const { db } = await createTestDb();
+    await seedChat(db);
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'retry cancellation later',
+      scheduledFor: 9_000_000,
+      serverId: 'srv-a',
+    });
+    mockDeleteScheduled.mockRejectedValue(new Error('server delete failed'));
+
+    await expect(cancelScheduled({ id, serverId: 'srv-a' })).rejects.toThrow(
+      'server delete failed',
+    );
+
+    expect(await getScheduledById(db, id)).toMatchObject({ id, serverId: 'srv-a' });
+  });
+
+  it('rolls back the local delete when account A retires after its server cancel succeeds', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db);
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'server gone, local handle retained',
+      scheduledFor: 9_000_000,
+      serverId: 'srv-a',
+    });
+    let serverDeleteCompleted = false;
+    mockDeleteScheduled.mockImplementation(async () => {
+      serverDeleteCompleted = true;
+    });
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    let serverWasDeletedFirst = false;
+    raw.function('pause_scheduled_cancel_during_delete', () => {
+      triggerRan = true;
+      serverWasDeletedFirst = serverDeleteCompleted;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_scheduled_cancel_during_delete
+      AFTER DELETE ON scheduled_messages
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT pause_scheduled_cancel_during_delete();
+      END
+    `);
+
+    const action = cancelScheduled({ id, serverId: 'srv-a' });
+    try {
+      await expect(action).rejects.toThrow('account session changed');
+      if (!drain) throw new Error('scheduled cancel did not revoke the account lease');
+      await drain;
+    } finally {
+      resumeRealtimeDeliveries();
+    }
+
+    expect(mockDeleteScheduled).toHaveBeenCalledWith({}, 'srv-a');
+    expect(triggerRan).toBe(true);
+    expect(serverWasDeletedFirst).toBe(true);
+    expect(await getScheduledById(db, id)).toMatchObject({ id, serverId: 'srv-a' });
+  });
+
   it('does not repoint a row from A’s late edit-create response after B', async () => {
     const { db } = await createTestDb();
     await seedChat(db);

@@ -601,8 +601,16 @@ export async function resetStuckScheduled(
   );
 }
 
+/** Delete one scheduled row while joining an authenticated transaction owner. */
+export function deleteScheduledWithinTransaction(
+  context: DbTransactionContext,
+  id: number,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.delete(scheduledMessages).where(eq(scheduledMessages.id, id));
+  });
+}
+
 export async function deleteScheduled(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, () =>
-    db.delete(scheduledMessages).where(eq(scheduledMessages.id, id)),
-  );
+  await withDbTransaction(db, (context) => deleteScheduledWithinTransaction(context, id));
 }

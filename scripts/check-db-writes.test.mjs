@@ -1901,11 +1901,15 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   const delegated = sendFrontDoorFindings.filter(
     (finding) => finding.detectedContext === 'coordinated-delegation',
   );
+  const cancelScheduledTransaction = sendFrontDoorFindings.filter(
+    (finding) =>
+      finding.symbol.startsWith('cancelScheduled.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#cancelScheduled.<callback:b5bc8ae556>:mutator-call:5d28847b50ce',
       'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:3468a73fa274',
       'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:7d834803b3c6',
       'src/services/send/index.ts#discardMessage.<callback:177d37aec8>:mutator-call:a403d6c21cdd',
@@ -1929,7 +1933,15 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
     ].sort(),
   );
 
-  assert.equal(sendFrontDoorFindings.length, 21);
+  assert.deepEqual(
+    cancelScheduledTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>.<callback:a851d931f6>:mutator-call:3c7e71894c98',
+      'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:0b12396b320f',
+      'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:ac5ab63b2745',
+    ].sort(),
+  );
+  assert.equal(sendFrontDoorFindings.length, 23);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -4406,6 +4418,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   ]);
   const leafSymbols = new Set([
     'deleteScheduledHistoryWithinTransaction',
+    'deleteScheduledWithinTransaction',
     'kvSetWithinTransaction',
     'markAllChatsReadLocalWithinTransaction',
     'markMessageSendErrorWithinTransaction',
@@ -4457,6 +4470,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
+      'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
       'src/db/repositories/kv.ts#kvSetWithinTransaction:drizzle-insert:0fe9d15a2010',
       'src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc',
@@ -4473,7 +4487,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 22);
+  assert.equal(selected.length, 23);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

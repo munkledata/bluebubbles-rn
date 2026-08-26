@@ -7,6 +7,7 @@ import {
   deleteScheduled,
   deleteScheduledHistory,
   deleteScheduledHistoryWithinTransaction,
+  deleteScheduledWithinTransaction,
   getScheduledById,
   insertScheduled,
   listAllScheduled,
@@ -149,6 +150,43 @@ describe('scheduled messages repo', () => {
 
     expect(triggerRan).toBe(true);
     expect(await getScheduledById(db, id)).toMatchObject({ id, status: 'sent' });
+  });
+
+  it('rolls back a scheduled-row delete when its account guard is revoked mid-delete', async () => {
+    const { db, raw } = await createTestDb();
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'keep after revocation',
+      scheduledFor: 100,
+      serverId: 'server-row',
+    });
+
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_scheduled_delete_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_guard_after_scheduled_delete
+      AFTER DELETE ON scheduled_messages
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT revoke_scheduled_delete_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        db,
+        (context) => deleteScheduledWithinTransaction(context, id),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(await getScheduledById(db, id)).toMatchObject({ id, status: 'pending' });
   });
 
   it('markScheduledSent removes a row from pending + due lists', async () => {

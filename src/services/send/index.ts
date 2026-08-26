@@ -5,13 +5,14 @@ import {
   claimFailedOutgoingForRetry,
   countOutgoingQueueHealth,
   deleteMessageLocal,
-  deleteScheduled,
+  deleteScheduledWithinTransaction,
   discardOutgoingMessage,
   getScheduledById,
   listServerScheduledPruneExposure,
   reconcileServerScheduled,
   updateScheduled,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { http } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
 import { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
@@ -377,14 +378,20 @@ export async function cancelScheduled(
   row: { id: number; serverId: string | null },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
+  const db = getDatabase();
+  const id = row.id;
+  const serverId = row.serverId;
   await runScheduledAccountOperation(accountLease, async () => {
-    const db = getDatabase();
     assertScheduledLease(accountLease);
-    if (row.serverId != null) {
-      await scheduledApi.deleteScheduled(http, row.serverId); // throws → local kept, UI alerts
+    if (serverId != null) {
+      await scheduledApi.deleteScheduled(http, serverId); // throws → local kept, UI alerts
       assertScheduledLease(accountLease);
     }
-    await deleteScheduled(db, row.id);
+    await withDbTransaction(
+      db,
+      (context) => deleteScheduledWithinTransaction(context, id),
+      () => accountLease.isCurrent(),
+    );
     assertScheduledLease(accountLease);
   });
 }
