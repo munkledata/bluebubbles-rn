@@ -3,7 +3,6 @@ import { getDatabase } from '@db/database';
 import {
   clearErrorReportsWithinTransaction,
   kvGet,
-  kvSet,
   kvSetWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
@@ -275,7 +274,9 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   setFlag: async (flag, value) => {
     set({ [flag]: value } as Partial<FeatureSettingsState>); // optimistic
     try {
-      await kvSet(getDatabase(), FLAGS[flag].key, value ? '1' : '0');
+      await withDbTransaction(getDatabase(), (context) =>
+        kvSetWithinTransaction(context, FLAGS[flag].key, value ? '1' : '0'),
+      );
     } catch {
       // best-effort persist; the in-memory toggle still applies this session
     }
@@ -310,7 +311,9 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     setting.apply(val); // apply immediately, before the persist
     set({ maxConcurrentDownloads: val }); // optimistic
     try {
-      await kvSet(getDatabase(), setting.key, setting.serialize(val));
+      await withDbTransaction(getDatabase(), (context) =>
+        kvSetWithinTransaction(context, setting.key, setting.serialize(val)),
+      );
     } catch {
       // best-effort persist; the in-memory cap still applies this session
     }
@@ -318,7 +321,9 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   setAutoDownloadDestination: async (dest) => {
     set({ autoDownloadDestination: dest }); // optimistic
     try {
-      await kvSet(getDatabase(), AUTO_DOWNLOAD_DEST_KEY, dest);
+      await withDbTransaction(getDatabase(), (context) =>
+        kvSetWithinTransaction(context, AUTO_DOWNLOAD_DEST_KEY, dest),
+      );
     } catch {
       // best-effort persist; the in-memory choice still applies this session
     }

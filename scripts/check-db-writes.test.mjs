@@ -1690,6 +1690,14 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const featureSettingTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/state/featureSettingsStore.ts' &&
+      (finding.symbol.includes('.setFlag') ||
+        finding.symbol.includes('.setMaxConcurrentDownloads') ||
+        finding.symbol.includes('.setAutoDownloadDestination')) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
   const customThemeTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/state/themeStore.ts' &&
@@ -1715,15 +1723,26 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:00e3b0b7ac>:mutator-call:222335d51483',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:2ed50265e1>:mutator-call:418c5613062c',
       'app/(app)/scheduled.tsx#ScheduledScreen.<callback:a7ba9b6c78>.onPress.<callback:fc0d082a48>:mutator-call:76c2c8d46170',
-      'src/state/featureSettingsStore.ts#<callback:63875fb47b>.setAutoDownloadDestination:mutator-call:cff90475436f',
-      'src/state/featureSettingsStore.ts#<callback:63875fb47b>.setFlag:mutator-call:aff3ba08a7a5',
-      'src/state/featureSettingsStore.ts#<callback:63875fb47b>.setMaxConcurrentDownloads:mutator-call:c460f711a44f',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:4bdf863381>.<callback:03b142b7d3>.<callback:97863ede27>:mutator-call:edec8d1bbc8a',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:82637a13a0>.<callback:e2f8a6cb01>.<callback:f7d1b4463f>:mutator-call:811582c1dc0c',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:827299d4fe>.<callback:41e952ab60>.<callback:41be2e6c31>:mutator-call:d640a83b730e',
       'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:1af5790b07>.onPress.<callback:4d6e5d9d24>:mutator-call:4a1bcbb1c22f',
       'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:4b30e83615>:mutator-call:334ea9706dc2',
       'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:5b7035b070>:mutator-call:e8b55608b6d2',
+    ].sort(),
+  );
+  assert.deepEqual(
+    featureSettingTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:bf0c20884e95',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setAutoDownloadDestination:mutator-call:04a9c99c751e',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setAutoDownloadDestination:mutator-call:43aa7c2a27d2',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setFlag.<callback:80c80d5352>:mutator-call:2b38d4952ff7',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setFlag:mutator-call:800766996029',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setFlag:mutator-call:dc6111e4cedb',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:54668f771385',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setMaxConcurrentDownloads:mutator-call:0c60fd27ca09',
+      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setMaxConcurrentDownloads:mutator-call:bda7342cda63',
     ].sort(),
   );
   assert.deepEqual(
