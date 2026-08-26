@@ -28,6 +28,15 @@ import { runTrackedRealtimeWork, type RealtimeDeliveryLease } from './realtime/d
  */
 let openInFlight: Promise<AppDatabase> | null = null;
 
+/**
+ * The one key rotation allowed in this process at a time.
+ *
+ * A rejection is deliberately kept until restart. The native rekey may already have succeeded
+ * even when a later vault promotion fails, so retrying here could overwrite the only staged key
+ * that can reopen the database. Startup `resolveDbKey` owns that recovery decision.
+ */
+let keyRotationInFlight: Promise<void> | null = null;
+
 function startDatabaseOpen(): Promise<AppDatabase> {
   const attempt = (async (): Promise<AppDatabase> => {
     // resolveDbKey (not getOrCreateDbKey) so a key rotation interrupted by a crash is finished
@@ -66,7 +75,9 @@ export async function ensureDatabase(): Promise<AppDatabase> {
 
 /** Rotate the SQLCipher database key (crash-safe). The open connection keeps working. */
 export async function rotateDatabaseKey(): Promise<void> {
-  await rotateDbKey(vault, getRawDatabase());
+  const attempt = (keyRotationInFlight ??= rotateDbKey(vault, getRawDatabase()));
+  await attempt;
+  if (keyRotationInFlight === attempt) keyRotationInFlight = null;
 }
 
 /**

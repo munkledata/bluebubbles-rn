@@ -12770,7 +12770,7 @@
     {
       "id": "src/services/databaseControl.ts#startDatabaseOpen:mutator-call:d37edc282604",
       "path": "src/services/databaseControl.ts",
-      "line": 32,
+      "line": 41,
       "symbol": "startDatabaseOpen",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#startDatabaseOpen.<callback:0c4403be08>",
@@ -12783,7 +12783,7 @@
     {
       "id": "src/services/databaseControl.ts#startDatabaseOpen.<callback:0c4403be08>:mutator-call:6ed01d291b1f",
       "path": "src/services/databaseControl.ts",
-      "line": 36,
+      "line": 45,
       "symbol": "startDatabaseOpen.<callback:0c4403be08>",
       "operation": "mutator-call",
       "target": "src/db/database.ts#initDatabase",
@@ -12796,7 +12796,7 @@
     {
       "id": "src/services/databaseControl.ts#ensureDatabase:mutator-call:4c661a0285e3",
       "path": "src/services/databaseControl.ts",
-      "line": 63,
+      "line": 72,
       "symbol": "ensureDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#startDatabaseOpen",
@@ -12809,7 +12809,7 @@
     {
       "id": "src/services/databaseControl.ts#rotateDatabaseKey:mutator-call:dc60d96f0ec1",
       "path": "src/services/databaseControl.ts",
-      "line": 69,
+      "line": 78,
       "symbol": "rotateDatabaseKey",
       "operation": "mutator-call",
       "target": "src/db/key.ts#rotateDbKey",
@@ -12822,7 +12822,7 @@
     {
       "id": "src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f",
       "path": "src/services/databaseControl.ts",
-      "line": 158,
+      "line": 169,
       "symbol": "updateSearchTextBatch",
       "operation": "sql-update",
       "target": "messages",
@@ -12835,7 +12835,7 @@
     {
       "id": "src/services/databaseControl.ts#tryFinishSearchTextBackfill.<callback:8a33c57441>:mutator-call:f688ff7452cc",
       "path": "src/services/databaseControl.ts",
-      "line": 181,
+      "line": 192,
       "symbol": "tryFinishSearchTextBackfill.<callback:8a33c57441>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#tryFinishSearchTextBackfill.<callback:8a33c57441>.<callback:8d44861fae>",
@@ -12848,7 +12848,7 @@
     {
       "id": "src/services/databaseControl.ts#tryFinishSearchTextBackfill.<callback:8a33c57441>:mutator-call:ff02cad44741",
       "path": "src/services/databaseControl.ts",
-      "line": 181,
+      "line": 192,
       "symbol": "tryFinishSearchTextBackfill.<callback:8a33c57441>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -12861,7 +12861,7 @@
     {
       "id": "src/services/databaseControl.ts#tryFinishSearchTextBackfill.<callback:8a33c57441>.<callback:8d44861fae>:mutator-call:9aa35fad542f",
       "path": "src/services/databaseControl.ts",
-      "line": 197,
+      "line": 208,
       "symbol": "tryFinishSearchTextBackfill.<callback:8a33c57441>.<callback:8d44861fae>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -12874,7 +12874,7 @@
     {
       "id": "src/services/databaseControl.ts#runSearchTextBackfillPass.<callback:acc336d401>:mutator-call:0273d0c4627f",
       "path": "src/services/databaseControl.ts",
-      "line": 242,
+      "line": 253,
       "symbol": "runSearchTextBackfillPass.<callback:acc336d401>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#runSearchTextBackfillPass.<callback:acc336d401>.<callback:e0004ba406>",
@@ -12887,7 +12887,7 @@
     {
       "id": "src/services/databaseControl.ts#runSearchTextBackfillPass.<callback:acc336d401>:mutator-call:ceafbbcc3c32",
       "path": "src/services/databaseControl.ts",
-      "line": 242,
+      "line": 253,
       "symbol": "runSearchTextBackfillPass.<callback:acc336d401>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -12900,7 +12900,7 @@
     {
       "id": "src/services/databaseControl.ts#runSearchTextBackfillPass.<callback:acc336d401>.<callback:e0004ba406>:mutator-call:1a0fcad8ace6",
       "path": "src/services/databaseControl.ts",
-      "line": 254,
+      "line": 265,
       "symbol": "runSearchTextBackfillPass.<callback:acc336d401>.<callback:e0004ba406>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#updateSearchTextBatch",
