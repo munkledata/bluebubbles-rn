@@ -290,9 +290,17 @@ export async function setChatMute(
  * The inbox sorts pinned chats first (see `listChatsForInbox`).
  */
 export async function setChatPin(db: AppDatabase, guid: string, pinned: boolean): Promise<void> {
-  await withDbTransaction(db, () =>
-    db.update(chats).set({ isPinned: pinned }).where(eq(chats.guid, guid)),
-  );
+  await withDbTransaction(db, (context) => setChatPinWithinTransaction(context, guid, pinned));
+}
+
+export function setChatPinWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  pinned: boolean,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.update(chats).set({ isPinned: pinned }).where(eq(chats.guid, guid));
+  });
 }
 
 /** Archive / unarchive a chat (client-local). Archived chats drop out of the main inbox. */
@@ -301,9 +309,19 @@ export async function setChatArchive(
   guid: string,
   archived: boolean,
 ): Promise<void> {
-  await withDbTransaction(db, () =>
-    db.update(chats).set({ isArchived: archived }).where(eq(chats.guid, guid)),
+  await withDbTransaction(db, (context) =>
+    setChatArchiveWithinTransaction(context, guid, archived),
   );
+}
+
+export function setChatArchiveWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  archived: boolean,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.update(chats).set({ isArchived: archived }).where(eq(chats.guid, guid));
+  });
 }
 
 /**

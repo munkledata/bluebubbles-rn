@@ -3,7 +3,13 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDatabase } from '@db/database';
-import { setChatArchive, setChatMute, setChatPin, type InboxRow } from '@db/repositories';
+import {
+  setChatArchiveWithinTransaction,
+  setChatMute,
+  setChatPinWithinTransaction,
+  type InboxRow,
+} from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { deleteChat, markRead, markUnread } from '@/services';
 import {
   captureRealtimeDeliveryLease,
@@ -108,9 +114,16 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 sep={theme.color.separator}
                 onPress={() =>
                   run(() =>
-                    runAccountScopedLocalMutation(accountLease, () =>
-                      setChatPin(getDatabase(), target.guid, !target.isPinned),
-                    ),
+                    runAccountScopedLocalMutation(accountLease, async () => {
+                      const db = getDatabase();
+                      const guid = target.guid;
+                      const pinned = !target.isPinned;
+                      await withDbTransaction(
+                        db,
+                        (context) => setChatPinWithinTransaction(context, guid, pinned),
+                        () => accountLease.isCurrent(),
+                      );
+                    }),
                   )
                 }
               />
@@ -132,9 +145,16 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 sep={theme.color.separator}
                 onPress={() =>
                   run(() =>
-                    runAccountScopedLocalMutation(accountLease, () =>
-                      setChatArchive(getDatabase(), target.guid, !target.isArchived),
-                    ),
+                    runAccountScopedLocalMutation(accountLease, async () => {
+                      const db = getDatabase();
+                      const guid = target.guid;
+                      const archived = !target.isArchived;
+                      await withDbTransaction(
+                        db,
+                        (context) => setChatArchiveWithinTransaction(context, guid, archived),
+                        () => accountLease.isCurrent(),
+                      );
+                    }),
                   )
                 }
               />

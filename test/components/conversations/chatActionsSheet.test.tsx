@@ -16,14 +16,14 @@
  *   - a null target renders no rows.
  *
  * In-file mocks:
- *   - `@db/repositories`: the sheet imports the five chat mutations; the real barrel pulls
- *     op-sqlite/drizzle native at import. Stub each as a jest.fn resolving void.
+ *   - `@db/repositories`: Pin/Archive use context-only helpers inside a guarded transaction;
+ *     Mute remains a public repository mutation. Stub each as a jest.fn resolving void.
  *   - `@/services`: `markRead`/`markUnread`/`deleteChat` are referenced; its barrel loads native
  *     modules at import.
  *   - `@ui/dialog/dialogStore`: spy `showDialog` so the Delete-confirm can be asserted without
  *     driving the real dialog store/Modal.
- *   `@db/database` (getDatabase) is already stubbed by the shared setup to a jest.fn() → undefined,
- *   so the mutations are called with `(undefined, guid, …)`.
+ *   - `@db/database`: route Pin/Archive through account-A/account-B fake databases so the suite can
+ *     assert the transaction boundary, rollback, and absence of cross-account SQL.
  *
  * run() is async (fn().finally(onClose)); after each press we `await waitFor` on onClose so the
  * deferred close never bleeds into the next test's act environment.
@@ -31,7 +31,12 @@
 import React from 'react';
 import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { ChatActionsSheet, type ChatActionTarget } from '@ui/conversations/ChatActionsSheet';
-import { setChatPin, setChatMute, setChatArchive } from '@db/repositories';
+import {
+  setChatArchiveWithinTransaction,
+  setChatMute,
+  setChatPinWithinTransaction,
+} from '@db/repositories';
+import { getDatabase } from '@db/database';
 import { deleteChat, markRead, markUnread } from '@/services';
 import {
   pauseRealtimeDeliveries,
@@ -45,9 +50,9 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 jest.mock('@db/repositories', () => ({
-  setChatPin: jest.fn(() => Promise.resolve()),
+  setChatPinWithinTransaction: jest.fn(() => Promise.resolve()),
   setChatMute: jest.fn(() => Promise.resolve()),
-  setChatArchive: jest.fn(() => Promise.resolve()),
+  setChatArchiveWithinTransaction: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('@/services', () => ({
@@ -58,9 +63,10 @@ jest.mock('@/services', () => ({
 
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 
-const mockSetChatPin = setChatPin as jest.Mock;
+const mockGetDatabase = getDatabase as jest.Mock;
+const mockSetChatPinWithinTransaction = setChatPinWithinTransaction as jest.Mock;
 const mockSetChatMute = setChatMute as jest.Mock;
-const mockSetChatArchive = setChatArchive as jest.Mock;
+const mockSetChatArchiveWithinTransaction = setChatArchiveWithinTransaction as jest.Mock;
 const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
@@ -68,6 +74,14 @@ const mockDeleteChat = deleteChat as jest.Mock;
 const PRIVATE_TITLE = 'private-conversation-title-7c91@example.test';
 const GENERIC_DELETE_MESSAGE =
   'Delete this conversation? This removes it from this device (not from the server).';
+const ACCOUNT_A_DATABASE = {
+  kind: 'chat-actions-sheet-account-a-db',
+  run: jest.fn(async (_statement: unknown) => undefined),
+};
+const ACCOUNT_B_DATABASE = {
+  kind: 'chat-actions-sheet-account-b-db',
+  run: jest.fn(async (_statement: unknown) => undefined),
+};
 
 /** The `buttons` array handed to showDialog by the last call (dialogStore's 3rd arg). */
 interface DialogButton {
@@ -85,6 +99,21 @@ function deferred<T = void>() {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+function sqlStatementText(value: unknown): string {
+  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
+  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  return chunks
+    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
+    .filter((part): part is string => typeof part === 'string')
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
+  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
 }
 
 function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
@@ -126,9 +155,12 @@ function makeTarget(overrides: Partial<ChatActionTarget> = {}): ChatActionTarget
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
-  mockSetChatPin.mockClear();
-  mockSetChatMute.mockClear();
-  mockSetChatArchive.mockClear();
+  mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DATABASE);
+  mockSetChatPinWithinTransaction.mockReset().mockResolvedValue(undefined);
+  mockSetChatMute.mockReset().mockResolvedValue(undefined);
+  mockSetChatArchiveWithinTransaction.mockReset().mockResolvedValue(undefined);
+  ACCOUNT_A_DATABASE.run.mockReset().mockResolvedValue(undefined);
+  ACCOUNT_B_DATABASE.run.mockReset().mockResolvedValue(undefined);
   mockMarkUnread.mockClear();
   mockMarkRead.mockClear();
   mockShowDialog.mockClear();
@@ -163,8 +195,10 @@ describe('ChatActionsSheet — Pin', () => {
     const t = makeTarget({ isPinned: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Pin'));
-    expect(mockSetChatPin).toHaveBeenCalledWith(undefined, t.guid, true);
+    await waitFor(() => expect(mockSetChatPinWithinTransaction).toHaveBeenCalledTimes(1));
+    expect(mockSetChatPinWithinTransaction).toHaveBeenCalledWith(expect.any(Object), t.guid, true);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('shows "Unpin" for a pinned chat and unpins it on press', async () => {
@@ -172,8 +206,10 @@ describe('ChatActionsSheet — Pin', () => {
     const onClose = await renderSheet(t);
     expect(screen.queryByText('Pin')).toBeNull();
     fireEvent.press(screen.getByText('Unpin'));
-    expect(mockSetChatPin).toHaveBeenCalledWith(undefined, t.guid, false);
+    await waitFor(() => expect(mockSetChatPinWithinTransaction).toHaveBeenCalledTimes(1));
+    expect(mockSetChatPinWithinTransaction).toHaveBeenCalledWith(expect.any(Object), t.guid, false);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('drops a retained A-account Pin callback after reconnecting B', async () => {
@@ -181,30 +217,46 @@ describe('ChatActionsSheet — Pin', () => {
     const onClose = await renderSheet(t);
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
+    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
 
     fireEvent.press(screen.getByText('Pin'));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(mockSetChatPin).not.toHaveBeenCalled();
+    expect(mockSetChatPinWithinTransaction).not.toHaveBeenCalled();
+    expect(mockGetDatabase).not.toHaveBeenCalled();
+    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
+    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
   });
 
-  it('keeps Disconnect waiting for an already-admitted Pin write', async () => {
+  it('waits for an admitted A-account Pin and rolls it back without touching B', async () => {
     const gate = deferred();
-    mockSetChatPin.mockReturnValueOnce(gate.promise);
+    mockSetChatPinWithinTransaction.mockReturnValueOnce(gate.promise);
     const onClose = await renderSheet(makeTarget({ isPinned: false }));
 
-    fireEvent.press(screen.getByText('Pin'));
-    await waitFor(() => expect(mockSetChatPin).toHaveBeenCalledTimes(1));
-    let pauseSettled = false;
-    const pause = pauseRealtimeDeliveries().then(() => {
-      pauseSettled = true;
-    });
-    await Promise.resolve();
-    expect(pauseSettled).toBe(false);
+    let pause: Promise<void> | undefined;
+    try {
+      fireEvent.press(screen.getByText('Pin'));
+      await waitFor(() => expect(mockSetChatPinWithinTransaction).toHaveBeenCalledTimes(1));
+      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE']);
+      let pauseSettled = false;
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseSettled = true;
+      });
+      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
+      await Promise.resolve();
+      expect(pauseSettled).toBe(false);
 
-    gate.resolve();
-    await pause;
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      gate.resolve();
+      await pause;
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      pause ??= pauseRealtimeDeliveries();
+      await Promise.allSettled([pause]);
+      resumeRealtimeDeliveries();
+    }
   });
 });
 
@@ -213,7 +265,7 @@ describe('ChatActionsSheet — Mute', () => {
     const t = makeTarget({ muted: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Mute'));
-    expect(mockSetChatMute).toHaveBeenCalledWith(undefined, t.guid, 'mute');
+    expect(mockSetChatMute).toHaveBeenCalledWith(ACCOUNT_A_DATABASE, t.guid, 'mute');
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
@@ -221,7 +273,7 @@ describe('ChatActionsSheet — Mute', () => {
     const t = makeTarget({ muted: true });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Unmute'));
-    expect(mockSetChatMute).toHaveBeenCalledWith(undefined, t.guid, null);
+    expect(mockSetChatMute).toHaveBeenCalledWith(ACCOUNT_A_DATABASE, t.guid, null);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
@@ -231,16 +283,28 @@ describe('ChatActionsSheet — Archive', () => {
     const t = makeTarget({ isArchived: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Archive'));
-    expect(mockSetChatArchive).toHaveBeenCalledWith(undefined, t.guid, true);
+    await waitFor(() => expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledTimes(1));
+    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      t.guid,
+      true,
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('shows "Unarchive" and unarchives on press', async () => {
     const t = makeTarget({ isArchived: true });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Unarchive'));
-    expect(mockSetChatArchive).toHaveBeenCalledWith(undefined, t.guid, false);
+    await waitFor(() => expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledTimes(1));
+    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      t.guid,
+      false,
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('drops retained A-account Mute and Archive callbacks while fresh B controls remain exact', async () => {
@@ -256,12 +320,16 @@ describe('ChatActionsSheet — Archive', () => {
 
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
+    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
     await invokeConfiguredPress(oldMute);
     await waitFor(() => expect(oldClose).toHaveBeenCalledTimes(1));
     await invokeConfiguredPress(oldArchive);
     await waitFor(() => expect(oldClose).toHaveBeenCalledTimes(2));
     expect(mockSetChatMute).not.toHaveBeenCalled();
-    expect(mockSetChatArchive).not.toHaveBeenCalled();
+    expect(mockSetChatArchiveWithinTransaction).not.toHaveBeenCalled();
+    expect(mockGetDatabase).not.toHaveBeenCalled();
+    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
+    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
 
     await oldView.unmount();
     const freshClose = await renderSheet(target);
@@ -272,8 +340,13 @@ describe('ChatActionsSheet — Archive', () => {
     await invokeConfiguredPress(freshArchive);
     await waitFor(() => expect(freshClose).toHaveBeenCalledTimes(2));
 
-    expect(mockSetChatMute).toHaveBeenCalledWith(undefined, target.guid, 'mute');
-    expect(mockSetChatArchive).toHaveBeenCalledWith(undefined, target.guid, true);
+    expect(mockSetChatMute).toHaveBeenCalledWith(ACCOUNT_B_DATABASE, target.guid, 'mute');
+    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      target.guid,
+      true,
+    );
+    expectDbRunSequence(ACCOUNT_B_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 });
 

@@ -21,15 +21,17 @@ import {
   recordAttachmentCacheEntry,
   resumeChatPurges,
   setChatArchive,
+  setChatArchiveWithinTransaction,
   setChatCustomization,
   setChatPin,
+  setChatPinWithinTransaction,
   setChatTheme,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import { kv, outgoingQueue, scheduledMessages } from '@db/schema';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -185,6 +187,61 @@ describe('chat actions repo', () => {
     await Promise.all([pin, archive]);
     expect(col(raw, 'c1', 'is_pinned')).toBe(1);
     expect(col(raw, 'c1', 'is_archived')).toBe(1);
+  });
+
+  it('rolls back pin and archive when their account guard is revoked mid-update', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+
+    let current = true;
+    let pinTriggerRan = false;
+    raw.function('revoke_chat_pin_guard', () => {
+      pinTriggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_chat_pin_guard
+      AFTER UPDATE OF is_pinned ON chats
+      WHEN OLD.guid = 'c1' AND NEW.is_pinned = 1
+      BEGIN
+        SELECT revoke_chat_pin_guard();
+      END
+    `);
+    await expect(
+      withDbTransaction(
+        db,
+        (context) => setChatPinWithinTransaction(context, 'c1', true),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(pinTriggerRan).toBe(true);
+    expect(col(raw, 'c1', 'is_pinned')).toBe(0);
+
+    current = true;
+    let archiveTriggerRan = false;
+    raw.function('revoke_chat_archive_guard', () => {
+      archiveTriggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_chat_archive_guard
+      AFTER UPDATE OF is_archived ON chats
+      WHEN OLD.guid = 'c1' AND NEW.is_archived = 1
+      BEGIN
+        SELECT revoke_chat_archive_guard();
+      END
+    `);
+    await expect(
+      withDbTransaction(
+        db,
+        (context) => setChatArchiveWithinTransaction(context, 'c1', true),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(archiveTriggerRan).toBe(true);
+    expect(col(raw, 'c1', 'is_archived')).toBe(0);
   });
 
   it('keeps a local pin/archive through a server re-sync (server fields still update)', async () => {

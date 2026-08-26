@@ -1724,6 +1724,19 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
             'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:',
           ))),
   );
+  const pinArchiveTransactions = findings.filter(
+    (finding) =>
+      [
+        'src/ui/conversations/ChatActionsSheet.tsx',
+        'src/ui/conversations/ConversationTile.tsx',
+      ].includes(finding.path) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/chats.ts#setChatPinWithinTransaction' ||
+        finding.target === 'src/db/repositories/chats.ts#setChatArchiveWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(`${finding.path}#`))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1742,9 +1755,6 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:00e3b0b7ac>:mutator-call:222335d51483',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:2ed50265e1>:mutator-call:418c5613062c',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:4bdf863381>.<callback:03b142b7d3>.<callback:97863ede27>:mutator-call:edec8d1bbc8a',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:82637a13a0>.<callback:e2f8a6cb01>.<callback:f7d1b4463f>:mutator-call:811582c1dc0c',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:827299d4fe>.<callback:41e952ab60>.<callback:41be2e6c31>:mutator-call:d640a83b730e',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:4b30e83615>:mutator-call:334ea9706dc2',
       'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:5b7035b070>:mutator-call:e8b55608b6d2',
     ].sort(),
   );
@@ -1787,6 +1797,20 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>.<callback:408993bad6>:mutator-call:cb0097bc8e7b',
       'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>:mutator-call:64dcea224823',
       'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>:mutator-call:d64ee82fedf5',
+    ].sort(),
+  );
+  assert.deepEqual(
+    pinArchiveTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:11ea819a72>.<callback:ccc6733d3a>.<callback:198c55def5>.<callback:b679cdc6bb>:mutator-call:8ad9f425ae42',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:11ea819a72>.<callback:ccc6733d3a>.<callback:198c55def5>:mutator-call:92fb447a6d69',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:11ea819a72>.<callback:ccc6733d3a>.<callback:198c55def5>:mutator-call:e3eafe9eef3a',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:1f36aef127>.<callback:c28f8ec3ea>.<callback:63e74079de>.<callback:3861af4d53>:mutator-call:4a12c0ea73c9',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:1f36aef127>.<callback:c28f8ec3ea>.<callback:63e74079de>:mutator-call:59990e819739',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:1f36aef127>.<callback:c28f8ec3ea>.<callback:63e74079de>:mutator-call:df84dc65e20a',
+      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:2af56543e2>.<callback:3861af4d53>:mutator-call:c6bf082a5ed1',
+      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:2af56543e2>:mutator-call:4cac51146d83',
+      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:2af56543e2>:mutator-call:6fa69c344de2',
     ].sort(),
   );
 });
@@ -4423,6 +4447,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markAllChatsReadLocalWithinTransaction',
     'markMessageSendErrorWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
+    'setChatArchiveWithinTransaction',
+    'setChatPinWithinTransaction',
     'setChatUnreadLocalWithinTransaction',
     'setSyncMarkerWithinTransaction',
     'updateSearchTextBatch',
@@ -4469,6 +4495,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
+      'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
+      'src/db/repositories/chats.ts#setChatPinWithinTransaction:drizzle-update:90be45ecc8db',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
@@ -4487,7 +4515,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 23);
+  assert.equal(selected.length, 25);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

@@ -2,7 +2,8 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
-import { setChatArchive, setChatMute, type InboxRow } from '@db/repositories';
+import { setChatArchiveWithinTransaction, setChatMute, type InboxRow } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { deleteChat, markRead, markUnread } from '@/services';
 import {
   captureRealtimeDeliveryLease,
@@ -112,9 +113,16 @@ export const ConversationTile = React.memo(function ConversationTile({
       icon: 'archive-outline',
       color: '#8E8E93',
       onPress: () =>
-        void runAccountScopedLocalMutation(accountLease, () =>
-          setChatArchive(getDatabase(), row.guid, !row.isArchived),
-        ),
+        void runAccountScopedLocalMutation(accountLease, async () => {
+          const db = getDatabase();
+          const guid = row.guid;
+          const archived = !row.isArchived;
+          await withDbTransaction(
+            db,
+            (context) => setChatArchiveWithinTransaction(context, guid, archived),
+            () => accountLease.isCurrent(),
+          );
+        }),
     },
     {
       key: 'delete',
