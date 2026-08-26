@@ -1738,12 +1738,15 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(`${finding.path}#`))),
   );
-  const chatSettingsMuteTransactions = findings.filter(
+  const chatSettingsPreferenceTransactions = findings.filter(
     (finding) =>
       finding.path === 'app/(app)/chat-settings/[guid].tsx' &&
-      (finding.symbol.includes('.toggleMute') || finding.symbol.includes('.resetAll')) &&
+      ['.saveName', '.pickColor', '.toggleMute', '.resetAll'].some((symbol) =>
+        finding.symbol.includes(symbol),
+      ) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#setChatMuteWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
@@ -1760,17 +1763,23 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:c44c588780a6',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:63a3594d82df',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:f372826d2ddd',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:8cdf53351c>:mutator-call:de445000943d',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:91140063870e',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:00e3b0b7ac>:mutator-call:222335d51483',
     ].sort(),
   );
   assert.deepEqual(
-    chatSettingsMuteTransactions.map((finding) => finding.id).sort(),
+    chatSettingsPreferenceTransactions.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>.<callback:86a20f484f>:mutator-call:3b7c16f87ad1',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:0b7aa9a9ff23',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:9d1418f7ea42',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:0830c96e70>.<callback:caabd546ce>:mutator-call:6014973f0edc',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:0830c96e70>:mutator-call:0c901a134016',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:0830c96e70>:mutator-call:b2afc42499ef',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>.<callback:86a20f484f>:mutator-call:ee58c9c3c8e6',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>.<callback:caabd546ce>:mutator-call:824eb594e9f3',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:2926c0c87307',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:301ef98393d4',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:52ed08c8e3a5',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:53845581a78d',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:f17f133722>.<callback:caabd546ce>:mutator-call:7d07009f125f',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:f17f133722>:mutator-call:37523a49c16f',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:f17f133722>:mutator-call:632d18be24bf',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>.<callback:6c5110fdb6>:mutator-call:1bbda7a3a183',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:baa1ef9f5b7c',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:d5e45d9ed904',
@@ -4472,6 +4481,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markMessageSendErrorWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
     'setChatArchiveWithinTransaction',
+    'setChatCustomizationWithinTransaction',
     'setChatMuteWithinTransaction',
     'setChatPinWithinTransaction',
     'setChatUnreadLocalWithinTransaction',
@@ -4534,6 +4544,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
       'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
+      'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction:drizzle-update:eb8d843c171a',
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
       'src/db/repositories/chats.ts#setChatPinWithinTransaction:drizzle-update:90be45ecc8db',
       'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
@@ -4554,7 +4565,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 26);
+  assert.equal(selected.length, 27);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

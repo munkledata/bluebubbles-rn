@@ -16,7 +16,7 @@ const mockUpdateGroupParticipant = jest.fn();
 const mockOpenNotificationSettings = jest.fn();
 const mockSetChatTheme = jest.fn();
 const mockSetBackgroundIsLight = jest.fn();
-const mockSetChatCustomization = jest.fn();
+const mockSetChatCustomizationWithinTransaction = jest.fn();
 const mockSetChatMuteWithinTransaction = jest.fn();
 const mockSafeOpenUrl = jest.fn();
 const mockSubscribeGenerationInvalidation = jest.fn();
@@ -168,6 +168,26 @@ function retainConfiguredPress(node: { props: Record<string, unknown> }): () => 
   return () => onPress({ nativeEvent: {} });
 }
 
+function defaultColorSwatch(): NonNullable<ReturnType<typeof screen.getByText>['parent']> {
+  const marker = screen.getAllByText('✕').find((node) => {
+    const style = node.parent?.props.style;
+    return (
+      Array.isArray(style) &&
+      style.some(
+        (value) =>
+          value !== null &&
+          typeof value === 'object' &&
+          'width' in value &&
+          value.width === 36 &&
+          'height' in value &&
+          value.height === 36,
+      )
+    );
+  });
+  if (!marker?.parent) throw new Error('Expected the default bubble-color swatch');
+  return marker.parent;
+}
+
 function privateCanaries(): string[] {
   return [
     PRIVATE_CUSTOM_TITLE,
@@ -222,7 +242,8 @@ jest.mock('@db/repositories', () => ({
   getChatTheme: jest.fn(),
   listChatAttachmentsByKind: jest.fn(),
   setBackgroundIsLight: (...args: unknown[]) => mockSetBackgroundIsLight(...args),
-  setChatCustomization: (...args: unknown[]) => mockSetChatCustomization(...args),
+  setChatCustomizationWithinTransaction: (...args: unknown[]) =>
+    mockSetChatCustomizationWithinTransaction(...args),
   setChatMuteWithinTransaction: (...args: unknown[]) => mockSetChatMuteWithinTransaction(...args),
   setChatTheme: (...args: unknown[]) => mockSetChatTheme(...args),
 }));
@@ -463,8 +484,6 @@ import ChatSettingsScreen from '../../../app/(app)/chat-settings/[guid]';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
-import { withDbTransaction } from '@db/transaction';
-// eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -504,7 +523,7 @@ beforeEach(() => {
   mockOpenNotificationSettings.mockResolvedValue(undefined);
   mockSetChatTheme.mockResolvedValue(undefined);
   mockSetBackgroundIsLight.mockResolvedValue(undefined);
-  mockSetChatCustomization.mockResolvedValue(undefined);
+  mockSetChatCustomizationWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
 });
 
@@ -1398,29 +1417,111 @@ describe('ChatSettingsScreen source and account ownership', () => {
 
   it('contains a current best-effort Name write rejection and permits an exact retry', async () => {
     const rawError = 'raw-current-name-write-error-77d1';
-    mockSetChatCustomization
+    mockSetChatCustomizationWithinTransaction
       .mockRejectedValueOnce(new Error(rawError))
       .mockResolvedValueOnce(undefined);
     const view = await renderWithTheme(<ChatSettingsScreen />);
 
     await fireEvent.changeText(screen.getByDisplayValue(PRIVATE_CUSTOM_TITLE), 'first-name-write');
     await waitFor(() =>
-      expect(mockSetChatCustomization).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
-        customName: 'first-name-write',
-      }),
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { customName: 'first-name-write' },
+      ),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'ROLLBACK']));
     expect(mockShowDialog).not.toHaveBeenCalled();
     expect(JSON.stringify(view.toJSON())).not.toContain(rawError);
+    expect(screen.getByDisplayValue('first-name-write')).toBeTruthy();
 
     await fireEvent.changeText(screen.getByDisplayValue('first-name-write'), 'retry-name-write');
-    await waitFor(() => expect(mockSetChatCustomization).toHaveBeenCalledTimes(2));
-    expect(mockSetChatCustomization).toHaveBeenLastCalledWith(mockDatabase, CHAT_GUID, {
-      customName: 'retry-name-write',
-    });
+    await waitFor(() => expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledTimes(2));
+    expect(mockSetChatCustomizationWithinTransaction).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      CHAT_GUID,
+      { customName: 'retry-name-write' },
+    );
+    await waitFor(() =>
+      expectDbRunSequence(mockDatabase, [
+        'BEGIN IMMEDIATE',
+        'ROLLBACK',
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+      ]),
+    );
     expect(screen.getByDisplayValue('retry-name-write')).toBeTruthy();
+  });
+
+  it('keeps rapid optimistic Name edits ordered behind the global writer queue', async () => {
+    const firstWrite = deferred<void>();
+    mockSetChatCustomizationWithinTransaction
+      .mockReturnValueOnce(firstWrite.promise)
+      .mockResolvedValueOnce(undefined);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    try {
+      await fireEvent.changeText(
+        screen.getByDisplayValue(PRIVATE_CUSTOM_TITLE),
+        'first-queued-name',
+      );
+      await waitFor(() =>
+        expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID,
+          { customName: 'first-queued-name' },
+        ),
+      );
+      expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']);
+
+      await fireEvent.changeText(
+        screen.getByDisplayValue('first-queued-name'),
+        'second-queued-name',
+      );
+      expect(screen.getByDisplayValue('second-queued-name')).toBeTruthy();
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        firstWrite.resolve();
+        await firstWrite.promise;
+      });
+      await waitFor(() =>
+        expect(mockSetChatCustomizationWithinTransaction).toHaveBeenLastCalledWith(
+          expect.any(Object),
+          CHAT_GUID,
+          { customName: 'second-queued-name' },
+        ),
+      );
+      await waitFor(() =>
+        expectDbRunSequence(mockDatabase, [
+          'BEGIN IMMEDIATE',
+          'COMMIT',
+          'BEGIN IMMEDIATE',
+          'COMMIT',
+        ]),
+      );
+    } finally {
+      await act(async () => {
+        firstWrite.resolve();
+        await firstWrite.promise;
+      });
+    }
+  });
+
+  it('guards an exact active Color write in one committed A transaction', async () => {
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(defaultColorSwatch());
+
+    await waitFor(() =>
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { customColor: null },
+      ),
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+    expect(mockDatabaseB.run).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1447,9 +1548,13 @@ describe('ChatSettingsScreen source and account ownership', () => {
     },
   );
 
-  it('keeps retained stale A Mute and Reset inert, then binds exact fresh B controls', async () => {
+  it('keeps retained stale A Name, Color, Mute, and Reset controls inert, then binds fresh B', async () => {
     const oldLease = mockAccountLease;
     const view = await renderWithTheme(<ChatSettingsScreen />);
+    const oldName = screen.getByDisplayValue(PRIVATE_CUSTOM_TITLE).props.onChangeText as (
+      text: string,
+    ) => void;
+    const oldColor = retainConfiguredPress(defaultColorSwatch());
     const oldMute = retainConfiguredPress(screen.getByRole('switch', { name: 'Mute' }));
     const oldReset = retainConfiguredPress(screen.getByText('Reset to default').parent!);
 
@@ -1459,23 +1564,54 @@ describe('ChatSettingsScreen source and account ownership', () => {
     mockAccountLease = makeLease(74);
     mockGetDatabase.mockReturnValue(mockDatabaseB);
     mockGetDatabase.mockClear();
-    mockSetChatCustomization.mockClear();
+    mockSetChatCustomizationWithinTransaction.mockClear();
     mockSetChatMuteWithinTransaction.mockClear();
     mockDatabase.run.mockClear();
     mockDatabaseB.run.mockClear();
 
     await act(async () => {
+      oldName('retained-a-name');
+      oldColor();
       oldMute();
       oldReset();
       await Promise.resolve();
     });
     expect(mockGetDatabase).not.toHaveBeenCalled();
-    expect(mockSetChatCustomization).not.toHaveBeenCalled();
+    expect(mockSetChatCustomizationWithinTransaction).not.toHaveBeenCalled();
     expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
     expect(mockDatabase.run).not.toHaveBeenCalled();
     expect(mockDatabaseB.run).not.toHaveBeenCalled();
 
     await renderWithTheme(<ChatSettingsScreen />);
+    await fireEvent.changeText(screen.getByDisplayValue(PRIVATE_CUSTOM_TITLE_B), 'fresh-b-name');
+    await fireEvent.press(defaultColorSwatch());
+    await waitFor(() =>
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenNthCalledWith(
+        1,
+        expect.any(Object),
+        CHAT_GUID_B,
+        { customName: 'fresh-b-name' },
+      ),
+    );
+    await waitFor(() =>
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenNthCalledWith(
+        2,
+        expect.any(Object),
+        CHAT_GUID_B,
+        { customColor: null },
+      ),
+    );
+    await waitFor(() =>
+      expectDbRunSequence(mockDatabaseB, [
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+      ]),
+    );
+
+    mockSetChatCustomizationWithinTransaction.mockClear();
+    mockDatabaseB.run.mockClear();
     await fireEvent.press(screen.getByRole('switch', { name: 'Mute' }));
     await waitFor(() =>
       expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
@@ -1486,18 +1622,16 @@ describe('ChatSettingsScreen source and account ownership', () => {
     );
     await waitFor(() => expectDbRunSequence(mockDatabaseB, ['BEGIN IMMEDIATE', 'COMMIT']));
 
-    mockSetChatCustomization.mockClear();
+    mockSetChatCustomizationWithinTransaction.mockClear();
     mockSetChatMuteWithinTransaction.mockClear();
     mockDatabaseB.run.mockClear();
-    mockSetChatCustomization.mockImplementationOnce((db: Parameters<typeof withDbTransaction>[0]) =>
-      withDbTransaction(db, async () => undefined),
-    );
     await fireEvent.press(screen.getByText('Reset to default'));
     await waitFor(() =>
-      expect(mockSetChatCustomization).toHaveBeenCalledWith(mockDatabaseB, CHAT_GUID_B, {
-        customName: null,
-        customColor: null,
-      }),
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID_B,
+        { customName: null, customColor: null },
+      ),
     );
     await waitFor(() =>
       expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
@@ -1514,7 +1648,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
         'COMMIT',
       ]),
     );
-    expect(mockSetChatCustomization.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mockSetChatCustomizationWithinTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetChatMuteWithinTransaction.mock.invocationCallOrder[0]!,
     );
     expect(mockDatabase.run).not.toHaveBeenCalled();
@@ -1567,22 +1701,70 @@ describe('ChatSettingsScreen source and account ownership', () => {
     }
   });
 
+  it('rolls back Reset customization on retirement and never starts mute', async () => {
+    const oldLease = mockAccountLease;
+    const pendingCustomization = deferred<void>();
+    mockSetChatCustomizationWithinTransaction.mockReturnValueOnce(pendingCustomization.promise);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Reset to default'));
+    await waitFor(() =>
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { customName: null, customColor: null },
+      ),
+    );
+    expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']);
+    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
+
+    let pauseSettled = false;
+    const pausePromise = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    try {
+      await retireLease(oldLease);
+      mockGetDatabase.mockReturnValue(mockDatabaseB);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(pauseSettled).toBe(false);
+
+      await act(async () => {
+        pendingCustomization.resolve();
+        await pendingCustomization.promise;
+      });
+      await pausePromise;
+      expect(pauseSettled).toBe(true);
+      expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+      expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+      expect(JSON.stringify(view.toJSON())).not.toContain('database commit guard rejected');
+    } finally {
+      await act(async () => {
+        pendingCustomization.resolve();
+        await pendingCustomization.promise;
+        await pausePromise;
+      });
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('commits Reset customization before its admitted mute transaction rolls back', async () => {
     const oldLease = mockAccountLease;
     const pendingCustomization = deferred<void>();
     const pendingMute = deferred<void>();
-    mockSetChatCustomization.mockImplementationOnce((db: Parameters<typeof withDbTransaction>[0]) =>
-      withDbTransaction(db, async () => pendingCustomization.promise),
-    );
+    mockSetChatCustomizationWithinTransaction.mockReturnValueOnce(pendingCustomization.promise);
     mockSetChatMuteWithinTransaction.mockReturnValueOnce(pendingMute.promise);
     const view = await renderWithTheme(<ChatSettingsScreen />);
 
     await fireEvent.press(screen.getByText('Reset to default'));
     await waitFor(() =>
-      expect(mockSetChatCustomization).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
-        customName: null,
-        customColor: null,
-      }),
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { customName: null, customColor: null },
+      ),
     );
     expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
     await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']));
@@ -1599,7 +1781,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
       ),
     );
     expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT', 'BEGIN IMMEDIATE']);
-    expect(mockSetChatCustomization.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mockSetChatCustomizationWithinTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetChatMuteWithinTransaction.mock.invocationCallOrder[0]!,
     );
 
@@ -1640,16 +1822,13 @@ describe('ChatSettingsScreen source and account ownership', () => {
 
   it('contains a Reset customization rejection and never begins its mute transaction', async () => {
     const rawError = 'raw-current-reset-customization-error-85c4';
-    mockSetChatCustomization.mockRejectedValueOnce(new Error(rawError));
+    mockSetChatCustomizationWithinTransaction.mockRejectedValueOnce(new Error(rawError));
     const view = await renderWithTheme(<ChatSettingsScreen />);
 
     await fireEvent.press(screen.getByText('Reset to default'));
-    await waitFor(() => expect(mockSetChatCustomization).toHaveBeenCalledTimes(1));
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await waitFor(() => expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'ROLLBACK']));
     expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
-    expect(mockDatabase.run).not.toHaveBeenCalled();
     expect(mockShowDialog).not.toHaveBeenCalled();
     expect(JSON.stringify(view.toJSON())).not.toContain(rawError);
   });
@@ -1662,9 +1841,11 @@ describe('ChatSettingsScreen source and account ownership', () => {
       'current-custom-title',
     );
     await waitFor(() =>
-      expect(mockSetChatCustomization).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
-        customName: 'current-custom-title',
-      }),
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { customName: 'current-custom-title' },
+      ),
     );
     await fireEvent.press(
       screen.getByRole('button', {

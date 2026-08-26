@@ -778,12 +778,13 @@ export async function clearChatTombstone(db: AppDatabase, guid: string): Promise
  * Set a chat's local customizations. Pass a field as `undefined` to leave it
  * unchanged, or `null` to clear it (revert to default). Validates the color.
  */
-export async function setChatCustomization(
-  db: AppDatabase,
-  guid: string,
-  patch: { customName?: string | null; customColor?: string | null },
-): Promise<void> {
-  const set: { customName?: string | null; customColor?: string | null } = {};
+type ChatCustomizationPatch = {
+  customName?: string | null;
+  customColor?: string | null;
+};
+
+function normalizeChatCustomizationPatch(patch: ChatCustomizationPatch): ChatCustomizationPatch {
+  const set: ChatCustomizationPatch = {};
   if (patch.customName !== undefined) {
     const trimmed = patch.customName?.trim();
     set.customName = trimmed ? trimmed : null;
@@ -794,8 +795,31 @@ export async function setChatCustomization(
     }
     set.customColor = patch.customColor;
   }
+  return set;
+}
+
+export async function setChatCustomization(
+  db: AppDatabase,
+  guid: string,
+  patch: ChatCustomizationPatch,
+): Promise<void> {
+  const set = normalizeChatCustomizationPatch(patch);
   if (Object.keys(set).length === 0) return;
-  await withDbTransaction(db, () => db.update(chats).set(set).where(eq(chats.guid, guid)));
+  await withDbTransaction(db, (context) =>
+    setChatCustomizationWithinTransaction(context, guid, set),
+  );
+}
+
+export function setChatCustomizationWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  patch: ChatCustomizationPatch,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    const set = normalizeChatCustomizationPatch(patch);
+    if (Object.keys(set).length === 0) return;
+    await db.update(chats).set(set).where(eq(chats.guid, guid));
+  });
 }
 
 /**

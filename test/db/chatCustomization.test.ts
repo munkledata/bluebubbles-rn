@@ -3,6 +3,7 @@ import {
   getChatHeader,
   listChatsForInbox,
   setChatCustomization,
+  setChatCustomizationWithinTransaction,
   setChatMute,
   setChatMuteWithinTransaction,
   upsertChats,
@@ -60,6 +61,49 @@ describe('chat customization repo', () => {
     await expect(setChatCustomization(t.db, 'c1', { customColor: 'magenta' })).rejects.toThrow(
       /invalid custom color/,
     );
+  });
+
+  it('rolls back customization when its account guard is revoked mid-update', async () => {
+    const t = await createTestDb();
+    await seed(t, 'c1', 'Server');
+    await setChatCustomization(t.db, 'c1', {
+      customName: 'Original',
+      customColor: '#1982FC',
+    });
+
+    let current = true;
+    let triggerRan = false;
+    t.raw.function('revoke_chat_customization_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_chat_customization_guard
+      AFTER UPDATE OF custom_name, custom_color ON chats
+      WHEN OLD.guid = 'c1' AND NEW.custom_name = 'Next'
+      BEGIN
+        SELECT revoke_chat_customization_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        t.db,
+        (context) =>
+          setChatCustomizationWithinTransaction(context, 'c1', {
+            customName: 'Next',
+            customColor: '#34C759',
+          }),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(await getChatHeader(t.db, 'c1')).toMatchObject({
+      customName: 'Original',
+      customColor: '#1982FC',
+    });
   });
 
   it('clears a custom name/color with null', async () => {

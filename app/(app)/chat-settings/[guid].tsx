@@ -20,7 +20,7 @@ import {
   getChatTheme,
   listChatAttachmentsByKind,
   setBackgroundIsLight,
-  setChatCustomization,
+  setChatCustomizationWithinTransaction,
   setChatMuteWithinTransaction,
   setChatTheme,
   type ChatMediaByKind,
@@ -526,16 +526,30 @@ function ChatSettingsScreen({
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
     setName(text);
-    queueScreenAccountTask(operationGrant, () =>
-      setChatCustomization(getDatabase(), guid, { customName: text }),
-    );
+    queueScreenAccountTask(operationGrant, async (activeLease) => {
+      const db = getDatabase();
+      const chatGuid = operationGrant.chatGuid;
+      const customization = { customName: text };
+      await withDbTransaction(
+        db,
+        (context) => setChatCustomizationWithinTransaction(context, chatGuid, customization),
+        () => activeLease.isCurrent(),
+      );
+    });
   };
   const pickColor = (color: string | null): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
-    queueScreenAccountTask(operationGrant, () =>
-      setChatCustomization(getDatabase(), guid, { customColor: color }),
-    );
+    queueScreenAccountTask(operationGrant, async (activeLease) => {
+      const db = getDatabase();
+      const chatGuid = operationGrant.chatGuid;
+      const customization = { customColor: color };
+      await withDbTransaction(
+        db,
+        (context) => setChatCustomizationWithinTransaction(context, chatGuid, customization),
+        () => activeLease.isCurrent(),
+      );
+    });
   };
   const toggleMute = (on: boolean): void => {
     const operationGrant = renderGrant;
@@ -627,7 +641,11 @@ function ChatSettingsScreen({
       const db = getDatabase();
       const chatGuid = operationGrant.chatGuid;
       const customization = { customName: null, customColor: null };
-      await setChatCustomization(db, chatGuid, customization);
+      await withDbTransaction(
+        db,
+        (context) => setChatCustomizationWithinTransaction(context, chatGuid, customization),
+        () => activeLease.isCurrent(),
+      );
       await withDbTransaction(
         db,
         (context) => setChatMuteWithinTransaction(context, chatGuid, null),
