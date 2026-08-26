@@ -1941,6 +1941,19 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:',
           ))),
   );
+  const outgoingContactInsertTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendContactService.ts' &&
+      finding.symbol.startsWith('sendContactMessage') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/sendContactService.ts#sendContactMessage.<callback:',
+          ))),
+  );
   const outgoingReactionInsertTransaction = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/sendReactionService.ts' &&
@@ -1970,15 +1983,22 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:481b423ba233',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:cce2ab93dad1',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e8d6115d0f4d',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:5fc264dfd1d6',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:9aa99d652d1b',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:a9d507013959',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:091ee2e61ccd',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f3987a155aed',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e8547c9b8ebc',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:04c64cabafc4',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:1c5a38f08f20',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8d029d29cd2e',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:dc87ff322759',
+    ].sort(),
+  );
+  assert.deepEqual(
+    outgoingContactInsertTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendContactService.ts#sendContactMessage.<callback:579fb0f07b>:mutator-call:9d87cf90b13e',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:27797dbe4479',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:63d697dcdb18',
     ].sort(),
   );
   assert.deepEqual(
@@ -2188,12 +2208,12 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4:2',
       'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:f82af7e4ba9c',
       'src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861',
-      'src/services/send/index.ts#pickAndSendContact.<callback:3fd5bf1484>:mutator-call:3251b567a0af',
+      'src/services/send/index.ts#pickAndSendContact.<callback:4a34f6e20d>:mutator-call:3494b022ac25',
       'src/services/send/index.ts#react.<callback:2a9e50aa06>:mutator-call:51ae9ba2c80c',
       'src/services/send/index.ts#reply.<callback:2f53931556>:mutator-call:d5b02e6e0ad7',
       'src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380',
       'src/services/send/index.ts#send.<callback:263848fd04>:mutator-call:949d3a0d0b96',
-      'src/services/send/index.ts#sendContactCard.<callback:274da970ec>:mutator-call:9ea3b488cbd0',
+      'src/services/send/index.ts#sendContactCard.<callback:7880c0d756>:mutator-call:5ae33ad44a99',
       'src/services/send/index.ts#sendImage.<callback:6bf1f06052>:mutator-call:2489950bc375',
       'src/services/send/index.ts#sendImages.<callback:cf01fabadb>.<callback:ed40d2cae2>:mutator-call:2a4b64de5b86',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
@@ -4761,6 +4781,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markOutgoingSentNoGuidWithinTransaction',
     'claimOutgoingForSendWithinTransaction',
     'claimFailedOutgoingForRetryWithinTransaction',
+    'insertOutgoingContactWithinTransaction',
     'insertOutgoingReactionWithinTransaction',
     'retireOutgoingWithinTransaction',
     'revertLocalEditWithinTransaction',
@@ -4906,6 +4927,20 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:',
           ))),
   );
+  const insertOutgoingContactTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/outgoing.ts' &&
+      finding.symbol.startsWith('insertOutgoingContact') &&
+      !finding.symbol.startsWith('insertOutgoingContactWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/outgoing.ts#insertOutgoingContact.<callback:',
+          ))),
+  );
   const deleteMessageLocalTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/messages.ts' &&
@@ -4999,6 +5034,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:sql-update:a0d6d4f1bcbc',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6',
+      'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction:drizzle-insert:325cfa72fa07',
+      'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction:drizzle-insert:5371eb923c6f',
+      'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction:drizzle-update:f9ebc8cf63d8',
       'src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:60b18ede0ce6',
       'src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:8ad15d9f2163',
       'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450',
@@ -5030,7 +5068,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 58);
+  assert.equal(selected.length, 61);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -5107,6 +5145,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#retireOutgoing.<callback:f2328120f0>:mutator-call:298962d2933f',
       'src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:bc4e8c366140',
       'src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:c3043ae321f5',
+    ].sort(),
+  );
+  assert.deepEqual(
+    insertOutgoingContactTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/outgoing.ts#insertOutgoingContact.<callback:98f48e222c>:mutator-call:09a076f2e3c8',
+      'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:bc8c5c28d457',
+      'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:d628f90e07c7',
     ].sort(),
   );
   assert.deepEqual(

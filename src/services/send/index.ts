@@ -257,11 +257,17 @@ export function sendContactCard(
   return runUiAccountOperation(
     accountLease,
     () =>
-      sendContactMessage(getDatabase(), http, {
-        chatGuid: snapshot.chatGuid,
-        contact: snapshot.contact,
-        selectedMessageGuid: snapshot.replyToGuid,
-      }),
+      sendContactMessage(
+        getDatabase(),
+        http,
+        {
+          chatGuid: snapshot.chatGuid,
+          contact: snapshot.contact,
+          selectedMessageGuid: snapshot.replyToGuid,
+        },
+        Date.now(),
+        () => accountLease.isCurrent(),
+      ),
     'logical-send',
   );
 }
@@ -293,7 +299,10 @@ export async function pickAndSendContact(
   const snapshot = snapshotContactCard(contact);
   return runUiAccountOperation(
     accountLease,
-    () => sendContactMessage(getDatabase(), http, { chatGuid, contact: snapshot }),
+    () =>
+      sendContactMessage(getDatabase(), http, { chatGuid, contact: snapshot }, Date.now(), () =>
+        accountLease.isCurrent(),
+      ),
     'logical-send',
   );
 }

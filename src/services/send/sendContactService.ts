@@ -1,6 +1,7 @@
 import type { HttpClient } from '@core/api/http';
 import { sendContact, type ContactEmail, type ContactPhone } from '@core/api/endpoints/messages';
-import { insertOutgoingContact } from '@db/repositories';
+import { insertOutgoingContactWithinTransaction } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
@@ -53,21 +54,34 @@ export async function sendContactMessage(
   http: HttpClient,
   args: { chatGuid: string; contact: ContactCard; selectedMessageGuid?: string },
   now: number = Date.now(),
+  commitGuard?: DbCommitGuard,
 ): Promise<{ tempGuid: string }> {
   if (!hasContactContent(args.contact)) {
     throw new Error('a contact needs a name, organization, phone, or email');
   }
   const tempGuid = generateTempGuid();
-  await insertOutgoingContact(db, {
-    tempGuid,
-    chatGuid: args.chatGuid,
-    // Placeholder bubble text; the server echo replaces it with the rendered contact card.
-    text: contactDisplayName(args.contact),
-    contact: args.contact,
-    now,
-    selectedMessageGuid: args.selectedMessageGuid,
-    threadOriginatorGuid: args.selectedMessageGuid,
-  });
+  // Derive the presentation label before claiming the process-wide writer. Native contact picking
+  // already completed in the front door and stays entirely outside this DB-only owner.
+  const displayName = contactDisplayName(args.contact);
+  await withDbTransaction(
+    db,
+    (context) =>
+      insertOutgoingContactWithinTransaction(context, {
+        tempGuid,
+        chatGuid: args.chatGuid,
+        // Placeholder bubble text; the server echo replaces it with the rendered contact card.
+        text: displayName,
+        contact: args.contact,
+        now,
+        selectedMessageGuid: args.selectedMessageGuid,
+        threadOriginatorGuid: args.selectedMessageGuid,
+      }),
+    commitGuard,
+  );
+
+  // The owner can commit immediately before Disconnect retires this account. Do not let the old
+  // continuation use a successor account's credential boundary.
+  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
 
   try {
     const server = await sendContact(http, {
@@ -80,9 +94,12 @@ export async function sendContactMessage(
       emails: args.contact.emails,
       selectedMessageGuid: args.selectedMessageGuid,
     });
-    await reconcileSendOutcome(db, tempGuid, server, now);
+    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
   } catch (e) {
-    await handleSendFailure(db, tempGuid, e, 'send-contact', args.chatGuid);
+    // A revoked success-settlement owner must not be reinterpreted as a transport failure and
+    // followed by a second stale-account DB attempt.
+    if (e instanceof DbCommitGuardRejectedError) throw e;
+    await handleSendFailure(db, tempGuid, e, 'send-contact', args.chatGuid, undefined, commitGuard);
   }
 
   return { tempGuid };

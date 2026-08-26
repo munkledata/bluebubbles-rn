@@ -324,6 +324,45 @@ describe('UI send account lease', () => {
     expect(drained).toBe(true);
   });
 
+  it('passes both contact persistence fronts guards tied to their captured leases', async () => {
+    const directLease = captureRealtimeDeliveryLease();
+    await expect(
+      sendContactCard({ chatGuid: 'chat-a', contact: { firstName: 'Alice' } }, directLease),
+    ).resolves.toEqual({ tempGuid: 'temp-contact' });
+
+    mockPickContact.mockResolvedValueOnce({ firstName: 'Bob' });
+    const pickerLease = captureRealtimeDeliveryLease();
+    await expect(pickAndSendContact('chat-b', pickerLease)).resolves.toEqual({
+      tempGuid: 'temp-contact',
+    });
+
+    expect(mockSendContact).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.anything(),
+      { chatGuid: 'chat-a', contact: { firstName: 'Alice' }, selectedMessageGuid: undefined },
+      expect.any(Number),
+      expect.any(Function),
+    );
+    expect(mockSendContact).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.anything(),
+      { chatGuid: 'chat-b', contact: { firstName: 'Bob' } },
+      expect.any(Number),
+      expect.any(Function),
+    );
+    const directGuard = mockSendContact.mock.calls[0]?.[4] as (() => boolean) | undefined;
+    const pickerGuard = mockSendContact.mock.calls[1]?.[4] as (() => boolean) | undefined;
+    expect(directGuard?.()).toBe(true);
+    expect(pickerGuard?.()).toBe(true);
+
+    await pauseRealtimeDeliveries();
+    expect(directGuard?.()).toBe(false);
+    expect(pickerGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
+  });
+
   it('passes React persistence a commit guard tied to the captured screen lease', async () => {
     const screenLease = captureRealtimeDeliveryLease();
     await expect(

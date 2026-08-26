@@ -261,29 +261,31 @@ export async function insertOutgoingText(
  * `text` is the caller-supplied placeholder (the contact's display name); the payload carries
  * the structured fields the server needs to rebuild the vCard on a retry.
  */
-export async function insertOutgoingContact(
-  db: AppDatabase,
-  args: {
-    tempGuid: string;
-    /** @deprecated Ignored. The transaction resolves `chatGuid` to its committed local id. */
-    chatId?: number;
-    chatGuid: string;
-    /** Placeholder bubble text (the contact's display name). */
-    text: string;
-    contact: {
-      firstName?: string;
-      lastName?: string;
-      organization?: string;
-      phones?: unknown[];
-      emails?: unknown[];
-    };
-    now: number;
-    selectedMessageGuid?: string;
-    threadOriginatorGuid?: string;
-  },
+export interface InsertOutgoingContactArgs {
+  tempGuid: string;
+  /** @deprecated Ignored. The transaction resolves `chatGuid` to its committed local id. */
+  chatId?: number;
+  chatGuid: string;
+  /** Placeholder bubble text (the contact's display name). */
+  text: string;
+  contact: {
+    firstName?: string;
+    lastName?: string;
+    organization?: string;
+    phones?: unknown[];
+    emails?: unknown[];
+  };
+  now: number;
+  selectedMessageGuid?: string;
+  threadOriginatorGuid?: string;
+}
+
+/** Transaction-only body for one optimistic contact-card insert. */
+export function insertOutgoingContactWithinTransaction(
+  context: DbTransactionContext,
+  args: InsertOutgoingContactArgs,
 ): Promise<void> {
-  // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  await withDbTransaction(db, async (context) => {
+  return runInTransactionContext(context, async (db) => {
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
       tempGuid: args.tempGuid,
@@ -315,6 +317,15 @@ export async function insertOutgoingContact(
       })
       .where(eq(chats.id, chatId));
   });
+}
+
+/** Standalone optimistic contact-card owner; composing services use the transaction-only body. */
+export async function insertOutgoingContact(
+  db: AppDatabase,
+  args: InsertOutgoingContactArgs,
+): Promise<void> {
+  // ONE transaction — see the insert-atomicity note above insertOutgoingText.
+  await withDbTransaction(db, (context) => insertOutgoingContactWithinTransaction(context, args));
 }
 
 /**
