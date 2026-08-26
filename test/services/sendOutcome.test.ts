@@ -4,6 +4,7 @@ import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import { ClientErrorCode, sendErrorCode } from '@utils';
 import { getChatIdByGuid, insertOutgoingText, upsertChats, upsertHandles } from '@db/repositories';
+import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { clearFailedSendNotice, notifyFailedSend } from '@/services/send/sendFailureNotice';
 import { handleSendFailure, reconcileSendOutcome } from '@/services/send/sendOutcome';
@@ -69,6 +70,45 @@ describe('reconcileSendOutcome', () => {
     expect(msgRow(raw, 'temp-bbbb0000')?.d).toBeNull();
     expect(queueCount(raw)).toBe(0);
     expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'temp-bbbb0000', undefined);
+  });
+
+  it('rolls back an absent-guid ack when its commit guard is revoked mid-update', async () => {
+    const { db, raw } = await createTestDb();
+    const tempGuid = 'temp-no-guid-guard-revoked';
+    await seedOutgoing(db, tempGuid, 1000);
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_absent_guid_ack_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_absent_guid_ack_guard
+      AFTER UPDATE OF send_state ON messages
+      WHEN OLD.guid = '${tempGuid}' AND NEW.send_state = 'sent'
+      BEGIN
+        SELECT revoke_absent_guid_ack_guard();
+      END
+    `);
+
+    await expect(
+      reconcileSendOutcome(db, tempGuid, {}, 1000, () => current),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(msgRow(raw, tempGuid)?.s).toBe('sending');
+    expect(queueCount(raw)).toBe(1);
+    expect(mockClearFailedSendNotice).not.toHaveBeenCalled();
+
+    raw.exec('DROP TRIGGER revoke_absent_guid_ack_guard');
+    current = true;
+    await expect(
+      reconcileSendOutcome(db, tempGuid, {}, 1000, () => current),
+    ).resolves.toBeUndefined();
+    expect(msgRow(raw, tempGuid)?.s).toBe('sent');
+    expect(queueCount(raw)).toBe(0);
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, tempGuid, expect.any(Function));
   });
 
   it('treats an RCS ack echoing our OWN tempGuid as guid-absent (row survives)', async () => {

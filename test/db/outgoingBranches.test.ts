@@ -903,6 +903,51 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
     expect(queueCount(raw, 'temp-rcs')).toBe(0);
   });
 
+  it('rolls back an RCS self-ack when its commit guard is revoked mid-update', async () => {
+    const { db, raw } = await createTestDb();
+    const tempGuid = 'temp-rcs-guard-revoked';
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'guard the self ack',
+      now: 1,
+    });
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_rcs_self_ack_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_rcs_self_ack_guard
+      AFTER UPDATE OF send_state ON messages
+      WHEN OLD.guid = '${tempGuid}' AND NEW.send_state = 'sent'
+      BEGIN
+        SELECT revoke_rcs_self_ack_guard();
+      END
+    `);
+    const selfAck = { guid: tempGuid, dateCreated: 1, dateDelivered: null };
+
+    await expect(
+      reconcileOutgoingSuccess(db, tempGuid, selfAck, () => current),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(msgState(raw, tempGuid)).toEqual({ s: 'sending', e: 0 });
+    expect(queueCount(raw, tempGuid)).toBe(1);
+
+    raw.exec('DROP TRIGGER revoke_rcs_self_ack_guard');
+    current = true;
+    await expect(
+      reconcileOutgoingSuccess(db, tempGuid, selfAck, () => current),
+    ).resolves.toBeUndefined();
+    expect(msgState(raw, tempGuid)).toEqual({ s: 'sent', e: 0 });
+    expect(queueCount(raw, tempGuid)).toBe(0);
+  });
+
   it('moves a cancelled-send ledger marker through HTTP-ack promotion and later purge', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');

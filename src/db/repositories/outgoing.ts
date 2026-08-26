@@ -554,7 +554,11 @@ export async function reconcileOutgoingSuccess(
   // no local file → a download/reload button). Treat it exactly like the guid-absent AppleScript
   // fallback: flip to 'sent', drop the queue row, and let the fanout reconcile by content.
   if (server.guid === tempGuid) {
-    await markOutgoingSentNoGuid(db, tempGuid, commitGuard);
+    await withDbTransaction(
+      db,
+      (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
+      commitGuard,
+    );
     return;
   }
   await withDbTransaction(
@@ -635,35 +639,42 @@ export async function markOutgoingSentNoGuid(
 ): Promise<void> {
   await withDbTransaction(
     db,
-    async () => {
-      // Never downgrade a row the server already told us FAILED. With the RCS bridge's immediate
-      // "sending" ack, a genuine send failure (`message-send-error`) can land just BEFORE this
-      // success ack; promoting to 'sent' would clobber it and hide the failure. 'error' is sticky —
-      // leave the errored row (and its retry-queue entry) exactly as reconcileOutgoingError set them.
-      //
-      // The guard is IN the write: as a separate SELECT it answered for an instant that had already
-      // passed by the time the UPDATE ran, so an error frame landing between the two was overwritten
-      // and the message showed as sent with no error badge and no retry row — silently never
-      // delivered. Same shape as `retireOutgoing` / `claimOutgoingForSend`.
-      const promoted = await db.all<{ id: number }>(sql`
+    (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
+    commitGuard,
+  );
+}
+
+export function markOutgoingSentNoGuidWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    // Never downgrade a row the server already told us FAILED. With the RCS bridge's immediate
+    // "sending" ack, a genuine send failure (`message-send-error`) can land just BEFORE this
+    // success ack; promoting to 'sent' would clobber it and hide the failure. 'error' is sticky —
+    // leave the errored row (and its retry-queue entry) exactly as reconcileOutgoingError set them.
+    //
+    // The guard is IN the write: as a separate SELECT it answered for an instant that had already
+    // passed by the time the UPDATE ran, so an error frame landing between the two was overwritten
+    // and the message showed as sent with no error badge and no retry row — silently never
+    // delivered. Same shape as `retireOutgoing` / `claimOutgoingForSend`.
+    const promoted = await db.all<{ id: number }>(sql`
       UPDATE messages SET send_state = 'sent', error = 0, error_message = NULL
        WHERE guid = ${tempGuid} AND (send_state IS NULL OR send_state <> 'error')
       RETURNING id`);
-      if (promoted.length > 0) {
-        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
-        return;
-      }
-      // Nothing matched: either the row is stickily 'error' (leave its ladder alone) or there is no
-      // message at all — and an ack for a message that no longer exists must still clear the queue
-      // row, or that orphan re-sends blind on every later drain.
-      const cur = await db.all<{ id: number }>(
-        sql`SELECT id FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
-      );
-      if (cur.length === 0)
-        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
-    },
-    commitGuard,
-  );
+    if (promoted.length > 0) {
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+      return;
+    }
+    // Nothing matched: either the row is stickily 'error' (leave its ladder alone) or there is no
+    // message at all — and an ack for a message that no longer exists must still clear the queue
+    // row, or that orphan re-sends blind on every later drain.
+    const cur = await db.all<{ id: number }>(
+      sql`SELECT id FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
+    );
+    if (cur.length === 0)
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+  });
 }
 
 /** The minimal echo fields reconcileEchoByContent needs to correlate to an optimistic row. */

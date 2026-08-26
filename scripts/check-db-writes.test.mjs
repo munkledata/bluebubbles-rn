@@ -1868,6 +1868,19 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       finding.symbol.startsWith('handleSendFailure') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const successWithoutRealGuidTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendOutcome.ts' &&
+      finding.symbol.startsWith('reconcileSendOutcome') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1888,7 +1901,6 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:5fc264dfd1d6',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:9aa99d652d1b',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:a9d507013959',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:7d4ffb0ff6ea',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c4f357471236',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:2bab059bd512',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:de2a3f8267de',
@@ -1897,6 +1909,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:1c5a38f08f20',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8d029d29cd2e',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:dc87ff322759',
+    ].sort(),
+  );
+  assert.deepEqual(
+    successWithoutRealGuidTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>:mutator-call:83fb7347f21a',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:337ad594df75',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c1122a9108a5',
     ].sort(),
   );
   assert.deepEqual(
@@ -4479,6 +4499,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'kvSetWithinTransaction',
     'markAllChatsReadLocalWithinTransaction',
     'markMessageSendErrorWithinTransaction',
+    'markOutgoingSentNoGuidWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
     'setChatArchiveWithinTransaction',
     'setChatCustomizationWithinTransaction',
@@ -4532,6 +4553,23 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:',
           ))),
   );
+  const noRealGuidTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/outgoing.ts' &&
+      (finding.symbol.startsWith('reconcileOutgoingSuccess') ||
+        finding.symbol.startsWith('markOutgoingSentNoGuid')) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          (finding.target.startsWith(
+            'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:',
+          ) ||
+            finding.target.startsWith(
+              'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:',
+            )))),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
@@ -4553,7 +4591,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
       'src/db/repositories/kv.ts#kvSetWithinTransaction:drizzle-insert:0fe9d15a2010',
       'src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9593aa17c736',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86:2',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:21d3ccc056b3',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
       'src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95',
@@ -4565,7 +4605,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 27);
+  assert.equal(selected.length, 29);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -4596,6 +4636,19 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>.<callback:77cdb8c804>:mutator-call:300095ddd30c',
       'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:478f5d06d71e',
       'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:9f5be45386f3',
+    ].sort(),
+  );
+  assert.deepEqual(
+    noRealGuidTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:a142c06cb1>:mutator-call:c476b9568e57',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:7b31765b5cbe',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:9e7cb9dc1fb3',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:6bc2fa0befa7',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9efd07b3e6a8',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:dc16ee7659f0',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:e450495fb835',
     ].sort(),
   );
   assert.equal(

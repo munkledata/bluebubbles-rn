@@ -3,7 +3,7 @@ import { ApiError } from '@core/api/errors';
 import { logger } from '@core/secure';
 import { ClientErrorCode, sendErrorCode } from '@utils';
 import {
-  markOutgoingSentNoGuid,
+  markOutgoingSentNoGuidWithinTransaction,
   reconcileOutgoingErrorWithinTransaction,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
@@ -40,7 +40,11 @@ export async function reconcileSendOutcome(
       commitGuard,
     );
   } else {
-    await markOutgoingSentNoGuid(db, tempGuid, commitGuard);
+    await withDbTransaction(
+      db,
+      (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
+      commitGuard,
+    );
   }
   await clearFailedSendNotice(
     db,
