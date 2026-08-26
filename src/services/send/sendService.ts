@@ -2,10 +2,10 @@ import type { HttpClient } from '@core/api/http';
 import { sendText, type MessageMention } from '@core/api/endpoints/messages';
 import {
   handoverScheduledTextToOutgoing,
-  insertOutgoingText,
+  insertOutgoingTextWithinTransaction,
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
-import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sessionAccessors } from '@state/sessionStore';
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
@@ -74,6 +74,7 @@ export async function sendTextMessage(
    */
   onQueued?: () => Promise<void> | void,
   scheduledHandover?: ScheduledTextHandover,
+  ordinaryCommitGuard?: DbCommitGuard,
 ): Promise<{ tempGuid: string }> {
   const tempGuid = generateTempGuid();
   const outgoing = {
@@ -91,6 +92,7 @@ export async function sendTextMessage(
     // Into the queue payload only, so a crash-recovery resend keeps the spans.
     mentions: args.mentions,
   };
+  const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
   if (scheduledHandover) {
     await handoverScheduledTextToOutgoing(
       db,
@@ -102,7 +104,11 @@ export async function sendTextMessage(
       scheduledHandover.commitGuard,
     );
   } else {
-    await insertOutgoingText(db, outgoing);
+    await withDbTransaction(
+      db,
+      (context) => insertOutgoingTextWithinTransaction(context, outgoing),
+      effectiveCommitGuard,
+    );
   }
   await onQueued?.();
 
@@ -110,7 +116,7 @@ export async function sendTextMessage(
   // synchronously at the network boundary so account A's text can never start a request using
   // account B's newly-live client configuration. There is no await between this check and the
   // call into HttpClient, so JavaScript cannot interleave a session change inside that gap.
-  if (scheduledHandover?.commitGuard && !scheduledHandover.commitGuard()) {
+  if (effectiveCommitGuard && !effectiveCommitGuard()) {
     throw new DbCommitGuardRejectedError();
   }
 
@@ -130,8 +136,9 @@ export async function sendTextMessage(
       mentions: args.mentions,
       method,
     });
-    await reconcileSendOutcome(db, tempGuid, server, now, scheduledHandover?.commitGuard);
+    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard);
   } catch (e) {
+    if (e instanceof DbCommitGuardRejectedError) throw e;
     await handleSendFailure(
       db,
       tempGuid,
@@ -139,7 +146,7 @@ export async function sendTextMessage(
       'send',
       args.chatGuid,
       undefined,
-      scheduledHandover?.commitGuard,
+      effectiveCommitGuard,
     );
   }
 

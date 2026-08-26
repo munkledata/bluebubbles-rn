@@ -159,6 +159,48 @@ describe('scheduled-message account ownership', () => {
     expect(await listAllScheduled(db)).toEqual([]);
   });
 
+  it('rolls back a local schedule insert when A retires inside the owner after server create', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db);
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    let networkSawTransaction = true;
+    mockCreateScheduled.mockImplementation(async () => {
+      networkSawTransaction = raw.inTransaction;
+      return serverItem('srv-created-before-retirement');
+    });
+
+    let drain: Promise<void> | undefined;
+    raw.function('retire_schedule_during_insert', () => {
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER retire_schedule_during_insert
+      AFTER INSERT ON scheduled_messages
+      BEGIN
+        SELECT retire_schedule_during_insert();
+      END
+    `);
+
+    const action = schedule({
+      chatGuid: 'c1',
+      text: 'server already owns this',
+      scheduledFor: 9_000_000,
+    });
+    try {
+      await expect(action).rejects.toThrow('account session changed');
+      if (!drain) throw new Error('scheduled create did not revoke the account lease');
+      await drain;
+    } finally {
+      resumeRealtimeDeliveries();
+    }
+
+    expect(networkSawTransaction).toBe(false);
+    expect(mockCreateScheduled).toHaveBeenCalledTimes(1);
+    expect(raw.inTransaction).toBe(false);
+    expect(await listAllScheduled(db)).toEqual([]);
+  });
+
   it('does not reconcile a slow A scheduled-list response into B', async () => {
     const { db } = await createTestDb();
     await seedChat(db);
@@ -369,6 +411,57 @@ describe('scheduled-message account ownership', () => {
 
     await rejected;
     await drain;
+    expect(await getScheduledById(db, id)).toMatchObject({
+      text: 'old text',
+      scheduledFor: 9_000_000,
+      serverId: 'srv-old',
+    });
+  });
+
+  it('rolls back an edit when A retires inside the local owner after server replacement', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db);
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'old text',
+      scheduledFor: 9_000_000,
+      serverId: 'srv-old',
+    });
+    const networkTransactionStates: boolean[] = [];
+    mockDeleteScheduled.mockImplementation(async () => {
+      networkTransactionStates.push(raw.inTransaction);
+    });
+    mockCreateScheduled.mockImplementation(async () => {
+      networkTransactionStates.push(raw.inTransaction);
+      return serverItem('srv-new', 'new text');
+    });
+
+    let drain: Promise<void> | undefined;
+    raw.function('retire_schedule_during_update', () => {
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER retire_schedule_during_update
+      AFTER UPDATE ON scheduled_messages
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT retire_schedule_during_update();
+      END
+    `);
+
+    const action = editScheduled(id, { text: 'new text', scheduledFor: 9_500_000 });
+    try {
+      await expect(action).rejects.toThrow('account session changed');
+      if (!drain) throw new Error('scheduled edit did not revoke the account lease');
+      await drain;
+    } finally {
+      resumeRealtimeDeliveries();
+    }
+
+    expect(networkTransactionStates).toEqual([false, false]);
+    expect(raw.inTransaction).toBe(false);
     expect(await getScheduledById(db, id)).toMatchObject({
       text: 'old text',
       scheduledFor: 9_000_000,

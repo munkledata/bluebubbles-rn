@@ -6,7 +6,7 @@ import { asRecurrence, nextOccurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
 import {
   claimDueScheduled,
-  insertScheduled,
+  insertScheduledWithinTransaction,
   listDueScheduled,
   markScheduledFailed,
   markScheduledSent,
@@ -16,6 +16,7 @@ import {
   type ScheduledRow,
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sendTextMessage } from './sendService';
 
@@ -173,6 +174,7 @@ export async function scheduleTextMessage(
   accountScope?: ScheduledOperationScope,
 ): Promise<{ id: number; serverId: string | null }> {
   assertScheduledScope(accountScope);
+  const commitGuard = accountScope ? () => accountScope.isCurrent() : undefined;
   let serverId: string | null = null;
   if (!args.selectedMessageGuid && !args.recurrence) {
     try {
@@ -193,7 +195,11 @@ export async function scheduleTextMessage(
     }
   }
   assertScheduledScope(accountScope);
-  const id = await insertScheduled(db, { ...args, serverId });
+  const id = await withDbTransaction(
+    db,
+    (context) => insertScheduledWithinTransaction(context, { ...args, serverId }),
+    commitGuard,
+  );
   assertScheduledScope(accountScope);
   return { id, serverId };
 }

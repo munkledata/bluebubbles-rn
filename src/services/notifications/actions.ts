@@ -325,7 +325,9 @@ async function replyTo(
     assertCurrentAccount(accountLease);
     const db = await ensureDatabase();
     assertCurrentAccount(accountLease);
-    await sendTextMessage(db, http, { chatGuid, text }, Date.now(), onQueued);
+    await sendTextMessage(db, http, { chatGuid, text }, Date.now(), onQueued, undefined, () =>
+      accountLease.isCurrent(),
+    );
     assertCurrentAccount(accountLease);
   } finally {
     turn.release();

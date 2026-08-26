@@ -25,7 +25,11 @@ jest.mock('@/services/syncControl', () => ({ maybeResumeSync: jest.fn() }));
 jest.mock('@/services/download/autoDownloadAttachments', () => ({
   autoDownloadMessageAttachments: jest.fn(),
 }));
-jest.mock('@/services/reachability', () => ({ startReachabilityWatch: jest.fn() }));
+jest.mock('@/services/reachability', () => ({
+  probeReachabilityNow: jest.fn(),
+  startReachabilityWatch: jest.fn(),
+  stopReachabilityWatch: jest.fn(),
+}));
 jest.mock('@/services/notifications/notifeeService', () => ({
   postNotification: jest.fn(async () => {}),
   requestNotificationPermission: jest.fn(async () => {}),

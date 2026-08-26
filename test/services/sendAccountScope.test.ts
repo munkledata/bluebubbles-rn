@@ -324,6 +324,53 @@ describe('UI send account lease', () => {
     expect(drained).toBe(true);
   });
 
+  it('passes text and reply persistence guards tied to their captured leases', async () => {
+    const sendLease = captureRealtimeDeliveryLease();
+    await expect(send({ chatGuid: 'chat-a', text: 'plain text' }, sendLease)).resolves.toEqual({
+      tempGuid: 'temp-text',
+    });
+
+    const replyLease = captureRealtimeDeliveryLease();
+    await expect(
+      reply({ chatGuid: 'chat-b', text: 'thread reply', replyToGuid: 'message-b' }, replyLease),
+    ).resolves.toEqual({ tempGuid: 'temp-text' });
+
+    expect(mockSendText).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.anything(),
+      { chatGuid: 'chat-a', text: 'plain text' },
+      expect.any(Number),
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
+    expect(mockSendText).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.anything(),
+      {
+        chatGuid: 'chat-b',
+        text: 'thread reply',
+        selectedMessageGuid: 'message-b',
+        effectId: undefined,
+      },
+      expect.any(Number),
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
+    const sendGuard = mockSendText.mock.calls[0]?.[6] as (() => boolean) | undefined;
+    const replyGuard = mockSendText.mock.calls[1]?.[6] as (() => boolean) | undefined;
+    expect(sendGuard?.()).toBe(true);
+    expect(replyGuard?.()).toBe(true);
+
+    await pauseRealtimeDeliveries();
+    expect(sendGuard?.()).toBe(false);
+    expect(replyGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
+  });
+
   it('passes both contact persistence fronts guards tied to their captured leases', async () => {
     const directLease = captureRealtimeDeliveryLease();
     await expect(

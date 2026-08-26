@@ -2081,6 +2081,18 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/sendReactionService.ts#sendReactionMessage.<callback:',
           ))),
   );
+  const outgoingTextInsertTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendService.ts' &&
+      finding.symbol.startsWith('sendTextMessage') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/sendService.ts#sendTextMessage.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2089,7 +2101,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:6c2fa704827f',
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46',
       'src/services/notifications/actions.ts#loveMessage:mutator-call:83b1671c589d',
-      'src/services/notifications/actions.ts#replyTo:mutator-call:57759651fda6',
+      'src/services/notifications/actions.ts#replyTo:mutator-call:a4a5d51a8f95',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:181ea993ff>:mutator-call:fcca55f5e353',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
@@ -2101,9 +2113,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e8547c9b8ebc',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:04c64cabafc4',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:1c5a38f08f20',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:8d029d29cd2e',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:dc87ff322759',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:2a25e55b8b30',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:bdeed6c57910',
     ].sort(),
   );
   assert.deepEqual(
@@ -2144,6 +2155,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendReactionService.ts#sendReactionMessage.<callback:bb2f03f995>:mutator-call:d61ca293f0db',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:affc16f291fa',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:b3e3fdaf9d7a',
+    ].sort(),
+  );
+  assert.deepEqual(
+    outgoingTextInsertTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendService.ts#sendTextMessage.<callback:3940f52b1d>:mutator-call:b8808f288fd5',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:03948a377dc5',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:e72ad74ae84c',
     ].sort(),
   );
   assert.deepEqual(
@@ -2225,6 +2244,18 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
             'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:',
           ))),
   );
+  const scheduledInsertTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/scheduleService.ts' &&
+      finding.symbol.startsWith('scheduleTextMessage') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2241,7 +2272,6 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d0f8f32a27ab',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-reference:28e61216ad29',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c48442414558',
       'src/services/send/sendEditService.ts#sendEdit.<callback:71e546f9ee>:mutator-call:58af46e14a80',
       'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:a6eb301d978e',
       'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:a6eb301d978e:2',
@@ -2282,6 +2312,90 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:7d69e3e3aa4b',
     ].sort(),
   );
+  assert.deepEqual(
+    scheduledInsertTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>:mutator-call:ef3b92e88431',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:31eb04a40935',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c6c6102cb4ec',
+    ].sort(),
+  );
+});
+
+test('certifies the exact residual repository delegations after explicit-owner conversion', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) =>
+      finding.detectedContext === 'coordinated-delegation' &&
+      finding.target.startsWith('src/db/repositories/'),
+  );
+  const devFixtures = findings.filter(
+    (finding) => finding.path === 'src/features/conversations/devSeed.ts',
+  );
+  const scheduledStateMachine = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/scheduled.ts' ||
+      finding.path === 'src/services/send/index.ts' ||
+      finding.path === 'src/services/send/scheduleService.ts' ||
+      finding.path === 'src/services/send/sendService.ts',
+  );
+  const intentionalBoundaries = findings.filter(
+    (finding) => !devFixtures.includes(finding) && !scheduledStateMachine.includes(finding),
+  );
+
+  assert.equal(devFixtures.length, 18);
+  assert.equal(intentionalBoundaries.length, 19);
+  assert.equal(scheduledStateMachine.length, 9);
+  assert.deepEqual(
+    findings.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
+      'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
+      'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
+      'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
+      'src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3',
+      'src/features/conversations/devSeed.ts#devSendFake.<callback:3603f2d977>:mutator-call:5f9f1755f5ee',
+      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
+      'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:052cf0ea2e>:mutator-call:3990f707da46',
+      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:60ad1f7fd0>:mutator-call:f3c74c27a202',
+      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:0403b8ef33>:mutator-call:1c3853448684',
+      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:4663da7605da',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:701132d9a72e',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:71542bb99e88',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:737bc3296081',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:98585f0a84d3',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:9baf717e8519',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c189a52293cc',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
+      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:a77881a84393',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:b150379b8c1d',
+      'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
+      'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
+      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
+      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
+      'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:6fde253c2f8b',
+      'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:8c46c894d3aa',
+      'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.drainFlight:mutator-call:45ee0a84041c',
+      'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:28df56079c8d',
+      'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:3cf169c31a85',
+      'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:6cc62ed5573d',
+      'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:b0a846e7dfb7',
+      'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
+      'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
+      'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
+      'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:04c64cabafc4',
+      'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
+      'src/services/sync/engine.ts#syncChatMessages:mutator-call:aed16e5f8245',
+    ].sort(),
+  );
 });
 
 test('certifies exactly the reviewed send front-door delegation edges', () => {
@@ -2318,22 +2432,31 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('src/services/send/index.ts#discardMessage.<callback:'))),
   );
+  const editScheduledTransaction = sendFrontDoorFindings.filter(
+    (finding) =>
+      finding.symbol.includes('.persistPatch') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/scheduled.ts#updateScheduledWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.includes('.persistPatch.<callback:'))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
       'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:3cd21b60f497',
       'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:a287fba2e403',
-      'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:1150f343ed37',
-      'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4',
-      'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:e0c4274972f4:2',
-      'src/services/send/index.ts#editScheduled.<callback:b8b1abf4f1>:mutator-call:f82af7e4ba9c',
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c',
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c:2',
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:b3039aaa43d0',
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:bdc77bdcd522',
       'src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861',
       'src/services/send/index.ts#pickAndSendContact.<callback:4a34f6e20d>:mutator-call:3494b022ac25',
       'src/services/send/index.ts#react.<callback:2a9e50aa06>:mutator-call:51ae9ba2c80c',
-      'src/services/send/index.ts#reply.<callback:2f53931556>:mutator-call:d5b02e6e0ad7',
+      'src/services/send/index.ts#reply.<callback:82d8d37cdf>:mutator-call:5af837449254',
       'src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380',
-      'src/services/send/index.ts#send.<callback:263848fd04>:mutator-call:949d3a0d0b96',
+      'src/services/send/index.ts#send.<callback:a9b9e4712f>:mutator-call:68982b8cb319',
       'src/services/send/index.ts#sendContactCard.<callback:7880c0d756>:mutator-call:5ae33ad44a99',
       'src/services/send/index.ts#sendImage.<callback:6bf1f06052>:mutator-call:2489950bc375',
       'src/services/send/index.ts#sendImages.<callback:cf01fabadb>.<callback:ed40d2cae2>:mutator-call:2a4b64de5b86',
@@ -2367,7 +2490,15 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:c673563accd3',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 27);
+  assert.deepEqual(
+    editScheduledTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch.<callback:4cb2405734>:mutator-call:580db6ed626e',
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:4c70b4d099b8',
+      'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:9a5e1dfb2592',
+    ].sort(),
+  );
+  assert.equal(sendFrontDoorFindings.length, 30);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -4908,6 +5039,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'insertOutgoingAttachmentWithinTransaction',
     'insertOutgoingContactWithinTransaction',
     'insertOutgoingReactionWithinTransaction',
+    'insertScheduledWithinTransaction',
     'listRetryableErrorReportsWithinTransaction',
     'markErrorReportsFailedWithinTransaction',
     'retireOutgoingWithinTransaction',
@@ -4926,6 +5058,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'setSyncedBackgroundUriIfCurrentWithinTransaction',
     'setSyncMarkerWithinTransaction',
     'updateReminderTimeWithinTransaction',
+    'updateScheduledWithinTransaction',
     'updateSearchTextBatch',
     'upsertHandlesWithinTransaction',
   ]);
@@ -4989,6 +5122,32 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       !finding.symbol.startsWith('updateReminderTimeWithinTransaction') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       finding.snippet.includes('updateReminderTimeWithinTransaction'),
+  );
+  const insertScheduledTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/scheduled.ts' &&
+      finding.symbol.startsWith('insertScheduled') &&
+      !finding.symbol.startsWith('insertScheduledWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/scheduled.ts#insertScheduled.<callback:',
+          ))),
+  );
+  const updateScheduledTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/scheduled.ts' &&
+      finding.symbol.startsWith('updateScheduled') &&
+      !finding.symbol.startsWith('updateScheduledWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/scheduled.ts#updateScheduledWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/scheduled.ts#updateScheduled.<callback:',
+          ))),
   );
   const sendSuccessOwnerTransactions = findings.filter(
     (finding) =>
@@ -5190,8 +5349,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf',
       'src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction:drizzle-update:69b01aa5bda9',
+      'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction:drizzle-insert:cc8ec01847ce',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
+      'src/db/repositories/scheduled.ts#updateScheduledWithinTransaction:drizzle-update:65c7e3fe2055',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
       'src/db/repositories/kv.ts#kvSetWithinTransaction:drizzle-insert:0fe9d15a2010',
       'src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc',
@@ -5240,7 +5401,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 72);
+  assert.equal(selected.length, 74);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -5287,6 +5448,22 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/reminders.ts#updateReminderTime.<callback:01f3a3c07f>:mutator-call:861aece00d05',
       'src/db/repositories/reminders.ts#updateReminderTime:mutator-call:1516cdcafef5',
       'src/db/repositories/reminders.ts#updateReminderTime:mutator-call:920049d903c2',
+    ].sort(),
+  );
+  assert.deepEqual(
+    insertScheduledTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/scheduled.ts#insertScheduled.<callback:6909ad3bc5>:mutator-call:1b3e4af90ec4',
+      'src/db/repositories/scheduled.ts#insertScheduled:mutator-call:a7f6784fcded',
+      'src/db/repositories/scheduled.ts#insertScheduled:mutator-call:de8b7dc6408f',
+    ].sort(),
+  );
+  assert.deepEqual(
+    updateScheduledTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/scheduled.ts#updateScheduled.<callback:45d83ae862>:mutator-call:90bc9a3e87f3',
+      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:0445ebfc3bea',
+      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:f53009bb2e28',
     ].sort(),
   );
   assert.deepEqual(

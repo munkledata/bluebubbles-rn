@@ -211,7 +211,14 @@ describe('handleNotificationAction — reply', () => {
       { chatGuid: 'c1', text: 'hi there' },
       expect.any(Number),
       expect.any(Function), // the queue handover — see the mock
+      undefined,
+      expect.any(Function),
     );
+    const commitGuard = mockSendText.mock.calls[0]?.[6] as (() => boolean) | undefined;
+    expect(commitGuard?.()).toBe(true);
+    await pauseRealtimeDeliveries();
+    expect(commitGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
 

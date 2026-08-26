@@ -48,8 +48,9 @@ const validSource = `
 `;
 
 const validSendServiceSource = `
-  export async function sendTextMessage(db, http, args, now, onQueued, scheduledHandover) {
+  export async function sendTextMessage(db, http, args, now, onQueued, scheduledHandover, ordinaryCommitGuard?) {
     const outgoing = { text: args.text };
+    const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
     if (scheduledHandover) {
       await handoverScheduledTextToOutgoing(
         db,
@@ -61,14 +62,23 @@ const validSendServiceSource = `
         scheduledHandover.commitGuard,
       );
     } else {
-      await insertOutgoingText(db, outgoing);
+      await withDbTransaction(
+        db,
+        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
+        effectiveCommitGuard,
+      );
     }
     await onQueued?.();
-    if (scheduledHandover?.commitGuard && !scheduledHandover.commitGuard()) {
+    if (effectiveCommitGuard && !effectiveCommitGuard()) {
       throw new DbCommitGuardRejectedError();
     }
-    const server = await sendText(http, args);
-    return server;
+    try {
+      const server = await sendText(http, args);
+      await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard);
+    } catch (e) {
+      if (e instanceof DbCommitGuardRejectedError) throw e;
+      await handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard);
+    }
   }
 `;
 
@@ -110,6 +120,12 @@ const expectedFindings = [
     symbol: 'sendTextMessage',
     operation: 'mutator-call',
     target: 'src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing',
+  },
+  {
+    path: 'src/services/send/sendService.ts',
+    symbol: 'sendTextMessage.<callback:abc123>',
+    operation: 'mutator-call',
+    target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
   },
 ];
 
@@ -419,8 +435,21 @@ test('rejects an unreachable, nested, or reassigned scheduled-handoff branch', (
   const nested = validSendServiceSource
     .replace('    if (scheduledHandover) {', '    if (enabled) {\n      if (scheduledHandover) {')
     .replace(
-      '    } else {\n      await insertOutgoingText(db, outgoing);\n    }',
-      '      } else {\n        await insertOutgoingText(db, outgoing);\n      }\n    }',
+      `    } else {
+      await withDbTransaction(
+        db,
+        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
+        effectiveCommitGuard,
+      );
+    }`,
+      `      } else {
+        await withDbTransaction(
+          db,
+          (context) => insertOutgoingTextWithinTransaction(context, outgoing),
+          effectiveCommitGuard,
+        );
+      }
+    }`,
     );
   assert.match(scheduledHandoffSourceErrors(nested).join('\n'), /top-level if/);
 
@@ -444,7 +473,7 @@ test('rejects moving or removing the queue handoff and pre-network account guard
   assert.match(scheduledHandoffSourceErrors(queuedAfterNetwork).join('\n'), /onQueued/);
 
   const withoutGuard = validSendServiceSource.replace(
-    `    if (scheduledHandover?.commitGuard && !scheduledHandover.commitGuard()) {
+    `    if (effectiveCommitGuard && !effectiveCommitGuard()) {
       throw new DbCommitGuardRejectedError();
     }
 `,
@@ -453,6 +482,84 @@ test('rejects moving or removing the queue handoff and pre-network account guard
   const guardErrors = scheduledHandoffSourceErrors(withoutGuard).join('\n');
   assert.match(guardErrors, /commit-guard rejection/);
   assert.match(guardErrors, /network call must occur after/);
+});
+
+test('rejects an unguarded public insert or a malformed ordinary transaction owner', () => {
+  const owner = `      await withDbTransaction(
+        db,
+        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
+        effectiveCommitGuard,
+      );`;
+  const publicInsert = validSendServiceSource.replace(
+    owner,
+    '      await insertOutgoingText(db, outgoing);',
+  );
+  assert.match(scheduledHandoffSourceErrors(publicInsert).join('\n'), /ordinary text/);
+
+  const wrongGuard = validSendServiceSource.replace(
+    owner,
+    owner.replace('effectiveCommitGuard,', 'ordinaryCommitGuard,'),
+  );
+  assert.match(scheduledHandoffSourceErrors(wrongGuard).join('\n'), /ordinary text/);
+
+  const rawDatabase = validSendServiceSource.replace(
+    'insertOutgoingTextWithinTransaction(context, outgoing)',
+    'insertOutgoingTextWithinTransaction(db, outgoing)',
+  );
+  assert.match(scheduledHandoffSourceErrors(rawDatabase).join('\n'), /ordinary text/);
+});
+
+test('rejects changed guard precedence, settlement propagation, or ownership-error handling', () => {
+  const wrongPrecedence = validSendServiceSource.replace(
+    'scheduledHandover?.commitGuard ?? ordinaryCommitGuard',
+    'ordinaryCommitGuard ?? scheduledHandover?.commitGuard',
+  );
+  assert.match(scheduledHandoffSourceErrors(wrongPrecedence).join('\n'), /effectiveCommitGuard/);
+
+  const unguardedOutcome = validSendServiceSource.replace(
+    'reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard)',
+    'reconcileSendOutcome(db, tempGuid, server, now, undefined)',
+  );
+  assert.match(scheduledHandoffSourceErrors(unguardedOutcome).join('\n'), /success and failure/);
+
+  const unguardedFailure = validSendServiceSource.replace(
+    "handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard)",
+    "handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, undefined)",
+  );
+  assert.match(scheduledHandoffSourceErrors(unguardedFailure).join('\n'), /success and failure/);
+
+  const swallowedOwnershipLoss = validSendServiceSource.replace(
+    '      if (e instanceof DbCommitGuardRejectedError) throw e;\n',
+    '',
+  );
+  assert.match(scheduledHandoffSourceErrors(swallowedOwnershipLoss).join('\n'), /rethrown before/);
+});
+
+test('requires the exact ordinary context-helper call graph and forbids the public fallback', () => {
+  const missingOwner = expectedFindings.slice(0, 3);
+  assert.match(scheduledRecoveryCallGraphErrors(missingOwner).join('\n'), /context insert/);
+
+  const extraOwner = [
+    ...expectedFindings,
+    {
+      path: 'src/services/send/sendService.ts',
+      symbol: 'sendTextMessage.<callback:def456>',
+      operation: 'mutator-call',
+      target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+    },
+  ];
+  assert.match(scheduledRecoveryCallGraphErrors(extraOwner).join('\n'), /found 2/);
+
+  const publicFallback = [
+    ...expectedFindings,
+    {
+      path: 'src/services/send/sendService.ts',
+      symbol: 'sendTextMessage',
+      operation: 'mutator-call',
+      target: 'src/db/repositories/outgoing.ts#insertOutgoingText',
+    },
+  ];
+  assert.match(scheduledRecoveryCallGraphErrors(publicFallback).join('\n'), /zero.*found 1/);
 });
 
 test('the reviewed sendTextMessage AST fingerprint rejects an early aliased network request', () => {

@@ -185,6 +185,148 @@ describe('sendTextMessage', () => {
     ).rejects.toThrow(/unknown chat/);
   });
 
+  it('rolls back ordinary construction when its account retires before commit, then allows a fresh send', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const beforeChat = raw
+      .prepare('SELECT latest_message_date AS latestMessageDate FROM chats WHERE guid = ?')
+      .get('c1');
+    let current = true;
+    let queued = 0;
+    let posts = 0;
+
+    raw.function('retire_ordinary_send_during_insert', () => {
+      current = false;
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER retire_ordinary_send_during_insert
+      AFTER INSERT ON outgoing_queue
+      BEGIN
+        SELECT retire_ordinary_send_during_insert();
+      END
+    `);
+
+    await expect(
+      sendTextMessage(
+        db,
+        fakeHttp(async () => {
+          posts += 1;
+          return { guid: 'must-not-send', dateCreated: 1_000, dateDelivered: null };
+        }),
+        { chatGuid: 'c1', text: 'account A only' },
+        1_000,
+        () => {
+          queued += 1;
+        },
+        undefined,
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(posts).toBe(0);
+    expect(queued).toBe(0);
+    expect(raw.inTransaction).toBe(false);
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
+    expect(
+      raw
+        .prepare('SELECT latest_message_date AS latestMessageDate FROM chats WHERE guid = ?')
+        .get('c1'),
+    ).toEqual(beforeChat);
+
+    raw.exec('DROP TRIGGER retire_ordinary_send_during_insert');
+    current = true;
+    await sendTextMessage(
+      db,
+      fakeHttp(async () => {
+        expect(raw.inTransaction).toBe(false);
+        posts += 1;
+        return { guid: 'real-after-retry', dateCreated: 2_000, dateDelivered: null };
+      }),
+      { chatGuid: 'c1', text: 'fresh current send' },
+      2_000,
+      undefined,
+      undefined,
+      () => current,
+    );
+
+    expect(posts).toBe(1);
+    expect(raw.prepare('SELECT guid, send_state AS sendState FROM messages').get()).toEqual({
+      guid: 'real-after-retry',
+      sendState: 'sent',
+    });
+  });
+
+  it('does not POST an ordinary send when onQueued observes account retirement', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    let current = true;
+    let posts = 0;
+
+    const send = sendTextMessage(
+      db,
+      fakeHttp(async () => {
+        posts += 1;
+        return { guid: 'must-not-send', dateCreated: 1_000, dateDelivered: null };
+      }),
+      { chatGuid: 'c1', text: 'durable but retired' },
+      1_000,
+      () => {
+        current = false;
+      },
+      undefined,
+      () => current,
+    );
+
+    await expect(send).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(posts).toBe(0);
+    expect(raw.inTransaction).toBe(false);
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 1 });
+    expect(raw.prepare('SELECT send_state AS sendState FROM messages').get()).toEqual({
+      sendState: 'sending',
+    });
+  });
+
+  it('does not settle an ordinary send after its account retires during HTTP', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    let current = true;
+    let releaseResponse!: (value: unknown) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const response = new Promise<unknown>((resolve) => {
+      releaseResponse = resolve;
+    });
+
+    const send = sendTextMessage(
+      db,
+      fakeHttp(() => {
+        expect(raw.inTransaction).toBe(false);
+        markStarted();
+        return response;
+      }),
+      { chatGuid: 'c1', text: 'A request already started' },
+      1_000,
+      undefined,
+      undefined,
+      () => current,
+    );
+    await started;
+    current = false;
+    releaseResponse({ guid: 'late-real-guid', dateCreated: 1_000, dateDelivered: null });
+
+    await expect(send).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(raw.inTransaction).toBe(false);
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 1 });
+    expect(raw.prepare('SELECT guid, send_state AS sendState FROM messages').get()).toMatchObject({
+      guid: expect.stringMatching(/^temp-/),
+      sendState: 'sending',
+    });
+  });
+
   it('does not POST when a scheduled account is revoked after handoff but before the request', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');

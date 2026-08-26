@@ -10,7 +10,8 @@ import {
   getScheduledById,
   listServerScheduledPruneExposure,
   reconcileServerScheduled,
-  updateScheduled,
+  updateScheduledWithinTransaction,
+  type UpdateScheduledPatch,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { http } from '../clients';
@@ -233,7 +234,10 @@ export function send(
   const snapshot = snapshotSendTextArgs(args);
   return runUiAccountOperation(
     accountLease,
-    () => sendTextMessage(getDatabase(), http, snapshot),
+    () =>
+      sendTextMessage(getDatabase(), http, snapshot, Date.now(), undefined, undefined, () =>
+        accountLease.isCurrent(),
+      ),
     'logical-send',
   );
 }
@@ -339,12 +343,20 @@ export function reply(
   return runUiAccountOperation(
     accountLease,
     () =>
-      sendTextMessage(getDatabase(), http, {
-        chatGuid: snapshot.chatGuid,
-        text: snapshot.text,
-        selectedMessageGuid: snapshot.replyToGuid,
-        effectId: snapshot.effectId,
-      }),
+      sendTextMessage(
+        getDatabase(),
+        http,
+        {
+          chatGuid: snapshot.chatGuid,
+          text: snapshot.text,
+          selectedMessageGuid: snapshot.replyToGuid,
+          effectId: snapshot.effectId,
+        },
+        Date.now(),
+        undefined,
+        undefined,
+        () => accountLease.isCurrent(),
+      ),
     'logical-send',
   );
 }
@@ -427,6 +439,12 @@ export async function editScheduled(
 ): Promise<void> {
   await runScheduledAccountOperation(accountLease, async () => {
     const db = getDatabase();
+    const persistPatch = (localPatch: UpdateScheduledPatch): Promise<void> =>
+      withDbTransaction(
+        db,
+        (context) => updateScheduledWithinTransaction(context, id, localPatch),
+        () => accountLease.isCurrent(),
+      );
     assertScheduledLease(accountLease);
     const row = await getScheduledById(db, id);
     assertScheduledLease(accountLease);
@@ -437,7 +455,7 @@ export async function editScheduled(
       if (patch.recurrence) {
         // Now recurring → keep it local-only so the ticker (which skips server-backed rows)
         // fires and re-arms it. The server row is already gone; just drop the serverId.
-        await updateScheduled(db, id, { ...patch, serverId: null });
+        await persistPatch({ ...patch, serverId: null });
         assertScheduledLease(accountLease);
         return;
       }
@@ -457,16 +475,16 @@ export async function editScheduled(
         // serverId so the on-device worker fires the edited message as a fallback (rather than
         // orphaning it — a non-null serverId would make the local worker skip it forever), apply
         // the edit locally, then surface the failure.
-        await updateScheduled(db, id, { ...patch, serverId: null });
+        await persistPatch({ ...patch, serverId: null });
         assertScheduledLease(accountLease);
         throw e;
       }
       // Repoint the local row at the fresh uuid alongside the text/time change.
-      await updateScheduled(db, id, { ...patch, serverId: newServerId });
+      await persistPatch({ ...patch, serverId: newServerId });
       assertScheduledLease(accountLease);
       return;
     }
-    await updateScheduled(db, id, patch);
+    await persistPatch(patch);
     assertScheduledLease(accountLease);
   });
 }

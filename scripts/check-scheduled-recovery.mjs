@@ -15,10 +15,13 @@ const RESET_TARGET = 'src/db/repositories/scheduled.ts#resetStuckScheduled';
 const CLAIM_TARGET = 'src/db/repositories/scheduled.ts#claimDueScheduled';
 const BROAD_CLAIM_TARGET = 'src/db/repositories/scheduled.ts#claimScheduled';
 const HANDOFF_TARGET = 'src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing';
+const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoingText';
+const TRANSACTION_TEXT_INSERT_TARGET =
+  'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
 const REVIEWED_RUN_DUE_BODY_HASH =
   '0102dd9c1bff60acd05562d68299fd5f3245f0775b0f909e0edf9031e0c352c0';
 const REVIEWED_SEND_TEXT_BODY_HASH =
-  '381feddb3727d7c9cca209c170c07cbfa06ae206fe48cd314c1d3730e4d1a482';
+  '73ad82acc8339bcf6c3322b9b47d90f50475b7833539b91daa141c329c430807';
 const EXPECTED_RUN_DUE_CALLERS = new Map([
   ['app/(app)/home.tsx', { argumentCount: 5, scope: 'accountLease' }],
   ['app/(app)/chat/[guid].tsx', { argumentCount: 5, scope: 'accountLease' }],
@@ -506,7 +509,44 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     ...bindingIntegrityErrors(declaration, 'scheduledHandover', {
       label: 'scheduled handoff parameter',
     }),
+    ...bindingIntegrityErrors(declaration, 'ordinaryCommitGuard', {
+      label: 'ordinary commit-guard parameter',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'effectiveCommitGuard', {
+      label: 'effective commit guard',
+    }),
   );
+  const finalParameter = declaration.parameters.at(-1);
+  if (
+    !finalParameter ||
+    !ts.isIdentifier(finalParameter.name) ||
+    finalParameter.name.text !== 'ordinaryCommitGuard' ||
+    !finalParameter.questionToken
+  ) {
+    errors.push('sendTextMessage must retain ordinaryCommitGuard as its final optional parameter');
+  }
+
+  const effectiveBindings = bindingDeclarationsNamed(
+    declaration.body,
+    'effectiveCommitGuard',
+  ).filter(ts.isVariableDeclaration);
+  const effectiveBinding = effectiveBindings[0];
+  const effectiveStatement = effectiveBinding?.parent?.parent;
+  const effectiveInitializer = effectiveBinding?.initializer
+    ?.getText(sourceFile)
+    .replace(/\s+/g, '');
+  if (
+    effectiveBindings.length !== 1 ||
+    !effectiveBinding ||
+    !effectiveStatement ||
+    !ts.isVariableStatement(effectiveStatement) ||
+    effectiveStatement.parent !== declaration.body ||
+    effectiveInitializer !== 'scheduledHandover?.commitGuard??ordinaryCommitGuard'
+  ) {
+    errors.push(
+      'effectiveCommitGuard must be the one top-level scheduledHandover?.commitGuard ?? ordinaryCommitGuard binding',
+    );
+  }
   const handoffCalls = callsNamed(declaration.body, new Set(['handoverScheduledTextToOutgoing']));
   if (handoffCalls.length !== 1) {
     return [
@@ -563,12 +603,25 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     );
   }
 
-  const ordinaryCalls = callsNamed(declaration.body, new Set(['insertOutgoingText']));
-  const ordinaryCall = ordinaryCalls[0];
-  const ordinaryStatement = ordinaryCall ? directAwaitedCallStatement(ordinaryCall) : undefined;
+  const ordinaryOwnerCalls = callsNamed(declaration.body, new Set(['withDbTransaction']));
+  const ordinaryOwnerCall = ordinaryOwnerCalls[0];
+  const ordinaryStatement = ordinaryOwnerCall
+    ? directAwaitedCallStatement(ordinaryOwnerCall)
+    : undefined;
+  const transactionInsertCalls = callsNamed(
+    declaration.body,
+    new Set(['insertOutgoingTextWithinTransaction']),
+  );
+  const transactionInsertCall = transactionInsertCalls[0];
+  const publicInsertCalls = callsNamed(declaration.body, new Set(['insertOutgoingText']));
+  const ownerCallback = ordinaryOwnerCall?.arguments[1];
+  const callbackBody =
+    ownerCallback && ts.isArrowFunction(ownerCallback) && ts.isCallExpression(ownerCallback.body)
+      ? ownerCallback.body
+      : undefined;
   if (
-    ordinaryCalls.length !== 1 ||
-    !ordinaryCall ||
+    ordinaryOwnerCalls.length !== 1 ||
+    !ordinaryOwnerCall ||
     !ordinaryStatement ||
     !branch ||
     !ts.isIfStatement(branch) ||
@@ -576,17 +629,35 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !ts.isBlock(branch.elseStatement) ||
     branch.elseStatement.statements.length !== 1 ||
     ordinaryStatement.parent !== branch.elseStatement ||
-    ordinaryCall.arguments.length !== 2 ||
-    !isIdentifierArgument(ordinaryCall, 0, 'db') ||
-    !isIdentifierArgument(ordinaryCall, 1, 'outgoing')
+    ordinaryOwnerCall.arguments.length !== 3 ||
+    !isIdentifierArgument(ordinaryOwnerCall, 0, 'db') ||
+    !isIdentifierArgument(ordinaryOwnerCall, 2, 'effectiveCommitGuard') ||
+    !ownerCallback ||
+    !ts.isArrowFunction(ownerCallback) ||
+    ownerCallback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+    ownerCallback.parameters.length !== 1 ||
+    !ownerCallback.parameters[0] ||
+    !ts.isIdentifier(ownerCallback.parameters[0].name) ||
+    ownerCallback.parameters[0].name.text !== 'context' ||
+    !callbackBody ||
+    directCallName(callbackBody) !== 'insertOutgoingTextWithinTransaction' ||
+    transactionInsertCalls.length !== 1 ||
+    transactionInsertCall !== callbackBody ||
+    callbackBody.arguments.length !== 2 ||
+    !isIdentifierArgument(callbackBody, 0, 'context') ||
+    !isIdentifierArgument(callbackBody, 1, 'outgoing') ||
+    publicInsertCalls.length !== 0
   ) {
     errors.push(
-      'ordinary insertOutgoingText must be the sole direct awaited statement in the scheduled handoff else branch',
+      'ordinary text must use the sole direct awaited guarded withDbTransaction/context insert in the scheduled handoff else branch',
     );
   }
 
   const bodyStatements = declaration.body.statements;
   const branchIndex = branch ? bodyStatements.indexOf(branch) : -1;
+  if (branchIndex < 1 || bodyStatements[branchIndex - 1] !== effectiveStatement) {
+    errors.push('effectiveCommitGuard must be declared immediately before the handoff branch');
+  }
   const onQueuedCalls = callsNamed(declaration.body, new Set(['onQueued']));
   const onQueuedCall = onQueuedCalls[0];
   const onQueuedStatement = onQueuedCall ? directAwaitedCallStatement(onQueuedCall) : undefined;
@@ -615,7 +686,7 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   if (
     !guardStatement ||
     !ts.isIfStatement(guardStatement) ||
-    compactGuardCondition !== 'scheduledHandover?.commitGuard&&!scheduledHandover.commitGuard()' ||
+    compactGuardCondition !== 'effectiveCommitGuard&&!effectiveCommitGuard()' ||
     !guardThrow ||
     !ts.isThrowStatement(guardThrow) ||
     !guardThrow.expression ||
@@ -625,7 +696,7 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     (guardThrow.expression.arguments?.length ?? 0) !== 0
   ) {
     errors.push(
-      'the exact scheduled commit-guard rejection must immediately follow onQueued before networking',
+      'the exact effective commit-guard rejection must immediately follow onQueued before networking',
     );
   }
 
@@ -636,7 +707,56 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !guardStatement ||
     networkCalls[0].getStart(sourceFile) <= guardStatement.getEnd()
   ) {
-    errors.push('the one sendText network call must occur after the scheduled commit guard');
+    errors.push('the one sendText network call must occur after the effective commit guard');
+  }
+
+  const reconcileCalls = callsNamed(declaration.body, new Set(['reconcileSendOutcome']));
+  const failureCalls = callsNamed(declaration.body, new Set(['handleSendFailure']));
+  const failureCall = failureCalls[0];
+  const failureStatement = failureCall ? directAwaitedCallStatement(failureCall) : undefined;
+  const catchClauses = [];
+  function collectCatchClauses(node) {
+    if (ts.isCatchClause(node)) catchClauses.push(node);
+    ts.forEachChild(node, collectCatchClauses);
+  }
+  collectCatchClauses(declaration.body);
+  const catchClause = catchClauses[0];
+  const catchVariable = catchClause?.variableDeclaration?.name;
+  const rethrow = catchClause?.block.statements[0];
+  const rethrowCondition = rethrow && ts.isIfStatement(rethrow) ? rethrow.expression : undefined;
+  const rethrowBody = rethrow && ts.isIfStatement(rethrow) ? rethrow.thenStatement : undefined;
+  if (
+    reconcileCalls.length !== 1 ||
+    !reconcileCalls[0] ||
+    reconcileCalls[0].arguments.length !== 5 ||
+    !isIdentifierArgument(reconcileCalls[0], 4, 'effectiveCommitGuard') ||
+    failureCalls.length !== 1 ||
+    !failureCall ||
+    failureCall.arguments.length !== 7 ||
+    !isIdentifierArgument(failureCall, 6, 'effectiveCommitGuard') ||
+    catchClauses.length !== 1 ||
+    !catchClause ||
+    !catchVariable ||
+    !ts.isIdentifier(catchVariable) ||
+    catchVariable.text !== 'e' ||
+    !rethrowCondition ||
+    !ts.isBinaryExpression(rethrowCondition) ||
+    rethrowCondition.operatorToken.kind !== ts.SyntaxKind.InstanceOfKeyword ||
+    !ts.isIdentifier(rethrowCondition.left) ||
+    rethrowCondition.left.text !== 'e' ||
+    !ts.isIdentifier(rethrowCondition.right) ||
+    rethrowCondition.right.text !== 'DbCommitGuardRejectedError' ||
+    !rethrowBody ||
+    !ts.isThrowStatement(rethrowBody) ||
+    !ts.isIdentifier(rethrowBody.expression) ||
+    rethrowBody.expression.text !== 'e' ||
+    !failureStatement ||
+    failureStatement.parent !== catchClause.block ||
+    catchClause.block.statements[1] !== failureStatement
+  ) {
+    errors.push(
+      'success and failure settlement must receive the effective guard, with ownership rejection rethrown before failure handling',
+    );
   }
 
   return errors;
@@ -764,6 +884,34 @@ function forbiddenUseErrors(findings, { label, target }) {
   return [`${label} must have zero production calls or references (found ${uses.length})`];
 }
 
+function ordinaryTextOwnerErrors(findings) {
+  const transactionUses = findings.filter(
+    (finding) =>
+      finding.path === SEND_SERVICE_PATH && finding.target === TRANSACTION_TEXT_INSERT_TARGET,
+  );
+  const publicUses = findings.filter(
+    (finding) => finding.path === SEND_SERVICE_PATH && finding.target === PUBLIC_TEXT_INSERT_TARGET,
+  );
+  const [transactionUse] = transactionUses;
+  const errors = [];
+  if (
+    transactionUses.length !== 1 ||
+    !transactionUse ||
+    transactionUse.operation !== 'mutator-call' ||
+    !/^sendTextMessage\.<callback:[a-f0-9]+>$/.test(transactionUse.symbol)
+  ) {
+    errors.push(
+      `ordinary text context insert must have exactly one direct sendTextMessage transaction-callback use (found ${transactionUses.length})`,
+    );
+  }
+  if (publicUses.length !== 0) {
+    errors.push(
+      `public insertOutgoingText must have zero sendTextMessage calls or references (found ${publicUses.length})`,
+    );
+  }
+  return errors;
+}
+
 /** Validate the closed-world production call graph reported by the DB scanner. */
 export function scheduledRecoveryCallGraphErrors(findings) {
   return [
@@ -789,6 +937,7 @@ export function scheduledRecoveryCallGraphErrors(findings) {
       path: 'src/services/send/sendService.ts',
       symbol: 'sendTextMessage',
     }),
+    ...ordinaryTextOwnerErrors(findings),
   ];
 }
 

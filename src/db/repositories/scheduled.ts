@@ -28,6 +28,25 @@ interface ScheduledPayload {
   selectedMessageGuid?: string;
 }
 
+export interface InsertScheduledArgs {
+  chatGuid: string;
+  text: string;
+  scheduledFor: number;
+  selectedMessageGuid?: string;
+  /** Set when the server is also tracking this row (server fires it; the local ticker skips it). */
+  serverId?: string | null;
+  /** null/undefined = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send. */
+  recurrence?: string | null;
+}
+
+export interface UpdateScheduledPatch {
+  text?: string;
+  scheduledFor?: number;
+  serverId?: string | null;
+  /** Pass null to clear back to one-shot; undefined leaves it untouched. */
+  recurrence?: string | null;
+}
+
 /** One exact local row that existed before a server scheduled-list request began. */
 export interface ServerScheduledPruneExposure {
   id: number;
@@ -76,24 +95,16 @@ function mapScheduled(r: {
   };
 }
 
-export async function insertScheduled(
-  db: AppDatabase,
-  args: {
-    chatGuid: string;
-    text: string;
-    scheduledFor: number;
-    selectedMessageGuid?: string;
-    /** Set when the server is also tracking this row (server fires it; the local ticker skips it). */
-    serverId?: string | null;
-    /** null/undefined = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send. */
-    recurrence?: string | null;
-  },
+/** Insert one scheduled row while joining an authenticated transaction owner. */
+export function insertScheduledWithinTransaction(
+  context: DbTransactionContext,
+  args: InsertScheduledArgs,
 ): Promise<number> {
-  const payload: ScheduledPayload = {
-    text: args.text,
-    selectedMessageGuid: args.selectedMessageGuid,
-  };
-  return withDbTransaction(db, async () => {
+  return runInTransactionContext(context, async (db) => {
+    const payload: ScheduledPayload = {
+      text: args.text,
+      selectedMessageGuid: args.selectedMessageGuid,
+    };
     const rows = await db
       .insert(scheduledMessages)
       .values({
@@ -107,6 +118,10 @@ export async function insertScheduled(
       .returning({ id: scheduledMessages.id });
     return rows[0]!.id;
   });
+}
+
+export async function insertScheduled(db: AppDatabase, args: InsertScheduledArgs): Promise<number> {
+  return withDbTransaction(db, (context) => insertScheduledWithinTransaction(context, args));
 }
 
 /**
@@ -233,19 +248,15 @@ export async function reconcileServerScheduled(
  * row is re-created against Gator's no-PUT API, its new `serverId`). The `status='pending'`
  * guard is the correctness lock — a row already claimed/sent can't be edited (mirrors
  * `claimScheduled`). The reply target (selectedMessageGuid) is preserved through the JSON.
+ *
+ * The transaction-only form lets an authenticated caller include account ownership in the commit.
  */
-export async function updateScheduled(
-  db: AppDatabase,
+export function updateScheduledWithinTransaction(
+  context: DbTransactionContext,
   id: number,
-  patch: {
-    text?: string;
-    scheduledFor?: number;
-    serverId?: string | null;
-    /** Pass null to clear back to one-shot; undefined leaves it untouched. */
-    recurrence?: string | null;
-  },
+  patch: UpdateScheduledPatch,
 ): Promise<void> {
-  await withDbTransaction(db, async () => {
+  return runInTransactionContext(context, async (db) => {
     const set: {
       payload?: string;
       scheduledFor?: number;
@@ -269,6 +280,14 @@ export async function updateScheduled(
       .set(set)
       .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'pending')));
   });
+}
+
+export async function updateScheduled(
+  db: AppDatabase,
+  id: number,
+  patch: UpdateScheduledPatch,
+): Promise<void> {
+  await withDbTransaction(db, (context) => updateScheduledWithinTransaction(context, id, patch));
 }
 
 /** Fetch a single scheduled row by id (any status), for the edit screen. */
