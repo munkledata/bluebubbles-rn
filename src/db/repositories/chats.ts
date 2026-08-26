@@ -942,7 +942,25 @@ export async function setSyncedBackgroundUriIfCurrent(
   expectedUri: string | null,
   nextUri: string | null,
 ): Promise<boolean> {
-  return withDbTransaction(db, async () => {
+  return withDbTransaction(db, (context) =>
+    setSyncedBackgroundUriIfCurrentWithinTransaction(
+      context,
+      guid,
+      expectedChannel,
+      expectedUri,
+      nextUri,
+    ),
+  );
+}
+
+export function setSyncedBackgroundUriIfCurrentWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  expectedChannel: string | null,
+  expectedUri: string | null,
+  nextUri: string | null,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
     const rows = await db
       .update(chats)
       .set({ syncedBackgroundUri: nextUri })
@@ -974,7 +992,25 @@ export async function setSyncedBackgroundLuminanceIfCurrent(
   expectedUri: string,
   isLight: boolean,
 ): Promise<boolean> {
-  return withDbTransaction(db, async () => {
+  return withDbTransaction(db, (context) =>
+    setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
+      context,
+      guid,
+      expectedChannel,
+      expectedUri,
+      isLight,
+    ),
+  );
+}
+
+export function setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  expectedChannel: string,
+  expectedUri: string,
+  isLight: boolean,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
     const rows = await db
       .update(chats)
       .set({ backgroundIsLight: isLight })

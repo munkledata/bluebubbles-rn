@@ -6,8 +6,10 @@ import {
   setChatAppearanceWithinTransaction,
   setChatTheme,
   setSyncedBackgroundLuminanceIfCurrent,
+  setSyncedBackgroundLuminanceIfCurrentWithinTransaction,
   setSyncedBackgroundUri,
   setSyncedBackgroundUriIfCurrent,
+  setSyncedBackgroundUriIfCurrentWithinTransaction,
   upsertChats,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
@@ -320,6 +322,132 @@ describe('synced background (macOS 26)', () => {
       ),
     ).toBe(false);
     expect((await getChatTheme(t.db, 'g1'))?.backgroundIsLight).toBe(1);
+  });
+
+  it('rolls back the context-only URI settlement when its commit guard is revoked', async () => {
+    const t = await createTestDb();
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })],
+      new Map(),
+    );
+    await setSyncedBackgroundUri(t.db, 'g1', 'file:///synced/old.jpg');
+
+    let current = true;
+    let triggerRan = false;
+    t.raw.function('revoke_synced_background_uri_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 0;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_synced_background_uri_guard
+      AFTER UPDATE OF synced_background_uri ON chats
+      WHEN OLD.guid = 'g1' AND NEW.synced_background_uri = 'file:///synced/next.jpg'
+      BEGIN
+        SELECT revoke_synced_background_uri_guard();
+      END
+    `);
+
+    try {
+      await expect(
+        withDbTransaction(
+          t.db,
+          (context) =>
+            setSyncedBackgroundUriIfCurrentWithinTransaction(
+              context,
+              'g1',
+              'CH-1',
+              'file:///synced/old.jpg',
+              'file:///synced/next.jpg',
+            ),
+          () => current,
+        ),
+      ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+      expect(triggerRan).toBe(true);
+      expect((await getSyncedBackgroundState(t.db, 'g1'))?.uri).toBe('file:///synced/old.jpg');
+
+      t.raw.exec('DROP TRIGGER revoke_synced_background_uri_guard');
+      current = true;
+      await expect(
+        withDbTransaction(t.db, (context) =>
+          setSyncedBackgroundUriIfCurrentWithinTransaction(
+            context,
+            'g1',
+            'CH-1',
+            'file:///synced/old.jpg',
+            'file:///synced/next.jpg',
+          ),
+        ),
+      ).resolves.toBe(true);
+      expect((await getSyncedBackgroundState(t.db, 'g1'))?.uri).toBe('file:///synced/next.jpg');
+    } finally {
+      t.raw.exec('DROP TRIGGER IF EXISTS revoke_synced_background_uri_guard');
+    }
+  });
+
+  it('rolls back the context-only luminance settlement when its commit guard is revoked', async () => {
+    const t = await createTestDb();
+    await upsertChats(
+      t.db,
+      [Chat.parse({ guid: 'g1', style: 43, backgroundChannelGuid: 'CH-1' })],
+      new Map(),
+    );
+    await setSyncedBackgroundUri(t.db, 'g1', 'file:///synced/current.jpg');
+
+    let current = true;
+    let triggerRan = false;
+    t.raw.function('revoke_synced_background_luminance_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 0;
+    });
+    t.raw.exec(`
+      CREATE TRIGGER revoke_synced_background_luminance_guard
+      AFTER UPDATE OF background_is_light ON chats
+      WHEN OLD.guid = 'g1' AND NEW.background_is_light = 1
+      BEGIN
+        SELECT revoke_synced_background_luminance_guard();
+      END
+    `);
+
+    try {
+      await expect(
+        withDbTransaction(
+          t.db,
+          (context) =>
+            setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
+              context,
+              'g1',
+              'CH-1',
+              'file:///synced/current.jpg',
+              true,
+            ),
+          () => current,
+        ),
+      ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+      expect(triggerRan).toBe(true);
+      expect((await getChatTheme(t.db, 'g1'))?.backgroundIsLight).toBeNull();
+
+      t.raw.exec('DROP TRIGGER revoke_synced_background_luminance_guard');
+      current = true;
+      await expect(
+        withDbTransaction(t.db, (context) =>
+          setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
+            context,
+            'g1',
+            'CH-1',
+            'file:///synced/current.jpg',
+            true,
+          ),
+        ),
+      ).resolves.toBe(true);
+      expect((await getChatTheme(t.db, 'g1'))?.backgroundIsLight).toBe(1);
+    } finally {
+      t.raw.exec('DROP TRIGGER IF EXISTS revoke_synced_background_luminance_guard');
+    }
   });
 
   it('queues direct URI, URI compare-and-swap, and luminance behind a rolling-back neighbour', async () => {

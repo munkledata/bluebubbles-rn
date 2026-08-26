@@ -6,9 +6,10 @@ import {
   getChatTheme,
   getSyncedBackgroundState,
   persistServerChat,
-  setSyncedBackgroundLuminanceIfCurrent,
-  setSyncedBackgroundUriIfCurrent,
+  setSyncedBackgroundLuminanceIfCurrentWithinTransaction,
+  setSyncedBackgroundUriIfCurrentWithinTransaction,
 } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   deleteNativeSyncedBackgroundCacheFile,
@@ -153,12 +154,23 @@ async function runSyncedBackgroundRequest(
   // Bind every native URL/header pair to the account generation that started this operation.
   // The lease checks below prevent that generation from committing after Disconnect.
   const ownsRequest = (): boolean => lease.isCurrent() && isLatest();
-  const commit = async (task: () => Promise<unknown>): Promise<boolean> => {
+  const commit = async (
+    task: () => Promise<unknown>,
+    onGuardRollback?: () => void,
+  ): Promise<boolean> => {
     if (!ownsRequest()) return false;
     let accepted = false;
     const status = await runTrackedRealtimeWork(lease, async () => {
       if (!ownsRequest()) return;
-      accepted = (await task()) !== false;
+      try {
+        accepted = (await task()) !== false;
+      } catch (error) {
+        if (!(error instanceof DbCommitGuardRejectedError)) throw error;
+        // Keep known-rollback cleanup inside the admitted slot so Disconnect cannot sweep the
+        // account while a just-rejected candidate still exists. Ordinary failures retain their
+        // uncertain outcome and continue to the outer best-effort handler unchanged.
+        onGuardRollback?.();
+      }
     });
     return status === 'delivered' && accepted;
   };
@@ -198,7 +210,20 @@ async function runSyncedBackgroundRequest(
     if (!channel) {
       if (
         state?.uri &&
-        (await commit(() => setSyncedBackgroundUriIfCurrent(db, guid, null, state.uri, null)))
+        (await commit(() =>
+          withDbTransaction(
+            db,
+            (context) =>
+              setSyncedBackgroundUriIfCurrentWithinTransaction(
+                context,
+                guid,
+                null,
+                state.uri,
+                null,
+              ),
+            ownsRequest,
+          ),
+        ))
       ) {
         await deletePreviousSyncedBackground(state.uri);
       }
@@ -241,12 +266,28 @@ async function runSyncedBackgroundRequest(
           return;
         }
       }
-      if (
-        !(await commit(() =>
-          setSyncedBackgroundUriIfCurrent(db, guid, channel, state?.uri ?? null, dest.uri),
-        ))
-      ) {
-        deleteOwnedFile(dest);
+      let candidateDeletedAfterGuardRollback = false;
+      const promoted = await commit(
+        () =>
+          withDbTransaction(
+            db,
+            (context) =>
+              setSyncedBackgroundUriIfCurrentWithinTransaction(
+                context,
+                guid,
+                channel,
+                state?.uri ?? null,
+                dest.uri,
+              ),
+            ownsRequest,
+          ),
+        () => {
+          deleteOwnedFile(dest);
+          candidateDeletedAfterGuardRollback = true;
+        },
+      );
+      if (!promoted) {
+        if (!candidateDeletedAfterGuardRollback) deleteOwnedFile(dest);
         return;
       }
       effectiveUri = dest.uri;
@@ -277,7 +318,18 @@ async function runSyncedBackgroundRequest(
         const isLight = await computeBackgroundIsLight(effectiveUri);
         if (isLight !== null && ownsRequest()) {
           await commit(() =>
-            setSyncedBackgroundLuminanceIfCurrent(db, guid, channel, effectiveUri, isLight),
+            withDbTransaction(
+              db,
+              (context) =>
+                setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
+                  context,
+                  guid,
+                  channel,
+                  effectiveUri,
+                  isLight,
+                ),
+              ownsRequest,
+            ),
           );
         }
       }

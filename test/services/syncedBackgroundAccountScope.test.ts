@@ -18,6 +18,19 @@ const setSyncedBackgroundUriIfCurrent = jest.fn(
 );
 const getChatTheme = jest.fn(async () => null);
 const setSyncedBackgroundLuminanceIfCurrent = jest.fn(async () => true);
+const mockDbCommitGuardRejectedError = class DbCommitGuardRejectedError extends Error {};
+const mockWithDbTransaction = jest.fn(
+  async (
+    _db: unknown,
+    task: (context: object) => Promise<unknown>,
+    commitGuard?: () => boolean,
+  ) => {
+    if (commitGuard && !commitGuard()) throw new mockDbCommitGuardRejectedError();
+    const result = await task({});
+    if (commitGuard && !commitGuard()) throw new mockDbCommitGuardRejectedError();
+    return result;
+  },
+);
 const mockComputeBackgroundIsLight = jest.fn(async () => false);
 const mockFileBytes = new Map<string, number>();
 const mockDeletedUris: string[] = [];
@@ -38,9 +51,13 @@ jest.mock('@core/api', () => ({
 jest.mock('@db/repositories', () => ({
   persistServerChat,
   getSyncedBackgroundState,
-  setSyncedBackgroundUriIfCurrent,
+  setSyncedBackgroundUriIfCurrentWithinTransaction: setSyncedBackgroundUriIfCurrent,
   getChatTheme,
-  setSyncedBackgroundLuminanceIfCurrent,
+  setSyncedBackgroundLuminanceIfCurrentWithinTransaction: setSyncedBackgroundLuminanceIfCurrent,
+}));
+jest.mock('@db/transaction', () => ({
+  DbCommitGuardRejectedError: mockDbCommitGuardRejectedError,
+  withDbTransaction: mockWithDbTransaction,
 }));
 jest.mock('@/services/backgrounds/luminance', () => ({
   computeBackgroundIsLight: mockComputeBackgroundIsLight,

@@ -2163,6 +2163,12 @@ test('certifies exactly the reviewed sync delegation edges', () => {
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const syncedBackgroundTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/backgrounds/syncedBackground.ts' &&
+      finding.symbol.startsWith('runSyncedBackgroundRequest.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2170,9 +2176,6 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:23a950f7cc3a',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:c05c5f67e9>:mutator-call:d0fa0a16f072',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:02b0bbee44>:mutator-call:f80d09a7f178',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:1abc96a624>:mutator-call:0b9d14388e75',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:460d78afb1>:mutator-call:ba18d23fb429',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:776b7ee9c8>:mutator-call:bf36914bdddf',
       'src/services/sync/engine.ts#fullSync:mutator-call:7505c95ec9fe',
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
@@ -2187,6 +2190,20 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
       'src/services/syncControl.ts#startSync:mutator-reference:e7fd2b62d1e0',
+    ].sort(),
+  );
+  assert.deepEqual(
+    syncedBackgroundTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>:mutator-call:b90babad5788',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:17a5f7a01d73',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:e796b0707ded',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>:mutator-call:0ea9aab320ef',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:65c8511e514c',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:bc9bdf219775',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>:mutator-call:ac2d0c7e4da7',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:331132e4ce88',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:fcfa941fe19e',
     ].sort(),
   );
 });
@@ -4569,6 +4586,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'setChatPinWithinTransaction',
     'setChatUnreadLocalWithinTransaction',
     'setHandleServerAvatarWithinTransaction',
+    'setSyncedBackgroundLuminanceIfCurrentWithinTransaction',
+    'setSyncedBackgroundUriIfCurrentWithinTransaction',
     'setSyncMarkerWithinTransaction',
     'updateSearchTextBatch',
     'upsertHandlesWithinTransaction',
@@ -4648,6 +4667,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction:drizzle-update:eb8d843c171a',
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
       'src/db/repositories/chats.ts#setChatPinWithinTransaction:drizzle-update:90be45ecc8db',
+      'src/db/repositories/chats.ts#setSyncedBackgroundLuminanceIfCurrentWithinTransaction:drizzle-update:076320f3beec',
+      'src/db/repositories/chats.ts#setSyncedBackgroundUriIfCurrentWithinTransaction:drizzle-update:653f97744cea',
       'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
       'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf',
@@ -4670,7 +4691,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 32);
+  assert.equal(selected.length, 34);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
