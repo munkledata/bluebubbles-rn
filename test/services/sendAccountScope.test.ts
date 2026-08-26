@@ -344,6 +344,26 @@ describe('UI send account lease', () => {
     resumeRealtimeDeliveries();
   });
 
+  it('passes unsend persistence a commit guard tied to the captured screen lease', async () => {
+    const screenLease = captureRealtimeDeliveryLease();
+    await expect(
+      unsend({ messageGuid: 'message-a', chatGuid: 'chat-a' }, screenLease),
+    ).resolves.toEqual({ ok: true });
+
+    expect(mockSendUnsend).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { messageGuid: 'message-a', chatGuid: 'chat-a' },
+      expect.any(Number),
+      expect.any(Function),
+    );
+    const commitGuard = mockSendUnsend.mock.calls[0]?.[4] as (() => boolean) | undefined;
+    expect(commitGuard?.()).toBe(true);
+    await pauseRealtimeDeliveries();
+    expect(commitGuard?.()).toBe(false);
+    resumeRealtimeDeliveries();
+  });
+
   it('publishes mixed logical sends in order while one multi-image job keeps sibling concurrency', async () => {
     const starts: string[] = [];
     const textResult = deferred<{ tempGuid: string }>();

@@ -960,12 +960,12 @@ export interface LocalUnsendSnapshot {
  * Returning null means the message row does not exist and no write occurred. Network work belongs
  * in the service after this owner commits; nothing outside the database runs under the mutex.
  */
-export async function applyLocalUnsend(
-  db: AppDatabase,
+export function applyLocalUnsendWithinTransaction(
+  context: DbTransactionContext,
   guid: string,
   now: number,
 ): Promise<LocalUnsendSnapshot | null> {
-  return withDbTransaction(db, async () => {
+  return runInTransactionContext(context, async (db) => {
     const rows = await db.all<{
       id: number;
       dateRetracted: number | null;
@@ -986,6 +986,15 @@ export async function applyLocalUnsend(
       chatGuid: previous.chatGuid,
     };
   });
+}
+
+/** Standalone optimistic-unsend owner; composing services use the transaction-only body. */
+export async function applyLocalUnsend(
+  db: AppDatabase,
+  guid: string,
+  now: number,
+): Promise<LocalUnsendSnapshot | null> {
+  return withDbTransaction(db, (context) => applyLocalUnsendWithinTransaction(context, guid, now));
 }
 
 /**
@@ -1051,13 +1060,13 @@ export async function revertLocalEdit(
  *
  * Returns whether the prior retraction marker was actually restored.
  */
-export async function revertLocalUnsend(
-  db: AppDatabase,
+export function revertLocalUnsendWithinTransaction(
+  context: DbTransactionContext,
   guid: string,
   appliedAt: number,
   previousDateRetracted?: number | null,
 ): Promise<boolean> {
-  return withDbTransaction(db, async () => {
+  return runInTransactionContext(context, async (db) => {
     // `undefined` is the legacy three-argument call; a production snapshot is always number|null.
     const restoreDateRetracted = previousDateRetracted === undefined ? null : previousDateRetracted;
     const rows = await db.all<{ id: number }>(
@@ -1067,6 +1076,18 @@ export async function revertLocalUnsend(
     );
     return rows.length > 0;
   });
+}
+
+/** Standalone optimistic-unsend revert owner; composing services use the transaction-only body. */
+export async function revertLocalUnsend(
+  db: AppDatabase,
+  guid: string,
+  appliedAt: number,
+  previousDateRetracted?: number | null,
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    revertLocalUnsendWithinTransaction(context, guid, appliedAt, previousDateRetracted),
+  );
 }
 
 /**

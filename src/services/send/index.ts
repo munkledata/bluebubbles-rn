@@ -359,7 +359,9 @@ export function unsend(
   args: { messageGuid: string; chatGuid?: string },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ ok: boolean } | null> {
-  return runUiAccountOperation(accountLease, () => sendUnsend(getDatabase(), http, args));
+  return runUiAccountOperation(accountLease, () =>
+    sendUnsend(getDatabase(), http, args, Date.now(), () => accountLease.isCurrent()),
+  );
 }
 
 /** UI-facing: store a message to send later (server-side when possible). */

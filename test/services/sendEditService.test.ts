@@ -2,9 +2,15 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
-import { upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { revertLocalUnsend, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+  runTrackedRealtimeWork,
+} from '@/services/realtime/deliveryCoordinator';
 import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
 import { createTestDb } from '../support/testDb';
 
@@ -205,6 +211,150 @@ describe('sendEdit / sendUnsend', () => {
       expect(missing).toEqual({ ok: false });
       expect(postedBodies).toHaveLength(1);
     } finally {
+      raw.close();
+    }
+  });
+
+  it('unsend: rolls back a retired optimistic apply before HTTP and lets a fresh lease revert', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_unsend_during_apply', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER pause_unsend_during_apply
+      AFTER UPDATE OF date_retracted ON messages
+      WHEN NEW.date_retracted = 7000
+      BEGIN SELECT pause_unsend_during_apply(); END`);
+
+    let posts = 0;
+    const oldLease = captureRealtimeDeliveryLease();
+    try {
+      const oldUnsend = runTrackedRealtimeWork(oldLease, (lease) =>
+        sendUnsend(
+          db,
+          {
+            post: async () => {
+              posts += 1;
+              return { unsent: true };
+            },
+          } as unknown as HttpClient,
+          { messageGuid: 'm1' },
+          7_000,
+          () => lease.isCurrent(),
+        ),
+      );
+
+      await expect(oldUnsend).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+      if (!drain) throw new Error('unsend apply did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(posts).toBe(0);
+      expect(raw.inTransaction).toBe(false);
+      expect(one(raw, "SELECT date_retracted AS value FROM messages WHERE guid='m1'")).toEqual({
+        value: 4_321,
+      });
+
+      raw.exec('DROP TRIGGER pause_unsend_during_apply');
+      resumeRealtimeDeliveries();
+      const freshLease = captureRealtimeDeliveryLease();
+      let freshResult: { ok: boolean } | undefined;
+      let postRanInsideTransaction = true;
+      await expect(
+        runTrackedRealtimeWork(freshLease, async (lease) => {
+          freshResult = await sendUnsend(
+            db,
+            {
+              post: async () => {
+                posts += 1;
+                postRanInsideTransaction = raw.inTransaction;
+                return { unsent: false };
+              },
+            } as unknown as HttpClient,
+            { messageGuid: 'm1' },
+            8_000,
+            () => lease.isCurrent(),
+          );
+        }),
+      ).resolves.toBe('delivered');
+
+      expect(freshResult).toEqual({ ok: false });
+      expect(posts).toBe(1);
+      expect(postRanInsideTransaction).toBe(false);
+      expect(raw.inTransaction).toBe(false);
+      expect(one(raw, "SELECT date_retracted AS value FROM messages WHERE guid='m1'")).toEqual({
+        value: 4_321,
+      });
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_unsend_during_apply');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      raw.close();
+    }
+  });
+
+  it('unsend: attempts a failed local revert once and permits an exact public retry', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+    let revertAttempts = 0;
+    raw.function('record_unsend_revert', () => {
+      revertAttempts += 1;
+      return 0;
+    });
+    raw.exec(`CREATE TRIGGER fail_unsend_revert
+      BEFORE UPDATE OF date_retracted ON messages
+      WHEN OLD.date_retracted = 7000 AND NEW.date_retracted = 4321
+      BEGIN
+        SELECT record_unsend_revert();
+        SELECT RAISE(ABORT, 'UNSEND_REVERT_CANARY');
+      END`);
+
+    let posts = 0;
+    try {
+      const attempt = await observe(
+        sendUnsend(
+          db,
+          {
+            post: async () => {
+              posts += 1;
+              return { unsent: false };
+            },
+          } as unknown as HttpClient,
+          { messageGuid: 'm1' },
+          7_000,
+        ),
+      ).outcome;
+
+      expect({
+        outcome: attempt.kind,
+        posts,
+        revertAttempts,
+        inTransaction: raw.inTransaction,
+        marker: one(raw, "SELECT date_retracted AS value FROM messages WHERE guid='m1'").value,
+      }).toEqual({
+        outcome: 'rejected',
+        posts: 1,
+        revertAttempts: 1,
+        inTransaction: false,
+        marker: 7_000,
+      });
+      if (attempt.kind === 'rejected') {
+        expect(errorMessages(attempt.error)).toContain('UNSEND_REVERT_CANARY');
+      }
+
+      raw.exec('DROP TRIGGER fail_unsend_revert');
+      await expect(revertLocalUnsend(db, 'm1', 7_000, 4_321)).resolves.toBe(true);
+      expect(one(raw, "SELECT date_retracted AS value FROM messages WHERE guid='m1'")).toEqual({
+        value: 4_321,
+      });
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS fail_unsend_revert');
       raw.close();
     }
   });

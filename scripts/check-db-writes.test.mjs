@@ -2036,6 +2036,30 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const unsendApplyTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendEditService.ts' &&
+      finding.symbol.startsWith('sendUnsendOnce') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:',
+          ))),
+  );
+  const unsendRevertTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendEditService.ts' &&
+      finding.symbol.startsWith('revertOptimisticUnsend') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/messages.ts#revertLocalUnsendWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2058,11 +2082,25 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:2f81cc2cfae1:2',
       'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:2f81cc2cfae1:3',
       'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:eea70be5b755',
-      'src/services/send/sendEditService.ts#sendUnsend.<callback:b94f884a1d>:mutator-call:7e69e4723136',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:6a4e83423962',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:a13ce71abf75',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:a13ce71abf75:2',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:a13ce71abf75:3',
+      'src/services/send/sendEditService.ts#sendUnsend.<callback:837ccd781d>:mutator-call:9ba6d956947c',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9f4270c480f8',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9f4270c480f8:2',
+    ].sort(),
+  );
+  assert.deepEqual(
+    unsendApplyTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:9b6c16c1d0>:mutator-call:5691003cf12c',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:053735d4ade9',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:a7367d0cdccd',
+    ].sort(),
+  );
+  assert.deepEqual(
+    unsendRevertTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:ce6ae5122c>:mutator-call:d66c9a3fba2f',
+      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:74c66704d912',
+      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:7d69e3e3aa4b',
     ].sort(),
   );
 });
@@ -4671,6 +4709,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'src/services/contacts/serverAvatars.ts',
   ]);
   const leafSymbols = new Set([
+    'applyLocalUnsendWithinTransaction',
     'deleteReminderByNotificationIdWithinTransaction',
     'deleteReminderWithinTransaction',
     'deleteMessageLocalWithinTransaction',
@@ -4685,6 +4724,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'claimFailedOutgoingForRetryWithinTransaction',
     'insertOutgoingReactionWithinTransaction',
     'retireOutgoingWithinTransaction',
+    'revertLocalUnsendWithinTransaction',
     'reconcileOutgoingSuccessWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
     'setChatAppearanceWithinTransaction',
@@ -4838,6 +4878,32 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/messages.ts#deleteMessageLocal.<callback:',
           ))),
   );
+  const applyLocalUnsendTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/messages.ts' &&
+      finding.symbol.startsWith('applyLocalUnsend') &&
+      !finding.symbol.startsWith('applyLocalUnsendWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/messages.ts#applyLocalUnsend.<callback:',
+          ))),
+  );
+  const revertLocalUnsendTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/messages.ts' &&
+      finding.symbol.startsWith('revertLocalUnsend') &&
+      !finding.symbol.startsWith('revertLocalUnsendWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/messages.ts#revertLocalUnsendWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/messages.ts#revertLocalUnsend.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
@@ -4877,6 +4943,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:4315b7c2a1>:mutator-call:8f577f345052',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction:drizzle-delete:d78d925090ff',
+      'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction:drizzle-update:e31d64188078',
+      'src/db/repositories/messages.ts#revertLocalUnsendWithinTransaction:sql-update:b1fe717be3ae',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction.<callback:a1e7b9de6b>:mutator-call:d5204e46c499',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:drizzle-delete:2cde35e0f6d4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:sql-update:1320d8a402de',
@@ -4898,7 +4966,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 54);
+  assert.equal(selected.length, 56);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -4991,6 +5059,22 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/messages.ts#deleteMessageLocal.<callback:2c9cb5d4ae>:mutator-call:c061bbf7d8c4',
       'src/db/repositories/messages.ts#deleteMessageLocal:mutator-call:231b571b1d67',
       'src/db/repositories/messages.ts#deleteMessageLocal:mutator-call:c9f4ead00063',
+    ].sort(),
+  );
+  assert.deepEqual(
+    applyLocalUnsendTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/messages.ts#applyLocalUnsend.<callback:6a0c9830c6>:mutator-call:16a53eb65fd1',
+      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:4fef908e0de8',
+      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:a3df4279d248',
+    ].sort(),
+  );
+  assert.deepEqual(
+    revertLocalUnsendTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/messages.ts#revertLocalUnsend.<callback:cd36f36705>:mutator-call:7038feb61aed',
+      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:2e8d7955a2c2',
+      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:d67d4e187ef6',
     ].sort(),
   );
   assert.equal(

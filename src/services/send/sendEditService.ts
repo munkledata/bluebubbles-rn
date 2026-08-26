@@ -3,10 +3,11 @@ import type { HttpClient } from '@core/api/http';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import {
   applyLocalEdit,
-  applyLocalUnsend,
+  applyLocalUnsendWithinTransaction,
   revertLocalEdit,
-  revertLocalUnsend,
+  revertLocalUnsendWithinTransaction,
 } from '@db/repositories';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 
 export interface SendEditArgs {
@@ -151,22 +152,50 @@ export interface SendUnsendArgs {
   chatGuid?: string;
 }
 
+/** One short guarded owner for every compare-and-set unsend rollback. */
+function revertOptimisticUnsend(
+  db: AppDatabase,
+  messageGuid: string,
+  appliedAt: number,
+  previousDateRetracted: number | null,
+  commitGuard?: DbCommitGuard,
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    (context) =>
+      revertLocalUnsendWithinTransaction(context, messageGuid, appliedAt, previousDateRetracted),
+    commitGuard,
+  );
+}
+
 /** Optimistic unsend: mark retracted locally, POST, restore the prior mark on failure. */
 async function sendUnsendOnce(
   db: AppDatabase,
   http: HttpClient,
   args: SendUnsendArgs,
   now: number,
+  commitGuard?: DbCommitGuard,
 ): Promise<{ ok: boolean }> {
   // Row existence, committed predecessor, owning chat and optimistic write share one DB owner.
   // An explicit route chat may override the snapshotted chat, but never bypass a missing row.
-  const previous = await applyLocalUnsend(db, args.messageGuid, now);
+  const previous = await withDbTransaction(
+    db,
+    (context) => applyLocalUnsendWithinTransaction(context, args.messageGuid, now),
+    commitGuard,
+  );
   if (!previous) return { ok: false };
+
+  // Disconnect can retire this account immediately after COMMIT. Do not start an old-account
+  // request through whatever credential boundary a successor account installs.
+  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+
   const chatGuid = args.chatGuid ?? previous.chatGuid;
   if (!chatGuid) {
-    await revertLocalUnsend(db, args.messageGuid, now, previous.dateRetracted);
+    await revertOptimisticUnsend(db, args.messageGuid, now, previous.dateRetracted, commitGuard);
     return { ok: false };
   }
+
+  let accepted = false;
   try {
     // The server returns a status object `{ unsent: true }`; derive ok from it (a
     // 2xx that didn't actually unsend → revert the local retraction).
@@ -175,20 +204,18 @@ async function sendUnsendOnce(
       messageGuid: args.messageGuid,
       partIndex: 0,
     });
-    if (ack.unsent !== true) {
-      // Compare-and-set — the privacy-relevant twin of the edit revert. If the server DID retract
-      // the message and only the response was lost, a blind clear puts content the user revoked
-      // from everyone back on their own screen. Guarding on our own marker leaves a server-stamped
-      // retraction alone.
-      await revertLocalUnsend(db, args.messageGuid, now, previous.dateRetracted);
-      return { ok: false };
-    }
-    return { ok: true };
+    accepted = ack.unsent === true;
   } catch {
-    // Same compare-and-set as above: a transport failure does NOT mean the server didn't retract.
-    await revertLocalUnsend(db, args.messageGuid, now, previous.dateRetracted);
-    return { ok: false };
+    // A transport failure follows the same single guarded revert as a soft negative response.
   }
+
+  if (accepted) return { ok: true };
+
+  // Compare-and-set, not a blind clear: a lost response can still be followed by a differently
+  // stamped server echo. Keeping this outside the HTTP catch ensures a rejected/failed DB owner is
+  // never caught and attempted a second time.
+  await revertOptimisticUnsend(db, args.messageGuid, now, previous.dateRetracted, commitGuard);
+  return { ok: false };
 }
 
 export function sendUnsend(
@@ -196,10 +223,13 @@ export function sendUnsend(
   http: HttpClient,
   args: SendUnsendArgs,
   now: number = Date.now(),
+  commitGuard?: DbCommitGuard,
 ): Promise<{ ok: boolean }> {
   // Capture every caller-owned input synchronously, including the clock marker. The full lifecycle
   // then shares the exact same per-row queue as edit, while each DB callback stays HTTP-free.
   const messageGuid = args.messageGuid;
   const queuedArgs = { ...args, messageGuid };
-  return queueMessageMutation(db, messageGuid, () => sendUnsendOnce(db, http, queuedArgs, now));
+  return queueMessageMutation(db, messageGuid, () =>
+    sendUnsendOnce(db, http, queuedArgs, now, commitGuard),
+  );
 }
