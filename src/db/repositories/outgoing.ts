@@ -1278,14 +1278,42 @@ export async function listRetryableOutgoing(
 }
 
 /**
- * Atomically lease one retry row and flip its exact optimistic bubble back to `sending`.
+ * Atomically lease one retry row and flip its exact optimistic bubble back to `sending` while an
+ * owning transaction is open.
  *
  * Returning `temp_guid` from the winning lease avoids trusting a caller-supplied GUID that could
  * disagree with `id`. The state flip scopes `markOutgoingSentNoGuid`'s sticky-error guard to
  * failures reported during this new attempt. Both writes must commit together: a lease without
  * the visible flip lets manual Try Again overlap the drain, while a flip without its lease can be
- * claimed by a second drain. The optional guard authorizes this commit; every call still owns the
- * shared DB queue, so callers must never wrap this helper in another transaction.
+ * claimed by a second drain.
+ */
+export function claimOutgoingForSendWithinTransaction(
+  context: DbTransactionContext,
+  id: number,
+  clock: () => number,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    // Read AFTER acquiring the process-wide lock. A timestamp captured before a long queue wait
+    // can make the two-minute lease expire as soon as it commits, allowing a second sender in.
+    const now = clock();
+    const rows = await db.all<{ tempGuid: string }>(sql`
+        UPDATE outgoing_queue SET next_retry_at = ${now + OUTGOING_LEASE_MS}
+        WHERE id = ${id} AND next_retry_at <= ${now}
+        RETURNING temp_guid AS tempGuid`);
+    const claimed = rows[0];
+    if (!claimed) return false;
+    await db
+      .update(messages)
+      .set({ sendState: 'sending', error: 0, errorMessage: null })
+      .where(and(eq(messages.guid, claimed.tempGuid), eq(messages.sendState, 'error')));
+    return true;
+  });
+}
+
+/**
+ * Standalone automatic-claim owner retained for repository and DEV callers. Production services
+ * that compose this write use {@link claimOutgoingForSendWithinTransaction} inside their own short
+ * guarded owner instead of nesting this wrapper.
  */
 export async function claimOutgoingForSend(
   db: AppDatabase,
@@ -1295,22 +1323,7 @@ export async function claimOutgoingForSend(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
-      // Read AFTER acquiring the process-wide lock. A timestamp captured before a long queue wait
-      // can make the two-minute lease expire as soon as it commits, allowing a second sender in.
-      const now = clock();
-      const rows = await db.all<{ tempGuid: string }>(sql`
-        UPDATE outgoing_queue SET next_retry_at = ${now + OUTGOING_LEASE_MS}
-        WHERE id = ${id} AND next_retry_at <= ${now}
-        RETURNING temp_guid AS tempGuid`);
-      const claimed = rows[0];
-      if (!claimed) return false;
-      await db
-        .update(messages)
-        .set({ sendState: 'sending', error: 0, errorMessage: null })
-        .where(and(eq(messages.guid, claimed.tempGuid), eq(messages.sendState, 'error')));
-      return true;
-    },
+    (context) => claimOutgoingForSendWithinTransaction(context, id, clock),
     commitGuard,
   );
 }

@@ -10,13 +10,13 @@ import {
 } from '@core/api/endpoints/messages';
 import { logger } from '@core/secure';
 import {
-  claimOutgoingForSend,
+  claimOutgoingForSendWithinTransaction,
   getAttachmentByGuid,
   listRetryableOutgoing,
   retireOutgoing,
   type RetryableOutgoing,
 } from '@db/repositories';
-import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   runTrackedRealtimeWork,
@@ -312,7 +312,7 @@ async function runOutgoingQueueBody(
   let sent = 0;
   for (const row of rows) {
     if (!accountIsCurrent(accountLease)) break;
-    // THE LEASE AND THE VISIBLE STATE FLIP ARE ONE STEP. `claimOutgoingForSend` owns the
+    // THE LEASE AND THE VISIBLE STATE FLIP ARE ONE STEP. This service owns their short guarded
     // transaction: the lease lives in
     // outgoing_queue.next_retry_at; 'sending' on the message row is what every OTHER actor reads
     // — the "Try Again" button's claim is a compare-and-set on `send_state = 'error'`. If these
@@ -326,7 +326,11 @@ async function runOutgoingQueueBody(
     // un-bumped — so the same message re-sends on every later drain (duplicates).
     let claimed = false;
     const claimCommitted = await runAccountCommit(accountLease, async (guard) => {
-      claimed = await claimOutgoingForSend(db, row.id, clock, guard);
+      claimed = await withDbTransaction(
+        db,
+        (context) => claimOutgoingForSendWithinTransaction(context, row.id, clock),
+        guard,
+      );
     });
     if (!claimCommitted) break;
     if (!claimed) continue;

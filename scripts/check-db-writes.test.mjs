@@ -1916,6 +1916,19 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:',
           ))),
   );
+  const outgoingQueueClaimTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/outgoingQueueService.ts' &&
+      finding.symbol.startsWith('runOutgoingQueueBody.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1929,7 +1942,6 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:a72544944c>:mutator-call:5be93ff1a7bb',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:a72544944c>:mutator-call:5be93ff1a7bb:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e6daa15e91>:mutator-call:a1862003ebf3',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:32b1142393>:mutator-call:a6f7181df803',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:481b423ba233',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:cce2ab93dad1',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e8d6115d0f4d',
@@ -1943,6 +1955,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:1c5a38f08f20',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8d029d29cd2e',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:dc87ff322759',
+    ].sort(),
+  );
+  assert.deepEqual(
+    outgoingQueueClaimTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>.<callback:ef896ff493>:mutator-call:ae9ded5a6343',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:7b452e2c0efa',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:a62d23d465c7',
     ].sort(),
   );
   assert.deepEqual(
@@ -4621,6 +4641,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markAllChatsReadLocalWithinTransaction',
     'markMessageSendErrorWithinTransaction',
     'markOutgoingSentNoGuidWithinTransaction',
+    'claimOutgoingForSendWithinTransaction',
     'claimFailedOutgoingForRetryWithinTransaction',
     'reconcileOutgoingSuccessWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
@@ -4711,6 +4732,20 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:',
           ))),
   );
+  const automaticClaimTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/outgoing.ts' &&
+      finding.symbol.startsWith('claimOutgoingForSend') &&
+      !finding.symbol.startsWith('claimOutgoingForSendWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/outgoing.ts#claimOutgoingForSend.<callback:',
+          ))),
+  );
   const discardOutgoingTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
@@ -4765,6 +4800,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86:2',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:21d3ccc056b3',
+      'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:drizzle-update:fef9b2b45b05',
+      'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:sql-update:a0d6d4f1bcbc',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:4315b7c2a1>:mutator-call:8f577f345052',
@@ -4790,7 +4827,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 48);
+  assert.equal(selected.length, 50);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -4843,6 +4880,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:e9bf331847>:mutator-call:4b8448a9e2d5',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:0ef007da403c',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:abe11442dbc6',
+    ].sort(),
+  );
+  assert.deepEqual(
+    automaticClaimTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/outgoing.ts#claimOutgoingForSend.<callback:8b54a95643>:mutator-call:aebe0c09810d',
+      'src/db/repositories/outgoing.ts#claimOutgoingForSend:mutator-call:68730b3fe11a',
+      'src/db/repositories/outgoing.ts#claimOutgoingForSend:mutator-call:d7146317172c',
     ].sort(),
   );
   assert.deepEqual(

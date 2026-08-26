@@ -660,6 +660,93 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
     expect(attemptsOf(raw, 'temp-guard-claim')).toBe(1);
   });
 
+  it('rolls back a mid-claim retirement before HTTP and lets a fresh account retry once', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const tempGuid = 'temp-guard-mid-claim';
+    await strandedText(db, raw, 'c1', tempGuid, 1_000);
+    raw
+      .prepare(
+        "UPDATE messages SET send_state='error', error=502, error_message='preserve this detail' WHERE guid=?",
+      )
+      .run(tempGuid);
+    raw
+      .prepare('UPDATE outgoing_queue SET attempts=1, next_retry_at=123 WHERE temp_guid=?')
+      .run(tempGuid);
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_automatic_retry_during_claim', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_automatic_retry_during_claim
+      AFTER UPDATE OF send_state ON messages
+      WHEN OLD.guid = '${tempGuid}' AND OLD.send_state = 'error' AND NEW.send_state = 'sending'
+      BEGIN
+        SELECT pause_automatic_retry_during_claim();
+      END
+    `);
+
+    let posts = 0;
+    const oldAccount = captureRealtimeDeliveryLease();
+    const http = fakeHttp(async () => {
+      posts += 1;
+      return { guid: 'real-after-mid-claim' };
+    });
+
+    try {
+      await expect(
+        runOutgoingQueue(db, http, noAttachmentIo, 2_000_000, oldAccount),
+      ).resolves.toEqual({ eligible: 1, sent: 0 });
+      if (!drain) throw new Error('automatic retry claim did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(posts).toBe(0);
+      expect(raw.inTransaction).toBe(false);
+      expect(
+        raw
+          .prepare(
+            'SELECT send_state AS sendState, error, error_message AS errorMessage FROM messages WHERE guid=?',
+          )
+          .get(tempGuid),
+      ).toEqual({ sendState: 'error', error: 502, errorMessage: 'preserve this detail' });
+      expect(
+        raw
+          .prepare(
+            'SELECT attempts, next_retry_at AS nextRetryAt FROM outgoing_queue WHERE temp_guid=?',
+          )
+          .get(tempGuid),
+      ).toEqual({ attempts: 1, nextRetryAt: 123 });
+
+      raw.exec('DROP TRIGGER pause_automatic_retry_during_claim');
+      resumeRealtimeDeliveries();
+      const freshAccount = captureRealtimeDeliveryLease();
+      let postRanInsideTransaction = false;
+      const freshHttp = fakeHttp(async () => {
+        postRanInsideTransaction = raw.inTransaction;
+        posts += 1;
+        return { guid: 'real-after-mid-claim' };
+      });
+
+      await expect(
+        runOutgoingQueue(db, freshHttp, noAttachmentIo, 2_000_000, freshAccount),
+      ).resolves.toEqual({ eligible: 1, sent: 1 });
+
+      expect(posts).toBe(1);
+      expect(postRanInsideTransaction).toBe(false);
+      expect(stateOf(raw, 'real-after-mid-claim')).toBe('sent');
+      expect(queueCount(raw)).toBe(0);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_automatic_retry_during_claim');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('does not reconcile a real-guid success after Disconnect while its commit is queued', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
