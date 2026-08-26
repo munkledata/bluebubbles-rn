@@ -1,7 +1,12 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Reminder } from '@core/models';
 import { reminders } from '../schema';
-import { withDbTransaction, type DbCommitGuard } from '../transaction';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbCommitGuard,
+  type DbTransactionContext,
+} from '../transaction';
 import type { AppDatabase } from '../types';
 
 // ---- Reminders -------------------------------------------------------------
@@ -74,6 +79,15 @@ export async function deleteReminder(
   );
 }
 
+export function deleteReminderByNotificationIdWithinTransaction(
+  context: DbTransactionContext,
+  notificationId: string,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.delete(reminders).where(eq(reminders.notificationId, notificationId));
+  });
+}
+
 export async function deleteReminderByNotificationId(
   db: AppDatabase,
   notificationId: string,
@@ -81,7 +95,7 @@ export async function deleteReminderByNotificationId(
 ): Promise<void> {
   await withDbTransaction(
     db,
-    () => db.delete(reminders).where(eq(reminders.notificationId, notificationId)),
+    (context) => deleteReminderByNotificationIdWithinTransaction(context, notificationId),
     commitGuard,
   );
 }

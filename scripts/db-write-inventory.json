@@ -9377,7 +9377,7 @@
     {
       "id": "src/db/repositories/reminders.ts#createReminder:mutator-call:41a5df1ad455",
       "path": "src/db/repositories/reminders.ts",
-      "line": 14,
+      "line": 19,
       "symbol": "createReminder",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9390,7 +9390,7 @@
     {
       "id": "src/db/repositories/reminders.ts#createReminder:mutator-call:5f71443b9c5b",
       "path": "src/db/repositories/reminders.ts",
-      "line": 14,
+      "line": 19,
       "symbol": "createReminder",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#createReminder.<callback:543afac7cb>",
@@ -9403,7 +9403,7 @@
     {
       "id": "src/db/repositories/reminders.ts#createReminder:drizzle-insert:af130dfa741c",
       "path": "src/db/repositories/reminders.ts",
-      "line": 17,
+      "line": 22,
       "symbol": "createReminder",
       "operation": "drizzle-insert",
       "target": "reminders",
@@ -9416,7 +9416,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminder:mutator-call:8d8ad880fb62",
       "path": "src/db/repositories/reminders.ts",
-      "line": 60,
+      "line": 65,
       "symbol": "deleteReminder",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminder.<callback:568358739a>",
@@ -9429,7 +9429,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminder:mutator-call:efcbb282beea",
       "path": "src/db/repositories/reminders.ts",
-      "line": 60,
+      "line": 65,
       "symbol": "deleteReminder",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9442,7 +9442,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminder:drizzle-delete:fe4cbf8ac53a",
       "path": "src/db/repositories/reminders.ts",
-      "line": 63,
+      "line": 68,
       "symbol": "deleteReminder",
       "operation": "drizzle-delete",
       "target": "reminders",
@@ -9453,22 +9453,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts"
     },
     {
-      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:mutator-call:4b3b7a562584",
+      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b",
       "path": "src/db/repositories/reminders.ts",
-      "line": 82,
-      "symbol": "deleteReminderByNotificationId",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId.<callback:590359d9cd>",
+      "line": 87,
+      "symbol": "deleteReminderByNotificationIdWithinTransaction",
+      "operation": "drizzle-delete",
+      "target": "reminders",
       "detectedContext": "withDbTransaction",
       "owner": "deleteReminderByNotificationId",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:mutator-call:5ae57a158b1a",
+      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:mutator-call:4f91da6c434d",
       "path": "src/db/repositories/reminders.ts",
-      "line": 82,
+      "line": 96,
       "symbol": "deleteReminderByNotificationId",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9476,25 +9476,38 @@
       "owner": "deleteReminderByNotificationId",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:drizzle-delete:affb660185be",
+      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:mutator-call:8e2cee1baa6a",
       "path": "src/db/repositories/reminders.ts",
-      "line": 84,
+      "line": 96,
       "symbol": "deleteReminderByNotificationId",
-      "operation": "drizzle-delete",
-      "target": "reminders",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId.<callback:56f135a15c>",
       "detectedContext": "withDbTransaction",
       "owner": "deleteReminderByNotificationId",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId.<callback:56f135a15c>:mutator-call:9f84209fc3ea",
+      "path": "src/db/repositories/reminders.ts",
+      "line": 98,
+      "symbol": "deleteReminderByNotificationId.<callback:56f135a15c>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "deleteReminderByNotificationId",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/db/repositories/reminders.ts#updateReminderTime:mutator-call:b0177e27e64c",
       "path": "src/db/repositories/reminders.ts",
-      "line": 107,
+      "line": 121,
       "symbol": "updateReminderTime",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#updateReminderTime.<callback:915a2330af>",
@@ -9507,7 +9520,7 @@
     {
       "id": "src/db/repositories/reminders.ts#updateReminderTime:mutator-call:c67238dad427",
       "path": "src/db/repositories/reminders.ts",
-      "line": 107,
+      "line": 121,
       "symbol": "updateReminderTime",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9520,7 +9533,7 @@
     {
       "id": "src/db/repositories/reminders.ts#updateReminderTime:drizzle-update:33717b513963",
       "path": "src/db/repositories/reminders.ts",
-      "line": 110,
+      "line": 124,
       "symbol": "updateReminderTime",
       "operation": "drizzle-update",
       "target": "reminders",
@@ -12222,22 +12235,48 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
     },
     {
-      "id": "src/services/chatActions.ts#cancelRemindersForChat:mutator-call:101f68c1cbb2",
+      "id": "src/services/chatActions.ts#cancelRemindersForChat:mutator-call:10e5ab4c9101",
       "path": "src/services/chatActions.ts",
       "line": 457,
       "symbol": "cancelRemindersForChat",
       "operation": "mutator-call",
-      "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId",
-      "detectedContext": "coordinated-delegation",
-      "owner": "cancelRemindersForChat",
-      "transactionContext": "coordinated-delegation",
+      "target": "src/services/chatActions.ts#cancelRemindersForChat.<callback:9d59a41411>",
+      "detectedContext": "withDbTransaction",
+      "owner": "cancelRemindersForChat reminder-row finalization",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/chatActions.ts#cancelRemindersForChat:mutator-call:f4f2756f3147",
+      "path": "src/services/chatActions.ts",
+      "line": 457,
+      "symbol": "cancelRemindersForChat",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "cancelRemindersForChat reminder-row finalization",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/chatActions.ts#cancelRemindersForChat.<callback:9d59a41411>:mutator-call:4d7918588245",
+      "path": "src/services/chatActions.ts",
+      "line": 459,
+      "symbol": "cancelRemindersForChat.<callback:9d59a41411>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "cancelRemindersForChat reminder-row finalization",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deleteChat.test.ts; test/services/notificationActions.test.ts; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:1837e71127eb",
       "path": "src/services/chatActions.ts",
-      "line": 507,
+      "line": 511,
       "symbol": "cancelServerScheduledForChat",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>",
@@ -12250,7 +12289,7 @@
     {
       "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:716a5525b26b",
       "path": "src/services/chatActions.ts",
-      "line": 507,
+      "line": 511,
       "symbol": "cancelServerScheduledForChat",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -12263,7 +12302,7 @@
     {
       "id": "src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>:mutator-call:0d29d38fd70c",
       "path": "src/services/chatActions.ts",
-      "line": 509,
+      "line": 513,
       "symbol": "cancelServerScheduledForChat.<callback:dc7ea326bb>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction",

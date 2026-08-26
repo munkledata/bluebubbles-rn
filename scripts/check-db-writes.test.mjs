@@ -2065,6 +2065,12 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       finding.symbol.startsWith('cancelServerScheduledForChat') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const cancelReminderCleanupTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('cancelRemindersForChat') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2088,7 +2094,6 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c189a52293cc',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
-      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:101f68c1cbb2',
       'src/services/chatActions.ts#deleteChat.<callback:f472676191>:mutator-call:7a4702559112',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:3c4dc28c8ea2',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:3c4dc28c8ea2:2',
@@ -2122,6 +2127,14 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>:mutator-call:0d29d38fd70c',
       'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:1837e71127eb',
       'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:716a5525b26b',
+    ].sort(),
+  );
+  assert.deepEqual(
+    cancelReminderCleanupTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/services/chatActions.ts#cancelRemindersForChat.<callback:9d59a41411>:mutator-call:4d7918588245',
+      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:10e5ab4c9101',
+      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:f4f2756f3147',
     ].sort(),
   );
 });
@@ -4527,6 +4540,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'src/services/contacts/serverAvatars.ts',
   ]);
   const leafSymbols = new Set([
+    'deleteReminderByNotificationIdWithinTransaction',
     'deleteScheduledHistoryWithinTransaction',
     'deleteScheduledWithinTransaction',
     'kvSetWithinTransaction',
@@ -4621,6 +4635,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
       'src/db/repositories/chats.ts#setChatPinWithinTransaction:drizzle-update:90be45ecc8db',
       'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
+      'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
@@ -4640,7 +4655,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 30);
+  assert.equal(selected.length, 31);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

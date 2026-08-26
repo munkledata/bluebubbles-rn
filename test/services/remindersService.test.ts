@@ -3,6 +3,7 @@ import {
   createReminder,
   deleteReminder,
   deleteReminderByNotificationId,
+  deleteReminderByNotificationIdWithinTransaction,
   getReminderByMessageGuid,
   listReminders,
   updateReminderTime,
@@ -10,7 +11,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   cancelReminder,
@@ -591,6 +592,50 @@ describe('reminder repository serialization', () => {
     senderName: null,
     scheduledFor,
     notificationId,
+  });
+
+  it('rolls back the context-only notification-id delete when its commit guard is revoked', async () => {
+    const { db, raw } = await createTestDb();
+    const notificationId = 'scoped-delete';
+    const id = await createReminder(db, reminder('scoped-delete', notificationId, 1000));
+
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_reminder_notification_delete_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_reminder_notification_delete_guard
+      AFTER DELETE ON reminders
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT revoke_reminder_notification_delete_guard();
+      END
+    `);
+
+    try {
+      await expect(
+        withDbTransaction(
+          db,
+          (context) => deleteReminderByNotificationIdWithinTransaction(context, notificationId),
+          () => current,
+        ),
+      ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+      expect(triggerRan).toBe(true);
+      expect(await getReminderByMessageGuid(db, 'scoped-delete')).toMatchObject({ id });
+
+      raw.exec('DROP TRIGGER revoke_reminder_notification_delete_guard');
+      current = true;
+      await withDbTransaction(db, (context) =>
+        deleteReminderByNotificationIdWithinTransaction(context, notificationId),
+      );
+      expect(await getReminderByMessageGuid(db, 'scoped-delete')).toBeNull();
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS revoke_reminder_notification_delete_guard');
+    }
   });
 
   it('queues create, move, and both delete shapes behind a rolling-back neighbour', async () => {

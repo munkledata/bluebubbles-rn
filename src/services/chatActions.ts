@@ -3,7 +3,7 @@ import { logger } from '@core/secure';
 import {
   clearChatTombstoneWithinTransaction,
   deleteChatLocal,
-  deleteReminderByNotificationId,
+  deleteReminderByNotificationIdWithinTransaction,
   deleteScheduledWithinTransaction,
   getChatIdByGuid,
   getNewestReceivedGuid,
@@ -454,7 +454,11 @@ async function cancelRemindersForChat(
     for (const s of settled) {
       assertChatActionLease(accountLease);
       if (s.status === 'fulfilled') {
-        await deleteReminderByNotificationId(db, s.value);
+        await withDbTransaction(
+          db,
+          (context) => deleteReminderByNotificationIdWithinTransaction(context, s.value),
+          () => accountLease.isCurrent(),
+        );
         assertChatActionLease(accountLease);
       }
     }

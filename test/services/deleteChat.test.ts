@@ -382,6 +382,59 @@ describe('deleteChat', () => {
     expect((await listReminders(db)).map((r) => r.notificationId)).toEqual(['r-other']);
   });
 
+  it('rolls back the post-native reminder-row delete when the account retires, then lets a fresh delete retry', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c1');
+    await seedReminder(db, 'c1', 'r-a');
+
+    let nativeCancelCompleted = false;
+    let nativeCancelRanInsideTransaction = false;
+    mockCancelReminder.mockImplementation(async () => {
+      nativeCancelRanInsideTransaction = raw.inTransaction;
+      nativeCancelCompleted = true;
+    });
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    let nativeWasCancelledFirst = false;
+    raw.function('pause_chat_delete_reminder_during_delete', () => {
+      triggerRan = true;
+      nativeWasCancelledFirst = nativeCancelCompleted;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_chat_delete_reminder_during_delete
+      AFTER DELETE ON reminders
+      WHEN OLD.notification_id = 'r-a'
+      BEGIN
+        SELECT pause_chat_delete_reminder_during_delete();
+      END
+    `);
+
+    try {
+      await expect(deleteChat('c1', captureRealtimeDeliveryLease())).resolves.toBeUndefined();
+      if (!drain) throw new Error('reminder-row delete did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(nativeCancelRanInsideTransaction).toBe(false);
+      expect(nativeWasCancelledFirst).toBe(true);
+      expect((await listReminders(db)).map((reminder) => reminder.notificationId)).toEqual(['r-a']);
+
+      raw.exec('DROP TRIGGER pause_chat_delete_reminder_during_delete');
+      resumeRealtimeDeliveries();
+      await deleteChat('c1');
+
+      expect(mockCancelReminder.mock.calls.map((call) => call[0])).toEqual(['r-a', 'r-a']);
+      expect(await listReminders(db)).toHaveLength(0);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_chat_delete_reminder_during_delete');
+      resumeRealtimeDeliveries();
+    }
+  });
+
   it('cancels BEFORE the rows go — otherwise the ids are unrecoverable', async () => {
     const { db } = await createTestDb();
     mockDb = db;
