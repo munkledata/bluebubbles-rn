@@ -405,17 +405,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
     },
     {
-      "id": "app/(app)/scheduled.tsx#ScheduledScreen.<callback:a7ba9b6c78>.onPress.<callback:fc0d082a48>:mutator-call:76c2c8d46170",
+      "id": "app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>:mutator-call:4f94f522cacc",
       "path": "app/(app)/scheduled.tsx",
-      "line": 125,
-      "symbol": "ScheduledScreen.<callback:a7ba9b6c78>.onPress.<callback:fc0d082a48>",
+      "line": 128,
+      "symbol": "ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/scheduled.ts#deleteScheduledHistory",
-      "detectedContext": "coordinated-delegation",
+      "target": "app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>.<callback:60a2bf7f5f>",
+      "detectedContext": "withDbTransaction",
       "owner": "ScheduledScreen clear history",
-      "transactionContext": "coordinated-delegation",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/scheduledScreen.test.tsx; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>:mutator-call:668be87a17e0",
+      "path": "app/(app)/scheduled.tsx",
+      "line": 128,
+      "symbol": "ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "ScheduledScreen clear history",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/scheduledScreen.test.tsx; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>.<callback:60a2bf7f5f>:mutator-call:3494b6fa045d",
+      "path": "app/(app)/scheduled.tsx",
+      "line": 131,
+      "symbol": "ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>.<callback:60a2bf7f5f>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "ScheduledScreen clear history",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/scheduledScreen.test.tsx; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2",
@@ -9195,7 +9221,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#insertScheduled:mutator-call:279dd81f9434",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 91,
+      "line": 96,
       "symbol": "insertScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#insertScheduled.<callback:cb565d88da>",
@@ -9208,7 +9234,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#insertScheduled:mutator-call:e06c6f20c3b2",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 91,
+      "line": 96,
       "symbol": "insertScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9221,7 +9247,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#insertScheduled:drizzle-insert:3546ee611d4d",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 92,
+      "line": 97,
       "symbol": "insertScheduled",
       "operation": "drizzle-insert",
       "target": "scheduledMessages",
@@ -9234,7 +9260,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#listServerScheduledPruneExposure:mutator-call:ed6159286623",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 121,
+      "line": 126,
       "symbol": "listServerScheduledPruneExposure",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9247,7 +9273,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 168,
+      "line": 173,
       "symbol": "reconcileServerScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#listServerScheduledPruneExposure",
@@ -9260,7 +9286,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:521a249c3e9e",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 173,
+      "line": 178,
       "symbol": "reconcileServerScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#reconcileServerScheduled.<callback:eac202e2ae>",
@@ -9273,7 +9299,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:65bc28dad720",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 173,
+      "line": 178,
       "symbol": "reconcileServerScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9286,7 +9312,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:sql-update:f9c60a95cc6c",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 188,
+      "line": 193,
       "symbol": "reconcileServerScheduled",
       "operation": "sql-update",
       "target": "scheduled_messages",
@@ -9299,7 +9325,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:drizzle-insert:70bca2aa59e7",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 197,
+      "line": 202,
       "symbol": "reconcileServerScheduled",
       "operation": "drizzle-insert",
       "target": "scheduledMessages",
@@ -9312,7 +9338,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:0e9fbf6f50f9",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 213,
+      "line": 218,
       "symbol": "reconcileServerScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9325,7 +9351,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:641354ba1f27",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 213,
+      "line": 218,
       "symbol": "reconcileServerScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#reconcileServerScheduled.<callback:9f84eec4e6>",
@@ -9338,7 +9364,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#reconcileServerScheduled:drizzle-delete:c09dcdf5565d",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 216,
+      "line": 221,
       "symbol": "reconcileServerScheduled",
       "operation": "drizzle-delete",
       "target": "scheduledMessages",
@@ -9351,7 +9377,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#updateScheduled:mutator-call:70010f5dc1b7",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 243,
+      "line": 248,
       "symbol": "updateScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9364,7 +9390,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#updateScheduled:mutator-call:a438fd3d84a3",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 243,
+      "line": 248,
       "symbol": "updateScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#updateScheduled.<callback:290ff8a5e1>",
@@ -9377,7 +9403,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#updateScheduled:drizzle-update:8e0c2416fea8",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 262,
+      "line": 267,
       "symbol": "updateScheduled",
       "operation": "drizzle-update",
       "target": "scheduledMessages",
@@ -9388,22 +9414,35 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts"
     },
     {
-      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistory:mutator-call:5249e11ff61f",
+      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 293,
+      "line": 302,
+      "symbol": "deleteScheduledHistoryWithinTransaction",
+      "operation": "drizzle-delete",
+      "target": "scheduledMessages",
+      "detectedContext": "withDbTransaction",
+      "owner": "deleteScheduledHistoryWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistory:mutator-call:3b57c3aef3c7",
+      "path": "src/db/repositories/scheduled.ts",
+      "line": 315,
       "symbol": "deleteScheduledHistory",
       "operation": "mutator-call",
-      "target": "src/db/repositories/scheduled.ts#deleteScheduledHistory.<callback:862ec8a60a>",
+      "target": "src/db/repositories/scheduled.ts#deleteScheduledHistory.<callback:be2a685944>",
       "detectedContext": "withDbTransaction",
       "owner": "deleteScheduledHistory",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistory:mutator-call:daa1f71cb99c",
+      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistory:mutator-call:b6f9fc9808be",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 293,
+      "line": 315,
       "symbol": "deleteScheduledHistory",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9411,25 +9450,25 @@
       "owner": "deleteScheduledHistory",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistory:drizzle-delete:d63a5f2bf52a",
+      "id": "src/db/repositories/scheduled.ts#deleteScheduledHistory.<callback:be2a685944>:mutator-call:9b28fd7c2330",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 294,
-      "symbol": "deleteScheduledHistory",
-      "operation": "drizzle-delete",
-      "target": "scheduledMessages",
+      "line": 315,
+      "symbol": "deleteScheduledHistory.<callback:be2a685944>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "deleteScheduledHistory",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/scheduledRepo.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/db/repositories/scheduled.ts#claimScheduled:mutator-call:4fc3d958f1f7",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 373,
+      "line": 386,
       "symbol": "claimScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9442,7 +9481,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#claimScheduled:mutator-call:873c4d069796",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 373,
+      "line": 386,
       "symbol": "claimScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#claimScheduled.<callback:1607094579>",
@@ -9455,7 +9494,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#claimScheduled:drizzle-update:9281d81fc80d",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 376,
+      "line": 389,
       "symbol": "claimScheduled",
       "operation": "drizzle-update",
       "target": "scheduledMessages",
@@ -9468,7 +9507,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#claimDueScheduled:mutator-call:58b89f680db9",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 400,
+      "line": 413,
       "symbol": "claimDueScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#claimDueScheduled.<callback:93fd481551>",
@@ -9481,7 +9520,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#claimDueScheduled:mutator-call:94def7d0be12",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 400,
+      "line": 413,
       "symbol": "claimDueScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9494,7 +9533,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#claimDueScheduled:sql-update:d4fa926b9398",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 403,
+      "line": 416,
       "symbol": "claimDueScheduled",
       "operation": "sql-update",
       "target": "scheduled_messages",
@@ -9507,7 +9546,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#markScheduledSent:mutator-call:0fcef8c23a10",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 427,
+      "line": 440,
       "symbol": "markScheduledSent",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#markScheduledSent.<callback:43dbc73bf4>",
@@ -9520,7 +9559,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#markScheduledSent:mutator-call:b659a739265d",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 427,
+      "line": 440,
       "symbol": "markScheduledSent",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9533,7 +9572,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#markScheduledSent:drizzle-update:1a6232eebcf3",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 430,
+      "line": 443,
       "symbol": "markScheduledSent",
       "operation": "drizzle-update",
       "target": "scheduledMessages",
@@ -9546,7 +9585,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#rearmScheduled:mutator-call:53d48ace71e9",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 459,
+      "line": 472,
       "symbol": "rearmScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#rearmScheduled.<callback:4a5395726e>",
@@ -9559,7 +9598,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#rearmScheduled:mutator-call:6f49e09abdc1",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 459,
+      "line": 472,
       "symbol": "rearmScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9572,7 +9611,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#rearmScheduled:drizzle-update:ea433c895cc6",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 462,
+      "line": 475,
       "symbol": "rearmScheduled",
       "operation": "drizzle-update",
       "target": "scheduledMessages",
@@ -9585,7 +9624,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing:mutator-call:71056b9ec5de",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 487,
+      "line": 500,
       "symbol": "handoverScheduledTextToOutgoing",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9598,7 +9637,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing:mutator-call:c56a19ce653a",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 487,
+      "line": 500,
       "symbol": "handoverScheduledTextToOutgoing",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing.<callback:dd0921976b>",
@@ -9611,7 +9650,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing:drizzle-update:dd0e6ef6084f",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 492,
+      "line": 505,
       "symbol": "handoverScheduledTextToOutgoing",
       "operation": "drizzle-update",
       "target": "scheduledMessages",
@@ -9624,7 +9663,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing:drizzle-update:dd0e6ef6084f:2",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 507,
+      "line": 520,
       "symbol": "handoverScheduledTextToOutgoing",
       "operation": "drizzle-update",
       "target": "scheduledMessages",
@@ -9637,7 +9676,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing.<callback:dd0921976b>:mutator-call:4c11af039748",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 523,
+      "line": 536,
       "symbol": "handoverScheduledTextToOutgoing.<callback:dd0921976b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction",
@@ -9650,7 +9689,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#markScheduledFailed:mutator-call:0b78657a265a",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 541,
+      "line": 554,
       "symbol": "markScheduledFailed",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#markScheduledFailed.<callback:5b9e036952>",
@@ -9663,7 +9702,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#markScheduledFailed:mutator-call:6ba3b9013f76",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 541,
+      "line": 554,
       "symbol": "markScheduledFailed",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9676,7 +9715,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#markScheduledFailed:sql-update:cca12a6e3d61",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 544,
+      "line": 557,
       "symbol": "markScheduledFailed",
       "operation": "sql-update",
       "target": "scheduled_messages",
@@ -9689,7 +9728,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#resetStuckScheduled:mutator-call:bd3813bb5f3f",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 571,
+      "line": 584,
       "symbol": "resetStuckScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9702,7 +9741,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#resetStuckScheduled:mutator-call:d2be68c047a1",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 571,
+      "line": 584,
       "symbol": "resetStuckScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#resetStuckScheduled.<callback:82a3e299bf>",
@@ -9715,7 +9754,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#resetStuckScheduled:sql-update:ac3b589b302d",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 574,
+      "line": 587,
       "symbol": "resetStuckScheduled",
       "operation": "sql-update",
       "target": "scheduled_messages",
@@ -9728,7 +9767,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#deleteScheduled:mutator-call:ac6fc100d041",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 592,
+      "line": 605,
       "symbol": "deleteScheduled",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9741,7 +9780,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#deleteScheduled:mutator-call:dbf402983afc",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 592,
+      "line": 605,
       "symbol": "deleteScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#deleteScheduled.<callback:8c1e0dda93>",
@@ -9754,7 +9793,7 @@
     {
       "id": "src/db/repositories/scheduled.ts#deleteScheduled:drizzle-delete:59e5443d4056",
       "path": "src/db/repositories/scheduled.ts",
-      "line": 593,
+      "line": 606,
       "symbol": "deleteScheduled",
       "operation": "drizzle-delete",
       "target": "scheduledMessages",

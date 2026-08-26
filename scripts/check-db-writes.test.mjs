@@ -1705,6 +1705,15 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
         finding.symbol.includes('.clearCustomTheme')) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const scheduledHistoryTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'app/(app)/scheduled.tsx' &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith('app/(app)/scheduled.tsx#ScheduledScreen.<callback:'))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1722,7 +1731,6 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:11a32f1cad>:mutator-call:e456088f025a',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:00e3b0b7ac>:mutator-call:222335d51483',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:2ed50265e1>:mutator-call:418c5613062c',
-      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:a7ba9b6c78>.onPress.<callback:fc0d082a48>:mutator-call:76c2c8d46170',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:4bdf863381>.<callback:03b142b7d3>.<callback:97863ede27>:mutator-call:edec8d1bbc8a',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:82637a13a0>.<callback:e2f8a6cb01>.<callback:f7d1b4463f>:mutator-call:811582c1dc0c',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:827299d4fe>.<callback:41e952ab60>.<callback:41be2e6c31>:mutator-call:d640a83b730e',
@@ -1754,6 +1762,14 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme.<callback:096d9b3756>:mutator-call:1207f46aa710',
       'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:07c82ca7ed59',
       'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:8783edd1784f',
+    ].sort(),
+  );
+  assert.deepEqual(
+    scheduledHistoryTransactions.map((finding) => finding.id).sort(),
+    [
+      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>.<callback:60a2bf7f5f>:mutator-call:3494b6fa045d',
+      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>:mutator-call:4f94f522cacc',
+      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>:mutator-call:668be87a17e0',
     ].sort(),
   );
 });
@@ -4372,6 +4388,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'src/services/contacts/serverAvatars.ts',
   ]);
   const leafSymbols = new Set([
+    'deleteScheduledHistoryWithinTransaction',
     'kvSetWithinTransaction',
     'markMessageSendErrorWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
@@ -4420,6 +4437,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
+      'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
       'src/db/repositories/kv.ts#kvSetWithinTransaction:drizzle-insert:0fe9d15a2010',
       'src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc',
@@ -4436,7 +4454,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 20);
+  assert.equal(selected.length, 21);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

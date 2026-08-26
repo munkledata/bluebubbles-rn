@@ -6,6 +6,7 @@ import {
   claimScheduled,
   deleteScheduled,
   deleteScheduledHistory,
+  deleteScheduledHistoryWithinTransaction,
   getScheduledById,
   insertScheduled,
   listAllScheduled,
@@ -110,6 +111,44 @@ describe('scheduled messages repo', () => {
     const pendingRow = (await listAllScheduled(db))[0]!;
     await deleteScheduledHistory(db, pendingRow.id);
     expect(await listAllScheduled(db)).toHaveLength(1);
+  });
+
+  it('rolls back a history clear when its account guard is revoked during the delete', async () => {
+    const { db, raw } = await createTestDb();
+    const id = await insertScheduled(db, {
+      chatGuid: 'c1',
+      text: 'must survive revocation',
+      scheduledFor: 100,
+    });
+    await claimScheduled(db, id);
+    await markScheduledSent(db, id);
+
+    let current = true;
+    let triggerRan = false;
+    raw.function('revoke_scheduled_history_guard', () => {
+      triggerRan = true;
+      current = false;
+      return 1;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_guard_after_scheduled_history_delete
+      AFTER DELETE ON scheduled_messages
+      WHEN OLD.id = ${id}
+      BEGIN
+        SELECT revoke_scheduled_history_guard();
+      END
+    `);
+
+    await expect(
+      withDbTransaction(
+        db,
+        (context) => deleteScheduledHistoryWithinTransaction(context, id),
+        () => current,
+      ),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+    expect(triggerRan).toBe(true);
+    expect(await getScheduledById(db, id)).toMatchObject({ id, status: 'sent' });
   });
 
   it('markScheduledSent removes a row from pending + due lists', async () => {

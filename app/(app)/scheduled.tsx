@@ -6,11 +6,12 @@ import { asRecurrence, recurrenceLabel } from '@core/schedule';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import {
-  deleteScheduledHistory,
+  deleteScheduledHistoryWithinTransaction,
   listAllScheduled,
   listScheduledHistory,
   type ScheduledRow,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { cancelScheduled, syncScheduledFromServer } from '@/services/send';
 import {
@@ -121,8 +122,15 @@ export default function ScheduledScreen(): React.JSX.Element {
                       label: 'Clear',
                       color: theme.color.tertiaryLabel,
                       onPress: () => {
-                        void runTrackedRealtimeWork(accountLease, async () => {
-                          await deleteScheduledHistory(getDatabase(), row.id);
+                        void runTrackedRealtimeWork(accountLease, async (activeLease) => {
+                          const db = getDatabase();
+                          const scheduledId = row.id;
+                          await withDbTransaction(
+                            db,
+                            (context) =>
+                              deleteScheduledHistoryWithinTransaction(context, scheduledId),
+                            () => activeLease.isCurrent(),
+                          );
                         }).catch(() => {
                           if (accountLease.isCurrent()) {
                             showDialog('Scheduled', 'Couldn’t clear that history item.');

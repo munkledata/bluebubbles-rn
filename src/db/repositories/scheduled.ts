@@ -1,6 +1,11 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { scheduledMessages } from '../schema';
-import { withDbTransaction, type DbCommitGuard } from '../transaction';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbCommitGuard,
+  type DbTransactionContext,
+} from '../transaction';
 import type { AppDatabase } from '../types';
 import { insertOutgoingTextWithinTransaction, type InsertOutgoingTextArgs } from './outgoing';
 
@@ -288,18 +293,26 @@ export async function listScheduledHistory(db: AppDatabase, limit = 50): Promise
   return rows.map(mapScheduled);
 }
 
-/** Delete a COMPLETED (sent/error/uncertain) row from the local history list. */
-export async function deleteScheduledHistory(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, () =>
-    db
+/** Delete one COMPLETED row while joining an authenticated transaction owner. */
+export function deleteScheduledHistoryWithinTransaction(
+  context: DbTransactionContext,
+  id: number,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db
       .delete(scheduledMessages)
       .where(
         and(
           eq(scheduledMessages.id, id),
           inArray(scheduledMessages.status, ['sent', 'error', 'uncertain']),
         ),
-      ),
-  );
+      );
+  });
+}
+
+/** Delete a COMPLETED (sent/error/uncertain) row from the local history list. */
+export async function deleteScheduledHistory(db: AppDatabase, id: number): Promise<void> {
+  await withDbTransaction(db, (context) => deleteScheduledHistoryWithinTransaction(context, id));
 }
 
 export async function listAllScheduled(db: AppDatabase): Promise<ScheduledRow[]> {
