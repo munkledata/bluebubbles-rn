@@ -1260,16 +1260,26 @@ export async function setLastReadMessageGuid(
  * taps Mark as Unread. With the stamp, only a watermark from AFTER the tap — a genuinely later read
  * somewhere else — can clear it.
  */
+export function setChatUnreadLocalWithinTransaction(
+  context: DbTransactionContext,
+  chatGuid: string,
+  now: number,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db
+      .update(chats)
+      .set({ lastReadMessageGuid: null, markedUnreadAt: now })
+      .where(eq(chats.guid, chatGuid));
+  });
+}
+
 export async function setChatUnreadLocal(
   db: AppDatabase,
   chatGuid: string,
   now: number = Date.now(),
 ): Promise<void> {
-  await withDbTransaction(db, () =>
-    db
-      .update(chats)
-      .set({ lastReadMessageGuid: null, markedUnreadAt: now })
-      .where(eq(chats.guid, chatGuid)),
+  await withDbTransaction(db, (context) =>
+    setChatUnreadLocalWithinTransaction(context, chatGuid, now),
   );
 }
 

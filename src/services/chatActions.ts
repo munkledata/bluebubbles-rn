@@ -12,7 +12,7 @@ import {
   listReminders,
   listScheduledByChat,
   resumeChatPurges,
-  setChatUnreadLocal,
+  setChatUnreadLocalWithinTransaction,
   setLastReadMessageGuidWithinTransaction,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
@@ -258,7 +258,16 @@ export function markUnread(
     // notification-action and background-event code paths.
     const db = await ensureDatabase();
     assertChatActionLease(activeLease);
-    await setChatUnreadLocal(db, chatGuid);
+    const markedUnreadAt = Date.now();
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatUnreadLocalWithinTransaction(context, chatGuid, markedUnreadAt);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
     assertChatActionLease(activeLease);
     if (chatGuid.startsWith('RCS;-;')) return;
     const fs = await hydratedFeatureSettings();

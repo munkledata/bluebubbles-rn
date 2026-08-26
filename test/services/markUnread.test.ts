@@ -96,12 +96,16 @@ async function seedChat(db: AppDatabase, guid: string): Promise<void> {
   await setLastReadMessageGuid(db, guid, 'marker-1'); // start READ
 }
 
+const readState = (raw: import('better-sqlite3').Database, guid: string) =>
+  raw
+    .prepare(
+      `SELECT last_read_message_guid AS marker, marked_unread_at AS markedUnreadAt
+         FROM chats WHERE guid = ?`,
+    )
+    .get(guid) as { marker: string | null; markedUnreadAt: number | null };
+
 const readMarker = (raw: import('better-sqlite3').Database, guid: string) =>
-  (
-    raw.prepare('SELECT last_read_message_guid m FROM chats WHERE guid = ?').get(guid) as {
-      m: string | null;
-    }
-  ).m;
+  readState(raw, guid).marker;
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
@@ -142,6 +146,90 @@ describe('markUnread', () => {
 
     expect(mockMarkChatUnread).toHaveBeenCalledTimes(1);
     expect(readMarker(raw, guid)).toBeNull(); // local flip kept
+  });
+
+  it('keeps the tap timestamp while waiting behind a rolling-back transaction', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(db, guid);
+
+    const neighbourReady = deferred<void>();
+    const releaseNeighbour = deferred<void>();
+    const neighbour = withDbTransaction(db, async () => {
+      neighbourReady.resolve();
+      await releaseNeighbour.promise;
+      throw new Error('mark-unread neighbour rollback');
+    });
+    const neighbourFailure = expect(neighbour).rejects.toThrow('mark-unread neighbour rollback');
+    await neighbourReady.promise;
+
+    const now = jest.spyOn(Date, 'now').mockReturnValue(4_000);
+    let action: Promise<void> | undefined;
+    try {
+      let actionSettled = false;
+      action = markUnread(guid);
+      void action.then(
+        () => {
+          actionSettled = true;
+        },
+        () => {
+          actionSettled = true;
+        },
+      );
+      await waitForCall(ensureDatabase as jest.Mock);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(actionSettled).toBe(false);
+      expect(readState(raw, guid)).toEqual({ marker: 'marker-1', markedUnreadAt: null });
+      expect(mockMarkChatUnread).not.toHaveBeenCalled();
+      now.mockReturnValue(9_000);
+
+      releaseNeighbour.resolve();
+      await neighbourFailure;
+      await expect(action).resolves.toBeUndefined();
+
+      expect(readState(raw, guid)).toEqual({ marker: null, markedUnreadAt: 4_000 });
+      expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
+    } finally {
+      now.mockRestore();
+      releaseNeighbour.resolve();
+      await Promise.allSettled([neighbour, action ?? Promise.resolve()]);
+    }
+  });
+
+  it('rolls back both unread fields when account ownership changes during the update', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    mockSettingsHydrated = false;
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(db, guid);
+
+    let drain: Promise<void> | undefined;
+    raw.function('pause_mark_unread_during_update', () => {
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_mark_unread_during_update
+      AFTER UPDATE OF last_read_message_guid, marked_unread_at ON chats
+      BEGIN
+        SELECT pause_mark_unread_during_update();
+      END
+    `);
+
+    const action = markUnread(guid);
+    try {
+      await expect(action).resolves.toBeUndefined();
+      if (!drain) throw new Error('mark-unread update did not revoke the account lease');
+      await drain;
+    } finally {
+      resumeRealtimeDeliveries();
+    }
+
+    expect(readState(raw, guid)).toEqual({ marker: 'marker-1', markedUnreadAt: null });
+    expect(mockHydrate).not.toHaveBeenCalled();
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
   });
 
   it('RCS chats flip locally but SKIP the server call entirely', async () => {

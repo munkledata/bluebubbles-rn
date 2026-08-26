@@ -1911,6 +1911,12 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       finding.symbol.startsWith('markRead.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const markUnreadTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('markUnread.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1945,7 +1951,6 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:d3a2be781833',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
-      'src/services/chatActions.ts#markUnread.<callback:03bea491bb>:mutator-call:76148ceada55',
     ].sort(),
   );
   assert.deepEqual(
@@ -1954,6 +1959,14 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#markRead.<callback:4923a4cef3>.<callback:f2c8eca326>:mutator-call:5beeafb66653',
       'src/services/chatActions.ts#markRead.<callback:4923a4cef3>:mutator-call:dfec54e681be',
       'src/services/chatActions.ts#markRead.<callback:4923a4cef3>:mutator-call:fcc9aef62714',
+    ].sort(),
+  );
+  assert.deepEqual(
+    markUnreadTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>.<callback:add0a7f05b>:mutator-call:d8cbd79b8427',
+      'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>:mutator-call:01f6d1879a3c',
+      'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>:mutator-call:6019b26b2128',
     ].sort(),
   );
 });
@@ -4362,6 +4375,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'kvSetWithinTransaction',
     'markMessageSendErrorWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
+    'setChatUnreadLocalWithinTransaction',
     'setSyncMarkerWithinTransaction',
     'updateSearchTextBatch',
     'upsertHandlesWithinTransaction',
@@ -4403,6 +4417,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/kv.ts#kvSetWithinTransaction:drizzle-insert:0fe9d15a2010',
       'src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9593aa17c736',
+      'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
       'src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95',
       'src/services/backup/backup.ts#restoreBackup:mutator-call:a77881a84393',
@@ -4414,7 +4429,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 20);
+  assert.equal(selected.length, 21);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
