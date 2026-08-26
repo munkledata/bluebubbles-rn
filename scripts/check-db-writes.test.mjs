@@ -1886,6 +1886,12 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const markReadTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('markRead.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1920,8 +1926,15 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:d3a2be781833',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
-      'src/services/chatActions.ts#markRead.<callback:88cc998ffb>:mutator-call:7d87e09d3376',
       'src/services/chatActions.ts#markUnread.<callback:03bea491bb>:mutator-call:76148ceada55',
+    ].sort(),
+  );
+  assert.deepEqual(
+    markReadTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/services/chatActions.ts#markRead.<callback:4923a4cef3>.<callback:f2c8eca326>:mutator-call:5beeafb66653',
+      'src/services/chatActions.ts#markRead.<callback:4923a4cef3>:mutator-call:dfec54e681be',
+      'src/services/chatActions.ts#markRead.<callback:4923a4cef3>:mutator-call:fcc9aef62714',
     ].sort(),
   );
 });

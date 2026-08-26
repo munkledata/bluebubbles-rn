@@ -13,12 +13,16 @@ import {
   listScheduledByChat,
   resumeChatPurges,
   setChatUnreadLocal,
-  setLastReadMessageGuid,
+  setLastReadMessageGuidWithinTransaction,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { withDbTransaction } from '@db/transaction';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbTransactionContext,
+} from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
@@ -170,6 +174,25 @@ async function hydratedFeatureSettings(): Promise<FeatureSettings> {
   return useFeatureSettingsStore.getState();
 }
 
+type MarkReadTarget =
+  | { readonly chatExists: false; readonly newestReceivedGuid: null }
+  | { readonly chatExists: true; readonly newestReceivedGuid: string | null };
+
+/** Resolve the complete local mark-read target without observing another owner's partial work. */
+function resolveMarkReadTargetWithinTransaction(
+  context: DbTransactionContext,
+  chatGuid: string,
+): Promise<MarkReadTarget> {
+  return runInTransactionContext(context, async (db) => {
+    const chatId = await getChatIdByGuid(db, chatGuid);
+    if (chatId == null) return { chatExists: false, newestReceivedGuid: null } as const;
+    return {
+      chatExists: true,
+      newestReceivedGuid: await getNewestReceivedGuid(db, chatId),
+    } as const;
+  });
+}
+
 /**
  * Mark a chat read: always update the local read marker (clears the badge), and send the server
  * read receipt ONLY when the "Send Read Receipts" toggle is on — so disabling receipts still
@@ -187,15 +210,26 @@ export function markRead(
     // had been killed, which is exactly when the button is most useful.
     const db = await ensureDatabase();
     assertChatActionLease(activeLease);
-    const chatId = await getChatIdByGuid(db, chatGuid);
+    const target = await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        const resolved = await resolveMarkReadTargetWithinTransaction(context, chatGuid);
+        assertChatActionLease(activeLease);
+        if (resolved.newestReceivedGuid) {
+          await setLastReadMessageGuidWithinTransaction(
+            context,
+            chatGuid,
+            resolved.newestReceivedGuid,
+          );
+          assertChatActionLease(activeLease);
+        }
+        return resolved;
+      },
+      () => activeLease.isCurrent(),
+    );
     assertChatActionLease(activeLease);
-    if (chatId == null) return;
-    const newest = await getNewestReceivedGuid(db, chatId);
-    assertChatActionLease(activeLease);
-    if (newest) {
-      await setLastReadMessageGuid(db, chatGuid, newest);
-      assertChatActionLease(activeLease);
-    }
+    if (!target.chatExists) return;
     const fs = await hydratedFeatureSettings();
     assertChatActionLease(activeLease);
     if (!fs.privateApiEnabled || !fs.sendReadReceipts) return;

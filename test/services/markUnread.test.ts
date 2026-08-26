@@ -14,14 +14,18 @@
  * against actual repository SQL; everything else (http client, api module, feature store) is
  * mocked at the module boundary like `notificationActions.test.ts`.
  */
+import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
   getChatIdByGuid,
   setLastReadMessageGuid,
   upsertChats,
+  upsertChatsWithinTransaction,
   upsertHandles,
   upsertMessages,
+  upsertMessagesWithinTransaction,
 } from '@db/repositories';
+import { runInTransactionContext, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -249,9 +253,151 @@ describe('markRead', () => {
   it('is a no-op for a chat this device has never seen', async () => {
     const { db } = await createTestDb();
     mockDb = db;
+    mockSettingsHydrated = false;
 
     await markRead('iMessage;-;+19999999999');
 
+    expect(mockHydrate).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it('still sends a receipt for a known chat with no received message', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    mockSettingsHydrated = false;
+    const guid = 'iMessage;-;+15550000000';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+
+    await markRead(guid);
+
+    expect(readMarker(raw, guid)).toBeNull();
+    expect(mockHydrate).toHaveBeenCalledTimes(1);
+    expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
+  });
+
+  it('waits out a rolling-back replacement before choosing the committed newest message', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    mockSettingsHydrated = false;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const chatIds = await upsertChats(
+      db,
+      [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })],
+      hm,
+    );
+    const committedChatId = chatIds.get(guid)!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'committed-newest', text: 'real', isFromMe: false, dateCreated: 1 })],
+      () => committedChatId,
+      hm,
+    );
+    await setLastReadMessageGuid(db, guid, 'previous-marker');
+
+    const replacementReady = deferred<void>();
+    const releaseReplacement = deferred<void>();
+    const replacement = withDbTransaction(db, async (context) => {
+      await runInTransactionContext(context, async (transactionDb) => {
+        await transactionDb.run(sql`DELETE FROM chats WHERE guid = ${guid}`);
+      });
+      const replacementIds = await upsertChatsWithinTransaction(
+        context,
+        [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })],
+        hm,
+      );
+      const replacementChatId = replacementIds.get(guid);
+      if (replacementChatId == null) throw new Error('replacement chat was not inserted');
+      await upsertMessagesWithinTransaction(
+        context,
+        [
+          Message.parse({
+            guid: 'rolled-back-phantom',
+            text: 'phantom',
+            isFromMe: false,
+            dateCreated: 2,
+          }),
+        ],
+        () => replacementChatId,
+        hm,
+      );
+      replacementReady.resolve();
+      await releaseReplacement.promise;
+      throw new Error('replacement rollback');
+    });
+    const replacementFailure = expect(replacement).rejects.toThrow('replacement rollback');
+    await replacementReady.promise;
+
+    let actionSettled = false;
+    const action = markRead(guid);
+    void action.then(
+      () => {
+        actionSettled = true;
+      },
+      () => {
+        actionSettled = true;
+      },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(actionSettled).toBe(false);
+    expect(mockHydrate).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+
+    releaseReplacement.resolve();
+    await replacementFailure;
+    await expect(action).resolves.toBeUndefined();
+
+    expect(readMarker(raw, guid)).toBe('committed-newest');
+    expect(mockHydrate).toHaveBeenCalledTimes(1);
+    expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
+  });
+
+  it('rolls back the marker when account ownership changes during its update', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    mockSettingsHydrated = false;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const chatIds = await upsertChats(
+      db,
+      [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })],
+      hm,
+    );
+    const chatId = chatIds.get(guid)!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'new-marker', text: 'new', isFromMe: false, dateCreated: 2 })],
+      () => chatId,
+      hm,
+    );
+    await setLastReadMessageGuid(db, guid, 'previous-marker');
+
+    let drain: Promise<void> | undefined;
+    raw.function('pause_mark_read_during_update', () => {
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_mark_read_during_update
+      AFTER UPDATE OF last_read_message_guid ON chats
+      BEGIN
+        SELECT pause_mark_read_during_update();
+      END
+    `);
+
+    const action = markRead(guid);
+    try {
+      await expect(action).resolves.toBeUndefined();
+      if (!drain) throw new Error('mark-read update did not revoke the account lease');
+      await drain;
+    } finally {
+      resumeRealtimeDeliveries();
+    }
+
+    expect(readMarker(raw, guid)).toBe('previous-marker');
+    expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
