@@ -500,6 +500,48 @@ describe('write-lock wait watchdog', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  it('does not escalate when a deep queue advances between the warning intervals', async () => {
+    const firstGate = deferred<void>();
+    const secondGate = deferred<void>();
+    let secondStarted = false;
+    let tailStarted = false;
+
+    const first = withDbWriteLock(() => firstGate.promise);
+    const second = withDbWriteLock(async () => {
+      secondStarted = true;
+      await secondGate.promise;
+    });
+    const tail = withDbWriteLock(async () => {
+      tailStarted = true;
+    });
+    try {
+      await jest.advanceTimersByTimeAsync(0);
+
+      await jest.advanceTimersByTimeAsync(LOCK_WAIT_MS);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(error).not.toHaveBeenCalled();
+
+      firstGate.resolve();
+      await first;
+      await jest.advanceTimersByTimeAsync(0);
+      expect(secondStarted).toBe(true);
+      expect(tailStarted).toBe(false);
+
+      // The tail is still blocked for a second full interval, but one holder released after it
+      // joined the queue. That is measurable progress, not a wedge worth uploading as an error.
+      await jest.advanceTimersByTimeAsync(LOCK_WAIT_MS);
+      expect(error).not.toHaveBeenCalled();
+
+      secondGate.resolve();
+      await Promise.all([second, tail]);
+      expect(tailStarted).toBe(true);
+    } finally {
+      firstGate.resolve();
+      secondGate.resolve();
+      await Promise.allSettled([first, second, tail]);
+    }
+  });
+
   it('warns on a long wait, and escalates only once when nothing releases at all', async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
