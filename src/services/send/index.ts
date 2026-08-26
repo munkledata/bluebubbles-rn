@@ -2,7 +2,7 @@ import * as scheduledApi from '@core/api/endpoints/scheduled';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import {
-  claimFailedOutgoingForRetry,
+  claimFailedOutgoingForRetryWithinTransaction,
   countOutgoingQueueHealth,
   deleteMessageLocal,
   deleteScheduledWithinTransaction,
@@ -613,8 +613,10 @@ export async function retry(
   try {
     await runUiAccountOperation(accountLease, async () => {
       const db = getDatabase();
-      const { claim, row } = await claimFailedOutgoingForRetry(db, tempGuid, Date.now, () =>
-        accountLease.isCurrent(),
+      const { claim, row } = await withDbTransaction(
+        db,
+        (context) => claimFailedOutgoingForRetryWithinTransaction(context, tempGuid, Date.now),
+        () => accountLease.isCurrent(),
       );
       if (!accountLease.isCurrent()) return;
       if (claim !== 'claimed' || !row) {

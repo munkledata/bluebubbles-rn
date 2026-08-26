@@ -100,6 +100,90 @@ describe('retry() account handover', () => {
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  it('rolls back a retired claim before POST and lets a fresh retry use the same temp guid', async () => {
+    const { db, raw } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const tempGuid = 'temp-retired-claim';
+    await seedFailedText(db, raw, tempGuid, 'retry after retirement');
+    raw
+      .prepare('UPDATE messages SET error_message=? WHERE guid=?')
+      .run('preserve this detail', tempGuid);
+    raw
+      .prepare('UPDATE outgoing_queue SET attempts=3, next_retry_at=123 WHERE temp_guid=?')
+      .run(tempGuid);
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_manual_retry_during_claim', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_manual_retry_during_claim
+      AFTER UPDATE OF send_state ON messages
+      WHEN OLD.guid = '${tempGuid}' AND OLD.send_state = 'error' AND NEW.send_state = 'sending'
+      BEGIN
+        SELECT pause_manual_retry_during_claim();
+      END
+    `);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    try {
+      await expect(retry(tempGuid)).resolves.toBeUndefined();
+      if (!drain) throw new Error('manual retry claim did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(posts).toEqual([]);
+      expect(showToast).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(
+        raw
+          .prepare(
+            'SELECT send_state AS sendState, error, error_message AS errorMessage FROM messages WHERE guid=?',
+          )
+          .get(tempGuid),
+      ).toEqual({ sendState: 'error', error: 502, errorMessage: 'preserve this detail' });
+      expect(
+        raw
+          .prepare(
+            'SELECT attempts, next_retry_at AS nextRetryAt FROM outgoing_queue WHERE temp_guid=?',
+          )
+          .get(tempGuid),
+      ).toEqual({ attempts: 3, nextRetryAt: 123 });
+
+      raw.exec('DROP TRIGGER pause_manual_retry_during_claim');
+      resumeRealtimeDeliveries();
+      let postRanInsideTransaction = false;
+      (http as unknown as { post: jest.Mock }).post.mockImplementationOnce(
+        async (path: string, _schema: unknown, opts: { json: JsonBody }) => {
+          postRanInsideTransaction = raw.inTransaction;
+          posts.push({ path, body: opts.json });
+          return { guid: 'real-after-retirement', dateCreated: 1000, dateDelivered: null };
+        },
+      );
+
+      await expect(retry(tempGuid)).resolves.toBeUndefined();
+
+      expect(postRanInsideTransaction).toBe(false);
+      expect(posts).toHaveLength(1);
+      expect(posts[0]?.body).toMatchObject({ tempGuid });
+      expect(
+        raw
+          .prepare('SELECT send_state AS sendState FROM messages WHERE guid=?')
+          .get('real-after-retirement'),
+      ).toEqual({ sendState: 'sent' });
+      expect(
+        raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue WHERE temp_guid=?').get(tempGuid),
+      ).toEqual({ count: 0 });
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_manual_retry_during_claim');
+      resumeRealtimeDeliveries();
+      warn.mockRestore();
+    }
+  });
 });
 
 describe('retry() — re-sends the QUEUED send, not the bubble', () => {

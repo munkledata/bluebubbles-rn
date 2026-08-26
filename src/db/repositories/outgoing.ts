@@ -480,6 +480,42 @@ export interface RetryHandover {
  * reset, because the button is the ONLY recourse for a row already retired at the attempt cap, and
  * leased, so a drain tick can't re-POST the same payload alongside the caller's own attempt.
  */
+export function claimFailedOutgoingForRetryWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+  clock: () => number = Date.now,
+): Promise<RetryHandover> {
+  return runInTransactionContext(context, async (db) => {
+    const now = clock();
+    const queued = await db.all<RetryableOutgoing>(sql`
+        SELECT id, temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts,
+               created_at AS createdAt
+        FROM outgoing_queue WHERE temp_guid = ${tempGuid} LIMIT 1`);
+    const row = queued[0];
+    if (!row) return { claim: 'unsendable' };
+    const taken = await db.all<{ id: number }>(sql`
+        UPDATE messages SET send_state = 'sending', error = 0, error_message = NULL
+         WHERE guid = ${tempGuid} AND send_state = 'error'
+        RETURNING id`);
+    if (taken.length === 0) {
+      // Read AFTER the failed compare-and-set, and only to word the message to the user — no write
+      // depends on it, so a stale answer here is harmless.
+      const cur = await db.all<{ sendState: string | null }>(
+        sql`SELECT send_state AS sendState FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
+      );
+      return { claim: cur[0]?.sendState === 'sending' ? 'sending' : 'settled' };
+    }
+    await db.run(sql`
+        UPDATE outgoing_queue SET attempts = 0, next_retry_at = ${now + OUTGOING_LEASE_MS}
+         WHERE temp_guid = ${tempGuid}`);
+    return { claim: 'claimed', row: { ...row, attempts: 0 } };
+  });
+}
+
+/**
+ * Claim one failed send in its own guarded transaction. Callers that already own the transaction
+ * must use {@link claimFailedOutgoingForRetryWithinTransaction} instead of nesting this wrapper.
+ */
 export async function claimFailedOutgoingForRetry(
   db: AppDatabase,
   tempGuid: string,
@@ -488,31 +524,7 @@ export async function claimFailedOutgoingForRetry(
 ): Promise<RetryHandover> {
   return withDbTransaction(
     db,
-    async () => {
-      const now = clock();
-      const queued = await db.all<RetryableOutgoing>(sql`
-        SELECT id, temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts,
-               created_at AS createdAt
-        FROM outgoing_queue WHERE temp_guid = ${tempGuid} LIMIT 1`);
-      const row = queued[0];
-      if (!row) return { claim: 'unsendable' };
-      const taken = await db.all<{ id: number }>(sql`
-        UPDATE messages SET send_state = 'sending', error = 0, error_message = NULL
-         WHERE guid = ${tempGuid} AND send_state = 'error'
-        RETURNING id`);
-      if (taken.length === 0) {
-        // Read AFTER the failed compare-and-set, and only to word the message to the user — no write
-        // depends on it, so a stale answer here is harmless.
-        const cur = await db.all<{ sendState: string | null }>(
-          sql`SELECT send_state AS sendState FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
-        );
-        return { claim: cur[0]?.sendState === 'sending' ? 'sending' : 'settled' };
-      }
-      await db.run(sql`
-        UPDATE outgoing_queue SET attempts = 0, next_retry_at = ${now + OUTGOING_LEASE_MS}
-         WHERE temp_guid = ${tempGuid}`);
-      return { claim: 'claimed', row: { ...row, attempts: 0 } };
-    },
+    (context) => claimFailedOutgoingForRetryWithinTransaction(context, tempGuid, clock),
     commitGuard,
   );
 }

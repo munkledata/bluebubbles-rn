@@ -2020,6 +2020,16 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       finding.symbol.startsWith('cancelScheduled.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const retryClaimTransaction = sendFrontDoorFindings.filter(
+    (finding) =>
+      finding.symbol.startsWith('retry.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith('src/services/send/index.ts#retry.<callback:'))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2036,7 +2046,6 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#pickAndSendContact.<callback:3fd5bf1484>:mutator-call:3251b567a0af',
       'src/services/send/index.ts#react.<callback:e9a95c26f3>:mutator-call:c35237e6478b',
       'src/services/send/index.ts#reply.<callback:2f53931556>:mutator-call:d5b02e6e0ad7',
-      'src/services/send/index.ts#retry.<callback:7c4158bf3d>:mutator-call:7d5ba2e65922',
       'src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380',
       'src/services/send/index.ts#send.<callback:263848fd04>:mutator-call:949d3a0d0b96',
       'src/services/send/index.ts#sendContactCard.<callback:274da970ec>:mutator-call:9ea3b488cbd0',
@@ -2055,7 +2064,15 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:ac5ab63b2745',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 23);
+  assert.deepEqual(
+    retryClaimTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/index.ts#retry.<callback:d6c267db00>.<callback:4478d45b13>:mutator-call:79c21958dac0',
+      'src/services/send/index.ts#retry.<callback:d6c267db00>:mutator-call:0e58141daeb9',
+      'src/services/send/index.ts#retry.<callback:d6c267db00>:mutator-call:20c356da5ff4',
+    ].sort(),
+  );
+  assert.equal(sendFrontDoorFindings.length, 25);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -4584,6 +4601,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markAllChatsReadLocalWithinTransaction',
     'markMessageSendErrorWithinTransaction',
     'markOutgoingSentNoGuidWithinTransaction',
+    'claimFailedOutgoingForRetryWithinTransaction',
     'reconcileOutgoingSuccessWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
     'setChatAppearanceWithinTransaction',
@@ -4660,6 +4678,19 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
               'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:',
             )))),
   );
+  const retryClaimTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/outgoing.ts' &&
+      finding.symbol.startsWith('claimFailedOutgoingForRetry') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
@@ -4689,6 +4720,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86:2',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:21d3ccc056b3',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:17a4a16e0a8e',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:4f9ad23d68e9',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:53202ca06801',
@@ -4707,7 +4740,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 41);
+  assert.equal(selected.length, 43);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -4752,6 +4785,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9efd07b3e6a8',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:7cffdc80344c',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:dc16ee7659f0',
+    ].sort(),
+  );
+  assert.deepEqual(
+    retryClaimTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:e9bf331847>:mutator-call:4b8448a9e2d5',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:0ef007da403c',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:abe11442dbc6',
     ].sort(),
   );
   assert.equal(
