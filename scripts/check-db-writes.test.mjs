@@ -4324,6 +4324,12 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       (leafSymbols.has(finding.symbol.split('.<callback:')[0]) &&
         finding.detectedContext === 'withDbTransaction'),
   );
+  const restoreTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/backup/backup.ts' &&
+      finding.symbol.startsWith('restoreBackup') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
@@ -4341,7 +4347,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9593aa17c736',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
       'src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:285cfb631766',
       'src/services/backup/backup.ts#restoreBackup:mutator-call:a77881a84393',
       'src/services/backup/backup.ts#restoreBackup:mutator-call:b150379b8c1d',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48',
@@ -4351,7 +4356,15 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 21);
+  assert.equal(selected.length, 20);
+  assert.deepEqual(
+    restoreTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/backup/backup.ts#restoreBackup.<callback:4a8c451f06>:mutator-call:e45b4f9b1e4d',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:1b7bfb7ae406',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:29a6a3b1dcc7',
+    ].sort(),
+  );
   assert.equal(
     findings.find(
       (finding) =>

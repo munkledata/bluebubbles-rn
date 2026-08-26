@@ -2,11 +2,11 @@ import {
   getAllKv,
   getAllThemes,
   getChatCustomizations,
-  restoreChatCustomizations,
+  restoreChatCustomizationWithinTransaction,
   restoreKv,
   restoreThemes,
 } from '@db/repositories';
-import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
+import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import type { SecretBox } from '@core/crypto';
 import { utf8Encode } from '@utils/bytes';
@@ -118,9 +118,16 @@ export async function restoreBackup(
   assertRestoreOwned(ownershipGuard);
 
   // Chat GUIDs are server-account identities even though two servers can emit the same bytes.
-  // The repository owns one short transaction per row (guarded when this import is account-bound),
-  // so neither an ordinary restore nor an untrusted large backup can join/hold a neighbouring lock.
-  const applied = await restoreChatCustomizations(db, backup.chatCustomizations, ownershipGuard);
+  // Own one short transaction per row (guarded when this import is account-bound), so neither an
+  // ordinary restore nor an untrusted large backup can join/hold a neighbouring lock.
+  let applied = 0;
+  for (const customization of backup.chatCustomizations) {
+    applied += await withDbTransaction(
+      db,
+      (context) => restoreChatCustomizationWithinTransaction(context, customization),
+      ownershipGuard,
+    );
+  }
   assertRestoreOwned(ownershipGuard);
   return { kv: kv.length, themes: backup.themes.length, chatCustomizations: applied };
 }

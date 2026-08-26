@@ -10454,17 +10454,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:285cfb631766",
+      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:1b7bfb7ae406",
       "path": "src/services/backup/backup.ts",
-      "line": 123,
+      "line": 125,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
-      "target": "src/db/repositories/backup.ts#restoreChatCustomizations",
-      "detectedContext": "coordinated-delegation",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
       "owner": "restoreBackup",
-      "transactionContext": "coordinated-delegation",
+      "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
+    },
+    {
+      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:29a6a3b1dcc7",
+      "path": "src/services/backup/backup.ts",
+      "line": 125,
+      "symbol": "restoreBackup",
+      "operation": "mutator-call",
+      "target": "src/services/backup/backup.ts#restoreBackup.<callback:4a8c451f06>",
+      "detectedContext": "withDbTransaction",
+      "owner": "restoreBackup",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
+    },
+    {
+      "id": "src/services/backup/backup.ts#restoreBackup.<callback:4a8c451f06>:mutator-call:e45b4f9b1e4d",
+      "path": "src/services/backup/backup.ts",
+      "line": 127,
+      "symbol": "restoreBackup.<callback:4a8c451f06>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "restoreBackup",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
     },
     {
       "id": "src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48",
