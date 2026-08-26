@@ -17,12 +17,19 @@ const mockOpenNotificationSettings = jest.fn();
 const mockSetChatTheme = jest.fn();
 const mockSetBackgroundIsLight = jest.fn();
 const mockSetChatCustomization = jest.fn();
-const mockSetChatMute = jest.fn();
+const mockSetChatMuteWithinTransaction = jest.fn();
 const mockSafeOpenUrl = jest.fn();
 const mockSubscribeGenerationInvalidation = jest.fn();
 const mockUseChatHeader = jest.fn();
 const mockReactiveHookCall = jest.fn();
-const mockDatabase = { kind: 'chat-settings-test-db' };
+const mockDatabase = {
+  kind: 'chat-settings-account-a-db',
+  run: jest.fn(async (_statement: unknown) => undefined),
+};
+const mockDatabaseB = {
+  kind: 'chat-settings-account-b-db',
+  run: jest.fn(async (_statement: unknown) => undefined),
+};
 const originalPlatformOS = Platform.OS;
 const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
   typeof AccessibilityInfo.isReduceMotionEnabled
@@ -47,6 +54,7 @@ function makeLease(generation: number, current = true): MockLease {
 
 let mockAccountLease = makeLease(73);
 let mockGuid = 'iMessage;-;chat-settings-private-guid';
+let mockMuteType: 'mute' | null = null;
 let mockPendingReactiveGuid: string | null = null;
 const mockInvalidationListeners = new Map<number, Set<() => void>>();
 let reduceMotionListener: ((enabled: boolean) => void) | undefined;
@@ -127,6 +135,21 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function sqlStatementText(value: unknown): string {
+  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
+  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  return chunks
+    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
+    .filter((part): part is string => typeof part === 'string')
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
+  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
+}
+
 function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
   const responder = node.props.onStartShouldSetResponder;
   if (typeof responder !== 'function') {
@@ -200,7 +223,7 @@ jest.mock('@db/repositories', () => ({
   listChatAttachmentsByKind: jest.fn(),
   setBackgroundIsLight: (...args: unknown[]) => mockSetBackgroundIsLight(...args),
   setChatCustomization: (...args: unknown[]) => mockSetChatCustomization(...args),
-  setChatMute: (...args: unknown[]) => mockSetChatMute(...args),
+  setChatMuteWithinTransaction: (...args: unknown[]) => mockSetChatMuteWithinTransaction(...args),
   setChatTheme: (...args: unknown[]) => mockSetChatTheme(...args),
 }));
 
@@ -262,7 +285,7 @@ jest.mock('@features/conversations/useChatHeader', () => ({
         displayName: source.serverTitle,
         customName: source.customTitle,
         customColor: null,
-        muteType: null,
+        muteType: mockMuteType,
         style: 43,
         participantCount: 2,
         participantNames: `${source.member}, Second Member`,
@@ -296,21 +319,24 @@ jest.mock('@/services/chat/groupManagement', () => ({
   updateGroupParticipant: (...args: unknown[]) => mockUpdateGroupParticipant(...args),
 }));
 
-jest.mock('@/services/realtime/deliveryCoordinator', () => ({
-  captureRealtimeDeliveryLease: () => mockAccountLease,
-  subscribeRealtimeGenerationInvalidation: (generation: number, callback: () => void) => {
-    mockSubscribeGenerationInvalidation(generation, callback);
-    const listeners = mockInvalidationListeners.get(generation) ?? new Set<() => void>();
-    listeners.add(callback);
-    mockInvalidationListeners.set(generation, listeners);
-    return () => listeners.delete(callback);
-  },
-  runTrackedRealtimeWork: async (lease: MockLease, task: (value: MockLease) => Promise<void>) => {
-    if (!lease.isCurrent()) return 'revoked';
-    await task(lease);
-    return lease.isCurrent() ? 'delivered' : 'revoked';
-  },
-}));
+jest.mock('@/services/realtime/deliveryCoordinator', () => {
+  const actual = jest.requireActual(
+    '@/services/realtime/deliveryCoordinator',
+  ) as typeof import('@/services/realtime/deliveryCoordinator');
+  return {
+    captureRealtimeDeliveryLease: () => mockAccountLease,
+    subscribeRealtimeGenerationInvalidation: (generation: number, callback: () => void) => {
+      mockSubscribeGenerationInvalidation(generation, callback);
+      const listeners = mockInvalidationListeners.get(generation) ?? new Set<() => void>();
+      listeners.add(callback);
+      mockInvalidationListeners.set(generation, listeners);
+      return () => listeners.delete(callback);
+    },
+    runTrackedRealtimeWork: actual.runTrackedRealtimeWork,
+    pauseRealtimeDeliveries: actual.pauseRealtimeDeliveries,
+    resumeRealtimeDeliveries: actual.resumeRealtimeDeliveries,
+  };
+});
 
 jest.mock('@ui/permissions/photoLibraryPermission', () => ({
   requestPhotoLibraryAccess: (...args: unknown[]) => mockRequestPhotoLibraryAccess(...args),
@@ -436,11 +462,19 @@ jest.mock('@ui', () => {
 import ChatSettingsScreen from '../../../app/(app)/chat-settings/[guid]';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
+// eslint-disable-next-line import/first
+import { withDbTransaction } from '@db/transaction';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 let keyboardDismissSpy: jest.SpiedFunction<typeof Keyboard.dismiss>;
 const mockGetDatabase = getDatabase as jest.Mock;
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.clearAllMocks();
   reduceMotionListener = undefined;
   removeReduceMotionListener = jest.fn();
@@ -451,10 +485,13 @@ beforeEach(() => {
     return { remove: removeReduceMotionListener };
   });
   mockGuid = CHAT_GUID;
+  mockMuteType = null;
   mockPendingReactiveGuid = null;
   mockAccountLease = makeLease(73);
   mockInvalidationListeners.clear();
-  mockGetDatabase.mockReturnValue(mockDatabase);
+  mockGetDatabase.mockReset().mockReturnValue(mockDatabase);
+  mockDatabase.run.mockReset().mockResolvedValue(undefined);
+  mockDatabaseB.run.mockReset().mockResolvedValue(undefined);
   Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
   keyboardDismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
   mockRequestPhotoLibraryAccess.mockResolvedValue(true);
@@ -468,10 +505,11 @@ beforeEach(() => {
   mockSetChatTheme.mockResolvedValue(undefined);
   mockSetBackgroundIsLight.mockResolvedValue(undefined);
   mockSetChatCustomization.mockResolvedValue(undefined);
-  mockSetChatMute.mockResolvedValue(undefined);
+  mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
+  resumeRealtimeDeliveries();
   keyboardDismissSpy.mockRestore();
   Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOS });
 });
@@ -1385,6 +1423,237 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(screen.getByDisplayValue('retry-name-write')).toBeTruthy();
   });
 
+  it.each([
+    ['Mute', null, 'mute'],
+    ['Unmute', 'mute', null],
+  ] as const)(
+    'guards an exact active %s write in one committed A transaction',
+    async (_label, initialMuteType, expectedMuteType) => {
+      mockMuteType = initialMuteType;
+      await renderWithTheme(<ChatSettingsScreen />);
+
+      await fireEvent.press(screen.getByRole('switch', { name: 'Mute' }));
+
+      await waitFor(() =>
+        expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID,
+          expectedMuteType,
+        ),
+      );
+      await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+      expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1);
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps retained stale A Mute and Reset inert, then binds exact fresh B controls', async () => {
+    const oldLease = mockAccountLease;
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+    const oldMute = retainConfiguredPress(screen.getByRole('switch', { name: 'Mute' }));
+    const oldReset = retainConfiguredPress(screen.getByText('Reset to default').parent!);
+
+    await retireLease(oldLease);
+    await view.unmount();
+    mockGuid = CHAT_GUID_B;
+    mockAccountLease = makeLease(74);
+    mockGetDatabase.mockReturnValue(mockDatabaseB);
+    mockGetDatabase.mockClear();
+    mockSetChatCustomization.mockClear();
+    mockSetChatMuteWithinTransaction.mockClear();
+    mockDatabase.run.mockClear();
+    mockDatabaseB.run.mockClear();
+
+    await act(async () => {
+      oldMute();
+      oldReset();
+      await Promise.resolve();
+    });
+    expect(mockGetDatabase).not.toHaveBeenCalled();
+    expect(mockSetChatCustomization).not.toHaveBeenCalled();
+    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
+    expect(mockDatabase.run).not.toHaveBeenCalled();
+    expect(mockDatabaseB.run).not.toHaveBeenCalled();
+
+    await renderWithTheme(<ChatSettingsScreen />);
+    await fireEvent.press(screen.getByRole('switch', { name: 'Mute' }));
+    await waitFor(() =>
+      expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID_B,
+        'mute',
+      ),
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabaseB, ['BEGIN IMMEDIATE', 'COMMIT']));
+
+    mockSetChatCustomization.mockClear();
+    mockSetChatMuteWithinTransaction.mockClear();
+    mockDatabaseB.run.mockClear();
+    mockSetChatCustomization.mockImplementationOnce((db: Parameters<typeof withDbTransaction>[0]) =>
+      withDbTransaction(db, async () => undefined),
+    );
+    await fireEvent.press(screen.getByText('Reset to default'));
+    await waitFor(() =>
+      expect(mockSetChatCustomization).toHaveBeenCalledWith(mockDatabaseB, CHAT_GUID_B, {
+        customName: null,
+        customColor: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID_B,
+        null,
+      ),
+    );
+    await waitFor(() =>
+      expectDbRunSequence(mockDatabaseB, [
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+      ]),
+    );
+    expect(mockSetChatCustomization.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetChatMuteWithinTransaction.mock.invocationCallOrder[0]!,
+    );
+    expect(mockDatabase.run).not.toHaveBeenCalled();
+  });
+
+  it('drains an admitted A Mute and rolls it back after account retirement', async () => {
+    const oldLease = mockAccountLease;
+    const pendingMute = deferred<void>();
+    mockSetChatMuteWithinTransaction.mockReturnValueOnce(pendingMute.promise);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByRole('switch', { name: 'Mute' }));
+    await waitFor(() =>
+      expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        'mute',
+      ),
+    );
+    expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']);
+
+    let pauseSettled = false;
+    const pausePromise = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    try {
+      await retireLease(oldLease);
+      mockGetDatabase.mockReturnValue(mockDatabaseB);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(pauseSettled).toBe(false);
+
+      await act(async () => {
+        pendingMute.resolve();
+        await pendingMute.promise;
+      });
+      await pausePromise;
+      expect(pauseSettled).toBe(true);
+      expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+      expect(JSON.stringify(view.toJSON())).not.toContain('database commit guard rejected');
+    } finally {
+      await act(async () => {
+        pendingMute.resolve();
+        await pendingMute.promise;
+        await pausePromise;
+      });
+      resumeRealtimeDeliveries();
+    }
+  });
+
+  it('commits Reset customization before its admitted mute transaction rolls back', async () => {
+    const oldLease = mockAccountLease;
+    const pendingCustomization = deferred<void>();
+    const pendingMute = deferred<void>();
+    mockSetChatCustomization.mockImplementationOnce((db: Parameters<typeof withDbTransaction>[0]) =>
+      withDbTransaction(db, async () => pendingCustomization.promise),
+    );
+    mockSetChatMuteWithinTransaction.mockReturnValueOnce(pendingMute.promise);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Reset to default'));
+    await waitFor(() =>
+      expect(mockSetChatCustomization).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, {
+        customName: null,
+        customColor: null,
+      }),
+    );
+    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']));
+
+    await act(async () => {
+      pendingCustomization.resolve();
+      await pendingCustomization.promise;
+    });
+    await waitFor(() =>
+      expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        null,
+      ),
+    );
+    expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT', 'BEGIN IMMEDIATE']);
+    expect(mockSetChatCustomization.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetChatMuteWithinTransaction.mock.invocationCallOrder[0]!,
+    );
+
+    let pauseSettled = false;
+    const pausePromise = pauseRealtimeDeliveries().then(() => {
+      pauseSettled = true;
+    });
+    try {
+      await retireLease(oldLease);
+      mockGetDatabase.mockReturnValue(mockDatabaseB);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(pauseSettled).toBe(false);
+
+      await act(async () => {
+        pendingMute.resolve();
+        await pendingMute.promise;
+      });
+      await pausePromise;
+      expectDbRunSequence(mockDatabase, [
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+        'BEGIN IMMEDIATE',
+        'ROLLBACK',
+      ]);
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+      expect(JSON.stringify(view.toJSON())).not.toContain('database commit guard rejected');
+    } finally {
+      await act(async () => {
+        pendingMute.resolve();
+        await pendingMute.promise;
+        await pausePromise;
+      });
+      resumeRealtimeDeliveries();
+    }
+  });
+
+  it('contains a Reset customization rejection and never begins its mute transaction', async () => {
+    const rawError = 'raw-current-reset-customization-error-85c4';
+    mockSetChatCustomization.mockRejectedValueOnce(new Error(rawError));
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText('Reset to default'));
+    await waitFor(() => expect(mockSetChatCustomization).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
+    expect(mockDatabase.run).not.toHaveBeenCalled();
+    expect(mockShowDialog).not.toHaveBeenCalled();
+    expect(JSON.stringify(view.toJSON())).not.toContain(rawError);
+  });
+
   it('keeps exact current group, notification, customization, and Leave actions', async () => {
     await renderWithTheme(<ChatSettingsScreen />);
 
@@ -1397,11 +1666,6 @@ describe('ChatSettingsScreen source and account ownership', () => {
         customName: 'current-custom-title',
       }),
     );
-    await fireEvent.press(screen.getByRole('switch', { name: 'Mute' }));
-    await waitFor(() =>
-      expect(mockSetChatMute).toHaveBeenCalledWith(mockDatabase, CHAT_GUID, 'mute'),
-    );
-
     await fireEvent.press(
       screen.getByRole('button', {
         name: 'Open system notification settings for this conversation',

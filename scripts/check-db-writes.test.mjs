@@ -1738,6 +1738,16 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(`${finding.path}#`))),
   );
+  const chatSettingsMuteTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'app/(app)/chat-settings/[guid].tsx' &&
+      (finding.symbol.includes('.toggleMute') || finding.symbol.includes('.resetAll')) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/chats.ts#setChatMuteWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1751,10 +1761,19 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:63a3594d82df',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:f372826d2ddd',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:8cdf53351c>:mutator-call:de445000943d',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:11a32f1cad>:mutator-call:291deda58a5d',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:11a32f1cad>:mutator-call:e456088f025a',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:91140063870e',
       'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:00e3b0b7ac>:mutator-call:222335d51483',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:2ed50265e1>:mutator-call:418c5613062c',
+    ].sort(),
+  );
+  assert.deepEqual(
+    chatSettingsMuteTransactions.map((finding) => finding.id).sort(),
+    [
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>.<callback:86a20f484f>:mutator-call:3b7c16f87ad1',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:0b7aa9a9ff23',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:9d1418f7ea42',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>.<callback:6c5110fdb6>:mutator-call:1bbda7a3a183',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:baa1ef9f5b7c',
+      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:d5e45d9ed904',
     ].sort(),
   );
   assert.deepEqual(

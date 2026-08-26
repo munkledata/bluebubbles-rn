@@ -21,10 +21,11 @@ import {
   listChatAttachmentsByKind,
   setBackgroundIsLight,
   setChatCustomization,
-  setChatMute,
+  setChatMuteWithinTransaction,
   setChatTheme,
   type ChatMediaByKind,
 } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { computeBackgroundIsLight } from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
@@ -223,14 +224,14 @@ function ChatSettingsScreen({
 
   const runScreenAccountTask = async (
     grant: ChatSettingsGrant,
-    task: () => Promise<void>,
+    task: (activeLease: RealtimeDeliveryLease) => Promise<void>,
   ): Promise<boolean> => {
     if (!grantIsCurrent(grant)) return false;
     let completed = false;
     try {
       const status = await runTrackedRealtimeWork(accountLease, async (lease) => {
         if (!lease.isCurrent()) return;
-        await task();
+        await task(lease);
         if (!lease.isCurrent()) return;
         completed = true;
       });
@@ -241,7 +242,10 @@ function ChatSettingsScreen({
       throw error;
     }
   };
-  const queueScreenAccountTask = (grant: ChatSettingsGrant, task: () => Promise<void>): void => {
+  const queueScreenAccountTask = (
+    grant: ChatSettingsGrant,
+    task: (activeLease: RealtimeDeliveryLease) => Promise<void>,
+  ): void => {
     if (!grantIsCurrent(grant)) return;
     void runScreenAccountTask(grant, task).catch(() => {
       // These local preference writes have always been best-effort; account ownership is the
@@ -536,9 +540,16 @@ function ChatSettingsScreen({
   const toggleMute = (on: boolean): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
-    queueScreenAccountTask(operationGrant, () =>
-      setChatMute(getDatabase(), guid, on ? 'mute' : null),
-    );
+    queueScreenAccountTask(operationGrant, async (activeLease) => {
+      const db = getDatabase();
+      const chatGuid = operationGrant.chatGuid;
+      const muteType = on ? 'mute' : null;
+      await withDbTransaction(
+        db,
+        (context) => setChatMuteWithinTransaction(context, chatGuid, muteType),
+        () => activeLease.isCurrent(),
+      );
+    });
   };
   // Pick a new group photo and upload it to the server (Private API sends it to everyone).
   const onChangeGroupPhoto = (): void => {
@@ -612,9 +623,16 @@ function ChatSettingsScreen({
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
     setName('');
-    queueScreenAccountTask(operationGrant, async () => {
-      await setChatCustomization(getDatabase(), guid, { customName: null, customColor: null });
-      await setChatMute(getDatabase(), guid, null);
+    queueScreenAccountTask(operationGrant, async (activeLease) => {
+      const db = getDatabase();
+      const chatGuid = operationGrant.chatGuid;
+      const customization = { customName: null, customColor: null };
+      await setChatCustomization(db, chatGuid, customization);
+      await withDbTransaction(
+        db,
+        (context) => setChatMuteWithinTransaction(context, chatGuid, null),
+        () => activeLease.isCurrent(),
+      );
     });
   };
 

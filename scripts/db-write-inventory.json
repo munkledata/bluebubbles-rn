@@ -108,7 +108,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:db9406682a>:mutator-call:d793dbd83e0b",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 332,
+      "line": 336,
       "symbol": "ChatSettingsScreen.applyChatTheme.<callback:db9406682a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatTheme",
@@ -121,7 +121,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:63a3594d82df",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 361,
+      "line": 365,
       "symbol": "ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatTheme",
@@ -134,7 +134,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>:mutator-call:f372826d2ddd",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 363,
+      "line": 367,
       "symbol": "ChatSettingsScreen.pickBackground.<callback:f54cc32415>.<callback:f0b9ff112b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setBackgroundIsLight",
@@ -147,7 +147,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:c44c588780a6",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 414,
+      "line": 418,
       "symbol": "ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatTheme",
@@ -160,7 +160,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:8641071be5dc",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 419,
+      "line": 423,
       "symbol": "ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatTheme",
@@ -173,7 +173,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>:mutator-call:111bca0857ff",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 422,
+      "line": 426,
       "symbol": "ChatSettingsScreen.generateThemeFromBackground.<callback:0ec6f8a280>.<callback:c3f8a5689c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setBackgroundIsLight",
@@ -186,7 +186,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:18ed6f9fbe>:mutator-call:d2790530293a",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 445,
+      "line": 449,
       "symbol": "ChatSettingsScreen.clearChatTheme.<callback:18ed6f9fbe>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatTheme",
@@ -199,7 +199,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:18ed6f9fbe>:mutator-call:846f572038eb",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 448,
+      "line": 452,
       "symbol": "ChatSettingsScreen.clearChatTheme.<callback:18ed6f9fbe>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setBackgroundIsLight",
@@ -212,7 +212,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:00e3b0b7ac>:mutator-call:222335d51483",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 526,
+      "line": 530,
       "symbol": "ChatSettingsScreen.saveName.<callback:00e3b0b7ac>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatCustomization",
@@ -225,7 +225,7 @@
     {
       "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:8cdf53351c>:mutator-call:de445000943d",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 533,
+      "line": 537,
       "symbol": "ChatSettingsScreen.pickColor.<callback:8cdf53351c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatCustomization",
@@ -236,23 +236,49 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
     },
     {
-      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:2ed50265e1>:mutator-call:418c5613062c",
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:baa1ef9f5b7c",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 540,
-      "symbol": "ChatSettingsScreen.toggleMute.<callback:2ed50265e1>",
+      "line": 547,
+      "symbol": "ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/chats.ts#setChatMute",
-      "detectedContext": "coordinated-delegation",
-      "owner": "ChatSettingsScreen.toggleMute",
-      "transactionContext": "coordinated-delegation",
+      "target": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>.<callback:6c5110fdb6>",
+      "detectedContext": "withDbTransaction",
+      "owner": "ChatSettingsScreen Mute",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatSettingsScreen.test.tsx; test/db/chatCustomization.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:11a32f1cad>:mutator-call:e456088f025a",
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:d5e45d9ed904",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 616,
-      "symbol": "ChatSettingsScreen.resetAll.<callback:11a32f1cad>",
+      "line": 547,
+      "symbol": "ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "ChatSettingsScreen Mute",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatSettingsScreen.test.tsx; test/db/chatCustomization.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>.<callback:6c5110fdb6>:mutator-call:1bbda7a3a183",
+      "path": "app/(app)/chat-settings/[guid].tsx",
+      "line": 549,
+      "symbol": "ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>.<callback:6c5110fdb6>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/chats.ts#setChatMuteWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "ChatSettingsScreen Mute",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatSettingsScreen.test.tsx; test/db/chatCustomization.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:91140063870e",
+      "path": "app/(app)/chat-settings/[guid].tsx",
+      "line": 630,
+      "symbol": "ChatSettingsScreen.resetAll.<callback:3bc8902bef>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatCustomization",
       "detectedContext": "coordinated-delegation",
@@ -262,17 +288,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
     },
     {
-      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:11a32f1cad>:mutator-call:291deda58a5d",
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:0b7aa9a9ff23",
       "path": "app/(app)/chat-settings/[guid].tsx",
-      "line": 617,
-      "symbol": "ChatSettingsScreen.resetAll.<callback:11a32f1cad>",
+      "line": 631,
+      "symbol": "ChatSettingsScreen.resetAll.<callback:3bc8902bef>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/chats.ts#setChatMute",
-      "detectedContext": "coordinated-delegation",
-      "owner": "ChatSettingsScreen.resetAll",
-      "transactionContext": "coordinated-delegation",
+      "target": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>.<callback:86a20f484f>",
+      "detectedContext": "withDbTransaction",
+      "owner": "ChatSettingsScreen Reset mute",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/chatActionsRepo.test.ts; test/state/featureSettingsStore.test.ts; test/state/themeStore.test.ts; test/components/routes/chatSettingsScreen.test.tsx; test/components/routes/scheduledScreen.test.tsx; test/components/conversations/chatActionsSheet.test.tsx; test/components/conversations/conversationListScreen.test.tsx; test/components/conversations/conversationTile.test.tsx"
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatSettingsScreen.test.tsx; test/db/chatCustomization.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>:mutator-call:9d1418f7ea42",
+      "path": "app/(app)/chat-settings/[guid].tsx",
+      "line": 631,
+      "symbol": "ChatSettingsScreen.resetAll.<callback:3bc8902bef>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "ChatSettingsScreen Reset mute",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatSettingsScreen.test.tsx; test/db/chatCustomization.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:3bc8902bef>.<callback:86a20f484f>:mutator-call:3b7c16f87ad1",
+      "path": "app/(app)/chat-settings/[guid].tsx",
+      "line": 633,
+      "symbol": "ChatSettingsScreen.resetAll.<callback:3bc8902bef>.<callback:86a20f484f>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/chats.ts#setChatMuteWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "ChatSettingsScreen Reset mute",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatSettingsScreen.test.tsx; test/db/chatCustomization.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:ea34ea031e>.tick.<callback:30afe351c6>:mutator-call:cc2cb67d4f22",
