@@ -3,7 +3,6 @@ import { getDatabase } from '@db/database';
 import {
   getCustomThemeById,
   kvGet,
-  kvSet,
   kvSetWithinTransaction,
   THEME_CUSTOM_KEY,
   THEME_PREF_KEY,
@@ -100,7 +99,9 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     }
     set({ customThemeId: id, customTokens: tokens }); // optimistic
     try {
-      await kvSet(getDatabase(), THEME_CUSTOM_KEY, String(id));
+      await withDbTransaction(getDatabase(), (context) =>
+        kvSetWithinTransaction(context, THEME_CUSTOM_KEY, String(id)),
+      );
     } catch {
       // best-effort persist
     }
@@ -120,7 +121,9 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   clearCustomTheme: async () => {
     set({ customThemeId: null, customTokens: null });
     try {
-      await kvSet(getDatabase(), THEME_CUSTOM_KEY, '');
+      await withDbTransaction(getDatabase(), (context) =>
+        kvSetWithinTransaction(context, THEME_CUSTOM_KEY, ''),
+      );
     } catch {
       // best-effort persist
     }

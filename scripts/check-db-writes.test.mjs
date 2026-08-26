@@ -1690,6 +1690,13 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
+  const customThemeTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/state/themeStore.ts' &&
+      (finding.symbol.includes('.setCustomTheme') ||
+        finding.symbol.includes('.clearCustomTheme')) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1711,14 +1718,23 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'src/state/featureSettingsStore.ts#<callback:63875fb47b>.setAutoDownloadDestination:mutator-call:cff90475436f',
       'src/state/featureSettingsStore.ts#<callback:63875fb47b>.setFlag:mutator-call:aff3ba08a7a5',
       'src/state/featureSettingsStore.ts#<callback:63875fb47b>.setMaxConcurrentDownloads:mutator-call:c460f711a44f',
-      'src/state/themeStore.ts#<callback:a1d6ed4f6b>.clearCustomTheme:mutator-call:ed4d32555cba',
-      'src/state/themeStore.ts#<callback:a1d6ed4f6b>.setCustomTheme:mutator-call:9e77e542adee',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:4bdf863381>.<callback:03b142b7d3>.<callback:97863ede27>:mutator-call:edec8d1bbc8a',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:82637a13a0>.<callback:e2f8a6cb01>.<callback:f7d1b4463f>:mutator-call:811582c1dc0c',
       'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:827299d4fe>.<callback:41e952ab60>.<callback:41be2e6c31>:mutator-call:d640a83b730e',
       'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:1af5790b07>.onPress.<callback:4d6e5d9d24>:mutator-call:4a1bcbb1c22f',
       'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:4b30e83615>:mutator-call:334ea9706dc2',
       'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:5b7035b070>:mutator-call:e8b55608b6d2',
+    ].sort(),
+  );
+  assert.deepEqual(
+    customThemeTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme.<callback:3d4db5413f>:mutator-call:48f115f8f4e7',
+      'src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme:mutator-call:07ee3458db41',
+      'src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme:mutator-call:9c61595b9b7e',
+      'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme.<callback:096d9b3756>:mutator-call:1207f46aa710',
+      'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:07c82ca7ed59',
+      'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:8783edd1784f',
     ].sort(),
   );
 });
