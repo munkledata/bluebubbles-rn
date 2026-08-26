@@ -1,8 +1,8 @@
 import { eq, sql } from 'drizzle-orm';
 import { kv } from '../schema';
-import { withDbWriteLock } from '../transaction';
+import { withDbTransaction, withDbWriteLock } from '../transaction';
 import type { AppDatabase } from '../types';
-import { setSyncMarker } from './sync';
+import { setSyncMarkerWithinTransaction } from './sync';
 
 // ---- Whole-cache maintenance ----------------------------------------------
 
@@ -68,12 +68,12 @@ const CACHE_DELETE_BATCH_SIZE = 500;
  * its atomicity. The statements commit independently, which means an outcome BETWEEN them remains
  * reachable (see the caller: `forget()` confirms the result and re-runs).
  *
- * Each statement takes and releases the shared writer queue: the marker uses its public transaction
- * owner and the bounded deletes use `withDbWriteLock`. No serialized transaction can open around a
- * delete and roll it back after this function reports success, while an unbounded whole-cache lock
- * cannot monopolize the queue or look permanently wedged to its watchdog. Ordinary writers not yet
- * migrated to the queue can still interleave, which is why the separate, queue-fenced
- * `localCacheDirty` confirmation remains load-bearing.
+ * Each statement takes and releases the shared writer queue: this function opens one short marker
+ * transaction, then the bounded deletes use `withDbWriteLock`. No serialized transaction can open
+ * around a delete and roll it back after this function reports success, while an unbounded
+ * whole-cache lock cannot monopolize the queue or look permanently wedged to its watchdog. Ordinary
+ * writers not yet migrated to the queue can still interleave, which is why the separate,
+ * queue-fenced `localCacheDirty` confirmation remains load-bearing.
  */
 export async function clearLocalCache(db: AppDatabase): Promise<void> {
   // FIRST, before a single delete. Marker-first bounds what a mid-wipe process death (the user
@@ -85,9 +85,14 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
   // harmless: rows that survive are the previous account's, so `localCacheDirty` must detect and
   // repeat a partial wipe.
   //
-  // The row itself must SURVIVE (id = 1, seeded by 0001_init): `setSyncMarker` is an UPDATE, so
-  // deleting it would silently stop every future marker write.
-  await setSyncMarker(db, { lastSyncedRowId: null, lastSyncedTimestamp: null });
+  // The row itself must SURVIVE (id = 1, seeded by 0001_init): the scoped marker write is an UPDATE,
+  // so deleting it would silently stop every future marker write.
+  await withDbTransaction(db, (context) =>
+    setSyncMarkerWithinTransaction(context, {
+      lastSyncedRowId: null,
+      lastSyncedTimestamp: null,
+    }),
+  );
 
   // Validated incoming envelopes may still contain message text. Remove them before the larger
   // content tables; a terminal receipt is account-scoped too and must never suppress account B.

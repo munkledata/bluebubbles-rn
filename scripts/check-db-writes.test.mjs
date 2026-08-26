@@ -4378,6 +4378,16 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       finding.symbol.startsWith('restoreBackup') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const clearLocalCacheMarkerTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/maintenance.ts' &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/maintenance.ts#clearLocalCache.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
@@ -4413,13 +4423,13 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/backup/backup.ts#restoreBackup:mutator-call:29a6a3b1dcc7',
     ].sort(),
   );
-  assert.equal(
-    findings.find(
-      (finding) =>
-        finding.id ===
-        'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:232e368415a0',
-    )?.detectedContext,
-    'coordinated-delegation',
+  assert.deepEqual(
+    clearLocalCacheMarkerTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/maintenance.ts#clearLocalCache.<callback:f5b3fd4c12>:mutator-call:7571dbda310a',
+      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:2ffb1910cfce',
+      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:7ff9694f91da',
+    ].sort(),
   );
   assert.equal(
     findings.some(

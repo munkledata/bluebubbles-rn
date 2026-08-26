@@ -293,6 +293,7 @@ describe('clearLocalCache', () => {
 
   it('does not start a wipe statement inside a rolling-back neighbouring transaction', async () => {
     const { db, raw } = await createTestDb();
+    await setSyncMarker(db, { lastSyncedRowId: 7, lastSyncedTimestamp: 8 });
     raw
       .prepare(
         `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
@@ -320,11 +321,16 @@ describe('clearLocalCache', () => {
     });
     await Promise.resolve();
     expect(wipeSettled).toBe(false);
+    expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 7, lastSyncedTimestamp: 8 });
     expect(count(raw, 'outgoing_queue')).toBe(1);
 
     releaseNeighbour();
     await expect(neighbour).rejects.toThrow('neighbour rollback');
     await wipe;
+    expect(await getSyncMarker(db)).toEqual({
+      lastSyncedRowId: null,
+      lastSyncedTimestamp: null,
+    });
     expect(count(raw, 'outgoing_queue')).toBe(0);
   });
 
