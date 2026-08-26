@@ -830,8 +830,8 @@ export type DeleteMessageLocalResult =
   /** A stale temp GUID has no retained canonical mapping; the caller must surface that uncertainty. */
   | 'unresolved-temp';
 
-export async function deleteMessageLocal(
-  db: AppDatabase,
+export function deleteMessageLocalWithinTransaction(
+  context: DbTransactionContext,
   guid: string,
   now: number,
 ): Promise<DeleteMessageLocalResult> {
@@ -840,7 +840,7 @@ export async function deleteMessageLocal(
   // the tombstone must not outlive the alias resolution or chat sort-key recompute inside
   // markMessageDeletedWithinTransaction — as bare autocommits each half can be swallowed by
   // whatever transaction a neighbouring writer happens to have open and lost with its rollback.
-  return withDbTransaction(db, async (context) => {
+  return runInTransactionContext(context, async (db) => {
     if (guid.startsWith('temp-'))
       await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, guid));
 
@@ -871,6 +871,21 @@ export async function deleteMessageLocal(
     // mapping, so the UI must not pretend the requested bubble was removed.
     return 'unresolved-temp';
   });
+}
+
+/**
+ * Record one user-requested local deletion in its own standalone transaction. Callers that already own
+ * the transaction must use {@link deleteMessageLocalWithinTransaction} instead of nesting this
+ * wrapper.
+ */
+export async function deleteMessageLocal(
+  db: AppDatabase,
+  guid: string,
+  now: number,
+): Promise<DeleteMessageLocalResult> {
+  return withDbTransaction(db, (context) =>
+    deleteMessageLocalWithinTransaction(context, guid, now),
+  );
 }
 
 // ---- Edit / Unsend (operate on real guids; mutate in place, reactive watcher updates UI) ----

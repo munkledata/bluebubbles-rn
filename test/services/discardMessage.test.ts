@@ -53,6 +53,15 @@ import { discardMessage } from '@/services/send';
 // eslint-disable-next-line import/first
 import { clearFailedSendNotice } from '@/services/send/sendFailureNotice';
 // eslint-disable-next-line import/first
+import { uploadRegistry } from '@/services/send/uploadControl';
+// eslint-disable-next-line import/first
+import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
+// eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { showToast } from '@ui/toast/toastStore';
@@ -225,6 +234,125 @@ describe('discardMessage — the two guarded steps together', () => {
     expect(count(raw, 'guid = ? AND date_deleted IS NOT NULL', 'temp-strand')).toBe(1);
     expect(queueCount(raw, 'temp-strand')).toBe(0);
     expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
+  });
+
+  it('rolls back a retired stranded-row discard and lets a fresh attempt commit every effect', async () => {
+    const { db, raw } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const chatId = await seedChat(db);
+    const tempGuid = 'temp-discard-retired';
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'older-message', text: 'older', dateCreated: 50 })],
+      () => chatId,
+      new Map(),
+    );
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'discard after retirement',
+      now: 100,
+    });
+    // A guid-less ack can mark the bubble sent before its queue cleanup commits. The discard claim
+    // must decline this row, but its queue cleanup and fallback tombstone still share one owner.
+    raw.prepare("UPDATE messages SET send_state='sent', error=0 WHERE guid=?").run(tempGuid);
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_discard_during_fallback_tombstone', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_discard_during_fallback_tombstone
+      AFTER INSERT ON message_deletion_ledger
+      WHEN NEW.guid = '${tempGuid}'
+      BEGIN
+        SELECT pause_discard_during_fallback_tombstone();
+      END
+    `);
+
+    const cleanupTransactionStates: boolean[] = [];
+    const uploadCancelTransactionStates: boolean[] = [];
+    const cancelUpload = jest.spyOn(uploadRegistry, 'cancel').mockImplementation(() => {
+      uploadCancelTransactionStates.push(raw.inTransaction);
+      return false;
+    });
+    const emptyCleanup = {
+      status: 'complete' as const,
+      attempted: 0,
+      confirmed: 0,
+      failed: 0,
+      skipped: 0,
+    };
+    const retire = jest
+      .spyOn(attachmentCacheCoordinator, 'retireInactiveEntries')
+      .mockImplementation(async () => {
+        cleanupTransactionStates.push(raw.inTransaction);
+        return emptyCleanup;
+      });
+    const drainCache = jest
+      .spyOn(attachmentCacheCoordinator, 'drainDueRetirements')
+      .mockImplementation(async () => {
+        cleanupTransactionStates.push(raw.inTransaction);
+        return emptyCleanup;
+      });
+
+    try {
+      await expect(discardMessage(tempGuid, 6_000)).resolves.toBeUndefined();
+      if (!drain)
+        throw new Error('discard did not retire the account lease during fallback tombstoning');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(raw.inTransaction).toBe(false);
+      expect(
+        raw
+          .prepare(
+            'SELECT send_state AS sendState, error, date_deleted AS dateDeleted FROM messages WHERE guid=?',
+          )
+          .get(tempGuid),
+      ).toEqual({ sendState: 'sent', error: 0, dateDeleted: null });
+      expect(queueCount(raw, tempGuid)).toBe(1);
+      expect(ledgerRows(raw)).toEqual([]);
+      expect(
+        raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id=?').get(chatId),
+      ).toEqual({ latest: 100 });
+      expect(showToast).not.toHaveBeenCalled();
+      expect(clearFailedSendNotice).not.toHaveBeenCalled();
+      expect(retire).not.toHaveBeenCalled();
+      expect(drainCache).not.toHaveBeenCalled();
+
+      raw.exec('DROP TRIGGER pause_discard_during_fallback_tombstone');
+      resumeRealtimeDeliveries();
+      (clearFailedSendNotice as jest.Mock).mockImplementationOnce(async () => {
+        cleanupTransactionStates.push(raw.inTransaction);
+      });
+
+      await expect(discardMessage(tempGuid, 6_000)).resolves.toBeUndefined();
+
+      expect(deletionDate(raw, tempGuid)).toBe(6_000);
+      expect(queueCount(raw, tempGuid)).toBe(0);
+      expect(ledgerRows(raw)).toEqual([{ guid: tempGuid, dateDeleted: 6_000 }]);
+      expect(
+        raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id=?').get(chatId),
+      ).toEqual({ latest: 50 });
+      expect(showToast).not.toHaveBeenCalled();
+      expect(clearFailedSendNotice).toHaveBeenCalledTimes(1);
+      expect(retire).toHaveBeenCalledTimes(1);
+      expect(drainCache).toHaveBeenCalledTimes(1);
+      expect(uploadCancelTransactionStates).toEqual([false, false]);
+      expect(cleanupTransactionStates).toEqual([false, false, false]);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_discard_during_fallback_tombstone');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      cancelUpload.mockRestore();
+      retire.mockRestore();
+      drainCache.mockRestore();
+    }
   });
 
   it('TOMBSTONES a real server guid rather than hard-deleting it', async () => {

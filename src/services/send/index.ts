@@ -4,9 +4,9 @@ import { getDatabase } from '@db/database';
 import {
   claimFailedOutgoingForRetryWithinTransaction,
   countOutgoingQueueHealth,
-  deleteMessageLocal,
+  deleteMessageLocalWithinTransaction,
   deleteScheduledWithinTransaction,
-  discardOutgoingMessage,
+  discardOutgoingMessageWithinTransaction,
   getScheduledById,
   listServerScheduledPruneExposure,
   reconcileServerScheduled,
@@ -657,13 +657,13 @@ export async function retry(
 /**
  * Discard a message from the user's "Delete" (single or bulk), whatever state it is in.
  *
- * TWO STEPS, and each one puts its condition in its own write, so between them every state is
- * covered exactly once:
- *  1. `discardOutgoingMessage` claims ONLY an unconfirmed optimistic row (a `temp-` guid still
+ * ONE guarded transaction with two branches covers every state exactly once:
+ *  1. `discardOutgoingMessageWithinTransaction` claims ONLY an unconfirmed optimistic row (a `temp-` guid still
  *     'sending' or 'error'): it tombstones the bubble and takes its queue row with it, so the
  *     retry ladder can't re-POST what the user just removed.
  *  2. Everything else — a real server guid, and a `temp-` row already flipped to 'sent' by a
- *     guid-less ack (RCS / AppleScript) — falls through to `deleteMessageLocal`.
+ *     guid-less ack (RCS / AppleScript) — falls through to
+ *     `deleteMessageLocalWithinTransaction` before the same commit.
  * BOTH steps tombstone; the difference is only which one owns the queue row and the ownership
  * answer the caller gets. Every state here is a message the server may still have, and a hard
  * delete of any of them is undone the next time the thread syncs (`ensureChatSynced` re-pages 500
@@ -685,17 +685,20 @@ export async function discardMessage(
     uploadRegistry.cancel(guid);
     const db = getDatabase();
     const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
-    const outgoingOwned = await discardOutgoingMessage(db, guid, now);
-    if (!outgoingOwned) {
-      if (!accountLease.isCurrent()) return;
-      const result = await deleteMessageLocal(db, guid, now);
-      if (!accountLease.isCurrent()) return;
-      if (result === 'unresolved-temp') {
-        // The fixed-size alias ledger may have retired an extremely old mapping. Never claim the
-        // destructive action succeeded against an identity we cannot prove; the reactive list now
-        // carries the real GUID, so selecting the message again gives the user a safe retry.
-        showToast('Message changed—select it again');
-      }
+    const result = await withDbTransaction(
+      db,
+      async (context) => {
+        const outgoingOwned = await discardOutgoingMessageWithinTransaction(context, guid, now);
+        return outgoingOwned ? null : deleteMessageLocalWithinTransaction(context, guid, now);
+      },
+      () => accountLease.isCurrent(),
+    );
+    if (!accountLease.isCurrent()) return;
+    if (result === 'unresolved-temp') {
+      // The fixed-size alias ledger may have retired an extremely old mapping. Never claim the
+      // destructive action succeeded against an identity we cannot prove; the reactive list now
+      // carries the real GUID, so selecting the message again gives the user a safe retry.
+      showToast('Message changed—select it again');
     }
     if (!accountLease.isCurrent()) return;
     // The tombstone commits before native mutation. Failed-send notices are keyed by the retained

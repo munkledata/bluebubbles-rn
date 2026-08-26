@@ -10,8 +10,12 @@ jest.mock('@db/repositories', () => {
   const actual = jest.requireActual('@db/repositories') as Record<string, unknown>;
   return {
     ...actual,
-    discardOutgoingMessage: jest.fn(actual.discardOutgoingMessage as () => unknown),
-    deleteMessageLocal: jest.fn(actual.deleteMessageLocal as () => unknown),
+    discardOutgoingMessageWithinTransaction: jest.fn(
+      actual.discardOutgoingMessageWithinTransaction as () => unknown,
+    ),
+    deleteMessageLocalWithinTransaction: jest.fn(
+      actual.deleteMessageLocalWithinTransaction as () => unknown,
+    ),
   };
 });
 jest.mock('@/services/clients', () => ({ http: { account: 'A' } }));
@@ -71,7 +75,12 @@ import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
 // eslint-disable-next-line import/first
 import { uploadRegistry } from '@/services/send/uploadControl';
 // eslint-disable-next-line import/first
-import { deleteMessageLocal, discardOutgoingMessage } from '@db/repositories';
+import {
+  deleteMessageLocalWithinTransaction,
+  discardOutgoingMessageWithinTransaction,
+} from '@db/repositories';
+// eslint-disable-next-line import/first
+import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { showToast } from '@ui/toast/toastStore';
 // eslint-disable-next-line import/first
@@ -84,6 +93,8 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+// eslint-disable-next-line import/first
+import { createTestDb } from '../support/testDb';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -113,8 +124,8 @@ const mockSendImage = sendImageMessage as jest.Mock;
 const mockSendReaction = sendReactionMessage as jest.Mock;
 const mockSendEdit = sendEdit as jest.Mock;
 const mockSendUnsend = sendUnsend as jest.Mock;
-const mockDiscardOutgoing = discardOutgoingMessage as jest.Mock;
-const mockDeleteMessageLocal = deleteMessageLocal as jest.Mock;
+const mockDiscardOutgoingWithinTransaction = discardOutgoingMessageWithinTransaction as jest.Mock;
+const mockDeleteMessageLocalWithinTransaction = deleteMessageLocalWithinTransaction as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -188,7 +199,9 @@ describe('UI send account lease', () => {
   });
 
   it('passes one cache scope from message discard through retirement and retry drain', async () => {
-    mockDiscardOutgoing.mockResolvedValueOnce(true);
+    const { db } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValueOnce(db);
+    mockDiscardOutgoingWithinTransaction.mockResolvedValueOnce(true);
     const retire = jest
       .spyOn(attachmentCacheCoordinator, 'retireInactiveEntries')
       .mockResolvedValue({
@@ -568,13 +581,15 @@ describe('UI send account lease', () => {
   });
 
   it('suppresses unresolved-message copy when Disconnect invalidates the lease during the DB await', async () => {
+    const { db } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValueOnce(db);
     const deletion = deferred<'unresolved-temp'>();
-    mockDiscardOutgoing.mockResolvedValueOnce(false);
-    mockDeleteMessageLocal.mockReturnValueOnce(deletion.promise);
+    mockDiscardOutgoingWithinTransaction.mockResolvedValueOnce(false);
+    mockDeleteMessageLocalWithinTransaction.mockReturnValueOnce(deletion.promise);
     const screenLease = captureRealtimeDeliveryLease();
 
     const pending = discardMessage('temp-stale-account', 1_000, screenLease);
-    await waitUntil(() => mockDeleteMessageLocal.mock.calls.length === 1);
+    await waitUntil(() => mockDeleteMessageLocalWithinTransaction.mock.calls.length === 1);
 
     let drained = false;
     const drain = pauseRealtimeDeliveries().then(() => {

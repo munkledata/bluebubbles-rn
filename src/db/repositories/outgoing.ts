@@ -396,12 +396,12 @@ export async function insertOutgoingReaction(
  * treats true as "handled" and skips the tombstone, so the message the user asked to delete stayed
  * on screen with no error while its retry ladder was silently stripped.
  */
-export async function discardOutgoingMessage(
-  db: AppDatabase,
+export function discardOutgoingMessageWithinTransaction(
+  context: DbTransactionContext,
   guid: string,
-  now: number = Date.now(),
+  now: number,
 ): Promise<boolean> {
-  return withDbTransaction(db, async (context) => {
+  return runInTransactionContext(context, async (db) => {
     const owned = await db.all<{ id: number }>(sql`
       UPDATE messages SET date_deleted = ${now}
        WHERE guid = ${guid} AND guid LIKE 'temp-%' AND send_state IN ('sending', 'error')
@@ -415,6 +415,21 @@ export async function discardOutgoingMessage(
     await markMessageDeletedWithinTransaction(context, guid, now);
     return true;
   });
+}
+
+/**
+ * Discard one optimistic outgoing message in its own standalone transaction. Callers that already own
+ * the transaction must use {@link discardOutgoingMessageWithinTransaction} instead of nesting this
+ * wrapper.
+ */
+export async function discardOutgoingMessage(
+  db: AppDatabase,
+  guid: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    discardOutgoingMessageWithinTransaction(context, guid, now),
+  );
 }
 
 /**
