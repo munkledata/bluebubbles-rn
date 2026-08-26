@@ -134,11 +134,64 @@ function requireSafeAuditStep(checkJob, name, command, errors) {
   }
 }
 
+function requireDatabaseWriteApprovalGuard(checkJob, installIndex, errors) {
+  const name = 'Database write approval guard';
+  const command = 'node scripts/check-db-writes.mjs --check';
+  const step = extractNamedStep(checkJob, name);
+  if (!step) {
+    errors.push(`CI check job is missing the "${name}" step.`);
+    return;
+  }
+  const reviewedLines = new Set([`      - name: ${name}`, `        run: ${command}`]);
+  const liveLines = linesOf(step).filter(
+    (line) => line.trim() && !line.trimStart().startsWith('#'),
+  );
+  if (liveLines.some((line) => !reviewedLines.has(line))) {
+    errors.push(`"${name}" may contain only its reviewed name and exact run command.`);
+  }
+  if (liveLines.filter((line) => line === `        run: ${command}`).length !== 1) {
+    errors.push(`"${name}" must run exactly: ${command}`);
+  }
+  if (checkJob.indexOf(`      - name: ${name}`) < installIndex) {
+    errors.push(`"${name}" must run after npm ci installs the scanner dependencies.`);
+  }
+  if (/^\s*if\s*:/m.test(step)) {
+    errors.push(`"${name}" must run unconditionally.`);
+  }
+  if (/^\s*continue-on-error\s*:/m.test(step) || /\|\|\s*true/.test(step)) {
+    errors.push(`"${name}" must fail the CI job when an unapproved write is found.`);
+  }
+}
+
 function validateCheckJob(workflow, errors) {
   const check = extractJob(workflow, 'check');
   if (!check) {
     errors.push('CI is missing the check job.');
     return;
+  }
+
+  // Keep this release-blocking job structurally fail-closed. Any new job-level control must be
+  // reviewed here first; otherwise `if`, `needs`, or `continue-on-error` could skip or neutralize
+  // every guard inside it while the individual step still looked correct.
+  const reviewedDeclarations = new Map([
+    ['    name: Typecheck · Format · Test', 'name'],
+    ['    runs-on: ubuntu-latest', 'runs-on'],
+    ['    steps:', 'steps'],
+  ]);
+  const keyCounts = new Map();
+  for (const line of linesOf(check.source)) {
+    if (!line.trim() || line.trimStart().startsWith('#') || indentation(line) !== 4) continue;
+    const key = reviewedDeclarations.get(line);
+    if (!key) {
+      errors.push(`The CI check job has an unreviewed job-level declaration: ${line.trim()}`);
+      continue;
+    }
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+  for (const key of reviewedDeclarations.values()) {
+    if (keyCounts.get(key) !== 1) {
+      errors.push(`The CI check job must declare "${key}" exactly once.`);
+    }
   }
 
   const checkout = extractIndentedBlock(
@@ -158,6 +211,7 @@ function validateCheckJob(workflow, errors) {
   }
 
   const installIndex = check.source.indexOf('run: npm ci');
+  requireDatabaseWriteApprovalGuard(check.source, installIndex, errors);
   const fullAuditIndex = check.source.indexOf('run: npm audit --audit-level=high');
   const productionAuditIndex = check.source.indexOf('run: npm audit --omit=dev --audit-level=high');
   if (installIndex < 0 || fullAuditIndex < installIndex || productionAuditIndex < installIndex) {
@@ -328,7 +382,7 @@ if (invokedDirectly) {
   try {
     const result = runWorkflowSecurityCheck();
     console.log(
-      `Workflow security guard passed: ${result.actionCount} action uses are immutable; audits, dependency review, and Android release verification are enforced.`,
+      `Workflow security guard passed: ${result.actionCount} action uses are immutable; database-write approval, audits, dependency review, and Android release verification are enforced.`,
     );
   } catch (error) {
     console.error(

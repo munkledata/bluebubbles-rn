@@ -54,6 +54,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Database write approval guard
+        run: node scripts/check-db-writes.mjs --check
+
       - name: Audit clean lockfile (all dependencies)
         run: npm audit --audit-level=high
 

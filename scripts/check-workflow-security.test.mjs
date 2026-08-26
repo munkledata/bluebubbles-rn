@@ -54,6 +54,100 @@ test('requires complete Git history for the secret-hygiene scan', () => {
   assert.ok(errorsFor(mutated).some((error) => error.includes('fetch-depth: 0')));
 });
 
+test('requires the fail-closed database write approval guard after dependency install', () => {
+  const step = [
+    '      - name: Database write approval guard',
+    '        run: node scripts/check-db-writes.mjs --check',
+  ].join('\n');
+
+  const reportOnly = workflow.replace(
+    'node scripts/check-db-writes.mjs --check',
+    'node scripts/check-db-writes.mjs --report',
+  );
+  assert.notEqual(reportOnly, workflow, 'the report-only mutation must change the fixture');
+  assert.ok(errorsFor(reportOnly).some((error) => error.includes('must run exactly')));
+
+  const missing = workflow.replace(`${step}\n\n`, '');
+  assert.notEqual(missing, workflow, 'the missing-step mutation must change the fixture');
+  assert.ok(errorsFor(missing).some((error) => error.includes('missing')));
+
+  const ignored = workflow.replace(
+    step,
+    `${step.split('\n')[0]}\n        continue-on-error: true\n${step.split('\n')[1]}`,
+  );
+  assert.notEqual(ignored, workflow, 'the ignored-failure mutation must change the fixture');
+  assert.ok(errorsFor(ignored).some((error) => error.includes('must fail the CI job')));
+
+  for (const extraStepControl of [
+    '"if": false',
+    "'continue-on-error': true",
+    '<<: { if: false }',
+    'shell: bash {0} || true',
+  ]) {
+    const controlledStep = workflow.replace(
+      step,
+      `${step.split('\n')[0]}\n        ${extraStepControl}\n${step.split('\n')[1]}`,
+    );
+    assert.notEqual(controlledStep, workflow, `${extraStepControl} must change the fixture`);
+    assert.ok(
+      errorsFor(controlledStep).some((error) => error.includes('only its reviewed name')),
+      `the database guard step must reject ${extraStepControl}`,
+    );
+  }
+
+  const duplicateRun = workflow.replace(
+    step,
+    `${step.split('\n')[0]}\n${step.split('\n')[1]}\n${step.split('\n')[1]}`,
+  );
+  assert.notEqual(duplicateRun, workflow, 'the duplicate-run mutation must change the fixture');
+  assert.ok(errorsFor(duplicateRun).some((error) => error.includes('must run exactly')));
+
+  const conditionalStep = workflow.replace(
+    step,
+    `${step.split('\n')[0]}\n        if: false\n${step.split('\n')[1]}`,
+  );
+  assert.notEqual(
+    conditionalStep,
+    workflow,
+    'the conditional-step mutation must change the fixture',
+  );
+  assert.ok(errorsFor(conditionalStep).some((error) => error.includes('must run unconditionally')));
+
+  const movedBeforeInstall = workflow
+    .replace(`${step}\n\n`, '')
+    .replace('      - name: Install dependencies', `${step}\n\n      - name: Install dependencies`);
+  assert.notEqual(movedBeforeInstall, workflow, 'the ordering mutation must change the fixture');
+  assert.ok(errorsFor(movedBeforeInstall).some((error) => error.includes('after npm ci')));
+
+  for (const jobControl of [
+    'if: false',
+    'needs: dependency-review',
+    'continue-on-error: true',
+    'timeout-minutes: 1',
+    '"if": false',
+    "'needs': dependency-review",
+    '"continue-on-error": true',
+    '<<: { if: false }',
+  ]) {
+    const controlledJob = workflow.replace('  check:\n', `  check:\n    ${jobControl}\n`);
+    assert.notEqual(controlledJob, workflow, `${jobControl} must change the fixture`);
+    assert.ok(
+      errorsFor(controlledJob).some((error) => error.includes('unreviewed job-level declaration')),
+      `the check job must reject ${jobControl}`,
+    );
+  }
+
+  const checkJobHeader = [
+    '  check:',
+    '    name: Typecheck · Format · Test',
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+  ].join('\n');
+  const duplicateSteps = workflow.replace(checkJobHeader, `${checkJobHeader}\n    steps:`);
+  assert.notEqual(duplicateSteps, workflow, 'the duplicate-key mutation must change the fixture');
+  assert.ok(errorsFor(duplicateSteps).some((error) => error.includes('"steps" exactly once')));
+});
+
 test('requires the Android build job', () => {
   const mutated = workflow.replace('\n  android:\n', '\n  android-disabled:\n');
   assert.notEqual(mutated, workflow, 'the Android job mutation must change the fixture');
