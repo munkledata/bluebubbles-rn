@@ -527,9 +527,16 @@ describe('runOutgoingQueue — attachment resend', () => {
     await seedChat(db, 'c1');
     await seedFailedAttachment(db, raw, 'temp-gone');
 
-    const up = fakeIo({ fileExists: async () => false });
+    let fileCheckRanInsideTransaction = true;
+    const up = fakeIo({
+      fileExists: async () => {
+        fileCheckRanInsideTransaction = raw.inTransaction;
+        return false;
+      },
+    });
     const res = await runOutgoingQueue(db, {} as HttpClient, up.io, 2_000_000);
     expect(res).toEqual({ eligible: 1, sent: 0 });
+    expect(fileCheckRanInsideTransaction).toBe(false);
     expect(up.captured).toBeUndefined(); // never attempted an upload
     // Retired: attempts jumped to the cap, so it is never eligible again — even far in the future.
     expect(attemptsOf(raw, 'temp-gone')).toBe(OUTGOING_MAX_ATTEMPTS);
@@ -890,6 +897,77 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
     expect(attemptsOf(raw, 'temp-guard-unknown')).toBe(1);
     expect(mockNotifyFailedSend).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('rolls back a mid-retirement account change before notice and lets a fresh account settle', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const tempGuid = 'temp-retire-mid-owner';
+    await strandedText(db, raw, 'c1', tempGuid, 1_000);
+    raw
+      .prepare('UPDATE outgoing_queue SET kind=?, attempts=1, next_retry_at=0 WHERE temp_guid=?')
+      .run('wormhole', tempGuid);
+    const row = await retryableRow(db, 2_000_000);
+
+    let drain: Promise<void> | undefined;
+    let triggerRan = false;
+    raw.function('pause_automatic_retry_during_retirement', () => {
+      triggerRan = true;
+      drain = pauseRealtimeDeliveries();
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER pause_automatic_retry_during_retirement
+      AFTER UPDATE OF send_state ON messages
+      WHEN OLD.guid = '${tempGuid}' AND NEW.send_state = 'error' AND NEW.error = 1
+      BEGIN
+        SELECT pause_automatic_retry_during_retirement();
+      END
+    `);
+
+    const oldAccount = captureRealtimeDeliveryLease();
+    try {
+      await expect(
+        resendOutgoingRow(db, {} as HttpClient, noAttachmentIo, row, () => 2_000_000, oldAccount),
+      ).resolves.toBe('paused');
+      if (!drain) throw new Error('outgoing retirement did not retire the account lease');
+      await drain;
+
+      expect(triggerRan).toBe(true);
+      expect(raw.inTransaction).toBe(false);
+      expect(attemptsOf(raw, tempGuid)).toBe(1);
+      expect(stateOf(raw, tempGuid)).toBe('sending');
+      expect(errorOf(raw, tempGuid)).toBe(0);
+      expect(queueCount(raw)).toBe(1);
+      expect(mockNotifyFailedSend).not.toHaveBeenCalled();
+
+      raw.exec('DROP TRIGGER pause_automatic_retry_during_retirement');
+      resumeRealtimeDeliveries();
+      const freshAccount = captureRealtimeDeliveryLease();
+      let noticeRanInsideTransaction = true;
+      mockNotifyFailedSend.mockImplementationOnce(async () => {
+        noticeRanInsideTransaction = raw.inTransaction;
+      });
+
+      await expect(
+        resendOutgoingRow(db, {} as HttpClient, noAttachmentIo, row, () => 2_000_000, freshAccount),
+      ).resolves.toBe('unsendable');
+
+      expect(attemptsOf(raw, tempGuid)).toBe(OUTGOING_MAX_ATTEMPTS);
+      expect(stateOf(raw, tempGuid)).toBe('error');
+      expect(errorOf(raw, tempGuid)).toBe(1);
+      expect(queueCount(raw)).toBe(1);
+      expect(noticeRanInsideTransaction).toBe(false);
+      expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', tempGuid, expect.any(Function));
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      raw.exec('DROP TRIGGER IF EXISTS pause_automatic_retry_during_retirement');
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      mockNotifyFailedSend.mockImplementation(async () => undefined);
+      warn.mockRestore();
+    }
   });
 
   it('rolls back real SQLite writes when revocation lands mid-transaction', async () => {

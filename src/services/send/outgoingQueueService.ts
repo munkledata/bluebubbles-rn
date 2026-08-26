@@ -13,7 +13,7 @@ import {
   claimOutgoingForSendWithinTransaction,
   getAttachmentByGuid,
   listRetryableOutgoing,
-  retireOutgoing,
+  retireOutgoingWithinTransaction,
   type RetryableOutgoing,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
@@ -141,6 +141,24 @@ async function runAccountCommit(
 }
 
 /**
+ * Commit one permanent retry retirement, then present its failure notice outside SQLite. Both
+ * terminal causes use this owner so missing-file and unknown-kind settlement cannot drift.
+ */
+async function retireUnsendableOutgoing(
+  db: AppDatabase,
+  chatGuid: string,
+  tempGuid: string,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  await withDbTransaction(
+    db,
+    (context) => retireOutgoingWithinTransaction(context, tempGuid, 1),
+    commitGuard,
+  );
+  await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
+}
+
+/**
  * Re-POST a single queued send (temp row + queue row already exist) and reconcile.
  *
  * Exported because the user's "Try Again" drives exactly one attempt through it: the manual retry
@@ -230,10 +248,9 @@ export async function resendOutgoingRow(
         // succeed. Retire now instead of burning attempts; the bubble keeps its error badge
         // and the sheet's Delete still works.
         logger.warn(`[queue] attachment retry has no local file — retiring`);
-        return (await runAccountCommit(accountLease, async (guard) => {
-          await retireOutgoing(db, row.tempGuid, 1, guard);
-          await notifyFailedSend(db, row.chatGuid, row.tempGuid, guard);
-        }))
+        return (await runAccountCommit(accountLease, (guard) =>
+          retireUnsendableOutgoing(db, row.chatGuid, row.tempGuid, guard),
+        ))
           ? 'unsendable'
           : 'paused';
       }
@@ -257,10 +274,9 @@ export async function resendOutgoingRow(
       // Unknown kind: retire rather than skip, or the row is claimed-and-skipped on every
       // drain forever (the old zombie behavior attachments used to have).
       logger.warn(`[queue] unknown outgoing kind '${row.kind}' — retiring`);
-      return (await runAccountCommit(accountLease, async (guard) => {
-        await retireOutgoing(db, row.tempGuid, 1, guard);
-        await notifyFailedSend(db, row.chatGuid, row.tempGuid, guard);
-      }))
+      return (await runAccountCommit(accountLease, (guard) =>
+        retireUnsendableOutgoing(db, row.chatGuid, row.tempGuid, guard),
+      ))
         ? 'unsendable'
         : 'paused';
     }

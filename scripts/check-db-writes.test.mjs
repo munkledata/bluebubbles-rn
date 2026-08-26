@@ -1929,6 +1929,18 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:',
           ))),
   );
+  const outgoingQueueRetirementTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/outgoingQueueService.ts' &&
+      finding.symbol.startsWith('retireUnsendableOutgoing') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:',
+          ))),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -1939,8 +1951,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#loveMessage:mutator-call:19cbbee6bf1d',
       'src/services/notifications/actions.ts#replyTo:mutator-call:57759651fda6',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:181ea993ff>:mutator-call:fcca55f5e353',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:a72544944c>:mutator-call:5be93ff1a7bb',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:a72544944c>:mutator-call:5be93ff1a7bb:2',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e6daa15e91>:mutator-call:a1862003ebf3',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:481b423ba233',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:cce2ab93dad1',
@@ -1963,6 +1975,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>.<callback:ef896ff493>:mutator-call:ae9ded5a6343',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:7b452e2c0efa',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:a62d23d465c7',
+    ].sort(),
+  );
+  assert.deepEqual(
+    outgoingQueueRetirementTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:4fb0fd5796>:mutator-call:082adb25d74d',
+      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:10b9cb63a5a1',
+      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:ebe5f8857989',
     ].sort(),
   );
   assert.deepEqual(
@@ -4643,6 +4663,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'markOutgoingSentNoGuidWithinTransaction',
     'claimOutgoingForSendWithinTransaction',
     'claimFailedOutgoingForRetryWithinTransaction',
+    'retireOutgoingWithinTransaction',
     'reconcileOutgoingSuccessWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
     'setChatAppearanceWithinTransaction',
@@ -4759,6 +4780,17 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:',
           ))),
   );
+  const retireOutgoingTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/outgoing.ts' &&
+      finding.symbol.startsWith('retireOutgoing') &&
+      !finding.symbol.startsWith('retireOutgoingWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target === 'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith('src/db/repositories/outgoing.ts#retireOutgoing.<callback:'))),
+  );
   const deleteMessageLocalTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/messages.ts' &&
@@ -4804,6 +4836,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:sql-update:a0d6d4f1bcbc',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6',
+      'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450',
+      'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:4315b7c2a1>:mutator-call:8f577f345052',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction:drizzle-delete:d78d925090ff',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction.<callback:a1e7b9de6b>:mutator-call:d5204e46c499',
@@ -4827,7 +4861,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 50);
+  assert.equal(selected.length, 52);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -4896,6 +4930,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:8d83cb9fc1>:mutator-call:0be1e09bf5c4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:6218930bffa9',
       'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:d96cda348479',
+    ].sort(),
+  );
+  assert.deepEqual(
+    retireOutgoingTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/outgoing.ts#retireOutgoing.<callback:f2328120f0>:mutator-call:298962d2933f',
+      'src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:bc4e8c366140',
+      'src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:c3043ae321f5',
     ].sort(),
   );
   assert.deepEqual(

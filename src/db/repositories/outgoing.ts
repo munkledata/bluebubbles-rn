@@ -883,20 +883,13 @@ export async function reconcileOutgoingAttachmentByContent(
   );
 }
 
-/**
- * Permanently retire a queue row (no further automatic retries): attempts jumps to the cap and
- * the bubble is forced to 'error' unless it already reconciled to 'sent'. For failures no retry
- * can ever fix — the attachment's on-disk file is gone, or the row's kind is unknown. The queue
- * row is KEPT, matching the natural attempts-cap retirement (the bubble's 'error' state is what
- * makes it cancellable, and `cancelOutgoing` removes the ladder along with it either way).
- */
-export async function retireOutgoing(
-  db: AppDatabase,
+/** Permanently retire all outgoing state for one temporary GUID inside its owning transaction. */
+export function retireOutgoingWithinTransaction(
+  context: DbTransactionContext,
   tempGuid: string,
   errorCode = 1,
-  commitGuard?: DbCommitGuard,
 ): Promise<void> {
-  const write = async (): Promise<void> => {
+  return runInTransactionContext(context, async (db) => {
     await db
       .update(outgoingQueue)
       .set({ attempts: OUTGOING_MAX_ATTEMPTS })
@@ -905,12 +898,30 @@ export async function retireOutgoing(
       .update(messages)
       .set({ sendState: 'error', error: errorCode, errorMessage: null })
       .where(and(eq(messages.guid, tempGuid), ne(messages.sendState, 'sent')));
-  };
-  // The optional guard authorizes this commit; it never decides whether these two writes own the
-  // shared DB queue. Keeping both updates in one transaction prevents a capped queue row from
-  // being paired with a still-sending bubble (or both writes disappearing with a neighbour's
-  // rollback). Callers must never invoke this public helper from inside another transaction.
-  await withDbTransaction(db, write, commitGuard);
+  });
+}
+
+/**
+ * Permanently retire a queue row (no further automatic retries): attempts jumps to the cap and
+ * the bubble is forced to 'error' unless it already reconciled to 'sent'. For failures no retry
+ * can ever fix — the attachment's on-disk file is gone, or the row's kind is unknown. The queue
+ * row is KEPT, matching the natural attempts-cap retirement (the bubble's 'error' state is what
+ * makes it cancellable, and `cancelOutgoing` removes the ladder along with it either way).
+ *
+ * The optional guard authorizes this standalone commit. Services composing the write use
+ * {@link retireOutgoingWithinTransaction} inside their own short guarded owner.
+ */
+export async function retireOutgoing(
+  db: AppDatabase,
+  tempGuid: string,
+  errorCode = 1,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  await withDbTransaction(
+    db,
+    (context) => retireOutgoingWithinTransaction(context, tempGuid, errorCode),
+    commitGuard,
+  );
 }
 
 /** Max automatic retries before a queued send retires to the 'error' bubble. */
