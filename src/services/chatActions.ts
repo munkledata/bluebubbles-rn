@@ -2,6 +2,7 @@ import { chatsApi, scheduledApi } from '@core/api';
 import { logger } from '@core/secure';
 import {
   clearChatTombstoneWithinTransaction,
+  DRAFT_KV_PREFIX,
   deleteChatLocal,
   deleteReminderByNotificationIdWithinTransaction,
   deleteScheduledWithinTransaction,
@@ -12,6 +13,7 @@ import {
   listReminders,
   listScheduledByChat,
   markAllChatsReadLocalWithinTransaction,
+  kvSetWithinTransaction,
   resumeChatPurges,
   setChatAppearanceWithinTransaction,
   setChatArchiveWithinTransaction,
@@ -256,6 +258,27 @@ export function markAllChatsRead(
       async (context) => {
         assertChatActionLease(activeLease);
         await markAllChatsReadLocalWithinTransaction(context);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Persist the current body-text draft for one conversation. */
+export function saveChatDraft(
+  chatGuid: string,
+  text: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await kvSetWithinTransaction(context, `${DRAFT_KV_PREFIX}${chatGuid}`, text);
         assertChatActionLease(activeLease);
       },
       () => activeLease.isCurrent(),

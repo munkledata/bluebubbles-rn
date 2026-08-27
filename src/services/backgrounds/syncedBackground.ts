@@ -29,6 +29,8 @@ import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
+import { http } from '../clients';
+import { ensureDatabase } from '../databaseControl';
 
 /** A 4K JPEG wallpaper fits comfortably; larger/slow responses are treated as hostile/broken. */
 export const SYNCED_BACKGROUND_MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
@@ -57,6 +59,32 @@ interface PerChatWork {
   latest: SyncedBackgroundRequest;
   completedRevision: number;
   running: Promise<void>;
+}
+
+/**
+ * Mounted-chat command boundary: acquire service infrastructure without letting the screen pass a
+ * database handle or accidentally capture a newer account generation.
+ */
+export async function ensureSyncedBackgroundForChat(
+  guid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  const opened: { db?: AppDatabase } = {};
+  try {
+    const status = await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+      if (!activeLease.isCurrent()) return;
+      const db = await ensureDatabase();
+      if (!activeLease.isCurrent()) return;
+      opened.db = db;
+    });
+    const db = opened.db;
+    if (status === 'paused' || !db || !accountLease.isCurrent()) return;
+    await ensureSyncedBackground(http, db, guid, accountLease);
+  } catch (error) {
+    if (accountLease.isCurrent()) {
+      logger.warn('[background] synced-background startup failed', error);
+    }
+  }
 }
 
 let nextRevision = 0;

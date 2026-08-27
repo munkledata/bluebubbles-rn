@@ -15,22 +15,22 @@ import {
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  DRAFT_KV_PREFIX,
   getChatIdByGuid,
   getChatParticipants,
   getFirstUnreadInChat,
   isChatHiddenByDeletion,
   kvGet,
-  kvSetWithinTransaction,
   type MessagePreview,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import {
   dispatchRealtimeEvent,
   ensureChatSynced,
-  ensureSyncedBackground,
+  ensureSyncedBackgroundForChat,
   http,
   markRead,
+  saveChatDraft,
   sendTyping,
 } from '@/services';
 import { getDatabase } from '@db/database';
@@ -409,7 +409,7 @@ function ChatScreenInner({
     void backfillUnlessDeleted(guid, accountLease);
     // Fetch this chat's synced (macOS 26) background if a participant set/changed one — the
     // reactive `chats` query repaints the background once the downloaded uri is written.
-    void ensureSyncedBackground(http, getDatabase(), guid);
+    void ensureSyncedBackgroundForChat(guid, accountLease);
   }, [accountLease, guid]);
 
   // Keep the read marker current while the thread STAYS open. The effect above fires exactly once
@@ -622,7 +622,7 @@ function ChatScreenInner({
   useEffect(() => {
     let alive = true;
     void runTrackedRealtimeWork(accountLease, async () => {
-      const value = await kvGet(getDatabase(), `draft.${guid}`);
+      const value = await kvGet(getDatabase(), `${DRAFT_KV_PREFIX}${guid}`);
       if (alive && accountLease.isCurrent()) setDraft(value ?? '');
     }).catch(() => {
       if (alive && accountLease.isCurrent()) setDraft('');
@@ -643,15 +643,7 @@ function ChatScreenInner({
       // over the real kv draft. The Composer's unmount flush calls this before it unmounts, so
       // `draft` is fresh by the time it remounts.
       setDraft(text);
-      void runTrackedRealtimeWork(accountLease, async (activeLease) => {
-        const db = getDatabase();
-        const key = `draft.${guid}`;
-        await withDbTransaction(
-          db,
-          (context) => kvSetWithinTransaction(context, key, text),
-          () => activeLease.isCurrent(),
-        );
-      }).catch(() => {
+      void saveChatDraft(guid, text, accountLease).catch(() => {
         // Best-effort while this account is live — losing a draft persist is not worth surfacing.
       });
     },

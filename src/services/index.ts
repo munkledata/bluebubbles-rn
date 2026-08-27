@@ -6,7 +6,7 @@
  * Re-exporting from a leaf still evaluates it, so its module-eval side effects are preserved.
  */
 
-export { ensureSyncedBackground } from './backgrounds/syncedBackground';
+export { ensureSyncedBackgroundForChat } from './backgrounds/syncedBackground';
 export { computeBackgroundIsLight } from './backgrounds/luminance';
 
 export { vault, http, getSecretBox, runCryptoSelfTest } from './clients';
@@ -17,6 +17,7 @@ export {
   markRead,
   markUnread,
   markAllChatsRead,
+  saveChatDraft,
   setChatMuted,
   setChatArchived,
   setChatPinned,

@@ -15,9 +15,8 @@ import { setSyncMarkerWithinTransaction } from './sync';
 export const DELETIONS_WATERMARK_KV_KEY = 'sync.deletionsSyncedAt';
 
 /**
- * Prefix of the per-chat composer-draft kv keys (`draft.<chat guid>`), written by the chat screen
- * (`app/(app)/chat/[guid].tsx`). Duplicated here for the same no-cycle reason as the watermark key
- * above — that writer lives in the route layer, which `src/db` must not reach into.
+ * Prefix of the per-chat composer-draft kv keys (`draft.<chat guid>`), shared by the chat-service
+ * writer, the route's read path, and account cleanup.
  */
 export const DRAFT_KV_PREFIX = 'draft.';
 
