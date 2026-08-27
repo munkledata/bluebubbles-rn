@@ -11,6 +11,7 @@ import { Chat, Message } from '@core/models';
 import {
   getChatHeader,
   handleMapKey,
+  listChatsForInbox,
   listMessagesWithSenders,
   upsertChats,
   upsertHandles,
@@ -154,5 +155,52 @@ describe('handle (address, service) identity', () => {
     // NULLIF('') → null, so the bubble's chat-service fallback still applies.
     expect(rows[0]!.senderService).toBeNull();
     expect(rows[0]!.handleId).not.toBeNull(); // the sender resolved through the composite key
+  });
+
+  it('keeps the last valid server color across partial payloads and projects a changed color', async () => {
+    const { db, raw } = await createTestDb();
+    const colorOf = (): string | null =>
+      (
+        raw
+          .prepare('SELECT color FROM handles WHERE address = ? AND service = ?')
+          .get(ADDR, 'iMessage') as { color: string | null }
+      ).color;
+
+    await upsertHandles(db, [
+      { address: ADDR, service: 'iMessage', color: ' #abcdef ' },
+      { address: ADDR, service: 'iMessage', color: null, displayName: 'Latest payload name' },
+      { address: ADDR, service: 'iMessage', color: 'not-a-color' },
+    ]);
+    expect(colorOf()).toBe('#ABCDEF');
+
+    await upsertHandles(db, [{ address: ADDR, service: 'iMessage' }]);
+    await upsertHandles(db, [{ address: ADDR, service: 'iMessage', color: null }]);
+    await upsertHandles(db, [{ address: ADDR, service: 'iMessage', color: 'not-a-color' }]);
+    expect(colorOf()).toBe('#ABCDEF');
+
+    const handles = await upsertHandles(db, [
+      { address: ADDR, service: 'iMessage', color: '#123456' },
+    ]);
+    expect(colorOf()).toBe('#123456');
+
+    const guid = `iMessage;-;${ADDR}`;
+    const chatMap = await upsertChats(db, [chatWith(guid, 'iMessage')], handles);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'colored-message',
+          text: 'hello',
+          dateCreated: 1000,
+          handle: { address: ADDR, service: 'iMessage' },
+        }),
+      ],
+      () => chatMap.get(guid)!,
+      handles,
+    );
+
+    expect((await getChatHeader(db, guid))?.participantColors).toBe('#123456');
+    expect((await listChatsForInbox(db))[0]?.participantColors).toBe('#123456');
+    expect((await listMessagesWithSenders(db, chatMap.get(guid)!))[0]?.senderColor).toBe('#123456');
   });
 });

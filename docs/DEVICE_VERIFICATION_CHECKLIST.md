@@ -761,6 +761,11 @@ outside this candidate's supported product, not as proof for `ANDROID-02` or `AN
       auto-fix, and requires a separate confirmation before an unresolved theme can be saved.
       Legacy light-theme continuity needs an approved natural Play-update baseline and otherwise
       remains `BLOCKED/OPEN`.
+- [ ] **`STAGED-SERVER` + future exact candidate / `HANDLE-COLOR-01`:** Provide valid pale and dark
+      six-digit colors for distinct direct/group handles, then observe a partial omitted/null
+      refresh and a later changed valid color. Direct and group avatars plus received bubbles must
+      retain/update the intended color without unreadable initials, body text, or mentions. This
+      post-v56 code is not evidence for frozen version code 56.
 - [ ] **`STATIC/HOST`:** Record the known `A11Y-01` gaps: visual `TextField` labels are not associated
       with inputs, the manual HTTP switch lacks a programmatic label, and message bubbles expose no
       TalkBack accessibility action for their long-press menu. These are findings, not candidate

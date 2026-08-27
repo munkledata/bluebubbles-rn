@@ -3,10 +3,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { InboxRow } from '@db/repositories';
 import {
   avatarSeed,
-  dedupeParticipants,
+  dedupeParticipantDetails,
   isGroupRow,
   participantAvatars,
+  participantColors,
   participantList,
+  primaryParticipantColor,
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar } from '../primitives';
@@ -31,9 +33,11 @@ export function PinnedGrid({
       {rows.map((row, index) => {
         const title = resolveTitle(row);
         const unread = row.unreadCount > 0;
-        const parts = dedupeParticipants(
+        const colors = participantColors(row.participantColors);
+        const parts = dedupeParticipantDetails(
           participantList(row.participantNames),
           participantAvatars(row.participantAvatars),
+          colors,
         );
         return (
           <Pressable
@@ -49,11 +53,17 @@ export function PinnedGrid({
           >
             <View style={styles.avatarWrap}>
               {isGroupRow(row) ? (
-                <GroupAvatar names={parts.names} uris={parts.uris} size={64} />
+                <GroupAvatar
+                  names={parts.names}
+                  uris={parts.uris}
+                  colors={parts.colors}
+                  size={64}
+                />
               ) : (
                 <Avatar
                   name={avatarSeed(row)}
                   uri={participantAvatars(row.participantAvatars)[0]}
+                  color={primaryParticipantColor(row.participantColors)}
                   size={64}
                 />
               )}

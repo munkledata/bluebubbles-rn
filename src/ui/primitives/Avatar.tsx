@@ -1,5 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { normalizeHandleColor } from '@core/models';
+import { readableTextOn } from '../theme/adaptiveFromImage';
 
 interface AvatarProps {
   /** Display name or handle address used for initials + deterministic color. */
@@ -56,7 +58,7 @@ export const Avatar = React.memo(function Avatar({
       />
     );
   }
-  const backgroundColor = color ?? colorFor(name);
+  const backgroundColor = normalizeHandleColor(color) ?? colorFor(name);
   return (
     <View
       accessible={false}
@@ -65,12 +67,14 @@ export const Avatar = React.memo(function Avatar({
         { width: size, height: size, borderRadius: size / 2, backgroundColor },
       ]}
     >
-      <Text style={[styles.text, { fontSize: size * 0.4 }]}>{initials(name)}</Text>
+      <Text style={[styles.text, { color: readableTextOn(backgroundColor), fontSize: size * 0.4 }]}>
+        {initials(name)}
+      </Text>
     </View>
   );
 });
 
 const styles = StyleSheet.create({
   circle: { alignItems: 'center', justifyContent: 'center' },
-  text: { color: '#FFFFFF', fontWeight: '600' },
+  text: { fontWeight: '600' },
 });

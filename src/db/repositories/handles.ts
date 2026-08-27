@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import type { Handle } from '@core/models';
+import { normalizeHandleColor, type Handle } from '@core/models';
 import { handles } from '../schema';
 import {
   runInTransactionContext,
@@ -7,7 +7,6 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
-import { dedupeBy } from './_shared';
 import { linkHandlesToContacts } from './contacts';
 
 /**
@@ -55,10 +54,20 @@ export function handleMapKey(h: { address: string; service?: string | null }): s
 }
 
 function prepareHandles(items: Handle[]): Handle[] {
-  return dedupeBy(
-    items.filter((h) => !!h?.address),
-    handleMapKey,
-  );
+  const byIdentity = new Map<string, Handle>();
+  for (const handle of items) {
+    if (!handle?.address) continue;
+    const key = handleMapKey(handle);
+    const previous = byIdentity.get(key);
+    // Keep existing last-item semantics for the handle's ordinary fields, but merge its color as
+    // last-known-valid data. Server pages can repeat one identity; a later partial duplicate must
+    // not discard valid color information before the SQL conflict clause gets a chance to run.
+    byIdentity.set(key, {
+      ...handle,
+      color: normalizeHandleColor(handle.color) ?? normalizeHandleColor(previous?.color),
+    });
+  }
+  return [...byIdentity.values()];
 }
 
 /**
@@ -88,7 +97,10 @@ export function upsertHandlesWithinTransaction(
           // indexes, so a NULL service would dodge the (address, service) conflict target.
           service: h.service ?? '',
           country: h.country ?? null,
-          color: h.color ?? null,
+          // Server-owned, last-known-valid presentation hint. A missing/null/invalid value means
+          // this payload has no usable color information; the conflict clause preserves any value
+          // learned by an earlier complete payload.
+          color: normalizeHandleColor(h.color),
           displayName: h.displayName ?? null,
           serverDisplayName: h.displayName ?? null,
         })),
@@ -104,7 +116,8 @@ export function upsertHandlesWithinTransaction(
           // the device contact is later removed.
           serverDisplayName: sql`excluded.display_name`,
           // service is part of the row's IDENTITY now — never overwritten on conflict.
-          color: sql`excluded.color`,
+          color: sql`CASE WHEN excluded.color IS NULL
+                           THEN ${handles.color} ELSE excluded.color END`,
         },
       })
       .returning({ id: handles.id, address: handles.address, service: handles.service });

@@ -545,6 +545,20 @@ describe('MessageBubble text rendering', () => {
     expect(screen.getByText('Hello there')).toBeTruthy();
   });
 
+  it('uses a readable foreground on the received sender handle color', async () => {
+    const background = '#FFFF00';
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: 'Colored sender', senderColor: background })} showTail />,
+    );
+
+    const text = screen.getByText('Colored sender');
+    expect(StyleSheet.flatten(text.parent!.props.style).backgroundColor).toBe(background);
+    expect(StyleSheet.flatten(text.props.style).color).toBe(readableTextOn(background));
+    expect(
+      contrastRatio(StyleSheet.flatten(text.props.style).color, background),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('renders a received @mention in a readable accent color and semibold', async () => {
     // "Hi @Alice!" → runs: "Hi " (gap), "@Alice" (mention), "!" (trailing)
     const body = mentionBody('Hi @Alice!', 3, 6);

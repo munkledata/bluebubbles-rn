@@ -17,6 +17,7 @@ import {
   errorTitleForCode,
   firstUrl,
   isBigEmoji,
+  isHexColor,
   resolveBubbleColor,
   safeOpenUrl,
   type BubbleRect,
@@ -110,7 +111,8 @@ export const MessageBubble = React.memo(function MessageBubble({
   // assumption is false there), and that handle's service loads/updates asynchronously from the
   // reactive query, so letting it win the `??` paints a transient green then flips to blue once the
   // re-sync settles. `chatService` is the stable, authoritative source for own bubbles. Received
-  // bubbles are gray regardless of service, so their `senderService` never affects colour.
+  // bubbles use their validated per-handle color when one exists, so `senderService` does not
+  // choose their background.
   const effectiveService = isFromMe
     ? (chatService ?? null)
     : (msg.senderService ?? chatService ?? null);
@@ -252,19 +254,20 @@ export const MessageBubble = React.memo(function MessageBubble({
   }
 
   // RCS gets its own teal (mirrors the SMS-green branch); `?? b.smsBackground` guards a custom
-  // theme persisted before the rcsBackground token existed. Both directions now colour: the
-  // received side reads the joined handle's service, the sent side reads the chat's service
-  // (threaded via `chatService`), so from-me SMS/RCS bubbles are green/teal, not iMessage blue.
+  // theme persisted before the rcsBackground token existed. Received rows use their last-known
+  // valid handle color, independent of service; from-me SMS/RCS rows use the chat service.
   const nonImessageBg = isRcs ? (b.rcsBackground ?? b.smsBackground) : b.smsBackground;
+  const receivedHandleColor = !isFromMe && isHexColor(msg.senderColor) ? msg.senderColor : null;
   const backgroundColor = isFromMe
     ? isSms || isRcs
       ? nonImessageBg
       : resolveBubbleColor(accentColor, b.senderBackground)
-    : b.receivedBackgroundBottom;
+    : (receivedHandleColor ?? b.receivedBackgroundBottom);
   // Own bubbles can use the theme sender colour, a per-chat accent, SMS green, or RCS teal.
   // Choose text from the background we actually rendered instead of reusing senderText, which
   // only describes the normal iMessage bubble and becomes unreadable on the brighter variants.
-  const textColor = isFromMe ? readableTextOn(backgroundColor) : b.receivedText;
+  const textColor =
+    isFromMe || receivedHandleColor ? readableTextOn(backgroundColor) : b.receivedText;
   // A sent mention must use the same readable foreground as the rest of the sent text. Received
   // mentions keep the accent when it clears AA, otherwise they fall back to readable body text.
   const mentionColor = isFromMe

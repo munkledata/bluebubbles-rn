@@ -46,15 +46,16 @@ describe('Avatar rendering', () => {
     expect(screen.queryByText('AB')).toBeNull();
   });
 
-  it('honors an explicit color and remains decorative', async () => {
-    await renderWithTheme(<Avatar name="Alice Bob" color="#123456" size={50} />);
+  it('honors an explicit color, chooses readable initials, and remains decorative', async () => {
+    await renderWithTheme(<Avatar name="Alice Bob" color="#FFFF00" size={50} />);
     const tile = screen.getByText('AB').parent!;
     expect(tile.props.accessible).toBe(false);
     expect(StyleSheet.flatten(tile.props.style)).toMatchObject({
       width: 50,
       height: 50,
       borderRadius: 25,
-      backgroundColor: '#123456',
+      backgroundColor: '#FFFF00',
     });
+    expect(StyleSheet.flatten(screen.getByText('AB').props.style).color).toBe('#111111');
   });
 });

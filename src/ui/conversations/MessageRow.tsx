@@ -203,6 +203,7 @@ export const MessageRow = React.memo(function MessageRow({
                   <Avatar
                     name={msg.senderName ?? msg.senderAddress ?? '?'}
                     uri={msg.senderAvatar}
+                    color={msg.senderColor ?? undefined}
                     size={26}
                   />
                 ) : null}

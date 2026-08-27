@@ -564,6 +564,8 @@ export interface MessageRow {
   senderAddress: string | null;
   senderName: string | null;
   senderAvatar: string | null;
+  /** Last known valid server-supplied handle color. */
+  senderColor?: string | null;
   senderService: string | null;
   // Group/chat-event fields (utils/groupEvent.ts). Optional so hand-built test literals need not
   // set them; the SELECT below always provides them at runtime. `otherHandleName` is resolved from
@@ -613,6 +615,7 @@ const MESSAGE_ROW_SELECT = sql`
     h.address AS senderAddress,
     COALESCE(h.display_name, h.address) AS senderName,
     h.avatar AS senderAvatar,
+    h.color AS senderColor,
     NULLIF(h.service, '') AS senderService
   FROM messages m
   LEFT JOIN handles h ON h.id = m.handle_id`;

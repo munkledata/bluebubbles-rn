@@ -1,12 +1,15 @@
 import {
   avatarSeed,
   chatServiceFromGuid,
+  dedupeParticipantDetails,
   dedupeParticipants,
   isGroupRow,
   isHexColor,
   isRcsChatGuid,
   participantAvatars,
+  participantColors,
   participantList,
+  primaryParticipantColor,
   resolveBubbleColor,
   resolveChatService,
   resolveTitle,
@@ -163,7 +166,7 @@ describe('avatarSeed', () => {
   });
 });
 
-describe('participantList / participantAvatars', () => {
+describe('participantList / participantAvatars / participantColors', () => {
   it('splits, trims, and drops empty names', () => {
     expect(participantList(' Alice ,Bob,, ')).toEqual(['Alice', 'Bob']);
     expect(participantList(null)).toEqual([]);
@@ -172,6 +175,12 @@ describe('participantList / participantAvatars', () => {
   it('splits pipe-delimited avatar uris, mapping empties to null', () => {
     expect(participantAvatars('file:///a.png|||')).toEqual(['file:///a.png', null]);
     expect(participantAvatars(null)).toEqual([]);
+  });
+
+  it('keeps valid aligned colors and drops malformed values', () => {
+    expect(participantColors('#112233|||bad|||#AABBCC')).toEqual(['#112233', null, '#AABBCC']);
+    expect(participantColors(null)).toEqual([]);
+    expect(primaryParticipantColor('|||#AABBCC')).toBe('#AABBCC');
   });
 });
 
@@ -210,5 +219,18 @@ describe('dedupeParticipants', () => {
     const { names, uris } = dedupeParticipants(['Alice', 'Alice'], ['file:///a.png']);
     expect(names).toEqual(['Alice', 'Alice']);
     expect(uris).toEqual(['file:///a.png', null]);
+  });
+
+  it('retains the color aligned with each participant that survives deduplication', () => {
+    const parts = dedupeParticipantDetails(
+      ['Alice', 'Alice', 'Bob'],
+      ['file:///alice.png', 'file:///alice.png', null],
+      [null, '#222222', '#333333'],
+    );
+    expect(parts).toEqual({
+      names: ['Alice', 'Bob'],
+      uris: ['file:///alice.png', null],
+      colors: ['#222222', '#333333'],
+    });
   });
 });

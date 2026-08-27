@@ -7,12 +7,14 @@ import { useFaceTime } from '@features/facetime/useFaceTime';
 import {
   addressMatchesTitle,
   avatarSeed,
-  dedupeParticipants,
+  dedupeParticipantDetails,
   formatHandleAddress,
   isGroupRow,
   participantAvatars,
+  participantColors,
   participantList,
   primaryChatAddress,
+  primaryParticipantColor,
   resolveChatService,
   resolveTitle,
 } from '@utils';
@@ -52,11 +54,12 @@ export function ConversationHeader({
           ? { label: 'iMessage', color: theme.color.bubble.senderBackground }
           : null;
   const parts = data
-    ? dedupeParticipants(
+    ? dedupeParticipantDetails(
         participantList(data.participantNames),
         participantAvatars(data.participantAvatars),
+        participantColors(data.participantColors),
       )
-    : { names: [] as string[], uris: [] as (string | null)[] };
+    : { names: [] as string[], uris: [] as (string | null)[], colors: [] as (string | null)[] };
 
   /**
    * The contact's phone number / email, shown under their name — the app's only place to see it.
@@ -107,12 +110,13 @@ export function ConversationHeader({
         {data ? (
           <View style={translucent ? [styles.avatarBubble, { backgroundColor: chip }] : null}>
             {group ? (
-              <GroupAvatar names={parts.names} uris={parts.uris} size={30} />
+              <GroupAvatar names={parts.names} uris={parts.uris} colors={parts.colors} size={30} />
             ) : (
               <Avatar
                 name={avatarSeed(data)}
                 size={30}
                 uri={participantAvatars(data.participantAvatars)[0]}
+                color={primaryParticipantColor(data.participantColors)}
               />
             )}
           </View>

@@ -1080,6 +1080,8 @@ export interface InboxRow {
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
+  /** `|||`-joined handle colors, positionally aligned with participant names/avatars. */
+  participantColors?: string | null;
   /** Comma-joined participant handle services ('iMessage'/'SMS'), for `resolveChatService`. */
   handleServices: string | null;
   unreadCount: number;
@@ -1126,6 +1128,9 @@ export async function listChatsForInbox(
       (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS participantAvatars,
+      (SELECT group_concat(COALESCE(h.color, ''), '|||' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS participantColors,
       (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS handleServices,
@@ -1212,6 +1217,8 @@ export interface ChatHeaderRow {
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
+  /** `|||`-joined handle colors, positionally aligned with participant names/avatars. */
+  participantColors?: string | null;
   /**
    * `|||`-joined participant handle ADDRESSES (the raw phone/email), positionally aligned with
    * `participantNames`/`participantAvatars`. Distinct from the names, which are
@@ -1263,6 +1270,9 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
       (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS participantAvatars,
+      (SELECT group_concat(COALESCE(h.color, ''), '|||' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS participantColors,
       (SELECT group_concat(COALESCE(h.address, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS participantAddresses,

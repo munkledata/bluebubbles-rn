@@ -17,11 +17,13 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
   avatarSeed,
   buildPreview,
-  dedupeParticipants,
+  dedupeParticipantDetails,
   formatChatDate,
   isGroupRow,
   participantAvatars,
+  participantColors,
   participantList,
+  primaryParticipantColor,
   resolveChatService,
   resolveTitle,
 } from '@utils';
@@ -68,9 +70,11 @@ export const ConversationTile = React.memo(function ConversationTile({
         : service === 'iMessage'
           ? { label: 'iMessage', color: theme.color.bubble.senderBackground }
           : null;
-  const groupParts = dedupeParticipants(
+  const colors = participantColors(row.participantColors);
+  const groupParts = dedupeParticipantDetails(
     participantList(row.participantNames),
     participantAvatars(row.participantAvatars),
+    colors,
   );
 
   const confirmDelete = (): void => {
@@ -165,9 +169,17 @@ export const ConversationTile = React.memo(function ConversationTile({
               always the spacer (keeps avatars aligned across read/unread rows). */}
           <View style={styles.dotSpacer} />
           {group ? (
-            <GroupAvatar names={groupParts.names} uris={groupParts.uris} />
+            <GroupAvatar
+              names={groupParts.names}
+              uris={groupParts.uris}
+              colors={groupParts.colors}
+            />
           ) : (
-            <Avatar name={avatarSeed(row)} uri={participantAvatars(row.participantAvatars)[0]} />
+            <Avatar
+              name={avatarSeed(row)}
+              uri={participantAvatars(row.participantAvatars)[0]}
+              color={primaryParticipantColor(row.participantColors)}
+            />
           )}
         </View>
 

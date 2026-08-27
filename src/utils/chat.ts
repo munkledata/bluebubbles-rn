@@ -147,6 +147,23 @@ export function participantAvatars(s: string | null): (string | null)[] {
   return s.split('|||').map((u) => (u && u.length > 0 ? u : null));
 }
 
+/** Pipe-delimited handle colors from a query, positionally aligned with participant names. */
+export function participantColors(s: string | null | undefined): (string | null)[] {
+  if (!s) return [];
+  return s.split('|||').map((color) => (isHexColor(color) ? color : null));
+}
+
+/** First usable color for a single-person avatar whose chat may carry multiple handle variants. */
+export function primaryParticipantColor(s: string | null | undefined): string | undefined {
+  return participantColors(s).find((color): color is string => color != null);
+}
+
+export interface ParticipantDetails {
+  names: string[];
+  uris: (string | null)[];
+  colors: (string | null)[];
+}
+
 /**
  * Collapse duplicate participants in the two positionally-aligned name/uri arrays (from the
  * inbox `group_concat`s). A group member reachable via multiple handles (phone + email, two
@@ -164,19 +181,39 @@ export function dedupeParticipants(
   names: string[],
   uris: (string | null)[],
 ): { names: string[]; uris: (string | null)[] } {
-  const seen = new Set<string>();
-  const seenUris = new Set<string>();
+  const { names: dedupedNames, uris: dedupedUris } = dedupeParticipantDetails(names, uris, []);
+  return { names: dedupedNames, uris: dedupedUris };
+}
+
+/** Collapse participant rows while retaining aligned avatar colors for the surviving handles. */
+export function dedupeParticipantDetails(
+  names: string[],
+  uris: (string | null)[],
+  colors: (string | null)[],
+): ParticipantDetails {
+  const seen = new Map<string, number>();
+  const seenUris = new Map<string, number>();
   const outNames: string[] = [];
   const outUris: (string | null)[] = [];
+  const outColors: (string | null)[] = [];
   names.forEach((name, i) => {
     const uri = uris[i] ?? null;
-    if (uri != null && seenUris.has(uri)) return; // same person, different handle labels
     const key = JSON.stringify([name, uri]); // collision-proof + printable (keeps the file text)
-    if (seen.has(key)) return;
-    seen.add(key);
-    if (uri != null) seenUris.add(uri);
+    const existingIndex = uri != null ? (seenUris.get(uri) ?? seen.get(key)) : seen.get(key);
+    if (existingIndex != null) {
+      // Duplicate handle for the same person: keep the first identity/photo ordering, but do not
+      // lose a valid color merely because the earlier service variant omitted it.
+      if (outColors[existingIndex] == null && colors[i] != null) {
+        outColors[existingIndex] = colors[i]!;
+      }
+      return;
+    }
+    const nextIndex = outNames.length;
+    seen.set(key, nextIndex);
+    if (uri != null) seenUris.set(uri, nextIndex);
     outNames.push(name);
     outUris.push(uri);
+    outColors.push(colors[i] ?? null);
   });
-  return { names: outNames, uris: outUris };
+  return { names: outNames, uris: outUris, colors: outColors };
 }

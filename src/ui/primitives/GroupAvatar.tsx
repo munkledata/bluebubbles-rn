@@ -8,10 +8,17 @@ interface GroupAvatarProps {
   size?: number;
   /** Contact photo uris positionally aligned with `names` (null = none). */
   uris?: (string | null)[];
+  /** Last-known handle colors positionally aligned with `names` (null = generated fallback). */
+  colors?: (string | null)[];
 }
 
 /** Two overlapped avatars for group chats (back top-left, front bottom-right). */
-export function GroupAvatar({ names, size = 40, uris }: GroupAvatarProps): React.JSX.Element {
+export function GroupAvatar({
+  names,
+  size = 40,
+  uris,
+  colors,
+}: GroupAvatarProps): React.JSX.Element {
   const theme = useTheme();
   const inner = Math.round(size * 0.66);
   const back = names[0] ?? '?';
@@ -20,7 +27,7 @@ export function GroupAvatar({ names, size = 40, uris }: GroupAvatarProps): React
   return (
     <View style={{ width: size, height: size }}>
       <View style={styles.back}>
-        <Avatar name={back} size={inner} uri={uris?.[0]} />
+        <Avatar name={back} size={inner} uri={uris?.[0]} color={colors?.[0] ?? undefined} />
       </View>
       <View
         style={[
@@ -28,7 +35,12 @@ export function GroupAvatar({ names, size = 40, uris }: GroupAvatarProps): React
           { borderColor: theme.color.background, borderRadius: (inner + 4) / 2 },
         ]}
       >
-        <Avatar name={front} size={inner} uri={uris?.[1] ?? uris?.[0]} />
+        <Avatar
+          name={front}
+          size={inner}
+          uri={uris?.[1] ?? uris?.[0]}
+          color={colors?.[1] ?? colors?.[0] ?? undefined}
+        />
       </View>
     </View>
   );
