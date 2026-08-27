@@ -104,7 +104,7 @@ const cleanupIssue = {
   code: 'persistent-log-init-failed',
 } as const;
 
-describe('LogsScreen error-only sharing', () => {
+describe('LogsScreen diagnostic sharing', () => {
   let entriesSpy: jest.SpyInstance<LogEntry[], []>;
   let shareSpy: jest.SpyInstance;
 
@@ -129,25 +129,25 @@ describe('LogsScreen error-only sharing', () => {
     shareSpy.mockRestore();
   });
 
-  it('labels and disables the action when the full snapshot has no shareable errors', async () => {
+  it('labels and disables the action when the snapshot has no shareable diagnostics', async () => {
     entriesSpy.mockReturnValue([infoEntry]);
 
     await renderWithTheme(<LogsScreen />);
 
-    const action = screen.getByRole('button', { name: 'Share errors' });
+    const action = screen.getByRole('button', { name: 'Share diagnostics' });
     expect(action.props.accessibilityState).toEqual({ disabled: true, busy: false });
     await fireEvent.press(action);
     expect(shareSpy).not.toHaveBeenCalled();
   });
 
-  it('shares errors from the full snapshot even when the active filter hides them', async () => {
+  it('shares diagnostics from the full snapshot even when the active filter hides them', async () => {
     entriesSpy.mockReturnValue([infoEntry, errorEntry]);
     await renderWithTheme(<LogsScreen />);
 
     await fireEvent.press(screen.getByRole('button', { name: 'INFO' }));
     await waitFor(() => expect(screen.queryByText('[socket] connection failed')).toBeNull());
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Share errors' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Share diagnostics' }));
 
     expect(shareSpy).toHaveBeenCalledTimes(1);
     const [{ message }] = shareSpy.mock.calls[0] as [{ message: string }];
@@ -162,7 +162,7 @@ describe('LogsScreen error-only sharing', () => {
     shareSpy.mockRejectedValue(new Error('private Android share failure'));
     await renderWithTheme(<LogsScreen />);
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Share errors' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Share diagnostics' }));
 
     await waitFor(() =>
       expect(mockShowDialog).toHaveBeenCalledWith(
@@ -311,7 +311,9 @@ describe('LogsScreen error-only sharing', () => {
         busy: true,
       }),
     );
-    expect(screen.getByRole('button', { name: 'Share errors' }).props.accessibilityState).toEqual({
+    expect(
+      screen.getByRole('button', { name: 'Share diagnostics' }).props.accessibilityState,
+    ).toEqual({
       disabled: true,
       busy: false,
     });
@@ -332,18 +334,18 @@ describe('LogsScreen error-only sharing', () => {
     shareSpy.mockReturnValue(pending.promise);
     await renderWithTheme(<LogsScreen />);
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Share errors' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Share diagnostics' }));
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Share errors' }).props.accessibilityState).toEqual(
-        { disabled: true, busy: true },
-      ),
+      expect(
+        screen.getByRole('button', { name: 'Share diagnostics' }).props.accessibilityState,
+      ).toEqual({ disabled: true, busy: true }),
     );
     expect(screen.getByRole('button', { name: 'Clear' }).props.accessibilityState).toEqual({
       disabled: true,
       busy: false,
     });
-    await fireEvent.press(screen.getByRole('button', { name: 'Share errors' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Share diagnostics' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Clear' }));
     expect(shareSpy).toHaveBeenCalledTimes(1);
     expect(mockClearLogs).not.toHaveBeenCalled();
@@ -353,9 +355,9 @@ describe('LogsScreen error-only sharing', () => {
       await pending.promise;
     });
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Share errors' }).props.accessibilityState).toEqual(
-        { disabled: false, busy: false },
-      ),
+      expect(
+        screen.getByRole('button', { name: 'Share diagnostics' }).props.accessibilityState,
+      ).toEqual({ disabled: false, busy: false }),
     );
   });
 

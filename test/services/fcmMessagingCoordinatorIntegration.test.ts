@@ -22,7 +22,13 @@ jest.mock('@react-native-firebase/messaging', () => ({
 jest.mock('react-native', () => ({ Platform: { Version: 35 } }));
 jest.mock('@core/api', () => ({ fcmApi: { registerDevice: jest.fn(async () => undefined) } }));
 jest.mock('@core/secure', () => ({
-  logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  logger: {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    event: jest.fn(),
+    error: jest.fn(),
+  },
 }));
 jest.mock('@state/lockStore', () => ({ useLockStore: { getState: () => ({}) } }));
 jest.mock('@state/sessionStore', () => ({ useSessionStore: { getState: () => ({}) } }));

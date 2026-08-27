@@ -6,7 +6,7 @@ import { memoryLogSink, projectErrorReportTimestamp, type LogEntry } from '@core
 import { useForegroundBootState } from '@features/boot/useForegroundBootState';
 import { resolvePersistentLogCleanupIssue } from '@/services/boot/foregroundBoot';
 import { fileLogSink } from '@/services/logging/fileLogSink';
-import { formatErrorLogsForShare } from '@/services/logging/shareLogs';
+import { formatDiagnosticLogsForShare } from '@/services/logging/shareLogs';
 import { formatTime } from '@utils';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { showDialog } from '@ui/dialog/dialogStore';
@@ -28,8 +28,9 @@ export function formatLogEntryTime(timestamp: number): string {
 
 /**
  * In-app log viewer over the logger's memory buffer (Settings → App Logs): level filter chips,
- * error-only Share (attach to a bug report), and Clear. ERROR rows are strictly projected;
- * non-error rows exist only in development and never cross the share boundary.
+ * finite diagnostic Share (attach to a bug report), and Clear. ERROR and selected INFO event rows
+ * are strictly projected; arbitrary non-error rows exist only in development and never cross the
+ * share boundary.
  */
 export default function LogsScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -43,7 +44,7 @@ export default function LogsScreen(): React.JSX.Element {
   const refresh = useCallback(() => setEntries(memoryLogSink.entries()), []);
 
   const visible = filterLogEntries(entries, filter);
-  const shareableErrors = useMemo(() => formatErrorLogsForShare(entries), [entries]);
+  const shareableDiagnostics = useMemo(() => formatDiagnosticLogsForShare(entries), [entries]);
   const persistentCleanupIssue = bootState.issues.some(
     (issue) => issue.stage === 'persistent-logs' && issue.code === 'persistent-log-init-failed',
   );
@@ -58,9 +59,9 @@ export default function LogsScreen(): React.JSX.Element {
         : theme.color.secondaryLabel;
 
   const onShare = (): void => {
-    if (!shareableErrors || isClearing || isSharing) return;
+    if (!shareableDiagnostics || isClearing || isSharing) return;
     setIsSharing(true);
-    void Share.share({ message: shareableErrors })
+    void Share.share({ message: shareableDiagnostics })
       .catch(() => {
         showDialog('App Logs', 'Gator could not open the share sheet. Please try again.');
       })
@@ -162,11 +163,11 @@ export default function LogsScreen(): React.JSX.Element {
           <Pressable
             style={styles.actionButton}
             onPress={onShare}
-            disabled={!shareableErrors || isClearing || isSharing}
+            disabled={!shareableDiagnostics || isClearing || isSharing}
             hitSlop={8}
             accessibilityRole="button"
             accessibilityState={{
-              disabled: !shareableErrors || isClearing || isSharing,
+              disabled: !shareableDiagnostics || isClearing || isSharing,
               busy: isSharing,
             }}
           >
@@ -175,13 +176,13 @@ export default function LogsScreen(): React.JSX.Element {
                 styles.controlAction,
                 {
                   color:
-                    shareableErrors && !isClearing && !isSharing
+                    shareableDiagnostics && !isClearing && !isSharing
                       ? theme.color.tint
                       : theme.color.tertiaryLabel,
                 },
               ]}
             >
-              Share errors
+              Share diagnostics
             </Text>
           </Pressable>
           <Pressable

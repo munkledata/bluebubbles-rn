@@ -1,56 +1,64 @@
 import {
   projectErrorReportTimestamp,
+  projectStoredDiagnosticEvent,
   projectStoredErrorReport,
   type LogEntry,
+  type PrivacySafeDiagnosticEventReport,
   type PrivacySafeErrorReport,
 } from '@core/secure';
 
-interface ShareableErrorLog {
+interface ShareableDiagnosticLog {
   timestamp: number | null;
   orderTimestamp: number;
   originalIndex: number;
-  report: PrivacySafeErrorReport;
+  report: PrivacySafeErrorReport | PrivacySafeDiagnosticEventReport;
 }
 
 /**
  * Build newline-delimited JSON for the App Logs share sheet.
  *
- * Only ERROR rows cross this export boundary. Every retained row is rebuilt through the same
- * strict projector used by the durable error-report queue, so a legacy row cannot smuggle its
- * original message, stack, tag, or metadata into the shared text.
+ * Only strict ERROR rows and explicitly projected finite INFO events cross this boundary. Every
+ * retained row is rebuilt immediately before sharing, so a legacy row cannot smuggle its original
+ * message, stack, tag, or metadata into the shared text.
  */
-export function formatErrorLogsForShare(entries: LogEntry[]): string {
-  const errors: ShareableErrorLog[] = [];
+export function formatDiagnosticLogsForShare(entries: LogEntry[]): string {
+  const diagnostics: ShareableDiagnosticLog[] = [];
 
   entries.forEach((entry, originalIndex) => {
-    if (entry.level !== 'error') return;
+    const report =
+      entry.level === 'error'
+        ? projectStoredErrorReport({
+            level: entry.level,
+            message: entry.message,
+            meta: entry.meta,
+          })
+        : entry.level === 'info'
+          ? projectStoredDiagnosticEvent({ message: entry.message, meta: entry.meta })
+          : undefined;
+    if (report === undefined) return;
 
     const projectedTimestamp = projectErrorReportTimestamp(entry.timestamp);
     const timestamp = projectedTimestamp === 0 ? null : projectedTimestamp;
-    errors.push({
+    diagnostics.push({
       timestamp,
       orderTimestamp: timestamp === null ? Number.POSITIVE_INFINITY : entry.timestamp,
       originalIndex,
-      report: projectStoredErrorReport({
-        level: entry.level,
-        message: entry.message,
-        meta: entry.meta,
-      }),
+      report,
     });
   });
 
-  errors.sort(
+  diagnostics.sort(
     (left, right) =>
       left.orderTimestamp - right.orderTimestamp || right.originalIndex - left.originalIndex,
   );
 
-  return errors
+  return diagnostics
     .map(({ timestamp, report }) =>
       JSON.stringify({
         timestamp: timestamp === null ? null : new Date(timestamp).toISOString(),
         level: report.level,
         message: report.message,
-        ...(report.stack === undefined ? {} : { stack: report.stack }),
+        ...(!('stack' in report) || report.stack === undefined ? {} : { stack: report.stack }),
         tag: report.tag,
         meta: JSON.parse(report.meta) as Record<string, unknown>,
       }),

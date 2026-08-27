@@ -2,10 +2,16 @@
  * Log redaction.
  *
  * The Flutter app logged FCM tokens and could leak the `?guid=` auth token via
- * logged URLs. ERROR lines are rebuilt from a finite structured allowlist before any sink. Other
- * levels pass through {@link redact} only in development and are dropped before release sinks.
+ * logged URLs. ERROR lines and selected event calls are rebuilt from finite structured allowlists
+ * before any sink. Free-form levels pass through {@link redact} only in development and are
+ * dropped before release sinks.
  */
-import { projectCapturedErrorDiagnostic } from './errorDiagnostic';
+import {
+  projectCapturedDiagnosticEvent,
+  projectCapturedErrorDiagnostic,
+  type DiagnosticEventCode,
+  type DiagnosticEventInputByCode,
+} from './errorDiagnostic';
 
 const PLACEHOLDER = '[redacted]';
 
@@ -205,7 +211,7 @@ export function isVerboseLocalLoggingEnabled(): boolean {
   return typeof __DEV__ !== 'undefined' && __DEV__;
 }
 
-/** Projects ERROR diagnostics and keeps legacy levels development-only before any sink. */
+/** Projects finite diagnostics and keeps legacy free-form levels development-only. */
 export class RedactingLogger {
   constructor(private readonly sink: LogSink) {}
 
@@ -233,6 +239,17 @@ export class RedactingLogger {
   debug = (m: string, meta?: unknown) => this.log('debug', m, meta);
   info = (m: string, meta?: unknown) => this.log('info', m, meta);
   warn = (m: string, meta?: unknown) => this.log('warn', m, meta);
+  event = <Code extends DiagnosticEventCode>(
+    code: Code,
+    meta: DiagnosticEventInputByCode[Code],
+  ): void => {
+    try {
+      const event = projectCapturedDiagnosticEvent(code, meta);
+      if (event !== undefined) this.sink.write('info', event.message, event.meta);
+    } catch {
+      // Logging is best-effort and must never become the app failure.
+    }
+  };
   error = (m: string, meta?: unknown) => {
     try {
       const diagnostic = projectCapturedErrorDiagnostic(m, meta);

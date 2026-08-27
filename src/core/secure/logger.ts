@@ -5,8 +5,10 @@ import {
   type LogSink,
 } from './redact';
 import {
+  projectCapturedDiagnosticEvent,
   projectCapturedErrorDiagnostic,
   projectErrorReportTimestamp,
+  projectStoredDiagnosticEvent,
   projectStoredErrorReport,
 } from './errorDiagnostic';
 
@@ -22,6 +24,25 @@ function capturedErrorSinkValue(
       ...(diagnostic.stack === undefined ? {} : { stack: diagnostic.stack }),
     },
   };
+}
+
+function capturedDiagnosticEventSinkValue(
+  message: string,
+  meta?: unknown,
+): { message: string; meta: unknown } | undefined {
+  const event = projectCapturedDiagnosticEvent(message, meta);
+  return event === undefined ? undefined : { message: event.message, meta: event.meta };
+}
+
+function retainedSinkValue(
+  level: LogLevel,
+  message: string,
+  meta?: unknown,
+): { message: string; meta: unknown; finite: boolean } | undefined {
+  if (level === 'error') return { ...capturedErrorSinkValue(message, meta), finite: true };
+  const event = level === 'info' ? capturedDiagnosticEventSinkValue(message, meta) : undefined;
+  if (event !== undefined) return { ...event, finite: true };
+  return isVerboseLocalLoggingEnabled() ? { message, meta, finite: false } : undefined;
 }
 
 function storedErrorSinkValue(entry: LogEntry): LogEntry | undefined {
@@ -40,10 +61,26 @@ function storedErrorSinkValue(entry: LogEntry): LogEntry | undefined {
   };
 }
 
+function storedLogSinkValue(entry: LogEntry): LogEntry | undefined {
+  if (entry.level === 'error') return storedErrorSinkValue(entry);
+  if (entry.level !== 'info') return undefined;
+  const timestamp = projectErrorReportTimestamp(entry.timestamp);
+  if (timestamp === 0) return undefined;
+  const event = projectStoredDiagnosticEvent({ message: entry.message, meta: entry.meta });
+  if (event === undefined) return undefined;
+  return {
+    level: 'info',
+    message: event.message,
+    meta: boundedLogMeta(JSON.parse(event.meta) as Record<string, unknown>),
+    timestamp,
+  };
+}
+
 /**
  * Console sink for the app-wide logger. Privacy projection/redaction already happened upstream in
- * {@link RedactingLogger}, so this just routes to the right console method. Free-form
- * debug/info/warn lines are development-only until they have finite schemas.
+ * {@link RedactingLogger}, so this just routes to the right console method. Release console output
+ * remains ERROR-only; selected finite INFO events are retained by memory/file sinks and appear on
+ * the console only in development.
  */
 export class ConsoleSink implements LogSink {
   write(level: LogLevel, message: string, meta?: unknown): void {
@@ -89,22 +126,22 @@ export function boundedLogMeta(meta: unknown): string | undefined {
 
 /**
  * In-memory ring buffer of the last {@link MEMORY_LOG_CAPACITY} log lines, powering the in-app
- * log viewer (Settings → App Logs). ERROR entries arrive as finite structured diagnostics.
- * Free-form debug/info/warn entries are retained in development only.
+ * log viewer (Settings → App Logs). ERROR entries and selected INFO events arrive as finite
+ * structured diagnostics. Free-form debug/info/warn entries are retained in development only.
  */
 export class MemorySink implements LogSink {
   private buf: LogEntry[] = [];
 
   write(level: LogLevel, message: string, meta?: unknown): void {
-    if (level !== 'error' && !isVerboseLocalLoggingEnabled()) return;
-    const safe = level === 'error' ? capturedErrorSinkValue(message, meta) : { message, meta };
+    const safe = retainedSinkValue(level, message, meta);
+    if (safe === undefined) return;
     const metaStr = safe.meta === undefined ? undefined : boundedLogMeta(safe.meta);
     const now = Date.now();
     this.buf.push({
       level,
       message: boundedLogMessage(safe.message),
       ...(metaStr === undefined ? {} : { meta: metaStr }),
-      timestamp: level === 'error' ? projectErrorReportTimestamp(now) : now,
+      timestamp: safe.finite ? projectErrorReportTimestamp(now) : now,
     });
     if (this.buf.length > MEMORY_LOG_CAPACITY)
       this.buf.splice(0, this.buf.length - MEMORY_LOG_CAPACITY);
@@ -122,11 +159,10 @@ export class MemorySink implements LogSink {
    */
   hydrate(entries: LogEntry[]): void {
     if (entries.length === 0) return;
-    // Persisted non-error rows came from the old free-form policy. Never restore them into the
-    // viewer/share surface, even in a development build.
+    // Restore only strict ERROR rows and explicitly projected finite INFO events. Every legacy
+    // free-form non-error row remains excluded, even in a development build.
     const boundedEntries = entries
-      .filter((entry) => entry.level === 'error')
-      .map(storedErrorSinkValue)
+      .map(storedLogSinkValue)
       .filter((entry): entry is LogEntry => entry !== undefined);
     this.buf = [...boundedEntries, ...this.buf];
     if (this.buf.length > MEMORY_LOG_CAPACITY)
@@ -149,10 +185,10 @@ export class TeeSink implements LogSink {
     if (!this.sinks.includes(sink)) this.sinks.push(sink);
   }
   write(level: LogLevel, message: string, meta?: unknown): void {
-    if (level !== 'error' && !isVerboseLocalLoggingEnabled()) return;
+    const safe = retainedSinkValue(level, message, meta);
+    if (safe === undefined) return;
     // Defend future/injected sinks even when a caller somehow bypasses RedactingLogger and reaches
     // the tee singleton directly. Built-in sinks reproject again, so this remains idempotent.
-    const safe = level === 'error' ? capturedErrorSinkValue(message, meta) : { message, meta };
     for (const s of this.sinks) s.write(level, safe.message, safe.meta);
   }
 }
@@ -161,9 +197,9 @@ export class TeeSink implements LogSink {
 export const memoryLogSink = new MemorySink();
 
 /**
- * The app-wide logger. ERROR calls are rebuilt as finite structured diagnostics. Free-form
- * debug/info/warn calls remain visible in development but are dropped before every release sink;
- * LOG-01 tracks replacing selected high-value lines with finite event schemas.
+ * The app-wide logger. ERROR calls and selected event calls are rebuilt as finite structured
+ * diagnostics. Free-form debug/info/warn calls remain visible in development but are dropped
+ * before every release sink.
  *
  * To add Sentry later: wrap this sink (or add a second one) that forwards the
  * already-projected/redacted message as a breadcrumb — see RELEASE_CHECKLIST §9.2.

@@ -92,6 +92,7 @@ import { logger } from '@core/secure';
 import { startFcm } from '@/services/notifications/fcmMessaging';
 
 const message = { messageId: 'provider-message-1', data: { type: 'new-message' } };
+let diagnosticEvent: jest.SpyInstance;
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
@@ -106,6 +107,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 beforeEach(() => {
+  diagnosticEvent = jest.spyOn(logger, 'event').mockImplementation(() => undefined);
   leaseCurrent = true;
   mockGetMessaging.mockReturnValue({ app: 'messaging' });
   mockDispatchRealtimeEvent.mockResolvedValue(undefined);
@@ -136,7 +138,6 @@ afterEach(() => {
 
 describe('FCM native callback ownership', () => {
   it('registers the killed-app handler at module evaluation and tracks its whole delivery', async () => {
-    const info = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
     expect(mockBackgroundHandler).toEqual(expect.any(Function));
 
     await expect(mockBackgroundHandler!(message)).resolves.toBeUndefined();
@@ -152,8 +153,8 @@ describe('FCM native callback ownership', () => {
         receivedAt: expect.any(Number),
       }),
     );
-    expect(info).toHaveBeenCalledWith('[fcm] push received', {
-      event: 'new-message',
+    expect(diagnosticEvent).toHaveBeenCalledWith('fcm.push_received', {
+      eventName: 'new-message',
       source: 'background',
     });
   });
@@ -448,7 +449,6 @@ describe('FCM native callback ownership', () => {
   });
 
   it('makes the foreground EventEmitter callback return void while delivery continues', async () => {
-    const info = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
     await expect(startFcm()).resolves.toBe('ready');
     expect(mockForegroundHandler).toEqual(expect.any(Function));
 
@@ -458,8 +458,8 @@ describe('FCM native callback ownership', () => {
 
     expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(1);
     expect(mockDispatchRealtimeEvent).toHaveBeenCalledTimes(1);
-    expect(info).toHaveBeenCalledWith('[fcm] push received', {
-      event: 'new-message',
+    expect(diagnosticEvent).toHaveBeenCalledWith('fcm.push_received', {
+      eventName: 'new-message',
       source: 'foreground',
     });
   });

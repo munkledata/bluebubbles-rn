@@ -67,7 +67,7 @@ describe('MemorySink (in-app log viewer buffer)', () => {
     expect(entry!.meta).toContain('[redacted]');
   });
 
-  it('retains only structured ERROR entries in a release build', () => {
+  it('retains only structured ERROR and finite INFO entries in a release build', () => {
     const previousDev = (globalThis as { __DEV__?: boolean }).__DEV__;
     const sink = new MemorySink();
     try {
@@ -75,6 +75,11 @@ describe('MemorySink (in-app log viewer buffer)', () => {
       sink.write('debug', 'private debug');
       sink.write('info', 'private info');
       sink.write('warn', 'private warning');
+      sink.write('info', 'fcm.push_received', {
+        event: 'new-message',
+        source: 'foreground',
+        body: 'private body canary',
+      });
       sink.write('error', '[media] share failed', new TypeError('private error'));
 
       expect(sink.entries()).toEqual([
@@ -88,7 +93,18 @@ describe('MemorySink (in-app log viewer buffer)', () => {
           }),
           timestamp: expect.any(Number),
         },
+        {
+          level: 'info',
+          message: 'fcm.push_received [event:new-message|source:foreground]',
+          meta: JSON.stringify({
+            schemaVersion: 1,
+            eventName: 'new-message',
+            source: 'foreground',
+          }),
+          timestamp: expect.any(Number),
+        },
       ]);
+      expect(JSON.stringify(sink.entries())).not.toContain('private body canary');
     } finally {
       (globalThis as { __DEV__?: boolean }).__DEV__ = previousDev;
     }

@@ -82,6 +82,25 @@ describe('app logger (RedactingLogger + ConsoleSink)', () => {
     );
   });
 
+  it('projects a finite FCM receipt before the release sink boundary', () => {
+    (globalThis as { __DEV__?: boolean }).__DEV__ = false;
+    const writes: unknown[] = [];
+    const log = new RedactingLogger({ write: (...args) => void writes.push(args) });
+
+    log.event('fcm.push_received', {
+      eventName: 'new-message',
+      source: 'background',
+    });
+
+    expect(writes).toEqual([
+      [
+        'info',
+        'fcm.push_received [event:new-message|source:background]',
+        { schemaVersion: 1, eventName: 'new-message', source: 'background' },
+      ],
+    ]);
+  });
+
   it('ConsoleSink suppresses every free-form level in production but emits them in dev', () => {
     const sink = new ConsoleSink();
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -91,6 +110,10 @@ describe('app logger (RedactingLogger + ConsoleSink)', () => {
       (globalThis as { __DEV__?: boolean }).__DEV__ = false;
       sink.write('debug', 'prod-noise');
       sink.write('info', 'prod-info');
+      sink.write('info', 'fcm.push_received', {
+        eventName: 'new-message',
+        source: 'background',
+      });
       sink.write('warn', 'prod-warning');
       expect(log).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();

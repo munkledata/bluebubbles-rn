@@ -1,8 +1,9 @@
 import type { ApiErrorKind } from '../api/errors';
-import { SERVER_EVENTS } from '../config';
+import { SERVER_EVENTS, type ServerEventName } from '../config';
 
 /** Version of the privacy-safe JSON object stored in `error_reports.meta`. */
 export const ERROR_REPORT_ENVELOPE_VERSION = 1 as const;
+export const DIAGNOSTIC_EVENT_ENVELOPE_VERSION = 1 as const;
 
 interface EventDefinition {
   code: string;
@@ -263,12 +264,45 @@ export interface PrivacySafeErrorReport extends Omit<PrivacySafeErrorDiagnostic,
   meta: string;
 }
 
+export type DiagnosticEventCode = 'fcm.push_received';
+export type DiagnosticReceiptSource = 'background' | 'foreground';
+
+export interface DiagnosticEventInputByCode {
+  'fcm.push_received': {
+    /** Provider input stays open; the projector maps every unknown value to `unknown`. */
+    readonly eventName: string;
+    readonly source: DiagnosticReceiptSource;
+  };
+}
+
+export interface SafeDiagnosticEventMeta {
+  readonly schemaVersion: typeof DIAGNOSTIC_EVENT_ENVELOPE_VERSION;
+  readonly eventName: ServerEventName | 'unknown';
+  readonly source: DiagnosticReceiptSource | 'unknown';
+}
+
+export interface PrivacySafeDiagnosticEvent {
+  readonly message: string;
+  readonly tag: 'fcm';
+  readonly meta: SafeDiagnosticEventMeta;
+}
+
+export interface PrivacySafeDiagnosticEventReport extends Omit<PrivacySafeDiagnosticEvent, 'meta'> {
+  readonly level: 'info';
+  readonly meta: string;
+}
+
 export interface StoredErrorReportInput {
   level?: unknown;
   message: string;
   stack?: string | null;
   tag?: string | null;
   meta?: string | null;
+}
+
+export interface StoredDiagnosticEventInput {
+  readonly message: string;
+  readonly meta?: string | null;
 }
 
 export interface PrivacySafeClientContext {
@@ -328,6 +362,59 @@ function safeBoolean(value: unknown): boolean | undefined {
 
 function safeSetValue(value: unknown, allowed: ReadonlySet<string>): string | undefined {
   return typeof value === 'string' && value.length <= 64 && allowed.has(value) ? value : undefined;
+}
+
+function diagnosticEventCodeFor(message: unknown): DiagnosticEventCode | undefined {
+  if (typeof message !== 'string' || message.length > 4_096) return undefined;
+  const qualifierAt = message.indexOf(' [');
+  const possibleCode = qualifierAt === -1 ? message : message.slice(0, qualifierAt);
+  return possibleCode === 'fcm.push_received' ? possibleCode : undefined;
+}
+
+function safeServerEventName(value: unknown): ServerEventName | 'unknown' {
+  if (typeof value !== 'string' || value.length > 64) return 'unknown';
+  return SERVER_EVENTS.find((eventName) => eventName === value) ?? 'unknown';
+}
+
+function safeDiagnosticReceiptSource(value: unknown): DiagnosticReceiptSource | 'unknown' {
+  return value === 'background' || value === 'foreground' ? value : 'unknown';
+}
+
+/** Project one selected non-error event before any release sink can inspect arbitrary metadata. */
+export function projectCapturedDiagnosticEvent(
+  message: unknown,
+  meta?: unknown,
+): PrivacySafeDiagnosticEvent | undefined {
+  const code = diagnosticEventCodeFor(message);
+  if (code === undefined) return undefined;
+  const record = asRecord(meta);
+  const eventNameValue = read(record, 'eventName') ?? read(record, 'event');
+  const eventName = safeServerEventName(eventNameValue);
+  const source = safeDiagnosticReceiptSource(read(record, 'source'));
+  const safeMeta: SafeDiagnosticEventMeta = {
+    schemaVersion: DIAGNOSTIC_EVENT_ENVELOPE_VERSION,
+    eventName,
+    source,
+  };
+  return {
+    message: `${code} [event:${eventName}|source:${source}]`,
+    tag: 'fcm',
+    meta: safeMeta,
+  };
+}
+
+function asDiagnosticEventReport(
+  event: PrivacySafeDiagnosticEvent,
+): PrivacySafeDiagnosticEventReport {
+  return { ...event, level: 'info', meta: JSON.stringify(event.meta) };
+}
+
+/** Re-project a persisted finite event before restore or diagnostic sharing. */
+export function projectStoredDiagnosticEvent(
+  input: StoredDiagnosticEventInput,
+): PrivacySafeDiagnosticEventReport | undefined {
+  const event = projectCapturedDiagnosticEvent(input.message, parseStoredMeta(input.meta));
+  return event === undefined ? undefined : asDiagnosticEventReport(event);
 }
 
 function errorRecord(

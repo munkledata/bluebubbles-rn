@@ -1,5 +1,5 @@
 import type { LogEntry } from '@core/secure';
-import { formatErrorLogsForShare } from '@/services/logging/shareLogs';
+import { formatDiagnosticLogsForShare } from '@/services/logging/shareLogs';
 
 function entry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {
@@ -10,9 +10,9 @@ function entry(overrides: Partial<LogEntry> = {}): LogEntry {
   };
 }
 
-describe('formatErrorLogsForShare', () => {
-  it('exports only strictly reprojected ERROR rows in chronological order', () => {
-    const text = formatErrorLogsForShare([
+describe('formatDiagnosticLogsForShare', () => {
+  it('exports only strictly reprojected diagnostics in chronological order', () => {
+    const text = formatDiagnosticLogsForShare([
       entry({
         message: '[share] capture failed: alice@example.com opened file:///private/photo.jpg',
         meta: JSON.stringify({
@@ -33,6 +33,16 @@ describe('formatErrorLogsForShare', () => {
         timestamp: Date.UTC(2026, 7, 6, 12, 34, 30),
       }),
       entry({
+        level: 'info',
+        message: 'fcm.push_received [private forged qualifiers]',
+        meta: JSON.stringify({
+          eventName: 'updated-message',
+          source: 'foreground',
+          body: 'private FCM body canary',
+        }),
+        timestamp: Date.UTC(2026, 7, 6, 12, 34, 30),
+      }),
+      entry({
         message: '[socket] connection failed',
         meta: JSON.stringify({
           errorName: 'TypeError',
@@ -45,6 +55,17 @@ describe('formatErrorLogsForShare', () => {
 
     const lines = text.split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines).toEqual([
+      {
+        timestamp: '2026-08-06T12:34:00.000Z',
+        level: 'info',
+        message: 'fcm.push_received [event:updated-message|source:foreground]',
+        tag: 'fcm',
+        meta: {
+          schemaVersion: 1,
+          eventName: 'updated-message',
+          source: 'foreground',
+        },
+      },
       {
         timestamp: '2026-08-06T12:34:00.000Z',
         level: 'error',
@@ -73,13 +94,15 @@ describe('formatErrorLogsForShare', () => {
       'legacy-response-canary',
       'non-error-canary-3035550199',
       'non-error-meta-canary',
+      'private forged qualifiers',
+      'private FCM body canary',
     ]) {
       expect(text).not.toContain(canary);
     }
   });
 
   it('fails closed for an unclassified legacy ERROR and an invalid timestamp', () => {
-    const text = formatErrorLogsForShare([
+    const text = formatDiagnosticLogsForShare([
       entry({
         message: 'private free-form failure for alice@example.com',
         meta: 'raw legacy metadata 3035550199',
@@ -100,7 +123,7 @@ describe('formatErrorLogsForShare', () => {
 
   it('sorts unknown times after valid rows and preserves oldest-first order for rounded ties', () => {
     const rounded = Date.UTC(2026, 7, 6, 12, 34);
-    const text = formatErrorLogsForShare([
+    const text = formatDiagnosticLogsForShare([
       entry({ message: '[socket] connection failed', timestamp: rounded }),
       entry({ message: '[media] share failed', timestamp: rounded }),
       entry({ message: 'private unknown event', timestamp: Number.POSITIVE_INFINITY }),
@@ -119,9 +142,9 @@ describe('formatErrorLogsForShare', () => {
     ]);
   });
 
-  it('returns an empty string when the snapshot contains no ERROR rows', () => {
+  it('returns an empty string when the snapshot contains no strict diagnostic rows', () => {
     expect(
-      formatErrorLogsForShare([
+      formatDiagnosticLogsForShare([
         entry({ level: 'debug', message: 'debug canary' }),
         entry({ level: 'info', message: 'info canary' }),
         entry({ level: 'warn', message: 'warn canary' }),

@@ -165,12 +165,22 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
         message: 'content://provider/private-name',
         timestamp: validTimestamp + 120_000,
       },
+      {
+        level: 'info',
+        message: 'fcm.push_received [untrusted legacy qualifiers]',
+        meta: JSON.stringify({
+          eventName: 'updated-message',
+          source: 'background',
+          body: 'private event body',
+        }),
+        timestamp: validTimestamp + 180_000,
+      },
     ]);
     const sink = new FileLogSink();
 
     await sink.init();
 
-    const [entry] = sink.all();
+    const [entry, receipt] = sink.all();
     expect(entry?.message).toBe('socket.connection_failed [ApiError|no_connection|http_5xx]');
     expect(entry?.meta).toBe(
       JSON.stringify({
@@ -186,8 +196,20 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
     expect(mockFileContents).not.toContain('alice@example.com');
     expect(mockFileContents).not.toContain('3035550199');
     expect(mockFileContents).not.toContain('content://');
-    expect(sink.all()).toHaveLength(1);
+    expect(mockFileContents).not.toContain('private event body');
+    expect(receipt).toEqual({
+      level: 'info',
+      message: 'fcm.push_received [event:updated-message|source:background]',
+      meta: JSON.stringify({
+        schemaVersion: 1,
+        eventName: 'updated-message',
+        source: 'background',
+      }),
+      timestamp: validTimestamp + 180_000,
+    });
+    expect(sink.all()).toHaveLength(2);
     expect(mockFileContents).toContain('socket.connection_failed');
+    expect(mockFileContents).toContain('fcm.push_received');
   });
 
   it.each([3035550199, 1e300, 1.5, Date.UTC(2200, 0, 1)])(
@@ -212,16 +234,31 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
     },
   );
 
-  it('drops direct free-form writes in release while retaining a structured ERROR', () => {
+  it('drops direct free-form writes in release while retaining finite diagnostics', () => {
     (globalThis as { __DEV__?: boolean }).__DEV__ = false;
     const sink = new FileLogSink();
 
     sink.write('debug', 'private debug');
     sink.write('info', 'private info');
     sink.write('warn', 'private warning');
+    sink.write('info', 'fcm.push_received', {
+      eventName: 'new-message',
+      source: 'background',
+      body: 'private event body',
+    });
     sink.write('error', '[media] share failed', new TypeError('private error'));
 
     expect(sink.all()).toEqual([
+      {
+        level: 'info',
+        message: 'fcm.push_received [event:new-message|source:background]',
+        meta: JSON.stringify({
+          schemaVersion: 1,
+          eventName: 'new-message',
+          source: 'background',
+        }),
+        timestamp: expect.any(Number),
+      },
       {
         level: 'error',
         message: 'media.share_failed [TypeError]',
@@ -233,6 +270,7 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
         timestamp: expect.any(Number),
       },
     ]);
+    expect(JSON.stringify(sink.all())).not.toContain('private event body');
   });
 
   it('drops a release non-error before serializing hostile metadata', () => {

@@ -128,21 +128,20 @@ async function deliverRespectingLock(
   source: 'background' | 'foreground',
   lease: RealtimeDeliveryLease,
 ): Promise<void> {
-  // DEVELOPMENT RECEIPT BREADCRUMB. Every push enters here — the killed-app background handler
-  // AND the foreground onMessage — so this is the one place a development build records that a
-  // push physically arrived. Release builds drop free-form non-error diagnostics.
+  // FINITE RECEIPT BREADCRUMB. Every push enters here — the killed-app background handler AND the
+  // foreground onMessage — so this is the one place App Logs records that a push physically
+  // arrived. The strict event projector retains only the finite event name and delivery source.
   //
   // WHY LOGGING A SUCCESS MATTERS: until this line, only FAILURES were logged, which made a
   // dropped push and a silently-handled one indistinguishable in development App Logs — both are
   // simply absent (an `updated-message` receipt posts no notification by design). During device
-  // investigation, compare this temporary/local breadcrumb with server sends. Production proof
-  // must instead use native traces or a deliberately designed finite diagnostic event.
+  // investigation, compare this local breadcrumb with server sends.
   //
   // `source` is the axis the killed-app bug lives on (headless wake vs app-already-running), so
   // it is recorded explicitly rather than inferred. Event NAME only, NEVER the body — that
   // carries message text. Even in development, never attach the body to this local line.
   const { eventName: receivedEvent } = delivery.parsed;
-  logger.info('[fcm] push received', { event: receivedEvent, source });
+  logger.event('fcm.push_received', { eventName: receivedEvent, source });
   // No complete stored session = the user disconnected. `forget()` deletes both vault keys and
   // retires the Firebase installation token, but this gate is still required while that cleanup is
   // running, when native token retirement fails, and for a push already in flight. Without it

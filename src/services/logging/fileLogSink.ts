@@ -4,8 +4,10 @@ import {
   isVerboseLocalLoggingEnabled,
   logSinks,
   memoryLogSink,
+  projectCapturedDiagnosticEvent,
   projectCapturedErrorReport,
   projectErrorReportTimestamp,
+  projectStoredDiagnosticEvent,
   projectStoredErrorReport,
   type LogEntry,
   type LogLevel,
@@ -13,10 +15,11 @@ import {
 } from '@core/secure';
 
 /**
- * Persistent log sink: writes strictly projected ERROR lines, plus development-only local lines,
- * to a capped file so the in-app viewer survives an app close/reopen (the {@link MemorySink} alone
- * is heap-only and is wiped when the JS context is destroyed). Restore always drops historical
- * non-error rows, so a release candidate cannot inherit the old free-form plaintext history.
+ * Persistent log sink: writes strictly projected ERROR lines, selected finite INFO events, and
+ * development-only local lines to a capped file so the in-app viewer survives an app close/reopen
+ * (the {@link MemorySink} alone is heap-only and is wiped when the JS context is destroyed).
+ * Restore always drops historical free-form non-error rows, so a release candidate cannot inherit
+ * the old plaintext history.
  *
  * Design notes:
  * - Lives OUTSIDE `src/core` (which must stay React-Native-free) and is INJECTED into the core
@@ -114,17 +117,33 @@ function replaceOrDeleteLogFile(file: LogFileHandle, contents: string): ReplaceL
   }
 }
 
-/** Rebuild ERROR rows and discard every older free-form level during an upgrade restore. */
+/** Rebuild finite rows and discard every older free-form level during an upgrade restore. */
 function sanitizePersistedEntries(value: unknown): LogEntry[] {
   if (!Array.isArray(value)) return [];
   const entries: LogEntry[] = [];
   for (const candidate of value) {
     if (candidate === null || typeof candidate !== 'object') continue;
     const raw = candidate as Record<string, unknown>;
-    if (raw.level !== 'error' || typeof raw.message !== 'string') continue;
+    if ((raw.level !== 'error' && raw.level !== 'info') || typeof raw.message !== 'string') {
+      continue;
+    }
     if (typeof raw.timestamp !== 'number') continue;
     const timestamp = projectErrorReportTimestamp(raw.timestamp);
     if (timestamp === 0) continue;
+    if (raw.level === 'info') {
+      const event = projectStoredDiagnosticEvent({
+        message: raw.message,
+        meta: typeof raw.meta === 'string' ? raw.meta : null,
+      });
+      if (event === undefined) continue;
+      entries.push({
+        level: 'info',
+        message: event.message,
+        meta: boundedLogMeta(JSON.parse(event.meta) as Record<string, unknown>),
+        timestamp,
+      });
+      continue;
+    }
     const safe = projectStoredErrorReport({
       message: raw.message,
       meta: typeof raw.meta === 'string' ? raw.meta : null,
@@ -156,12 +175,15 @@ export class FileLogSink implements LogSink {
   private contentGeneration = 0;
 
   write(level: LogLevel, message: string, meta?: unknown): void {
-    if (level !== 'error' && !isVerboseLocalLoggingEnabled()) return;
     const safeError = level === 'error' ? projectCapturedErrorReport(message, meta) : undefined;
-    const retainedMessage = safeError?.message ?? message;
+    const safeEvent = level === 'info' ? projectCapturedDiagnosticEvent(message, meta) : undefined;
+    if (level !== 'error' && safeEvent === undefined && !isVerboseLocalLoggingEnabled()) {
+      return;
+    }
+    const retainedMessage = safeError?.message ?? safeEvent?.message ?? message;
     const retainedMeta =
       safeError === undefined
-        ? meta
+        ? (safeEvent?.meta ?? meta)
         : {
             ...(JSON.parse(safeError.meta) as Record<string, unknown>),
             ...(safeError.stack === undefined ? {} : { stack: safeError.stack }),
@@ -172,7 +194,8 @@ export class FileLogSink implements LogSink {
       level,
       message: boundedLogMessage(retainedMessage),
       ...(metaStr === undefined ? {} : { meta: metaStr }),
-      timestamp: level === 'error' ? projectErrorReportTimestamp(now) : now,
+      timestamp:
+        safeError !== undefined || safeEvent !== undefined ? projectErrorReportTimestamp(now) : now,
     });
     if (this.buf.length > FILE_LOG_CAPACITY)
       this.buf.splice(0, this.buf.length - FILE_LOG_CAPACITY);
@@ -421,8 +444,8 @@ export async function flushPersistentLogsForHeadlessCompletion(): Promise<boolea
  */
 export function initPersistentLogs(): Promise<void> {
   // Attach before the first await. Android may execute a killed-process task without ever rendering
-  // the foreground boot tree; its finite ERROR must be buffered by a persistent-capable sink before
-  // task work starts, then explicitly flushed before the native callback settles.
+  // the foreground boot tree; its finite diagnostic must be buffered by a persistent-capable sink
+  // before task work starts, then explicitly flushed before the native callback settles.
   logSinks.add(fileLogSink);
   persistentLogInitialization ??= fileLogSink.restore((persisted) =>
     memoryLogSink.hydrate(persisted),
