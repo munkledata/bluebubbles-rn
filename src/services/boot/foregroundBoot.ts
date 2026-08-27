@@ -134,26 +134,34 @@ const coordinator = createBootCoordinator<ForegroundBootAttempt>({
   onCleanupError: (error) => logger.warn('[boot] foreground cleanup failed', error),
 });
 
-coordinator.subscribe((state) => {
-  if (state.status === 'failed' && state.failure.code === 'foreground-boot-superseded') {
-    coordinator.invalidate(state.runId);
-    void startForegroundBoot();
-  }
-});
+let compositionInitialized = false;
 
-installForegroundBootInvalidator(() => {
-  const state = coordinator.getState();
-  if (state.status !== 'idle') coordinator.invalidate(state.runId);
-});
-installForegroundBootRestarter(() => {
-  void startForegroundBoot();
-});
-installForegroundBootIssueReporter((issue) => {
-  const state = coordinator.getState();
-  if (state.status !== 'idle' && state.status !== 'failed') {
-    coordinator.reportIssue(state.runId, issue);
-  }
-});
+/** Install process-wide foreground-boot ownership only when the composition root starts it. */
+export function initializeForegroundBootComposition(): void {
+  if (compositionInitialized) return;
+  compositionInitialized = true;
+
+  coordinator.subscribe((state) => {
+    if (state.status === 'failed' && state.failure.code === 'foreground-boot-superseded') {
+      coordinator.invalidate(state.runId);
+      void startForegroundBoot();
+    }
+  });
+
+  installForegroundBootInvalidator(() => {
+    const state = coordinator.getState();
+    if (state.status !== 'idle') coordinator.invalidate(state.runId);
+  });
+  installForegroundBootRestarter(() => {
+    void startForegroundBoot();
+  });
+  installForegroundBootIssueReporter((issue) => {
+    const state = coordinator.getState();
+    if (state.status !== 'idle' && state.status !== 'failed') {
+      coordinator.reportIssue(state.runId, issue);
+    }
+  });
+}
 
 let processWorkStarted = false;
 const processIssues = new Map<BootStage, BootIssue>();
@@ -294,6 +302,7 @@ function startProcessWork(): void {
 
 /** Start the one process-owned foreground run and return the coordinator's exact shared Promise. */
 export function startForegroundBoot(): Promise<BootState> {
+  initializeForegroundBootComposition();
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     const relaunchContract = startDevDbRelaunchContractIfRequested();
     if (relaunchContract) return relaunchContract;
@@ -324,5 +333,9 @@ export function getForegroundBootSnapshot(): BootState {
 }
 
 export function subscribeForegroundBoot(listener: () => void): () => void {
+  // Install the internal superseded-run recovery listener before the first external observer.
+  // BootCoordinator intentionally stops notifying when a listener changes state, so this preserves
+  // the original ordering without installing anything merely because the module was imported.
+  initializeForegroundBootComposition();
   return coordinator.subscribe(() => listener());
 }
