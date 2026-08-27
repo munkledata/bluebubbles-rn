@@ -5,11 +5,10 @@ import { useCallback, useRef, useState } from 'react';
 import { Share } from 'react-native';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
-import { getDatabase } from '@db/database';
 import { type MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
-import { scheduleReminder } from '@/services/notifications/remindersService';
+import { scheduleMessageReminder } from '@/services/notifications/remindersService';
 import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
@@ -409,8 +408,7 @@ export function useMessageActions({
       try {
         const when = await pickReminderTime();
         if (when == null || !screenLease.isCurrent()) return;
-        await scheduleReminder(
-          getDatabase(),
+        await scheduleMessageReminder(
           {
             chatGuid: guid,
             messageGuid: msg.guid,
@@ -420,7 +418,6 @@ export function useMessageActions({
             scheduledFor: when,
             now: Date.now(),
           },
-          undefined,
           screenLease,
         );
         if (screenLease.isCurrent()) {

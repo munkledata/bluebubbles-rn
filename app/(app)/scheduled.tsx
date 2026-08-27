@@ -5,19 +5,14 @@ import { StyleSheet, Text } from 'react-native';
 import { asRecurrence, recurrenceLabel } from '@core/schedule';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
-import {
-  deleteScheduledHistoryWithinTransaction,
-  listAllScheduled,
-  listScheduledHistory,
-  type ScheduledRow,
-} from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { listAllScheduled, listScheduledHistory, type ScheduledRow } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { cancelScheduled, syncScheduledFromServer } from '@/services/send';
 import {
-  captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
-} from '@/services/realtime/deliveryCoordinator';
+  cancelScheduled,
+  clearScheduledHistoryItem,
+  syncScheduledFromServer,
+} from '@/services/send';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatTime } from '@utils';
@@ -126,16 +121,7 @@ export default function ScheduledScreen(): React.JSX.Element {
                       label: 'Clear',
                       color: theme.color.tertiaryLabel,
                       onPress: () => {
-                        void runTrackedRealtimeWork(accountLease, async (activeLease) => {
-                          const db = getDatabase();
-                          const scheduledId = row.id;
-                          await withDbTransaction(
-                            db,
-                            (context) =>
-                              deleteScheduledHistoryWithinTransaction(context, scheduledId),
-                            () => activeLease.isCurrent(),
-                          );
-                        }).catch(() => {
+                        void clearScheduledHistoryItem(row.id, accountLease).catch(() => {
                           if (accountLease.isCurrent()) {
                             showDialog('Scheduled', 'Couldn’t clear that history item.');
                           }

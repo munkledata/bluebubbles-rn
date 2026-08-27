@@ -9,6 +9,7 @@ import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import type { Reminder } from '@core/models';
 import { logger } from '@core/secure';
+import { ensureDatabase } from '../databaseControl';
 import { cancelReminderNotification, scheduleReminderNotification } from './notifeeService';
 import { isSafeReminderNotificationId, newReminderNotificationId } from './notificationRouting';
 import {
@@ -46,6 +47,21 @@ export class ReminderSessionChangedError extends Error {
 
 function assertReminderLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw new ReminderSessionChangedError();
+}
+
+/** Acquire the composition-root database while the originating account remains admitted. */
+async function acquireReminderDatabase(lease: RealtimeDeliveryLease): Promise<AppDatabase> {
+  const opened: { db?: AppDatabase } = {};
+  const status = await runTrackedRealtimeWork(lease, async () => {
+    assertReminderLease(lease);
+    const db = await ensureDatabase();
+    assertReminderLease(lease);
+    opened.db = db;
+  });
+  if (status === 'paused' || !opened.db || !lease.isCurrent()) {
+    throw new ReminderSessionChangedError();
+  }
+  return opened.db;
 }
 
 /**
@@ -140,6 +156,34 @@ export interface ScheduleReminderArgs {
   senderName: string | null;
   scheduledFor: number;
   now?: number;
+}
+
+/** UI-facing reminder creation without exposing the database or native scheduler. */
+export async function scheduleMessageReminder(
+  args: ScheduleReminderArgs,
+  accountLease: RealtimeDeliveryLease,
+): Promise<number> {
+  const db = await acquireReminderDatabase(accountLease);
+  return scheduleReminder(db, args, notifeeScheduler, accountLease);
+}
+
+/** UI-facing reminder cancellation without exposing the database or native scheduler. */
+export async function cancelMessageReminder(
+  reminder: Pick<Reminder, 'id' | 'notificationId'>,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  const db = await acquireReminderDatabase(accountLease);
+  await cancelReminder(db, reminder, notifeeScheduler, accountLease);
+}
+
+/** UI-facing reminder reschedule without exposing the database or native scheduler. */
+export async function rescheduleMessageReminder(
+  reminder: Reminder,
+  scheduledFor: number,
+  accountLease: RealtimeDeliveryLease,
+): Promise<string> {
+  const db = await acquireReminderDatabase(accountLease);
+  return rescheduleReminder(db, reminder, scheduledFor, notifeeScheduler, accountLease);
 }
 
 /**

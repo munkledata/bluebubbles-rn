@@ -5,6 +5,7 @@ import {
   claimFailedOutgoingForRetryWithinTransaction,
   countOutgoingQueueHealth,
   deleteMessageLocalWithinTransaction,
+  deleteScheduledHistoryWithinTransaction,
   deleteScheduledWithinTransaction,
   discardOutgoingMessageWithinTransaction,
   getScheduledById,
@@ -472,6 +473,23 @@ export async function cancelScheduled(
     await withDbTransaction(
       db,
       (context) => deleteScheduledWithinTransaction(context, id),
+      () => accountLease.isCurrent(),
+    );
+    assertScheduledLease(accountLease);
+  });
+}
+
+/** Remove one completed scheduled-message history row through the scheduled service boundary. */
+export function clearScheduledHistoryItem(
+  id: number,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runScheduledAccountOperation(accountLease, async () => {
+    const db = getDatabase();
+    assertScheduledLease(accountLease);
+    await withDbTransaction(
+      db,
+      (context) => deleteScheduledHistoryWithinTransaction(context, id),
       () => accountLease.isCurrent(),
     );
     assertScheduledLease(accountLease);

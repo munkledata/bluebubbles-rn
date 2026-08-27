@@ -7,7 +7,10 @@ import type { Reminder } from '@core/models';
 import { getDatabase } from '@db/database';
 import { listReminders } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { cancelReminder, rescheduleReminder } from '@/services/notifications/remindersService';
+import {
+  cancelMessageReminder,
+  rescheduleMessageReminder,
+} from '@/services/notifications/remindersService';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
@@ -31,7 +34,7 @@ export default function RemindersScreen(): React.JSX.Element {
       try {
         const when = await pickReminderTime();
         if (when == null || !accountLease.isCurrent()) return;
-        await rescheduleReminder(getDatabase(), r, when, undefined, accountLease);
+        await rescheduleMessageReminder(r, when, accountLease);
       } catch {
         if (accountLease.isCurrent()) {
           showDialog('Reminder', 'Couldn’t reschedule the reminder.');
@@ -44,7 +47,7 @@ export default function RemindersScreen(): React.JSX.Element {
     void (async () => {
       if (!accountLease.isCurrent()) return;
       try {
-        await cancelReminder(getDatabase(), r, undefined, accountLease);
+        await cancelMessageReminder(r, accountLease);
       } catch {
         if (accountLease.isCurrent()) showDialog('Reminder', 'Couldn’t cancel the reminder.');
       }
