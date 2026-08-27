@@ -1,15 +1,16 @@
-import notifee, {
+import {
   AlarmType,
   AndroidCategory,
   AndroidImportance,
   AndroidStyle,
   AuthorizationStatus,
   TriggerType,
+  nativeNotificationAdapter as notifee,
   type DisplayedNotification,
   type Notification,
   type TimestampTrigger,
   type TriggerNotification,
-} from 'react-native-notify-kit';
+} from './nativeNotificationAdapter';
 import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
 import { logger } from '@core/secure';
 import type { AppDatabase } from '@db/types';

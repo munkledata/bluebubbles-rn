@@ -23,6 +23,7 @@ module.exports = [
     ],
   },
   {
+    files: ['app/**/*.{js,jsx,ts,tsx}', 'src/**/*.{js,jsx,ts,tsx}'],
     rules: {
       // Error so CI actually guards this class: the genuinely-intentional cases are each
       // annotated with an eslint-disable at the call site, so a NEW unjustified missing-dep
@@ -43,6 +44,41 @@ module.exports = [
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
+    files: ['index.js', 'app/**/*.{js,jsx,ts,tsx}', 'src/**/*.{js,jsx,ts,tsx}'],
+    ignores: ['src/services/notifications/nativeNotificationAdapter.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react-native-notify-kit',
+              message: 'Import the owned nativeNotificationAdapter instead.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['react-native-notify-kit/*'],
+              message: 'Import the owned nativeNotificationAdapter instead.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'ImportExpression[source.value=/^react-native-notify-kit(?:\\/|$)/]',
+          message: 'Import the owned nativeNotificationAdapter instead.',
+        },
+        {
+          selector:
+            "CallExpression[callee.name='require'][arguments.0.value=/^react-native-notify-kit(?:\\/|$)/]",
+          message: 'Require the owned nativeNotificationAdapter instead.',
+        },
       ],
     },
   },

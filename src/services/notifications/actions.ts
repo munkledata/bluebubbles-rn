@@ -1,4 +1,3 @@
-import { type EventDetail } from 'react-native-notify-kit';
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
 import { isFaceTimeLink } from '@core/facetime';
@@ -26,6 +25,7 @@ import {
   cancelFaceTimeNotification,
   cancelNotificationById,
 } from './notifeeService';
+import type { EventDetail } from './nativeNotificationAdapter';
 import {
   chatNotificationId,
   isSafeReminderNotificationId,

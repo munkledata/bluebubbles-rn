@@ -1,4 +1,3 @@
-import notifee, { EventType } from 'react-native-notify-kit';
 import { Redirect, Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState as NativeAppState, StyleSheet, View, type AppStateStatus } from 'react-native';
@@ -8,6 +7,10 @@ import {
   handleNotificationAction,
   handleNotificationPress,
 } from '@/services/notifications/actions';
+import {
+  EventType,
+  nativeNotificationAdapter as notifee,
+} from '@/services/notifications/nativeNotificationAdapter';
 import {
   drainNotificationTap,
   openFromNotification,

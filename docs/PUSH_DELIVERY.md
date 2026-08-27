@@ -241,3 +241,32 @@ nobody logs**. Instrument the seams, not the components — which is what §2.3 
 
 Related: `AGENTS.md` ("Every headless registration must be imported from `index.js`") and
 `docs/APP_SERVER_PARITY.md`.
+
+## 5. Native notification package ownership
+
+`src/services/notifications/nativeNotificationAdapter.ts` is the only production module allowed to import
+`react-native-notify-kit` (currently pinned to `10.4.8`). It owns the small native surface Gator uses: channel and
+permission calls, display/trigger/cancel operations, foreground/background event registration, and the cold-start
+notification lookup. `notifeeService.ts` continues to own Gator's domain policy and serialized mutation queue; UI,
+features, and headless handlers consume the owned adapter instead of the package singleton. The ESLint boundary covers
+the package root and every subpath across `index.js`, `app/`, and `src/`, including static, dynamic, and CommonJS
+imports.
+
+Keep `index.js` importing `backgroundEvents` before `expo-router/entry`. Passing registration through the adapter does
+not make route-time registration safe: the background callback must still reach notify-kit during bundle-entry
+evaluation.
+
+Before a notify-kit upgrade, verify all of the following against the pinned Expo/RN versions and an Android build:
+
+- maintained release/security posture, license continuity, React Native New Architecture support, and no unresolved
+  upstream regression affecting APIs Gator uses;
+- permission state/request behavior and app/per-chat channel creation, deletion, and settings handoff;
+- foreground action/body events, background/headless actions, killed-start `getInitialNotification`, and pending-tap
+  navigation after App Lock;
+- displayed/trigger/all/targeted cancellation truth, trigger scheduling, messaging-style rendering, and full-screen
+  FaceTime behavior.
+
+Replace the package behind the adapter when it becomes incompatible with the pinned Expo/RN toolchain, loses a safe
+maintained release path, develops an unresolved security/licensing problem, or cannot meet the lifecycle/cancellation
+matrix above. Host mocks and the import boundary prove ownership, not Android delivery or cancellation timing; those
+remain exact-device evidence.

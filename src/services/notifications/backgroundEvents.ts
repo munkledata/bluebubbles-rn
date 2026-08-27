@@ -1,7 +1,7 @@
-import notifee, { EventType } from 'react-native-notify-kit';
 import { logger } from '@core/secure';
 import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
 import { handleNotificationAction, handleNotificationPress } from './actions';
+import { EventType, nativeNotificationAdapter as notifee } from './nativeNotificationAdapter';
 import { stashPendingNotification } from './pendingNav';
 
 /**
