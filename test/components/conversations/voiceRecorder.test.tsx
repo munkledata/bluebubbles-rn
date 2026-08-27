@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, renderWithTheme, waitFor } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 
 jest.mock('expo-audio', () => ({
   RecordingPresets: { HIGH_QUALITY: {} },
@@ -15,6 +15,11 @@ import * as Audio from 'expo-audio';
 
 const mockRequestRecordingPermissionsAsync = Audio.requestRecordingPermissionsAsync as jest.Mock;
 const mockUseAudioRecorder = Audio.useAudioRecorder as jest.Mock;
+
+beforeEach(() => {
+  mockRequestRecordingPermissionsAsync.mockReset();
+  mockUseAudioRecorder.mockReset();
+});
 
 describe('VoiceRecorder permissions', () => {
   it('reports a denied microphone grant before closing', async () => {
@@ -42,6 +47,36 @@ describe('VoiceRecorder permissions', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(prepareToRecordAsync).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
+  });
+
+  it('asks before hardware Back discards an active recording', async () => {
+    mockRequestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: true });
+    const stop = jest.fn().mockResolvedValue(undefined);
+    const record = jest.fn();
+    mockUseAudioRecorder.mockReturnValue({
+      prepareToRecordAsync: jest.fn().mockResolvedValue(undefined),
+      record,
+      stop,
+      uri: 'file://voice.m4a',
+    });
+    const onClose = jest.fn();
+
+    await renderWithTheme(<VoiceRecorder onClose={onClose} onSend={jest.fn()} />);
+    await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
+
+    const modal = screen.root;
+    expect(modal?.type).toBe('Modal');
+    await act(async () => {
+      fireEvent(modal!, 'requestClose');
+    });
+    expect(screen.getByText('Discard this recording?')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Discard'));
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 
   it('reports a native permission-request failure before closing', async () => {

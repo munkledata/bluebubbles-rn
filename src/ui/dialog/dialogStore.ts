@@ -22,9 +22,11 @@ interface DialogState {
   current: DialogRequest | null;
   /** Dialogs waiting behind the current one (a confirm's handler may open another). */
   queue: DialogRequest[];
-  enqueue: (req: Omit<DialogRequest, 'id'>) => void;
+  enqueue: (req: Omit<DialogRequest, 'id'>) => number;
   /** Close the current dialog and promote the next queued one (if any). */
   dismiss: () => void;
+  /** Remove one caller-owned dialog without disturbing unrelated queued dialogs. */
+  dismissById: (id: number) => void;
   /** Account teardown: discard dialog copy/callbacks that belong to the previous server. */
   reset: () => void;
 }
@@ -44,11 +46,21 @@ export const useDialogStore = create<DialogState>((set, get) => ({
     const full: DialogRequest = { ...req, id: nextId++ };
     if (get().current == null) set({ current: full });
     else set((s) => ({ queue: [...s.queue, full] }));
+    return full.id;
   },
   dismiss: () =>
     set((s) => {
       const [next, ...rest] = s.queue;
       return { current: next ?? null, queue: rest };
+    }),
+  dismissById: (id) =>
+    set((s) => {
+      if (s.current?.id === id) {
+        const [next, ...rest] = s.queue;
+        return { current: next ?? null, queue: rest };
+      }
+      const queue = s.queue.filter((request) => request.id !== id);
+      return queue.length === s.queue.length ? s : { queue };
     }),
   reset: () => set({ current: null, queue: [] }),
 }));
@@ -57,8 +69,8 @@ export const useDialogStore = create<DialogState>((set, get) => ({
  * Show a themed dialog. Positional args mirror `Alert.alert(title, message?, buttons?)`, so a call
  * site migrates by renaming `Alert.alert` → `showDialog`. With no buttons it shows a single "OK".
  */
-export function showDialog(title: string, message?: string, buttons?: DialogButton[]): void {
-  useDialogStore.getState().enqueue({
+export function showDialog(title: string, message?: string, buttons?: DialogButton[]): number {
+  return useDialogStore.getState().enqueue({
     title,
     message,
     buttons: buttons && buttons.length > 0 ? buttons : [{ text: 'OK', style: 'default' }],
@@ -74,8 +86,8 @@ export function showConfirm(opts: {
   destructive?: boolean;
   onConfirm: () => void;
   onCancel?: () => void;
-}): void {
-  showDialog(opts.title, opts.message, [
+}): number {
+  return showDialog(opts.title, opts.message, [
     { text: opts.cancelText ?? 'Cancel', style: 'cancel', onPress: opts.onCancel },
     {
       text: opts.confirmText ?? 'OK',
@@ -91,8 +103,8 @@ export function showAlert(opts: {
   message?: string;
   buttonText?: string;
   onDismiss?: () => void;
-}): void {
-  showDialog(opts.title, opts.message, [
+}): number {
+  return showDialog(opts.title, opts.message, [
     { text: opts.buttonText ?? 'OK', style: 'default', onPress: opts.onDismiss },
   ]);
 }

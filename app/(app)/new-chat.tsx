@@ -20,6 +20,7 @@ import { useRcsEnabled } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
 import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
+import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 
 /** A chosen recipient chip: an address plus its best display name. */
 interface Recipient {
@@ -81,6 +82,7 @@ export default function NewChatScreen(): React.JSX.Element {
   // future owned native intake may populate this only after completing a bounded atomic batch.
   const [staged, setStaged] = useState<SharedAttachment[]>(initialContent.attachments);
   const forwardConsumedRef = useRef(false);
+  const abandonedRef = useRef(false);
   const forwardProtectionReleaseRef = useRef<(() => void) | null>(null);
   const forwardProtectionReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Per-recipient iMessage availability (advisory): true → blue chip, false → green (SMS),
@@ -89,6 +91,13 @@ export default function NewChatScreen(): React.JSX.Element {
   // Each address is probed at most once for this mounted account. Results stay address-keyed so
   // removing and re-adding a recipient can reuse a confirmed transport without another request.
   const probedRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    abandonedRef.current = false;
+    return () => {
+      abandonedRef.current = true;
+    };
+  }, []);
 
   // The lease itself is deliberately non-reactive. Subscribe to its synchronous invalidation so
   // an account-A form is removed from the host tree instead of waiting for route teardown.
@@ -181,6 +190,21 @@ export default function NewChatScreen(): React.JSX.Element {
     forwardProtectionReleaseRef.current = null;
     release?.();
   };
+
+  const hasUnsavedChanges =
+    !accountUnavailable &&
+    (recipients.length > 0 || query.length > 0 || message.length > 0 || staged.length > 0);
+  const { navigateWithoutPrompt } = useUnsavedChangesGuard({
+    enabled: hasUnsavedChanges,
+    title: busy ? 'Leave while starting the conversation?' : 'Discard new message?',
+    message: busy
+      ? 'The send may already be in progress, but this screen will not reopen after you leave.'
+      : 'The recipients, message, and attachments in this draft will be cleared.',
+    onDiscard: () => {
+      abandonedRef.current = true;
+      releaseForwardProtection();
+    },
+  });
 
   // Any confirmed-false recipient auto-switches the compose to SMS so the send routes correctly
   // without guessing. The original account owns both request admission and result publication;
@@ -349,7 +373,7 @@ export default function NewChatScreen(): React.JSX.Element {
         service,
         accountLease,
       );
-      if (!accountLease.isCurrent()) return;
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) {
         const sent = await sendImages({ chatGuid: guid, images: staged }, accountLease);
@@ -359,10 +383,10 @@ export default function NewChatScreen(): React.JSX.Element {
       // removed forward files were deliberately excluded; neither case needs the handoff pins.
       // A thrown attachment send skips this boundary and retains protection for a safe retry.
       releaseForwardProtection();
-      if (!accountLease.isCurrent()) return;
-      router.replace(`/chat/${encodeURIComponent(guid)}`);
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
+      navigateWithoutPrompt(() => router.replace(`/chat/${encodeURIComponent(guid)}`));
     } catch (e) {
-      if (!accountLease.isCurrent()) return;
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Log at ERROR: only error-level lines reach ErrorReportSink, and this is a user-visible
       // dead end (found on-device — the dialog appeared with NO log line anywhere, so a real
       // failure like an RCS bridge outage left zero telemetry).
@@ -372,7 +396,7 @@ export default function NewChatScreen(): React.JSX.Element {
         'Couldn’t start the conversation. Check the address and your server connection.',
       );
     } finally {
-      if (accountLease.isCurrent()) setBusy(false);
+      if (accountLease.isCurrent() && !abandonedRef.current) setBusy(false);
     }
   };
 

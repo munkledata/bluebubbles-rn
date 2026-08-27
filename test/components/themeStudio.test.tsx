@@ -1,6 +1,6 @@
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { fireEvent, renderWithTheme, screen, waitFor } from './support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from './support/renderWithTheme';
 import { ThemeStudio } from '@ui/theme/ThemeStudio';
 import { auditThemeContrast, cloneTokens } from '@ui/theme/editableTokens';
 import { gatorTheme, lightTheme } from '@ui/theme/tokens';
@@ -107,5 +107,41 @@ describe('ThemeStudio dark-only editor', () => {
 
     await fireEvent.press(screen.getByRole('button', { name: 'Apply unreadable theme anyway' }));
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+  });
+
+  it('requires an in-studio discard choice after theme fields change', async () => {
+    const onCancel = jest.fn();
+    await renderWithTheme(
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        }}
+      >
+        <ThemeStudio initialTokens={gatorTheme} onApply={jest.fn()} onCancel={onCancel} />
+      </SafeAreaProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('Theme name'), 'Changed theme');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Cancel theme changes' }));
+    });
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.getByText('Discard changes?')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByText('Keep Editing'));
+    });
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Cancel theme changes' }));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Discard'));
+    });
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });

@@ -78,6 +78,7 @@ export default function ThemesScreen(): React.JSX.Element {
 
   const [rows, setRows] = useState<CustomThemeRow[]>([]);
   const [editing, setEditing] = useState<Editing | null>(null);
+  const [studioCancelRequest, setStudioCancelRequest] = useState(0);
 
   // A mounted route can render once more while Disconnect replaces the account tree. Never let
   // already-resolved rows, the active marker, or an open editor from account A appear in that
@@ -377,7 +378,7 @@ export default function ThemesScreen(): React.JSX.Element {
           visible
           transparent
           animationType={editing.animationType}
-          onRequestClose={() => setEditing(null)}
+          onRequestClose={() => setStudioCancelRequest((request) => request + 1)}
           testID="global-theme-studio-modal"
         >
           <ThemeStudio
@@ -387,6 +388,7 @@ export default function ThemesScreen(): React.JSX.Element {
             showName
             onApply={onApply}
             onCancel={() => setEditing(null)}
+            cancelRequest={studioCancelRequest}
           />
         </Modal>
       ) : null}

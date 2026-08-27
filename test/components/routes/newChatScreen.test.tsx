@@ -86,6 +86,9 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('@/services', () => ({ createNewChat: jest.fn(), http: {} }));
 jest.mock('@/services/send', () => ({ sendImages: jest.fn() }));
+jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
+  useUnsavedChangesGuard: () => ({ navigateWithoutPrompt: (navigate: () => void) => navigate() }),
+}));
 jest.mock('@core/api/endpoints/handles', () => ({ checkIMessageAvailability: jest.fn() }));
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),

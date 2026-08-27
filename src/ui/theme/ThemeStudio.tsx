@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../primitives/Button';
@@ -57,6 +57,8 @@ export interface ThemeStudioProps {
    *  an inline error inside the editor (it's rendered in a Modal, so a stacked dialog is unreliable). */
   onApply: (tokens: ThemeTokens, name: string) => void | Promise<void>;
   onCancel: () => void;
+  /** Incremented by the owning Modal's Android onRequestClose callback. */
+  cancelRequest?: number;
 }
 
 /**
@@ -72,17 +74,43 @@ export function ThemeStudio({
   showName = true,
   onApply,
   onCancel,
+  cancelRequest = 0,
 }: ThemeStudioProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   // Fall back to the active global theme as a starting point when no tokens are passed.
   const seed = darkThemeOrFallback(initialTokens, theme);
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(seed, initialName ?? 'My Theme'));
+  const [initialDraft] = useState<Draft>(() => draftFrom(seed, initialName ?? 'My Theme'));
+  const [draft, setDraft] = useState<Draft>(initialDraft);
   // Inline validation / save error. Shown in the editor itself — NOT a dialog: this editor is
   // rendered inside a Modal, and Android reliably shows only one Modal at a time, so a stacked
   // dialog would not display (a themed-dialog-over-Modal regression).
   const [error, setError] = useState<string | null>(null);
   const [contrastConfirmation, setContrastConfirmation] = useState(false);
+  const [discardConfirmation, setDiscardConfirmation] = useState(false);
+  const lastCancelRequestRef = useRef(cancelRequest);
+
+  const dirty =
+    draft.name !== initialDraft.name ||
+    EDITABLE_COLORS.some((field) => draft.hex[field.key] !== initialDraft.hex[field.key]);
+
+  const requestCancel = useCallback((): void => {
+    if (discardConfirmation) {
+      setDiscardConfirmation(false);
+      return;
+    }
+    if (!dirty) {
+      onCancel();
+      return;
+    }
+    setDiscardConfirmation(true);
+  }, [dirty, discardConfirmation, onCancel]);
+
+  useEffect(() => {
+    if (cancelRequest === lastCancelRequestRef.current) return;
+    lastCancelRequestRef.current = cancelRequest;
+    requestCancel();
+  }, [cancelRequest, requestCancel]);
 
   // Live preview/audit tokens are built only when every hex is valid. An in-progress invalid edit
   // keeps the safe base preview and cannot enter the contrast math.
@@ -103,6 +131,7 @@ export function ThemeStudio({
   const updateDraft = (next: Draft): void => {
     setDraft(next);
     setContrastConfirmation(false);
+    setDiscardConfirmation(false);
     setError(null);
   };
 
@@ -147,7 +176,7 @@ export function ThemeStudio({
     <View style={[styles.sheet, { backgroundColor: theme.color.background }]}>
       <View style={[styles.sheetHeader, { paddingTop: insets.top + 8 }]}>
         <Pressable
-          onPress={onCancel}
+          onPress={requestCancel}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Cancel theme changes"
@@ -166,6 +195,29 @@ export function ThemeStudio({
           </Text>
         </Pressable>
       </View>
+      {discardConfirmation ? (
+        <View
+          style={[
+            styles.discardBar,
+            {
+              backgroundColor: theme.color.secondaryBackground,
+              borderColor: theme.color.separator,
+            },
+          ]}
+        >
+          <Text style={[styles.discardText, { color: theme.color.label }]}>Discard changes?</Text>
+          <View style={styles.discardActions}>
+            <Pressable onPress={() => setDiscardConfirmation(false)} accessibilityRole="button">
+              <Text style={[styles.discardAction, { color: theme.color.tint }]}>Keep Editing</Text>
+            </Pressable>
+            <Pressable onPress={onCancel} accessibilityRole="button">
+              <Text style={[styles.discardAction, { color: theme.color.destructive }]}>
+                Discard
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {error ? (
         <View style={[styles.errorBar, { backgroundColor: theme.color.secondaryBackground }]}>
           <Text style={[styles.errorText, { color: theme.color.destructive }]}>{error}</Text>
@@ -300,6 +352,18 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '600' },
   errorBar: { paddingHorizontal: 16, paddingVertical: 8 },
   errorText: { fontSize: 13 },
+  discardBar: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    gap: 10,
+  },
+  discardText: { fontSize: 15, fontWeight: '600' },
+  discardActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 20 },
+  discardAction: { fontSize: 15, fontWeight: '600' },
   content: { padding: 16, paddingBottom: 60, gap: 0 },
   contrastWarning: {
     borderWidth: StyleSheet.hairlineWidth,

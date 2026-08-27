@@ -2,6 +2,7 @@ import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Image } from 'expo-image';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  BackHandler,
   findNodeHandle,
   Keyboard,
   Pressable,
@@ -75,6 +76,17 @@ interface ComposerProps {
   /** Pre-stage attachments into the tray on mount (e.g. a photo shared INTO this chat via the
    *  Android Direct Share row). Seeded once; the user reviews + taps send. */
   initialAttachments?: PendingAttachment[];
+  /** Whether this composer is the active chat surface (false while multi-select replaces it). */
+  active?: boolean;
+  /** Reports authored state that is NOT covered by the normal per-chat text draft. */
+  onRemovalStateChange?: (state: ComposerRemovalState) => void;
+}
+
+export interface ComposerRemovalState {
+  /** The current edit differs from the original message and would be lost on removal. */
+  hasUnsavedEdit: boolean;
+  /** Attachments, subject, or mention metadata are not part of the persisted body-text draft. */
+  hasUnsavedDraftMetadata: boolean;
 }
 
 /**
@@ -104,6 +116,8 @@ export const Composer = React.memo(function Composer({
   initialText,
   onDraftChange,
   initialAttachments,
+  active = true,
+  onRemovalStateChange,
 }: ComposerProps): React.JSX.Element {
   const theme = useTheme();
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
@@ -177,7 +191,7 @@ export const Composer = React.memo(function Composer({
   }, []);
 
   useEffect(() => {
-    if (inputTag == null) return;
+    if (!active || inputTag == null) return;
     return attachPasteListener(inputTag, ({ files, dropped }) => {
       // Only `setPending` (stable) is used here, so the listener never needs re-attaching when
       // the composer re-renders — which would otherwise churn the native registration on every
@@ -191,7 +205,7 @@ export const Composer = React.memo(function Composer({
       // Silence would read as "paste is broken" — say so when nothing could be staged.
       if (files.length === 0 && dropped > 0) showToast("Couldn't read that pasted file");
     });
-  }, [inputTag]);
+  }, [active, inputTag]);
   const removePending = (uri: string): void =>
     setPending((cur) => cur.filter((p) => p.uri !== uri));
   const toggleTray = (): void =>
@@ -210,6 +224,21 @@ export const Composer = React.memo(function Composer({
   useEffect(() => {
     if (kbVisible) setTrayOpen(false);
   }, [kbVisible]);
+  useEffect(() => {
+    if (!active) {
+      setTrayOpen(false);
+      inputRef.current?.blur();
+      Keyboard.dismiss();
+    }
+  }, [active]);
+  useEffect(() => {
+    if (!active || !trayOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setTrayOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [active, trayOpen]);
   const handlePickFiles = (): void => {
     const p = onPickFiles?.();
     if (p) void p.then((items) => items.forEach(addPending));
@@ -223,6 +252,11 @@ export const Composer = React.memo(function Composer({
     typingActive.current = active;
     onTyping?.(active);
   };
+  useEffect(() => {
+    if (active) return;
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    emitTyping(false);
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   const onChangeText = (value: string): void => {
     setText(value);
     queueDraft(value);
@@ -240,10 +274,20 @@ export const Composer = React.memo(function Composer({
   // Prefill the input when an edit starts, stashing whatever draft it displaces so ending the edit
   // can put it back (otherwise editing a message silently discards the in-progress draft).
   const preEditRef = useRef('');
+  const editingActiveRef = useRef(false);
   useEffect(() => {
     if (editingText != null) {
-      preEditRef.current = draftStateRef.current.text;
+      if (!editingActiveRef.current) preEditRef.current = draftStateRef.current.text;
+      editingActiveRef.current = true;
       setText(editingText);
+      return;
+    }
+    // Route-level Back can cancel edit mode by clearing the parent `editing` prop. Restore the
+    // displaced draft here as well as in the visible Cancel handler so both paths are lossless.
+    if (editingActiveRef.current) {
+      editingActiveRef.current = false;
+      setText(preEditRef.current);
+      draftStateRef.current = { ...draftStateRef.current, text: preEditRef.current };
     }
   }, [editingText]);
 
@@ -272,6 +316,15 @@ export const Composer = React.memo(function Composer({
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftStateRef = useRef({ text: '', isEditing: false, onDraftChange });
   draftStateRef.current = { text, isEditing, onDraftChange };
+
+  // Body text already flushes to the per-chat DB draft below. Report only the authored pieces
+  // that cannot be reconstructed after this component or route is removed.
+  const hasUnsavedEdit = isEditing && text !== editingText;
+  const hasUnsavedDraftMetadata =
+    subject.trim().length > 0 || pending.length > 0 || mentions.length > 0;
+  useEffect(() => {
+    onRemovalStateChange?.({ hasUnsavedEdit, hasUnsavedDraftMetadata });
+  }, [hasUnsavedDraftMetadata, hasUnsavedEdit, onRemovalStateChange]);
   const queueDraft = (value: string): void => {
     if (!onDraftChange || isEditing) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -512,6 +565,7 @@ export const Composer = React.memo(function Composer({
 
       {subjectEnabled && !isEditing ? (
         <TextInput
+          editable={active}
           value={subject}
           onChangeText={setSubject}
           placeholder="Subject"
@@ -556,6 +610,7 @@ export const Composer = React.memo(function Composer({
         ) : null}
         <TextInput
           ref={inputRef}
+          editable={active}
           multiline
           value={text}
           onChangeText={onChangeText}

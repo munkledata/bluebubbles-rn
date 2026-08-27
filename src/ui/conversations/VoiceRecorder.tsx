@@ -31,6 +31,7 @@ export function VoiceRecorder({
   const theme = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [elapsed, setElapsed] = useState(0);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const started = useRef(false);
   const finished = useRef(false);
 
@@ -92,26 +93,59 @@ export function VoiceRecorder({
     onClose();
   };
 
+  const requestSystemCancel = (): void => {
+    if (confirmDiscard) {
+      setConfirmDiscard(false);
+      return;
+    }
+    if (!started.current) {
+      void finish(false);
+      return;
+    }
+    setConfirmDiscard(true);
+  };
+
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => void finish(false)}>
-      <Pressable style={styles.backdrop} onPress={() => void finish(false)}>
-        <Pressable style={[styles.sheet, { backgroundColor: theme.color.secondaryBackground }]}>
-          <Text style={[styles.rec, { color: theme.color.destructive }]}>
-            ● Recording {fmt(elapsed)}
-          </Text>
-          <View style={styles.row}>
-            <Pressable onPress={() => void finish(false)} hitSlop={8}>
-              <Text style={[styles.cancel, { color: theme.color.secondaryLabel }]}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => void finish(true)}
-              style={[styles.send, { backgroundColor: theme.color.tint }]}
-            >
-              <Text style={[styles.sendText, { color: readableTextOn(theme.color.tint) }]}>
-                Send
+    <Modal visible transparent animationType="fade" onRequestClose={requestSystemCancel}>
+      <Pressable style={styles.backdrop} onPress={requestSystemCancel}>
+        <Pressable
+          style={[styles.sheet, { backgroundColor: theme.color.secondaryBackground }]}
+          onPress={(event) => event.stopPropagation()}
+        >
+          {confirmDiscard ? (
+            <>
+              <Text style={[styles.confirmTitle, { color: theme.color.label }]}>
+                Discard this recording?
               </Text>
-            </Pressable>
-          </View>
+              <View style={styles.row}>
+                <Pressable onPress={() => setConfirmDiscard(false)} hitSlop={8}>
+                  <Text style={[styles.cancel, { color: theme.color.tint }]}>Keep Recording</Text>
+                </Pressable>
+                <Pressable onPress={() => void finish(false)} hitSlop={8}>
+                  <Text style={[styles.cancel, { color: theme.color.destructive }]}>Discard</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.rec, { color: theme.color.destructive }]}>
+                ● Recording {fmt(elapsed)}
+              </Text>
+              <View style={styles.row}>
+                <Pressable onPress={() => void finish(false)} hitSlop={8}>
+                  <Text style={[styles.cancel, { color: theme.color.secondaryLabel }]}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void finish(true)}
+                  style={[styles.send, { backgroundColor: theme.color.tint }]}
+                >
+                  <Text style={[styles.sendText, { color: readableTextOn(theme.color.tint) }]}>
+                    Send
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -122,6 +156,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: { padding: 24, paddingBottom: 40, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
   rec: { fontSize: 18, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
+  confirmTitle: { fontSize: 18, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cancel: { fontSize: 16 },
   send: { paddingHorizontal: 22, paddingVertical: 10, borderRadius: 20 },

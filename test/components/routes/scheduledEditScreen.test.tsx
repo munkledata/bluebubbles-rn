@@ -20,6 +20,9 @@ jest.mock('@ui', () => ({
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@db/repositories', () => ({ getScheduledById: jest.fn() }));
 jest.mock('@/services/send', () => ({ editScheduled: jest.fn() }));
+jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
+  useUnsavedChangesGuard: () => ({ navigateWithoutPrompt: (navigate: () => void) => navigate() }),
+}));
 jest.mock('@ui/conversations/pickDateTime', () => ({ pickFutureDateTime: jest.fn() }));
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: '42' }),

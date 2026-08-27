@@ -314,6 +314,7 @@ function ChatSettingsScreen({
   const hasUnavailableLightTheme = storedChatTheme?.mode === 'light';
   const hasBackground = !!chatThemeData?.backgroundUri;
   const [studioAnimation, setStudioAnimation] = useState<'none' | 'slide' | null>(null);
+  const [studioCancelRequest, setStudioCancelRequest] = useState(0);
 
   // Shared media (Phase 2.1): photos/videos/documents/links for the details sections.
   // Reactive on messages + attachments so a new shared item appears without a refresh.
@@ -971,7 +972,7 @@ function ChatSettingsScreen({
           visible
           transparent
           animationType={studioAnimation}
-          onRequestClose={closeStudio}
+          onRequestClose={() => setStudioCancelRequest((request) => request + 1)}
           testID="chat-theme-studio-modal"
         >
           <ThemeStudio
@@ -980,6 +981,7 @@ function ChatSettingsScreen({
             showName={false}
             onApply={(tokens) => applyChatTheme(tokens)}
             onCancel={closeStudio}
+            cancelRequest={studioCancelRequest}
           />
         </Modal>
       ) : null}

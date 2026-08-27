@@ -34,7 +34,12 @@ const config: ExpoConfig = {
     // com.bluegreengatorapps.messages) in the repo root, or set GOOGLE_SERVICES_JSON to
     // a file secret for EAS builds. The native build FAILS without this file.
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
-    predictiveBackGestureEnabled: false,
+    // Opt into Android's current back dispatcher. Route-level authored-data guards use
+    // Expo Router's native-stack prevention so protected authored-data routes do not silently
+    // drop work on a committed Back.
+    // Interactive preview/progress still depends on the installed RN/Router native stack and
+    // remains an exact-device verification item (ANDROID-02).
+    predictiveBackGestureEnabled: true,
     // No adb/device-transfer backups (SEC-6): the SQLCipher key lives in the Android Keystore
     // and never leaves the device, so a restored DB would be undecryptable anyway. This must be
     // the top-level Expo android option; expo-build-properties has no allowBackup setting.

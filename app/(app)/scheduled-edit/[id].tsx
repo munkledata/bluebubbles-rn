@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { asRecurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
@@ -13,6 +13,13 @@ import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
 import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatTime } from '@utils';
+import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
+
+interface ScheduledDraft {
+  text: string;
+  when: number | null;
+  recurrence: Recurrence | null;
+}
 
 /** Edit a still-pending scheduled message: change the text and/or the fire time. */
 export default function ScheduledEditScreen(): React.JSX.Element {
@@ -26,6 +33,33 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [initialDraft, setInitialDraft] = useState<ScheduledDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const abandonedRef = useRef(false);
+
+  const hasUnsavedChanges =
+    loaded &&
+    initialDraft != null &&
+    (text !== initialDraft.text ||
+      when !== initialDraft.when ||
+      recurrence !== initialDraft.recurrence);
+  const { navigateWithoutPrompt } = useUnsavedChangesGuard({
+    enabled: hasUnsavedChanges,
+    title: saving ? 'Leave while saving?' : 'Discard scheduled-message changes?',
+    message: saving
+      ? 'The update may still finish, but this screen will not navigate again after you leave.'
+      : 'Your edited message, time, and repeat setting will be lost.',
+    onDiscard: () => {
+      abandonedRef.current = true;
+    },
+  });
+
+  useEffect(() => {
+    abandonedRef.current = false;
+    return () => {
+      abandonedRef.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -33,9 +67,15 @@ export default function ScheduledEditScreen(): React.JSX.Element {
         const row = await getScheduledById(getDatabase(), schedId);
         if (!accountLease.isCurrent()) return;
         if (row) {
+          const nextRecurrence = asRecurrence(row.recurrence);
           setText(row.text);
           setWhen(row.scheduledFor);
-          setRecurrence(asRecurrence(row.recurrence));
+          setRecurrence(nextRecurrence);
+          setInitialDraft({
+            text: row.text,
+            when: row.scheduledFor,
+            recurrence: nextRecurrence,
+          });
         }
       } catch (e) {
         if (!accountLease.isCurrent()) return;
@@ -61,9 +101,10 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   };
 
   const save = (): void => {
-    if (!accountLease.isCurrent()) return;
+    if (!accountLease.isCurrent() || saving) return;
     const trimmed = text.trim();
     if (!trimmed) return;
+    setSaving(true);
     // editScheduled mirrors the change to the server first (for server-backed rows); a failed
     // server update rethrows so we surface it instead of silently diverging.
     void editScheduled(
@@ -72,12 +113,17 @@ export default function ScheduledEditScreen(): React.JSX.Element {
       accountLease,
     )
       .then(() => {
-        if (accountLease.isCurrent()) router.back();
+        if (accountLease.isCurrent() && !abandonedRef.current) {
+          navigateWithoutPrompt(() => router.back());
+        }
       })
       .catch(() => {
-        if (accountLease.isCurrent()) {
+        if (accountLease.isCurrent() && !abandonedRef.current) {
           showDialog('Scheduled', 'Couldn’t update — the server is unreachable.');
         }
+      })
+      .finally(() => {
+        if (accountLease.isCurrent() && !abandonedRef.current) setSaving(false);
       });
   };
 
@@ -87,11 +133,18 @@ export default function ScheduledEditScreen(): React.JSX.Element {
         title="Edit Scheduled"
         onBack={() => router.back()}
         right={
-          <Pressable onPress={save} disabled={!text.trim()} accessibilityRole="button">
+          <Pressable
+            onPress={save}
+            disabled={!text.trim() || saving}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !text.trim() || saving }}
+          >
             <Text
               style={[
                 styles.save,
-                { color: text.trim() ? theme.color.tint : theme.color.tertiaryLabel },
+                {
+                  color: text.trim() && !saving ? theme.color.tint : theme.color.tertiaryLabel,
+                },
               ]}
             >
               Save

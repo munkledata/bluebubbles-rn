@@ -32,6 +32,8 @@ const GUID = 'iMessage;-;+15551234567';
 const PRIVATE_WALLPAPER_URI = 'file:///private/chat-wallpaper-r-canary-9f31d7.jpg';
 const SECOND_WALLPAPER_URI = 'file:///private/chat-wallpaper-second-74c02a.jpg';
 const mockPush = jest.fn();
+const mockNavigationDispatch = jest.fn();
+const mockUsePreventRemove = jest.fn();
 const mockIsDevServer = jest.fn(() => false);
 // Mutable so a test can hand the SAME mounted screen a new guid (reused-instance path).
 let mockGuid = GUID;
@@ -66,9 +68,14 @@ jest.mock('expo-router', () => {
   return {
     useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
     useLocalSearchParams: () => ({ guid: mockGuid }),
+    useNavigation: () => ({ dispatch: mockNavigationDispatch }),
     useRouter: () => ({ push: mockPush }),
   };
 });
+jest.mock('expo-router/react-navigation', () => ({
+  usePreventRemove: (enabled: boolean, callback: (options: unknown) => void) =>
+    mockUsePreventRemove(enabled, callback),
+}));
 
 // Zero by default (what the rest of the suite wants); mutable so the keyboard-inset test can hand
 // the selection bar a realistic navigation bar.
@@ -923,6 +930,27 @@ describe('ChatScreen — keyboard avoidance contract', () => {
     const barUp = (await screen.findByText('2 selected')).parent;
     const flatUp = Object.assign({}, ...[barUp?.props.style].flat(Infinity).filter(Boolean));
     expect(flatUp.paddingBottom).toBe(14);
+  });
+
+  it('keeps Composer mounted and makes Back exit selection before removing the chat', async () => {
+    await renderWithTheme(<ChatScreen />);
+    const composerInstance = mockCaptured.composer!.__instance;
+
+    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    await run(() => mockCaptured.overlay!.onSelect());
+    expect(await screen.findByText('1 selected')).toBeTruthy();
+    expect(mockCaptured.composer!.__instance).toBe(composerInstance);
+    expect(mockCaptured.composer!.active).toBe(false);
+
+    const latestGuardCall =
+      mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+    expect(latestGuardCall?.[0]).toBe(true);
+    await run(() => latestGuardCall?.[1]({ data: { action: { type: 'GO_BACK' } } }));
+
+    expect(screen.queryByText('1 selected')).toBeNull();
+    expect(mockCaptured.composer!.__instance).toBe(composerInstance);
+    expect(mockCaptured.composer!.active).toBe(true);
+    expect(mockNavigationDispatch).not.toHaveBeenCalled();
   });
 });
 

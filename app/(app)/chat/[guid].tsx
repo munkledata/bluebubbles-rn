@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,7 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { showDialog } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   getChatIdByGuid,
@@ -82,6 +83,7 @@ import {
   TypingBubble,
   UploadStatusBar,
   useTheme,
+  type ComposerRemovalState,
   type PendingAttachment,
 } from '@ui';
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
@@ -284,6 +286,7 @@ function ChatScreenInner({
   // '' (not undefined) is the strict-TS-safe way to drop a param — the existing guards treat ''
   // as absent (`focusDate ? … : NaN`, findIndex('') === -1).
   const router = useRouter();
+  const navigation = useNavigation();
   const exitAnchor = useCallback((): void => {
     setJump(null);
     router.setParams({ focus: '', focusDate: '' });
@@ -645,6 +648,68 @@ function ChatScreenInner({
     [accountLease, guid],
   );
 
+  const [composerRemovalState, setComposerRemovalState] = useState<ComposerRemovalState>({
+    hasUnsavedEdit: false,
+    hasUnsavedDraftMetadata: false,
+  });
+  const backConfirmationPendingRef = useRef(false);
+  const shouldHandleBack =
+    selectedGuids != null ||
+    replyTo != null ||
+    editing != null ||
+    composerRemovalState.hasUnsavedDraftMetadata;
+
+  // Android/Header Back peels the active chat layer before removing the route. Ordinary body text
+  // is not included: Composer already flushes it to the per-chat DB draft on route removal.
+  usePreventRemove(shouldHandleBack, ({ data }) => {
+    if (selectedGuids != null) {
+      setSelectedGuids(null);
+      return;
+    }
+    if (editing != null) {
+      if (!composerRemovalState.hasUnsavedEdit) {
+        setEditing(null);
+        return;
+      }
+      if (backConfirmationPendingRef.current) return;
+      backConfirmationPendingRef.current = true;
+      showConfirm({
+        title: 'Discard message edit?',
+        message: 'The changes to this message will be lost.',
+        confirmText: 'Discard',
+        destructive: true,
+        onCancel: () => {
+          backConfirmationPendingRef.current = false;
+        },
+        onConfirm: () => {
+          backConfirmationPendingRef.current = false;
+          setEditing(null);
+        },
+      });
+      return;
+    }
+    if (replyTo != null) {
+      setReplyTo(null);
+      return;
+    }
+    if (!composerRemovalState.hasUnsavedDraftMetadata || backConfirmationPendingRef.current) return;
+    backConfirmationPendingRef.current = true;
+    showConfirm({
+      title: 'Discard message attachments and options?',
+      message:
+        'Attachments, the subject, and mention details are not part of the saved text draft.',
+      confirmText: 'Discard',
+      destructive: true,
+      onCancel: () => {
+        backConfirmationPendingRef.current = false;
+      },
+      onConfirm: () => {
+        backConfirmationPendingRef.current = false;
+        navigation.dispatch(data.action);
+      },
+    });
+  });
+
   // The inline tray's "Files" button — pick documents and return them to STAGE as pending
   // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
   // beyond the OS document picker itself.
@@ -800,9 +865,9 @@ function ChatScreenInner({
       accountLease={accountLease}
     />
   );
-  // Multi-select replaces the composer with a selection action bar. The Composer's unmount flush
-  // persists any in-progress draft to kv AND to `draft` state (via onDraftChange), so exiting
-  // select mode remounts the Composer with a fresh `initialText` and restores the draft.
+  // Multi-select visually replaces the composer with a selection action bar. Keep Composer
+  // MOUNTED (display:none below): unmount/remount preserved body text but destroyed attachments,
+  // subject/mention metadata, and in-progress edits.
   const selectionBar = selectedGuids ? (
     // Add the bottom safe-area inset (like the Composer this bar replaces) so Copy/Delete/Done
     // clear the Android system nav bar under edge-to-edge instead of hiding behind it.
@@ -832,10 +897,13 @@ function ChatScreenInner({
     </View>
   ) : null;
 
-  const bottomStack = selectedGuids ? (
-    selectionBar
-  ) : (
-    <>
+  const composerStack = (
+    <View
+      style={selectedGuids ? styles.hiddenComposer : null}
+      pointerEvents={selectedGuids ? 'none' : 'auto'}
+      accessibilityElementsHidden={selectedGuids != null}
+      importantForAccessibility={selectedGuids ? 'no-hide-descendants' : 'auto'}
+    >
       {isTyping ? <TypingBubble /> : null}
       {/* Renders nothing unless this chat has an upload in flight. It lives INSIDE the measured
           bottom bar, so appearing/disappearing re-lands the message list through the wrapper's
@@ -870,7 +938,15 @@ function ChatScreenInner({
         initialText={draft ?? sharedText ?? undefined}
         onDraftChange={onDraftChange}
         initialAttachments={sharedAttachments.length > 0 ? sharedAttachments : undefined}
+        active={selectedGuids == null && screenFocused}
+        onRemovalStateChange={setComposerRemovalState}
       />
+    </View>
+  );
+  const bottomStack = (
+    <>
+      {selectionBar}
+      {composerStack}
     </>
   );
 
@@ -1038,6 +1114,7 @@ const JUMP_UNREAD_MIN = 6;
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  hiddenComposer: { display: 'none' },
   // Placeholder while the first message page loads, so the list mounts already-populated
   // (see messagesLoading) — occupies the list's slot so the layout doesn't jump on arrival.
   listLoading: { alignItems: 'center', justifyContent: 'center' },
