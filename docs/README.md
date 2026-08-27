@@ -7,10 +7,10 @@ Start with the root [`README.md`](../README.md) for the product and architecture
 
 - [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) is the **only task-status authority**. It owns task ids,
   priorities, dependencies, blockers, acceptance criteria, and completion evidence.
-- [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the short exact-candidate operational gate. It does not replace
-  the engineering backlog.
+- [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the short candidate operational gate; it currently records no
+  conforming frozen candidate. It does not replace the engineering backlog.
 - [`DEVICE_VERIFICATION_CHECKLIST.md`](./DEVICE_VERIFICATION_CHECKLIST.md) preserves the retired v56 preparation
-  ledger. It is not executable for v57; `DEVICE-01` owns the candidate-specific replacement.
+  ledger. It is not executable for a replacement candidate; `DEVICE-01` owns the candidate-specific rewrite.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the private Internal Testing
   procedure; Play/EAS/server writes still require explicit owner approval.
 

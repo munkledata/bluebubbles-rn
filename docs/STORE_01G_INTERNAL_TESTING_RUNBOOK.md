@@ -1,56 +1,69 @@
 # STORE-01G — Internal Testing readiness runbook
 
-> **Status (2026-08-25): DRAFT / OWNER INPUT REQUIRED.** This runbook prepares the private Google
-> Play Internal Testing round. It does not authorize or prove an upload, submission, tester invitation,
-> server deployment, Play acceptance, install, or device result.
+> **Status (2026-08-27): DRAFT / NO CURRENT CANDIDATE / OWNER INPUT REQUIRED.** This runbook prepares
+> a future private Google Play Internal Testing round. It does not authorize or prove a build, upload,
+> submission, tester invitation, server deployment, Play acceptance, install, or device result.
 
 This is the secret-free operational companion to `STORE-01`. Keep individual tester identities,
 private endpoints, credentials, QR payloads, and the Play opt-in link outside Git. Record only the
 non-secret labels, owners, counts, dates, and evidence references needed to reproduce the round.
 
-## 1. Exact candidate boundary
+## 1. Candidate boundary — replacement not built
 
-| Field                      | Frozen value                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------- |
-| App/package                | Gator / `com.bluegreengatorapps.messages`                                                         |
-| App version                | `0.1.41`                                                                                          |
-| Android version code       | `57`                                                                                              |
-| Candidate source commit    | `8564b348d02c4e218e8a75a6a36e265ec5740772`                                                        |
-| Local AAB                  | `gator-release-0.1.41-v57-8564b34.aab` — ignored, never commit it                                 |
-| Size                       | `55,768,266` bytes                                                                                |
-| SHA-256                    | `3ad096fe474fb35b8f0619ca9b9ac337dc3613d16a1df1f98d638176ef25be2b`                                |
-| Upload certificate SHA-256 | `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43` |
-| Packaged boundary          | `arm64-v8a`; minimum SDK 24; target SDK 36; backups disabled                                      |
-| Build boundary             | Candidate built locally; release scripts enforce local-only EAS builds                            |
-| Distribution boundary      | Private Google Play Internal Testing only; not uploaded or submitted                              |
+No conforming current candidate exists. A replacement must be frozen before any tester or Play work:
 
-### Retired historical candidate — static proof only
+| Field                      | Required replacement value                                                   |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| App/package                | Gator / `com.bluegreengatorapps.messages`                                     |
+| App version                | `[OPEN — do not guess]`                                                      |
+| Android version code       | `[OPEN — obtain from the approved build receipt]`                            |
+| Candidate source commit    | `[OPEN — exact freeze containing post-v57 commit 9046e27]`                   |
+| Local AAB                  | `[OPEN — ignored, never commit it]`                                          |
+| Size                       | `[OPEN]`                                                                     |
+| SHA-256                    | `[OPEN]`                                                                     |
+| Upload certificate SHA-256 | `[OPEN — record from the exact replacement]`                                 |
+| Packaged boundary          | `[OPEN — inspect the exact replacement]`                                     |
+| Build boundary             | Local-only EAS build; separate explicit approval required                    |
+| Distribution boundary      | Private Google Play Internal Testing only; no upload or submission authorized |
+
+### Frozen nonconforming v57 — static proof only
+
+The former `0.1.41` / version-code-57 candidate remains preserved at source commit
+`8564b348d02c4e218e8a75a6a36e265ec5740772` as
+`gator-release-0.1.41-v57-8564b34.aab` (`55,768,266` bytes), SHA-256
+`3ad096fe474fb35b8f0619ca9b9ac337dc3613d16a1df1f98d638176ef25be2b`, upload certificate
+SHA-256 `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`.
+It is arm64-v8a, minimum SDK 24, target SDK 36, and backups-disabled, but it predates the approved
+`PLAY-02` removal in `9046e27`. Do not upload, submit, install, or use it as current runtime evidence.
+
+### Earlier retired v56 — static proof only
 
 The former candidate remains preserved as `0.1.40` / version code `56`, source commit
 `5d367eb58e38126258423f1cd9ce0da42b179f7f`, AAB
 `gator-release-0.1.40-v56-5d367eb.aab` (`55,729,707` bytes), SHA-256
-`926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`. It is not the current
-Internal Testing candidate. Static proof remains historical; no Play, tester, install/update,
-device, notification, or cleanup result transfers to version code `57`.
+`926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`. Static proof remains
+historical; no Play, tester, install/update, device, notification, or cleanup result transfers to a
+replacement candidate.
 
-Do not rebuild the current candidate. Production auto-increment would consume version code `58` and create
-a different artifact that needs a new identity and verification record. Any future submission must
-name this exact local file and verify its digest immediately beforehand; never select an ambiguous
-“latest” build.
+No replacement build is approved in this runbook. A future approved local build creates a different
+artifact that needs a new identity and verification record; do not assume its version code. Any
+future submission must name that exact replacement file and verify its digest immediately beforehand;
+never select an ambiguous “latest” build.
 
 ### Current execution mode
 
-The owner has locked version code `57` for this Internal Testing round. Follow the authoritative `STORE-01` execution
-mode in `WORK_PLAN_2026-08-03.md`: do not fold later source work into this artifact's evidence, create
-more host-proof children, rebuild, or rerun broad host gates unless exact-AAB execution finds a real
-blocking defect. Documentation and live-evidence updates need only narrow format, diff, and exact-value
-checks. Use this runbook as the current handoff; future sessions should read only the Work Plan register
-and `STORE-01` section, `RELEASE_CHECKLIST.md` section 0, and this file unless a specific contradiction
-requires history. Put progress in the evidence ledger below and consolidate the parent update at closure.
+The owner approved the post-v57 `PLAY-02` removal but has not approved a replacement build. Follow the
+authoritative `STORE-01` execution mode in `WORK_PLAN_2026-08-03.md`: do not rebuild, upload, submit,
+create more host-proof children, or rerun broad host gates. Use this runbook as the current handoff;
+future sessions should read only the Work Plan register and `STORE-01` section,
+`RELEASE_CHECKLIST.md` section 0, and this file unless a specific contradiction requires history.
+Put progress in the evidence ledger below and consolidate the parent update at closure.
 
 ## 2. Current proven state
 
 - `eas.json` has one Android submission target: Google Play track `internal`.
+- No conforming current candidate exists. Frozen v57 predates `9046e27` and is not eligible for the
+  next round.
 - The release build phase is local-only and cannot submit. A separate submit phase previews by default and requires
   `--execute` plus an interactive candidate-specific phrase; no upload or submission was run for v57. The existing
   GitHub Actions native lane can compile disposable fixture/debug-signed APK/AAB verification artifacts; those are
@@ -107,7 +120,7 @@ lists Android 16 through its latest published entry. Carrier and rollout timing 
 device's observed Android version and build during execution before awarding candidate evidence.
 
 The project owner deferred physical-phone inspection on 2026-08-23. All Play-install and
-device-dependent evidence remains open; no version-code-57 device result is claimed.
+device-dependent evidence remains open; no replacement-candidate device result is claimed.
 
 The owner approved the update baseline on 2026-08-23. It is the most recent locally documented Play
 release with a defensible source label: commit `0564a80b572f16faf63c4d7b13c798a72451c845`
@@ -159,7 +172,7 @@ its data as test evidence.
 ### Retired v56 notice — approved historical v1
 
 This notice was approved for the retired version-code-56 candidate. Preserve it as history; do not
-send it for the current round.
+send it for a future round.
 
 > Gator 0.1.40 (56) is an unfinished Android-only build for a small private test. It is not a public
 > release or evidence of Google Play policy compliance. Use only the supplied synthetic test account
@@ -181,12 +194,13 @@ Notice owner: `Project owner`
 
 Approved version/date: `v1 / 2026-08-23`
 
-### Current v57 notice — draft v2
+### Replacement notice — draft v3
 
-The owner must freshly approve this candidate-specific notice before it is sent:
+Draft v2 for frozen v57 was never approved and is retired. After a replacement is frozen, fill its
+exact identity and obtain fresh owner approval before sending this notice:
 
-> Gator 0.1.41 (57) is an unfinished Android-only build for a small private test. It is not a public
-> release or evidence of Google Play policy compliance. Use only the supplied synthetic test account
+> Gator [VERSION] ([VERSION CODE]) is an unfinished Android-only build for a small private test. It is
+> not a public release or evidence of Google Play policy compliance. Use only the supplied synthetic test account
 > and content; do not connect a personal or production server, contacts, messages, files, or Apple
 > identity. The app requires a separately managed compatible Mac server. This candidate contains
 > native libraries only for 64-bit ARM Android devices, uses a dark-only interface, does not accept
@@ -203,12 +217,13 @@ The owner must freshly approve this candidate-specific notice before it is sent:
 
 Notice owner: `Project owner`
 
-Approved version/date: `[OPEN — v2 not approved]`
+Approved version/date: `[OPEN — replacement notice not approved]`
 
 ## 6. Staged tester journey
 
-Each result must identify version `0.1.41` / code `57`, candidate source `8564b34`, device model,
-Android version, test date, and tester evidence alias. Do not reuse the stale `0.1.28` device record.
+Each result must identify the replacement version/code, exact source commit containing `9046e27`,
+device model, Android version, test date, and tester evidence alias. Do not reuse the stale `0.1.28`,
+v56, or v57 device records.
 
 1. **Access preflight**
    - Confirm live Play Console shows only the intended Internal Testing release for this round.
@@ -221,7 +236,7 @@ Android version, test date, and tester evidence alias. Do not reuse the stale `0
    - On the clean-install branch, have a non-admin tester open the private opt-in link, opt in, and
      install from Google Play.
    - On the separate update branch, record the approved prior app version/code and authorized source,
-     then update through Play to code `57`.
+     then update through Play to the exact replacement version code recorded in section 1.
    - Record the installed package/version and Play-provided artifact evidence. Record Play App
      Signing's delivery-certificate fingerprint separately from the upload-certificate fingerprint.
 3. **Connection and initial sync**
@@ -258,7 +273,7 @@ host test into device evidence.
 | Live track inventory           | Project owner        | 2026-08-25 | BLOCKED — account opens Play signup  |                            |
 | Play App Signing certificate   |                      |            | OPEN                                 |                            |
 | Tester list/count              |                      |            | OPEN                                 |                            |
-| Tester notice v2               | Project owner        |            | OPEN — not approved                  |                            |
+| Replacement tester notice      | Project owner        |            | OPEN — not approved                  |                            |
 | Feedback path round-trip       | Project owner        | 2026-08-23 | PASS — owner-confirmed               | Owner-held email record    |
 | Staged server dry-run          | Project owner        | 2026-08-23 | BLOCKED — isolated setup unavailable |                            |
 | Synthetic fixture manifest     |                      |            | OPEN                                 |                            |
@@ -277,8 +292,8 @@ Stop the round immediately if any of these occurs:
 - a tester sees production data or receives production credentials;
 - an unintended account can enroll or install;
 - Closed, Open, or Production contains an unexpected active/manual release;
-- the installed version is not code `57`, or the upload digest is not
-  `3ad096fe474fb35b8f0619ca9b9ac337dc3613d16a1df1f98d638176ef25be2b`;
+- the installed version, source, or upload digest differs from the exact replacement recorded in
+  section 1;
 - the staged server origin changes unexpectedly or requires insecure/unapproved access;
 - credentials, QR data, server URLs, message content, private file paths, or raw logs enter public
   feedback, Git, screenshots, or build output;
@@ -291,7 +306,6 @@ feedback/link state passes a read-only preflight, and the access plan has an ind
 exact-candidate device journeys, prompted declarations, cleanup, and tester-access evidence pass.
 
 Uploading or submitting the AAB is a separate external-state milestone requiring explicit owner
-approval, and no such approval is currently recorded. It must use the existing local
-`gator-release-0.1.41-v57-8564b34.aab` candidate only after rechecking SHA-256
-`3ad096fe474fb35b8f0619ca9b9ac337dc3613d16a1df1f98d638176ef25be2b`; it must not trigger a hosted
-EAS build or any promotion.
+approval, and no such approval is currently recorded. It must use the not-yet-built replacement
+recorded in section 1 only after rechecking its SHA-256. Frozen v57 is prohibited; submission must
+not trigger a hosted EAS build or any promotion.
