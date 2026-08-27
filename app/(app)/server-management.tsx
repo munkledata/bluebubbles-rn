@@ -492,6 +492,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
             busy={visibleRepairStatus === 'cancelling'}
             onPress={visibleRepairActive ? onCancelRepair : onStartRepair}
           />
+          <ActionRow
+            label="Restore Deleted Conversations"
+            disabled={!accountCurrent}
+            onPress={() => {
+              if (accountLease.isCurrent()) router.push('/deleted-chats');
+            }}
+          />
         </SettingsSection>
 
         <SettingsSection label="STATISTICS" style={styles.gap}>

@@ -2,8 +2,10 @@ import { logger } from '@core/secure';
 import type { SyncMarker } from '@core/sync';
 import {
   captureFullRepairPruneExposure,
+  chatExistsAndIsVisible,
   getSyncMarker,
   reconcileFullRepairPruneExposure,
+  restoreDeletedChatWithinTransaction,
   setSyncMarkerWithinTransaction,
   type FullRepairPruneExposure,
 } from '@db/repositories';
@@ -27,18 +29,21 @@ import {
   incrementalSync,
   sameFullSyncServerView,
   syncAllChats,
+  syncChatMessageRange,
   syncChatMessages,
+  syncSingleChat,
   syncDeletedMessages,
   type FullSyncServerView,
 } from './sync';
 
 /**
- * TWO slots, deliberately — they hold DIFFERENT work and must never substitute for each other.
+ * THREE slots, deliberately — they hold DIFFERENT work and must never substitute for each other.
  *
  * `syncInFlight` holds a full `runSync` (chat-list refresh + full/incremental branch + deletion
  * catch-up + the trailing contacts sync). `trackedInFlight` holds an out-of-band run published via
  * {@link runTrackedSync} — today the background WorkManager task, which pages ONLY an incremental
- * catch-up. Both are drained by {@link awaitSyncIdle}, which is what `forget()` needs; but a
+ * catch-up. `targetedRepairInFlight` holds the serialized user-invoked repair of one chat. All
+ * three are drained by {@link awaitSyncIdle}, which is what `forget()` needs; but a
  * foreground caller must never be handed the background run as if it were its own. It was, once:
  * one shared slot meant a boot / pull-to-refresh / resume arriving while the 15-minute task held
  * it returned that promise and did none of the pipeline — no chat-list refresh, no deletion
@@ -52,6 +57,8 @@ let syncInFlight: Promise<void> | null = null;
  */
 let inFlightEpoch: number | null = null;
 let trackedInFlight: Promise<void> | null = null;
+/** Manual per-chat repairs serialize with the two global sync owners without impersonating one. */
+let targetedRepairInFlight: Promise<void> | null = null;
 /** On-demand chat backfills run alongside the main pipeline but still belong to its teardown. */
 const auxiliaryInFlight = new Set<Promise<unknown>>();
 interface ActiveRepairRun {
@@ -63,8 +70,23 @@ interface ActiveRepairRun {
   slot: Promise<void> | null;
 }
 let activeRepair: ActiveRepairRun | null = null;
+export interface ChatRepairResult {
+  messages: number;
+  historyExhausted: boolean;
+  restored: boolean;
+}
+
+interface TargetedRepairRun {
+  readonly epoch: number;
+  readonly key: string;
+  readonly result: Promise<ChatRepairResult>;
+  readonly slot: Promise<void>;
+}
+
+const targetedRepairByKey = new Map<string, TargetedRepairRun>();
 let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
+const TARGETED_CHAT_REPAIR_MAX_MESSAGES = 500;
 
 /** Resolve once every currently-published run has STOPPED (settled), however it settled. */
 function settledAll(runs: Array<Promise<void> | null>): Promise<unknown> {
@@ -111,7 +133,7 @@ export function startSync(): Promise<void> {
   // Serialize behind a background catch-up (and behind a previous session's run) rather than
   // paging alongside it: both walk the same cursor, so overlapping them doubles the fetching and
   // interleaves two writers' marker writes.
-  const slot: Promise<void> = settledAll([syncInFlight, trackedInFlight])
+  const slot: Promise<void> = settledAll([syncInFlight, trackedInFlight, targetedRepairInFlight])
     .then(() => runSync())
     .finally(() => {
       // Only the run that still OWNS the slot may clear it — a successor may already have
@@ -146,7 +168,7 @@ export function startSync(): Promise<void> {
  * newer slot to older ones, so the two slots can never wait on each other.
  */
 export function runTrackedSync(run: () => Promise<void>): Promise<void> {
-  const slot: Promise<void> = settledAll([syncInFlight, trackedInFlight])
+  const slot: Promise<void> = settledAll([syncInFlight, trackedInFlight, targetedRepairInFlight])
     .then(run)
     .finally(() => {
       if (trackedInFlight === slot) trackedInFlight = null;
@@ -196,7 +218,7 @@ export function startFullRepair(): Promise<void> {
     cancelled: false,
     slot: null,
   };
-  const predecessors = [syncInFlight, trackedInFlight];
+  const predecessors = [syncInFlight, trackedInFlight, targetedRepairInFlight];
   useSyncStore.getState().queueRepair();
 
   let slot!: Promise<void>;
@@ -236,6 +258,135 @@ export function cancelFullRepair(): boolean {
   return true;
 }
 
+interface TargetedRepairOptions {
+  readonly expectedDeletedAt?: number;
+}
+
+/**
+ * Re-download one conversation's server metadata and latest 500 messages.
+ *
+ * This uses its own serialized slot: returning the promise from `syncInFlight` would make a pull
+ * to refresh incorrectly believe that a chat-only repair had performed the global sync pipeline.
+ * Capture/publish happens before the first await so Disconnect can abort and drain the owner.
+ */
+function startTargetedChatRepair(
+  chatGuid: string,
+  options: TargetedRepairOptions = {},
+): Promise<ChatRepairResult> {
+  const guid = chatGuid.trim();
+  if (!guid) return Promise.reject(new Error('A conversation is required for repair.'));
+  if (
+    options.expectedDeletedAt != null &&
+    (!Number.isSafeInteger(options.expectedDeletedAt) || options.expectedDeletedAt < 0)
+  ) {
+    return Promise.reject(new Error('The deleted-conversation marker is invalid.'));
+  }
+
+  const epoch = sessionAccessors.getEpoch();
+  const key = `${epoch}\u0000${guid}\u0000${options.expectedDeletedAt ?? 'repair'}`;
+  const existing = targetedRepairByKey.get(key);
+  if (existing) return existing.result;
+
+  const lease = captureRealtimeDeliveryLease();
+  const abortController = new AbortController();
+  const releaseInvalidation = subscribeRealtimeGenerationInvalidation(lease.generation, () => {
+    abortController.abort();
+  });
+  const predecessor = targetedRepairInFlight;
+
+  const result = settledAll([syncInFlight, trackedInFlight, predecessor]).then(async () => {
+    const stopped = (): boolean =>
+      abortController.signal.aborted || sessionAccessors.getEpoch() !== epoch || !lease.isCurrent();
+    if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
+    const db = await ensureDatabase();
+    if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
+    const api = httpSyncApi(http);
+
+    const synced = await syncSingleChat(db, api, guid, {
+      shouldAbort: stopped,
+      signal: abortController.signal,
+    });
+    if (!synced || stopped()) {
+      throw new Error('Conversation repair stopped before the chat was refreshed.');
+    }
+
+    const history = await syncChatMessageRange(db, api, guid, {
+      maxMessages: TARGETED_CHAT_REPAIR_MAX_MESSAGES,
+      shouldAbort: stopped,
+      signal: abortController.signal,
+      probeExhaustion: options.expectedDeletedAt != null,
+      readFloorAtOrBefore: options.expectedDeletedAt,
+    });
+    if (stopped()) throw new Error('Conversation repair stopped before completion.');
+
+    let restored = false;
+    if (options.expectedDeletedAt != null) {
+      restored = await withDbTransaction(
+        db,
+        (context) =>
+          restoreDeletedChatWithinTransaction(context, {
+            guid,
+            expectedDeletedAt: options.expectedDeletedAt!,
+            historyExhausted: history.exhausted,
+            repairedReadFloor: history.readFloorCandidate,
+          }),
+        () => !stopped(),
+      );
+      if (!restored && !stopped()) {
+        // A genuinely new message may have retired the tombstone while the repair was paging. That
+        // is already a successful restore. A still-hidden row failed the CAS or lacks a safe floor.
+        restored = await chatExistsAndIsVisible(db, guid);
+        if (stopped()) {
+          throw new Error('Conversation repair stopped because the account changed.');
+        }
+      }
+      if (!restored) {
+        throw new Error(
+          'This conversation could not be restored safely from the bounded server history.',
+        );
+      }
+    }
+
+    if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
+
+    return {
+      messages: history.messages,
+      historyExhausted: history.exhausted,
+      restored,
+    };
+  });
+
+  let slot!: Promise<void>;
+  slot = result
+    .then(
+      () => undefined,
+      () => undefined,
+    )
+    .finally(() => {
+      releaseInvalidation();
+      const current = targetedRepairByKey.get(key);
+      if (current?.slot === slot) targetedRepairByKey.delete(key);
+      if (targetedRepairInFlight === slot) targetedRepairInFlight = null;
+    });
+  const run: TargetedRepairRun = { epoch, key, result, slot };
+  targetedRepairByKey.set(key, run);
+  targetedRepairInFlight = slot;
+  return result;
+}
+
+/** User-facing bounded repair for one live conversation. */
+export function startChatRepair(chatGuid: string): Promise<ChatRepairResult> {
+  return startTargetedChatRepair(chatGuid);
+}
+
+/** Re-fetch while still hidden, then atomically hand off the unread floor and restore the chat. */
+export function restoreDeletedChat(
+  chatGuid: string,
+  expectedDeletedAt: number,
+): Promise<ChatRepairResult> {
+  return startTargetedChatRepair(chatGuid, { expectedDeletedAt });
+}
+
 /**
  * Resolve once no sync is in flight (immediately when none is).
  *
@@ -264,12 +415,12 @@ export async function awaitSyncIdle(): Promise<void> {
   // Wait REPEATEDLY, not once: a run can be chained/published while we are awaiting its predecessor.
   // The caller owns the 20-second deadline; returning early after an arbitrary number of chains
   // would falsely report idle and let a still-live account-A page land after the wipe.
-  while (syncInFlight || trackedInFlight || auxiliaryInFlight.size > 0) {
+  while (syncInFlight || trackedInFlight || targetedRepairInFlight || auxiliaryInFlight.size > 0) {
     const auxiliary = [...auxiliaryInFlight];
     // Never rethrows — a failed run is still an idle one; the caller only needs it to have
     // STOPPED writing.
     await Promise.all([
-      settledAll([syncInFlight, trackedInFlight]),
+      settledAll([syncInFlight, trackedInFlight, targetedRepairInFlight]),
       ...auxiliary.map((run) => run.catch(() => undefined)),
     ]);
   }
@@ -280,7 +431,7 @@ export async function awaitSyncIdle(): Promise<void> {
  * flight or just finished — so connectivity coming back re-syncs without a manual pull.
  */
 export function maybeResumeSync(): void {
-  if (syncInFlight || trackedInFlight) return;
+  if (syncInFlight || trackedInFlight || targetedRepairInFlight) return;
   if (Date.now() - lastSyncAt < RESUME_MIN_INTERVAL_MS) return;
   void startSync();
 }

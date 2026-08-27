@@ -15,11 +15,13 @@ import {
   kvGet,
   kvSet,
   listChatAttachmentGuids,
+  listDeletedChats,
   listChatsForInbox,
   listOrphanedAttachmentGuids,
   markMessageDeleted,
   recordAttachmentCacheEntry,
   resumeChatPurges,
+  restoreDeletedChatWithinTransaction,
   setChatArchive,
   setChatArchiveWithinTransaction,
   setChatCustomization,
@@ -1036,6 +1038,61 @@ describe('chat actions repo', () => {
     // Without the delete-time handover the marker is still NULL here and this is 3 — the entire
     // conversation the user deleted, badged as unread.
     expect(rows[0]!.unreadCount).toBe(0);
+  });
+
+  it('explicitly restores only the expected deletion and hands repaired history to the read marker', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+    const history = [received('h1', 1000), received('h2', 2000)];
+    await upsertMessages(db, history, () => chatId, handles);
+    await deleteChatLocal(db, 'c1', 5000);
+
+    // Simulate an older/incomplete tombstone that did not retain its original floor, then land the
+    // bounded repair prefix while the conversation is still hidden.
+    raw.prepare('UPDATE chats SET last_read_message_guid = NULL WHERE guid = ?').run('c1');
+    await upsertMessages(db, history, () => chatId, handles);
+    expect((await listDeletedChats(db)).rows.map((row) => row.guid)).toEqual(['c1']);
+
+    // Rows left ambiently by an interrupted purge are not proof that THIS bounded crawl reached a
+    // safe floor. Only a candidate carried from the fetched prefix (or full exhaustion) may restore.
+    await expect(
+      withDbTransaction(db, (context) =>
+        restoreDeletedChatWithinTransaction(context, {
+          guid: 'c1',
+          expectedDeletedAt: 5000,
+          historyExhausted: false,
+          repairedReadFloor: null,
+        }),
+      ),
+    ).resolves.toBe(false);
+
+    const restored = await withDbTransaction(db, (context) =>
+      restoreDeletedChatWithinTransaction(context, {
+        guid: 'c1',
+        expectedDeletedAt: 5000,
+        historyExhausted: false,
+        repairedReadFloor: { guid: 'h2', dateCreated: 2000 },
+      }),
+    );
+    expect(restored).toBe(true);
+    expect(col(raw, 'c1', 'last_read_message_guid')).toBe('h2');
+    expect((await listChatsForInbox(db))[0]!.unreadCount).toBe(0);
+
+    // A retained restore callback from the first deletion cannot clear a newer delete.
+    await deleteChatLocal(db, 'c1', 7000);
+    await expect(
+      withDbTransaction(db, (context) =>
+        restoreDeletedChatWithinTransaction(context, {
+          guid: 'c1',
+          expectedDeletedAt: 5000,
+          historyExhausted: true,
+          repairedReadFloor: null,
+        }),
+      ),
+    ).resolves.toBe(false);
+    expect(await isChatHiddenByDeletion(db, 'c1')).toBe(true);
   });
 
   it('a LIVE un-hide counts only the new message, even when the history backfills later', async () => {

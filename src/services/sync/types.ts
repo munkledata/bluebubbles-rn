@@ -10,6 +10,8 @@ import type { SyncCursor } from '@core/sync';
 export interface SyncApi {
   /** Server version, used to pick the incremental cursor mode. */
   serverVersion(signal?: AbortSignal): Promise<string>;
+  /** One exact chat for targeted repair; optional only for legacy/test adapters. */
+  fetchChat?(chatGuid: string, signal?: AbortSignal): Promise<Chat>;
   fetchChats(offset: number, limit: number, signal?: AbortSignal): Promise<Chat[]>;
   fetchChatMessages(
     chatGuid: string,

@@ -192,8 +192,16 @@ value TEXT)`.
 - **Secrets** — live in the Keystore-backed SecureVault, not the DB.
 - **Attachment binaries** — only `local_path` is in the DB; bytes download on first view.
 - **Full per-chat message history** — bulk sync caps at ~100 messages/chat; up to 500 more
-  is backfilled **only when a thread is opened** (`ensureChatSynced`/`syncChatMessages`).
-  Older un-pulled history is never reached by the incremental cursor.
+  is backfilled when a thread opens (`ensureChatSynced`/`syncChatMessages`) or when the user runs
+  **Repair Conversation** from its Details screen. The manual path also refreshes that exact chat's
+  server metadata and participants; it does not scan other chats or move the global cursor. Older
+  un-pulled history is reached only by the all-history Local Cache Repair.
+- **Locally deleted conversations** — tombstoned chats stay out of normal lists but remain available
+  under Server Management → Restore Deleted Conversations. Restore re-fetches a bounded history
+  prefix while the tombstone still hides it, then advances the unread floor and clears that exact
+  deletion atomically. A bounded crawl must carry its own pre-deletion floor candidate into the
+  guarded write; ambient purge leftovers are not proof. It fails closed when the prefix cannot
+  prove a safe floor.
 - **Pull-to-refresh** deliberately does a _light_ sync and does not bulk re-fetch existing
   chats' messages (avoids wedging the single-threaded server).
 - **URL/Open-Graph previews** — current containment is cache-only: previously stored metadata may

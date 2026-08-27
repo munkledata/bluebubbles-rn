@@ -18,8 +18,11 @@ export {
   refreshInbox,
   maybeResumeSync,
   ensureChatSynced,
+  startChatRepair,
+  restoreDeletedChat,
   startFullRepair,
   cancelFullRepair,
+  type ChatRepairResult,
 } from './syncControl';
 export {
   dispatchRealtimeEvent,

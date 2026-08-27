@@ -26,7 +26,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { computeBackgroundIsLight } from '@/services';
+import { computeBackgroundIsLight, startChatRepair } from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import {
   clearGroupPhoto,
@@ -479,6 +479,7 @@ function ChatSettingsScreen({
   const [adding, setAdding] = useState(false);
   const [addAddress, setAddAddress] = useState('');
   const [busy, setBusy] = useState(false);
+  const [repairing, setRepairing] = useState(false);
 
   const showGroupError = (grant: ChatSettingsGrant): void => {
     if (grantIsCurrent(grant)) {
@@ -675,6 +676,44 @@ function ChatSettingsScreen({
     });
   };
 
+  const repairConversation = (): void => {
+    const dialogGrant = renderGrant;
+    if (!grantIsCurrent(dialogGrant) || repairing) return;
+    showDialog(
+      'Repair Conversation',
+      'Re-download this conversation’s server details and 500 most recent messages? Your local name, theme, wallpaper, mute setting, and deleted-message protections stay in place.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start Repair',
+          onPress: () => {
+            if (!grantIsCurrent(dialogGrant)) return;
+            setRepairing(true);
+            void startChatRepair(dialogGrant.chatGuid)
+              .then((result) => {
+                if (!grantIsCurrent(dialogGrant)) return;
+                showDialog(
+                  'Conversation Repaired',
+                  `${result.messages.toLocaleString()} recent messages were refreshed.`,
+                );
+              })
+              .catch(() => {
+                if (grantIsCurrent(dialogGrant)) {
+                  showDialog(
+                    'Repair Failed',
+                    'Gator couldn’t refresh this conversation. Check the server connection and try again.',
+                  );
+                }
+              })
+              .finally(() => {
+                if (grantIsCurrent(dialogGrant)) setRepairing(false);
+              });
+          },
+        },
+      ],
+    );
+  };
+
   const openStudio = (): void => {
     if (!grantIsCurrent(renderGrant)) return;
     const nextAnimation = modalAnimationFor(reduceMotion.current);
@@ -811,6 +850,16 @@ function ChatSettingsScreen({
               accessibilityLabel="Open system notification settings for this conversation"
             />
           ) : null}
+        </SettingsSection>
+
+        <SettingsSection label="REPAIR" style={styles.gap}>
+          <NavRow
+            label={repairing ? 'Repairing Conversation…' : 'Repair Conversation'}
+            chevron={false}
+            disabled={repairing}
+            onPress={repairConversation}
+            accessibilityLabel="Repair this conversation from the server"
+          />
         </SettingsSection>
 
         {isGroup ? (

@@ -69,8 +69,9 @@ export async function createChat(http: HttpClient, params: CreateChatParams): Pr
  * guid, in which case callers may fall back to the list. Schema tolerates a `{ chat }`
  * wrapper or a bare chat.
  */
-export async function getChat(http: HttpClient, guid: string): Promise<Chat> {
+export async function getChat(http: HttpClient, guid: string, signal?: AbortSignal): Promise<Chat> {
   const res = await http.get(`/chat/${encodeURIComponent(guid)}`, SingleChat, {
+    signal,
     query: { with: 'participants,lastmessage' },
   });
   return unwrapChat(res);

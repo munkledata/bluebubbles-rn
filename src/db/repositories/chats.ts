@@ -697,6 +697,133 @@ export async function isChatHiddenByDeletion(db: AppDatabase, guid: string): Pro
   return rows.length > 0;
 }
 
+/** True only when the exact chat row still exists and is currently visible in conversation lists. */
+export async function chatExistsAndIsVisible(db: AppDatabase, guid: string): Promise<boolean> {
+  const rows: Array<{ visible: number }> = await db.all(sql`
+    SELECT 1 AS visible FROM chats c WHERE c.guid = ${guid} AND ${chatVisible('c')} LIMIT 1
+  `);
+  return rows.length > 0;
+}
+
+export interface DeletedChatRow {
+  id: number;
+  guid: string;
+  chatIdentifier: string | null;
+  displayName: string | null;
+  customName: string | null;
+  style: number | null;
+  deletedAt: number;
+  participantCount: number;
+  participantNames: string | null;
+  participantAvatars: string | null;
+  participantColors: string | null;
+  handleServices: string | null;
+}
+
+export interface DeletedChatPage {
+  rows: DeletedChatRow[];
+  hasMore: boolean;
+}
+
+/**
+ * A bounded page of chats that are still hidden by a local deletion tombstone.
+ *
+ * `deleted_at IS NOT NULL` alone is intentionally insufficient: a newly arrived message makes a
+ * chat visible immediately, before ingestion's compare-and-set has a chance to clear the stamp.
+ * The restore screen must never offer to "restore" an already-live conversation.
+ */
+export async function listDeletedChats(
+  db: AppDatabase,
+  opts: { limit?: number } = {},
+): Promise<DeletedChatPage> {
+  const requested = opts.limit ?? 50;
+  const limit = Number.isFinite(requested) ? Math.min(Math.max(Math.floor(requested), 1), 250) : 50;
+  const rows = await db.all<DeletedChatRow>(sql`
+    SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
+      c.display_name AS displayName, c.custom_name AS customName, c.style,
+      c.deleted_at AS deletedAt,
+      (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
+      (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS participantNames,
+      (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS participantAvatars,
+      (SELECT group_concat(COALESCE(h.color, ''), '|||' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS participantColors,
+      (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
+         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+        WHERE ch.chat_id = c.id) AS handleServices
+    FROM chats c
+    WHERE c.deleted_at IS NOT NULL AND NOT ${chatVisible('c')}
+      -- Full Repair can retain a customized server-absent shell under its own synthetic marker.
+      -- That is reconciliation bookkeeping, not a conversation the user chose to delete.
+      AND NOT EXISTS (SELECT 1 FROM kv rk
+                       WHERE rk.key = ${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX} || c.guid)
+    ORDER BY c.deleted_at DESC, c.id DESC
+    LIMIT ${limit + 1}
+  `);
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+/**
+ * Explicitly restore one still-deleted chat after its bounded server history has been re-fetched.
+ *
+ * The unread floor and tombstone move in ONE compare-and-set. A retained dialog/list row cannot
+ * clear a newer deletion because `expectedDeletedAt` must still match. If the server page was
+ * bounded before exhaustion, restoration is allowed only when the local data can already carry a
+ * safe floor: this repair's own fetched prefix contains a received message at/before the deletion
+ * boundary. The exact GUID/date is re-validated here; arbitrary interrupted-purge leftovers cannot
+ * impersonate proof from this crawl. Otherwise the caller must leave the chat hidden.
+ */
+export function restoreDeletedChatWithinTransaction(
+  context: DbTransactionContext,
+  target: {
+    guid: string;
+    expectedDeletedAt: number;
+    historyExhausted: boolean;
+    repairedReadFloor: { guid: string; dateCreated: number } | null;
+  },
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const floorGuid = target.repairedReadFloor?.guid ?? null;
+    const floorDateCreated = target.repairedReadFloor?.dateCreated ?? null;
+    const restored = await db.all<{ id: number }>(sql`
+      UPDATE chats
+         SET last_read_message_guid = COALESCE(
+               (SELECT fm.guid FROM messages fm
+                 WHERE fm.chat_id = chats.id AND fm.is_from_me = 0
+                   AND fm.date_deleted IS NULL AND fm.associated_message_type IS NULL
+                   AND fm.date_created <= chats.deleted_at
+                   AND (${target.historyExhausted ? 1 : 0} = 1
+                        OR (fm.guid = ${floorGuid} AND fm.date_created = ${floorDateCreated}))
+                   AND fm.date_created > COALESCE(
+                         (SELECT lm.date_created FROM messages lm
+                           WHERE lm.guid = chats.last_read_message_guid
+                             AND lm.chat_id = chats.id), 0)
+                 ORDER BY fm.date_created DESC, fm.id DESC LIMIT 1),
+               chats.last_read_message_guid),
+             deleted_at = NULL
+       WHERE guid = ${target.guid}
+         AND deleted_at = ${target.expectedDeletedAt}
+         AND NOT EXISTS (SELECT 1 FROM kv rk
+                          WHERE rk.key = ${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX} || chats.guid)
+         AND (
+           ${target.historyExhausted ? 1 : 0} = 1
+           OR EXISTS (SELECT 1 FROM messages fm
+                       WHERE fm.chat_id = chats.id AND fm.is_from_me = 0
+                         AND fm.date_deleted IS NULL AND fm.associated_message_type IS NULL
+                         AND fm.guid = ${floorGuid}
+                         AND fm.date_created = ${floorDateCreated}
+                         AND fm.date_created <= chats.deleted_at)
+         )
+      RETURNING id
+    `);
+    return restored.length === 1;
+  });
+}
+
 /**
  * The guids of every attachment owned by this chat.
  *

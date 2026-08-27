@@ -18,7 +18,9 @@ import {
   incrementalSync,
   INCREMENTAL_TX_CHUNK,
   syncAllChats,
+  syncChatMessageRange,
   syncChatMessages,
+  syncSingleChat,
 } from '@/services/sync/engine';
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from '@/services/sync/types';
@@ -748,6 +750,66 @@ describe('incrementalSync', () => {
 });
 
 describe('syncChatMessages — account-bound page writes', () => {
+  it('repairs only the requested chat and reports whether the bounded history was exhausted', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'other@example.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'other-chat', displayName: 'Untouched', participants: [] })],
+      handles,
+    );
+    let chatListScans = 0;
+    const repairedMessages = [received('repair-old', 1000), received('repair-new', 2000)];
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChat: async (guid) => {
+        expect(guid).toBe('repair-chat');
+        return Chat.parse({
+          guid,
+          displayName: 'Repaired',
+          participants: [{ address: 'repair@example.com' }],
+          lastMessage: repairedMessages[1],
+        });
+      },
+      fetchChats: async () => {
+        chatListScans += 1;
+        return [];
+      },
+      fetchChatMessages: async (_guid, offset) => (offset === 0 ? repairedMessages : []),
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+
+    await expect(syncSingleChat(db, api, 'repair-chat')).resolves.toBe(true);
+    await expect(
+      syncChatMessageRange(db, api, 'repair-chat', {
+        pageSize: 2,
+        maxMessages: 2,
+        probeExhaustion: true,
+        readFloorAtOrBefore: 1500,
+      }),
+    ).resolves.toEqual({
+      messages: 2,
+      exhausted: true,
+      readFloorCandidate: { guid: 'repair-old', dateCreated: 1000 },
+    });
+
+    expect(chatListScans).toBe(0);
+    expect(raw.prepare('SELECT display_name FROM chats WHERE guid = ?').get('repair-chat')).toEqual(
+      { display_name: 'Repaired' },
+    );
+    expect(raw.prepare('SELECT display_name FROM chats WHERE guid = ?').get('other-chat')).toEqual({
+      display_name: 'Untouched',
+    });
+    expect(
+      raw
+        .prepare(
+          'SELECT m.guid FROM messages m JOIN chats c ON c.id = m.chat_id WHERE c.guid = ? ORDER BY m.date_created',
+        )
+        .all('repair-chat'),
+    ).toEqual([{ guid: 'repair-old' }, { guid: 'repair-new' }]);
+  });
+
   it('rejects a queued old-account page before BEGIN and leaves the chat unchanged', async () => {
     const { db, raw } = await createTestDb();
     const handles = await upsertHandles(db, [{ address: 'backfill@example.com' }]);

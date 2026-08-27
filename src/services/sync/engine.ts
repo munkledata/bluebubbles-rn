@@ -587,27 +587,143 @@ async function linkHandlesAfterCommit(
 }
 
 /**
+ * Refresh exactly one chat's server-owned metadata, participants, and latest message.
+ *
+ * Targeted repair must not scan `chat/query`: doing so would write every chat on the way to the
+ * target. The exact-chat endpoint gives this operation a hard ownership boundary while the same
+ * short guarded writers used by ordinary sync preserve device-local customization and tombstones.
+ */
+export async function syncSingleChat(
+  db: AppDatabase,
+  api: SyncApi,
+  chatGuid: string,
+  opts: { shouldAbort?: () => boolean; signal?: AbortSignal } = {},
+): Promise<boolean> {
+  const fetchChat = api.fetchChat;
+  if (!fetchChat) throw new Error('Targeted chat repair is unavailable for this sync adapter.');
+  const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
+  const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
+  if (!shouldContinue()) return false;
+
+  const chat = await fetchChat(chatGuid, opts.signal);
+  if (!shouldContinue()) return false;
+  if (chat.guid !== chatGuid) {
+    throw new Error('The server returned a different chat during targeted repair.');
+  }
+
+  const participants = chat.participants ?? [];
+  let chatId: number | null = null;
+  await withDbTransaction(
+    db,
+    async (context) => {
+      const handleMap = await upsertHandlesWithinTransaction(context, participants);
+      const chatMap = await upsertChatsWithinTransaction(context, [chat], handleMap);
+      chatId = chatMap.get(chatGuid) ?? null;
+    },
+    commitGuard,
+  );
+  if (!shouldContinue() || chatId == null) return false;
+
+  const lastMessage = chat.lastMessage;
+  if (lastMessage) {
+    if (lastMessage.isFromMe) {
+      await reconcileOutgoingAttachmentByContent(db, lastMessage, chatId, commitGuard);
+    }
+    if (!shouldContinue()) return false;
+    await withDbTransaction(
+      db,
+      async (context) => {
+        const messageHandles = lastMessage.handle ? [lastMessage.handle] : [];
+        const handleMap = await upsertHandlesWithinTransaction(context, messageHandles);
+        await upsertMessagesWithinTransaction(context, [lastMessage], () => chatId!, handleMap);
+        // The first chat write could only resolve its Mac read watermark against the pre-repair
+        // message set. Re-apply after the latest message lands, in this same short owner.
+        await reapplyReadWatermarksWithinTransaction(context, [chat]);
+      },
+      commitGuard,
+    );
+  }
+
+  await linkHandlesAfterCommit(
+    db,
+    [
+      ...participants.map((handle) => handle.address),
+      ...(lastMessage?.handle?.address ? [lastMessage.handle.address] : []),
+    ],
+    commitGuard,
+  );
+  return shouldContinue();
+}
+
+export interface ChatMessageRangeResult {
+  messages: number;
+  /** True only when the server returned the end of this chat's history. */
+  exhausted: boolean;
+  /**
+   * Newest received, non-reaction row THIS crawl fetched at/before the requested boundary.
+   * The restore CAS re-validates this exact row after ingestion; an unrelated partial-purge
+   * leftover must never stand in as proof that the bounded server prefix crossed the read floor.
+   */
+  readFloorCandidate: { guid: string; dateCreated: number } | null;
+}
+
+export interface ChatMessageRangeOptions {
+  pageSize?: number;
+  maxMessages?: number;
+  shouldAbort?: () => boolean;
+  signal?: AbortSignal;
+  /** After hitting the cap, issue one one-row read to distinguish exact exhaustion from truncation. */
+  probeExhaustion?: boolean;
+  /** Collect a restore read-floor candidate from rows fetched by this crawl at/before this time. */
+  readFloorAtOrBefore?: number;
+}
+
+/**
  * On-demand backfill of ONE chat's messages from the server, independent of the global
  * full/incremental sync. Opening a thread calls this so its history is present even when the
  * large initial sync hasn't reached that chat yet (or was interrupted) — pages
  * `/chat/:guid/message` (newest-first) and upserts each page until exhausted or `maxMessages`.
  * Idempotent (upsert COALESCE), so re-opening a thread re-confirms without duplicating.
  */
-export async function syncChatMessages(
+export async function syncChatMessageRange(
   db: AppDatabase,
   api: SyncApi,
   chatGuid: string,
-  opts: {
-    pageSize?: number;
-    maxMessages?: number;
-    shouldAbort?: () => boolean;
-    signal?: AbortSignal;
-  } = {},
-): Promise<number> {
-  if (opts.shouldAbort?.()) return 0;
+  opts: ChatMessageRangeOptions = {},
+): Promise<ChatMessageRangeResult> {
+  let readFloorCandidate: ChatMessageRangeResult['readFloorCandidate'] = null;
+  const result = (messages: number, exhausted: boolean): ChatMessageRangeResult => ({
+    messages,
+    exhausted,
+    readFloorCandidate,
+  });
+  const considerReadFloor = (message: Message): void => {
+    const boundary = opts.readFloorAtOrBefore;
+    const dateCreated = message.dateCreated;
+    // `upsertMessagesWithinTransaction` persists an omitted `isFromMe` as false, so the proof must
+    // use the same received-message interpretation as the final SQL re-validation.
+    if (
+      boundary == null ||
+      dateCreated == null ||
+      dateCreated > boundary ||
+      message.isFromMe === true ||
+      message.associatedMessageType != null
+    ) {
+      return;
+    }
+    if (
+      readFloorCandidate == null ||
+      dateCreated > readFloorCandidate.dateCreated ||
+      (dateCreated === readFloorCandidate.dateCreated && message.guid > readFloorCandidate.guid)
+    ) {
+      readFloorCandidate = { guid: message.guid, dateCreated };
+    }
+  };
+
+  if (opts.shouldAbort?.()) return result(0, false);
   const chatId = await getChatIdByGuid(db, chatGuid);
-  if (opts.shouldAbort?.()) return 0;
-  if (chatId == null) return 0; // chat not synced yet — nothing to attach messages to
+  if (opts.shouldAbort?.()) return result(0, false);
+  if (chatId == null) return result(0, false);
   const pageSize =
     opts.pageSize == null
       ? CHAT_MESSAGE_PAGE_SIZE
@@ -620,11 +736,12 @@ export async function syncChatMessages(
       : Number.isFinite(opts.maxMessages) && opts.maxMessages > 0
         ? Math.min(Math.floor(opts.maxMessages), CHAT_MESSAGE_MAX)
         : 0;
-  if (pageSize === 0 || cap === 0) return 0;
+  if (pageSize === 0 || cap === 0) return result(0, false);
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
   const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
   let offset = 0;
   let total = 0;
+  let exhausted = false;
   for (;;) {
     if (!shouldContinue()) break;
     const msgs = await api.fetchChatMessages(chatGuid, offset, pageSize, opts.signal);
@@ -632,11 +749,15 @@ export async function syncChatMessages(
     // request/retry ladder. Resetting the live session therefore cannot cancel a request already
     // on the wire; re-check after every network await before any returned A row reaches the DB.
     if (!shouldContinue()) break;
-    if (msgs.length === 0) break;
+    if (msgs.length === 0) {
+      exhausted = true;
+      break;
+    }
     // Preserve the established page-granular cap: once a page has been requested, store its whole
     // bounded prefix and then stop when `total >= cap`. A cap that is not divisible by pageSize can
     // therefore include at most one partial-page overage (never more than 99 rows).
     const pageRows = msgs.slice(0, pageSize);
+    pageRows.forEach(considerReadFloor);
     const pageHandles = pageRows.flatMap((message) => (message.handle ? [message.handle] : []));
     for (let i = 0; i < pageRows.length; i += INCREMENTAL_TX_CHUNK) {
       const slice = pageRows.slice(i, i + INCREMENTAL_TX_CHUNK);
@@ -647,10 +768,10 @@ export async function syncChatMessages(
         // the upsert. Each helper owns its own guarded short transaction, so it cannot be composed
         // inside the slice transaction below.
         for (const m of slice) {
-          if (!shouldContinue()) return total;
+          if (!shouldContinue()) return result(total, false);
           if (m.isFromMe) await reconcileOutgoingAttachmentByContent(db, m, chatId, commitGuard);
         }
-        if (!shouldContinue()) return total;
+        if (!shouldContinue()) return result(total, false);
         await withDbTransaction(
           db,
           async (transactionContext) => {
@@ -668,23 +789,45 @@ export async function syncChatMessages(
           commitGuard,
         );
       } catch (error) {
-        if (error instanceof DbCommitGuardRejectedError && !shouldContinue()) return total;
+        if (error instanceof DbCommitGuardRejectedError && !shouldContinue()) {
+          return result(total, false);
+        }
         throw error;
       }
       total += slice.length;
-      if (!shouldContinue()) return total;
+      if (!shouldContinue()) return result(total, false);
     }
     await linkHandlesAfterCommit(
       db,
       pageHandles.map((handle) => handle.address),
       commitGuard,
     );
-    if (!shouldContinue()) return total;
+    if (!shouldContinue()) return result(total, false);
     offset += pageRows.length;
-    if (msgs.length < pageSize) break;
-    if (total >= cap) break;
+    if (msgs.length < pageSize) {
+      exhausted = true;
+      break;
+    }
+    if (total >= cap) {
+      if (opts.probeExhaustion && shouldContinue()) {
+        const probe = await api.fetchChatMessages(chatGuid, offset, 1, opts.signal);
+        if (!shouldContinue()) return result(total, false);
+        exhausted = probe.length === 0;
+      }
+      break;
+    }
   }
-  return total;
+  return result(total, exhausted);
+}
+
+/** Existing on-open API: retain its simple numeric result while targeted repair consumes metadata. */
+export async function syncChatMessages(
+  db: AppDatabase,
+  api: SyncApi,
+  chatGuid: string,
+  opts: ChatMessageRangeOptions = {},
+): Promise<number> {
+  return (await syncChatMessageRange(db, api, chatGuid, opts)).messages;
 }
 
 /** kv key holding the deletion-catch-up watermark: the max `dateDeleted` (Unix ms) already applied. */
