@@ -6,7 +6,7 @@ import { toFtsQuery } from './_shared';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
 // message queries, so this dependency stays acyclic.
-import { chatVisible } from './chats';
+import { chatVisible } from './chatVisibility';
 
 /** Read-only message queries kept separate from mutation and transaction ownership. */
 
