@@ -17,12 +17,7 @@ import type { MessagePreview } from '@db/repositories';
 import { attachPasteListener } from '@/services/paste';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { showToast } from '../toast/toastStore';
-import {
-  activeMentionQuery,
-  computeMentionRanges,
-  type MentionPick,
-  type MentionRange,
-} from '@utils';
+import type { MentionRange } from '@utils';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme, withAlpha } from '../theme';
@@ -30,6 +25,7 @@ import type { Recurrence } from '@core/schedule';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
 import { EffectPicker } from './effects';
 import { RecurrenceSheet } from './RecurrenceSheet';
+import { useComposerAuthoringSession } from './useComposerAuthoringSession';
 
 interface ComposerProps {
   /** effectId set when sending with an iMessage send-effect (long-press send); subject is the
@@ -131,8 +127,6 @@ export const Composer = React.memo(function Composer({
   // Over a wallpaper the composer bar is transparent, so the reply/edit preview would sit straight
   // on the image — back it with the same frosted chip the controls use.
   const replyBarBg = translucent ? [styles.replyBarBubble, { backgroundColor: chip }] : null;
-  const [text, setText] = useState('');
-  const [subject, setSubject] = useState('');
   const [effectOpen, setEffectOpen] = useState(false);
   const [trayOpen, setTrayOpen] = useState(false);
   // Set once the date+time pickers resolve; the RecurrenceSheet (step 3) commits or cancels it.
@@ -140,38 +134,6 @@ export const Composer = React.memo(function Composer({
     null,
   );
   const [pending, setPending] = useState<PendingAttachment[]>([]);
-  // Picked @mentions (resolved to text spans at send time) + the current cursor for @-detection.
-  const [mentions, setMentions] = useState<MentionPick[]>([]);
-  const [cursor, setCursor] = useState(0);
-  const trimmed = text.trim();
-  const isEditing = editingText != null;
-  const attachEnabled = !!onSendAttachments && !isEditing;
-  const canSend = trimmed.length > 0 || (!isEditing && pending.length > 0);
-
-  // @mention autocomplete: the query being typed at the cursor and the participants it matches.
-  const mentionQ =
-    mentionParticipants.length > 0 && !isEditing ? activeMentionQuery(text, cursor) : null;
-  const mentionMatches =
-    mentionQ != null
-      ? mentionParticipants
-          .filter((p) => {
-            const q = mentionQ.query.toLowerCase();
-            return p.name.toLowerCase().includes(q) || p.address.toLowerCase().includes(q);
-          })
-          .slice(0, 6)
-      : [];
-
-  // Replace the in-progress "@query" with "@Name " and record the mention for send-time resolution.
-  const pickMention = (p: { address: string; name: string }): void => {
-    if (!mentionQ) return;
-    const label = `@${p.name}`;
-    const before = text.slice(0, mentionQ.atIndex);
-    const after = text.slice(cursor);
-    const next = `${before}${label} ${after}`;
-    setText(next);
-    setMentions((m) => [...m, { address: p.address, label }]);
-    setCursor(before.length + label.length + 1);
-  };
 
   const addPending = (item: PendingAttachment): void =>
     setPending((cur) => (cur.some((p) => p.uri === item.uri) ? cur : [...cur, item]));
@@ -244,153 +206,39 @@ export const Composer = React.memo(function Composer({
     if (p) void p.then((items) => items.forEach(addPending));
   };
 
-  // Debounced typing emit: start-typing on input, stop-typing after a pause / on send.
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const typingActive = useRef(false);
-  const emitTyping = (active: boolean): void => {
-    if (active === typingActive.current) return;
-    typingActive.current = active;
-    onTyping?.(active);
-  };
-  useEffect(() => {
-    if (active) return;
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    emitTyping(false);
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
-  const onChangeText = (value: string): void => {
-    setText(value);
-    queueDraft(value);
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    if (value.length > 0) {
-      emitTyping(true);
-      typingTimer.current = setTimeout(() => emitTyping(false), 3000);
-    } else {
-      emitTyping(false);
-    }
-  };
-  // Stop typing on unmount (leaving the chat).
-  useEffect(() => () => emitTyping(false), []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Prefill the input when an edit starts, stashing whatever draft it displaces so ending the edit
-  // can put it back (otherwise editing a message silently discards the in-progress draft).
-  const preEditRef = useRef('');
-  const editingActiveRef = useRef(false);
-  useEffect(() => {
-    if (editingText != null) {
-      if (!editingActiveRef.current) preEditRef.current = draftStateRef.current.text;
-      editingActiveRef.current = true;
-      setText(editingText);
-      return;
-    }
-    // Route-level Back can cancel edit mode by clearing the parent `editing` prop. Restore the
-    // displaced draft here as well as in the visible Cancel handler so both paths are lossless.
-    if (editingActiveRef.current) {
-      editingActiveRef.current = false;
-      setText(preEditRef.current);
-      draftStateRef.current = { ...draftStateRef.current, text: preEditRef.current };
-    }
-  }, [editingText]);
-
-  // Restore a persisted draft — only into an EMPTY, non-editing composer (the draft loads async;
-  // never clobber something the user already typed).
-  const restoredRef = useRef(false);
-  useEffect(() => {
-    if (restoredRef.current || !initialText || isEditing) return;
-    restoredRef.current = true;
-    setText((cur) => cur || initialText);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialText]);
-
-  // Seed shared attachments (Direct Share INTO this chat) into the tray once, on mount, without
-  // clobbering anything the user may already have staged. Also opens the tray so they're visible.
-  const seededRef = useRef(false);
-  useEffect(() => {
-    if (seededRef.current || !initialAttachments || initialAttachments.length === 0) return;
-    seededRef.current = true;
-    setPending((cur) => (cur.length > 0 ? cur : initialAttachments));
-    setTrayOpen(true);
-  }, [initialAttachments]);
-
-  // Draft persistence: debounced while typing; flushed on unmount so the last keystrokes aren't
-  // lost when backing out of the chat. Editing an existing message never persists as a draft.
-  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftStateRef = useRef({ text: '', isEditing: false, onDraftChange });
-  draftStateRef.current = { text, isEditing, onDraftChange };
-
-  // Body text already flushes to the per-chat DB draft below. Report only the authored pieces
-  // that cannot be reconstructed after this component or route is removed.
-  const hasUnsavedEdit = isEditing && text !== editingText;
-  const hasUnsavedDraftMetadata =
-    subject.trim().length > 0 || pending.length > 0 || mentions.length > 0;
-  useEffect(() => {
-    onRemovalStateChange?.({ hasUnsavedEdit, hasUnsavedDraftMetadata });
-  }, [hasUnsavedDraftMetadata, hasUnsavedEdit, onRemovalStateChange]);
-  const queueDraft = (value: string): void => {
-    if (!onDraftChange || isEditing) return;
-    if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => onDraftChange(value), 500);
-  };
-  useEffect(
-    () => () => {
-      if (draftTimer.current) clearTimeout(draftTimer.current);
-      const s = draftStateRef.current;
-      if (s.onDraftChange && !s.isEditing) s.onDraftChange(s.text);
-    },
-    [],
-  );
-
-  const submit = (effectId?: string): void => {
-    const captured = trimmed;
-    const capturedSubject = subject.trim();
-    // Resolve mentions against the trimmed text that's actually sent, so the spans line up.
-    const finalMentions = mentions.length > 0 ? computeMentionRanges(captured, mentions) : [];
-    // Attachments staged before an edit belong to the draft, not to the edited message. Keep them
-    // untouched until edit mode ends instead of sending or discarding them with the edit.
-    const atts = isEditing ? [] : pending;
-    if (!captured && atts.length === 0) return;
-    if (isSubmitOwnerCurrent && !isSubmitOwnerCurrent()) return;
-    const logicalSendCount = (atts.length > 0 ? 1 : 0) + (captured ? 1 : 0);
-    if (!isEditing && canSubmit && !canSubmit(logicalSendCount)) {
-      showToast('Too many messages are waiting—try again in a moment');
-      return;
-    }
-
-    // Queue admission happens synchronously inside these callbacks. Start every job covered by the
-    // all-or-none capacity preflight before clearing the only user-authored copy below.
-    if (atts.length > 0) onSendAttachments?.(atts);
-    if (captured) {
-      onSend(
-        captured,
-        effectId,
-        capturedSubject || undefined,
-        finalMentions.length > 0 ? finalMentions : undefined,
-      );
-    }
-
-    // After a normal send the draft is consumed → empty. After an edit send the draft was never
-    // consumed → put back whatever the edit displaced, so editing doesn't eat an in-progress draft.
-    const postText = isEditing ? preEditRef.current : '';
-    setText(postText);
-    setSubject('');
-    setMentions([]);
-    if (!isEditing) setPending([]);
-    setTrayOpen(false);
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    // Sent → the draft is consumed; clear it immediately (skip the debounce). Also sync the
-    // unmount-flush ref NOW — setText lands async, so backing out right after sending would
-    // otherwise re-persist the stale text from the ref.
-    if (draftTimer.current) clearTimeout(draftTimer.current);
-    if (!isEditing) onDraftChange?.('');
-    draftStateRef.current = { ...draftStateRef.current, text: postText };
-    emitTyping(false);
-  };
-
-  const cancelEdit = (): void => {
-    // Restore whatever draft the edit displaced (not blank) so cancelling an edit keeps the draft.
-    setText(preEditRef.current);
-    draftStateRef.current = { ...draftStateRef.current, text: preEditRef.current };
-    onCancelEdit?.();
-  };
+  const {
+    text,
+    setText,
+    subject,
+    setSubject,
+    trimmed,
+    isEditing,
+    canSend,
+    mentionMatches,
+    pickMention,
+    setCursor,
+    onChangeText,
+    submit,
+    cancelEdit,
+  } = useComposerAuthoringSession({
+    active,
+    editingText,
+    initialText,
+    initialAttachments,
+    mentionParticipants,
+    pending,
+    setPending,
+    setTrayOpen,
+    onSend,
+    onSendAttachments,
+    canSubmit,
+    isSubmitOwnerCurrent,
+    onCancelEdit,
+    onDraftChange,
+    onTyping,
+    onRemovalStateChange,
+  });
+  const attachEnabled = !!onSendAttachments && !isEditing;
 
   // Two-step native pickers (date → time); cancelling either aborts scheduling.
   const pickSchedule = (): void => {
