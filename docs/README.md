@@ -31,9 +31,24 @@ Start with the root [`README.md`](../README.md) for the product and architecture
 
 ## Workstream implementation specs
 
-- [`Workstream K — architecture and documentation`](./workstreams/K_ARCHITECTURE_AND_DOCUMENTATION.md) owns stable
-  design and sequencing for `REL-011`, `REL-012`, `DOCS-01`, `PARITY-01`, and `PKG-KEEP-01`. Mutable task status and
-  evidence remain only in the master work plan.
+These files own stable design and sequencing. Mutable task status, dependencies, blockers, acceptance, and evidence
+remain only in the master work plan.
+
+| Workstream | Stable implementation spec |
+| --- | --- |
+| A | [`Baseline and immediate containment`](./workstreams/A_BASELINE_AND_CONTAINMENT.md) |
+| B | [`Network and WebView trust`](./workstreams/B_NETWORK_AND_WEBVIEW.md) |
+| C | [`SDK/native foundation and bounded files`](./workstreams/C_NATIVE_FOUNDATION_AND_FILES.md) |
+| D | [`Cold/headless and realtime reliability`](./workstreams/D_HEADLESS_AND_REALTIME.md) |
+| E | [`Session isolation and notifications`](./workstreams/E_SESSION_AND_NOTIFICATIONS.md) |
+| F | [`Privacy, policy, and release truth`](./workstreams/F_PRIVACY_POLICY_AND_RELEASE_TRUTH.md) |
+| G | [`Database ownership`](./workstreams/G_DATABASE_OWNERSHIP.md) |
+| H | [`UI, theme, and accessibility`](./workstreams/H_UI_THEME_AND_ACCESSIBILITY.md) |
+| I | [`Recovery, scale, and backup`](./workstreams/I_RECOVERY_SCALE_AND_BACKUP.md) |
+| J | [`Package ownership and Android fit`](./workstreams/J_PACKAGE_AND_ANDROID_FIT.md) |
+| K | [`Architecture and documentation`](./workstreams/K_ARCHITECTURE_AND_DOCUMENTATION.md) |
+| L | [`Product breadth`](./workstreams/L_PRODUCT_BREADTH.md) |
+| M | [`Candidate and release`](./workstreams/M_CANDIDATE_AND_RELEASE.md) |
 
 ## Focused research and historical verification design
 
