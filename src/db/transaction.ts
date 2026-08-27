@@ -126,7 +126,7 @@ function armLockWatchdog(): () => void {
       // queue drains; this does not.
       if (lockReleases !== releasesAtEntry || wedgeReported) return;
       wedgeReported = true;
-      logger.error('[db] write queue appears wedged', {
+      logger.error('[db] write queue appears wedged', 's9d54bjxmi', {
         waitedMs: 2 * LOCK_WAIT_WARN_MS,
         waiting: waitingForLock,
       });

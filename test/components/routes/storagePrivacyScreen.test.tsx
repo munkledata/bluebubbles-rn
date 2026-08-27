@@ -68,6 +68,7 @@ describe('StoragePrivacyScreen', () => {
       screen.getByText(/Android 7 devices keep persistent attachment downloads disabled/),
     ).toBeTruthy();
     expect(screen.getByText(/blocks the next connection/)).toBeTruthy();
+    expect(screen.getByText(/opaque crash-site code without a filename/)).toBeTruthy();
     expect(
       screen.getByText(/does not delete copies exported to Photos or the Gator album/),
     ).toBeTruthy();

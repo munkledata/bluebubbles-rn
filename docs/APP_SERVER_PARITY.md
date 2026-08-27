@@ -107,8 +107,9 @@ error, batch-uploads them, and the server fingerprints (categorizes) + writes th
   `ErrorUtils.setGlobalHandler`, unhandled rejections via `HermesInternal.enablePromiseRejectionTracker`,
   the React `ErrorBoundary`, and every `logger.error`) into the `error_reports` table (migration `0025`) —
   a lease/backoff/attempt-cap queue cloned from `outgoing_queue`. Before any sink, ERROR input is rebuilt as
-  one of 19 finite events with event-owned typed fields and a synthetic `at gator.<event>` frame; raw Error
-  messages/stacks do not persist or upload. The chained RN handler receives the same safe shape rather than the
+  one of 19 finite events with event-owned typed fields and an opaque `at gator.site.<token>` grouping frame;
+  raw Error messages, filenames, function names, and stacks do not persist or upload. The chained RN handler
+  receives the same safe shape rather than the
   original Error. `runErrorReportQueue` batch-`POST`s to `/api/v1/error-reports` (`retry:false`), deletes only
   after a full acknowledgement, and retries the whole batch on partial/failure. `flushErrorReports` runs on
   AppState active/background, connected mount, and the bg task. Versioned client consent defaults OFF; the

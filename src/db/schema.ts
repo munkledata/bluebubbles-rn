@@ -530,7 +530,7 @@ export const errorReports = sqliteTable(
     level: text('level').notNull(),
     /** Finite event code plus allowlisted classifier, e.g. `runtime.uncaught [TypeError]`. */
     message: text('message').notNull(),
-    /** Synthetic event-owned grouping frame; never a raw Error stack. */
+    /** Synthetic opaque call-site grouping frame; never a raw Error stack. */
     stack: text('stack'),
     /** Finite event category (server fingerprints on it). */
     tag: text('tag'),

@@ -1,6 +1,7 @@
 import {
   MAX_LOG_MESSAGE_CHARS,
   MAX_LOG_META_CHARS,
+  ERROR_DIAGNOSTIC_SITES,
   MemorySink,
   RedactingLogger,
   TeeSink,
@@ -80,7 +81,11 @@ describe('MemorySink (in-app log viewer buffer)', () => {
         source: 'foreground',
         body: 'private body canary',
       });
-      sink.write('error', '[media] share failed', new TypeError('private error'));
+      new RedactingLogger(sink).error(
+        '[media] share failed',
+        ERROR_DIAGNOSTIC_SITES.mediaShare,
+        new TypeError('private error'),
+      );
 
       expect(sink.entries()).toEqual([
         {
@@ -89,7 +94,7 @@ describe('MemorySink (in-app log viewer buffer)', () => {
           meta: JSON.stringify({
             schemaVersion: 1,
             errorName: 'TypeError',
-            stack: 'at gator.media.share_failed',
+            stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`,
           }),
           timestamp: expect.any(Number),
         },
@@ -234,7 +239,11 @@ describe('MemorySink (in-app log viewer buffer)', () => {
       {
         level: 'error',
         message: '[socket] error connecting to private.example for alice@example.com',
-        meta: JSON.stringify({ name: 'TypeError', response: 'private response' }),
+        meta: JSON.stringify({
+          name: 'TypeError',
+          response: 'private response',
+          stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`,
+        }),
         timestamp: validTimestamp + 59_999,
       },
     ]);
@@ -245,7 +254,7 @@ describe('MemorySink (in-app log viewer buffer)', () => {
       meta: JSON.stringify({
         schemaVersion: 1,
         errorName: 'TypeError',
-        stack: 'at gator.socket.connection_failed',
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`,
       }),
       timestamp: validTimestamp,
     });

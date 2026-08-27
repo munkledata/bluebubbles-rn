@@ -256,7 +256,7 @@ export default function SettingsScreen(): React.JSX.Element {
     }
     showDialog(
       'Share error reports?',
-      'When allowed, Gator sends a finite error code, limited technical fields such as error type or HTTP status, app and Android versions, and a synthetic Gator event frame to your connected server when it supports uploads. Gator does not send the original error message or stack trace. You can turn this off at any time.',
+      'When allowed, Gator sends a finite error code, limited technical fields such as error type or HTTP status, app and Android versions, and an opaque Gator crash-site code to your connected server when it supports uploads. Gator does not send the original error message, filename, function name, or stack trace. You can turn this off at any time.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

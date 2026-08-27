@@ -175,7 +175,7 @@ export async function openAttachmentFile(
     if (!isCurrent()) return { status: 'stale' };
     // `error`, not `warn`: only error-level lines reach ErrorReportSink, and this failure is
     // otherwise invisible to us.
-    logger.error('[openFile] failed to open attachment', e);
+    logger.error('[openFile] failed to open attachment', 'sk4i8sxfdf', e);
     return { status: 'error' };
   }
 }

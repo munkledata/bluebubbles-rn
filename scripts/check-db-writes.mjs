@@ -10196,7 +10196,7 @@ function incomingIngressCertifiedNodes({
       "logger.debug('[socket] event failure retired during account transition', { event });" ||
     !ts.isReturnStatement(socketRetiredFailureIf.thenStatement.statements[1]) ||
     normalizedSnippet(socketCatchCallback.body.statements[1], socketFile) !==
-      "logger.error('[socket] event handling failed', { event, error: err });"
+      "logger.error('[socket] event handling failed', 's1v3iohm10', { event, error: err, });"
   ) {
     return empty();
   }
@@ -10421,7 +10421,7 @@ function incomingIngressCertifiedNodes({
     statementText(deliverRespectingLock, 0) !==
       'const { eventName: receivedEvent } = delivery.parsed;' ||
     statementText(deliverRespectingLock, 1) !==
-      "logger.info('[fcm] push received', { event: receivedEvent, source });" ||
+      "logger.event('fcm.push_received', { eventName: receivedEvent, source });" ||
     statementText(deliverRespectingLock, 2) !==
       'const sessionState = await readFcmSessionState(vault, accountRevocationMarker);' ||
     statementText(deliverRespectingLock, 3) !== 'if (!lease.isCurrent()) return;' ||

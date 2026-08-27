@@ -52,7 +52,10 @@ export function createShareCapture(deps: ShareCaptureDeps): (rawValue: unknown) 
       }
 
       if (deps.cacheRoot.length === 0) {
-        logger.error('[share] no cache directory available — cannot accept shared files');
+        logger.error(
+          '[share] no cache directory available — cannot accept shared files',
+          'st1ncp1gde',
+        );
         deps.toast("Couldn't read that file.");
         deps.clearNativeIntent();
         return;
@@ -67,7 +70,9 @@ export function createShareCapture(deps: ShareCaptureDeps): (rawValue: unknown) 
 
       if (files.length === 0) {
         // Staging nothing keeps a future bounded-share consumer from routing to an empty composer.
-        logger.error('[share] all shared files were unreadable', { affectedCount: failed });
+        logger.error('[share] all shared files were unreadable', 'sz3en37b70', {
+          affectedCount: failed,
+        });
         deps.toast("Couldn't read that file. Try sharing it again.");
         deps.clearNativeIntent();
         return;
@@ -87,7 +92,7 @@ export function createShareCapture(deps: ShareCaptureDeps): (rawValue: unknown) 
       void pruneShareCache({ cacheRoot: deps.cacheRoot, io: deps.io, now }).catch(() => {});
     } catch (err) {
       // Belt and braces: a throw here would be the silent failure all over again.
-      logger.error('[share] capture failed', err);
+      logger.error('[share] capture failed', 'sj1gzvygll', err);
       try {
         deps.clearNativeIntent();
       } catch {

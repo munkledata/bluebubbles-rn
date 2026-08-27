@@ -5,9 +5,73 @@ import { SERVER_EVENTS, type ServerEventName } from '../config';
 export const ERROR_REPORT_ENVELOPE_VERSION = 1 as const;
 export const DIAGNOSTIC_EVENT_ENVELOPE_VERSION = 1 as const;
 
+/**
+ * Nonsemantic crash-site ids retained instead of source paths or function names.
+ *
+ * They are grouping labels, not secrets or hashes of private input. A token is fixed for one
+ * reviewed production site so the self-hosted server can distinguish recurring failures without
+ * receiving an enumerable source location.
+ */
+export const ERROR_DIAGNOSTIC_SITES = {
+  shareNoCacheDirectory: 'st1ncp1gde',
+  shareAllFilesUnreadable: 'sz3en37b70',
+  shareCaptureFailed: 'sj1gzvygll',
+  dbForegroundInitialization: 'syjo8z3ok4',
+  dbSessionInitialization: 'solmtuzd5x',
+  connectDatabaseInitialization: 'skjyhvynmb',
+  newChatCreate: 'sfcbzc1wod',
+  mediaShareSourceUnprotected: 'sexrkdbhts',
+  mediaShareSourceMissing: 'siyzk5fb53',
+  mediaShare: 'scu302lx0h',
+  backgroundWork: 'slwt25up17',
+  dbWriteQueueWedge: 's9d54bjxmi',
+  openFile: 'sk4i8sxfdf',
+  uiRender: 'sgp6mdwnu1',
+  socketEvent: 's1v3iohm10',
+  socketConnection: 's8uz0091sa',
+  lockUnlock: 'sfnkpmyuai',
+  runtimeFatal: 's9b2ygxnbx',
+  runtimeUncaught: 'sfdpe2gt2k',
+  runtimeUnhandledRejection: 'sgddkqme19',
+  runtimeRecoverable: 'sef4olsfn3',
+} as const;
+
+export type ErrorDiagnosticSiteToken =
+  (typeof ERROR_DIAGNOSTIC_SITES)[keyof typeof ERROR_DIAGNOSTIC_SITES];
+
+/** Compile-time pairing for every approved production `logger.error` call. */
+export interface ErrorDiagnosticSiteByMessage {
+  '[share] no cache directory available — cannot accept shared files': typeof ERROR_DIAGNOSTIC_SITES.shareNoCacheDirectory;
+  '[share] all shared files were unreadable': typeof ERROR_DIAGNOSTIC_SITES.shareAllFilesUnreadable;
+  '[share] capture failed': typeof ERROR_DIAGNOSTIC_SITES.shareCaptureFailed;
+  '[db] initialization failed':
+    | typeof ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization
+    | typeof ERROR_DIAGNOSTIC_SITES.dbSessionInitialization;
+  '[connect] database initialization failed': typeof ERROR_DIAGNOSTIC_SITES.connectDatabaseInitialization;
+  '[new-chat] createNewChat failed': typeof ERROR_DIAGNOSTIC_SITES.newChatCreate;
+  '[media] share source could not be protected': typeof ERROR_DIAGNOSTIC_SITES.mediaShareSourceUnprotected;
+  '[media] share source is no longer available': typeof ERROR_DIAGNOSTIC_SITES.mediaShareSourceMissing;
+  '[media] share failed': typeof ERROR_DIAGNOSTIC_SITES.mediaShare;
+  '[bg] background work failed': typeof ERROR_DIAGNOSTIC_SITES.backgroundWork;
+  '[db] write queue appears wedged': typeof ERROR_DIAGNOSTIC_SITES.dbWriteQueueWedge;
+  '[openFile] failed to open attachment': typeof ERROR_DIAGNOSTIC_SITES.openFile;
+  '[ErrorBoundary] render crash': typeof ERROR_DIAGNOSTIC_SITES.uiRender;
+  '[socket] event handling failed': typeof ERROR_DIAGNOSTIC_SITES.socketEvent;
+  '[socket] connection failed': typeof ERROR_DIAGNOSTIC_SITES.socketConnection;
+  '[lock] unlock failed after successful auth': typeof ERROR_DIAGNOSTIC_SITES.lockUnlock;
+  '[fatal] runtime error': typeof ERROR_DIAGNOSTIC_SITES.runtimeFatal;
+  '[uncaught] runtime error': typeof ERROR_DIAGNOSTIC_SITES.runtimeUncaught;
+  '[unhandledRejection] runtime error': typeof ERROR_DIAGNOSTIC_SITES.runtimeUnhandledRejection;
+}
+
+export type ErrorDiagnosticMessage = keyof ErrorDiagnosticSiteByMessage;
+export type ErrorDiagnosticSiteFor<Message extends ErrorDiagnosticMessage> =
+  ErrorDiagnosticSiteByMessage[Message];
+
 interface EventDefinition {
   code: string;
   tag: string;
+  siteTokens: readonly [ErrorDiagnosticSiteToken, ...ErrorDiagnosticSiteToken[]];
   matches(message: string): boolean;
 }
 
@@ -41,11 +105,13 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
   {
     code: 'share.no_cache_directory',
     tag: 'share',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.shareNoCacheDirectory],
     matches: exact('[share] no cache directory available — cannot accept shared files'),
   },
   {
     code: 'share.all_files_unreadable',
     tag: 'share',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.shareAllFilesUnreadable],
     matches: either(
       exact('[share] all shared files were unreadable'),
       (message) => unreadableShareCount(message) !== undefined,
@@ -54,42 +120,58 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
   {
     code: 'share.capture_failed',
     tag: 'share',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.shareCaptureFailed],
     matches: either(exact('[share] capture failed'), begins('[share] capture failed:')),
   },
   {
     code: 'db.initialization_failed',
     tag: 'db',
+    siteTokens: [
+      ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
+      ERROR_DIAGNOSTIC_SITES.dbSessionInitialization,
+    ],
     matches: exact('[db] initialization failed'),
   },
   {
     code: 'connect.database_initialization_failed',
     tag: 'connect',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.connectDatabaseInitialization],
     matches: exact('[connect] database initialization failed'),
   },
   {
     code: 'new_chat.create_failed',
     tag: 'new-chat',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.newChatCreate],
     matches: exact('[new-chat] createNewChat failed'),
   },
   {
     code: 'media.share_source_unprotected',
     tag: 'media',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.mediaShareSourceUnprotected],
     matches: exact('[media] share source could not be protected'),
   },
   {
     code: 'media.share_source_missing',
     tag: 'media',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.mediaShareSourceMissing],
     matches: exact('[media] share source is no longer available'),
   },
-  { code: 'media.share_failed', tag: 'media', matches: exact('[media] share failed') },
+  {
+    code: 'media.share_failed',
+    tag: 'media',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.mediaShare],
+    matches: exact('[media] share failed'),
+  },
   {
     code: 'background.work_failed',
     tag: 'bg',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.backgroundWork],
     matches: exact('[bg] background work failed'),
   },
   {
     code: 'db.write_queue_wedged',
     tag: 'db',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.dbWriteQueueWedge],
     matches: either(
       exact('[db] write queue appears wedged'),
       begins('[db] no write-lock holder released in '),
@@ -98,26 +180,31 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
   {
     code: 'open_file.open_failed',
     tag: 'openFile',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.openFile],
     matches: exact('[openFile] failed to open attachment'),
   },
   {
     code: 'ui.render_crash',
     tag: 'ErrorBoundary',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.uiRender],
     matches: exact('[ErrorBoundary] render crash'),
   },
   {
     code: 'socket.event_handling_failed',
     tag: 'socket',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.socketEvent],
     matches: exact('[socket] event handling failed'),
   },
   {
     code: 'socket.connection_failed',
     tag: 'socket',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.socketConnection],
     matches: either(exact('[socket] connection failed'), begins('[socket] error connecting to ')),
   },
   {
     code: 'lock.unlock_failed',
     tag: 'lock',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.lockUnlock],
     matches: either(
       exact('[lock] unlock failed after successful auth'),
       begins('[lock] unlock failed after a successful auth:'),
@@ -126,21 +213,25 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
   {
     code: 'runtime.fatal',
     tag: 'fatal',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.runtimeFatal],
     matches: either(exact('[fatal] runtime error'), begins('[fatal] ')),
   },
   {
     code: 'runtime.uncaught',
     tag: 'uncaught',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.runtimeUncaught],
     matches: either(exact('[uncaught] runtime error'), begins('[uncaught] ')),
   },
   {
     code: 'runtime.unhandled_rejection',
     tag: 'unhandledRejection',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.runtimeUnhandledRejection],
     matches: either(exact('[unhandledRejection] runtime error'), begins('[unhandledRejection] ')),
   },
   {
     code: 'runtime.recoverable',
     tag: 'recoverable',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.runtimeRecoverable],
     matches: exact('[recoverable] runtime warning'),
   },
 ] as const;
@@ -148,6 +239,8 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
 const FALLBACK_EVENT = { code: 'diagnostic.unclassified', tag: 'diagnostic' } as const;
 const EVENT_BY_CODE = new Map(EVENT_DEFINITIONS.map((definition) => [definition.code, definition]));
 const SERVER_EVENT_NAMES = new Set<string>(SERVER_EVENTS);
+const ERROR_DIAGNOSTIC_SITE_TOKENS = new Set<string>(Object.values(ERROR_DIAGNOSTIC_SITES));
+const ERROR_DIAGNOSTIC_SITE_FRAME = /^at gator\.site\.(s[a-z0-9]{9})$/;
 
 const ERROR_DETAIL_EVENT_CODES = new Set([
   'share.capture_failed',
@@ -501,15 +594,51 @@ function canonicalMessage(code: string, meta: SafeErrorDiagnosticMeta): string {
   return qualifiers.length === 0 ? code : `${code} [${qualifiers.join('|')}]`;
 }
 
+function registeredDiagnosticSite(value: unknown): ErrorDiagnosticSiteToken | undefined {
+  return typeof value === 'string' && ERROR_DIAGNOSTIC_SITE_TOKENS.has(value)
+    ? (value as ErrorDiagnosticSiteToken)
+    : undefined;
+}
+
+function diagnosticSiteFromFrame(value: unknown): ErrorDiagnosticSiteToken | undefined {
+  if (typeof value !== 'string') return undefined;
+  return registeredDiagnosticSite(ERROR_DIAGNOSTIC_SITE_FRAME.exec(value)?.[1]);
+}
+
+function allowedDiagnosticSite(
+  definition: EventDefinition | typeof FALLBACK_EVENT,
+  explicitSite: unknown,
+  ...storedFrames: unknown[]
+): ErrorDiagnosticSiteToken | undefined {
+  if (!('siteTokens' in definition)) return undefined;
+
+  if (explicitSite !== undefined) {
+    const explicitToken = registeredDiagnosticSite(explicitSite);
+    return explicitToken !== undefined && definition.siteTokens.includes(explicitToken)
+      ? explicitToken
+      : undefined;
+  }
+
+  const storedTokens = new Set<ErrorDiagnosticSiteToken>();
+  for (const value of storedFrames) {
+    const token = diagnosticSiteFromFrame(value);
+    if (token !== undefined && definition.siteTokens.includes(token)) storedTokens.add(token);
+  }
+  return storedTokens.size === 1 ? [...storedTokens][0] : undefined;
+}
+
 function project(
   message: string,
   rawMeta: Record<string, unknown> | undefined,
+  siteEvidence?: unknown,
+  storedStack?: unknown,
 ): PrivacySafeErrorDiagnostic {
   const definition = eventFor(message);
   const meta = buildMeta(rawMeta, definition, message);
+  const site = allowedDiagnosticSite(definition, siteEvidence, read(rawMeta, 'stack'), storedStack);
   return {
     message: canonicalMessage(definition.code, meta),
-    ...(definition === FALLBACK_EVENT ? {} : { stack: `at gator.${definition.code}` }),
+    ...(site === undefined ? {} : { stack: `at gator.site.${site}` }),
     tag: definition.tag,
     meta,
   };
@@ -527,9 +656,10 @@ function fallbackDiagnostic(): PrivacySafeErrorDiagnostic {
 export function projectCapturedErrorDiagnostic(
   message: string,
   meta?: unknown,
+  site?: ErrorDiagnosticSiteToken,
 ): PrivacySafeErrorDiagnostic {
   try {
-    return project(message, asRecord(meta));
+    return project(message, asRecord(meta), site);
   } catch {
     return fallbackDiagnostic();
   }
@@ -549,14 +679,15 @@ function asReport(diagnostic: PrivacySafeErrorDiagnostic): PrivacySafeErrorRepor
 export function projectCapturedErrorReport(
   message: string,
   meta?: unknown,
+  site?: ErrorDiagnosticSiteToken,
 ): PrivacySafeErrorReport {
-  return asReport(projectCapturedErrorDiagnostic(message, meta));
+  return asReport(projectCapturedErrorDiagnostic(message, meta, site));
 }
 
 /** Re-project legacy/current durable rows immediately before the HTTP boundary. */
 export function projectStoredErrorReport(input: StoredErrorReportInput): PrivacySafeErrorReport {
   try {
-    return asReport(project(input.message, parseStoredMeta(input.meta)));
+    return asReport(project(input.message, parseStoredMeta(input.meta), undefined, input.stack));
   } catch {
     return asReport(fallbackDiagnostic());
   }

@@ -77,7 +77,7 @@ describe('global error-handler privacy boundary', () => {
     expect(safe).toMatchObject({
       name: 'TypeError',
       message: 'runtime.fatal [TypeError]',
-      stack: 'at gator.runtime.fatal',
+      stack: 'at gator.site.s9b2ygxnbx',
     });
     expect(
       JSON.stringify({ name: safe.name, message: safe.message, stack: safe.stack }),
@@ -186,7 +186,7 @@ describe('global error-handler privacy boundary', () => {
     expect(safe).toMatchObject({
       name: 'GatorDiagnostic',
       message: 'runtime.uncaught',
-      stack: 'at gator.runtime.uncaught',
+      stack: 'at gator.site.sfdpe2gt2k',
     });
     expect(
       JSON.stringify({ name: safe.name, message: safe.message, stack: safe.stack }),

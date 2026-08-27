@@ -1,4 +1,8 @@
-import { isVerboseLocalLoggingEnabled, projectCapturedErrorDiagnostic } from '@core/secure';
+import {
+  ERROR_DIAGNOSTIC_SITES,
+  isVerboseLocalLoggingEnabled,
+  projectCapturedErrorDiagnostic,
+} from '@core/secure';
 
 /** The exact fields React Native 0.86 passes to its native ExceptionsManager module. */
 export interface ReactNativeExceptionData {
@@ -90,9 +94,18 @@ export function projectReactNativeExceptionData(data: unknown): ReactNativeExcep
       : typeof componentStack === 'string'
         ? '[ErrorBoundary] render crash'
         : '[uncaught] runtime error';
-    const diagnostic = projectCapturedErrorDiagnostic(event, {
-      errorName: read(data, 'name'),
-    });
+    const site = isFatal
+      ? ERROR_DIAGNOSTIC_SITES.runtimeFatal
+      : typeof componentStack === 'string'
+        ? ERROR_DIAGNOSTIC_SITES.uiRender
+        : ERROR_DIAGNOSTIC_SITES.runtimeUncaught;
+    const diagnostic = projectCapturedErrorDiagnostic(
+      event,
+      {
+        errorName: read(data, 'name'),
+      },
+      site,
+    );
 
     return {
       message: diagnostic.message,
@@ -138,6 +151,9 @@ function projectedConsoleArguments(
     const diagnostic = projectCapturedErrorDiagnostic(
       typeof first === 'string' ? first : fallbackEvent,
       typeof first === 'string' ? values[1] : first,
+      fallbackEvent === '[recoverable] runtime warning'
+        ? ERROR_DIAGNOSTIC_SITES.runtimeRecoverable
+        : ERROR_DIAGNOSTIC_SITES.runtimeUncaught,
     );
     return [
       isReactWarning ? `Warning: ${diagnostic.message}` : diagnostic.message,

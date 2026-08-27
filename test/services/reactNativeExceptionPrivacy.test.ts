@@ -65,7 +65,7 @@ describe('React Native exception privacy boundary', () => {
       stack: [
         {
           file: '0.js',
-          methodName: 'gator.ui.render_crash',
+          methodName: 'gator.site.sgp6mdwnu1',
           lineNumber: 0,
           column: 0,
         },

@@ -1,4 +1,4 @@
-import { projectCapturedErrorDiagnostic } from '@core/secure';
+import { ERROR_DIAGNOSTIC_SITES, projectCapturedErrorDiagnostic } from '@core/secure';
 import { captureError } from './errorReportSink';
 
 /**
@@ -38,6 +38,7 @@ export function privacySafeGlobalError(error: unknown, isFatal?: boolean): Error
   const diagnostic = projectCapturedErrorDiagnostic(
     isFatal ? '[fatal] runtime error' : '[uncaught] runtime error',
     error,
+    isFatal ? ERROR_DIAGNOSTIC_SITES.runtimeFatal : ERROR_DIAGNOSTIC_SITES.runtimeUncaught,
   );
   const safe = new Error(diagnostic.message);
   safe.name = diagnostic.meta.errorName ?? 'GatorDiagnostic';

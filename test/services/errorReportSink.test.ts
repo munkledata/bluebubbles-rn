@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { logSinks, type LogSink } from '@core/secure';
+import { ERROR_DIAGNOSTIC_SITES, logSinks, type LogSink } from '@core/secure';
 import * as errorReportRepository from '@db/repositories/errorReports';
 import type { AppDatabase } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -51,6 +51,7 @@ describe('ErrorReportSink', () => {
   it('persists only the structured event, typed fields, and synthetic frame', async () => {
     const sink = new ErrorReportSink();
     sink.write('error', '[socket] event handling failed', {
+      stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketEvent}`,
       event: 'new-message',
       response: 'private response for alice@example.com',
       error: {
@@ -64,7 +65,7 @@ describe('ErrorReportSink', () => {
     expect(r.length).toBe(1);
     expect(r[0]!.tag).toBe('socket');
     expect(r[0]!.message).toBe('socket.event_handling_failed [event:new-message|TypeError]');
-    expect(r[0]!.stack).toBe('at gator.socket.event_handling_failed');
+    expect(r[0]!.stack).toBe(`at gator.site.${ERROR_DIAGNOSTIC_SITES.socketEvent}`);
     expect(JSON.parse(String(r[0]!.meta))).toEqual({
       schemaVersion: 1,
       errorName: 'TypeError',
@@ -178,7 +179,7 @@ describe('ErrorReportSink', () => {
     expect(rec!.meta).toEqual({
       schemaVersion: 1,
       errorName: 'TypeError',
-      stack: 'at gator.runtime.uncaught',
+      stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.runtimeUncaught}`,
     });
     expect(JSON.stringify(rec)).not.toMatch(/nope|https:\/\/x|token=abc/);
     expect(consoleError).toHaveBeenCalled();

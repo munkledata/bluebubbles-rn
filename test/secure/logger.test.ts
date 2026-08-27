@@ -1,5 +1,6 @@
 import {
   ConsoleSink,
+  ERROR_DIAGNOSTIC_SITES,
   isVerboseLocalLoggingEnabled,
   RedactingLogger,
   type LogSink,
@@ -56,7 +57,7 @@ describe('app logger (RedactingLogger + ConsoleSink)', () => {
     };
     const log = new RedactingLogger(sink);
 
-    log.error('[socket] connection failed', {
+    log.error('[socket] connection failed', ERROR_DIAGNOSTIC_SITES.socketConnection, {
       name: 'ApiError',
       kind: 'timeout',
       status: 504,
@@ -73,7 +74,7 @@ describe('app logger (RedactingLogger + ConsoleSink)', () => {
           errorName: 'ApiError',
           errorCode: 'timeout',
           status: 504,
-          stack: 'at gator.socket.connection_failed',
+          stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`,
         },
       },
     ]);

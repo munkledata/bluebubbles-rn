@@ -1,4 +1,5 @@
 import {
+  ERROR_DIAGNOSTIC_SITES,
   ERROR_REPORT_ENVELOPE_VERSION,
   projectCapturedErrorReport,
   projectErrorReportClientContext,
@@ -14,53 +15,117 @@ describe('error-report structured privacy envelope', () => {
     [
       '[share] no cache directory available — cannot accept shared files',
       'share.no_cache_directory',
+      ERROR_DIAGNOSTIC_SITES.shareNoCacheDirectory,
     ],
-    ['[share] all shared files were unreadable', 'share.all_files_unreadable'],
-    ['[share] capture failed', 'share.capture_failed'],
-    ['[db] initialization failed', 'db.initialization_failed'],
-    ['[connect] database initialization failed', 'connect.database_initialization_failed'],
-    ['[new-chat] createNewChat failed', 'new_chat.create_failed'],
-    ['[media] share source could not be protected', 'media.share_source_unprotected'],
-    ['[media] share source is no longer available', 'media.share_source_missing'],
-    ['[media] share failed', 'media.share_failed'],
-    ['[bg] background work failed', 'background.work_failed'],
-    ['[db] write queue appears wedged', 'db.write_queue_wedged'],
-    ['[openFile] failed to open attachment', 'open_file.open_failed'],
-    ['[ErrorBoundary] render crash', 'ui.render_crash'],
-    ['[socket] event handling failed', 'socket.event_handling_failed'],
-    ['[socket] connection failed', 'socket.connection_failed'],
-    ['[lock] unlock failed after successful auth', 'lock.unlock_failed'],
-    ['[fatal] runtime error', 'runtime.fatal'],
-    ['[uncaught] runtime error', 'runtime.uncaught'],
-    ['[unhandledRejection] runtime error', 'runtime.unhandled_rejection'],
-    ['[recoverable] runtime warning', 'runtime.recoverable'],
-  ])('maps %s to the stable event code %s', (message, expected) => {
-    expect(projectCapturedErrorReport(message).message).toBe(expected);
+    [
+      '[share] all shared files were unreadable',
+      'share.all_files_unreadable',
+      ERROR_DIAGNOSTIC_SITES.shareAllFilesUnreadable,
+    ],
+    ['[share] capture failed', 'share.capture_failed', ERROR_DIAGNOSTIC_SITES.shareCaptureFailed],
+    [
+      '[db] initialization failed',
+      'db.initialization_failed',
+      ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
+    ],
+    [
+      '[connect] database initialization failed',
+      'connect.database_initialization_failed',
+      ERROR_DIAGNOSTIC_SITES.connectDatabaseInitialization,
+    ],
+    [
+      '[new-chat] createNewChat failed',
+      'new_chat.create_failed',
+      ERROR_DIAGNOSTIC_SITES.newChatCreate,
+    ],
+    [
+      '[media] share source could not be protected',
+      'media.share_source_unprotected',
+      ERROR_DIAGNOSTIC_SITES.mediaShareSourceUnprotected,
+    ],
+    [
+      '[media] share source is no longer available',
+      'media.share_source_missing',
+      ERROR_DIAGNOSTIC_SITES.mediaShareSourceMissing,
+    ],
+    ['[media] share failed', 'media.share_failed', ERROR_DIAGNOSTIC_SITES.mediaShare],
+    [
+      '[bg] background work failed',
+      'background.work_failed',
+      ERROR_DIAGNOSTIC_SITES.backgroundWork,
+    ],
+    [
+      '[db] write queue appears wedged',
+      'db.write_queue_wedged',
+      ERROR_DIAGNOSTIC_SITES.dbWriteQueueWedge,
+    ],
+    [
+      '[openFile] failed to open attachment',
+      'open_file.open_failed',
+      ERROR_DIAGNOSTIC_SITES.openFile,
+    ],
+    ['[ErrorBoundary] render crash', 'ui.render_crash', ERROR_DIAGNOSTIC_SITES.uiRender],
+    [
+      '[socket] event handling failed',
+      'socket.event_handling_failed',
+      ERROR_DIAGNOSTIC_SITES.socketEvent,
+    ],
+    [
+      '[socket] connection failed',
+      'socket.connection_failed',
+      ERROR_DIAGNOSTIC_SITES.socketConnection,
+    ],
+    [
+      '[lock] unlock failed after successful auth',
+      'lock.unlock_failed',
+      ERROR_DIAGNOSTIC_SITES.lockUnlock,
+    ],
+    ['[fatal] runtime error', 'runtime.fatal', ERROR_DIAGNOSTIC_SITES.runtimeFatal],
+    ['[uncaught] runtime error', 'runtime.uncaught', ERROR_DIAGNOSTIC_SITES.runtimeUncaught],
+    [
+      '[unhandledRejection] runtime error',
+      'runtime.unhandled_rejection',
+      ERROR_DIAGNOSTIC_SITES.runtimeUnhandledRejection,
+    ],
+    [
+      '[recoverable] runtime warning',
+      'runtime.recoverable',
+      ERROR_DIAGNOSTIC_SITES.runtimeRecoverable,
+    ],
+  ])('maps %s to stable event code %s and an opaque site frame', (message, expected, site) => {
+    expect(projectCapturedErrorReport(message, undefined, site)).toMatchObject({
+      message: expected,
+      stack: `at gator.site.${site}`,
+    });
   });
 
   it('keeps only event-owned typed diagnostics and a synthetic grouping frame', () => {
-    const report = projectCapturedErrorReport('[socket] event handling failed', {
-      event: 'new-message',
-      response: 'private response body',
-      accountGuid: 'private-account-guid',
-      error: {
-        name: 'ApiError',
-        kind: 'timeout',
-        status: 504,
-        retryable: true,
-        message: 'alice@example.com at https://private.example',
-        cause: { password: 'hunter2', response: 'private nested response' },
-        stack:
-          'ApiError: alice@example.com\n' +
-          '    at deliver (/Users/alice/project/src/incomingEventDispatcher.ts:123:45)\n' +
-          '    at https://private.example/app/eventRouter.ts:88:9',
+    const report = projectCapturedErrorReport(
+      '[socket] event handling failed',
+      {
+        event: 'new-message',
+        response: 'private response body',
+        accountGuid: 'private-account-guid',
+        error: {
+          name: 'ApiError',
+          kind: 'timeout',
+          status: 504,
+          retryable: true,
+          message: 'alice@example.com at https://private.example',
+          cause: { password: 'hunter2', response: 'private nested response' },
+          stack:
+            'ApiError: alice@example.com\n' +
+            '    at deliver (/Users/alice/project/src/incomingEventDispatcher.ts:123:45)\n' +
+            '    at https://private.example/app/eventRouter.ts:88:9',
+        },
       },
-    });
+      ERROR_DIAGNOSTIC_SITES.socketEvent,
+    );
 
     expect(report).toEqual({
       level: 'error',
       message: 'socket.event_handling_failed [event:new-message|ApiError|timeout|http_5xx]',
-      stack: 'at gator.socket.event_handling_failed',
+      stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketEvent}`,
       tag: 'socket',
       meta: JSON.stringify({
         schemaVersion: ERROR_REPORT_ENVELOPE_VERSION,
@@ -162,36 +227,119 @@ describe('error-report structured privacy envelope', () => {
       '    at AlicePassport (/Users/alice/private/AlicePassport.ts:12:3)\n' +
       '    at phone (/tmp/diagnostic.ts:3035550:199)\n' +
       'parse@https://private.example/app/chat.ts:88:9';
-    const report = projectCapturedErrorReport('[media] share failed', {
-      name: 'TypeError',
-      stack: privateStack,
-    });
+    const report = projectCapturedErrorReport(
+      '[media] share failed',
+      {
+        name: 'TypeError',
+        stack: privateStack,
+      },
+      ERROR_DIAGNOSTIC_SITES.mediaShare,
+    );
 
-    expect(report.stack).toBe('at gator.media.share_failed');
+    expect(report.stack).toBe(`at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`);
     expect(JSON.stringify(report)).not.toContain('AlicePassport');
     expect(JSON.stringify(report)).not.toContain('3035550199');
     expect(JSON.stringify(report)).not.toContain('private.example');
   });
 
   it('is idempotent when a current envelope crosses the legacy upload boundary', () => {
-    const first = projectCapturedErrorReport('[media] share failed', {
-      name: 'TypeError',
-      code: 'ERR_NETWORK',
-      stack: 'TypeError: private\n at media.ts:96:5',
-    });
+    const first = projectCapturedErrorReport(
+      '[media] share failed',
+      {
+        name: 'TypeError',
+        code: 'ERR_NETWORK',
+        stack: 'TypeError: private\n at media.ts:96:5',
+      },
+      ERROR_DIAGNOSTIC_SITES.mediaShare,
+    );
     const second = projectStoredErrorReport({
       ...first,
       meta: first.meta,
     });
     expect(second).toEqual(first);
 
-    const withoutError = projectCapturedErrorReport('[media] share failed');
+    const withoutError = projectCapturedErrorReport(
+      '[media] share failed',
+      undefined,
+      ERROR_DIAGNOSTIC_SITES.mediaShare,
+    );
     expect(
       projectCapturedErrorReport(withoutError.message, {
         ...parsedMeta(withoutError),
         stack: withoutError.stack,
       }),
     ).toEqual(withoutError);
+  });
+
+  it('fails closed for missing, malformed, or cross-event site evidence', () => {
+    expect(projectCapturedErrorReport('[socket] connection failed').stack).toBeUndefined();
+    expect(
+      projectCapturedErrorReport(
+        '[socket] connection failed',
+        undefined,
+        's-invalid' as typeof ERROR_DIAGNOSTIC_SITES.socketConnection,
+      ).stack,
+    ).toBeUndefined();
+    expect(
+      projectCapturedErrorReport(
+        '[socket] connection failed',
+        { stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}` },
+        ERROR_DIAGNOSTIC_SITES.mediaShare,
+      ).stack,
+    ).toBeUndefined();
+
+    const foreground = projectCapturedErrorReport(
+      '[db] initialization failed',
+      undefined,
+      ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
+    );
+    const session = projectCapturedErrorReport(
+      '[db] initialization failed',
+      undefined,
+      ERROR_DIAGNOSTIC_SITES.dbSessionInitialization,
+    );
+    expect(foreground.stack).not.toBe(session.stack);
+  });
+
+  it('preserves only an exact event-owned site frame from either durable carrier', () => {
+    const frame = `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`;
+    const expected = expect.objectContaining({ stack: frame });
+    expect(projectStoredErrorReport({ message: 'socket.connection_failed', stack: frame })).toEqual(
+      expected,
+    );
+    expect(
+      projectStoredErrorReport({
+        message: 'socket.connection_failed',
+        meta: JSON.stringify({ schemaVersion: 1, stack: frame }),
+      }),
+    ).toEqual(expected);
+    expect(
+      projectStoredErrorReport({
+        message: 'socket.connection_failed',
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`,
+        meta: JSON.stringify({ schemaVersion: 1, stack: 'at /Users/alice/private.ts:1:2' }),
+      }).stack,
+    ).toBeUndefined();
+    expect(
+      projectStoredErrorReport({
+        message: 'socket.connection_failed',
+        stack: ERROR_DIAGNOSTIC_SITES.socketConnection,
+        meta: JSON.stringify({
+          schemaVersion: 1,
+          stack: ERROR_DIAGNOSTIC_SITES.socketConnection,
+        }),
+      }).stack,
+    ).toBeUndefined();
+    expect(
+      projectStoredErrorReport({
+        message: 'db.initialization_failed',
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization}`,
+        meta: JSON.stringify({
+          schemaVersion: 1,
+          stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.dbSessionInitialization}`,
+        }),
+      }).stack,
+    ).toBeUndefined();
   });
 
   it('allows only non-identifying client context buckets', () => {
@@ -276,11 +424,12 @@ describe('error-report structured privacy envelope', () => {
           cause: { body: identifier },
           stack: `${identifier}\n at diagnostic.ts:10:20`,
         },
+        ERROR_DIAGNOSTIC_SITES.socketConnection,
       );
       const serialized = JSON.stringify(report);
       expect(serialized).not.toContain(identifier);
       expect(report.message).toBe('socket.connection_failed [UnknownError]');
-      expect(report.stack).toBe('at gator.socket.connection_failed');
+      expect(report.stack).toBe(`at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`);
     }
   });
 
@@ -333,12 +482,22 @@ describe('error-report structured privacy envelope', () => {
     });
 
     expect(() =>
-      projectCapturedErrorReport(`[socket] error connecting to ${huge}`, proxy),
+      projectCapturedErrorReport(
+        `[socket] error connecting to ${huge}`,
+        proxy,
+        ERROR_DIAGNOSTIC_SITES.socketConnection,
+      ),
     ).not.toThrow();
-    expect(projectCapturedErrorReport(`[socket] error connecting to ${huge}`, proxy)).toEqual({
+    expect(
+      projectCapturedErrorReport(
+        `[socket] error connecting to ${huge}`,
+        proxy,
+        ERROR_DIAGNOSTIC_SITES.socketConnection,
+      ),
+    ).toEqual({
       level: 'error',
       message: 'socket.connection_failed',
-      stack: 'at gator.socket.connection_failed',
+      stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`,
       tag: 'socket',
       meta: JSON.stringify({ schemaVersion: 1 }),
     });

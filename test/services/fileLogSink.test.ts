@@ -65,7 +65,13 @@ import {
   MAX_PERSISTED_LOG_FILE_BYTES,
 } from '@/services/logging/fileLogSink';
 // eslint-disable-next-line import/first
-import { logSinks, MAX_LOG_MESSAGE_CHARS, MAX_LOG_META_CHARS, RedactingLogger } from '@core/secure';
+import {
+  ERROR_DIAGNOSTIC_SITES,
+  logSinks,
+  MAX_LOG_MESSAGE_CHARS,
+  MAX_LOG_META_CHARS,
+  RedactingLogger,
+} from '@core/secure';
 
 /**
  * FileLogSink's in-memory buffering plus its account-teardown ordering. Native file I/O is replaced
@@ -188,7 +194,6 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
         errorName: 'ApiError',
         errorCode: 'no_connection',
         status: 503,
-        stack: 'at gator.socket.connection_failed',
       }),
     );
     expect(entry?.timestamp).toBe(validTimestamp);
@@ -265,7 +270,6 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
         meta: JSON.stringify({
           schemaVersion: 1,
           errorName: 'TypeError',
-          stack: 'at gator.media.share_failed',
         }),
         timestamp: expect.any(Number),
       },
@@ -293,7 +297,7 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
   it('never retains free-form error prose even when a caller reaches the file sink directly', () => {
     const sink = new FileLogSink();
     const logger = new RedactingLogger(sink);
-    logger.error('[media] share failed', {
+    logger.error('[media] share failed', ERROR_DIAGNOSTIC_SITES.mediaShare, {
       name: 'TypeError',
       message: 'private response for alice@example.com and +13035550199',
       stack: 'TypeError: private\n at AlicePassport.ts:3035550:199',
@@ -306,7 +310,7 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
       meta: JSON.stringify({
         schemaVersion: 1,
         errorName: 'TypeError',
-        stack: 'at gator.media.share_failed',
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`,
       }),
       timestamp: expect.any(Number),
     });

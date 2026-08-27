@@ -126,11 +126,13 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             does not delete copies exported to Photos or the Gator album; remove those in your
             Photos app. Temporary cache files may remain until Gator or Android removes them. Clear
             App Logs deletes the saved log and tells you if Android cannot confirm removal. Release
-            builds retain structured error diagnostics plus a small push-receipt record containing a
-            minute-rounded receipt time, the server event category, and whether delivery was
-            foreground or background. Development builds may keep extra local diagnostics, but Share
-            diagnostics exports only the structured errors and finite receipt events. Clearing app
-            data or uninstalling removes Gator’s app-private files but not exported media copies.
+            builds retain structured error diagnostics, including an opaque crash-site code without
+            a filename, function name, or original stack, plus a small push-receipt record
+            containing a minute-rounded receipt time, the server event category, and whether
+            delivery was foreground or background. Development builds may keep extra local
+            diagnostics, but Share diagnostics exports only the structured errors and finite receipt
+            events. Clearing app data or uninstalling removes Gator’s app-private files but not
+            exported media copies.
           </Text>
         </SettingsSection>
 

@@ -11,6 +11,8 @@ import {
   projectCapturedErrorDiagnostic,
   type DiagnosticEventCode,
   type DiagnosticEventInputByCode,
+  type ErrorDiagnosticMessage,
+  type ErrorDiagnosticSiteFor,
 } from './errorDiagnostic';
 
 const PLACEHOLDER = '[redacted]';
@@ -250,9 +252,13 @@ export class RedactingLogger {
       // Logging is best-effort and must never become the app failure.
     }
   };
-  error = (m: string, meta?: unknown) => {
+  error = <Message extends ErrorDiagnosticMessage>(
+    message: Message,
+    site: ErrorDiagnosticSiteFor<Message>,
+    meta?: unknown,
+  ): void => {
     try {
-      const diagnostic = projectCapturedErrorDiagnostic(m, meta);
+      const diagnostic = projectCapturedErrorDiagnostic(message, meta, site);
       this.sink.write('error', diagnostic.message, {
         ...diagnostic.meta,
         ...(diagnostic.stack === undefined ? {} : { stack: diagnostic.stack }),

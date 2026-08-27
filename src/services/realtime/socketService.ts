@@ -275,7 +275,10 @@ export class SocketService {
               logger.debug('[socket] event failure retired during account transition', { event });
               return;
             }
-            logger.error('[socket] event handling failed', { event, error: err });
+            logger.error('[socket] event handling failed', 's1v3iohm10', {
+              event,
+              error: err,
+            });
           });
       });
     }
@@ -482,7 +485,7 @@ export class SocketService {
     this.lastErrorLoggedAt.set(socketErrorKey(sig), now);
     // Keep host/message only in the in-memory throttle signature. Retained sinks receive the
     // static event plus the projector's finite Error name/code/status classification.
-    logger.error('[socket] connection failed', err);
+    logger.error('[socket] connection failed', 's8uz0091sa', err);
   }
 
   /**

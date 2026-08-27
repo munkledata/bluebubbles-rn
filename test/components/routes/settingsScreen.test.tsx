@@ -239,7 +239,10 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     const consent = useDialogStore.getState().current;
     expect(consent?.title).toBe('Share error reports?');
     expect(consent?.message).toContain('finite error code');
-    expect(consent?.message).toContain('does not send the original error message or stack trace');
+    expect(consent?.message).toContain('opaque Gator crash-site code');
+    expect(consent?.message).toContain(
+      'does not send the original error message, filename, function name, or stack trace',
+    );
     expect(mockKvSetWithinTransaction).not.toHaveBeenCalledWith(
       expect.anything(),
       ERROR_REPORTING_CONSENT_KEY,

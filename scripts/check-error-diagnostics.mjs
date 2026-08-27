@@ -6,28 +6,68 @@ import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-/** Every production ERROR call must start with one developer-owned event from this finite set. */
-export const ALLOWED_ERROR_MESSAGES = new Set([
-  '[ErrorBoundary] render crash',
-  '[bg] background work failed',
-  '[connect] database initialization failed',
-  '[db] initialization failed',
-  '[db] write queue appears wedged',
-  '[fatal] runtime error',
-  '[lock] unlock failed after successful auth',
-  '[media] share failed',
-  '[media] share source could not be protected',
-  '[media] share source is no longer available',
-  '[new-chat] createNewChat failed',
-  '[openFile] failed to open attachment',
-  '[share] all shared files were unreadable',
-  '[share] capture failed',
-  '[share] no cache directory available — cannot accept shared files',
-  '[socket] connection failed',
-  '[socket] event handling failed',
-  '[uncaught] runtime error',
-  '[unhandledRejection] runtime error',
+/** Exact committed registry: public opaque labels, never hashes of user or runtime input. */
+export const EXPECTED_ERROR_DIAGNOSTIC_SITES = Object.freeze({
+  shareNoCacheDirectory: 'st1ncp1gde',
+  shareAllFilesUnreadable: 'sz3en37b70',
+  shareCaptureFailed: 'sj1gzvygll',
+  dbForegroundInitialization: 'syjo8z3ok4',
+  dbSessionInitialization: 'solmtuzd5x',
+  connectDatabaseInitialization: 'skjyhvynmb',
+  newChatCreate: 'sfcbzc1wod',
+  mediaShareSourceUnprotected: 'sexrkdbhts',
+  mediaShareSourceMissing: 'siyzk5fb53',
+  mediaShare: 'scu302lx0h',
+  backgroundWork: 'slwt25up17',
+  dbWriteQueueWedge: 's9d54bjxmi',
+  openFile: 'sk4i8sxfdf',
+  uiRender: 'sgp6mdwnu1',
+  socketEvent: 's1v3iohm10',
+  socketConnection: 's8uz0091sa',
+  lockUnlock: 'sfnkpmyuai',
+  runtimeFatal: 's9b2ygxnbx',
+  runtimeUncaught: 'sfdpe2gt2k',
+  runtimeUnhandledRejection: 'sgddkqme19',
+  runtimeRecoverable: 'sef4olsfn3',
+});
+
+/** Every production ERROR call must use its exact developer-owned event/site pair. */
+export const ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE = new Map([
+  ['[share] no cache directory available — cannot accept shared files', ['shareNoCacheDirectory']],
+  ['[share] all shared files were unreadable', ['shareAllFilesUnreadable']],
+  ['[share] capture failed', ['shareCaptureFailed']],
+  ['[db] initialization failed', ['dbForegroundInitialization', 'dbSessionInitialization']],
+  ['[connect] database initialization failed', ['connectDatabaseInitialization']],
+  ['[new-chat] createNewChat failed', ['newChatCreate']],
+  ['[media] share source could not be protected', ['mediaShareSourceUnprotected']],
+  ['[media] share source is no longer available', ['mediaShareSourceMissing']],
+  ['[media] share failed', ['mediaShare']],
+  ['[bg] background work failed', ['backgroundWork']],
+  ['[db] write queue appears wedged', ['dbWriteQueueWedge']],
+  ['[openFile] failed to open attachment', ['openFile']],
+  ['[ErrorBoundary] render crash', ['uiRender']],
+  ['[socket] event handling failed', ['socketEvent']],
+  ['[socket] connection failed', ['socketConnection']],
+  ['[lock] unlock failed after successful auth', ['lockUnlock']],
+  ['[fatal] runtime error', ['runtimeFatal']],
+  ['[uncaught] runtime error', ['runtimeUncaught']],
+  ['[unhandledRejection] runtime error', ['runtimeUnhandledRejection']],
 ]);
+
+export const ALLOWED_ERROR_MESSAGES = new Set(ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE.keys());
+export const EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE = new Map([
+  ...ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE,
+  ['[recoverable] runtime warning', ['runtimeRecoverable']],
+]);
+const EXPECTED_LOGGER_SITE_TOKENS = new Set(
+  [...ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE.values()]
+    .flat()
+    .map((site) => EXPECTED_ERROR_DIAGNOSTIC_SITES[site]),
+);
+const INVALID_SITE_REGISTRY_ENTRY = '<invalid-site-registry-entry>';
+const INVALID_PROJECTOR_SITE = '<invalid-projector-site>';
+const INVALID_PROJECTOR_EVENT = '<invalid-projector-event>';
+const PROJECTOR_EVENT_PROPERTIES = new Set(['code', 'tag', 'siteTokens', 'matches']);
 
 /** Finite native logcat messages; raw throwable/provider prose is never permitted. */
 export const ALLOWED_NATIVE_LOG_MESSAGES = new Set([
@@ -45,7 +85,7 @@ const OWNED_REACT_NATIVE_CONSOLE_BOUNDARY = 'src/services/errors/reactNativeExce
 const OWNED_CONSOLE_SINK_CONTRACT =
   '29ad9f69cac087f4f847b2901c9308ee8fac239ab9cc8486d83961410edef385';
 const OWNED_REACT_NATIVE_CONSOLE_BOUNDARY_CONTRACT =
-  'dcc066b759425fdb018319c476d132c261fa2c1d70230b3e713458c8b8747d0b';
+  'f0141cf6aed9164f125e36c37ac2b0962fe7c56821ab0ba9c89d51dea9276652';
 const OWNED_NATIVE_LOG_FILE =
   'modules/gator-paste-input/android/src/main/java/expo/modules/gatorpasteinput/GatorPasteInputModule.kt';
 const OWNED_NATIVE_LOG_TAG = 'GatorPasteInput';
@@ -152,6 +192,15 @@ function unwrapExpression(expression) {
     expression = expression.expression;
   }
   return expression;
+}
+
+function diagnosticSiteProperty(expression) {
+  expression = expression && unwrapExpression(expression);
+  if (!expression || !ts.isPropertyAccessExpression(expression)) return undefined;
+  const owner = unwrapExpression(expression.expression);
+  return ts.isIdentifier(owner) && owner.text === 'ERROR_DIAGNOSTIC_SITES'
+    ? expression.name.text
+    : undefined;
 }
 
 function combinedExpressionKind(...kinds) {
@@ -812,15 +861,39 @@ function inspectErrorCalls(source, fileName = 'input.ts') {
   const bindings = diagnosticBindings(sourceFile);
   const findings = ownedConsoleContractFindings(sourceFile);
   let calls = 0;
+  const sites = [];
   const addLoggerCall = (node) => {
     calls += 1;
     const message = literalText(node.arguments[0]);
-    if (message !== undefined && ALLOWED_ERROR_MESSAGES.has(message)) return;
     const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    if (message === undefined || !ALLOWED_ERROR_MESSAGES.has(message)) {
+      findings.push({
+        line: position.line + 1,
+        message,
+        reason: message === undefined ? 'dynamic message' : 'unknown event',
+      });
+      return;
+    }
+    const siteToken = literalText(node.arguments[1]);
+    if (siteToken === undefined) {
+      findings.push({
+        line: position.line + 1,
+        message,
+        reason: node.arguments[1] === undefined ? 'missing crash site' : 'dynamic crash site',
+      });
+      return;
+    }
+    const allowedTokens = (ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE.get(message) ?? []).map(
+      (site) => EXPECTED_ERROR_DIAGNOSTIC_SITES[site],
+    );
+    if (allowedTokens.includes(siteToken)) {
+      sites.push(siteToken);
+      return;
+    }
     findings.push({
       line: position.line + 1,
       message,
-      reason: message === undefined ? 'dynamic message' : 'unknown event',
+      reason: 'event/site mismatch',
     });
   };
   const addDirectSinkCall = (node) => {
@@ -1036,7 +1109,7 @@ function inspectErrorCalls(source, fileName = 'input.ts') {
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return { calls, findings };
+  return { calls, findings, sites };
 }
 
 /** Return every dynamic or non-allowlisted `logger.error(...)` call in one source file. */
@@ -1749,16 +1822,180 @@ export function findExactProjectorMessages(source, fileName = 'errorDiagnostic.t
   return messages;
 }
 
+function topLevelVariableInitializer(sourceFile, variableName) {
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === variableName) {
+        return declaration.initializer && unwrapExpression(declaration.initializer);
+      }
+    }
+  }
+  return undefined;
+}
+
+function staticPropertyName(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+  return undefined;
+}
+
+/** Read the exact finite token registry without executing application code. */
+export function findDiagnosticSiteDefinitions(source, fileName = 'errorDiagnostic.ts') {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const initializer = topLevelVariableInitializer(sourceFile, 'ERROR_DIAGNOSTIC_SITES');
+  const definitions = new Map();
+  if (!initializer || !ts.isObjectLiteralExpression(initializer)) return definitions;
+  let invalidEntry = 0;
+  for (const property of initializer.properties) {
+    if (!ts.isPropertyAssignment(property)) {
+      definitions.set(`${INVALID_SITE_REGISTRY_ENTRY}:${invalidEntry++}`, undefined);
+      continue;
+    }
+    const name = staticPropertyName(property.name);
+    const value = literalText(property.initializer);
+    if (name === undefined || value === undefined || definitions.has(name)) {
+      definitions.set(`${INVALID_SITE_REGISTRY_ENTRY}:${invalidEntry++}`, undefined);
+      continue;
+    }
+    definitions.set(name, value);
+  }
+  return definitions;
+}
+
+/** Extract each finite projector message and the registry properties allowed to group it. */
+export function findProjectorSitePairs(source, fileName = 'errorDiagnostic.ts') {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const initializer = topLevelVariableInitializer(sourceFile, 'EVENT_DEFINITIONS');
+  const pairs = new Map();
+  if (!initializer || !ts.isArrayLiteralExpression(initializer)) return pairs;
+  let invalidEvent = 0;
+  for (const element of initializer.elements) {
+    const definition = unwrapExpression(element);
+    if (!ts.isObjectLiteralExpression(definition)) {
+      pairs.set(`${INVALID_PROJECTOR_EVENT}:${invalidEvent++}`, []);
+      continue;
+    }
+    const propertyNames = definition.properties.map((property) =>
+      ts.isPropertyAssignment(property) ? staticPropertyName(property.name) : undefined,
+    );
+    if (
+      propertyNames.length !== PROJECTOR_EVENT_PROPERTIES.size ||
+      propertyNames.some((name) => name === undefined || !PROJECTOR_EVENT_PROPERTIES.has(name)) ||
+      new Set(propertyNames).size !== propertyNames.length
+    ) {
+      pairs.set(`${INVALID_PROJECTOR_EVENT}:${invalidEvent++}`, []);
+      continue;
+    }
+    const siteProperty = definition.properties.find(
+      (property) => staticPropertyName(property.name) === 'siteTokens',
+    );
+    const matchesProperty = definition.properties.find(
+      (property) => staticPropertyName(property.name) === 'matches',
+    );
+    const exactMessages = [];
+    const visit = (node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'exact'
+      ) {
+        const message = literalText(node.arguments[0]);
+        if (message !== undefined) exactMessages.push(message);
+      }
+      ts.forEachChild(node, visit);
+    };
+    if (matchesProperty && ts.isPropertyAssignment(matchesProperty)) {
+      visit(matchesProperty.initializer);
+    }
+    if (
+      !siteProperty ||
+      !ts.isPropertyAssignment(siteProperty) ||
+      !matchesProperty ||
+      !ts.isPropertyAssignment(matchesProperty) ||
+      exactMessages.length === 0
+    ) {
+      pairs.set(`${INVALID_PROJECTOR_EVENT}:${invalidEvent++}`, []);
+      continue;
+    }
+    const siteInitializer = unwrapExpression(siteProperty.initializer);
+    const sites =
+      siteInitializer && ts.isArrayLiteralExpression(siteInitializer)
+        ? siteInitializer.elements.map(
+            (site) => diagnosticSiteProperty(site) ?? INVALID_PROJECTOR_SITE,
+          )
+        : [INVALID_PROJECTOR_SITE];
+    for (const message of exactMessages) {
+      const previous = pairs.get(message);
+      pairs.set(message, previous ? [...previous, INVALID_PROJECTOR_SITE] : sites);
+    }
+  }
+  return pairs;
+}
+
 export function runErrorDiagnosticCheck({ root = process.cwd() } = {}) {
   const errors = [];
   let calls = 0;
   let nativeCalls = 0;
-  const projectorMessages = findExactProjectorMessages(
-    readFileSync(resolve(root, 'src/core/secure/errorDiagnostic.ts'), 'utf8'),
-  );
+  const seenSites = [];
+  const projectorSource = readFileSync(resolve(root, 'src/core/secure/errorDiagnostic.ts'), 'utf8');
+  const projectorMessages = findExactProjectorMessages(projectorSource);
+  const siteDefinitions = findDiagnosticSiteDefinitions(projectorSource);
+  const projectorSitePairs = findProjectorSitePairs(projectorSource);
+  for (const [name, expectedValue] of Object.entries(EXPECTED_ERROR_DIAGNOSTIC_SITES)) {
+    const actualValue = siteDefinitions.get(name);
+    if (actualValue !== expectedValue) {
+      errors.push(
+        `diagnostic site ${name} must equal ${JSON.stringify(expectedValue)}; found ${JSON.stringify(actualValue)}`,
+      );
+    }
+  }
+  for (const name of siteDefinitions.keys()) {
+    if (!(name in EXPECTED_ERROR_DIAGNOSTIC_SITES)) {
+      errors.push(`unapproved diagnostic site registry property: ${name}`);
+    }
+  }
+  const siteValues = [...siteDefinitions.values()];
+  if (new Set(siteValues).size !== siteValues.length) {
+    errors.push('diagnostic site registry values must be globally unique');
+  }
+  for (const value of siteValues) {
+    if (!/^s[a-z0-9]{9}$/.test(value)) {
+      errors.push(`diagnostic site token has an unsafe format: ${JSON.stringify(value)}`);
+    }
+  }
   for (const message of ALLOWED_ERROR_MESSAGES) {
     if (!projectorMessages.has(message)) {
       errors.push(`allowed production event is missing from the core projector: ${message}`);
+    }
+  }
+  for (const [message, expectedSites] of EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE) {
+    const actualSites = projectorSitePairs.get(message) ?? [];
+    if (
+      actualSites.length !== expectedSites.length ||
+      actualSites.some((site, index) => site !== expectedSites[index])
+    ) {
+      errors.push(
+        `projector event/site mismatch for ${JSON.stringify(message)}: expected ${expectedSites.join(',')}; found ${actualSites.join(',')}`,
+      );
+    }
+  }
+  for (const message of projectorSitePairs.keys()) {
+    if (!EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE.has(message)) {
+      errors.push(`unapproved projector site event: ${JSON.stringify(message)}`);
     }
   }
   const javascriptFiles = ['src', 'app', 'modules'].flatMap((base) =>
@@ -1770,11 +2007,24 @@ export function runErrorDiagnosticCheck({ root = process.cwd() } = {}) {
     const source = readFileSync(file, 'utf8');
     const inspected = inspectErrorCalls(source, file);
     calls += inspected.calls;
+    seenSites.push(...inspected.sites);
     for (const finding of inspected.findings) {
       errors.push(
         `${relative(root, file)}:${finding.line} ${finding.reason}` +
           (finding.message === undefined ? '' : `: ${JSON.stringify(finding.message)}`),
       );
+    }
+  }
+  const siteCounts = new Map();
+  for (const site of seenSites) siteCounts.set(site, (siteCounts.get(site) ?? 0) + 1);
+  for (const site of EXPECTED_LOGGER_SITE_TOKENS) {
+    const count = siteCounts.get(site) ?? 0;
+    if (count !== 1)
+      errors.push(`production crash site ${site} must appear exactly once; found ${count}`);
+  }
+  for (const site of siteCounts.keys()) {
+    if (!EXPECTED_LOGGER_SITE_TOKENS.has(site)) {
+      errors.push(`unapproved production crash site: ${site}`);
     }
   }
   const nativeRoots = [resolve(root, 'modules')];
@@ -1814,7 +2064,12 @@ export function runErrorDiagnosticCheck({ root = process.cwd() } = {}) {
   }
   if (calls === 0) errors.push('no production logger.error calls were found');
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
-  return { calls, allowedMessages: ALLOWED_ERROR_MESSAGES.size, nativeCalls };
+  return {
+    calls,
+    allowedMessages: ALLOWED_ERROR_MESSAGES.size,
+    crashSites: EXPECTED_LOGGER_SITE_TOKENS.size,
+    nativeCalls,
+  };
 }
 
 const invokedDirectly =
@@ -1823,7 +2078,7 @@ if (invokedDirectly) {
   try {
     const result = runErrorDiagnosticCheck();
     console.log(
-      `Error-diagnostic guard passed: ${result.calls} production calls; ${result.allowedMessages} error events; ${result.nativeCalls} native log events.`,
+      `Error-diagnostic guard passed: ${result.calls} production calls; ${result.allowedMessages} error events; ${result.crashSites} opaque crash sites; ${result.nativeCalls} native log events.`,
     );
   } catch (error) {
     console.error(

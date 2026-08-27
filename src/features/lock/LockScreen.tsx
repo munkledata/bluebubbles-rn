@@ -84,7 +84,7 @@ export function LockScreen({ onUnlock }: LockScreenProps = {}): React.JSX.Elemen
         if (!isCurrentAttempt()) return;
       } catch (e) {
         if (!isCurrentAttempt()) return;
-        logger.error('[lock] unlock failed after successful auth', e);
+        logger.error('[lock] unlock failed after successful auth', 'sfnkpmyuai', e);
         setUnlockError('Couldn’t open your messages. Close Gator and open it again.');
       }
     } finally {

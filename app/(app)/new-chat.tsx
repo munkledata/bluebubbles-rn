@@ -366,7 +366,7 @@ export default function NewChatScreen(): React.JSX.Element {
       // Log at ERROR: only error-level lines reach ErrorReportSink, and this is a user-visible
       // dead end (found on-device — the dialog appeared with NO log line anywhere, so a real
       // failure like an RCS bridge outage left zero telemetry).
-      logger.error('[new-chat] createNewChat failed', e);
+      logger.error('[new-chat] createNewChat failed', 'sfcbzc1wod', e);
       showDialog(
         'New message',
         'Couldn’t start the conversation. Check the address and your server connection.',

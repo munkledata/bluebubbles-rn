@@ -80,7 +80,7 @@ export async function shareAttachment(
   // exact source in the gap before expo-sharing opens it.
   const protection = acquirePathProtection(localPath);
   if (!protection) {
-    logger.error('[media] share source could not be protected');
+    logger.error('[media] share source could not be protected', 'sexrkdbhts');
     return { ok: false, reason: 'failed' };
   }
   try {
@@ -88,7 +88,7 @@ export async function shareAttachment(
     const exists = await attachmentPathExists(localPath);
     if (!isCurrent()) return { ok: false, reason: 'stale' };
     if (!exists) {
-      logger.error('[media] share source is no longer available');
+      logger.error('[media] share source is no longer available', 'siyzk5fb53');
       return { ok: false, reason: 'failed' };
     }
     // Lazy import: expo-sharing is a native module, kept off the screen-open path. NOTE the
@@ -105,7 +105,7 @@ export async function shareAttachment(
     if (!isCurrent()) return { ok: false, reason: 'stale' };
     // `error`, not `warn`: ErrorReportSink only captures error-level lines, and this failure is
     // otherwise invisible — there is no other signal that the share sheet failed to open.
-    logger.error('[media] share failed', e);
+    logger.error('[media] share failed', 'scu302lx0h', e);
     return { ok: false, reason: 'failed' };
   } finally {
     protection.release();

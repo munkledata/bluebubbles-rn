@@ -1,4 +1,4 @@
-import type { LogEntry } from '@core/secure';
+import { ERROR_DIAGNOSTIC_SITES, type LogEntry } from '@core/secure';
 import { formatDiagnosticLogsForShare } from '@/services/logging/shareLogs';
 
 function entry(overrides: Partial<LogEntry> = {}): LogEntry {
@@ -47,7 +47,8 @@ describe('formatDiagnosticLogsForShare', () => {
         meta: JSON.stringify({
           errorName: 'TypeError',
           response: 'legacy-response-canary',
-          stack: 'at /Users/bob/server.ts:98:76',
+          stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`,
+          originalStack: 'at /Users/bob/server.ts:98:76',
         }),
         timestamp: Date.UTC(2026, 7, 6, 12, 34, 56, 789),
       }),
@@ -70,7 +71,7 @@ describe('formatDiagnosticLogsForShare', () => {
         timestamp: '2026-08-06T12:34:00.000Z',
         level: 'error',
         message: 'socket.connection_failed [TypeError]',
-        stack: 'at gator.socket.connection_failed',
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.socketConnection}`,
         tag: 'socket',
         meta: { schemaVersion: 1, errorName: 'TypeError' },
       },
@@ -78,7 +79,6 @@ describe('formatDiagnosticLogsForShare', () => {
         timestamp: '2026-08-06T12:35:00.000Z',
         level: 'error',
         message: 'share.capture_failed [ApiError|timeout]',
-        stack: 'at gator.share.capture_failed',
         tag: 'share',
         meta: { schemaVersion: 1, errorName: 'ApiError', errorCode: 'timeout' },
       },

@@ -6,9 +6,13 @@ import test from 'node:test';
 import ts from 'typescript';
 
 import {
-  ALLOWED_ERROR_MESSAGES,
+  ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE,
   ALLOWED_NATIVE_LOG_MESSAGES,
+  EXPECTED_ERROR_DIAGNOSTIC_SITES,
+  EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE,
+  findDiagnosticSiteDefinitions,
   findExactProjectorMessages,
+  findProjectorSitePairs,
   findUnsafeNativeLogCalls,
   findUnstructuredErrorCalls,
   runErrorDiagnosticCheck,
@@ -28,12 +32,33 @@ function writeFixtureFile(fixtureRoot, relativePath, source) {
 }
 
 function initializeGuardFixture(fixtureRoot) {
+  const projectorDefinitions = [...EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE]
+    .map(
+      ([message, sites]) =>
+        `{ siteTokens: [${sites.map((site) => `ERROR_DIAGNOSTIC_SITES.${site}`).join(', ')}], matches: exact(${JSON.stringify(message)}) }`,
+    )
+    .join(',\n');
   writeFixtureFile(
     fixtureRoot,
     'src/core/secure/errorDiagnostic.ts',
-    [...ALLOWED_ERROR_MESSAGES].map((message) => `exact(${JSON.stringify(message)});`).join('\n'),
+    [
+      `export const ERROR_DIAGNOSTIC_SITES = ${JSON.stringify(EXPECTED_ERROR_DIAGNOSTIC_SITES)} as const;`,
+      'const exact = (message) => message;',
+      `const EVENT_DEFINITIONS = [${projectorDefinitions}] as const;`,
+    ].join('\n'),
   );
-  writeFixtureFile(fixtureRoot, 'src/fixture.ts', "logger.error('[socket] connection failed');");
+  writeFixtureFile(
+    fixtureRoot,
+    'src/fixture.ts',
+    [...ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE]
+      .flatMap(([message, sites]) =>
+        sites.map(
+          (site) =>
+            `logger.error(${JSON.stringify(message)}, ${JSON.stringify(EXPECTED_ERROR_DIAGNOSTIC_SITES[site])}, new Error('private'));`,
+        ),
+      )
+      .join('\n'),
+  );
   mkdirSync(join(fixtureRoot, 'app'), { recursive: true });
   mkdirSync(join(fixtureRoot, 'modules'), { recursive: true });
 }
@@ -77,10 +102,70 @@ function topLevelConsoleWriteText(source, fileName) {
 }
 
 test('accepts every finite production event message as a string literal', () => {
-  const source = [...ALLOWED_ERROR_MESSAGES]
-    .map((message) => `logger.error(${JSON.stringify(message)}, new Error('private'));`)
+  const source = [...ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE]
+    .flatMap(([message, sites]) =>
+      sites.map(
+        (site) =>
+          `logger.error(${JSON.stringify(message)}, ${JSON.stringify(EXPECTED_ERROR_DIAGNOSTIC_SITES[site])}, new Error('private'));`,
+      ),
+    )
     .join('\n');
   assert.deepEqual(findUnstructuredErrorCalls(source), []);
+});
+
+test('rejects missing, dynamic, and cross-event crash-site evidence', () => {
+  const source = [
+    "logger.error('[socket] connection failed');",
+    "logger.error('[socket] connection failed', dynamicSite);",
+    `logger.error('[socket] connection failed', ${JSON.stringify(EXPECTED_ERROR_DIAGNOSTIC_SITES.mediaShare)});`,
+  ].join('\n');
+  assert.deepEqual(
+    findUnstructuredErrorCalls(source).map((finding) => finding.reason),
+    ['missing crash site', 'dynamic crash site', 'event/site mismatch'],
+  );
+});
+
+test('pins the exact unique registry and projector event/site pairs', () => {
+  const source = readFileSync(join(root, 'src/core/secure/errorDiagnostic.ts'), 'utf8');
+  assert.deepEqual(
+    Object.fromEntries(findDiagnosticSiteDefinitions(source)),
+    EXPECTED_ERROR_DIAGNOSTIC_SITES,
+  );
+  assert.deepEqual(findProjectorSitePairs(source), EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE);
+  assert.equal(
+    new Set(Object.values(EXPECTED_ERROR_DIAGNOSTIC_SITES)).size,
+    Object.keys(EXPECTED_ERROR_DIAGNOSTIC_SITES).length,
+  );
+
+  const spreadRegistry = source.replace(
+    'export const ERROR_DIAGNOSTIC_SITES = {',
+    'export const ERROR_DIAGNOSTIC_SITES = { ...dynamicSites,',
+  );
+  assert.notEqual(spreadRegistry, source);
+  assert.notDeepEqual(
+    Object.fromEntries(findDiagnosticSiteDefinitions(spreadRegistry)),
+    EXPECTED_ERROR_DIAGNOSTIC_SITES,
+  );
+
+  const dynamicProjectorSite = source.replace(
+    'siteTokens: [ERROR_DIAGNOSTIC_SITES.socketConnection],',
+    'siteTokens: [ERROR_DIAGNOSTIC_SITES.socketConnection, dynamicSite],',
+  );
+  assert.notEqual(dynamicProjectorSite, source);
+  assert.notDeepEqual(
+    findProjectorSitePairs(dynamicProjectorSite),
+    EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE,
+  );
+
+  const spreadProjectorDefinition = source.replace(
+    'siteTokens: [ERROR_DIAGNOSTIC_SITES.socketConnection],',
+    'siteTokens: [ERROR_DIAGNOSTIC_SITES.socketConnection], ...dynamicDefinition,',
+  );
+  assert.notEqual(spreadProjectorDefinition, source);
+  assert.notDeepEqual(
+    findProjectorSitePairs(spreadProjectorDefinition),
+    EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE,
+  );
 });
 
 test('rejects interpolated, variable, concatenated, and unknown messages', () => {

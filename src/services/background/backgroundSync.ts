@@ -138,7 +138,7 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
       },
       flushDiagnostics: (db, client, info, scope) =>
         flushBackgroundDiagnostics(db, client, !!info.supports_error_log_upload, scope),
-      onWorkError: (error) => logger.error('[bg] background work failed', error),
+      onWorkError: (error) => logger.error('[bg] background work failed', 'slwt25up17', error),
       onDiagnosticsError: (error) =>
         logger.debug('[bg] background diagnostics skipped after failure', error),
     });

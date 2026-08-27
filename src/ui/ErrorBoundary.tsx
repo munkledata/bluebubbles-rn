@@ -24,7 +24,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   override componentDidCatch(error: Error, info: React.ErrorInfo): void {
     // Redacted central logger (the Sentry breadcrumb seam — see RELEASE_CHECKLIST §9.2).
-    logger.error('[ErrorBoundary] render crash', { error, componentStack: info.componentStack });
+    logger.error('[ErrorBoundary] render crash', 'sgp6mdwnu1', {
+      error,
+      componentStack: info.componentStack,
+    });
   }
 
   private reset = (): void => this.setState({ error: null });

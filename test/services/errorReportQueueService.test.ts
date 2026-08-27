@@ -25,7 +25,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import type { ServerInfo } from '@core/models';
-import { logger } from '@core/secure';
+import { ERROR_DIAGNOSTIC_SITES, logger } from '@core/secure';
 import { insertErrorReport, kvSet, listRetryableErrorReports } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -65,7 +65,7 @@ async function seed(db: AppDatabase, n: number, now = Date.now()): Promise<void>
       {
         level: 'error',
         message: '[media] share failed',
-        stack: `at f${i}`,
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`,
         tag: 'media',
         createdAt: now - n + i,
       },
@@ -201,7 +201,7 @@ describe('runErrorReportQueue', () => {
       const expectedReport = {
         level: 'error',
         message: 'media.share_failed',
-        stack: 'at gator.media.share_failed',
+        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`,
         tag: 'media',
         meta: JSON.stringify({ schemaVersion: 1 }),
         timestamp: Date.UTC(2026, 7, 6, 12, 34),
@@ -261,7 +261,7 @@ describe('runErrorReportQueue', () => {
 
     const [jsonReport, fallbackReport] = sent?.reports ?? [];
     expect(jsonReport?.message).toBe('socket.connection_failed [ApiError|no_connection|http_5xx]');
-    expect(jsonReport?.stack).toBe('at gator.socket.connection_failed');
+    expect(jsonReport?.stack).toBeUndefined();
     expect(JSON.parse(String(jsonReport?.meta))).toEqual({
       schemaVersion: 1,
       errorName: 'ApiError',
@@ -270,7 +270,6 @@ describe('runErrorReportQueue', () => {
     });
     expect(fallbackReport).toMatchObject({
       message: 'share.capture_failed',
-      stack: 'at gator.share.capture_failed',
       tag: 'share',
       meta: JSON.stringify({ schemaVersion: 1 }),
     });

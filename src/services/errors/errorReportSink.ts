@@ -188,9 +188,13 @@ export function captureError(
     // Keep the runtime origin as a finite event. The raw Error remains input to the strict
     // projector so its allowlisted class/code can survive, but its message/stack cannot reach a
     // console, memory, file, database, or HTTP sink.
-    if (origin === 'fatal') logger.error('[fatal] runtime error', meta);
-    else if (origin === 'uncaught') logger.error('[uncaught] runtime error', meta);
-    else logger.error('[unhandledRejection] runtime error', meta);
+    if (origin === 'fatal') {
+      logger.error('[fatal] runtime error', 's9b2ygxnbx', meta);
+    } else if (origin === 'uncaught') {
+      logger.error('[uncaught] runtime error', 'sfdpe2gt2k', meta);
+    } else {
+      logger.error('[unhandledRejection] runtime error', 'sgddkqme19', meta);
+    }
     if (opts?.fatal) void errorReportSink.flushToDb();
   } catch {
     // never throw from the error-capture path

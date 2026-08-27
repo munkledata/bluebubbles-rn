@@ -438,7 +438,7 @@ export async function openForegroundBootDatabase(
   try {
     db = await ensureDatabase();
   } catch (error) {
-    logger.error('[db] initialization failed', error);
+    logger.error('[db] initialization failed', 'syjo8z3ok4', error);
     throw new ForegroundBootOperationalError(
       'database-open-failed',
       DATABASE_BOOT_FAILURE_MESSAGE,
@@ -652,7 +652,7 @@ export async function hydrateSession(): Promise<void> {
   try {
     db = await ensureDatabase();
   } catch (e: unknown) {
-    logger.error('[db] initialization failed', e);
+    logger.error('[db] initialization failed', 'solmtuzd5x', e);
     if (isActivationCurrent()) {
       void pauseRealtimeDeliveries();
       store.failed(SETTINGS_HYDRATION_FAILURE_MESSAGE);
@@ -996,7 +996,11 @@ export async function connect(
         return;
       }
       if (databaseResult.kind === 'error') {
-        logger.error('[connect] database initialization failed', databaseResult.error);
+        logger.error(
+          '[connect] database initialization failed',
+          'skjyhvynmb',
+          databaseResult.error,
+        );
         if (isAttemptCurrent()) {
           void pauseRealtimeDeliveries();
           store.failed(SETTINGS_HYDRATION_FAILURE_MESSAGE);
