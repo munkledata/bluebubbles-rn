@@ -42,12 +42,13 @@ jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(),
   expoFileExists: jest.fn(async () => true),
 }));
+jest.mock('@/services/send/outgoingPasteOwnership', () => ({
+  createOutgoingPasteOwnershipPreparer: jest.fn(() => jest.fn()),
+}));
 jest.mock('@/services/send/sendFailureNotice', () => ({
   clearFailedSendNotice: jest.fn(async () => undefined),
   notifyFailedSend: jest.fn(async () => undefined),
 }));
-jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
-
 // eslint-disable-next-line import/first
 import { discardMessage } from '@/services/send';
 // eslint-disable-next-line import/first
@@ -63,8 +64,6 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
-// eslint-disable-next-line import/first
-import { showToast } from '@ui/toast/toastStore';
 
 jest.setTimeout(120_000);
 
@@ -301,7 +300,7 @@ describe('discardMessage — the two guarded steps together', () => {
       });
 
     try {
-      await expect(discardMessage(tempGuid, 6_000)).resolves.toBeUndefined();
+      await expect(discardMessage(tempGuid, 6_000)).resolves.toBe('stale');
       if (!drain)
         throw new Error('discard did not retire the account lease during fallback tombstoning');
       await drain;
@@ -320,7 +319,6 @@ describe('discardMessage — the two guarded steps together', () => {
       expect(
         raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id=?').get(chatId),
       ).toEqual({ latest: 100 });
-      expect(showToast).not.toHaveBeenCalled();
       expect(clearFailedSendNotice).not.toHaveBeenCalled();
       expect(retire).not.toHaveBeenCalled();
       expect(drainCache).not.toHaveBeenCalled();
@@ -331,7 +329,7 @@ describe('discardMessage — the two guarded steps together', () => {
         cleanupTransactionStates.push(raw.inTransaction);
       });
 
-      await expect(discardMessage(tempGuid, 6_000)).resolves.toBeUndefined();
+      await expect(discardMessage(tempGuid, 6_000)).resolves.toBe('discarded');
 
       expect(deletionDate(raw, tempGuid)).toBe(6_000);
       expect(queueCount(raw, tempGuid)).toBe(0);
@@ -339,7 +337,6 @@ describe('discardMessage — the two guarded steps together', () => {
       expect(
         raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id=?').get(chatId),
       ).toEqual({ latest: 50 });
-      expect(showToast).not.toHaveBeenCalled();
       expect(clearFailedSendNotice).toHaveBeenCalledTimes(1);
       expect(retire).toHaveBeenCalledTimes(1);
       expect(drainCache).toHaveBeenCalledTimes(1);
@@ -568,7 +565,6 @@ describe('discardMessage — the two guarded steps together', () => {
 
     await discardMessage('temp-purged-alias', 6_000);
     expect(ledgerRows(raw)).toEqual([{ guid: 'real-purged-alias', dateDeleted: 6_000 }]);
-    expect(showToast).not.toHaveBeenCalled();
 
     await upsertMessages(
       db,
@@ -747,7 +743,7 @@ describe('discardMessage — the two guarded steps together', () => {
     expect(ledgerRows(raw)).toEqual([{ guid: 'temp-reused-exact', dateDeleted: 6_000 }]);
   });
 
-  it('returns unresolved for an unknown temp and the service surfaces fixed, identifier-free copy', async () => {
+  it('returns an identifier-free typed status for an unknown temporary message', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
@@ -768,12 +764,10 @@ describe('discardMessage — the two guarded steps together', () => {
     await expect(deleteMessageLocal(db, 'temp-no-retained-alias', 5_999)).resolves.toBe(
       'unresolved-temp',
     );
-    await discardMessage('temp-no-retained-alias', 6_000);
+    await expect(discardMessage('temp-no-retained-alias', 6_000)).resolves.toBe('message-changed');
 
     expect(deletionDate(raw, 'real-unrelated')).toBeNull();
     expect(ledgerRows(raw)).toEqual([{ guid: 'temp-no-retained-alias', dateDeleted: 6_000 }]);
-    expect(showToast).toHaveBeenCalledWith('Message changed—select it again');
-    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('temp-no-retained-alias'));
   });
 
   it('rolls alias creation back when the message identity promotion fails', async () => {
@@ -908,10 +902,9 @@ describe('discardMessage — the two guarded steps together', () => {
         .get(),
     ).toEqual({ canonical: 'real-cap-4096' });
 
-    await discardMessage('temp-cap-0000', 6_000);
+    await expect(discardMessage('temp-cap-0000', 6_000)).resolves.toBe('message-changed');
 
     expect(deletionDate(raw, 'real-cap-0000')).toBeNull();
     expect(ledgerRows(raw)).toContainEqual({ guid: 'temp-cap-0000', dateDeleted: 6_000 });
-    expect(showToast).toHaveBeenCalledWith('Message changed—select it again');
   });
 });

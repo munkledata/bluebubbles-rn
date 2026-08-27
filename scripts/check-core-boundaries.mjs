@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const CORE_DIRECTORY = 'src/core';
+const SERVICES_DIRECTORY = 'src/services';
 const FORBIDDEN_SOURCE_DIRECTORIES = ['db', 'features', 'native', 'services', 'state', 'ui'];
 const FORBIDDEN_ALIASES = ['@db', '@features', '@native', '@services', '@state', '@ui'];
 
@@ -26,20 +27,11 @@ export function importSpecifiers(source, fileName = 'source.ts') {
   const scriptKind = extname(fileName).toLowerCase().includes('x')
     ? ts.ScriptKind.TSX
     : ts.ScriptKind.TS;
-  const file = ts.createSourceFile(
-    fileName,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKind,
-  );
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, scriptKind);
   const specifiers = [];
 
   function visit(node) {
-    if (
-      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
-      node.moduleSpecifier
-    ) {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
       const specifier = literalText(node.moduleSpecifier);
       if (specifier) specifiers.push(specifier);
     } else if (
@@ -82,11 +74,11 @@ function isForbiddenPackage(specifier) {
 }
 
 function isForbiddenAlias(specifier) {
-  return FORBIDDEN_ALIASES.some(
-    (alias) => specifier === alias || specifier.startsWith(`${alias}/`),
-  ) || FORBIDDEN_SOURCE_DIRECTORIES.some(
-    (directory) =>
-      specifier === `@/${directory}` || specifier.startsWith(`@/${directory}/`),
+  return (
+    FORBIDDEN_ALIASES.some((alias) => specifier === alias || specifier.startsWith(`${alias}/`)) ||
+    FORBIDDEN_SOURCE_DIRECTORIES.some(
+      (directory) => specifier === `@/${directory}` || specifier.startsWith(`@/${directory}/`),
+    )
   );
 }
 
@@ -101,6 +93,22 @@ function isForbiddenRelativeImport({ root, file, specifier }) {
   return FORBIDDEN_SOURCE_DIRECTORIES.some((directory) =>
     isInside(target, resolve(root, 'src', directory)),
   );
+}
+
+function isUiAlias(specifier) {
+  return (
+    specifier === '@ui' ||
+    specifier.startsWith('@ui/') ||
+    specifier === '@/ui' ||
+    specifier.startsWith('@/ui/') ||
+    specifier === 'src/ui' ||
+    specifier.startsWith('src/ui/')
+  );
+}
+
+function isUiRelativeImport({ root, file, specifier }) {
+  if (!specifier.startsWith('.')) return false;
+  return isInside(resolve(file, '..', specifier), resolve(root, 'src/ui'));
 }
 
 export function validateCoreImports({ root, files }) {
@@ -124,6 +132,23 @@ export function validateCoreImports({ root, files }) {
   return errors.sort();
 }
 
+export function validateServiceImports({ root, files }) {
+  const errors = [];
+
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    for (const specifier of importSpecifiers(source, file)) {
+      if (specifier === '<non-literal>') {
+        errors.push(`${relative(root, file)} uses a non-literal require/import.`);
+      } else if (isUiAlias(specifier) || isUiRelativeImport({ root, file, specifier })) {
+        errors.push(`${relative(root, file)} imports forbidden UI boundary "${specifier}".`);
+      }
+    }
+  }
+
+  return errors.sort();
+}
+
 export function runCoreBoundaryCheck({ root = process.cwd() } = {}) {
   const core = resolve(root, CORE_DIRECTORY);
   const files = sourceFiles(core);
@@ -132,15 +157,26 @@ export function runCoreBoundaryCheck({ root = process.cwd() } = {}) {
   return { files: files.length };
 }
 
+export function runServiceBoundaryCheck({ root = process.cwd() } = {}) {
+  const services = resolve(root, SERVICES_DIRECTORY);
+  const files = sourceFiles(services);
+  const errors = validateServiceImports({ root, files });
+  if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
+  return { files: files.length };
+}
+
 const invokedDirectly =
   process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (invokedDirectly) {
   try {
-    const result = runCoreBoundaryCheck();
-    console.log(`Core boundary guard passed: ${result.files} platform-free source files.`);
+    const core = runCoreBoundaryCheck();
+    const services = runServiceBoundaryCheck();
+    console.log(
+      `Architecture boundary guard passed: ${core.files} core files and ${services.files} UI-free service files.`,
+    );
   } catch (error) {
     console.error(
-      `Core boundary guard failed:\n${error instanceof Error ? error.message : String(error)}`,
+      `Architecture boundary guard failed:\n${error instanceof Error ? error.message : String(error)}`,
     );
     process.exitCode = 1;
   }

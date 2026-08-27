@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Linking } from 'react-native';
+import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import * as WebBrowser from 'expo-web-browser';
 import { faceTimeApi } from '@core/api';
@@ -113,7 +114,7 @@ export function useFaceTime(): {
         const link = await faceTimeApi.createFaceTimeLink(http, addresses);
         if (!isCurrent()) return;
         if (!isFaceTimeLink(link)) throw new Error('server returned no FaceTime link');
-        await send({ chatGuid, text: link }, accountLease);
+        await send({ chatGuid, text: link }, accountLease, presentSendIssue);
         if (!isCurrent()) return;
         await openFaceTimeLink(link, isCurrent);
       } catch (err) {

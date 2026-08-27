@@ -3,7 +3,7 @@
  * autoDownloadMessageAttachments (src/services/download/autoDownloadAttachments.ts): the ingestion
  * -path auto-download orchestration. The native pieces it lazily imports (the download fetcher +
  * expo-media-library) are mocked; assertions cover the gating (flag off / non-image) and the
- * download → album-save → batched-toast flow. Node project (no real natives).
+ * download → album-save → typed presentation outcome flow. Node project (no real natives).
  */
 // Mock the DB layer so importing the feature store doesn't pull op-sqlite (ESM, not transformable
 // under ts-jest). We drive listAttachmentsByMessageIds directly and never touch a real DB.
@@ -17,6 +17,7 @@ import { download } from '@/services/download/index';
 import { saveImageToLibrary } from '@/services/media';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useToastStore } from '@ui/toast/toastStore';
+import { servicePresentationAdapter } from '@ui/servicePresentation';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -25,7 +26,6 @@ import {
   autoDownloadMessageAttachments,
   MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
   MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE,
-  resetAutoDownloadToastBatch,
 } from '@/services/download/autoDownloadAttachments';
 
 const mockList = listAttachmentsByMessageIds as jest.Mock;
@@ -47,7 +47,7 @@ function imageRow(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  resetAutoDownloadToastBatch();
+  servicePresentationAdapter.resetSession();
   mockList.mockReset();
   mockDownload.mockReset().mockResolvedValue('file:///dl/a1.jpg');
   mockSave.mockReset().mockResolvedValue('saved');
@@ -118,15 +118,17 @@ describe('autoDownloadMessageAttachments', () => {
     expect(mockSave).not.toHaveBeenCalled();
   });
 
-  it('album destination saves into the album (move) and pops a batched toast', async () => {
+  it('returns an album-save outcome for the mounted UI to batch into one toast', async () => {
     jest.useFakeTimers();
     try {
       useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
       mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
-      await autoDownloadMessageAttachments(db, 1);
+      const outcome = await autoDownloadMessageAttachments(db, 1);
       expect(mockSave).toHaveBeenCalledWith('file:///dl/a1.jpg', { album: true });
+      expect(outcome).toEqual({ savedImages: 1, destination: 'album' });
       // Toast is batched — nothing yet, then fires after the debounce window.
       expect(useToastStore.getState().current).toBeNull();
+      servicePresentationAdapter.presentAutoDownload(outcome);
       jest.advanceTimersByTime(1300);
       expect(useToastStore.getState().current?.message).toContain('Gator album');
     } finally {
@@ -139,15 +141,16 @@ describe('autoDownloadMessageAttachments', () => {
     try {
       useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
       mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
-      await autoDownloadMessageAttachments(db, 1);
+      const outcome = await autoDownloadMessageAttachments(db, 1);
       expect(mockSave).toHaveBeenCalledTimes(1);
 
-      resetAutoDownloadToastBatch();
+      servicePresentationAdapter.presentAutoDownload(outcome);
+      servicePresentationAdapter.resetSession();
       jest.advanceTimersByTime(1_300);
 
       expect(useToastStore.getState().current).toBeNull();
     } finally {
-      resetAutoDownloadToastBatch();
+      servicePresentationAdapter.resetSession();
       jest.useRealTimers();
     }
   });
@@ -174,14 +177,14 @@ describe('autoDownloadMessageAttachments', () => {
       expect(mockSave).toHaveBeenCalledTimes(1);
 
       current = false;
-      resetAutoDownloadToastBatch();
+      servicePresentationAdapter.resetSession();
       finishSave('saved');
       await run;
       jest.advanceTimersByTime(1_300);
 
       expect(useToastStore.getState().current).toBeNull();
     } finally {
-      resetAutoDownloadToastBatch();
+      servicePresentationAdapter.resetSession();
       jest.useRealTimers();
     }
   });

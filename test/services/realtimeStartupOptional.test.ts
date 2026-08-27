@@ -237,7 +237,10 @@ jest.mock('@/services/syncControl', () => ({
   startSync: mockStartSync,
 }));
 jest.mock('@/services/download/autoDownloadAttachments', () => ({
-  autoDownloadMessageAttachments: jest.fn(async () => undefined),
+  autoDownloadMessageAttachments: jest.fn(async () => ({
+    savedImages: 0,
+    destination: null,
+  })),
 }));
 jest.mock('@/services/download/attachmentCacheAccountScope', () => ({
   createAttachmentCacheAccountScope: mockCreateAttachmentCacheAccountScope,

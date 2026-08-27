@@ -47,8 +47,6 @@ jest.mock('@/services/send/attachmentUpload', () => ({
 jest.mock('@/services/send/uploadControl', () => ({
   uploadRegistry: { cancel: jest.fn() },
 }));
-jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
-
 // eslint-disable-next-line import/first
 import {
   discardMessage,
@@ -84,8 +82,6 @@ import {
 } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
-// eslint-disable-next-line import/first
-import { showToast } from '@ui/toast/toastStore';
 // eslint-disable-next-line import/first
 import { createAttachmentCacheAccountScope } from '@/services/download/attachmentCacheAccountScope';
 // eslint-disable-next-line import/first
@@ -290,8 +286,8 @@ describe('UI send account lease', () => {
     await expect(
       unsend({ messageGuid: 'message-a', chatGuid: 'chat-a' }, screenLease),
     ).resolves.toBeNull();
-    await expect(retry('temp-a', screenLease)).resolves.toBeUndefined();
-    await expect(discardMessage('message-a', 1_000, screenLease)).resolves.toBeUndefined();
+    await expect(retry('temp-a', screenLease)).resolves.toBe('stale');
+    await expect(discardMessage('message-a', 1_000, screenLease)).resolves.toBe('stale');
 
     expect(mockSendText).not.toHaveBeenCalled();
     expect(mockSendImage).not.toHaveBeenCalled();
@@ -778,8 +774,11 @@ describe('UI send account lease', () => {
     );
     await waitUntil(() => mockSendText.mock.calls.length === 1);
 
-    await expect(send({ chatGuid: 'chat-a', text: 'over-capacity' })).resolves.toBeNull();
-    expect(showToast).toHaveBeenCalledWith('Too many messages are waiting—try again in a moment');
+    const reportIssue = jest.fn();
+    await expect(
+      send({ chatGuid: 'chat-a', text: 'over-capacity' }, undefined, reportIssue),
+    ).resolves.toBeNull();
+    expect(reportIssue).toHaveBeenCalledWith('queue-capacity');
     expect(mockSendText).toHaveBeenCalledTimes(1);
 
     firstResult.resolve({ tempGuid: 'temp-first' });
@@ -806,11 +805,9 @@ describe('UI send account lease', () => {
     expect(drained).toBe(false);
 
     deletion.resolve('unresolved-temp');
-    await expect(pending).resolves.toBeUndefined();
+    await expect(pending).resolves.toBe('stale');
     await drain;
     resumeRealtimeDeliveries();
-
-    expect(showToast).not.toHaveBeenCalled();
   });
 
   it('keeps tracking sibling image sends after one item rejects early', async () => {

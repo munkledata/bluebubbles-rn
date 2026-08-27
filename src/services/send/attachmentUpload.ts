@@ -5,7 +5,6 @@ import { parseServerErrorDetailBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import { logger } from '@core/secure';
 import { uploadStoreSink } from '@state/uploadStore';
-import { showToast } from '@ui/toast/toastStore';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { runTrackedUpload } from './trackedUpload';
 import { uploadGate, uploadRegistry } from './uploadControl';
@@ -159,7 +158,6 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
     if (stopReason !== null) throw stoppedError();
     if (!fileExists) {
       logger.warn('[upload] attachment file is missing before upload');
-      showToast("Couldn't read that file — try attaching it again.");
       throw new ApiError('local_file', 'Attachment file is no longer available');
     }
 
@@ -212,7 +210,6 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       // The native uploader throws a plain IOException for both an unreadable local file and a
       // dead network — classify so the bubble names the right problem.
       if (isLocalFileFailure(err)) {
-        showToast("Couldn't read that file — try attaching it again.");
         throw new ApiError('local_file', 'Attachment file could not be read', undefined, err);
       }
       throw new ApiError('no_connection', 'Upload request failed', undefined, err);

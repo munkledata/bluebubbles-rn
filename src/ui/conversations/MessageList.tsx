@@ -37,6 +37,7 @@ import { MessageRow } from './MessageRow';
 import { FailedMessageSheet } from './FailedMessageSheet';
 import { ReactionDetailsSheet } from './ReactionDetailsSheet';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
+import { presentDiscardMessageResult, presentManualRetryResult } from './sendNotices';
 
 interface MessageListProps {
   chatGuid: string;
@@ -502,10 +503,18 @@ export function MessageList({
           // Passing the bubble's text/image is what made a failed contact card go out as a plain
           // message reading the contact's name, and dropped a reply's target / effect / subject /
           // mentions, none of which this component can see.
-          if (stillFailed && failed) void retry(failed.guid, screenLease);
+          if (stillFailed && failed) {
+            void retry(failed.guid, screenLease).then((result) => {
+              if (screenLease.isCurrent()) presentManualRetryResult(result);
+            });
+          }
         }}
         onDelete={() => {
-          if (stillFailed && failed) void discardMessage(failed.guid, Date.now(), screenLease);
+          if (stillFailed && failed) {
+            void discardMessage(failed.guid, Date.now(), screenLease).then((result) => {
+              if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+            });
+          }
         }}
       />
       <ReactionDetailsSheet

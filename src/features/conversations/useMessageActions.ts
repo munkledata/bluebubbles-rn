@@ -17,6 +17,7 @@ import {
 import { discardMessage, react, unsend } from '@/services/send';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
+import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
 import { isLocalFileUri, type BubbleRect } from '@utils';
@@ -192,7 +193,10 @@ export function useMessageActions({
             // whose POST is still in flight, and that one also has to take its retry ladder with
             // it or the queue re-POSTs the message the user just deleted.
             void (async () => {
-              for (const g of set) await discardMessage(g, now, screenLease);
+              for (const g of set) {
+                const result = await discardMessage(g, now, screenLease);
+                if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+              }
             })();
             setSelectedGuids(null);
           },
@@ -260,7 +264,11 @@ export function useMessageActions({
           // anything its guarded first step does not own, so the message is removed either way.
           text: sending ? 'Cancel Sending' : 'Remove',
           style: 'destructive',
-          onPress: () => void discardMessage(g, Date.now(), screenLease),
+          onPress: () => {
+            void discardMessage(g, Date.now(), screenLease).then((result) => {
+              if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+            });
+          },
         },
       ],
     );
@@ -276,7 +284,7 @@ export function useMessageActions({
       selectedMessageText: selected.text ?? '',
     };
     if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction, emoji, screenLease);
-    else void react(args, screenLease);
+    else void react(args, screenLease, presentSendIssue);
   };
 
   const onReplyToSelected = (): void => {
@@ -339,7 +347,11 @@ export function useMessageActions({
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => void discardMessage(g, Date.now(), screenLease),
+        onPress: () => {
+          void discardMessage(g, Date.now(), screenLease).then((result) => {
+            if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+          });
+        },
       },
     ]);
   };

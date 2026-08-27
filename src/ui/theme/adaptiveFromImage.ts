@@ -13,29 +13,16 @@
  * We deliberately do NOT use Material Color Utilities — the generator is a small,
  * deterministic HSL pipeline tuned for iOS-style bubbles with WCAG-checked contrast.
  */
+import { parseHexColor, relativeLuminance } from '@core/color';
 import { darkTheme, iosLightTheme, type ThemeMode, type ThemeTokens } from './tokens';
+
+export { relativeLuminance } from '@core/color';
 
 // ---- Pure colour helpers (node-testable) ----------------------------------
 
 /** Clamp a number into [min, max]. */
 function clamp(n: number, min: number, max: number): number {
   return n < min ? min : n > max ? max : n;
-}
-
-/** Parse `#RGB` / `#RRGGBB` into 0–255 channels. Throws on an unparseable string. */
-function parseHex(hex: string): { r: number; g: number; b: number } {
-  let h = hex.trim().replace(/^#/, '');
-  if (h.length === 3) {
-    h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!;
-  }
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) {
-    throw new Error(`invalid hex color: ${hex}`);
-  }
-  return {
-    r: parseInt(h.slice(0, 2), 16),
-    g: parseInt(h.slice(2, 4), 16),
-    b: parseInt(h.slice(4, 6), 16),
-  };
 }
 
 /** Two-digit uppercase hex for a 0–255 channel (rounded + clamped). */
@@ -51,7 +38,7 @@ export interface Hsl {
 
 /** `#hex` → HSL. Hue in degrees, saturation/lightness in [0, 1]. */
 export function hexToHsl(hex: string): Hsl {
-  const { r, g, b } = parseHex(hex);
+  const { r, g, b } = parseHexColor(hex);
   const rn = r / 255;
   const gn = g / 255;
   const bn = b / 255;
@@ -104,18 +91,6 @@ export function hslToHex(h: number, s: number, l: number): string {
     [r, g, b] = [c, 0, x];
   }
   return `#${channelHex((r + m) * 255)}${channelHex((g + m) * 255)}${channelHex((b + m) * 255)}`;
-}
-
-/** Linearize one 0–255 sRGB channel for luminance (WCAG 2.x). */
-function linearChannel(c255: number): number {
-  const c = c255 / 255;
-  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
-/** WCAG relative luminance of a colour (0 = black, 1 = white). */
-export function relativeLuminance(hex: string): number {
-  const { r, g, b } = parseHex(hex);
-  return 0.2126 * linearChannel(r) + 0.7152 * linearChannel(g) + 0.0722 * linearChannel(b);
 }
 
 /** WCAG contrast ratio between two colours (1–21). Order-independent. */

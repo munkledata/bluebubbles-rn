@@ -24,12 +24,14 @@ import {
 import '@/services/notifications/backgroundEvents';
 import { logger } from '@core/secure';
 import { prepareNotificationPresentationState } from '@/services/notifications/notifeeService';
+import { installServicePresentationAdapter } from '@/services/presentationAdapter';
 import { useForegroundBootState } from '@features/boot/useForegroundBootState';
 import { ForegroundLockGate } from '@features/lock/ForegroundLockGate';
 import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { AppDialog, AppToast, ErrorBoundary, ThemeProvider, useTheme } from '@ui';
 import { showToast } from '@ui/toast/toastStore';
+import { servicePresentationAdapter } from '@ui/servicePresentation';
 import { buildDarkNavigationTheme, DARK_STATUS_BAR_STYLE } from '@ui/theme/dark-navigation-theme';
 
 function hasForegroundAuthority(): boolean {
@@ -81,6 +83,8 @@ export default function RootLayout(): React.JSX.Element {
   const appActiveRef = useRef(hasForegroundAuthority());
   const pendingColdUnlockRunRef = useRef<number | null>(null);
   const restartBootOnActiveRef = useRef(false);
+
+  useEffect(() => installServicePresentationAdapter(servicePresentationAdapter), []);
 
   useEffect(() => {
     mountedRef.current = true;

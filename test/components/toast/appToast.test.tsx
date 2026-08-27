@@ -99,9 +99,8 @@ describe('AppToast', () => {
   });
 
   it('drops a stale toast instead of showing it, and drains a whole stale backlog', async () => {
-    // Auto-download calls showToast from a killed-app FCM wake, where there is no React host to
-    // dismiss anything. If Android later reuses that JS context for a real launch, this is the
-    // backlog the host inherits — pills describing downloads that happened hours ago.
+    // A stale backlog can still be inherited after a suspended UI context resumes. Never show
+    // old account/status copy merely because the toast host mounts again later.
     const old = Date.now() - 60_000;
     useToastStore.setState({
       current: { id: 901, message: 'ghost one', durationMs: 2500, createdAt: old },

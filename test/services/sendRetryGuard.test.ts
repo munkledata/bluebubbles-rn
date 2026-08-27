@@ -32,16 +32,15 @@ jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(async () => ({ guid: 'up-1', viaPrivateApi: false })),
   expoFileExists: jest.fn(async () => true),
 }));
-jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
-
+jest.mock('@/services/send/outgoingPasteOwnership', () => ({
+  createOutgoingPasteOwnershipPreparer: jest.fn(() => jest.fn()),
+}));
 // eslint-disable-next-line import/first
 import { retry } from '@/services/send';
 // eslint-disable-next-line import/first
 import { http } from '@/services/clients';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
-// eslint-disable-next-line import/first
-import { showToast } from '@ui/toast/toastStore';
 // eslint-disable-next-line import/first -- composition-root/native dependencies above must be mocked first
 import {
   pauseRealtimeDeliveries,
@@ -94,9 +93,7 @@ describe('retry() account handover', () => {
       throw new Error('old database was closed');
     });
 
-    await expect(retry('temp-old-account')).resolves.toBeUndefined();
-
-    expect(showToast).not.toHaveBeenCalled();
+    await expect(retry('temp-old-account')).resolves.toBe('stale');
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -131,13 +128,12 @@ describe('retry() account handover', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     try {
-      await expect(retry(tempGuid)).resolves.toBeUndefined();
+      await expect(retry(tempGuid)).resolves.toBe('stale');
       if (!drain) throw new Error('manual retry claim did not retire the account lease');
       await drain;
 
       expect(triggerRan).toBe(true);
       expect(posts).toEqual([]);
-      expect(showToast).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
       expect(
         raw
@@ -165,7 +161,7 @@ describe('retry() account handover', () => {
         },
       );
 
-      await expect(retry(tempGuid)).resolves.toBeUndefined();
+      await expect(retry(tempGuid)).resolves.toBe('retried');
 
       expect(postRanInsideTransaction).toBe(false);
       expect(posts).toHaveLength(1);
@@ -203,7 +199,6 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
       c: 1,
     });
     expect(raw.prepare('SELECT COUNT(*) c FROM messages').get()).toEqual({ c: 1 });
-    expect(showToast).not.toHaveBeenCalled();
   });
 
   /**
@@ -281,10 +276,9 @@ describe('retry() vs the automatic retry drain', () => {
       .prepare("UPDATE messages SET send_state='sending', error=0 WHERE guid='temp-inflight'")
       .run();
 
-    await retry('temp-inflight');
+    await expect(retry('temp-inflight')).resolves.toBe('already-sending');
 
     expect(posts).toHaveLength(0); // nothing re-sent
-    expect(showToast).toHaveBeenCalledWith('Already trying to send this message');
     // The bubble AND its retry ladder survive — touching either would void a live lease.
     expect(raw.prepare("SELECT COUNT(*) c FROM messages WHERE guid='temp-inflight'").get()).toEqual(
       { c: 1 },
@@ -301,10 +295,9 @@ describe('retry() vs the automatic retry drain', () => {
     // The RCS bridge / AppleScript ack keeps the temp guid and only flips the state.
     raw.prepare("UPDATE messages SET send_state='sent', error=0 WHERE guid='temp-ok'").run();
 
-    await retry('temp-ok');
+    await expect(retry('temp-ok')).resolves.toBe('already-settled');
 
     expect(posts).toHaveLength(0);
-    expect(showToast).toHaveBeenCalledWith('Message was already sent');
     expect(raw.prepare('SELECT COUNT(*) c FROM messages').get()).toEqual({ c: 1 });
   });
 
@@ -319,10 +312,9 @@ describe('retry() vs the automatic retry drain', () => {
     await seedFailedText(db, raw, 'temp-noqueue', 'orphaned');
     raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-noqueue'").run();
 
-    await retry('temp-noqueue');
+    await expect(retry('temp-noqueue')).resolves.toBe('unretryable');
 
     expect(posts).toHaveLength(0);
-    expect(showToast).toHaveBeenCalledWith('This message can’t be sent again');
     expect(
       raw.prepare("SELECT send_state s FROM messages WHERE guid='temp-noqueue'").get(),
     ).toEqual({ s: 'error' });

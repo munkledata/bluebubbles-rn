@@ -1,5 +1,5 @@
 import { logger } from '@core/secure';
-import { relativeLuminance } from '@ui/theme';
+import { relativeLuminance } from '@core/color';
 
 /** Above this WCAG relative luminance the wallpaper counts as "light" → dark overlay text. */
 const LIGHT_THRESHOLD = 0.55;

@@ -20,6 +20,7 @@ import { useRcsEnabled } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
 import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
+import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 
 /** A chosen recipient chip: an address plus its best display name. */
@@ -376,7 +377,11 @@ export default function NewChatScreen(): React.JSX.Element {
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) {
-        const sent = await sendImages({ chatGuid: guid, images: staged }, accountLease);
+        const sent = await sendImages(
+          { chatGuid: guid, images: staged },
+          accountLease,
+          presentSendIssue,
+        );
         if (sent == null) return;
       }
       // The submission fully succeeded. Sent files now have durable outgoing owners, while any

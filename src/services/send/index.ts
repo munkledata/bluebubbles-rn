@@ -36,7 +36,6 @@ import {
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
 import { uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
-import { showToast } from '@ui/toast/toastStore';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
 import { isAttachmentCacheRecoveryReady } from '../download/attachmentCacheRecovery';
@@ -46,6 +45,20 @@ import { createOutgoingPasteOwnershipPreparer } from './outgoingPasteOwnership';
 
 export { isContactsPermissionDeniedError } from '../contacts/contactsService';
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
+
+export type SendOperationIssue = 'queue-capacity';
+export type SendIssueReporter = (issue: SendOperationIssue) => void;
+
+export type ManualRetryResult =
+  | 'retried'
+  | 'already-sending'
+  | 'already-settled'
+  | 'unretryable'
+  | 'unsendable'
+  | 'failed'
+  | 'stale';
+
+export type DiscardMessageResult = 'discarded' | 'message-changed' | 'stale';
 
 function snapshotPickedImage(image: PickedImage): PickedImage {
   return { ...image };
@@ -123,6 +136,7 @@ async function runUiAccountOperation<T>(
   lease: RealtimeDeliveryLease,
   task: () => Promise<T>,
   mode: 'immediate' | 'logical-send' = 'immediate',
+  reportIssue?: SendIssueReporter,
 ): Promise<T | null> {
   let completed = false;
   let result!: T;
@@ -138,7 +152,11 @@ async function runUiAccountOperation<T>(
   } catch (error) {
     if (!lease.isCurrent()) return null;
     if (error instanceof LogicalSendQueueCapacityError) {
-      showToast('Too many messages are waiting—try again in a moment');
+      try {
+        reportIssue?.('queue-capacity');
+      } catch (reportError) {
+        logger.warn('[send] optional issue reporter failed', reportError);
+      }
       return null;
     }
     throw error;
@@ -170,6 +188,7 @@ export function sendImage(
     image: PickedImage;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{
   tempGuid: string;
 } | null> {
@@ -197,6 +216,7 @@ export function sendImage(
       );
     },
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -207,6 +227,7 @@ export function sendImages(
     images: PickedImage[];
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{ tempGuid: string }[] | null> {
   const snapshot = {
     chatGuid: args.chatGuid,
@@ -245,6 +266,7 @@ export function sendImages(
       return sent;
     },
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -252,6 +274,7 @@ export function sendImages(
 export function send(
   args: SendTextArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{ tempGuid: string } | null> {
   const snapshot = snapshotSendTextArgs(args);
   return runUiAccountOperation(
@@ -261,6 +284,7 @@ export function send(
         accountLease.isCurrent(),
       ),
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -272,6 +296,7 @@ export function sendContactCard(
     replyToGuid?: string;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{
   tempGuid: string;
 } | null> {
@@ -295,6 +320,7 @@ export function sendContactCard(
         () => accountLease.isCurrent(),
       ),
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -308,6 +334,7 @@ export function sendContactCard(
 export async function pickAndSendContact(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{ tempGuid: string } | null> {
   if (!accountLease.isCurrent()) return null;
   // The native picker may sit open for minutes, but has not touched account data yet. Keep it
@@ -330,6 +357,7 @@ export async function pickAndSendContact(
         accountLease.isCurrent(),
       ),
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -337,6 +365,7 @@ export async function pickAndSendContact(
 export function react(
   args: SendReactionArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{ tempGuid: string } | null> {
   const snapshot = { ...args };
   return runUiAccountOperation(
@@ -346,6 +375,7 @@ export function react(
         accountLease.isCurrent(),
       ),
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -358,6 +388,7 @@ export function reply(
     effectId?: string;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
 ): Promise<{
   tempGuid: string;
 } | null> {
@@ -380,6 +411,7 @@ export function reply(
         () => accountLease.isCurrent(),
       ),
     'logical-send',
+    reportIssue,
   );
 }
 
@@ -661,52 +693,62 @@ export async function recoverOutgoing(
 export async function retry(
   tempGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<void> {
-  if (!accountLease.isCurrent()) return;
-  // NEVER rejects. The only call site is a `void retry(...)` in a press handler, so a rejection
-  // here is an unhandled promise: no toast, no log, a tap that visibly did nothing. The bubble and
-  // its ladder survive any failure now, so there is nothing to repair — only something to report.
+): Promise<ManualRetryResult> {
+  if (!accountLease.isCurrent()) return 'stale';
+  // NEVER rejects. UI callers map this typed result to presentation; a rejection from a press
+  // handler would bypass that mapping and become an unhandled promise. The bubble and its ladder
+  // survive any failure, so there is nothing to repair — only an outcome to report.
   try {
-    await runUiAccountOperation(accountLease, async () => {
-      const db = getDatabase();
-      const { claim, row } = await withDbTransaction(
-        db,
-        (context) => claimFailedOutgoingForRetryWithinTransaction(context, tempGuid, Date.now),
-        () => accountLease.isCurrent(),
-      );
-      if (!accountLease.isCurrent()) return;
-      if (claim !== 'claimed' || !row) {
-        showToast(
-          claim === 'sending'
-            ? 'Already trying to send this message'
-            : claim === 'settled'
-              ? 'Message was already sent'
-              : 'This message can’t be sent again',
+    const result = await runUiAccountOperation(
+      accountLease,
+      async (): Promise<ManualRetryResult> => {
+        const db = getDatabase();
+        const { claim, row } = await withDbTransaction(
+          db,
+          (context) => claimFailedOutgoingForRetryWithinTransaction(context, tempGuid, Date.now),
+          () => accountLease.isCurrent(),
         );
-        return;
-      }
-      // The same attempt the drain would make — same payload, same temp guid, same reconcile.
-      const outcome = await resendOutgoingRow(
-        db,
-        http,
-        outgoingQueueIO,
-        row,
-        () => Date.now(),
-        accountLease,
-      );
-      if (!accountLease.isCurrent()) return;
-      // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
-      // bubble keeps its error badge (Delete on the sheet still works) — say why rather than leave
-      // the tap looking like it did nothing.
-      if (outcome === 'unsendable') showToast('Original file is no longer available');
-    });
+        if (!accountLease.isCurrent()) return 'stale';
+        if (claim !== 'claimed' || !row) {
+          return claim === 'sending'
+            ? 'already-sending'
+            : claim === 'settled'
+              ? 'already-settled'
+              : 'unretryable';
+        }
+        // The same attempt the drain would make — same payload, same temp guid, same reconcile.
+        const outcome = await resendOutgoingRow(
+          db,
+          http,
+          outgoingQueueIO,
+          row,
+          () => Date.now(),
+          accountLease,
+        );
+        if (!accountLease.isCurrent()) return 'stale';
+        // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
+        // bubble keeps its error badge (Delete on the sheet still works) — say why rather than leave
+        // the tap looking like it did nothing.
+        switch (outcome) {
+          case 'sent':
+            return 'retried';
+          case 'failed':
+            return 'failed';
+          case 'unsendable':
+            return 'unsendable';
+          case 'paused':
+            return 'stale';
+        }
+      },
+    );
+    return result ?? 'stale';
   } catch (e) {
     // Disconnect may have revoked this retry while a DB/native await was in flight. An A-account
     // failure must not surface as a toast in B's newly connected UI (or as a misleading warning).
-    if (!accountLease.isCurrent()) return;
+    if (!accountLease.isCurrent()) return 'stale';
     // A DB/driver failure in the claim itself. The automatic ladder still owns the row.
     logger.warn('[send] manual retry failed', e);
-    showToast('Couldn’t retry — try again in a moment');
+    return 'failed';
   }
 }
 
@@ -731,8 +773,8 @@ export async function discardMessage(
   guid: string,
   now: number = Date.now(),
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<void> {
-  await runUiAccountOperation(accountLease, async () => {
+): Promise<DiscardMessageResult> {
+  const outcome = await runUiAccountOperation(accountLease, async () => {
     // STOP THE BYTES FIRST, before either tombstone. "Cancel Sending" used to be a pure DB write:
     // the bubble vanished while the phone carried on streaming the entire file to the server — on a
     // large video, for minutes, over the user's data. The upload simply had no cancel handle to
@@ -749,18 +791,17 @@ export async function discardMessage(
       },
       () => accountLease.isCurrent(),
     );
-    if (!accountLease.isCurrent()) return;
-    if (result === 'unresolved-temp') {
-      // The fixed-size alias ledger may have retired an extremely old mapping. Never claim the
-      // destructive action succeeded against an identity we cannot prove; the reactive list now
-      // carries the real GUID, so selecting the message again gives the user a safe retry.
-      showToast('Message changed—select it again');
-    }
-    if (!accountLease.isCurrent()) return;
+    if (!accountLease.isCurrent()) return 'stale';
+    // The fixed-size alias ledger may have retired an extremely old mapping. Never claim the
+    // destructive action succeeded against an identity we cannot prove; the reactive list now
+    // carries the real GUID, so selecting the message again gives the user a safe retry.
+    const disposition: DiscardMessageResult =
+      result === 'unresolved-temp' ? 'message-changed' : 'discarded';
+    if (!accountLease.isCurrent()) return 'stale';
     // The tombstone commits before native mutation. Failed-send notices are keyed by the retained
     // local message id, so removing the bubble must also withdraw its already-posted tray record.
     await clearFailedSendNotice(db, guid, () => accountLease.isCurrent());
-    if (!accountLease.isCurrent()) return;
+    if (!accountLease.isCurrent()) return 'stale';
     // Tombstone + ledger/ref changes committed above. Exact native deletion stays outside their DB
     // transaction and inside this account-scoped operation, so Disconnect drains it before wipe.
     await attachmentCacheCoordinator
@@ -769,7 +810,9 @@ export async function discardMessage(
     await attachmentCacheCoordinator
       .drainDueRetirements(db, { scope: attachmentCacheScope })
       .catch((error) => logger.debug('[send] deleted-message cache cleanup deferred', error));
+    return disposition;
   });
+  return outcome ?? 'stale';
 }
 
 /*

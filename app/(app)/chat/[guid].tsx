@@ -94,6 +94,7 @@ import {
   showContactsPermissionRecovery,
 } from '@ui/permissions/contactsPermission';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
+import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useLockStore } from '@state/lockStore';
 import { useTypingStore } from '@state/typingStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -554,12 +555,21 @@ function ChatScreenInner({
       if (replyTo) {
         if (isDev()) void devSendFakeReply(guid, text, replyTo.guid, effectId, accountLease);
         else
-          void reply({ chatGuid: guid, text, replyToGuid: replyTo.guid, effectId }, accountLease);
+          void reply(
+            { chatGuid: guid, text, replyToGuid: replyTo.guid, effectId },
+            accountLease,
+            presentSendIssue,
+          );
         setReplyTo(null);
         return;
       }
       if (isDev()) void devSendFake(guid, text, effectId, accountLease);
-      else void send({ chatGuid: guid, text, effectId, subject, mentions }, accountLease);
+      else
+        void send(
+          { chatGuid: guid, text, effectId, subject, mentions },
+          accountLease,
+          presentSendIssue,
+        );
     },
     [accountLease, guid, editing, replyTo, isDev],
   );
@@ -721,11 +731,13 @@ function ChatScreenInner({
   // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
   const onSendAttachments = useCallback(
     (items: PendingAttachment[]): void => {
-      void sendImages({ chatGuid: guid, images: items }, accountLease).catch((error) => {
-        if (!accountLease.isCurrent()) return;
-        logger.warn('[chat] attachment send rejected', error);
-        showToast('Couldn’t send one or more attachments—add the missing file again');
-      });
+      void sendImages({ chatGuid: guid, images: items }, accountLease, presentSendIssue).catch(
+        (error) => {
+          if (!accountLease.isCurrent()) return;
+          logger.warn('[chat] attachment send rejected', error);
+          showToast('Couldn’t send one or more attachments—add the missing file again');
+        },
+      );
     },
     [accountLease, guid],
   );
@@ -747,7 +759,7 @@ function ChatScreenInner({
   const supportsSendContact = useSendContactSupported();
   const runContactPicker = useCallback((): void => {
     const attempt = (): void => {
-      pickAndSendContact(guid, accountLease).catch((e) => {
+      pickAndSendContact(guid, accountLease, presentSendIssue).catch((e) => {
         if (!accountLease.isCurrent()) return;
         if (isContactsPermissionDeniedError(e)) {
           showContactsPermissionRecovery({
@@ -1032,7 +1044,12 @@ function ChatScreenInner({
                     },
                   },
                   accountLease,
-                );
+                  presentSendIssue,
+                ).catch((error) => {
+                  if (!accountLease.isCurrent()) return;
+                  logger.warn('[chat] voice message send rejected', error);
+                  showToast('Couldn’t send that recording—try recording it again');
+                });
               }}
             />
           </Suspense>

@@ -23,7 +23,10 @@ jest.mock('@/services/backgrounds/syncedBackground', () => ({ ensureSyncedBackgr
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
 jest.mock('@/services/syncControl', () => ({ maybeResumeSync: jest.fn() }));
 jest.mock('@/services/download/autoDownloadAttachments', () => ({
-  autoDownloadMessageAttachments: jest.fn(),
+  autoDownloadMessageAttachments: jest.fn(async () => ({
+    savedImages: 0,
+    destination: null,
+  })),
 }));
 jest.mock('@/services/reachability', () => ({
   probeReachabilityNow: jest.fn(),

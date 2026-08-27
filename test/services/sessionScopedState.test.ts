@@ -20,9 +20,12 @@ import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { useUploadStore } from '@state/uploadStore';
 import { showDialog, useDialogStore } from '@ui/dialog/dialogStore';
+import { servicePresentationAdapter } from '@ui/servicePresentation';
 import { showToast, useToastStore } from '@ui/toast/toastStore';
+import { installServicePresentationAdapter } from '@/services/presentationAdapter';
 
 const mockIsDevServer = jest.fn();
+let uninstallPresentationAdapter: (() => void) | null = null;
 
 jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer() }));
 jest.mock('@/services/clients', () => ({ http: {} }));
@@ -53,6 +56,7 @@ const api = findMyApi as unknown as {
 beforeEach(() => {
   jest.useFakeTimers();
   jest.resetAllMocks();
+  uninstallPresentationAdapter = installServicePresentationAdapter(servicePresentationAdapter);
   mockIsDevServer.mockReturnValue(false);
   api.getDevices.mockResolvedValue([]);
   api.getFriends.mockResolvedValue([]);
@@ -65,6 +69,8 @@ beforeEach(() => {
 
 afterEach(() => {
   resetSessionScopedState();
+  uninstallPresentationAdapter?.();
+  uninstallPresentationAdapter = null;
   useShareIntentStore.getState().clear();
   useFeatureSettingsStore.setState({ compactChatList: false });
   useSyncSettingsStore.setState({ messagesPerChat: 0 });

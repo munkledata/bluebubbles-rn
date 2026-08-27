@@ -7,7 +7,9 @@ import test from 'node:test';
 import {
   importSpecifiers,
   runCoreBoundaryCheck,
+  runServiceBoundaryCheck,
   validateCoreImports,
+  validateServiceImports,
 } from './check-core-boundaries.mjs';
 
 function fixture(files) {
@@ -82,10 +84,7 @@ test('rejects a non-literal dynamic import because its boundary cannot be checke
   });
 
   try {
-    assert.throws(
-      () => runCoreBoundaryCheck({ root }),
-      /uses a non-literal require\/import/,
-    );
+    assert.throws(() => runCoreBoundaryCheck({ root }), /uses a non-literal require\/import/);
   } finally {
     rmSync(root, { recursive: true });
   }
@@ -93,5 +92,35 @@ test('rejects a non-literal dynamic import because its boundary cannot be checke
 
 test('the repository core currently satisfies the boundary', () => {
   const result = runCoreBoundaryCheck();
+  assert.ok(result.files > 0);
+});
+
+test('rejects every service-to-UI import form and non-literal loading', () => {
+  const root = fixture({
+    'src/services/nested/example.ts': `
+      import { Toast } from '@ui';
+      export { Dialog } from '@/ui/dialog';
+      const store = require('@ui/toast/toastStore');
+      async function load() { return import('../../ui/theme'); }
+      async function unknown(name: string) { return import(name); }
+    `,
+  });
+  const file = resolve(root, 'src/services/nested/example.ts');
+
+  try {
+    const errors = validateServiceImports({ root, files: [file] });
+    assert.equal(errors.length, 5);
+    assert.ok(errors.some((error) => error.includes('"@ui"')));
+    assert.ok(errors.some((error) => error.includes('"@/ui/dialog"')));
+    assert.ok(errors.some((error) => error.includes('"@ui/toast/toastStore"')));
+    assert.ok(errors.some((error) => error.includes('"../../ui/theme"')));
+    assert.ok(errors.some((error) => error.includes('non-literal require/import')));
+  } finally {
+    rmSync(root, { recursive: true });
+  }
+});
+
+test('the repository services currently satisfy the UI boundary', () => {
+  const result = runServiceBoundaryCheck();
   assert.ok(result.files > 0);
 });

@@ -35,6 +35,7 @@ import { ensureSyncedBackground } from './backgrounds/syncedBackground';
 import { ensureDatabase } from './databaseControl';
 import { ensureChatSynced, maybeResumeSync, startSync } from './syncControl';
 import { autoDownloadMessageAttachments } from './download/autoDownloadAttachments';
+import { presentAutoDownloadOutcome } from './presentationAdapter';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
 import {
@@ -248,7 +249,11 @@ function realtimeSink(db: AppDatabase): EventSink {
             new NotifyingEventSink(
               new DbEventSink(
                 db,
-                (messageId) => autoDownloadMessageAttachments(db, messageId),
+                async (messageId) => {
+                  const lease = captureRealtimeDeliveryLease();
+                  const outcome = await autoDownloadMessageAttachments(db, messageId, lease);
+                  if (lease.isCurrent()) presentAutoDownloadOutcome(outcome);
+                },
                 async (context) => {
                   if (!context?.isCurrent()) return;
                   const attachmentCacheScope = createAttachmentCacheAccountScope(context);

@@ -7,12 +7,10 @@ import { useSyncStore } from '@state/syncStore';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { useUploadStore } from '@state/uploadStore';
-import { useDialogStore } from '@ui/dialog/dialogStore';
-import { useToastStore } from '@ui/toast/toastStore';
-import { resetAutoDownloadToastBatch } from './download/autoDownloadAttachments';
 import { errorReportSink } from './errors/errorReportSink';
 import { resetActiveChat } from './notifications/activeChat';
 import { resetPendingNotification } from './notifications/pendingNav';
+import { resetSessionPresentation, type SessionPresentationSurface } from './presentationAdapter';
 
 export interface SessionScopedResetResult {
   /** Drains already inside the DB path when the old account was synchronously disowned. */
@@ -22,20 +20,18 @@ export interface SessionScopedResetResult {
 }
 
 export type SessionScopedResetSurface =
+  | SessionPresentationSurface
   | 'error-reports'
   | 'find-my'
   | 'typing'
   | 'active-chat'
   | 'pending-notification'
-  | 'auto-download-toast'
   | 'facetime'
   | 'rcs-health'
   | 'transport-health'
   | 'sync'
   | 'uploads'
   | 'downloads'
-  | 'dialogs'
-  | 'toasts'
   | 'query-cache';
 
 /**
@@ -77,12 +73,6 @@ export function resetSessionScopedState(): SessionScopedResetResult {
     failedSurfaces.push('pending-notification');
   }
   try {
-    resetAutoDownloadToastBatch();
-  } catch {
-    failedSurfaces.push('auto-download-toast');
-  }
-
-  try {
     useFaceTimeStore.getState().reset();
   } catch {
     failedSurfaces.push('facetime');
@@ -113,18 +103,9 @@ export function resetSessionScopedState(): SessionScopedResetResult {
     failedSurfaces.push('downloads');
   }
 
-  // Dialog/toast copy can contain contact names, message state, or server errors. Their queued
-  // callbacks also belong to the old screen/session and must not run after reconnecting.
-  try {
-    useDialogStore.getState().reset();
-  } catch {
-    failedSurfaces.push('dialogs');
-  }
-  try {
-    useToastStore.getState().reset();
-  } catch {
-    failedSurfaces.push('toasts');
-  }
+  // Dialog/toast copy can contain contact names, message state, or server errors. The mounted app
+  // owns those UI stores and synchronously reports any reset failures through its narrow adapter.
+  failedSurfaces.push(...resetSessionPresentation());
 
   // QueryClient.clear() destroys active query entries (including chat search and server/account
   // responses) and synchronously removes all cached data from the shared provider.
