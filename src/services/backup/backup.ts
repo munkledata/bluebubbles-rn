@@ -6,7 +6,11 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import type { SecretBox } from '@core/crypto';
+import {
+  isChunkedSecretBoxEnvelope,
+  SecretBoxPlaintextLimitError,
+  type SecretBox,
+} from '@core/crypto';
 import { utf8Encode } from '@utils/bytes';
 import { BACKUP_LIMITS, BackupSchema, isBackupKey, type Backup } from './backupSchema';
 
@@ -134,10 +138,10 @@ function parseSizeCheckedBackup(text: string): Backup {
 }
 
 /**
- * Seal a backup into an encrypted, base64 envelope under a user passphrase
- * (XChaCha20-Poly1305 + Argon2id, via SecretBox). The `box` is injected so this stays
- * pure + Node-testable. The encrypted envelope is the ONLY thing that should leave the
- * device (an unencrypted backup on cloud storage would defeat the protection).
+ * Seal a backup into the chunked BB2 envelope under a user passphrase. Each bounded chunk is
+ * independently authenticated with XChaCha20-Poly1305 after one Argon2id key derivation. The
+ * `box` is injected so this stays pure + Node-testable. The encrypted envelope is the ONLY thing
+ * that should leave the device (an unencrypted backup on cloud storage would defeat protection).
  */
 export async function sealBackup(
   box: SecretBox,
@@ -145,23 +149,34 @@ export async function sealBackup(
   passphrase: string,
 ): Promise<string> {
   const plaintext = serializeBackup(backup);
-  return box.seal(plaintext, passphrase);
+  return box.sealChunked(plaintext, passphrase);
 }
 
 /**
- * Open + validate an encrypted backup envelope. Throws on a wrong passphrase or tamper
- * (authenticated decryption) and on a malformed/old inner payload (parseBackup → zod).
- * The `isBackupKey` allow-list in `restoreBackup` still runs on import, so the
- * settings-only guarantee survives the encrypt/decrypt round-trip.
+ * Open + validate an encrypted backup envelope. New BB2 files are decoded/decrypted one bounded
+ * chunk at a time; existing v1 files retain their hard-capped compatibility path. Both throw on a
+ * wrong passphrase or tamper and on a malformed inner payload (parseBackup → zod). The
+ * `isBackupKey` allow-list in `restoreBackup` still runs on import.
  */
 export async function openBackup(
   box: SecretBox,
   sealed: string,
   passphrase: string,
 ): Promise<Backup> {
-  // SecretBox's base64 decoder allocates a byte buffer. Reject over-sized text before entering it.
+  // Reject oversized source text before either the legacy whole-base64 decoder or BB2 preflight.
   assertBackupSourceTextWithinLimit(sealed);
-  const plaintext = await box.open(sealed.trim(), passphrase);
+  const encoded = sealed.trim();
+  let plaintext: string;
+  try {
+    plaintext = isChunkedSecretBoxEnvelope(encoded)
+      ? await box.openChunked(encoded, passphrase, BACKUP_LIMITS.plaintextBytes)
+      : await box.openBounded(encoded, passphrase, BACKUP_LIMITS.plaintextBytes);
+  } catch (error) {
+    if (error instanceof SecretBoxPlaintextLimitError) {
+      throw new BackupInputLimitError('plaintext-too-large');
+    }
+    throw error;
+  }
   // Authenticated decryption proves integrity, not size. Bound the result before JSON.parse.
   assertBackupPlaintextWithinLimit(plaintext);
   return parseSizeCheckedBackup(plaintext);

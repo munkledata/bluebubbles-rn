@@ -173,7 +173,7 @@ export function isBackupKey(key: string): boolean {
 }
 
 /**
- * Distinguish an encrypted backup envelope (a base64 SecretBox blob) from a legacy
+ * Distinguish an encrypted backup envelope (legacy base64 or the BB2 text format) from a
  * plaintext JSON backup (which always starts with `{`). Lets import auto-route.
  */
 export function looksEncrypted(text: string): boolean {

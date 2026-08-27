@@ -48,8 +48,9 @@ export const CRYPTO_SIZES = {
 } as const;
 
 /**
- * Argon2id cost parameters. INTERACTIVE is appropriate for unlocking a key on a
- * mobile device on app open; bump for higher-value secrets if needed.
+ * Argon2id cost parameters. This exact profile is part of the existing SecretBox v1 and BB2
+ * compatibility contract. Do not change it in place: a future cost change needs a versioned
+ * envelope path that can still derive keys for existing ciphertext.
  */
 export const ARGON2_INTERACTIVE = {
   opsLimit: 2,

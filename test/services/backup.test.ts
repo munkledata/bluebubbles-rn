@@ -7,8 +7,16 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import { SecretBox } from '@core/crypto';
-import { fromBase64 } from '@utils/bytes';
+import {
+  CHUNKED_SECRET_BOX_CHUNK_BYTES,
+  CHUNKED_SECRET_BOX_PREFIX,
+  CRYPTO_SIZES,
+  encodeEnvelope,
+  SECRET_BOX_AEAD_TAG_BYTES,
+  SecretBox,
+  type CryptoBackend,
+} from '@core/crypto';
+import { fromBase64, toBase64 } from '@utils/bytes';
 import {
   BackupInputLimitError,
   buildBackup,
@@ -748,15 +756,37 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
   const makeBox = async (): Promise<SecretBox> =>
     new SecretBox(await createLibsodiumBackend(), cheapArgon);
 
-  it('round-trips and the ciphertext leaks no plaintext', async () => {
+  it('round-trips in bounded authenticated chunks and leaks no plaintext', async () => {
     const t = await createTestDb();
     await kvSet(t.db, 'theme.preset', 'oledDark');
     const backup = await buildBackup(t.db, { exportedAt: 7 });
-    const box = await makeBox();
+    backup.themes.push({
+      name: 'Large theme',
+      mode: 'dark',
+      tokens: 'x'.repeat(CHUNKED_SECRET_BOX_CHUNK_BYTES * 2 + 7),
+      isPreset: 0,
+    });
+    const backend = await createLibsodiumBackend();
+    const encrypt = jest.spyOn(backend, 'aeadEncrypt');
+    const decrypt = jest.spyOn(backend, 'aeadDecrypt');
+    const box = new SecretBox(backend, cheapArgon);
     const sealed = await sealBackup(box, backup, 'pass-123');
+    expect(sealed.startsWith(CHUNKED_SECRET_BOX_PREFIX)).toBe(true);
     expect(sealed).not.toContain('oledDark');
     expect(looksEncrypted(sealed)).toBe(true);
+    expect(encrypt).toHaveBeenCalledTimes(3);
+    expect(
+      encrypt.mock.calls.every(
+        ([params]) => params.plaintext.length <= CHUNKED_SECRET_BOX_CHUNK_BYTES,
+      ),
+    ).toBe(true);
     expect(await openBackup(box, sealed, 'pass-123')).toEqual(backup);
+    expect(decrypt).toHaveBeenCalledTimes(3);
+    expect(
+      decrypt.mock.calls.every(
+        ([params]) => params.ciphertext.length <= CHUNKED_SECRET_BOX_CHUNK_BYTES + 16,
+      ),
+    ).toBe(true);
   });
 
   it('open rejects a wrong passphrase (authenticated)', async () => {
@@ -770,28 +800,145 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
     const t = await createTestDb();
     const box = await makeBox();
     const sealed = await sealBackup(box, await buildBackup(t.db, { exportedAt: 1 }), 'pp');
-    const raw = fromBase64(sealed);
-    raw[raw.length - 1] = (raw[raw.length - 1]! ^ 0xff) & 0xff;
-    const tampered = Buffer.from(raw).toString('base64');
+    const frameStart = sealed.indexOf('.', CHUNKED_SECRET_BOX_PREFIX.length) + 1;
+    const tampered = `${sealed.slice(0, frameStart)}${sealed.charAt(frameStart) === 'A' ? 'B' : 'A'}${sealed.slice(frameStart + 1)}`;
     await expect(openBackup(box, tampered, 'pp')).rejects.toBeDefined();
   });
 
+  it('rejects an oversized BB2 plaintext claim before Argon2', async () => {
+    const backend = await createLibsodiumBackend();
+    const deriveKey = jest.spyOn(backend, 'deriveKey');
+    const box = new SecretBox(backend, cheapArgon);
+    const backup: Backup = {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [],
+      chatCustomizations: [],
+    };
+    const sealed = await sealBackup(box, backup, 'pp');
+    deriveKey.mockClear();
+
+    const headerEnd = sealed.indexOf('.', CHUNKED_SECRET_BOX_PREFIX.length);
+    const header = fromBase64(sealed.slice(CHUNKED_SECRET_BOX_PREFIX.length, headerEnd));
+    new DataView(header.buffer, header.byteOffset, header.byteLength).setUint32(
+      header.length - 4,
+      BACKUP_LIMITS.plaintextBytes + 1,
+    );
+    const forged = `${CHUNKED_SECRET_BOX_PREFIX}${toBase64(header)}${sealed.slice(headerEnd)}`;
+
+    await expect(openBackup(box, forged, 'pp')).rejects.toThrow(
+      'backup-input-limit:plaintext-too-large',
+    );
+    expect(deriveKey).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing, appended, or mis-padded BB2 frames before Argon2', async () => {
+    const backend = await createLibsodiumBackend();
+    const deriveKey = jest.spyOn(backend, 'deriveKey');
+    const box = new SecretBox(backend, cheapArgon);
+    const backup: Backup = {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [
+        {
+          name: 'Large theme',
+          mode: 'dark',
+          tokens: 'x'.repeat(CHUNKED_SECRET_BOX_CHUNK_BYTES + 1),
+          isPreset: 0,
+        },
+      ],
+      chatCustomizations: [],
+    };
+    const sealed = await sealBackup(box, backup, 'pp');
+    deriveKey.mockClear();
+
+    await expect(openBackup(box, sealed.slice(0, sealed.lastIndexOf('.')), 'pp')).rejects.toThrow(
+      'truncated chunked envelope',
+    );
+    await expect(openBackup(box, `${sealed}.QUFBQQ==`, 'pp')).rejects.toThrow(
+      'extra chunked envelope frame',
+    );
+
+    const finalSeparator = sealed.lastIndexOf('.');
+    const finalToken = sealed.slice(finalSeparator + 1);
+    const wrongPadding = finalToken.endsWith('==')
+      ? `${finalToken.slice(0, -2)}AA`
+      : finalToken.endsWith('=')
+        ? `${finalToken.slice(0, -1)}A`
+        : `${finalToken.slice(0, -3)}A==`;
+    await expect(
+      openBackup(box, `${sealed.slice(0, finalSeparator + 1)}${wrongPadding}`, 'pp'),
+    ).rejects.toThrow('malformed chunked envelope frame');
+    expect(deriveKey).not.toHaveBeenCalled();
+  });
+
+  it('bounds legacy v1 bodies before Argon2 and rejects malformed UTF-8 before JSON', async () => {
+    const salt = new Uint8Array(CRYPTO_SIZES.salt);
+    const nonce = new Uint8Array(CRYPTO_SIZES.nonce);
+    const backend = await createLibsodiumBackend();
+    const deriveKey = jest.spyOn(backend, 'deriveKey');
+    const box = new SecretBox(backend, cheapArgon);
+
+    await expect(
+      openBackup(
+        box,
+        encodeEnvelope({
+          salt,
+          nonce,
+          body: new Uint8Array(SECRET_BOX_AEAD_TAG_BYTES - 1),
+        }),
+        'pp',
+      ),
+    ).rejects.toThrow('envelope body too short');
+    await expect(
+      openBackup(
+        box,
+        encodeEnvelope({
+          salt,
+          nonce,
+          body: new Uint8Array(BACKUP_LIMITS.plaintextBytes + SECRET_BOX_AEAD_TAG_BYTES + 1),
+        }),
+        'pp',
+      ),
+    ).rejects.toThrow('backup-input-limit:plaintext-too-large');
+    expect(deriveKey).not.toHaveBeenCalled();
+
+    const invalidUtf8Backend = {
+      deriveKey: jest.fn(async () => new Uint8Array(CRYPTO_SIZES.key)),
+      aeadDecrypt: jest.fn(async () => Uint8Array.of(0xff)),
+    } as unknown as CryptoBackend;
+    const invalidUtf8Box = new SecretBox(invalidUtf8Backend, cheapArgon);
+    await expect(
+      openBackup(
+        invalidUtf8Box,
+        encodeEnvelope({
+          salt,
+          nonce,
+          body: new Uint8Array(SECRET_BOX_AEAD_TAG_BYTES),
+        }),
+        'pp',
+      ),
+    ).rejects.toThrow('secret box plaintext is not valid UTF-8');
+  });
+
   it('rejects an oversized encoded envelope before calling the base64 decoder', async () => {
-    const open = jest.fn();
-    const box = { open } as unknown as SecretBox;
+    const openBounded = jest.fn();
+    const box = { openBounded } as unknown as SecretBox;
     await expect(
       openBackup(box, 'A'.repeat(BACKUP_LIMITS.encodedCharacters + 1), 'old-passphrase'),
     ).rejects.toThrow('backup-input-limit:encoded-too-large');
-    expect(open).not.toHaveBeenCalled();
+    expect(openBounded).not.toHaveBeenCalled();
   });
 
   it('rejects oversized decrypted plaintext before JSON.parse', async () => {
-    const open = jest.fn(async () => 'x'.repeat(BACKUP_LIMITS.plaintextCharacters + 1));
-    const box = { open } as unknown as SecretBox;
+    const openBounded = jest.fn(async () => 'x'.repeat(BACKUP_LIMITS.plaintextCharacters + 1));
+    const box = { openBounded } as unknown as SecretBox;
     await expect(openBackup(box, 'small-envelope', 'old-passphrase')).rejects.toThrow(
       'backup-input-limit:plaintext-too-large',
     );
-    expect(open).toHaveBeenCalledTimes(1);
+    expect(openBounded).toHaveBeenCalledTimes(1);
   });
 
   it('the no-secrets guard survives encrypt → decrypt → restore (import-side filter)', async () => {

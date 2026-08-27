@@ -39,7 +39,7 @@ export async function createNativeCryptoBackend(): Promise<CryptoBackend> {
     // NOTE: react-native-libsodium's NATIVE binding requires `additional_data` to be a
     // STRING — it throws "input type not yet implemented" on null or a Uint8Array (unlike
     // the lenient libsodium-wrappers used in Jest, which is why this only surfaced on
-    // device). We never use AAD, so pass '' when absent.
+    // device). BB2 backup frames pass canonical ASCII AAD; use '' only when AAD is absent.
     async aeadEncrypt({ plaintext, key, nonce, additionalData }): Promise<Uint8Array> {
       return sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
         plaintext,

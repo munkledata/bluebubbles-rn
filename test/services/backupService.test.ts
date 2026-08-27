@@ -354,7 +354,7 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
   it('normalizes a native-share failure that arrives after account retirement', async () => {
     await seedDb();
     mockGetSecretBox.mockResolvedValueOnce({
-      seal: jest.fn(async () => 'sealed-backup'),
+      sealChunked: jest.fn(async () => 'sealed-backup'),
     } as unknown as SecretBox);
     const sheet = deferred<void>();
     mockShare.mockReturnValueOnce(sheet.promise);
@@ -485,12 +485,12 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
 
   it("drops a decrypted A restore after reconnect instead of customizing B's same GUID", async () => {
     const opened = deferred<string>();
-    const open = jest.fn(() => opened.promise);
-    mockGetSecretBox.mockResolvedValueOnce({ open } as unknown as SecretBox);
+    const openBounded = jest.fn(() => opened.promise);
+    mockGetSecretBox.mockResolvedValueOnce({ openBounded } as unknown as SecretBox);
     const oldScreenLease = captureRealtimeDeliveryLease();
 
     const pending = importBackupAuto('encrypted-old-account-envelope', 'pw', oldScreenLease);
-    await waitUntil(() => open.mock.calls.length === 1);
+    await waitUntil(() => openBounded.mock.calls.length === 1);
 
     // Decryption is pure CPU/crypto work and must not make Disconnect wait.
     await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();

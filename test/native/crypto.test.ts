@@ -36,13 +36,13 @@ describe('native crypto backend (react-native-libsodium wiring)', () => {
   // Argon2id is intentionally slow; lightest params for test speed.
   const cheapArgon = { opsLimit: 1, memLimit: 8 * 1024 * 1024 };
 
-  it('produces a CryptoBackend that round-trips through SecretBox', async () => {
+  it('round-trips chunked SecretBox data with non-empty AAD', async () => {
     const backend = await createNativeCryptoBackend();
     const box = new SecretBox(backend, cheapArgon);
     const secret = 'super-secret-server-password';
-    const sealed = await box.seal(secret, 'passphrase-123');
+    const sealed = await box.sealChunked(secret, 'passphrase-123');
     expect(sealed).not.toContain(secret);
-    expect(await box.open(sealed, 'passphrase-123')).toBe(secret);
+    expect(await box.openChunked(sealed, 'passphrase-123', 1024)).toBe(secret);
   });
 
   it('rejects a wrong passphrase (authenticated decryption)', async () => {
