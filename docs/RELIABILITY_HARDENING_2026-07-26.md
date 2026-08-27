@@ -1,8 +1,13 @@
-# Reliability hardening — status, 2026-07-26
+# Reliability hardening — historical status, 2026-07-26
+
+> **STATUS (2026-08-27): HISTORICAL IMPLEMENTATION NARRATIVE.** This file preserves the
+> July 2026 incident and remediation sequence; it is not a current work tracker or subsystem
+> authority. Use `docs/WORK_PLAN_2026-08-03.md` for open status and `AGENTS.md` plus
+> `docs/README.md` to locate current contracts and runbooks.
 
 Where this work started, what shipped, and what is still only provable on a device.
 
-Two companion documents hold the detail and stay authoritative for their own areas:
+Two companion documents preserve the dated supporting detail:
 
 - `docs/STATE_AUDIT_2026-07-25.md` — the two reported UI bugs and the app-wide React/state audit.
 - `docs/DB_WRITE_SAFETY_AUDIT_2026-07-25.md` — every DB write path, audited for races and lost updates.

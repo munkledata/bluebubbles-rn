@@ -1,14 +1,17 @@
 # Component Testing Plan — jest-expo + React Native Testing Library
 
-**Goal:** add automated UI component tests to Gator RN, alongside (never replacing) the existing
+> **STATUS (2026-08-27): RETIRED IMPLEMENTATION PLAN — NOT A CURRENT WORK ORDER.** The
+> component harness and coverage work described below has been completed or superseded. Suite
+> counts, commands, phases, and copyable agent prompts are frozen historical context; do not execute
+> them as remaining remediation. Use `docs/WORK_PLAN_2026-08-03.md` for current status and
+> `AGENTS.md` for current testing contracts.
+
+**Historical goal:** add automated UI component tests to Gator RN, alongside (never replacing) the existing
 Node-only jest suite. Chosen over Maestro/Detox because it needs no emulator (this dev machine is
 RAM-constrained) and reuses the existing jest toolchain.
 
-**How to use this document:** each phase below is a self-contained work order for one agent.
-Run the phases **in order** — each has a verify gate, and later phases depend on earlier ones.
-Copy the entire "Agent prompt" block (plus the Shared Context section) into the agent. Do not
-run two phases in parallel; within Phase 3, the per-component batches CAN run in parallel since
-they only add independent test files.
+**How to read this document:** each phase below records the original work order. Keep it for design
+history only; its directions and numeric baselines are not current instructions.
 
 ---
 
