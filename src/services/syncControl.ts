@@ -1,5 +1,7 @@
 import { logger } from '@core/secure';
-import { getSyncMarker } from '@db/repositories';
+import type { SyncMarker } from '@core/sync';
+import { getSyncMarker, setSyncMarkerWithinTransaction } from '@db/repositories';
+import { withDbTransaction } from '@db/transaction';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
@@ -8,7 +10,11 @@ import { ensureDatabase } from './databaseControl';
 import { syncContacts } from './contacts/contactsService';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
-import { captureRealtimeDeliveryLease } from './realtime/deliveryCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from './realtime/deliveryCoordinator';
 import {
   fullSync,
   httpSyncApi,
@@ -40,6 +46,15 @@ let inFlightEpoch: number | null = null;
 let trackedInFlight: Promise<void> | null = null;
 /** On-demand chat backfills run alongside the main pipeline but still belong to its teardown. */
 const auxiliaryInFlight = new Set<Promise<unknown>>();
+interface ActiveRepairRun {
+  readonly epoch: number;
+  readonly lease: RealtimeDeliveryLease;
+  readonly abortController: AbortController;
+  readonly releaseInvalidation: () => void;
+  cancelled: boolean;
+  slot: Promise<void> | null;
+}
+let activeRepair: ActiveRepairRun | null = null;
 let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
 
@@ -89,7 +104,7 @@ export function startSync(): Promise<void> {
   // paging alongside it: both walk the same cursor, so overlapping them doubles the fetching and
   // interleaves two writers' marker writes.
   const slot: Promise<void> = settledAll([syncInFlight, trackedInFlight])
-    .then(runSync)
+    .then(() => runSync())
     .finally(() => {
       // Only the run that still OWNS the slot may clear it — a successor may already have
       // published itself here, and nulling that out would make `awaitSyncIdle` — and therefore
@@ -145,6 +160,75 @@ export function refreshInbox(): Promise<void> {
 }
 
 /**
+ * Queue a full local-cache repair behind every older sync owner.
+ *
+ * The repair logically resets the full-sync branch without clearing the durable incremental marker
+ * until success. Existing domain rows remain in place while full-sync upserts authoritative server
+ * data over them, so device-local pins,
+ * names, archive/mute state, wallpapers, themes, reminders, drafts, and deletion ledgers survive.
+ * Cancellation/failure leaves the old marker usable; success replaces it from server responses only.
+ */
+export function startFullRepair(): Promise<void> {
+  const epoch = sessionAccessors.getEpoch();
+  const existing = activeRepair;
+  if (existing?.slot && existing.epoch === epoch && !existing.cancelled) return existing.slot;
+
+  // Capture account authority and publish the successor slot synchronously, before its first await,
+  // so Disconnect can see/drain it and a queued account-A repair can never recapture account B.
+  const lease = captureRealtimeDeliveryLease();
+  const abortController = new AbortController();
+  const releaseInvalidation = subscribeRealtimeGenerationInvalidation(lease.generation, () => {
+    abortController.abort();
+  });
+  const controller: ActiveRepairRun = {
+    epoch,
+    lease,
+    abortController,
+    releaseInvalidation,
+    cancelled: false,
+    slot: null,
+  };
+  const predecessors = [syncInFlight, trackedInFlight];
+  useSyncStore.getState().queueRepair();
+
+  let slot!: Promise<void>;
+  slot = settledAll(predecessors)
+    .then(() =>
+      runSync({
+        repair: true,
+        expectedEpoch: controller.epoch,
+        accountLease: controller.lease,
+        shouldCancel: () => controller.cancelled,
+        signal: controller.abortController.signal,
+      }),
+    )
+    .finally(() => {
+      controller.releaseInvalidation();
+      if (activeRepair === controller) activeRepair = null;
+      if (syncInFlight === slot) {
+        syncInFlight = null;
+        inFlightEpoch = null;
+      }
+      lastSyncAt = Date.now();
+    });
+  controller.slot = slot;
+  activeRepair = controller;
+  syncInFlight = slot;
+  inFlightEpoch = epoch;
+  return slot;
+}
+
+/** Request a cooperative stop. The current bounded request/owner settles before the next phase. */
+export function cancelFullRepair(): boolean {
+  const repair = activeRepair;
+  if (!repair || repair.cancelled || repair.epoch !== sessionAccessors.getEpoch()) return false;
+  repair.cancelled = true;
+  repair.abortController.abort();
+  useSyncStore.getState().requestRepairCancel();
+  return true;
+}
+
+/**
  * Resolve once no sync is in flight (immediately when none is).
  *
  * `forget()` awaits this before wiping the DB. A sync that is still paging when the wipe lands
@@ -193,10 +277,21 @@ export function maybeResumeSync(): void {
   void startSync();
 }
 
-async function runSync(): Promise<void> {
+interface SyncRunOptions {
+  readonly repair?: boolean;
+  readonly expectedEpoch?: number;
+  readonly accountLease?: RealtimeDeliveryLease;
+  readonly shouldCancel?: () => boolean;
+  readonly signal?: AbortSignal;
+}
+
+type SyncRunOutcome = 'running' | 'completed' | 'cancelled' | 'stale' | 'failed';
+
+async function runSync(options: SyncRunOptions = {}): Promise<void> {
   const sync = useSyncStore.getState();
-  // Nothing cancels a sync, and `forget()` only waits 20s for one to unwind before wiping the DB —
-  // so a run can still be alive after the session it belongs to is gone (or replaced). Every phase
+  // Ordinary sync has no user cancellation, and `forget()` only waits 20s for one to unwind before
+  // wiping the DB — so a run can still be alive after the session it belongs to is gone (or
+  // replaced). Every phase
   // that FETCHES before it writes is already neutralised by the credential clear (a reset origin
   // builds a relative URL, so the request fails), but the phases that write from memory or from the
   // local DB are not: they would re-create the previous account's rows after the wipe. This is how
@@ -207,13 +302,28 @@ async function runSync(): Promise<void> {
   // identical origin string, so an origin comparison went FALSE again exactly when the run was at
   // its most dangerous — the wipe had already emptied the DB, and the closing phases would put the
   // pre-wipe chat snapshot back and commit a marker over the reset. The epoch never repeats.
-  const epochAtStart = sessionAccessors.getEpoch();
-  const accountLease = captureRealtimeDeliveryLease();
+  const repair = options.repair === true;
+  const epochAtStart = options.expectedEpoch ?? sessionAccessors.getEpoch();
+  const accountLease = options.accountLease ?? captureRealtimeDeliveryLease();
   const sessionEnded = (): boolean =>
     sessionAccessors.getEpoch() !== epochAtStart || !accountLease.isCurrent();
+  const cancelled = (): boolean => options.shouldCancel?.() ?? false;
+  const shouldAbort = (): boolean => sessionEnded() || cancelled();
+  const stoppedOutcome = (): SyncRunOutcome => (cancelled() ? 'cancelled' : 'stale');
+  let outcome: SyncRunOutcome = 'running';
+  let failureMessage = 'Sync failed';
+  let rebuiltRepairMarker: SyncMarker | null = null;
+
   try {
+    if (shouldAbort()) {
+      outcome = stoppedOutcome();
+      return;
+    }
     const db = await ensureDatabase();
-    if (sessionEnded()) return;
+    if (shouldAbort()) {
+      outcome = stoppedOutcome();
+      return;
+    }
     const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
     // The session passed bootstrap's durable credential gates before startSync. Recover exact-file
     // retirements only now—not from generic DB open paths used by locked/forgotten callers.
@@ -223,46 +333,94 @@ async function runSync(): Promise<void> {
     await attachmentCacheCoordinator
       .drainDueRetirements(db, { scope: attachmentCacheScope })
       .catch((error) => logger.debug('[sync] attachment cache recovery deferred', error));
-    if (sessionEnded()) return;
+    if (shouldAbort()) {
+      outcome = stoppedOutcome();
+      return;
+    }
     const api = httpSyncApi(http);
-    sync.begin();
+    if (repair) sync.beginRepair();
+    else sync.begin();
+
+    if (repair) {
+      sync.noteRepair(
+        'Preparing full cursor rebuild',
+        'Keeping local customizations and deletion protections in place.',
+      );
+      sync.noteRepair(
+        'Downloading all chats and messages',
+        'The previous sync marker stays usable until the full download succeeds.',
+      );
+    }
 
     const marker = await getSyncMarker(db);
-    const isFirstSync = marker.lastSyncedRowId == null && marker.lastSyncedTimestamp == null;
+    if (shouldAbort()) {
+      outcome = stoppedOutcome();
+      return;
+    }
+    const isFirstSync =
+      repair || (marker.lastSyncedRowId == null && marker.lastSyncedTimestamp == null);
     if (isFirstSync) {
       // Honor the "Messages per Chat" initial-sync cap (0 = all). Full history still backfills on
       // demand when a chat is opened, so a cap only bounds the first bulk pass.
       const perChat = useSyncSettingsStore.getState().messagesPerChat;
       const result = await fullSync(db, api, {
         onProgress: (p) => {
-          if (!sessionEnded()) sync.progress(p);
+          if (!shouldAbort()) sync.progress(p);
         },
-        shouldAbort: sessionEnded,
+        shouldAbort,
         // Pass zero rather than omitting it: zero is the user's explicit "All" choice, while an
         // absent engine option deliberately keeps the conservative 100-message default.
-        maxMessagesPerChat: perChat,
+        // A repair is explicitly a FULL re-download, independent of the first-install tuning.
+        maxMessagesPerChat: repair ? 0 : perChat,
+        failOnChatError: repair,
+        commitMarker: !repair,
+        signal: options.signal,
+        onServerMarker: repair
+          ? (nextMarker) => {
+              rebuiltRepairMarker = nextMarker;
+            }
+          : undefined,
       });
-      if (!sessionEnded()) sync.done(result);
+      if (shouldAbort()) {
+        outcome = stoppedOutcome();
+        return;
+      }
+      if (repair) {
+        if (rebuiltRepairMarker == null) {
+          throw new Error('Repair finished without a server-derived sync marker.');
+        }
+        sync.noteRepair('Reconciling deletions', 'Chat and message download finished.');
+      } else {
+        sync.done(result);
+      }
     } else {
       // Refresh the FULL chat list first so conversations the interrupted first sync never reached
       // (disproportionately older SMS threads) appear in the inbox; their history backfills on open.
       // Best-effort — a failure here must not block the incremental message sync below.
-      await syncAllChats(db, api, 200, sessionEnded).catch((e) =>
+      await syncAllChats(db, api, 200, shouldAbort, options.signal).catch((e) =>
         logger.debug('[sync] chat-list refresh failed', e),
       );
-      if (sessionEnded()) return;
+      if (shouldAbort()) {
+        outcome = stoppedOutcome();
+        return;
+      }
       const version =
-        useSessionStore.getState().serverInfo?.server_version ?? (await api.serverVersion());
-      if (sessionEnded()) return;
+        useSessionStore.getState().serverInfo?.server_version ??
+        (await api.serverVersion(options.signal));
+      if (shouldAbort()) {
+        outcome = stoppedOutcome();
+        return;
+      }
       // Per-page progress so the DB-reactive inbox hydrates mid-sync (not just at the end).
       const result = await incrementalSync(db, api, {
         serverVersion: version,
         onProgress: (p) => {
-          if (!sessionEnded()) sync.progress(p);
+          if (!shouldAbort()) sync.progress(p);
         },
-        shouldAbort: sessionEnded,
+        shouldAbort,
+        signal: options.signal,
       });
-      if (!sessionEnded()) sync.done(result);
+      if (!shouldAbort()) sync.done(result);
     }
 
     // R1 deletion catch-up: apply `message-deleted` events missed while the app was dead or
@@ -274,34 +432,88 @@ async function runSync(): Promise<void> {
     // Skipped outright once the session has ended: its FIRST run seeds the kv watermark with NO
     // network call at all, so it is another write the credential clear cannot stop — it would
     // re-seed the key `clearLocalCache` had just removed, with the old server's clock.
-    if (!sessionEnded()) {
-      await syncDeletedMessages(db, api, {
+    if (!shouldAbort()) {
+      const deletionCatchup = syncDeletedMessages(db, api, {
         supported: sessionAccessors.messageDeletedSupported(),
-        shouldAbort: sessionEnded,
-      }).catch((e) => logger.debug('[sync] deletion catch-up failed', e));
-      if (!sessionEnded()) {
-        await attachmentCacheCoordinator
-          .retireInactiveEntries(db, { scope: attachmentCacheScope })
-          .catch((error) =>
+        shouldAbort,
+        signal: options.signal,
+      });
+      if (repair) await deletionCatchup;
+      else await deletionCatchup.catch((e) => logger.debug('[sync] deletion catch-up failed', e));
+      if (!shouldAbort()) {
+        const retireInactive = attachmentCacheCoordinator.retireInactiveEntries(db, {
+          scope: attachmentCacheScope,
+        });
+        if (repair) await retireInactive;
+        else {
+          await retireInactive.catch((error) =>
             logger.debug('[sync] deleted-message cache retirement deferred', error),
           );
-        await attachmentCacheCoordinator
-          .drainDueRetirements(db, { scope: attachmentCacheScope })
-          .catch((error) => logger.debug('[sync] deleted-message cache cleanup deferred', error));
+        }
+        const drainRetirements = attachmentCacheCoordinator.drainDueRetirements(db, {
+          scope: attachmentCacheScope,
+        });
+        if (repair) await drainRetirements;
+        else {
+          await drainRetirements.catch((error) =>
+            logger.debug('[sync] deleted-message cache cleanup deferred', error),
+          );
+        }
       }
     }
+    if (shouldAbort()) {
+      outcome = stoppedOutcome();
+      return;
+    }
+    if (repair) {
+      sync.noteRepair('Finalizing local cache', 'Deletion catch-up and cache cleanup finished.');
+      if (rebuiltRepairMarker == null) {
+        throw new Error('Repair finished without a server-derived sync marker.');
+      }
+      const finalRepairMarker = rebuiltRepairMarker;
+      // The only repair marker write: one short guarded owner after every page and finalizer
+      // succeeded. A cancel/failure/process death before this point leaves the old marker usable.
+      await withDbTransaction(
+        db,
+        (context) => setSyncMarkerWithinTransaction(context, finalRepairMarker),
+        () => !shouldAbort(),
+      );
+      // Once the guarded commit returns, the repair is complete. A cancel tap racing immediately
+      // after this terminal commit is too late and correctly resolves to Complete, not Cancelled.
+      outcome = 'completed';
+      sync.noteRepair('Repair complete', 'Installed the rebuilt server-derived sync marker.');
+      return;
+    }
+    outcome = 'completed';
   } catch (e) {
     // A retired account's late failure belongs to that retired run, not to the replacement
     // account's banner. Its DB writes are guarded separately in the engine.
-    if (!sessionEnded()) sync.fail(e instanceof Error ? e.message : 'Sync failed');
-  }
+    if (cancelled()) outcome = 'cancelled';
+    else if (sessionEnded()) outcome = 'stale';
+    else {
+      failureMessage = e instanceof Error ? e.message : 'Sync failed';
+      outcome = 'failed';
+      if (!repair) sync.fail(failureMessage);
+    }
+  } finally {
+    // Resolve device contacts onto handles so chats — especially GROUPS — show contact names
+    // instead of raw phone numbers in the inbox/headers. Fire-and-forget with its own catch:
+    // a denied contacts permission (or any IO error) must NOT affect the message-sync status.
+    // Runs after connect and on every boot-with-session (both call startSync); idempotent.
+    if (!shouldAbort()) {
+      void syncContacts().catch((e) => logger.debug('[contacts] auto-sync skipped', e));
+    }
 
-  // Resolve device contacts onto handles so chats — especially GROUPS — show contact names
-  // instead of raw phone numbers in the inbox/headers. Fire-and-forget with its own catch:
-  // a denied contacts permission (or any IO error) must NOT affect the message-sync status.
-  // Runs after connect and on every boot-with-session (both call startSync); idempotent.
-  if (!sessionEnded()) {
-    void syncContacts().catch((e) => logger.debug('[contacts] auto-sync skipped', e));
+    // Never let an old account publish into a replacement account's global store. A same-epoch
+    // lease retirement (for example a transport rotation) is still useful feedback to this account.
+    if (repair && sessionAccessors.getEpoch() === epochAtStart) {
+      if (outcome === 'completed') sync.finishRepair();
+      else if (outcome === 'cancelled') sync.cancelRepair();
+      else if (outcome === 'failed') sync.failRepair(failureMessage);
+      else if (outcome === 'stale') {
+        sync.cancelRepair('Repair stopped because the connection changed. Restart it to continue.');
+      }
+    }
   }
 }
 

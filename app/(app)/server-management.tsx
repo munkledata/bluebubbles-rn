@@ -15,7 +15,7 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import { buildSetupQr } from '@features/setup/qr';
-import { http, startSync } from '@/services';
+import { cancelFullRepair, http, startFullRepair, startSync } from '@/services';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -23,7 +23,7 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { useSessionStore } from '@state/sessionStore';
-import { useSyncStore } from '@state/syncStore';
+import { useSyncStore, type SyncRepairStatus } from '@state/syncStore';
 import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 /**
@@ -86,6 +86,16 @@ function modalAnimationFor(reduceMotion: boolean | null): ModalAnimationType {
   return reduceMotion === false ? 'slide' : 'none';
 }
 
+function repairStatusCopy(status: SyncRepairStatus, phase: string | null): string {
+  if (status === 'idle') return 'Not run';
+  if (status === 'queued') return phase ?? 'Waiting';
+  if (status === 'running') return phase ?? 'Running';
+  if (status === 'cancelling') return 'Stopping after current request';
+  if (status === 'cancelled') return 'Stopped — safe to restart';
+  if (status === 'done') return 'Complete';
+  return 'Failed — safe to restart';
+}
+
 /** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
 export default function ServerManagementScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -101,6 +111,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // re-render loop ("Maximum update depth exceeded"). zustand has no auto-shallow-compare.
   const syncChats = useSyncStore((s) => s.chats);
   const syncMessages = useSyncStore((s) => s.messages);
+  const repairStatus = useSyncStore((s) => s.repairStatus);
+  const repairPhase = useSyncStore((s) => s.repairPhase);
+  const repairLog = useSyncStore((s) => s.repairLog);
   // Every query/callback created by this screen belongs to the account that mounted it. A global
   // confirm dialog can retain its button callback after navigation, so checking only mounted state
   // is insufficient.
@@ -269,6 +282,32 @@ export default function ServerManagementScreen(): React.JSX.Element {
     void startSync();
   };
 
+  const repairActive =
+    repairStatus === 'queued' || repairStatus === 'running' || repairStatus === 'cancelling';
+
+  const onStartRepair = (): void => {
+    if (busy || repairActive || !accountLease.isCurrent()) return;
+    const restarting = repairStatus === 'cancelled' || repairStatus === 'error';
+    showDialog(
+      restarting ? 'Restart Local Cache Repair' : 'Repair Local Cache',
+      'Re-download every chat and message from your server without disconnecting. Pins, custom names, wallpapers, themes, reminders, drafts, and deleted-chat protections stay in place. This can take a while.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: restarting ? 'Restart Repair' : 'Start Repair',
+          onPress: () => {
+            if (accountLease.isCurrent()) void startFullRepair();
+          },
+        },
+      ],
+    );
+  };
+
+  const onCancelRepair = (): void => {
+    if (!accountLease.isCurrent() || repairStatus === 'cancelling') return;
+    cancelFullRepair();
+  };
+
   // Format a stat with thousands separators; em-dash until stats have loaded.
   const statVal = (n?: number): string => (totals ? (n ?? 0).toLocaleString() : '—');
 
@@ -284,6 +323,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const visibleSyncStatus = accountCurrent ? syncStatus : 'idle';
   const visibleSyncChats = accountCurrent ? syncChats : 0;
   const visibleSyncMessages = accountCurrent ? syncMessages : 0;
+  const visibleRepairStatus = accountCurrent ? repairStatus : 'idle';
+  const visibleRepairPhase = accountCurrent ? repairPhase : null;
+  const visibleRepairLog = accountCurrent ? repairLog : [];
+  const visibleRepairActive =
+    visibleRepairStatus === 'queued' ||
+    visibleRepairStatus === 'running' ||
+    visibleRepairStatus === 'cancelling';
 
   return (
     <Screen>
@@ -399,6 +445,52 @@ export default function ServerManagementScreen(): React.JSX.Element {
             disabled={!!busy}
             busy={busy === 'View Logs'}
             onPress={onViewLogs}
+          />
+        </SettingsSection>
+
+        <SettingsSection label="LOCAL CACHE REPAIR" style={styles.gap}>
+          <View style={styles.repairIntro}>
+            <Text style={[styles.repairDescription, { color: theme.color.secondaryLabel }]}>
+              Re-download server data without disconnecting or erasing your local choices.
+            </Text>
+          </View>
+          {visibleRepairStatus !== 'idle' ? (
+            <>
+              <InfoRow
+                label="Repair status"
+                value={repairStatusCopy(visibleRepairStatus, visibleRepairPhase)}
+              />
+              <InfoRow
+                label="Repair progress"
+                value={`${visibleSyncChats.toLocaleString()} chats · ${visibleSyncMessages.toLocaleString()} messages`}
+              />
+              {visibleRepairLog.length > 0 ? (
+                <View style={styles.repairLog}>
+                  {visibleRepairLog.map((line, index) => (
+                    <Text
+                      key={`${index}-${line}`}
+                      style={[styles.repairLogLine, { color: theme.color.secondaryLabel }]}
+                    >
+                      {line}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          ) : null}
+          <ActionRow
+            label={
+              visibleRepairActive
+                ? visibleRepairStatus === 'cancelling'
+                  ? 'Stopping Repair…'
+                  : 'Cancel Repair'
+                : visibleRepairStatus === 'cancelled' || visibleRepairStatus === 'error'
+                  ? 'Restart Repair'
+                  : 'Repair Local Cache'
+            }
+            disabled={visibleRepairStatus === 'cancelling' || !!busy}
+            busy={visibleRepairStatus === 'cancelling'}
+            onPress={visibleRepairActive ? onCancelRepair : onStartRepair}
           />
         </SettingsSection>
 
@@ -535,6 +627,10 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15, flexShrink: 1, textAlign: 'right' },
   errorText: { fontSize: 14, flex: 1, lineHeight: 19 },
+  repairIntro: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  repairDescription: { fontSize: 14, lineHeight: 20 },
+  repairLog: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, gap: 4 },
+  repairLogLine: { fontSize: 12, lineHeight: 17 },
   done: { fontSize: 17, textAlign: 'right' },
   logBody: { padding: 14 },
   logText: { fontSize: 11, fontFamily: 'Menlo', lineHeight: 16 },

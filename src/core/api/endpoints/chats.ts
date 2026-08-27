@@ -14,8 +14,13 @@ export interface ChatQuery {
 export const ChatList = z.object({ chats: z.array(Chat).nullish() });
 
 /** POST /api/v1/chat/query — paginated chat list. */
-export async function queryChats(http: HttpClient, q: ChatQuery = {}): Promise<Chat[]> {
+export async function queryChats(
+  http: HttpClient,
+  q: ChatQuery = {},
+  signal?: AbortSignal,
+): Promise<Chat[]> {
   const res = await http.post('/chat/query', ChatList, {
+    signal,
     json: {
       limit: q.limit ?? 1000,
       offset: q.offset ?? 0,

@@ -10,6 +10,7 @@ import {
   upsertChats,
   upsertContacts,
   upsertHandles,
+  upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import {
@@ -220,6 +221,101 @@ describe('fullSync', () => {
       '[sync] full-sync page repeated for chat cRepeating at offset 200 — stopping to avoid refetching it forever',
     );
     warn.mockRestore();
+  });
+});
+
+describe('fullSync — repair mode', () => {
+  it('leaves the old marker usable and reports a server-only replacement cursor', async () => {
+    const { db } = await createTestDb();
+    const localHandles = await upsertHandles(db, []);
+    const localChats = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'local-phantom-chat', participants: [] })],
+      localHandles,
+    );
+    const localChatId = localChats.get('local-phantom-chat')!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'local-phantom-message',
+          text: 'local corruption',
+          originalROWID: 99_999,
+          dateCreated: 99_999_000,
+          isFromMe: true,
+        }),
+      ],
+      () => localChatId,
+      localHandles,
+    );
+    const previousMarker = { lastSyncedRowId: 500, lastSyncedTimestamp: 50_000 };
+    await setSyncMarker(db, previousMarker);
+
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async (offset, _limit, signal) => {
+        signals.push(signal);
+        return offset === 0
+          ? [Chat.parse({ guid: 'server-chat', participants: [{ address: 'a@x.com' }] })]
+          : [];
+      },
+      fetchChatMessages: async (_guid, _offset, _limit, signal) => {
+        signals.push(signal);
+        return [msg('server-message', 12, 'authoritative', 'server-chat')];
+      },
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+    let rebuiltMarker: {
+      lastSyncedRowId: number | null;
+      lastSyncedTimestamp: number | null;
+    } | null = null;
+
+    await expect(
+      fullSync(db, api, {
+        maxMessagesPerChat: 0,
+        failOnChatError: true,
+        commitMarker: false,
+        signal: controller.signal,
+        onServerMarker: (marker) => {
+          rebuiltMarker = marker;
+        },
+      }),
+    ).resolves.toEqual({ chats: 1, messages: 1 });
+
+    expect(signals).toEqual([controller.signal, controller.signal]);
+    expect(rebuiltMarker).toEqual({ lastSyncedRowId: 12, lastSyncedTimestamp: 1200 });
+    expect(await getSyncMarker(db)).toEqual(previousMarker);
+  });
+
+  it('reports any per-chat failure as incomplete and never publishes a replacement cursor', async () => {
+    const { db } = await createTestDb();
+    const previousMarker = { lastSyncedRowId: 77, lastSyncedTimestamp: 7_700 };
+    await setSyncMarker(db, previousMarker);
+    const onServerMarker = jest.fn();
+    const api: SyncApi = {
+      serverVersion: async () => '1.9.0',
+      fetchChats: async (offset) =>
+        offset === 0 ? [Chat.parse({ guid: 'unavailable-chat', participants: [] })] : [],
+      fetchChatMessages: async () => {
+        throw new Error('chat history unavailable');
+      },
+      fetchMessagesAfter: async () => [],
+      fetchDeletedAfter: async () => [],
+    };
+
+    await expect(
+      fullSync(db, api, {
+        maxMessagesPerChat: 0,
+        failOnChatError: true,
+        commitMarker: false,
+        onServerMarker,
+      }),
+    ).rejects.toThrow('chat history unavailable');
+    expect(onServerMarker).not.toHaveBeenCalled();
+    expect(await getSyncMarker(db)).toEqual(previousMarker);
   });
 });
 

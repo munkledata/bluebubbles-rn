@@ -16,6 +16,7 @@ const fullSync = jest.fn();
 const syncAllChats = jest.fn();
 const syncChatMessages = jest.fn();
 const getSyncMarker = jest.fn();
+const setSyncMarkerWithinTransaction = jest.fn();
 const syncContacts = jest.fn();
 const serverVersion = jest.fn();
 const mockSyncDb = { testId: 'sync-control-db' };
@@ -32,6 +33,10 @@ const mockCreateAttachmentCacheAccountScope = jest.fn<
 >(() => mockAttachmentCacheScope);
 const mockCaptureRealtimeDeliveryLease = jest.fn<typeof mockAccountLease, []>(
   () => mockAccountLease,
+);
+const mockReleaseInvalidation = jest.fn();
+const mockSubscribeRealtimeGenerationInvalidation = jest.fn(
+  (_generation: number, _listener: () => void) => mockReleaseInvalidation,
 );
 const mockRetireInactiveEntries = jest.fn<Promise<void>, [unknown, { scope: unknown }]>(
   async () => undefined,
@@ -54,6 +59,7 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: mockCaptureRealtimeDeliveryLease,
+  subscribeRealtimeGenerationInvalidation: mockSubscribeRealtimeGenerationInvalidation,
 }));
 jest.mock('@/services/sync', () => ({
   fullSync,
@@ -65,12 +71,19 @@ jest.mock('@/services/sync', () => ({
 }));
 // The stores syncControl pulls in reach `@db/database`, which loads op-sqlite's native binding.
 jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
-jest.mock('@db/repositories', () => ({ getSyncMarker }));
+jest.mock('@db/repositories', () => ({ getSyncMarker, setSyncMarkerWithinTransaction }));
 
 import type { ServerInfo } from '@core/models';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
-import { awaitSyncIdle, ensureChatSynced, runTrackedSync, startSync } from '@/services/syncControl';
+import {
+  awaitSyncIdle,
+  cancelFullRepair,
+  ensureChatSynced,
+  runTrackedSync,
+  startFullRepair,
+  startSync,
+} from '@/services/syncControl';
 
 /** Let every pending microtask AND timer callback run. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -236,6 +249,55 @@ describe('runTrackedSync — the background task participates in the coalescing 
     await tracked;
     await waiting;
     expect(idle).toBe(true);
+  });
+});
+
+describe('full repair — cancellation ownership', () => {
+  it('aborts the active request and leaves the previous marker untouched', async () => {
+    let repairOptions:
+      | {
+          maxMessagesPerChat?: number;
+          failOnChatError?: boolean;
+          commitMarker?: boolean;
+          signal?: AbortSignal;
+        }
+      | undefined;
+    fullSync.mockImplementation(
+      async (_db: unknown, _api: unknown, options: typeof repairOptions) => {
+        repairOptions = options;
+        await new Promise<void>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(Object.assign(new Error('repair request aborted'), { name: 'AbortError' }));
+          });
+        });
+        return { chats: 0, messages: 0 };
+      },
+    );
+
+    connectSession('https://repair.example');
+    const running = startFullRepair();
+    await settle();
+
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(repairOptions).toMatchObject({
+      maxMessagesPerChat: 0,
+      failOnChatError: true,
+      commitMarker: false,
+    });
+    expect(repairOptions?.signal?.aborted).toBe(false);
+    expect(useSyncStore.getState().repairStatus).toBe('running');
+
+    expect(cancelFullRepair()).toBe(true);
+    expect(repairOptions?.signal?.aborted).toBe(true);
+    await expect(running).resolves.toBeUndefined();
+
+    expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(useSyncStore.getState()).toMatchObject({
+      status: 'idle',
+      repairStatus: 'cancelled',
+      repairPhase: 'Repair stopped',
+    });
+    expect(mockReleaseInvalidation).toHaveBeenCalledTimes(1);
   });
 });
 

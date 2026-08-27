@@ -44,4 +44,19 @@ describe('mapWithConcurrency', () => {
     await mapWithConcurrency([], 3, fn);
     expect(fn).not.toHaveBeenCalled();
   });
+
+  it('stops assigning queued work when requested', async () => {
+    let stopped = false;
+    const seen: number[] = [];
+    await mapWithConcurrency(
+      Array.from({ length: 1_000 }, (_, index) => index),
+      2,
+      async (item) => {
+        seen.push(item);
+        stopped = true;
+      },
+      { shouldStop: () => stopped },
+    );
+    expect(seen).toEqual([0]);
+  });
 });

@@ -9,14 +9,19 @@ import type { SyncCursor } from '@core/sync';
  */
 export interface SyncApi {
   /** Server version, used to pick the incremental cursor mode. */
-  serverVersion(): Promise<string>;
-  fetchChats(offset: number, limit: number): Promise<Chat[]>;
-  fetchChatMessages(chatGuid: string, offset: number, limit: number): Promise<Message[]>;
-  fetchMessagesAfter(cursor: SyncCursor, limit: number): Promise<Message[]>;
+  serverVersion(signal?: AbortSignal): Promise<string>;
+  fetchChats(offset: number, limit: number, signal?: AbortSignal): Promise<Chat[]>;
+  fetchChatMessages(
+    chatGuid: string,
+    offset: number,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Message[]>;
+  fetchMessagesAfter(cursor: SyncCursor, limit: number, signal?: AbortSignal): Promise<Message[]>;
   /**
    * GET /message/deleted — deletions strictly after the Unix-ms watermark (R1 catch-up sync for
    * `message-deleted` events missed while the app was dead/locked). Only called when the server
    * advertises `supports_message_deleted`; older servers would 404.
    */
-  fetchDeletedAfter(afterMs: number): Promise<DeletedMessage[]>;
+  fetchDeletedAfter(afterMs: number, signal?: AbortSignal): Promise<DeletedMessage[]>;
 }

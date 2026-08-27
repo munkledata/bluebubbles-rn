@@ -11,7 +11,12 @@ export async function mapWithConcurrency<T>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<void>,
-  opts: { delayMs?: number; onError?: (item: T, error: unknown) => void } = {},
+  opts: {
+    delayMs?: number;
+    onError?: (item: T, error: unknown) => void;
+    /** Stop assigning queued work; already-running tasks remain responsible for their own abort. */
+    shouldStop?: () => boolean;
+  } = {},
 ): Promise<void> {
   const delayMs = opts.delayMs ?? 0;
   const queue = items.slice();
@@ -21,9 +26,11 @@ export async function mapWithConcurrency<T>(
 
   const work = async (): Promise<void> => {
     for (;;) {
+      if (opts.shouldStop?.()) return;
       const item = queue.shift();
       if (item === undefined) return;
       if (delayMs > 0) await sleep(delayMs);
+      if (opts.shouldStop?.()) return;
       try {
         await fn(item);
       } catch (e) {

@@ -13,7 +13,14 @@ export { vault, http, getSecretBox, runCryptoSelfTest } from './clients';
 export { ensureDatabase, rotateDatabaseKey } from './databaseControl';
 export { createNewChat, sendTyping, markRead, markUnread, deleteChat } from './chatActions';
 export { hydrateLock, setAppLockEnabled, completeUnlock } from './lock';
-export { startSync, refreshInbox, maybeResumeSync, ensureChatSynced } from './syncControl';
+export {
+  startSync,
+  refreshInbox,
+  maybeResumeSync,
+  ensureChatSynced,
+  startFullRepair,
+  cancelFullRepair,
+} from './syncControl';
 export {
   dispatchRealtimeEvent,
   devPush,

@@ -35,8 +35,10 @@ export async function chatMessages(
   http: HttpClient,
   chatGuid: string,
   page: MessagePage = {},
+  signal?: AbortSignal,
 ): Promise<Message[]> {
   const res = await http.get(`/chat/${encodeURIComponent(chatGuid)}/message`, MessageList, {
+    signal,
     query: {
       limit: page.limit ?? 100,
       offset: page.offset ?? 0,
@@ -163,8 +165,13 @@ export interface MessageQuery {
  * POST /api/v1/message/query — messages after a cursor, oldest-first, with their
  * chats embedded (so incremental sync can resolve each message's chat).
  */
-export async function queryMessages(http: HttpClient, q: MessageQuery): Promise<Message[]> {
+export async function queryMessages(
+  http: HttpClient,
+  q: MessageQuery,
+  signal?: AbortSignal,
+): Promise<Message[]> {
   const res = await http.post('/message/query', MessageList, {
+    signal,
     json: {
       limit: q.limit ?? 1000,
       after: q.afterTimestamp,
@@ -217,8 +224,10 @@ export type DeletedMessage = z.infer<typeof DeletedMessageResponseRow>;
 export async function deletedMessages(
   http: HttpClient,
   afterMs: number,
+  signal?: AbortSignal,
 ): Promise<DeletedMessage[]> {
   const res = await http.get('/message/deleted', DeletedMessageList, {
+    signal,
     query: { after: afterMs },
   });
   return res.deleted ?? [];

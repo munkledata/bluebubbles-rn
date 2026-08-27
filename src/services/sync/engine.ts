@@ -117,6 +117,18 @@ export interface FullSyncOptions {
    * store here so this module stays store-free and node-testable; `runSync` supplies it.
    */
   shouldAbort?: () => boolean;
+  /** Cancels the active HttpClient request/retry wait; `shouldAbort` still guards every commit. */
+  signal?: AbortSignal;
+  /** Repair mode: any chat page failure makes the run restartable instead of marking it complete. */
+  failOnChatError?: boolean;
+  /**
+   * Defaults to true for first-install sync. Repair defers the final marker replacement until its
+   * caller has confirmed the whole run succeeded, leaving the previous incremental marker usable
+   * after cancellation, failure, or process death.
+   */
+  commitMarker?: boolean;
+  /** Highest cursor observed in SERVER responses during this run (never derived from local rows). */
+  onServerMarker?: (marker: SyncMarker) => void;
 }
 
 /**
@@ -130,6 +142,8 @@ export async function syncAllChats(
   api: SyncApi,
   chatPageSize = 200,
   shouldAbort?: () => boolean,
+  signal?: AbortSignal,
+  onServerMessages?: (messages: readonly Message[]) => void,
 ): Promise<StoredChat[]> {
   const boundedPageSize =
     Number.isFinite(chatPageSize) && chatPageSize > 0 ? Math.min(Math.floor(chatPageSize), 200) : 0;
@@ -140,7 +154,7 @@ export async function syncAllChats(
   let offset = 0;
   for (;;) {
     if (!shouldContinue()) break;
-    const batch = await api.fetchChats(offset, boundedPageSize);
+    const batch = await api.fetchChats(offset, boundedPageSize, signal);
     if (!shouldContinue()) break;
     if (batch.length === 0) break;
     const pageRows = batch.slice(0, boundedPageSize);
@@ -217,6 +231,7 @@ export async function syncAllChats(
           commitGuard,
         );
         if (!shouldContinue()) return stored;
+        onServerMessages?.(lastMsgs);
       }
       stored.push(...storedSlice);
     }
@@ -258,10 +273,27 @@ export async function fullSync(
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
   const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
   let messages = 0;
+  let serverMarker: SyncMarker = { lastSyncedRowId: null, lastSyncedTimestamp: null };
+  const advanceServerMarker = (rows: readonly Message[]): void => {
+    serverMarker = advanceMarker(
+      serverMarker,
+      rows.map((message) => ({
+        rowId: message.originalROWID ?? null,
+        timestamp: message.dateCreated ?? null,
+      })),
+    );
+  };
 
   // Phase 1: store ALL chats first (fast — just the list + participants). This guarantees every
   // conversation shows in the inbox even if the message pass below is interrupted by a timeout.
-  const stored = await syncAllChats(db, api, opts.chatPageSize ?? 200, opts.shouldAbort);
+  const stored = await syncAllChats(
+    db,
+    api,
+    opts.chatPageSize ?? 200,
+    opts.shouldAbort,
+    opts.signal,
+    advanceServerMarker,
+  );
   const chats = stored.length;
   if (shouldContinue()) opts.onProgress?.({ chats, messages });
   if (!shouldContinue() || messagePageSize === 0 || maxPerChat === 0) {
@@ -271,6 +303,7 @@ export async function fullSync(
   // Phase 2: bounded recent messages per chat, PACED (small concurrency + a per-task delay) so the
   // bulk pull doesn't peg a single self-hosted server. Per-chat errors are isolated so one
   // unreachable chat (or a mid-sync drop) can't abort the rest — those chats backfill later.
+  const chatErrors: unknown[] = [];
   await mapWithConcurrency(
     stored,
     CHAT_BACKFILL_CONCURRENCY,
@@ -281,7 +314,7 @@ export async function fullSync(
         if (!shouldContinue()) return;
         const requestSize = Math.min(messagePageSize, maxPerChat - mOffset);
         if (requestSize <= 0) break;
-        const msgs = await api.fetchChatMessages(guid, mOffset, requestSize);
+        const msgs = await api.fetchChatMessages(guid, mOffset, requestSize, opts.signal);
         if (!shouldContinue()) return;
         if (msgs.length === 0) break;
         const pageRows = msgs.slice(0, requestSize);
@@ -290,9 +323,15 @@ export async function fullSync(
           logger.warn(
             `[sync] full-sync page repeated for chat ${guid} at offset ${mOffset} — stopping to avoid refetching it forever`,
           );
+          if (opts.failOnChatError) {
+            throw new Error(
+              'The server repeated a chat page, so repair stopped before completion.',
+            );
+          }
           break;
         }
         seenPageFingerprints.add(pageFingerprint);
+        advanceServerMarker(pageRows);
         const pageHandles = pageRows.flatMap((message) => (message.handle ? [message.handle] : []));
         for (let i = 0; i < pageRows.length; i += INCREMENTAL_TX_CHUNK) {
           const slice = pageRows.slice(i, i + INCREMENTAL_TX_CHUNK);
@@ -327,8 +366,15 @@ export async function fullSync(
         if (msgs.length < requestSize || mOffset >= maxPerChat) break;
       }
     },
-    { delayMs: CHAT_BACKFILL_DELAY_MS },
+    {
+      delayMs: CHAT_BACKFILL_DELAY_MS,
+      shouldStop: () => !shouldContinue(),
+      onError: (_chat, error) => {
+        if (chatErrors.length === 0) chatErrors.push(error);
+      },
+    },
   );
+  if (opts.failOnChatError && chatErrors.length > 0) throw chatErrors[0];
 
   // EVERYTHING BELOW WRITES WITHOUT FETCHING FIRST, which makes this extra check load-bearing even
   // though every fetch-shaped phase above also checks account ownership around its request and at
@@ -361,11 +407,14 @@ export async function fullSync(
     commitGuard,
   );
 
-  await withDbTransaction(
-    db,
-    async (context) => setSyncMarkerWithinTransaction(context, await maxMessageMarker(db)),
-    commitGuard,
-  );
+  opts.onServerMarker?.(serverMarker);
+  if (opts.commitMarker !== false) {
+    await withDbTransaction(
+      db,
+      async (context) => setSyncMarkerWithinTransaction(context, await maxMessageMarker(db)),
+      commitGuard,
+    );
+  }
   return { chats, messages };
 }
 
@@ -403,7 +452,12 @@ export async function syncChatMessages(
   db: AppDatabase,
   api: SyncApi,
   chatGuid: string,
-  opts: { pageSize?: number; maxMessages?: number; shouldAbort?: () => boolean } = {},
+  opts: {
+    pageSize?: number;
+    maxMessages?: number;
+    shouldAbort?: () => boolean;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<number> {
   if (opts.shouldAbort?.()) return 0;
   const chatId = await getChatIdByGuid(db, chatGuid);
@@ -428,7 +482,7 @@ export async function syncChatMessages(
   let total = 0;
   for (;;) {
     if (!shouldContinue()) break;
-    const msgs = await api.fetchChatMessages(chatGuid, offset, pageSize);
+    const msgs = await api.fetchChatMessages(chatGuid, offset, pageSize, opts.signal);
     // HttpClient deliberately keeps one immutable account-A transport snapshot for an entire
     // request/retry ladder. Resetting the live session therefore cannot cancel a request already
     // on the wire; re-check after every network await before any returned A row reaches the DB.
@@ -563,6 +617,8 @@ export interface DeletionSyncOptions {
   pageSize?: number;
   /** Stop before the next request/write when this account no longer owns the run. */
   shouldAbort?: () => boolean;
+  /** Cancel the active deletion request/retry wait. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -628,7 +684,7 @@ export async function syncDeletedMessages(
   let applied = 0;
   for (let page = 0; page < maxPages; page++) {
     if (!shouldContinue()) break;
-    const rows = await api.fetchDeletedAfter(watermark);
+    const rows = await api.fetchDeletedAfter(watermark, opts.signal);
     // HttpClient keeps an immutable request snapshot through retries. A Disconnect cannot cancel
     // that already-running request, so reject its old-account result before any DB transaction.
     if (!shouldContinue()) break;
@@ -697,6 +753,8 @@ export interface IncrementalSyncOptions {
   maxPages?: number;
   /** Stop before the next request/write when this account no longer owns the run. */
   shouldAbort?: () => boolean;
+  /** Cancel the active incremental request/retry wait. */
+  signal?: AbortSignal;
   /** Shared deduper (e.g. with the live socket path) to avoid double-processing. */
   deduper?: GuidDeduper;
   /**
@@ -751,7 +809,7 @@ export async function incrementalSync(
   for (;;) {
     if (!shouldContinue() || pages >= maxPages) break;
     const cursor = buildSyncCursor(opts.serverVersion, marker);
-    const batch = await api.fetchMessagesAfter(cursor, batchSize);
+    const batch = await api.fetchMessagesAfter(cursor, batchSize, opts.signal);
     // A request can finish after Disconnect. Do not turn that old response into writes against a
     // newly opened account DB; a transaction guard below closes the later lock-wait/commit race.
     if (!shouldContinue()) break;
