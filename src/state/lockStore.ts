@@ -6,6 +6,8 @@ interface LockState {
   hydrated: boolean; // whether `enabled` has been read from the vault yet
   lastBackgrounded: number | null;
   timeoutMs: number; // grace period before a re-lock on resume
+  /** Increments only after a successful foreground authentication decision. */
+  foregroundUnlockId: number;
   /** Apply the persisted setting at boot. When enabled, start LOCKED (lock-on-launch). */
   hydrate: (enabled: boolean) => void;
   setEnabled: (v: boolean) => void;
@@ -27,11 +29,17 @@ export const useLockStore = create<LockState>((set) => ({
   hydrated: false,
   lastBackgrounded: null,
   timeoutMs: 30_000,
+  foregroundUnlockId: 0,
   hydrate: (enabled) => set({ enabled, hydrated: true, locked: enabled }),
   // Enabling locks immediately; disabling clears the gate so the user isn't stuck.
   setEnabled: (v) => set(v ? { enabled: true, locked: true } : { enabled: false, locked: false }),
   setTimeoutMs: (ms) => set({ timeoutMs: ms }),
   noteBackgrounded: (now) => set({ lastBackgrounded: now }),
   lock: () => set({ locked: true }),
-  unlock: () => set({ locked: false, lastBackgrounded: null }),
+  unlock: () =>
+    set((state) => ({
+      locked: false,
+      lastBackgrounded: null,
+      foregroundUnlockId: state.foregroundUnlockId + 1,
+    })),
 }));

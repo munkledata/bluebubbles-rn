@@ -40,7 +40,8 @@ describe('StoragePrivacyScreen', () => {
       screen.getByText(/external provider may receive the URL or precise coordinates/),
     ).toBeTruthy();
     expect(screen.getByText(/no longer has a configurable Redacted Mode/)).toBeTruthy();
-    expect(screen.getByText(/does not guarantee protection from screenshots/)).toBeTruthy();
+    expect(screen.getByText(/keeps protected content out of Android Recents/)).toBeTruthy();
+    expect(screen.getByText(/Secure Screen setting blocks screenshots/)).toBeTruthy();
   });
 
   it('names both the encrypted rows and every plaintext file class', async () => {

@@ -2,6 +2,7 @@ import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { logger } from '@core/secure';
 import { isDevServer } from '@utils/isDev';
+import { setNativeAppLockEnabled } from '@native/screenSecurity';
 import { vault } from './clients';
 import { flushErrorReports } from './errors';
 import { pauseRealtime, resumeRealtime } from './realtimeControl';
@@ -22,18 +23,34 @@ export class InvalidAppLockSettingError extends Error {
   }
 }
 
+function syncNativeAppLockPolicy(enabled: boolean): void {
+  const applied = setNativeAppLockEnabled(enabled);
+  if (enabled && !applied) {
+    throw new Error('App Lock requires the Android Recents protection module.');
+  }
+}
+
 /** Read the persisted app-lock setting from the vault (no DB needed) and apply it. */
 export async function hydrateLock(options: { shouldCommit?: () => boolean } = {}): Promise<void> {
   const v = await vault.get('appLockEnabled');
   if (v !== null && v !== 'true' && v !== 'false') throw new InvalidAppLockSettingError();
   if (options.shouldCommit && !options.shouldCommit()) return;
-  useLockStore.getState().hydrate(v === 'true');
+  const enabled = v === 'true';
+  // Synchronize the native Recents owner before the gate can render protected routes. A build
+  // without this post-v56 native module keeps the existing React gate but cannot claim Recents
+  // protection until rebuilt and device-verified.
+  syncNativeAppLockPolicy(enabled);
+  useLockStore.getState().hydrate(enabled);
 }
 
 /** Persist the app-lock setting. Callers must confirm biometrics exist before enabling. */
 export async function setAppLockEnabled(enabled: boolean): Promise<void> {
+  // Enabling is fail-closed: install the native Recents policy before persisting/unmounting the
+  // protected React tree. Disabling may safely clear the native mirror after the vault commits.
+  if (enabled) syncNativeAppLockPolicy(true);
   await vault.set('appLockEnabled', enabled ? 'true' : 'false');
   useLockStore.getState().setEnabled(enabled);
+  if (!enabled) syncNativeAppLockPolicy(false);
   // Settings is inside the connected layout. Turning App Lock on replaces that layout with the
   // lock gate, whose unmount cleanup removes listeners but does not itself close the live socket.
   // Stop intake in the same synchronous state transition so no private event can write behind it.

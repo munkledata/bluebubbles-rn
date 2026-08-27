@@ -34,6 +34,7 @@ import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 import { ConnectionBanner } from '@ui/connection';
 import { ServerRotationApprovalHost } from '@ui/server-rotation';
 import { useChatNavigator } from '@ui/useChatNavigator';
+import { completeNativeForegroundPrivacyTransition } from '@native/screenSecurity';
 
 /** Catch every intentionally fire-and-forget notification task without logging payload content. */
 function runNotificationTask(
@@ -124,6 +125,9 @@ function ConnectedAppLayout(): React.JSX.Element {
           pauseRealtime();
           return;
         }
+        // Android 12 and older use a transient secure-window fallback for App Lock Recents. Keep
+        // it through native resume until this exact grace-period decision says content may show.
+        completeNativeForegroundPrivacyTransition();
         void resumeRealtime().catch((error: unknown) => {
           leaseLogger.warn('[realtime] foreground resume failed', error);
         });

@@ -53,6 +53,10 @@ jest.mock('expo-constants', () => ({
   },
 }));
 jest.mock('@native/biometrics', () => ({ isBiometricAvailable: jest.fn() }));
+jest.mock('@native/screenSecurity', () => ({
+  getSecureScreenState: jest.fn(() => ({ available: true, enabled: false })),
+  setSecureScreenEnabled: jest.fn(),
+}));
 jest.mock('@/services', () => ({
   disconnectFailureMessage: jest.fn(
     () =>
@@ -86,6 +90,8 @@ jest.mock('@db/repositories', () => ({
 import SettingsScreen from '../../../app/(app)/settings';
 // eslint-disable-next-line import/first
 import { isBiometricAvailable } from '@native/biometrics';
+// eslint-disable-next-line import/first
+import { getSecureScreenState, setSecureScreenEnabled } from '@native/screenSecurity';
 // eslint-disable-next-line import/first
 import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 // eslint-disable-next-line import/first
@@ -123,6 +129,8 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const mockIsBiometricAvailable = isBiometricAvailable as jest.Mock;
+const mockGetSecureScreenState = getSecureScreenState as jest.Mock;
+const mockSetSecureScreenEnabled = setSecureScreenEnabled as jest.Mock;
 const mockForget = forget as jest.Mock;
 const mockRotate = rotateDatabaseKey as jest.Mock;
 const mockSetAppLock = setAppLockEnabled as jest.Mock;
@@ -193,6 +201,8 @@ beforeEach(() => {
   useTransportHealthStore.getState().setSocketState(transportGeneration, 'connected');
   useDialogStore.setState({ current: null, queue: [] });
   mockIsBiometricAvailable.mockResolvedValue(true);
+  mockGetSecureScreenState.mockReturnValue({ available: true, enabled: false });
+  mockSetSecureScreenEnabled.mockReset();
   mockForget.mockResolvedValue(undefined);
   mockSyncContacts.mockResolvedValue({ contacts: 3, matched: 2 });
   mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
@@ -470,16 +480,29 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
 });
 
 describe('SettingsScreen — App Lock biometric gate', () => {
-  it('states the storage limits of App Lock next to the toggle', async () => {
+  it('states the independent App Lock, Recents, Secure Screen, and storage boundaries', async () => {
     await renderWithTheme(<SettingsScreen />);
-    expect(screen.getByText(/App Lock blocks the app screen after it locks/)).toBeTruthy();
-    expect(screen.getByText(/does not make the database key biometric-bound/)).toBeTruthy();
+    expect(screen.getByText(/keeps their content out of Android Recents/)).toBeTruthy();
+    expect(screen.getByText(/Neither setting makes the database key biometric-bound/)).toBeTruthy();
+    expect(screen.getByText(/Secure Screen separately blocks screenshots/)).toBeTruthy();
+    expect(screen.getByText(/Locked pushes stay generic and sync after unlock/)).toBeTruthy();
+  });
+
+  it('toggles the independent native Secure Screen preference', async () => {
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText('Block Android screenshots and screen recording'),
+        'valueChange',
+        true,
+      );
+    });
+
+    expect(mockSetSecureScreenEnabled).toHaveBeenCalledWith(true);
     expect(
-      screen.getByText(/or block screenshots, screen recording, or task-switcher snapshots/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Locked pushes show a generic notice and sync after unlock/),
-    ).toBeTruthy();
+      screen.getByLabelText('Block Android screenshots and screen recording').props.value,
+    ).toBe(true);
   });
 
   it('blocks enabling and shows a dialog when no biometric is enrolled', async () => {

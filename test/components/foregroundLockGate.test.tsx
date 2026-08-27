@@ -4,11 +4,16 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ForegroundLockGate } from '@features/lock/ForegroundLockGate';
 import { authenticate } from '@native/biometrics';
+import { completeNativeForegroundPrivacyTransition } from '@native/screenSecurity';
 import type { BootState } from '@/services/boot/bootStateMachine';
 import { renderWithTheme } from './support/renderWithTheme';
 
 jest.mock('@native/biometrics', () => ({ authenticate: jest.fn() }));
+jest.mock('@native/screenSecurity', () => ({
+  completeNativeForegroundPrivacyTransition: jest.fn(() => true),
+}));
 const mockAuthenticate = authenticate as jest.MockedFunction<typeof authenticate>;
+const mockCompletePrivacyTransition = jest.mocked(completeNativeForegroundPrivacyTransition);
 const originalCurrentStateDescriptor = Object.getOwnPropertyDescriptor(AppState, 'currentState');
 
 const TEST_METRICS = {
@@ -37,12 +42,14 @@ function gate(
     onWarmUnlock?: () => void | Promise<void>;
     onRetry?: (runId: number) => void | Promise<void>;
   } = {},
+  foregroundUnlockId = 0,
 ): React.JSX.Element {
   return withSafeArea(
     <ForegroundLockGate
       bootState={bootState}
       lockHydrated={lockHydrated}
       locked={locked}
+      foregroundUnlockId={foregroundUnlockId}
       onColdUnlock={callbacks.onColdUnlock ?? jest.fn()}
       onWarmUnlock={callbacks.onWarmUnlock ?? jest.fn()}
       onRetry={callbacks.onRetry ?? jest.fn()}
@@ -59,6 +66,7 @@ describe('ForegroundLockGate', () => {
       value: 'active',
     });
     mockAuthenticate.mockReset().mockImplementation(() => new Promise<boolean>(() => undefined));
+    mockCompletePrivacyTransition.mockClear();
   });
 
   afterAll(() => {
@@ -90,13 +98,25 @@ describe('ForegroundLockGate', () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(1);
   });
 
-  it('releases route content only after an unlocked decision', async () => {
+  it('does not clear the native hold for an initially mounted private tree', async () => {
     await renderWithTheme(gate(true, false, <Text>Private route content</Text>));
 
     expect(screen.getByText('Private route content')).toBeTruthy();
     expect(screen.queryByRole('progressbar', { name: 'Loading Gator' })).toBeNull();
     expect(screen.queryByText('Gator is locked')).toBeNull();
     expect(mockAuthenticate).not.toHaveBeenCalled();
+    expect(mockCompletePrivacyTransition).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a protected tree only after a fresh foreground unlock decision', async () => {
+    const privateTree = <Text>Private route content</Text>;
+    const result = await renderWithTheme(gate(true, true, privateTree));
+    mockCompletePrivacyTransition.mockClear();
+
+    await result.rerender(gate(true, false, privateTree, READY_BOOT, {}, 1));
+
+    expect(screen.getByText('Private route content')).toBeTruthy();
+    expect(mockCompletePrivacyTransition).toHaveBeenCalledTimes(1);
   });
 
   it('unmounts protected content across unknown, unlocked, and warm-locked transitions', async () => {
@@ -118,9 +138,16 @@ describe('ForegroundLockGate', () => {
     expect(screen.getByText('Mounted private state')).toBeTruthy();
     expect(onMount).toHaveBeenCalledTimes(1);
 
+    const acknowledgementsBeforeLock = mockCompletePrivacyTransition.mock.calls.length;
     await result.rerender(gate(true, true, <ProtectedTree />));
     expect(screen.queryByText('Mounted private state')).toBeNull();
     expect(onUnmount).toHaveBeenCalledTimes(1);
+    expect(mockCompletePrivacyTransition.mock.calls.length).toBeGreaterThan(
+      acknowledgementsBeforeLock,
+    );
+    expect(onUnmount.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockCompletePrivacyTransition.mock.invocationCallOrder.at(-1)!,
+    );
   });
 
   it('removes a protected native Modal before showing the warm-lock screen', async () => {

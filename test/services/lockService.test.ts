@@ -9,6 +9,7 @@ const recoverOutgoing = jest.fn<Promise<{ eligible: number; sent: number }>, []>
 const isDevServer = jest.fn(() => false);
 const vaultGet = jest.fn(async () => null as string | null);
 const vaultSet = jest.fn(async () => undefined);
+const setNativeAppLockEnabled = jest.fn(() => true);
 
 jest.mock('@/services/bootstrap', () => ({ hydrateSession }));
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
@@ -18,11 +19,14 @@ jest.mock('@utils/isDev', () => ({ isDevServer }));
 jest.mock('@/services/clients', () => ({
   vault: { get: vaultGet, set: vaultSet },
 }));
+jest.mock('@native/screenSecurity', () => ({
+  setNativeAppLockEnabled,
+}));
 
 import { logger } from '@core/secure';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
-import { completeUnlock, setAppLockEnabled } from '@/services/lock';
+import { completeUnlock, hydrateLock, setAppLockEnabled } from '@/services/lock';
 
 beforeEach(() => {
   hydrateSession.mockReset().mockResolvedValue(undefined);
@@ -32,6 +36,8 @@ beforeEach(() => {
   recoverOutgoing.mockReset().mockResolvedValue({ eligible: 0, sent: 0 });
   isDevServer.mockReset().mockReturnValue(false);
   vaultSet.mockReset().mockResolvedValue(undefined);
+  vaultGet.mockReset().mockResolvedValue(null);
+  setNativeAppLockEnabled.mockReset().mockReturnValue(true);
   useLockStore.setState({
     enabled: true,
     locked: true,
@@ -43,12 +49,37 @@ beforeEach(() => {
 });
 
 describe('setAppLockEnabled', () => {
+  it('hydrates the native Recents owner before publishing the persisted App Lock choice', async () => {
+    vaultGet.mockResolvedValueOnce('true');
+
+    await hydrateLock();
+
+    expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
+  });
+
+  it('refuses to enable App Lock when native Recents protection is unavailable', async () => {
+    useLockStore.setState({ enabled: false, locked: false });
+    setNativeAppLockEnabled.mockReturnValueOnce(false);
+
+    await expect(setAppLockEnabled(true)).rejects.toThrow(
+      'App Lock requires the Android Recents protection module.',
+    );
+
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(useLockStore.getState()).toMatchObject({ enabled: false, locked: false });
+  });
+
   it('locks the gate and stops an existing realtime connection when enabled', async () => {
     useLockStore.setState({ enabled: false, locked: false });
 
     await setAppLockEnabled(true);
 
     expect(vaultSet).toHaveBeenCalledWith('appLockEnabled', 'true');
+    expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
+    expect(setNativeAppLockEnabled.mock.invocationCallOrder[0]!).toBeLessThan(
+      vaultSet.mock.invocationCallOrder[0]!,
+    );
     expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true });
     expect(pauseRealtime).toHaveBeenCalledTimes(1);
   });
@@ -57,6 +88,7 @@ describe('setAppLockEnabled', () => {
     await setAppLockEnabled(false);
 
     expect(vaultSet).toHaveBeenCalledWith('appLockEnabled', 'false');
+    expect(setNativeAppLockEnabled).toHaveBeenCalledWith(false);
     expect(useLockStore.getState()).toMatchObject({ enabled: false, locked: false });
     expect(pauseRealtime).not.toHaveBeenCalled();
   });

@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.gator.screensecurity'
+version = '0.1.0'
+
+dependencies {
+  // ExtraWindowEventListener is a React Native API. Keep it compile-only because the host app
+  // already owns the exact ReactAndroid runtime selected by Expo/RN autolinking.
+  compileOnly 'com.facebook.react:react-android'
+}
+
+android {
+  namespace "expo.modules.gatorscreensecurity"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}

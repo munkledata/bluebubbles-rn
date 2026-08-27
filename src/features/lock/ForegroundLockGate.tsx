@@ -1,9 +1,10 @@
-import type { PropsWithChildren } from 'react';
+import { useEffect, useRef, type PropsWithChildren } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { BootState } from '@/services/boot/bootStateMachine';
 import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useTheme } from '@ui/theme/ThemeProvider';
 import { LockScreen } from './LockScreen';
+import { completeNativeForegroundPrivacyTransition } from '@native/screenSecurity';
 
 interface ForegroundLockGateProps {
   /** Sanitized coordinator state; it never contains a password, origin, or raw error. */
@@ -11,6 +12,8 @@ interface ForegroundLockGateProps {
   /** False until the vault-backed App Lock choice has been read. Unknown is fail-closed. */
   readonly lockHydrated: boolean;
   readonly locked: boolean;
+  /** Changes only after a successful foreground authentication decision. */
+  readonly foregroundUnlockId: number;
   readonly onColdUnlock: (runId: number) => void | Promise<void>;
   readonly onWarmUnlock: () => void | Promise<void>;
   readonly onRetry: (runId: number) => void | Promise<void>;
@@ -25,12 +28,25 @@ export function ForegroundLockGate({
   bootState,
   lockHydrated,
   locked,
+  foregroundUnlockId,
   onColdUnlock,
   onWarmUnlock,
   onRetry,
   children,
 }: PropsWithChildren<ForegroundLockGateProps>): React.JSX.Element {
   const theme = useTheme();
+  const acknowledgedUnlockId = useRef(foregroundUnlockId);
+
+  useEffect(() => {
+    const protectedTreeVisible = bootState.status === 'ready' && lockHydrated && !locked;
+    if (protectedTreeVisible && foregroundUnlockId === acknowledgedUnlockId.current) return;
+
+    // Generic/locked trees are always safe to acknowledge. A protected tree may acknowledge only
+    // a fresh biometric unlock decision; an Activity recreation remounts with the current id and
+    // therefore cannot silently clear the Android 12-and-older native privacy hold.
+    if (protectedTreeVisible) acknowledgedUnlockId.current = foregroundUnlockId;
+    completeNativeForegroundPrivacyTransition();
+  }, [bootState.runId, bootState.status, foregroundUnlockId, lockHydrated, locked]);
 
   if (bootState.status === 'idle' || bootState.status === 'loading') {
     return (

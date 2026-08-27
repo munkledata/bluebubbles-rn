@@ -7,6 +7,11 @@ import { getDatabase } from '@db/database';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
+import {
+  getSecureScreenState,
+  setSecureScreenEnabled,
+  type SecureScreenState,
+} from '@native/screenSecurity';
 import { disconnectFailureMessage, forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { requestDisableBatteryOptimization } from '@/services/battery';
 import {
@@ -92,6 +97,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const preset = useThemeStore((s) => s.preset);
   const setPreset = useThemeStore((s) => s.setPreset);
   const appLock = useLockStore((s) => s.enabled);
+  const [secureScreen, setSecureScreen] = useState<SecureScreenState>(getSecureScreenState);
   const maxDownloads = useFeatureSettingsStore((s) => s.maxConcurrentDownloads);
   const setMaxDownloads = useFeatureSettingsStore((s) => s.setMaxConcurrentDownloads);
   const privateApiEnabled = useFeatureSettingsStore((s) => s.privateApiEnabled);
@@ -257,7 +263,23 @@ export default function SettingsScreen(): React.JSX.Element {
       );
       return;
     }
-    await setAppLockEnabled(next);
+    try {
+      await setAppLockEnabled(next);
+    } catch {
+      if (screenCurrent()) {
+        showDialog('App Lock', 'Couldn’t update App Lock. The previous setting is unchanged.');
+      }
+    }
+  };
+
+  const onToggleSecureScreen = (next: boolean): void => {
+    if (!screenCurrent()) return;
+    try {
+      setSecureScreenEnabled(next);
+      setSecureScreen({ available: true, enabled: next });
+    } catch {
+      showDialog('Secure Screen', 'Couldn’t update Android screen-capture protection.');
+    }
   };
 
   const runContactsSync = async (): Promise<void> => {
@@ -485,7 +507,14 @@ export default function SettingsScreen(): React.JSX.Element {
               onValueChange={(v) => void onToggleAppLock(v)}
               accessibilityLabel="Require biometric unlock to open the app"
             />
-            <NoteRow text="App Lock blocks the app screen after it locks. It does not make the database key biometric-bound, encrypt files, or block screenshots, screen recording, or task-switcher snapshots. Locked pushes show a generic notice and sync after unlock." />
+            <SwitchRow
+              label="Secure Screen"
+              value={secureScreen.enabled}
+              onValueChange={onToggleSecureScreen}
+              disabled={!secureScreen.available}
+              accessibilityLabel="Block Android screenshots and screen recording"
+            />
+            <NoteRow text="App Lock blocks protected routes and keeps their content out of Android Recents, including during its grace period. Secure Screen separately blocks screenshots and screen recording. Neither setting makes the database key biometric-bound or encrypts files. Locked pushes stay generic and sync after unlock." />
             <NavRow
               label="Reminders"
               color="label"

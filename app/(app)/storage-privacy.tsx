@@ -80,9 +80,9 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           <Text style={textStyle}>
             Gator no longer has a configurable Redacted Mode or Hide Preview mode. App Lock is a
             foreground screen gate; it is not file encryption or biometric-bound key custody. It
-            does not guarantee protection from screenshots, screen recording, or every Recents
-            snapshot, and it does not retroactively replace detailed notifications that Android
-            already displayed.
+            keeps protected content out of Android Recents, including during its grace period. The
+            independent Secure Screen setting blocks screenshots and screen recording. Neither
+            setting retroactively replaces detailed notifications that Android already displayed.
           </Text>
         </SettingsSection>
 
