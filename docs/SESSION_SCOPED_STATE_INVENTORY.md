@@ -48,7 +48,7 @@ account B while it completes the rest of the wipe.
 | Download store                  | Attachment GUID status/progress                        | Store reset; native observer delivery is generation-guarded                                           |
 | Dialog store                    | Private copy and queued callbacks                      | Store reset clears current dialog and queue                                                           |
 | Toast store                     | Private copy and queued toasts                         | Store reset clears current toast and queue                                                            |
-| TanStack Query                  | Server/account responses and local search results      | `queryClient.clear()` destroys active entries; all 14 remote reads consume its transport abort signal |
+| TanStack Query                  | Server/account responses and local search results      | `queryClient.clear()` destroys active entries; all 15 remote reads consume its transport abort signal |
 
 `sessionStore` is intentionally outside that import graph. `runForget()` resets it immediately
 after the coordinator so navigation remains derived from session state. Its origin, password,
@@ -97,10 +97,10 @@ still has to acquire the current durable/session authority shown above.
 
 ## Query inventory
 
-- Server Management, Server Health, and iMessage Account queries include the account-delivery
+- Server Management, Server Health, iMessage Account, and Backup queries include the account-delivery
   generation in their keys, reject stale results before publishing or mutating the cache, and pass
   TanStack's abort signal through their endpoint wrappers into `HttpClient`.
-- The 14 remote query records cancel an active request or retry delay without starting another old
+- The 15 remote query records cancel an active request or retry delay without starting another old
   request. The one local chat-search record remains deliberately non-abortable SQLite work.
 - Chat search reads the local encrypted DB and uses a term-only key. Disconnect destroys its Query
   entry. The focused same-key A→B regression proves a non-abortable A query settling after B cannot

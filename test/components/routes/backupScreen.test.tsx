@@ -15,6 +15,9 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+jest.mock('@/ui/backup/ServerBackupSlotsSection', () => ({
+  ServerBackupSlotsSection: () => null,
+}));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => ({
     generation: 7,

@@ -219,6 +219,24 @@ export async function importBackupText(
 }
 
 /**
+ * Build and encrypt one current-account backup without choosing where it goes. Both local-file
+ * export and server slots call this boundary, so neither transport can accidentally receive the
+ * passphrase or the plaintext Backup object.
+ */
+export async function createEncryptedBackupCiphertext(
+  passphrase: string,
+  now: number,
+  lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<string> {
+  assertCurrent(lease);
+  const passphraseIssue = getNewBackupPassphraseIssue(passphrase);
+  if (passphraseIssue) throw new BackupPassphraseRejectedError(passphraseIssue);
+  const backup = await buildCurrentBackup(now, lease);
+  const box = await awaitCurrent(lease, getSecretBox());
+  return awaitCurrent(lease, sealBackup(box, backup, passphrase));
+}
+
+/**
  * Build, encrypt under `passphrase`, and share an encrypted backup file (.gatorbackup).
  * The cache file is deleted in a finally so nothing lingers. This is the secure default
  * — the encrypted blob is the only thing that leaves the device.
@@ -228,12 +246,7 @@ export async function exportEncryptedBackup(
   now: number,
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  assertCurrent(lease);
-  const passphraseIssue = getNewBackupPassphraseIssue(passphrase);
-  if (passphraseIssue) throw new BackupPassphraseRejectedError(passphraseIssue);
-  const backup = await buildCurrentBackup(now, lease);
-  const box = await awaitCurrent(lease, getSecretBox());
-  const sealed = await awaitCurrent(lease, sealBackup(box, backup, passphrase));
+  const sealed = await createEncryptedBackupCiphertext(passphrase, now, lease);
   const sharingAvailable = await awaitCurrent(lease, Sharing.isAvailableAsync());
   if (!sharingAvailable) throw new Error('sharing-unavailable');
 

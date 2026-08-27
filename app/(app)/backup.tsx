@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import {
@@ -20,6 +20,7 @@ import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
+import { ServerBackupSlotsSection } from '@/ui/backup/ServerBackupSlotsSection';
 import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 interface BackupDocumentPickerModule {
@@ -69,6 +70,7 @@ export default function BackupScreen(): React.JSX.Element {
   const [pass2, setPass2] = useState('');
   const [paste, setPaste] = useState('');
   const [restorePass, setRestorePass] = useState('');
+  const operationActive = useRef(false);
   // A retained picker/dialog callback must never adopt credentials from a later connection.
   const [screenLease] = useState(captureRealtimeDeliveryLease);
   const [accountRetired, setAccountRetired] = useState(() => !screenLease.isCurrent());
@@ -83,6 +85,7 @@ export default function BackupScreen(): React.JSX.Element {
         setPass2('');
         setPaste('');
         setRestorePass('');
+        operationActive.current = false;
         setBusy(false);
       }),
     [screenLease],
@@ -101,6 +104,18 @@ export default function BackupScreen(): React.JSX.Element {
   const passphraseIssue = getNewBackupPassphraseIssue(pass);
   const canExport = !busy && passphraseIssue === null && pass === pass2;
 
+  const tryBeginOperation = (): boolean => {
+    if (operationActive.current || !screenLease.isCurrent()) return false;
+    operationActive.current = true;
+    setBusy(true);
+    return true;
+  };
+
+  const finishOperation = (): void => {
+    operationActive.current = false;
+    if (screenLease.isCurrent()) setBusy(false);
+  };
+
   const onExport = async (): Promise<void> => {
     if (!screenLease.isCurrent()) return;
     const issue = getNewBackupPassphraseIssue(pass);
@@ -112,7 +127,7 @@ export default function BackupScreen(): React.JSX.Element {
       showDialog('Backup', 'Passphrases do not match.');
       return;
     }
-    setBusy(true);
+    if (!tryBeginOperation()) return;
     try {
       await exportEncryptedBackup(pass, Date.now(), screenLease);
       if (!screenLease.isCurrent()) return;
@@ -131,7 +146,7 @@ export default function BackupScreen(): React.JSX.Element {
           : 'Export failed.',
       );
     } finally {
-      if (screenLease.isCurrent()) setBusy(false);
+      finishOperation();
     }
   };
 
@@ -139,8 +154,7 @@ export default function BackupScreen(): React.JSX.Element {
   // contents into the restore field — so a user who exported a file can restore it without opening
   // it elsewhere and copy-pasting the whole ciphertext. They then enter the passphrase and Restore.
   const onPickFile = async (): Promise<void> => {
-    if (!screenLease.isCurrent()) return;
-    setBusy(true);
+    if (!tryBeginOperation()) return;
     try {
       const content = await pickBackupFileForLease(screenLease);
       if (content !== null && screenLease.isCurrent()) setPaste(content);
@@ -148,14 +162,14 @@ export default function BackupScreen(): React.JSX.Element {
       if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;
       showDialog('Restore', 'Couldn’t open the backup file.');
     } finally {
-      if (screenLease.isCurrent()) setBusy(false);
+      finishOperation();
     }
   };
 
   const onImport = async (): Promise<void> => {
     if (!screenLease.isCurrent()) return;
     if (!paste.trim()) return;
-    setBusy(true);
+    if (!tryBeginOperation()) return;
     try {
       const r = await importBackupAuto(paste.trim(), restorePass, screenLease);
       if (!screenLease.isCurrent()) return;
@@ -172,7 +186,7 @@ export default function BackupScreen(): React.JSX.Element {
         'Couldn’t restore — check your passphrase and that the backup is valid.',
       );
     } finally {
-      if (screenLease.isCurrent()) setBusy(false);
+      finishOperation();
     }
   };
 
@@ -275,6 +289,13 @@ export default function BackupScreen(): React.JSX.Element {
             </Text>
           </Pressable>
         </SettingsSection>
+
+        <ServerBackupSlotsSection
+          lease={screenLease}
+          operationBusy={busy}
+          tryBeginOperation={tryBeginOperation}
+          finishOperation={finishOperation}
+        />
       </ScrollView>
     </Screen>
   );
