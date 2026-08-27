@@ -208,8 +208,8 @@ export default function BackupScreen(): React.JSX.Element {
             style={inputStyle}
           />
           <Text style={[styles.passphraseHint, { color: theme.color.secondaryLabel }]}>
-            Use at least {MIN_NEW_BACKUP_PASSPHRASE_LENGTH} characters, avoid common phrases, and
-            don’t reuse an important password.
+            Use at least {MIN_NEW_BACKUP_PASSPHRASE_LENGTH} characters. Pick several unrelated words
+            or a password-manager-generated value, and don’t reuse an important password.
           </Text>
           <Pressable
             accessibilityRole="button"

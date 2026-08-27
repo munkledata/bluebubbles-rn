@@ -87,13 +87,13 @@ describe('BackupScreen passphrase boundary', () => {
   it('explains the stronger export rule and caps pasted input in the TextInput', async () => {
     await renderWithTheme(<BackupScreen />);
 
-    expect(screen.getByText(/Use at least 12 characters, avoid common phrases/)).toBeTruthy();
+    expect(screen.getByText(/Use at least 15 characters.*several unrelated words/)).toBeTruthy();
     expect(screen.getByPlaceholderText('…or paste backup contents here').props.maxLength).toBe(
       BACKUP_LIMITS.encodedCharacters,
     );
   });
 
-  it('keeps common phrases disabled and exports a distinct 12+ character passphrase', async () => {
+  it('keeps common phrases disabled and exports a distinct 15+ character passphrase', async () => {
     await renderWithTheme(<BackupScreen />);
     const pass = screen.getByPlaceholderText('Passphrase');
     const confirm = screen.getByPlaceholderText('Confirm passphrase');

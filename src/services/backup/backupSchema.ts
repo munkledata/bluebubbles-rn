@@ -26,42 +26,59 @@ export const BACKUP_LIMITS = {
   muteTypeCharacters: 64,
 } as const;
 
-export const MIN_NEW_BACKUP_PASSPHRASE_LENGTH = 12;
+export const MIN_NEW_BACKUP_PASSPHRASE_LENGTH = 15;
 
 /**
- * A deliberately small, understandable block-list for NEW exports. This is not a password
- * strength estimator; it only catches especially predictable phrases that satisfy the length
- * rule. Imports do not call this rule, so an existing backup with a short/old passphrase remains
- * usable.
+ * A deliberately finite, understandable blocklist for NEW exports. It covers common passwords,
+ * predictable long variants, and app-specific guesses without imposing character-class rules.
+ * Imports do not call this rule, so an existing backup with a short/old passphrase remains usable.
  */
 const COMMON_BACKUP_PASSPHRASES: ReadonlySet<string> = new Set([
-  '',
   '000000000000',
   '111111111111',
   '123456789012',
   'aaaaaaaaaaaa',
+  'adminadminadmin',
+  'backupbackupbackup',
+  'bluebubbles1234',
+  'bluebubblesbluebubbles',
+  'changemechangeme',
   'correct horse battery staple',
+  'dragon123456789',
+  'footballfootball',
+  'gatorbackup12345',
+  'gatorgatorgator',
+  'iloveyouiloveyou',
   'letmein123456',
+  'letmeinletmein',
+  'monkey123456789',
+  'password password',
   'password1234',
   'password12345',
   'password123456',
+  'password123456789',
+  'passwordpassword',
   'qwerty123456',
+  'qwerty123456789',
+  'qwertyuiopasdfg',
   'this is a password',
+  'welcome12345678',
 ]);
 
 export type NewBackupPassphraseIssue = 'too-short' | 'too-common';
 
 function normalizePassphraseForComparison(passphrase: string): string {
-  return passphrase.trim().replace(/\s+/g, ' ').toLowerCase();
+  return passphrase.normalize('NFC').trim().replace(/\s+/gu, ' ').toLowerCase();
 }
 
 export function getNewBackupPassphraseIssue(passphrase: string): NewBackupPassphraseIssue | null {
-  // Count user-visible Unicode code points and ignore padding at the ends; six emoji or three
-  // letters surrounded by spaces must not masquerade as twelve characters.
-  if (Array.from(passphrase.trim()).length < MIN_NEW_BACKUP_PASSPHRASE_LENGTH) return 'too-short';
-  return COMMON_BACKUP_PASSPHRASES.has(normalizePassphraseForComparison(passphrase))
-    ? 'too-common'
-    : null;
+  // Count normalized Unicode code points and collapse whitespace padding that adds no useful
+  // guessing resistance. Check the blocklist first so a familiar short password gets the more
+  // useful rejection reason instead of only "too short."
+  const normalized = normalizePassphraseForComparison(passphrase);
+  if (normalized.length === 0) return 'too-short';
+  if (COMMON_BACKUP_PASSPHRASES.has(normalized)) return 'too-common';
+  return Array.from(normalized).length < MIN_NEW_BACKUP_PASSPHRASE_LENGTH ? 'too-short' : null;
 }
 
 /** Backup file format. version is bumped if the shape ever changes. */

@@ -311,6 +311,7 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
   it.each([
     ['short', 'only-short'],
     ['common', 'password1234'],
+    ['app-specific', 'bluebubbles1234'],
   ])('rejects a %s passphrase before reading account data', async (_case, passphrase) => {
     await expect(exportEncryptedBackup(passphrase, 2_000)).rejects.toBeInstanceOf(
       BackupPassphraseRejectedError,

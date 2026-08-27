@@ -976,15 +976,18 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
 });
 
 describe('new backup passphrase policy', () => {
-  it('requires 12 characters for new exports', () => {
-    expect(MIN_NEW_BACKUP_PASSPHRASE_LENGTH).toBe(12);
+  it('requires 15 normalized characters for new exports', () => {
+    expect(MIN_NEW_BACKUP_PASSPHRASE_LENGTH).toBe(15);
     expect(getNewBackupPassphraseIssue('elevenchars')).toBe('too-short');
-    expect(getNewBackupPassphraseIssue('🔐'.repeat(6))).toBe('too-short');
-    expect(getNewBackupPassphraseIssue('twelve-chars')).toBeNull();
+    expect(getNewBackupPassphraseIssue('🔐'.repeat(14))).toBe('too-short');
+    expect(getNewBackupPassphraseIssue('a             b')).toBe('too-short');
+    expect(getNewBackupPassphraseIssue('fifteen-chars!!')).toBeNull();
   });
 
   it('rejects common phrases case-insensitively, but accepts a distinct long phrase', () => {
     expect(getNewBackupPassphraseIssue('  PASSWORD1234  ')).toBe('too-common');
+    expect(getNewBackupPassphraseIssue('BlueBubbles1234')).toBe('too-common');
+    expect(getNewBackupPassphraseIssue('password123456789')).toBe('too-common');
     expect(getNewBackupPassphraseIssue('            ')).toBe('too-short');
     expect(getNewBackupPassphraseIssue('river-lantern-orbit-92')).toBeNull();
   });
