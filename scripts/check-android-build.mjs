@@ -30,6 +30,7 @@ export const FORBIDDEN_PERMISSIONS = [
   'android.permission.READ_MEDIA_AUDIO',
   'android.permission.SYSTEM_ALERT_WINDOW',
   'android.permission.ACCESS_NOTIFICATION_POLICY',
+  'android.permission.USE_FULL_SCREEN_INTENT',
 ];
 
 // Expo's dev-client overlay legitimately needs this in a debuggable build. It remains forbidden
@@ -44,7 +45,6 @@ export const REQUIRED_PERMISSIONS = [
   'android.permission.READ_MEDIA_IMAGES',
   'android.permission.READ_MEDIA_VIDEO',
   'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
-  'android.permission.USE_FULL_SCREEN_INTENT',
   'android.permission.RECORD_AUDIO',
   'android.permission.MODIFY_AUDIO_SETTINGS',
   'android.permission.CAMERA',

@@ -48,13 +48,10 @@ const config: ExpoConfig = {
     // and never leaves the device, so a restored DB would be undecryptable anyway. This must be
     // the top-level Expo android option; expo-build-properties has no allowBackup setting.
     allowBackup: false,
-    // USE_FULL_SCREEN_INTENT (Android 14+): the incoming-FaceTime full-screen-intent
-    // notification degrades to heads-up without it.
     // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS: the composer records voice messages; CAMERA is
     // declared by expo-camera for setup QR scanning and composer photo capture.
     // All need a native rebuild to take effect.
     permissions: [
-      'android.permission.USE_FULL_SCREEN_INTENT',
       // Keep the API 33+ runtime notification permission as an explicit product contract even
       // though the current notify-kit version also merges it transitively.
       'android.permission.POST_NOTIFICATIONS',
@@ -66,6 +63,9 @@ const config: ExpoConfig = {
     blockedPermissions: [
       'android.permission.WRITE_CONTACTS',
       'android.permission.READ_MEDIA_AUDIO',
+      // Incoming FaceTime remains an actionable high-importance heads-up notification. Never let
+      // a notification dependency restore automatic full-screen launch.
+      'android.permission.USE_FULL_SCREEN_INTENT',
       // Dev tooling and notify-kit merge these special permissions transitively. Production
       // Gator never draws over other apps or requests Do Not Disturb policy access.
       'android.permission.SYSTEM_ALERT_WINDOW',

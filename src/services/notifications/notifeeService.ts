@@ -338,7 +338,6 @@ async function sanitizedFaceTimeNotification(
       category: AndroidCategory.CALL,
       ongoing: true,
       autoCancel: false,
-      fullScreenAction: { id: 'default', launchActivity: 'default' },
       pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
         { title: 'Decline', pressAction: { id: ACTION_DECLINE_FACETIME } },
@@ -1579,7 +1578,7 @@ function ensureFaceTimeChannel(): Promise<string> {
 }
 
 /**
- * Post an "Incoming FaceTime" heads-up/full-screen notification with Answer + Decline actions.
+ * Post an "Incoming FaceTime" heads-up notification with Answer + Decline actions.
  * Its native id carries a random route token; the call UUID remains in the encrypted database.
  * Ongoing + high-importance so it rings until answered/declined.
  */
@@ -1614,7 +1613,6 @@ async function postFaceTimeNotification(
       category: AndroidCategory.CALL,
       ongoing: true,
       autoCancel: false,
-      fullScreenAction: { id: 'default', launchActivity: 'default' },
       pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
         { title: 'Decline', pressAction: { id: ACTION_DECLINE_FACETIME } },
