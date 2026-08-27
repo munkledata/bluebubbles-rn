@@ -204,6 +204,7 @@ class GatorPasteInputModule : Module() {
   private val batchSequence = AtomicLong(0L)
   private val outstandingPermissions = ConcurrentHashMap.newKeySet<PermissionLease>()
   private val activeDeadline = AtomicReference<PasteBatchDeadline?>(null)
+  private val protectedPastePaths = AtomicReference<Set<String>?>(null)
   private val worker = ThreadPoolExecutor(
     1,
     1,
@@ -228,12 +229,14 @@ class GatorPasteInputModule : Module() {
     //
     // Runs on the MAIN queue because `AppContext.findView` is annotated `@UiThread` (it resolves
     // through the UIManager's mounting layer).
-    AsyncFunction("attach") { tag: Int ->
+    AsyncFunction("attach") { tag: Int, protectedUris: List<String> ->
       val view = appContext.findView<EditText>(tag)
       // Ends on an `if` (never on `runCatching`) so the block's value is Unit — the bridge has no
       // converter for a Kotlin `Result`.
       if (view != null) {
-        attach(view, tag)
+        val pasteRoot = File(view.context.cacheDir, CACHE_DIR)
+        val protectionSnapshot = resolveProtectedPastePaths(pasteRoot, protectedUris)
+        attach(view, tag, protectionSnapshot)
       }
     }.runOnQueue(Queues.MAIN)
 
@@ -253,11 +256,13 @@ class GatorPasteInputModule : Module() {
       deadlineScheduler.shutdownNow()
       outstandingPermissions.forEach { it.release() }
       outstandingPermissions.clear()
+      protectedPastePaths.set(null)
     }
   }
 
-  private fun attach(view: EditText, tag: Int) {
+  private fun attach(view: EditText, tag: Int, protectionSnapshot: Set<String>) {
     runCatching {
+      protectedPastePaths.set(protectionSnapshot)
       // Re-registering simply replaces the previous listener, so this is idempotent and needs no
       // "already attached" bookkeeping.
       ViewCompat.setOnReceiveContentListener(view, ACCEPTED_MIME_TYPES) { _, payload ->
@@ -268,7 +273,7 @@ class GatorPasteInputModule : Module() {
       // user defocuses and returns — i.e. the Gboard image chip stays greyed out on first open.
       val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
       imm?.restartInput(view)
-      scheduleStartupCleanup(view.context.applicationContext)
+      scheduleStartupCleanup(view.context.applicationContext, protectionSnapshot)
     }.onFailure { android.util.Log.w("GatorPasteInput", "attach failed") }
   }
 
@@ -374,7 +379,13 @@ class GatorPasteInputModule : Module() {
       // after the prior batch has either committed or removed every partial. Reject cache pressure
       // before querying/opening any provider, then pass the remaining GLOBAL bytes into the same
       // actual-stream budget that enforces the per-batch limit.
-      val cacheStats = inspectPasteCacheRoot(root, System.currentTimeMillis())
+      val protectionSnapshot = protectedPastePaths.get()
+        ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+      val cacheStats = inspectPasteCacheRoot(
+        root,
+        System.currentTimeMillis(),
+        protectionSnapshot,
+      )
       val cacheAllowance = availablePasteBatchBytes(cacheStats)
       deadline.throwIfExpired()
       val budget = PasteBatchBudget(
@@ -560,17 +571,48 @@ class GatorPasteInputModule : Module() {
     return null
   }
 
-  private fun scheduleStartupCleanup(context: Context) {
+  private fun scheduleStartupCleanup(context: Context, protectionSnapshot: Set<String>) {
     if (destroyed.get() || !cleanupScheduled.compareAndSet(false, true)) return
     try {
       worker.execute {
         runCatching {
-          inspectPasteCacheRoot(File(context.cacheDir, CACHE_DIR), System.currentTimeMillis())
+          inspectPasteCacheRoot(
+            File(context.cacheDir, CACHE_DIR),
+            System.currentTimeMillis(),
+            protectionSnapshot,
+          )
         }.onFailure { android.util.Log.w("GatorPasteInput", "paste cache cleanup failed") }
       }
     } catch (_: RejectedExecutionException) {
       cleanupScheduled.set(false)
       // Every actual paste retries this cleanup inside its serialized worker job.
+    }
+  }
+
+  /** Convert an all-or-none DB URI snapshot into exact canonical paths used by native cleanup. */
+  private fun resolveProtectedPastePaths(root: File, rawUris: List<String>): Set<String> {
+    require(rawUris.size <= MAX_PROTECTED_PASTE_PATHS) {
+      "Too many protected pasted attachments"
+    }
+    return rawUris.mapTo(LinkedHashSet(rawUris.size)) { rawUri ->
+      require(rawUri.isNotEmpty() && rawUri.length <= MAX_PROTECTED_PASTE_URI_CHARS) {
+        "Invalid protected pasted attachment URI"
+      }
+      val uri = Uri.parse(rawUri)
+      require(
+        uri.scheme == "file" &&
+          uri.authority.isNullOrEmpty() &&
+          uri.query == null &&
+          uri.fragment == null,
+      ) { "Invalid protected pasted attachment URI" }
+      val rawPath = uri.path
+        ?: throw IllegalArgumentException("Protected pasted attachment URI has no path")
+      val canonicalPath = ownedPasteReferencePath(root, File(rawPath))
+        ?: throw IllegalArgumentException("Protected pasted attachment URI is outside the cache")
+      require(Uri.fromFile(File(canonicalPath)).toString() == rawUri) {
+        "Protected pasted attachment URI is not canonical"
+      }
+      canonicalPath
     }
   }
 

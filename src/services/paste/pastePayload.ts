@@ -91,6 +91,7 @@ function toAttachment(raw: RawPastedFile, index: number, now: number): SharedAtt
     name: safeShareFileName(rawName, uri, mimeType, index, now),
     mimeType,
     size,
+    origin: 'paste',
   };
 }
 

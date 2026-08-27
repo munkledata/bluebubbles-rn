@@ -13,8 +13,15 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendAttachmentService';
-import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import {
+  sendImageMessage,
+  type AttachmentOwnershipPreparer,
+  type AttachmentUploader,
+} from '@/services/send/sendAttachmentService';
+import {
+  attachmentCacheCoordinator,
+  type AttachmentCacheReservation,
+} from '@/services/download/attachmentCacheCoordinator';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -125,6 +132,134 @@ describe('sendImageMessage', () => {
     expect(protect.mock.invocationCallOrder[0]).toBeLessThan(release.mock.invocationCallOrder[0]!);
     expect(release).toHaveBeenCalledTimes(1);
     protect.mockRestore();
+  });
+
+  it('refuses a pasted path unless ownership preparation returns its exact reservation', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const image = { ...IMG, origin: 'paste' as const };
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(db, dummyHttp, { chatGuid: 'c1', image }, up.upload),
+    ).rejects.toThrow('ownership preparation is unavailable');
+
+    const incompletePrepare: AttachmentOwnershipPreparer = async () => ({ image });
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid: 'c1', image },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        incompletePrepare,
+      ),
+    ).rejects.toThrow('ownership is inconsistent');
+
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+  });
+
+  it('atomically promotes an adopted paste path with the attachment and retry row', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const durableUri = 'file:///documents/attachments/media-temp/generation-7/media-photo.jpg';
+    raw
+      .prepare(
+        "INSERT INTO attachment_cache_entries(path, bytes, last_used_at, state, attempts, next_retry_at) VALUES (?, 1000, 1, 'reserved', 0, 0)",
+      )
+      .run(durableUri);
+    const beginProtectionHandoff = jest.fn(() => true);
+    const release = jest.fn(async () => undefined);
+    const reservation: AttachmentCacheReservation = {
+      path: durableUri,
+      maxBytes: 1000,
+      generation: 7,
+      beginProtectionHandoff,
+      rollbackProtectionHandoff: jest.fn(() => true),
+      release,
+    };
+    const prepare: AttachmentOwnershipPreparer = jest.fn(async ({ image }) => ({
+      image: { ...image, uri: durableUri },
+      cacheReservation: reservation,
+    }));
+    const up = fakeUploader(async (upload) => {
+      expect(upload.uri).toBe(durableUri);
+      expect(one(raw, 'SELECT state FROM attachment_cache_entries')).toEqual({ state: 'active' });
+      expect(one(raw, 'SELECT local_path AS localPath FROM attachments')).toEqual({
+        localPath: durableUri,
+      });
+      expect(JSON.parse(String(one(raw, 'SELECT payload FROM outgoing_queue').payload))).toEqual({
+        attachmentGuid: upload.attachmentGuid,
+        localPath: durableUri,
+      });
+      expect(release).toHaveBeenCalledTimes(1);
+      return { guid: 'real-adopted-paste', viaPrivateApi: true };
+    });
+
+    await sendImageMessage(
+      db,
+      dummyHttp,
+      { chatGuid: 'c1', image: { ...IMG, origin: 'paste' } },
+      up.upload,
+      1000,
+      undefined,
+      undefined,
+      prepare,
+    );
+
+    expect(beginProtectionHandoff).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls an adopted paste promotion back to reserved when outgoing insertion fails', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const durableUri = 'file:///documents/attachments/media-temp/generation-7/media-photo.jpg';
+    raw
+      .prepare(
+        "INSERT INTO attachment_cache_entries(path, bytes, last_used_at, state, attempts, next_retry_at) VALUES (?, 1000, 1, 'reserved', 0, 0)",
+      )
+      .run(durableUri);
+    raw.exec(`CREATE TRIGGER fail_adopted_paste_attachment
+      BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'forced attachment failure'); END`);
+    const rollbackProtectionHandoff = jest.fn(() => true);
+    const release = jest.fn(async () => undefined);
+    const reservation: AttachmentCacheReservation = {
+      path: durableUri,
+      maxBytes: 1000,
+      generation: 7,
+      beginProtectionHandoff: jest.fn(() => true),
+      rollbackProtectionHandoff,
+      release,
+    };
+    const prepare: AttachmentOwnershipPreparer = async ({ image }) => ({
+      image: { ...image, uri: durableUri },
+      cacheReservation: reservation,
+    });
+    const up = fakeUploader(async () => ({ guid: 'must-not-upload', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid: 'c1', image: { ...IMG, origin: 'paste' } },
+        up.upload,
+        1000,
+        undefined,
+        undefined,
+        prepare,
+      ),
+    ).rejects.toThrow('forced attachment failure');
+
+    expect(rollbackProtectionHandoff).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(up.captured).toBeUndefined();
+    expect(one(raw, 'SELECT state FROM attachment_cache_entries')).toEqual({ state: 'reserved' });
+    expect((one(raw, 'SELECT COUNT(*) AS count FROM messages') as { count: number }).count).toBe(0);
+    raw.exec('DROP TRIGGER fail_adopted_paste_attachment');
   });
 
   it('rolls back a retired attachment insert before upload and lets a fresh lease send', async () => {

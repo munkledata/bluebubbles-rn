@@ -166,7 +166,7 @@ class GatorBoundedDownloadModule : Module() {
       synchronized(attachmentCacheIoLock) {
         val target = ownedAttachmentCacheFile(root, rawUri)
         val before = attachmentCacheLstat(target)
-        if (before == null) {
+        val outcome = if (before == null) {
           attachmentCacheDeleteOutcome("missing", 0L)
         } else {
           if (!OsConstants.S_ISREG(before.st_mode)) {
@@ -184,6 +184,69 @@ class GatorBoundedDownloadModule : Module() {
             throw IllegalStateException("Attachment cache file still exists after delete")
           }
           attachmentCacheDeleteOutcome("deleted", before.st_size)
+        }
+        // A process kill can land after an outgoing-paste reservation created these two fixed
+        // parents but before the source rename. Reserved-owner recovery calls this same exact
+        // delete boundary; prune the now-empty current-layout parents in either outcome.
+        runCatching { pruneEmptyAttachmentCacheParents(root, target) }
+        outcome
+      }
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
+    AsyncFunction("adoptPastedAttachment") {
+        sourceUri: String,
+        destinationUri: String,
+        expectedBytesValue: Double,
+      ->
+      val expectedBytes = boundedPositiveLong(expectedBytesValue, MAX_PASTED_ATTACHMENT_BYTES)
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("Android context is unavailable")
+      val pasteRoot = File(context.cacheDir, PASTED_INPUT_CACHE_DIRECTORY)
+      val attachmentRoot = File(appContext.persistentFilesDirectory, ATTACHMENT_CACHE_DIRECTORY)
+      synchronized(attachmentCacheIoLock) {
+        val source = ownedPastedAttachmentFile(pasteRoot, sourceUri)
+        var destination = ownedCurrentAttachmentCacheFile(attachmentRoot, destinationUri)
+        val sourceStat = attachmentCacheLstat(source)
+          ?: throw IllegalArgumentException("Pasted attachment is missing")
+        require(OsConstants.S_ISREG(sourceStat.st_mode)) {
+          "Pasted attachment is not a regular file"
+        }
+        require(sourceStat.st_size == expectedBytes) {
+          "Pasted attachment size changed"
+        }
+        require(attachmentCacheLstat(destination) == null) {
+          "Outgoing attachment destination already exists"
+        }
+
+        var moved = false
+        try {
+          val parent = destination.parentFile
+            ?: throw IllegalArgumentException("Outgoing attachment destination has no parent")
+          if (!parent.exists() && !parent.mkdirs()) {
+            throw IllegalStateException("Outgoing attachment destination is unavailable")
+          }
+          // Re-resolve after mkdirs so a raced/symlinked parent cannot redirect the rename.
+          destination = ownedCurrentAttachmentCacheFile(attachmentRoot, destinationUri)
+          require(attachmentCacheLstat(destination) == null) {
+            "Outgoing attachment destination already exists"
+          }
+          Os.rename(source.path, destination.path)
+          moved = true
+
+          val destinationStat = attachmentCacheLstat(destination)
+            ?: throw IllegalStateException("Adopted attachment is missing")
+          require(
+            OsConstants.S_ISREG(destinationStat.st_mode) && destinationStat.st_size == expectedBytes,
+          ) { "Adopted attachment failed final validation" }
+          source.parentFile?.let { batch ->
+            if (batch.listFiles()?.isEmpty() == true) batch.delete()
+          }
+          adoptedPasteOutcome(destinationUri, expectedBytes)
+        } catch (error: Exception) {
+          // Once rename succeeds the durable `reserved` ledger row owns exact cleanup. Before it
+          // succeeds, remove only the empty current-layout parents created by this attempt.
+          if (!moved) runCatching { pruneEmptyAttachmentCacheParents(attachmentRoot, destination) }
+          throw error
         }
       }
     }.runOnQueue(appContext.backgroundCoroutineScope)
@@ -456,6 +519,40 @@ class GatorBoundedDownloadModule : Module() {
     return target
   }
 
+  /** Resolve only the generation-scoped layout used by new outgoing ownership handoffs. */
+  private fun ownedCurrentAttachmentCacheFile(root: File, rawUri: String): File {
+    val uri = Uri.parse(rawUri)
+    require(
+      uri.scheme == "file" &&
+        uri.authority.isNullOrEmpty() &&
+        uri.query == null &&
+        uri.fragment == null,
+    ) { "Invalid outgoing attachment cache URI" }
+    val rawPath = uri.path ?: throw IllegalArgumentException("Missing outgoing attachment path")
+    val target = requireOwnedCurrentAttachmentCachePath(root, File(rawPath))
+    require(Uri.fromFile(target).toString() == rawUri) {
+      "Outgoing attachment cache URI is not canonical"
+    }
+    return target
+  }
+
+  /** Resolve one exact completed file beneath this app's fixed rich-paste cache root. */
+  private fun ownedPastedAttachmentFile(root: File, rawUri: String): File {
+    val uri = Uri.parse(rawUri)
+    require(
+      uri.scheme == "file" &&
+        uri.authority.isNullOrEmpty() &&
+        uri.query == null &&
+        uri.fragment == null,
+    ) { "Invalid pasted attachment URI" }
+    val rawPath = uri.path ?: throw IllegalArgumentException("Missing pasted attachment path")
+    val target = requireOwnedPastedAttachment(root, File(rawPath))
+    require(Uri.fromFile(target).toString() == rawUri) {
+      "Pasted attachment URI is not canonical"
+    }
+    return target
+  }
+
   /** lstat keeps a last-moment symlink swap from being followed; ENOENT is an idempotent miss. */
   private fun attachmentCacheLstat(target: File): StructStat? = try {
     Os.lstat(target.path)
@@ -514,6 +611,12 @@ class GatorBoundedDownloadModule : Module() {
   private fun attachmentCacheDeleteOutcome(status: String, bytes: Long): Map<String, Any> = mapOf(
     "ok" to true,
     "status" to status,
+    "bytes" to bytes.toDouble(),
+  )
+
+  private fun adoptedPasteOutcome(uri: String, bytes: Long): Map<String, Any> = mapOf(
+    "ok" to true,
+    "uri" to uri,
     "bytes" to bytes.toDouble(),
   )
 

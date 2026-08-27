@@ -7,6 +7,7 @@ import java.io.InputStream
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -25,6 +26,8 @@ class PasteBatchPolicyTest {
     assertEquals(1024L * 1024 * 1024, PASTE_CACHE_MAX_BYTES)
     assertEquals(32, PASTE_CACHE_MAX_BATCHES)
     assertEquals(64, PASTE_CACHE_MAX_ROOT_ENTRIES)
+    assertEquals(24L * 60 * 60 * 1000, PASTE_CACHE_MAX_AGE_MS)
+    assertEquals(2_000, MAX_PROTECTED_PASTE_PATHS)
   }
 
   @Test
@@ -164,17 +167,24 @@ class PasteBatchPolicyTest {
   }
 
   @Test
-  fun `cache inspection deletes exact pending and expired batches then measures retained bytes`() {
+  fun `cache inspection deletes pending and expired unreferenced batches but preserves references`() {
     val root = temporary.newFolder("pasted-in").canonicalFile
     val pending = batch(root, "9000-1.pending", 3)
     val expired = batch(root, "1000-2", 4)
+    val protected = batch(root, "1001-3", 6)
     val retained = batch(root, "9500-3", 5)
 
-    val stats = inspectPasteCacheRoot(root, nowMs = 10_000L, maxAgeMs = 1_000L)
+    val stats = inspectPasteCacheRoot(
+      root,
+      nowMs = 10_000L,
+      protectedPaths = setOf(File(protected, "payload.bin").canonicalPath),
+      maxAgeMs = 1_000L,
+    )
 
-    assertEquals(PasteCacheStats(committedBatches = 1, committedBytes = 5L), stats)
+    assertEquals(PasteCacheStats(committedBatches = 2, committedBytes = 11L), stats)
     assertFalse(pending.exists())
     assertFalse(expired.exists())
+    assertTrue(protected.exists())
     assertTrue(retained.exists())
   }
 
@@ -182,12 +192,19 @@ class PasteBatchPolicyTest {
   fun `cache inspection safely accounts for legacy timestamp-only batches after upgrade`() {
     val root = temporary.newFolder("legacy-pasted-in").canonicalFile
     val expired = batch(root, "1000", 4)
+    val protected = batch(root, "1001", 6)
     val retained = batch(root, "9500", 5)
 
-    val stats = inspectPasteCacheRoot(root, nowMs = 10_000L, maxAgeMs = 1_000L)
+    val stats = inspectPasteCacheRoot(
+      root,
+      nowMs = 10_000L,
+      protectedPaths = setOf(File(protected, "payload.bin").canonicalPath),
+      maxAgeMs = 1_000L,
+    )
 
-    assertEquals(PasteCacheStats(committedBatches = 1, committedBytes = 5L), stats)
+    assertEquals(PasteCacheStats(committedBatches = 2, committedBytes = 11L), stats)
     assertFalse(expired.exists())
+    assertTrue(protected.exists())
     assertTrue(retained.exists())
   }
 
@@ -198,7 +215,7 @@ class PasteBatchPolicyTest {
     val emptyCurrent = File(root, "9500-1").apply { mkdirs() }
     val retained = batch(root, "9500-2", 5)
 
-    val stats = inspectPasteCacheRoot(root, nowMs = 10_000L, maxAgeMs = 1_000L)
+    val stats = inspectPasteCacheRoot(root, nowMs = 10_000L, protectedPaths = emptySet())
 
     assertEquals(PasteCacheStats(committedBatches = 1, committedBytes = 5L), stats)
     assertFalse(emptyLegacy.exists())
@@ -238,7 +255,7 @@ class PasteBatchPolicyTest {
     val unknownRoot = temporary.newFolder("unknown-root").canonicalFile
     val unknown = File(unknownRoot, "not-owned.txt").apply { writeBytes(byteArrayOf(1)) }
     expectFailure(PasteBatchFailure.CACHE_QUOTA) {
-      inspectPasteCacheRoot(unknownRoot, nowMs = 10_000L)
+      inspectPasteCacheRoot(unknownRoot, nowMs = 10_000L, protectedPaths = emptySet())
     }
     assertTrue(unknown.exists())
 
@@ -247,7 +264,7 @@ class PasteBatchPolicyTest {
     val outside = temporary.newFile("outside-secret.bin").apply { writeBytes(byteArrayOf(9)) }
     Files.createSymbolicLink(File(expired, "linked.bin").toPath(), outside.toPath())
     expectFailure(PasteBatchFailure.CACHE_QUOTA) {
-      inspectPasteCacheRoot(symlinkRoot, nowMs = 100_000_000L, maxAgeMs = 1L)
+      inspectPasteCacheRoot(symlinkRoot, nowMs = 10_000L, protectedPaths = emptySet())
     }
     assertTrue(outside.exists())
     assertTrue(expired.exists())
@@ -257,26 +274,61 @@ class PasteBatchPolicyTest {
   fun `over-cap legacy root performs bounded cleanup then succeeds on the next pass`() {
     val root = temporary.newFolder("many-batches").canonicalFile
     batch(root, "9000-1", 1)
-    File(root, "9000-2").apply { mkdirs() }
+    File(root, "8000-2").apply { mkdirs() }
     batch(root, "9000-3", 1)
 
     expectFailure(PasteBatchFailure.CACHE_QUOTA) {
       inspectPasteCacheRoot(
         root,
         nowMs = 10_000L,
-        maxAgeMs = 1L,
+        protectedPaths = emptySet(),
+        maxAgeMs = 1_000L,
         maxRootEntries = 2,
       )
     }
-    assertEquals(1, root.listFiles()?.size)
+    assertEquals(2, root.listFiles()?.size)
 
     val repaired = inspectPasteCacheRoot(
       root,
       nowMs = 10_000L,
-      maxAgeMs = 1L,
+      protectedPaths = emptySet(),
+      maxAgeMs = 1_000L,
       maxRootEntries = 2,
     )
-    assertEquals(PasteCacheStats(committedBatches = 0, committedBytes = 0L), repaired)
+    assertEquals(PasteCacheStats(committedBatches = 2, committedBytes = 2L), repaired)
+  }
+
+  @Test
+  fun `expired abandoned batches are reclaimed before the batch quota becomes permanent`() {
+    val root = temporary.newFolder("abandoned-batches").canonicalFile
+    repeat(PASTE_CACHE_MAX_BATCHES) { index -> batch(root, "${1_000 + index}-1", 1) }
+
+    val stats = inspectPasteCacheRoot(
+      root,
+      nowMs = 100_000L,
+      protectedPaths = emptySet(),
+      maxAgeMs = 1_000L,
+    )
+
+    assertEquals(PasteCacheStats(committedBatches = 0, committedBytes = 0L), stats)
+    assertEquals(0, root.listFiles()?.size)
+  }
+
+  @Test
+  fun `DB reference paths accept exact committed batches and reject aliases or other roots`() {
+    val root = temporary.newFolder("reference-root").canonicalFile
+    val current = File(batch(root, "1000-1", 1), "payload.bin").canonicalFile
+    val legacy = File(batch(root, "1001", 1), "payload.bin").canonicalFile
+    val pending = File(batch(root, "1002-1.pending", 1), "payload.bin").canonicalFile
+    val outside = temporary.newFile("outside-reference.bin").canonicalFile
+    val alias = File(current.parentFile, "alias.bin")
+    Files.createSymbolicLink(alias.toPath(), outside.toPath())
+
+    assertEquals(current.path, ownedPasteReferencePath(root, current))
+    assertEquals(legacy.path, ownedPasteReferencePath(root, legacy))
+    assertNull(ownedPasteReferencePath(root, pending))
+    assertNull(ownedPasteReferencePath(root, outside))
+    assertNull(ownedPasteReferencePath(root, alias))
   }
 
   private fun budget(maxFile: Long, maxBatch: Long): PasteBatchBudget = PasteBatchBudget(

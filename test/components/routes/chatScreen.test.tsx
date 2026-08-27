@@ -144,6 +144,7 @@ jest.mock('@ui', () => {
     ThreadSheet: () => null,
     EditHistorySheet: () => null,
     MessageDetailsSheet: () => null,
+    showToast: jest.fn(),
   };
 });
 
@@ -219,7 +220,7 @@ jest.mock('@/services/send', () => ({
   schedule: jest.fn().mockResolvedValue(undefined),
   send: jest.fn(),
   sendImage: jest.fn(),
-  sendImages: jest.fn(),
+  sendImages: jest.fn().mockResolvedValue(null),
   unsend: jest.fn(),
 }));
 
@@ -248,7 +249,10 @@ import {
   runDueScheduled,
   schedule,
   send,
+  sendImages,
 } from '@/services/send';
+// eslint-disable-next-line import/first
+import { showToast } from '@ui';
 // eslint-disable-next-line import/first
 import { devSendFake, devSendFakeReply } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
@@ -942,6 +946,29 @@ describe('ChatScreen — stable list callbacks (row memoization contract)', () =
 });
 
 describe('ChatScreen — stable composer callbacks (Composer memo contract)', () => {
+  it('surfaces a current-account attachment admission failure', async () => {
+    const failure = new Error('paste ownership unavailable');
+    (sendImages as jest.Mock).mockRejectedValueOnce(failure);
+    await renderWithTheme(<ChatScreen />);
+
+    await act(async () => {
+      mockCaptured.composer!.onSendAttachments([
+        {
+          uri: 'file:///cache/pasted-in/1000-1/photo.jpg',
+          name: 'photo.jpg',
+          mimeType: 'image/jpeg',
+          size: 10,
+          origin: 'paste',
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    expect(showToast).toHaveBeenCalledWith(
+      'Couldn’t send one or more attachments—add the missing file again',
+    );
+  });
+
   it('keeps every composer callback identity across an unrelated screen re-render', async () => {
     await renderWithTheme(<ChatScreen />);
     const first = {

@@ -13,6 +13,7 @@ import {
   listAttachmentCacheEntriesForRecovery,
   listInactiveAttachmentCachePaths,
   listDueAttachmentCacheRetirements,
+  listPastedAttachmentProtectionPaths,
   recordAttachmentCacheEntry,
   recordAttachmentCacheAccess,
   repairMissingActiveAttachmentCacheEntry,
@@ -854,6 +855,48 @@ describe('attachment cache ledger', () => {
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_protected', paths: [PATH] });
     expect(await getAttachmentCacheEntry(db, PATH)).toMatchObject({ state: 'active' });
+  });
+
+  it('snapshots legacy paste paths from attachment rows and queued fallbacks only', async () => {
+    const { db, raw } = await createTestDb();
+    const attachmentPath = 'file:///data/user/0/app/cache/pasted-in/1000-1/from-row.jpg';
+    const queuedPath = 'file:///data/user/0/app/cache/pasted-in/1001-1/from-queue.jpg';
+    raw
+      .prepare(`INSERT INTO attachments (guid, local_path) VALUES (?, ?), (?, ?) `)
+      .run('paste-row', attachmentPath, 'ordinary-row', PATH);
+    raw
+      .prepare(
+        `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
+         VALUES (?, 'chat', 'attachment', ?), (?, 'chat', 'attachment', ?),
+                (?, 'chat', 'text', ?)`,
+      )
+      .run(
+        'paste-queue',
+        JSON.stringify({ attachmentGuid: 'missing-paste', localPath: queuedPath }),
+        'ordinary-queue',
+        JSON.stringify({ attachmentGuid: 'ordinary', localPath: PATH }),
+        'irrelevant-malformed-text',
+        '{"body":"/pasted-in/',
+      );
+
+    await expect(listPastedAttachmentProtectionPaths(db)).resolves.toEqual({
+      status: 'complete',
+      paths: [attachmentPath, queuedPath],
+    });
+  });
+
+  it('refuses a partial paste-protection snapshot on malformed candidate payloads', async () => {
+    const { db, raw } = await createTestDb();
+    raw
+      .prepare(
+        `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
+         VALUES ('malformed-paste-queue', 'chat', 'attachment', ?)`,
+      )
+      .run('{"localPath":"file:///cache/pasted-in/1000-1/file.jpg"');
+
+    await expect(listPastedAttachmentProtectionPaths(db)).resolves.toEqual({
+      status: 'incomplete',
+    });
   });
 
   it('protects the current attachment path selected by a queued attachment guid', async () => {

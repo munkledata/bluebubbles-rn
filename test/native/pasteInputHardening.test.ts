@@ -12,6 +12,7 @@ const moduleConfig = readFileSync(
   resolve(repoRoot, 'modules/gator-paste-input/expo-module.config.json'),
   'utf8',
 );
+const serviceSource = readFileSync(resolve(repoRoot, 'src/services/paste/pasteInput.ts'), 'utf8');
 
 describe('owned rich-paste native boundary', () => {
   it('pins count, per-file, aggregate, and absolute batch limits', () => {
@@ -93,6 +94,21 @@ describe('owned rich-paste native boundary', () => {
     expect(policySource).toMatch(/deleteOwnedPasteBatchDirectory\(pending, allowEmpty = true\)/);
     expect(policySource).toMatch(/deleteOwnedPasteBatchDirectory\(committed, allowEmpty = true\)/);
     expect(`${moduleSource}\n${policySource}`).not.toMatch(/deleteRecursively/);
+  });
+
+  it('age-deletes only batches absent from a validated durable-reference snapshot', () => {
+    expect(policySource).toMatch(/PASTE_CACHE_MAX_AGE_MS = 24L \* 60 \* 60 \* 1000\b/);
+    expect(policySource).toMatch(/stamp < cutoff && files\.none \{ it\.path in protectedPaths \}/);
+    expect(moduleSource).toContain(
+      'AsyncFunction("attach") { tag: Int, protectedUris: List<String> ->',
+    );
+    expect(moduleSource).toContain('resolveProtectedPastePaths(pasteRoot, protectedUris)');
+    expect(moduleSource).toContain('Uri.fromFile(File(canonicalPath)).toString() == rawUri');
+    expect(moduleSource).toMatch(
+      /inspectPasteCacheRoot\([\s\S]*System\.currentTimeMillis\(\),[\s\S]*protectionSnapshot/,
+    );
+    expect(serviceSource).toContain('listPastedAttachmentProtectionPaths(getDatabase())');
+    expect(serviceSource).toContain('native.attach(tag, protectedUris)');
   });
 
   it('rechecks the absolute deadline immediately before publication and reports failure', () => {

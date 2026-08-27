@@ -1,9 +1,15 @@
 import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { insertOutgoingAttachmentWithinTransaction } from '@db/repositories';
+import {
+  commitAttachmentCacheReservation,
+  insertOutgoingAttachmentWithinTransaction,
+} from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
+import {
+  attachmentCacheCoordinator,
+  type AttachmentCacheReservation,
+} from '../download/attachmentCacheCoordinator';
 import { handleSendFailure, reconcileSendOutcome, type SendOutcomeOptions } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 
@@ -14,6 +20,8 @@ export interface PickedImage {
   size: number;
   width?: number;
   height?: number;
+  /** Native-owned rich-paste cache file; production must adopt it before DB ownership. */
+  origin?: 'paste';
 }
 
 /**
@@ -45,6 +53,21 @@ export type AttachmentUploader = (args: {
   timeoutMs?: number;
 }) => Promise<SendAck>;
 
+export interface PreparedAttachmentOwnership {
+  readonly image: PickedImage;
+  /** Present only when native paste bytes were moved into a reserved ordinary-cache path. */
+  readonly cacheReservation?: AttachmentCacheReservation;
+}
+
+/** Native/file-system ownership preparation injected by the production composition root. */
+export type AttachmentOwnershipPreparer = (input: {
+  readonly db: AppDatabase;
+  readonly image: PickedImage;
+  readonly attachmentGuid: string;
+}) => Promise<PreparedAttachmentOwnership>;
+
+const ATTACHMENT_CACHE_PROMOTION_CONFLICT = Symbol('attachment-cache-promotion-conflict');
+
 /**
  * Optimistic image send: inserts a local attachment row (renders immediately from disk), streams
  * the file to the server, then reconciles message + attachment guids. Mirrors `sendTextMessage`;
@@ -59,50 +82,95 @@ export async function sendImageMessage(
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
   outcomeOptions?: SendOutcomeOptions,
+  prepareOwnership?: AttachmentOwnershipPreparer,
 ): Promise<{ tempGuid: string }> {
+  const tempGuid = generateTempGuid();
+  const attachmentGuid = `${tempGuid}-att`;
+  let image = args.image;
+  let cacheReservation: AttachmentCacheReservation | undefined;
+  let cacheProtectionHandoff = false;
+  if (image.origin === 'paste') {
+    if (!prepareOwnership) {
+      throw new Error('Pasted attachment ownership preparation is unavailable.');
+    }
+    const prepared = await prepareOwnership({ db, image, attachmentGuid });
+    image = prepared.image;
+    cacheReservation = prepared.cacheReservation;
+    if (
+      !cacheReservation ||
+      image.uri !== cacheReservation.path ||
+      image.size !== cacheReservation.maxBytes ||
+      !Number.isSafeInteger(image.size) ||
+      image.size <= 0
+    ) {
+      await cacheReservation?.release().catch(() => undefined);
+      throw new Error('Prepared attachment ownership is inconsistent.');
+    }
+  }
+
   // A forwarded download can share this exact cache file with its source message. Pin it before
   // the first DB await so a concurrent tombstone/quota pass cannot claim and unlink it between the
   // user's Start tap and the durable outgoing attachment+queue commit. Non-cache picked files are
   // harmlessly pinned in memory for this short handoff too; the DB trigger is the final atomic gate
   // if a crash-surviving `reserved`/`retiring` ledger row already owns the path.
   let sourceProtection: ReturnType<typeof attachmentCacheCoordinator.protect> | undefined;
-  try {
-    sourceProtection = attachmentCacheCoordinator.protect(args.image.uri);
-  } catch {
-    // Content-provider and future non-file URIs may be outside the cache coordinator's path shape.
-    // They have no attachment-cache ledger row, so ordinary upload validation remains authoritative.
-    sourceProtection = undefined;
-  }
-  if (sourceProtection === null) {
-    throw new Error('Attachment is no longer available for sending.');
+  if (!cacheReservation) {
+    try {
+      sourceProtection = attachmentCacheCoordinator.protect(image.uri);
+    } catch {
+      // Content-provider and future non-file URIs may be outside the cache coordinator's path
+      // shape. They have no attachment-cache ledger row, so upload validation stays authoritative.
+      sourceProtection = undefined;
+    }
+    if (sourceProtection === null) {
+      throw new Error('Attachment is no longer available for sending.');
+    }
   }
 
-  let tempGuid: string;
-  let attachmentGuid: string;
   try {
-    tempGuid = generateTempGuid();
-    attachmentGuid = `${tempGuid}-att`;
     await withDbTransaction(
       db,
-      (context) =>
-        insertOutgoingAttachmentWithinTransaction(context, {
+      async (context) => {
+        if (cacheReservation) {
+          const promoted = await commitAttachmentCacheReservation(context, {
+            path: image.uri,
+            bytes: image.size,
+            lastUsedAt: now,
+          });
+          if (!promoted || !cacheReservation.beginProtectionHandoff()) {
+            throw ATTACHMENT_CACHE_PROMOTION_CONFLICT;
+          }
+          cacheProtectionHandoff = true;
+        }
+        await insertOutgoingAttachmentWithinTransaction(context, {
           tempGuid,
           attachmentGuid,
           chatGuid: args.chatGuid,
-          localPath: args.image.uri,
-          mimeType: args.image.mimeType,
-          transferName: args.image.name,
-          totalBytes: args.image.size,
-          width: args.image.width,
-          height: args.image.height,
+          localPath: image.uri,
+          mimeType: image.mimeType,
+          transferName: image.name,
+          totalBytes: image.size,
+          width: image.width,
+          height: image.height,
           now,
-        }),
+        });
+      },
       commitGuard,
     );
+  } catch (error) {
+    if (cacheReservation && cacheProtectionHandoff) {
+      cacheReservation.rollbackProtectionHandoff();
+      cacheProtectionHandoff = false;
+    }
+    if (error === ATTACHMENT_CACHE_PROMOTION_CONFLICT) {
+      throw new Error('Pasted attachment ownership changed before it could be sent.');
+    }
+    throw error;
   } finally {
     // The queue row plus attachment local_path now provide durable ownership. Releasing earlier
     // would reopen the deletion race; retaining it through the network upload would pin needlessly.
     sourceProtection?.release();
+    if (cacheReservation) await cacheReservation.release().catch(() => undefined);
   }
 
   // Disconnect can retire this operation immediately after COMMIT. Do not let that old
@@ -116,10 +184,10 @@ export async function sendImageMessage(
       chatGuid: args.chatGuid,
       tempGuid,
       attachmentGuid,
-      name: args.image.name,
-      uri: args.image.uri,
-      mimeType: args.image.mimeType,
-      totalBytes: args.image.size,
+      name: image.name,
+      uri: image.uri,
+      mimeType: image.mimeType,
+      totalBytes: image.size,
     });
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     // The server ack carries only the message GUID (no attachment guid) — the optimistic

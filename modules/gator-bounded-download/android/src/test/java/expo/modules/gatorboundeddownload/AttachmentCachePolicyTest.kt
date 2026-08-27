@@ -176,4 +176,49 @@ class AttachmentCachePolicyTest {
       }.isFailure,
     )
   }
+
+  @Test
+  fun `validates completed paste sources and rejects outside pending or symlinked files`() {
+    val root = temporary.newFolder(PASTED_INPUT_CACHE_DIRECTORY).canonicalFile
+    val current = File(root, "1000-1/photo.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(1, 2))
+    }
+    val legacy = File(root, "1001/document.pdf").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(3))
+    }
+    val pending = File(root, "1002-1.pending/partial.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(4))
+    }
+    val outside = temporary.newFile("outside-paste.bin").apply { writeBytes(byteArrayOf(5)) }
+    val linked = File(root, "1003-1/linked.bin").apply {
+      parentFile?.mkdirs()
+      Files.createSymbolicLink(toPath(), outside.toPath())
+    }
+
+    assertEquals(current.canonicalFile, requireOwnedPastedAttachment(root, current))
+    assertEquals(legacy.canonicalFile, requireOwnedPastedAttachment(root, legacy))
+    assertTrue(runCatching { requireOwnedPastedAttachment(root, pending) }.isFailure)
+    assertTrue(runCatching { requireOwnedPastedAttachment(root, outside) }.isFailure)
+    assertTrue(runCatching { requireOwnedPastedAttachment(root, linked) }.isFailure)
+    assertTrue(outside.exists())
+  }
+
+  @Test
+  fun `new outgoing ownership accepts only the current cache layout and prunes exact empty parents`() {
+    val root = temporary.newFolder("outgoing-attachments").canonicalFile
+    val current = File(root, "media-temp/generation-7/media-photo.jpg")
+    val legacy = File(root, "legacy-guid/photo.jpg")
+
+    assertEquals(current.canonicalFile, requireOwnedCurrentAttachmentCachePath(root, current))
+    assertTrue(runCatching { requireOwnedCurrentAttachmentCachePath(root, legacy) }.isFailure)
+
+    current.parentFile?.mkdirs()
+    pruneEmptyAttachmentCacheParents(root, current)
+    assertFalse(current.parentFile?.exists() ?: true)
+    assertFalse(current.parentFile?.parentFile?.exists() ?: true)
+    assertTrue(root.exists())
+  }
 }

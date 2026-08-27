@@ -24,6 +24,9 @@ jest.mock('@/services/send/sendService', () => ({
   sendTextMessage: jest.fn(),
 }));
 jest.mock('@/services/send/sendAttachmentService', () => ({ sendImageMessage: jest.fn() }));
+jest.mock('@/services/send/outgoingPasteOwnership', () => ({
+  createOutgoingPasteOwnershipPreparer: jest.fn(() => jest.fn()),
+}));
 jest.mock('@/services/send/sendReactionService', () => ({ sendReactionMessage: jest.fn() }));
 jest.mock('@/services/send/sendEditService', () => ({
   sendEdit: jest.fn(),
@@ -445,6 +448,8 @@ describe('UI send account lease', () => {
         expect.anything(),
         expect.any(Number),
         expect.any(Function),
+        undefined,
+        expect.any(Function),
       ]);
     }
     const singleGuard = mockSendImage.mock.calls[0]?.[5] as (() => boolean) | undefined;
@@ -453,6 +458,8 @@ describe('UI send account lease', () => {
     expect(singleGuard?.()).toBe(true);
     expect(firstBatchGuard?.()).toBe(true);
     expect(secondBatchGuard?.()).toBe(true);
+    expect(mockSendImage.mock.calls[0]?.[7]).not.toBe(mockSendImage.mock.calls[1]?.[7]);
+    expect(mockSendImage.mock.calls[1]?.[7]).toBe(mockSendImage.mock.calls[2]?.[7]);
 
     await pauseRealtimeDeliveries();
     expect(singleGuard?.()).toBe(false);

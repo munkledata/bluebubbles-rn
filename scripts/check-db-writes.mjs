@@ -110,7 +110,9 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/realtime/incomingEventDrain.ts',
   'src/services/realtimeControl.ts',
   'src/services/notifications/actions.ts',
+  'src/services/paste/pasteInput.ts',
   'src/services/send/outgoingQueueService.ts',
+  'src/services/send/outgoingPasteOwnership.ts',
   'src/services/send/sendAttachmentService.ts',
   'src/services/send/sendContactService.ts',
   'src/services/send/sendOutcome.ts',
@@ -2237,7 +2239,7 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeProductionCalleeFingerprints = new Map([
     [syncAllChats, 'f4d3547916c524936d78b75950eddcf545a6aae976287f401b6306b4d3bcbf57'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, 'e9be43fc0b1c8b8c6f51e7604cf40f5640d135b2b6ca1dfadb2e159c7b32d905'],
+    [sendImageMessage, '360a1f755ec516935f104ced3e5225ffc6e14b645f536be03e7b00704dca7f5d'],
     [reconcileSendOutcome, 'c8ef12e12a7a116289e00886b0589bfe42abfa5060d7411b650fa323f0a22c8c'],
     [handleSendFailure, 'c7aeae6c332c61990873f7513974be7fa205e35bd422acb57e1a5b6e6e903e3b'],
     [
@@ -3075,6 +3077,9 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeWaveSendEdges = runtimeWaveEdgesTo(sendImageMessage);
   const runtimeWaveEventEdges = runtimeWaveEdgesTo(dbEventSinkOnEvent);
   const allSendImageEdges = edges.filter((edge) => edge.callee === sendImageMessage);
+  const productionSendImageEdges = allSendImageEdges.filter(
+    (edge) => edge !== runtimeWaveSendEdges[0],
+  );
   const isDirectUnspreadCallEdge = (edge, callee) =>
     edge.callee === callee &&
     callableNodeForExpression(edge.node.expression, checker) === callee &&
@@ -3112,8 +3117,12 @@ function dbProcessRelaunchCertificateCandidate({
     runtimeWaveEventEdges.length !== 1 ||
     allSendImageEdges.length !== 3 ||
     allSendImageEdges.some((edge) => edge.node.arguments.some(ts.isSpreadElement)) ||
-    allSendImageEdges.some(
-      (edge) => edge !== runtimeWaveSendEdges[0] && edge.node.arguments.length > 6,
+    productionSendImageEdges.length !== 2 ||
+    productionSendImageEdges.some(
+      (edge) =>
+        edge.node.arguments.length !== 8 ||
+        !identifierNamed(edge.node.arguments[6], 'undefined') ||
+        !identifierNamed(edge.node.arguments[7], 'pasteOwnership'),
     ) ||
     directReconcileEdges.length !== allReconcileEdges.length ||
     directFailureEdges.length !== allFailureEdges.length ||

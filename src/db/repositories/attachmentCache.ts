@@ -1,5 +1,9 @@
 import { sql } from 'drizzle-orm';
-import { runInTransactionContext, type DbTransactionContext } from '../transaction';
+import {
+  runInTransactionContext,
+  withDbTransaction,
+  type DbTransactionContext,
+} from '../transaction';
 import type { AppDatabase } from '../types';
 
 /**
@@ -143,10 +147,18 @@ interface OutgoingAttachmentQueueRow {
   payloadChars: number;
 }
 
+interface PastedAttachmentReferenceRow {
+  path: string | null;
+  pathChars: number;
+}
+
 interface ParsedOutgoingAttachment {
   attachmentGuid: string;
   localPath: string;
 }
+
+export type PastedAttachmentProtectionSnapshot =
+  { status: 'complete'; paths: string[] } | { status: 'incomplete' };
 
 const MAX_RETIREMENT_BATCH = 100;
 const MAX_SNAPSHOT_CANDIDATES = 4096;
@@ -306,6 +318,82 @@ function parseOutgoingAttachment(payload: string): ParsedOutgoingAttachment | nu
   } catch {
     return null;
   }
+}
+
+/**
+ * Snapshot every legacy rich-paste path that still has durable attachment or retry ownership.
+ *
+ * The queue payload is an intentional fallback when its attachment row is absent or re-pointed.
+ * Malformed/oversized input refuses the whole snapshot so native cleanup never acts on a partial
+ * protection set. This transaction is read-only, bounded, and contains no native work.
+ */
+export function listPastedAttachmentProtectionPathsWithinTransaction(
+  context: DbTransactionContext,
+): Promise<PastedAttachmentProtectionSnapshot> {
+  return runInTransactionContext(context, async (db) => {
+    const attachmentRows: PastedAttachmentReferenceRow[] =
+      await db.all<PastedAttachmentReferenceRow>(sql`
+      SELECT
+        CASE WHEN length(local_path) <= ${MAX_PATH_CHARS} THEN local_path ELSE NULL END AS path,
+        length(local_path) AS pathChars
+      FROM attachments
+      WHERE instr(local_path, '/pasted-in/') > 0
+      ORDER BY id ASC
+      LIMIT ${MAX_ATTACHMENT_CACHE_REFERENCES_PER_TRANSACTION + 1}
+    `);
+    if (
+      attachmentRows.length > MAX_ATTACHMENT_CACHE_REFERENCES_PER_TRANSACTION ||
+      attachmentRows.some(
+        (row) =>
+          row.path === null ||
+          !Number.isSafeInteger(row.pathChars) ||
+          row.pathChars <= 0 ||
+          row.pathChars > MAX_PATH_CHARS,
+      )
+    ) {
+      return { status: 'incomplete' };
+    }
+
+    const queueRows: OutgoingAttachmentQueueRow[] = await db.all<OutgoingAttachmentQueueRow>(sql`
+      SELECT id,
+             CASE WHEN length(payload) <= ${MAX_OUTGOING_PAYLOAD_CHARS} THEN payload ELSE NULL END AS payload,
+             length(payload) AS payloadChars
+      FROM outgoing_queue
+      WHERE kind = 'attachment'
+        AND instr(payload, '/pasted-in/') > 0
+      ORDER BY id ASC
+      LIMIT ${MAX_OUTGOING_ATTACHMENT_ROWS + 1}
+    `);
+    if (
+      queueRows.length > MAX_OUTGOING_ATTACHMENT_ROWS ||
+      queueRows.some(
+        (row) =>
+          row.payload === null ||
+          !Number.isSafeInteger(row.payloadChars) ||
+          row.payloadChars < 0 ||
+          row.payloadChars > MAX_OUTGOING_PAYLOAD_CHARS,
+      )
+    ) {
+      return { status: 'incomplete' };
+    }
+
+    const protectedPaths = new Set<string>(attachmentRows.map((row) => row.path!));
+    for (const row of queueRows) {
+      const queued = parseOutgoingAttachment(row.payload ?? '');
+      if (queued === null) return { status: 'incomplete' };
+      if (queued.localPath.includes('/pasted-in/')) protectedPaths.add(queued.localPath);
+    }
+    return { status: 'complete', paths: [...protectedPaths].sort(comparePaths) };
+  });
+}
+
+/** Standalone short owner for the foreground paste-listener readiness snapshot. */
+export function listPastedAttachmentProtectionPaths(
+  db: AppDatabase,
+): Promise<PastedAttachmentProtectionSnapshot> {
+  return withDbTransaction(db, (context) =>
+    listPastedAttachmentProtectionPathsWithinTransaction(context),
+  );
 }
 
 /** Delay for the persisted failure count (attempt one waits five seconds). */

@@ -13,6 +13,8 @@ internal const val PASTE_CACHE_MAX_BYTES = 1024L * 1024 * 1024
 internal const val PASTE_CACHE_MAX_BATCHES = 32
 internal const val PASTE_CACHE_MAX_ROOT_ENTRIES = 64
 internal const val PASTE_CACHE_MAX_AGE_MS = 24L * 60 * 60 * 1000
+internal const val MAX_PROTECTED_PASTE_PATHS = 2_000
+internal const val MAX_PROTECTED_PASTE_URI_CHARS = 4_096
 
 private val COMMITTED_BATCH_DIRECTORY = Regex("^\\d+-\\d+$")
 private val PENDING_BATCH_DIRECTORY = Regex("^\\d+-\\d+\\.pending$")
@@ -126,7 +128,7 @@ internal data class PasteCacheStats(
 )
 
 /**
- * Remove only this module's exact abandoned/expired directories, then measure every retained byte.
+ * Remove only exact pending, empty, or expired unreferenced directories, then measure retained bytes.
  *
  * The root is app-private, but its contents are still treated as corrupt until they match the
  * module's exact shape. Unknown entries, symlinks, nested directories, and oversized scans fail
@@ -138,11 +140,13 @@ internal data class PasteCacheStats(
 internal fun inspectPasteCacheRoot(
   root: File,
   nowMs: Long,
+  protectedPaths: Set<String>,
   maxAgeMs: Long = PASTE_CACHE_MAX_AGE_MS,
   maxRootEntries: Int = PASTE_CACHE_MAX_ROOT_ENTRIES,
 ): PasteCacheStats {
   require(maxAgeMs >= 0L)
   require(maxRootEntries > 0)
+  require(protectedPaths.size <= MAX_PROTECTED_PASTE_PATHS)
   if (!root.exists() && !root.mkdirs()) throw PasteBatchException(PasteBatchFailure.UNAVAILABLE)
   val canonicalRoot = canonicalPlainPasteFile(root)
     ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
@@ -152,10 +156,10 @@ internal fun inspectPasteCacheRoot(
   val firstPass = canonicalRoot.listFiles()
     ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   // `listFiles()` itself necessarily materializes the root listing. If an older release left more
-  // directories than today's ceiling, perform only a bounded number of exact expired/pending
+  // directories than today's ceiling, perform only a bounded number of exact pending/expired
   // deletions, then reject this paste and let the next attach/paste continue the migration.
   if (firstPass.size > maxRootEntries) {
-    cleanupPasteRootOverage(canonicalRoot, firstPass, cutoff, maxRootEntries)
+    cleanupPasteRootOverage(canonicalRoot, firstPass, cutoff, protectedPaths, maxRootEntries)
     throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   }
   firstPass.forEach { raw ->
@@ -171,12 +175,12 @@ internal fun inspectPasteCacheRoot(
       COMMITTED_BATCH_DIRECTORY.matches(entry.name) || LEGACY_BATCH_DIRECTORY.matches(entry.name) -> {
         val stamp = entry.name.substringBefore('-').toLongOrNull()
           ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
-        // Validate every child before an expired directory is eligible for deletion. In
-        // particular, never let recursive cleanup follow a corrupt symlink outside this root.
+        // Validate every child before deletion. Age is authority only after the DB snapshot proves
+        // that no attachment row or outgoing queue fallback still owns a file in this batch.
         val files = ownedPasteBatchFiles(entry, allowEmpty = true)
         // Older releases could leave an exact timestamp-only directory empty after every copy
         // failed. It is abandoned, not a permanent cache-poisoning unknown entry.
-        if (files.isEmpty() || stamp < cutoff) {
+        if (files.isEmpty() || (stamp < cutoff && files.none { it.path in protectedPaths })) {
           deleteOwnedPasteBatchDirectory(entry, allowEmpty = true)
         }
       }
@@ -235,6 +239,21 @@ private fun canonicalPlainPasteFile(file: File): File? = runCatching {
   file.canonicalFile.takeIf { canonical -> canonical.path == file.absoluteFile.path }
 }.getOrNull()
 
+/** Canonicalize one possibly-missing DB reference under an exact committed paste batch. */
+internal fun ownedPasteReferencePath(root: File, candidate: File): String? {
+  if (candidate.absolutePath.length > MAX_PROTECTED_PASTE_URI_CHARS) return null
+  val canonicalRoot = canonicalPlainPasteFile(root) ?: return null
+  val target = canonicalPlainPasteFile(candidate) ?: return null
+  val batch = target.parentFile ?: return null
+  if (
+    batch.parentFile?.path != canonicalRoot.path ||
+    !(COMMITTED_BATCH_DIRECTORY.matches(batch.name) || LEGACY_BATCH_DIRECTORY.matches(batch.name))
+  ) {
+    return null
+  }
+  return target.path
+}
+
 private fun ownedPasteBatchFiles(directory: File, allowEmpty: Boolean): List<File> {
   val rawFiles = directory.listFiles() ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   if (rawFiles.size > MAX_PASTED_FILES || (!allowEmpty && rawFiles.isEmpty())) {
@@ -263,6 +282,7 @@ private fun cleanupPasteRootOverage(
   root: File,
   entries: Array<File>,
   cutoff: Long,
+  protectedPaths: Set<String>,
   maxDeletes: Int,
 ) {
   var deleted = 0
@@ -281,13 +301,15 @@ private fun cleanupPasteRootOverage(
     if (entry.parentFile?.path != root.path || !entry.isDirectory) {
       throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
     }
-    deleteOwnedPasteBatchDirectory(entry, allowEmpty = true)
-    deleted += 1
+    val files = ownedPasteBatchFiles(entry, allowEmpty = true)
+    if (pending || files.none { it.path in protectedPaths }) {
+      deleteOwnedPasteBatchDirectory(entry, allowEmpty = true)
+      deleted += 1
+    }
   }
 
-  // A recent empty legacy/current directory is also abandoned. Inspect only the remaining
-  // bounded cleanup allowance; older non-empty directories become phase-one candidates once
-  // their age expires, so a huge corrupt root never forces unbounded child traversal here.
+  // A recent empty legacy/current directory is also abandoned. Inspect only the remaining bounded
+  // cleanup allowance; old protected batches were retained in phase one.
   val maxAdditionalInspections = maxDeletes - deleted
   var inspected = 0
   entries.forEach { raw ->

@@ -76,6 +76,7 @@ import {
   MessageDetailsSheet,
   MessageList,
   Screen,
+  showToast,
   ThreadSheet,
   ScreenEffectOverlay,
   TypingBubble,
@@ -654,8 +655,13 @@ function ChatScreenInner({
 
   // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
   const onSendAttachments = useCallback(
-    (items: PendingAttachment[]): void =>
-      void sendImages({ chatGuid: guid, images: items }, accountLease),
+    (items: PendingAttachment[]): void => {
+      void sendImages({ chatGuid: guid, images: items }, accountLease).catch((error) => {
+        if (!accountLease.isCurrent()) return;
+        logger.warn('[chat] attachment send rejected', error);
+        showToast('Couldn’t send one or more attachments—add the missing file again');
+      });
+    },
     [accountLease, guid],
   );
   const onCancelReply = useCallback((): void => setReplyTo(null), []);

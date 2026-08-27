@@ -38,6 +38,13 @@ export const deleteNativeAttachmentCacheFile = jest.fn(async (_uri: string) => (
   bytes: 0,
 }));
 
+export const adoptNativePastedAttachment = jest.fn(
+  async (_sourceUri: string, destinationUri: string, expectedBytes: number) => ({
+    uri: destinationUri,
+    bytes: expectedBytes,
+  }),
+);
+
 export const getNativeAttachmentCacheAvailableBytes = jest.fn(async (): Promise<number> => 0);
 
 export const scanNativeAttachmentCacheFiles = jest.fn(async () => []);

@@ -48,6 +48,7 @@ describe('parsePasteEvent', () => {
         name: 'shot.png',
         mimeType: 'image/png',
         size: 4096,
+        origin: 'paste',
       },
     ]);
   });

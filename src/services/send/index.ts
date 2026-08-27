@@ -39,8 +39,10 @@ import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './out
 import { showToast } from '@ui/toast/toastStore';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
+import { isAttachmentCacheRecoveryReady } from '../download/attachmentCacheRecovery';
 import { logicalSendQueue, LogicalSendQueueCapacityError } from './logicalSendQueue';
 import { clearFailedSendNotice } from './sendFailureNotice';
+import { createOutgoingPasteOwnershipPreparer } from './outgoingPasteOwnership';
 
 export { isContactsPermissionDeniedError } from '../contacts/contactsService';
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
@@ -175,12 +177,25 @@ export function sendImage(
     chatGuid: args.chatGuid,
     image: snapshotPickedImage(args.image),
   };
+  const pasteOwnership = createOutgoingPasteOwnershipPreparer(
+    createAttachmentCacheAccountScope(accountLease),
+    () => isAttachmentCacheRecoveryReady(accountLease),
+  );
   return runUiAccountOperation(
     accountLease,
-    () =>
-      sendImageMessage(getDatabase(), http, snapshot, expoAttachmentUploader, Date.now(), () =>
-        accountLease.isCurrent(),
-      ),
+    () => {
+      const db = getDatabase();
+      return sendImageMessage(
+        db,
+        http,
+        snapshot,
+        expoAttachmentUploader,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        undefined,
+        pasteOwnership,
+      );
+    },
     'logical-send',
   );
 }
@@ -197,18 +212,25 @@ export function sendImages(
     chatGuid: args.chatGuid,
     images: args.images.map(snapshotPickedImage),
   };
+  const pasteOwnership = createOutgoingPasteOwnershipPreparer(
+    createAttachmentCacheAccountScope(accountLease),
+    () => isAttachmentCacheRecoveryReady(accountLease),
+  );
   return runUiAccountOperation(
     accountLease,
     async () => {
+      const db = getDatabase();
       const settled = await Promise.allSettled(
         snapshot.images.map((image) =>
           sendImageMessage(
-            getDatabase(),
+            db,
             http,
             { chatGuid: snapshot.chatGuid, image },
             expoAttachmentUploader,
             Date.now(),
             () => accountLease.isCurrent(),
+            undefined,
+            pasteOwnership,
           ),
         ),
       );

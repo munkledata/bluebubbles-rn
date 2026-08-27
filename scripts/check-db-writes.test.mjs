@@ -2070,6 +2070,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
+          'src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation' ||
+        finding.target ===
           'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
@@ -2141,9 +2143,10 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingAttachmentInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:e95fce8915>:mutator-call:0b672252f288',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:9b093f961fb2',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e3118f4b101e',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:be9e092e28>:mutator-call:64e0c86ab356',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:be9e092e28>:mutator-call:dd1ad3915782',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:416a9b797aaf',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:80f38074242e',
     ].sort(),
   );
   assert.deepEqual(
@@ -2364,7 +2367,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 18);
-  assert.equal(intentionalBoundaries.length, 19);
+  assert.equal(intentionalBoundaries.length, 20);
   assert.equal(scheduledStateMachine.length, 9);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2397,6 +2400,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
+      'src/services/paste/pasteInput.ts#loadPastedAttachmentProtectionPaths:mutator-call:2756cd6e5177',
       'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:6fde253c2f8b',
       'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:8c46c894d3aa',
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.drainFlight:mutator-call:45ee0a84041c',
@@ -2479,8 +2483,8 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380',
       'src/services/send/index.ts#send.<callback:a9b9e4712f>:mutator-call:68982b8cb319',
       'src/services/send/index.ts#sendContactCard.<callback:7880c0d756>:mutator-call:5ae33ad44a99',
-      'src/services/send/index.ts#sendImage.<callback:6bf1f06052>:mutator-call:2489950bc375',
-      'src/services/send/index.ts#sendImages.<callback:cf01fabadb>.<callback:ed40d2cae2>:mutator-call:2a4b64de5b86',
+      'src/services/send/index.ts#sendImage.<callback:3e5d127268>:mutator-call:e13c9737cd25',
+      'src/services/send/index.ts#sendImages.<callback:644cd98236>.<callback:293c535c7f>:mutator-call:148a999c74e6',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
     ].sort(),
@@ -2698,9 +2702,17 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       leafSymbols.has(finding.symbol.split('.<callback:')[0]) &&
       finding.detectedContext === 'withDbTransaction',
   );
+  const snapshotOwners = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/attachmentCache.ts' &&
+      finding.symbol === 'listPastedAttachmentProtectionPaths' &&
+      finding.detectedContext === 'transaction-coordinator',
+  );
   const delegatedPaths = new Set([
     'src/services/download/attachmentCacheCoordinator.ts',
     'src/services/download/attachmentCacheRecovery.ts',
+    'src/services/paste/pasteInput.ts',
+    'src/services/send/outgoingPasteOwnership.ts',
   ]);
   const delegated = findings.filter(
     (finding) =>
@@ -2708,7 +2720,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
   );
 
   assert.deepEqual(
-    [...leaves, ...delegated].map((finding) => finding.id).sort(),
+    [...leaves, ...snapshotOwners, ...delegated].map((finding) => finding.id).sort(),
     [
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37',
@@ -2718,6 +2730,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation:sql-update:8061a1433826',
       'src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9',
       'src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation:sql-insert:23906c8fe812',
+      'src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:543990b98095',
       'src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190',
       'src/db/repositories/attachmentCache.ts#recordAttachmentCacheEntry:sql-insert:1d5b6db8c26c',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666',
@@ -2740,10 +2753,14 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:d137fff87abf',
       'src/services/download/attachmentCacheRecovery.ts#recoverAttachmentCache.<callback:496dd08887>:mutator-call:953608ed77f1',
       'src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles:mutator-call:0004c1106585',
+      'src/services/paste/pasteInput.ts#attachPasteListener:mutator-reference:b3d6e6429035',
+      'src/services/paste/pasteInput.ts#loadPastedAttachmentProtectionPaths:mutator-call:2756cd6e5177',
+      'src/services/send/outgoingPasteOwnership.ts#createOutgoingPasteOwnershipPreparer.<callback:ca2b04b199>:mutator-call:4adc4cfd204e',
     ].sort(),
   );
   assert.equal(leaves.length, 13);
-  assert.equal(delegated.length, 17);
+  assert.equal(snapshotOwners.length, 1);
+  assert.equal(delegated.length, 20);
   assert.deepEqual(
     findings
       .filter((finding) => finding.path === 'src/services/download/attachmentCacheAccountScope.ts')
@@ -3765,8 +3782,8 @@ fullOnlyTest(
       {
         label: 'image-send callee detaches its optimistic DB owner',
         path: 'src/services/send/sendAttachmentService.ts',
-        before: '    await withDbTransaction(\n      db,\n      (context) =>',
-        after: '    void withDbTransaction(\n      db,\n      (context) =>',
+        before: '    await withDbTransaction(\n      db,\n      async (context) => {',
+        after: '    void withDbTransaction(\n      db,\n      async (context) => {',
       },
       {
         label: 'sync contact bypass helper detaches its reachable DB work',
@@ -3791,15 +3808,17 @@ fullOnlyTest(
       {
         label: 'production image send enters the harness-only notice-suppression lane',
         path: 'src/services/send/index.ts',
-        before:
-          '      sendImageMessage(getDatabase(), http, snapshot, expoAttachmentUploader, Date.now(), () =>\n' +
-          '        accountLease.isCurrent(),\n' +
-          '      ),',
+        before: '        undefined,\n        pasteOwnership,\n      );',
         after:
-          '      sendImageMessage(getDatabase(), http, snapshot, expoAttachmentUploader, Date.now(), () =>\n' +
-          '        accountLease.isCurrent(),\n' +
           "        { failureNoticeMode: 'suppressed' },\n" +
-          '      ),',
+          '        pasteOwnership,\n' +
+          '      );',
+      },
+      {
+        label: 'production image send drops the reviewed paste-ownership preparer',
+        path: 'src/services/send/index.ts',
+        before: '        pasteOwnership,\n      );',
+        after: '        undefined,\n      );',
       },
       {
         label: 'production success call hides notice suppression inside a spread',

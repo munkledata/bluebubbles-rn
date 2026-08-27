@@ -1,5 +1,7 @@
 import { requireOptionalNativeModule } from 'expo';
 import { logger } from '@core/secure';
+import { getDatabase } from '@db/database';
+import { listPastedAttachmentProtectionPaths } from '@db/repositories';
 import type { SharedAttachment } from '@state/shareIntentStore';
 import { parsePasteEvent } from './pastePayload';
 
@@ -22,7 +24,7 @@ interface PasteSubscription {
 
 interface GatorPasteInputNative {
   /** Register the receive-content listener on the input with this React tag. */
-  attach: (tag: number) => Promise<void>;
+  attach: (tag: number, protectedUris: string[]) => Promise<void>;
   detach: (tag: number) => Promise<void>;
   addListener: (event: 'onPaste', listener: (payload: unknown) => void) => PasteSubscription;
 }
@@ -47,6 +49,16 @@ export interface PasteResult {
   dropped: number;
 }
 
+type PasteProtectionLoader = () => Promise<string[]>;
+
+async function loadPastedAttachmentProtectionPaths(): Promise<string[]> {
+  const snapshot = await listPastedAttachmentProtectionPaths(getDatabase());
+  if (snapshot.status !== 'complete') {
+    throw new Error('Pasted attachment protection snapshot is incomplete.');
+  }
+  return snapshot.paths;
+}
+
 /**
  * Start accepting pasted files on the text input with the given React tag; returns an unsubscribe.
  *
@@ -61,10 +73,12 @@ export interface PasteResult {
 export function attachPasteListener(
   tag: number,
   onPaste: (result: PasteResult) => void,
+  loadProtectedUris: PasteProtectionLoader = loadPastedAttachmentProtectionPaths,
 ): () => void {
   const native = getNative();
   if (!native) return () => {};
 
+  let active = true;
   let subscription: PasteSubscription | null = null;
   try {
     subscription = native.addListener('onPaste', (payload: unknown) => {
@@ -79,14 +93,21 @@ export function attachPasteListener(
         onPaste({ files: parsed.files, dropped: parsed.dropped });
       }
     });
-    void native.attach(tag)?.catch?.((err: unknown) => {
-      logger.warn(`[paste] attach rejected: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    void loadProtectedUris()
+      .then((protectedUris) => {
+        if (!active) return;
+        return native.attach(tag, protectedUris);
+      })
+      .catch(() => {
+        // An incomplete DB snapshot must disable file paste rather than age-delete a durable retry.
+        logger.warn('[paste] attach protection snapshot rejected');
+      });
   } catch (err) {
     logger.warn(`[paste] could not attach: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return () => {
+    active = false;
     try {
       subscription?.remove();
       void native.detach(tag)?.catch?.(() => {

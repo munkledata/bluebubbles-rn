@@ -6,8 +6,11 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
 internal const val ATTACHMENT_CACHE_DIRECTORY = "attachments"
+internal const val PASTED_INPUT_CACHE_DIRECTORY = "pasted-in"
 internal const val MAX_ATTACHMENT_CACHE_PATH_CHARS = 4096
 internal const val MAX_LEGACY_ATTACHMENT_CACHE_SEGMENT_CHARS = 255
+internal const val MAX_PASTED_ATTACHMENT_BYTES = 128L * 1024 * 1024
+private const val MAX_PASTED_BATCH_FILES = 10
 private const val MEDIA_SEGMENT_PREFIX = "media-"
 private const val MAX_ENCODED_MEDIA_SEGMENT_CHARS = 180
 private const val MAX_GENERATION_SEGMENT_CHARS = 32
@@ -15,6 +18,7 @@ private const val GENERATION_SEGMENT_PREFIX = "generation-"
 private const val JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L
 private val ENCODED_MEDIA_VALUE = Regex("^(?:[A-Za-z0-9_.!~*'()-]|%[0-9A-F]{2})*$")
 private val GENERATION_SEGMENT = Regex("^generation-(?:0|[1-9][0-9]*|unscoped)$")
+private val COMMITTED_PASTE_BATCH = Regex("^(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*))?$")
 
 /**
  * Validate one exact ordinary-attachment cache file without requiring it to still exist.
@@ -77,6 +81,80 @@ internal fun requireOwnedAttachmentCachePath(root: File, candidate: File): File 
     "Attachment cache filename is invalid"
   }
   return canonicalCandidate
+}
+
+/** Accept only the current generation-scoped layout used for newly adopted outgoing files. */
+internal fun requireOwnedCurrentAttachmentCachePath(root: File, candidate: File): File {
+  val target = requireOwnedAttachmentCachePath(root, candidate)
+  val generationDirectory = target.parentFile
+    ?: throw IllegalArgumentException("Attachment cache path has no generation directory")
+  val mediaDirectory = generationDirectory.parentFile
+    ?: throw IllegalArgumentException("Attachment cache path has no media directory")
+  require(mediaDirectory.parentFile?.path == root.canonicalFile.path) {
+    "Outgoing attachment destination must use the current cache namespace"
+  }
+  require(isEncodedMediaSegment(mediaDirectory.name)) {
+    "Outgoing attachment media directory is invalid"
+  }
+  require(isAttachmentCacheGenerationSegment(generationDirectory.name)) {
+    "Outgoing attachment generation directory is invalid"
+  }
+  require(isEncodedMediaSegment(target.name)) {
+    "Outgoing attachment filename is invalid"
+  }
+  return target
+}
+
+/**
+ * Resolve one exact completed rich-paste file beneath the native-fixed cache root.
+ *
+ * The whole bounded batch is validated before returning. This prevents a corrupt sibling symlink
+ * from turning a later empty-directory cleanup into a traversal primitive.
+ */
+internal fun requireOwnedPastedAttachment(root: File, candidate: File): File {
+  val absoluteRoot = root.absoluteFile
+  val canonicalRoot = root.canonicalFile
+  require(canonicalRoot.path == absoluteRoot.path) { "Paste cache root is not canonical" }
+  require(canonicalRoot.isDirectory) { "Paste cache root is unavailable" }
+
+  val absoluteCandidate = candidate.absoluteFile
+  require(absoluteCandidate.path.length <= MAX_ATTACHMENT_CACHE_PATH_CHARS) {
+    "Pasted attachment path is too long"
+  }
+  val target = candidate.canonicalFile
+  require(target.path == absoluteCandidate.path) { "Pasted attachment path is not canonical" }
+  val batch = target.parentFile ?: throw IllegalArgumentException("Pasted attachment has no batch")
+  require(batch.parentFile?.path == canonicalRoot.path && COMMITTED_PASTE_BATCH.matches(batch.name)) {
+    "Pasted attachment is outside a committed batch"
+  }
+  require(batch.isDirectory && target.isFile) { "Pasted attachment is not a regular file" }
+
+  val siblings = batch.listFiles() ?: throw IllegalArgumentException("Paste batch is unreadable")
+  require(siblings.isNotEmpty() && siblings.size <= MAX_PASTED_BATCH_FILES) {
+    "Paste batch has an invalid file count"
+  }
+  siblings.forEach { raw ->
+    val sibling = raw.canonicalFile
+    require(
+      sibling.path == raw.absoluteFile.path &&
+        sibling.parentFile?.path == batch.path &&
+        sibling.isFile,
+    ) { "Paste batch contains an invalid file" }
+  }
+  require(siblings.any { it.absoluteFile.path == target.path }) {
+    "Pasted attachment is not in its batch"
+  }
+  return target
+}
+
+/** Remove only the two exact empty current-layout parents created for one reserved file. */
+internal fun pruneEmptyAttachmentCacheParents(root: File, target: File) {
+  val canonicalRoot = root.canonicalFile
+  val canonicalTarget = requireOwnedCurrentAttachmentCachePath(canonicalRoot, target)
+  val generation = canonicalTarget.parentFile ?: return
+  val media = generation.parentFile ?: return
+  if (generation.listFiles()?.isEmpty() == true) generation.delete()
+  if (media.listFiles()?.isEmpty() == true) media.delete()
 }
 
 /** Match non-empty canonical output of JavaScript's `encodedMediaPathSegment`. */

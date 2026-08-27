@@ -17,6 +17,8 @@ export interface PendingAttachment {
   size: number;
   width?: number;
   height?: number;
+  /** Preserved while a native-owned pasted file moves through the ordinary attachment tray. */
+  origin?: 'paste';
 }
 
 export const ATTACHMENT_TRAY_HEIGHT = 104;

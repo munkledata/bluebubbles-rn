@@ -41,6 +41,12 @@ interface NativeAttachmentCacheAvailableBytesResult {
   availableBytes?: number;
 }
 
+interface NativeAdoptedPastedAttachmentResult {
+  ok?: boolean;
+  uri?: string;
+  bytes?: number;
+}
+
 interface NativeAttachmentCacheScanBeginResult {
   ok?: boolean;
   scanId?: string;
@@ -85,6 +91,11 @@ interface GatorBoundedDownloadNative {
   deleteSyncedBackgroundCacheFile(uri: string): Promise<boolean>;
   statAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheStatResult>;
   deleteAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheDeleteResult>;
+  adoptPastedAttachment(
+    sourceUri: string,
+    destinationUri: string,
+    expectedBytes: number,
+  ): Promise<NativeAdoptedPastedAttachmentResult>;
   getAttachmentCacheAvailableBytes(): Promise<NativeAttachmentCacheAvailableBytesResult>;
   beginAttachmentCacheScan(): Promise<NativeAttachmentCacheScanBeginResult>;
   nextAttachmentCacheScanPage(scanId: string): Promise<NativeAttachmentCacheScanPageResult>;
@@ -131,6 +142,11 @@ export type AttachmentCacheDeleteStatus = 'deleted' | 'missing';
 
 export interface AttachmentCacheDeleteResult {
   readonly status: AttachmentCacheDeleteStatus;
+  readonly bytes: number;
+}
+
+export interface AdoptedPastedAttachment {
+  readonly uri: string;
   readonly bytes: number;
 }
 
@@ -310,6 +326,40 @@ export async function deleteNativeAttachmentCacheFile(
   }
 
   return { status: result.status, bytes: result.bytes };
+}
+
+/**
+ * Move one exact native-owned rich-paste file into one reserved ordinary-cache destination.
+ *
+ * Android fixes and validates both roots and refuses legacy/noncanonical destination layouts;
+ * JavaScript supplies the expected URI only so it can reserve the same ledger identity first.
+ */
+export async function adoptNativePastedAttachment(
+  sourceUri: string,
+  destinationUri: string,
+  expectedBytes: number,
+): Promise<AdoptedPastedAttachment> {
+  const native = getNative();
+  if (!native) throw new NativeBoundedDownloadError('unavailable');
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) {
+    throw new NativeBoundedDownloadError('size');
+  }
+
+  let result: NativeAdoptedPastedAttachmentResult;
+  try {
+    result = await native.adoptPastedAttachment(sourceUri, destinationUri, expectedBytes);
+  } catch {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  if (
+    result?.ok !== true ||
+    result.uri !== destinationUri ||
+    result.bytes !== expectedBytes ||
+    !Number.isSafeInteger(result.bytes)
+  ) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  return { uri: result.uri, bytes: result.bytes };
 }
 
 /** Read free storage for the native-owned attachment-cache volume. */

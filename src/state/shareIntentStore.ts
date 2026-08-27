@@ -6,6 +6,8 @@ export interface SharedAttachment {
   name: string;
   mimeType: string;
   size: number;
+  /** Native-owned rich-paste cache file that must be adopted before durable outgoing commit. */
+  origin?: 'paste';
 }
 
 interface ShareIntentState {

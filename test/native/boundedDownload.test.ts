@@ -10,6 +10,7 @@ const native = {
   deleteSyncedBackgroundCacheFile: jest.fn(),
   statAttachmentCacheFile: jest.fn(),
   deleteAttachmentCacheFile: jest.fn(),
+  adoptPastedAttachment: jest.fn(),
   getAttachmentCacheAvailableBytes: jest.fn(),
   beginAttachmentCacheScan: jest.fn(),
   nextAttachmentCacheScanPage: jest.fn(),
@@ -33,6 +34,7 @@ jest.mock('expo', () => ({
 // Relative import deliberately bypasses Jest's @native production-boundary mapper.
 // eslint-disable-next-line import/first
 import {
+  adoptNativePastedAttachment,
   deleteNativeAttachmentCacheFile,
   downloadNativeBoundedFile,
   deleteNativeSyncedBackgroundCacheFile,
@@ -69,6 +71,15 @@ beforeEach(() => {
     status: 'deleted',
     bytes: 42,
   });
+  native.adoptPastedAttachment
+    .mockReset()
+    .mockImplementation(
+      async (_sourceUri: string, destinationUri: string, expectedBytes: number) => ({
+        ok: true,
+        uri: destinationUri,
+        bytes: expectedBytes,
+      }),
+    );
   native.getAttachmentCacheAvailableBytes.mockReset().mockResolvedValue({
     ok: true,
     availableBytes: 1_024,
@@ -460,6 +471,30 @@ it('distinguishes deleted and already-missing attachment-cache files', async () 
     status: 'missing',
     bytes: 0,
   });
+});
+
+it('adopts one exact pasted file only when native returns the reserved destination and size', async () => {
+  const source = 'file:///private/cache/pasted-in/1000-1/photo.jpg';
+  const destination = 'file:///private/files/attachments/media-temp/generation-7/media-photo.jpg';
+
+  await expect(adoptNativePastedAttachment(source, destination, 42)).resolves.toEqual({
+    uri: destination,
+    bytes: 42,
+  });
+  expect(native.adoptPastedAttachment).toHaveBeenCalledWith(source, destination, 42);
+
+  native.adoptPastedAttachment.mockResolvedValueOnce({
+    ok: true,
+    uri: `${destination}.other`,
+    bytes: 42,
+  });
+  await expect(adoptNativePastedAttachment(source, destination, 42)).rejects.toEqual(
+    expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+  );
+
+  await expect(adoptNativePastedAttachment(source, destination, 0)).rejects.toEqual(
+    expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'size' }),
+  );
 });
 
 it.each([
