@@ -1,6 +1,13 @@
-# Remaining work
+# Remaining work — historical 2026-06-21 snapshot (retired)
 
-> **STATUS UPDATE (2026-06-30):** Several items closed since this was written — **settings search,
+> **RETIRED — NOT CURRENT STATUS.** This checklist and its 2026-06-30 update are retained as historical
+> rationale only. Do not use its checkboxes, build link, branch claim, priorities, or “still open” wording to
+> choose work. Current task/status/blocker/acceptance authority is
+> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); exact-candidate operations are in
+> [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md); device-only proof is in
+> [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md).
+
+> **HISTORICAL UPDATE RECORDED 2026-06-30:** Several items closed since this was written — **settings search,
 > download-concurrency config, seeded redacted avatars, and client error-code assignment on send
 > failures are now DONE**, and `master` is already pushed and in sync with origin (the "push master"
 > item is stale). Still open: scheduled recurrence, server-update install, QR display, and the socket
@@ -8,9 +15,8 @@
 > credential/native-gated: Sentry, Tasker receiver. (The Find My embedded map is now built — a
 > Leaflet/OSM WebView, no Google Maps key needed — so it's no longer blocked.)
 
-_Living checklist of what's NOT yet done, as of 2026-06-21 (after merging the parity Phases 1–3
-to master). See [ROADMAP.md](./ROADMAP.md) for the full feature plan and [COMPARISON.md](./COMPARISON.md)
-for the RN-vs-Flutter gap analysis._
+_Historical checklist preserved below. [ROADMAP.md](./ROADMAP.md) and
+[COMPARISON.md](./COMPARISON.md) are also dated inputs, not current plans._
 
 ## 1. On-device / real-server verification (needs a device + a real Gator server)
 Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the **dev-session bypass**

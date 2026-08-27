@@ -176,7 +176,11 @@ All findings F1–F32 were addressed and merged to `master` in both repos. Verif
 (both with new tests covering the live-fanout hydration, send-path bodies, rate-limit oracle removal,
 scheduler claim, and WebPush SSRF guard).
 
-**Deferred / decision items (tracked in [REMAINING_WORK.md](./REMAINING_WORK.md) §6 and the server's `AUDIT_FOLLOWUPS.md`):**
+**Deferred / decision items:** At the 2026-06-21 checkpoint these app items were recorded in the now-retired
+[REMAINING_WORK.md](./REMAINING_WORK.md); current app dispositions are in
+[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Server-only follow-ups remain in the server
+repository's `AUDIT_FOLLOWUPS.md`.
+
 - **F10 — Android `requireAuthentication`:** intentionally left OFF (would break headless-FCM-while-locked
   decrypt = the F1 path). Docs corrected; needs a product decision on key custody vs. push.
 - **F18 — server config secrets → macOS Keychain:** ✅ **DONE (2026-06-22).** The 5 cloud credentials now
