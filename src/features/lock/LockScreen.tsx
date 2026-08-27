@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logger } from '@core/secure';
 import { authenticate } from '@native/biometrics';
 import { useLockStore } from '@state/lockStore';
+import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useTheme } from '@ui/theme/ThemeProvider';
 
 interface LockScreenProps {
@@ -134,7 +135,9 @@ export function LockScreen({ onUnlock }: LockScreenProps = {}): React.JSX.Elemen
           style={[styles.btn, { backgroundColor: theme.color.tint }]}
           accessibilityRole="button"
         >
-          <Text style={styles.btnText}>{failed ? 'Try again' : 'Unlock'}</Text>
+          <Text style={[styles.btnText, { color: readableTextOn(theme.color.tint) }]}>
+            {failed ? 'Try again' : 'Unlock'}
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -148,5 +151,5 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700' },
   sub: { fontSize: 15, marginBottom: 12 },
   btn: { paddingHorizontal: 28, paddingVertical: 12, borderRadius: 22, marginTop: 8 },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  btnText: { fontSize: 16, fontWeight: '600' },
 });

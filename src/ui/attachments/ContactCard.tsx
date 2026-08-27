@@ -10,7 +10,7 @@ import { useDownloadStore } from '@state/downloadStore';
 import { openAttachmentFile } from '@/services/openFile';
 import { parseVCard, type VCardData } from '@utils';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
 import { readBoundedTextAttachment } from './readBoundedTextAttachment';
 
@@ -236,11 +236,13 @@ export function ContactCard({ att, isFromMe }: ContactCardProps): React.JSX.Elem
     >
       <View style={[styles.avatar, { backgroundColor: theme.color.tint }]}>
         {!contentUnavailable && status === 'downloading' ? (
-          <ActivityIndicator color="#fff" size="small" />
+          <ActivityIndicator color={readableTextOn(theme.color.tint)} size="small" />
         ) : initials ? (
-          <Text style={styles.avatarText}>{initials}</Text>
+          <Text style={[styles.avatarText, { color: readableTextOn(theme.color.tint) }]}>
+            {initials}
+          </Text>
         ) : (
-          <Icon name="person-outline" size={20} color="#fff" />
+          <Icon name="person-outline" size={20} color={readableTextOn(theme.color.tint)} />
         )}
       </View>
       <View style={styles.meta}>
@@ -274,7 +276,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  avatarText: { fontWeight: '700', fontSize: 15 },
   meta: { flexShrink: 1, flexGrow: 1 },
   name: { fontSize: 15, fontWeight: '600' },
   sub: { fontSize: 12, marginTop: 2 },

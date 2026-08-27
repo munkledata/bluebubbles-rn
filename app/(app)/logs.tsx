@@ -8,7 +8,7 @@ import { resolvePersistentLogCleanupIssue } from '@/services/boot/foregroundBoot
 import { fileLogSink } from '@/services/logging/fileLogSink';
 import { formatDiagnosticLogsForShare } from '@/services/logging/shareLogs';
 import { formatTime } from '@utils';
-import { Screen, ScreenHeader, useTheme } from '@ui';
+import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { showDialog } from '@ui/dialog/dialogStore';
 
 type LevelFilter = 'all' | 'info' | 'warn' | 'error';
@@ -153,7 +153,12 @@ export default function LogsScreen(): React.JSX.Element {
               accessibilityRole="button"
               accessibilityState={{ selected: filter === f }}
             >
-              <Text style={{ color: filter === f ? '#fff' : theme.color.label, fontSize: 13 }}>
+              <Text
+                style={{
+                  color: filter === f ? readableTextOn(theme.color.tint) : theme.color.label,
+                  fontSize: 13,
+                }}
+              >
                 {f.toUpperCase()}
               </Text>
             </Pressable>

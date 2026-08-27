@@ -6,7 +6,7 @@ import {
 } from 'expo-audio';
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 
 function fmt(sec: number): string {
   return `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
@@ -107,7 +107,9 @@ export function VoiceRecorder({
               onPress={() => void finish(true)}
               style={[styles.send, { backgroundColor: theme.color.tint }]}
             >
-              <Text style={styles.sendText}>Send</Text>
+              <Text style={[styles.sendText, { color: readableTextOn(theme.color.tint) }]}>
+                Send
+              </Text>
             </Pressable>
           </View>
         </Pressable>
@@ -123,5 +125,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cancel: { fontSize: 16 },
   send: { paddingHorizontal: 22, paddingVertical: 10, borderRadius: 20 },
-  sendText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  sendText: { fontSize: 16, fontWeight: '600' },
 });

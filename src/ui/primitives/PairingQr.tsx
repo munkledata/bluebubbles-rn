@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { QrCode } from './QrCode';
 
 /**
@@ -84,7 +84,9 @@ export function PairingQr({ payload }: PairingQrProps): React.JSX.Element {
           accessibilityRole="button"
           style={[styles.revealButton, { backgroundColor: theme.color.tint }]}
         >
-          <Text style={styles.revealText}>Reveal QR Code</Text>
+          <Text style={[styles.revealText, { color: readableTextOn(theme.color.tint) }]}>
+            Reveal QR Code
+          </Text>
         </Pressable>
       )}
     </View>
@@ -95,5 +97,5 @@ const styles = StyleSheet.create({
   body: { alignItems: 'center', gap: 20, padding: 24 },
   warning: { fontSize: 14, lineHeight: 19, textAlign: 'center' },
   revealButton: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
-  revealText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  revealText: { fontSize: 16, fontWeight: '600' },
 });

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
-import { readableTextOn, useTheme } from '../theme';
+import { readableTextOn } from '../theme/adaptiveFromImage';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Variant = 'filled' | 'tinted' | 'plain';
 

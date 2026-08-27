@@ -6,7 +6,7 @@ import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordi
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 
 function fmt(sec: number): string {
   const s = !isFinite(sec) || sec < 0 ? 0 : sec;
@@ -70,7 +70,7 @@ export function AudioAttachment({
         <Icon
           name={!ready ? 'download-outline' : status.playing ? 'pause' : 'play'}
           size={16}
-          color="#fff"
+          color={readableTextOn(theme.color.tint)}
         />
       </View>
       <View style={styles.body}>

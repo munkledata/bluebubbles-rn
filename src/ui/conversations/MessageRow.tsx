@@ -16,7 +16,7 @@ import {
   type BubbleRect,
 } from '@utils';
 import { Avatar } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { MessageBubble } from './MessageBubble';
 import { MessageSwipeWrapper } from './MessageSwipeWrapper';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
@@ -243,7 +243,11 @@ export const MessageRow = React.memo(function MessageRow({
             ]}
             pointerEvents="none"
           >
-            {isSelected ? <Text style={styles.selectCheckMark}>✓</Text> : null}
+            {isSelected ? (
+              <Text style={[styles.selectCheckMark, { color: readableTextOn(theme.color.tint) }]}>
+                ✓
+              </Text>
+            ) : null}
           </View>
           {/* Full-row tap target: in select mode taps toggle membership (and the overlay
               intentionally blocks the bubble's own press/long-press interactions). */}
@@ -293,7 +297,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  selectCheckMark: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  selectCheckMark: { fontSize: 13, fontWeight: '700' },
   // Pill-backed variants (wallpaper set): hug the text instead of stretching full-width, so the
   // frosted chip wraps the label. Alignment moves from textAlign to alignSelf.
   senderPill: { alignSelf: 'flex-start' },

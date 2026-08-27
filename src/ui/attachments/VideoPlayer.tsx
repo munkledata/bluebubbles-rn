@@ -9,7 +9,7 @@ import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { ProgressRing } from './ProgressRing';
 import { UploadProgressOverlay } from './UploadProgressOverlay';
 
@@ -152,7 +152,13 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
               { backgroundColor: status === 'error' ? theme.color.destructive : theme.color.tint },
             ]}
           >
-            <Icon name={status === 'error' ? 'refresh-outline' : 'play'} size={20} color="#fff" />
+            <Icon
+              name={status === 'error' ? 'refresh-outline' : 'play'}
+              size={20}
+              color={readableTextOn(
+                status === 'error' ? theme.color.destructive : theme.color.tint,
+              )}
+            />
           </View>
         </View>
       )}

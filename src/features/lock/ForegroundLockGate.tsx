@@ -1,6 +1,7 @@
 import type { PropsWithChildren } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { BootState } from '@/services/boot/bootStateMachine';
+import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useTheme } from '@ui/theme/ThemeProvider';
 import { LockScreen } from './LockScreen';
 
@@ -79,7 +80,9 @@ export function ForegroundLockGate({
             onPress={() => void onRetry(bootState.runId)}
             style={[styles.retryButton, { backgroundColor: theme.color.tint }]}
           >
-            <Text style={styles.retryLabel}>Try Again</Text>
+            <Text style={[styles.retryLabel, { color: readableTextOn(theme.color.tint) }]}>
+              Try Again
+            </Text>
           </Pressable>
         ) : null}
       </View>
@@ -123,5 +126,5 @@ const styles = StyleSheet.create({
   failureTitle: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
   failureMessage: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
   retryButton: { marginTop: 8, borderRadius: 22, paddingHorizontal: 28, paddingVertical: 12 },
-  retryLabel: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  retryLabel: { fontSize: 16, fontWeight: '600' },
 });

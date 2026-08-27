@@ -14,7 +14,7 @@ import {
   transferRatio,
 } from '@utils';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
 
 interface FileChipProps {
@@ -87,11 +87,13 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
     >
       <View style={[styles.icon, { backgroundColor: theme.color.tint }]}>
         {upload || status === 'downloading' ? (
-          <ActivityIndicator color="#fff" size="small" />
+          <ActivityIndicator color={readableTextOn(theme.color.tint)} size="small" />
         ) : status === 'error' ? (
-          <Icon name="refresh-outline" size={20} color="#fff" />
+          <Icon name="refresh-outline" size={20} color={readableTextOn(theme.color.tint)} />
         ) : (
-          <Text style={styles.iconText}>{label.slice(0, 3)}</Text>
+          <Text style={[styles.iconText, { color: readableTextOn(theme.color.tint) }]}>
+            {label.slice(0, 3)}
+          </Text>
         )}
       </View>
       <View style={styles.meta}>
@@ -116,7 +118,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   icon: { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  iconText: { color: '#fff', fontWeight: '800', fontSize: 12 },
+  iconText: { fontWeight: '800', fontSize: 12 },
   meta: { flexShrink: 1 },
   name: { fontSize: 15, fontWeight: '600' },
   sub: { fontSize: 12, marginTop: 2 },

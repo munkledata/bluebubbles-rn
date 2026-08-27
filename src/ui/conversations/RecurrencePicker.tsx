@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Recurrence } from '@core/schedule';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 
 const OPTIONS: { label: string; value: Recurrence | null }[] = [
   { label: 'None', value: null },
@@ -41,7 +41,10 @@ export function RecurrencePicker({
             ]}
           >
             <Text
-              style={[styles.chipText, { color: selected ? '#fff' : theme.color.label }]}
+              style={[
+                styles.chipText,
+                { color: selected ? readableTextOn(theme.color.tint) : theme.color.label },
+              ]}
               numberOfLines={1}
             >
               {opt.label}

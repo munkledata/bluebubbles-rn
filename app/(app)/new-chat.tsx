@@ -18,7 +18,7 @@ import { consumeForwardAttachmentHandoff } from '@features/conversations/forward
 import { useContactSearch } from '@features/contacts/useContactSearch';
 import { useRcsEnabled } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
-import { Icon, Screen, ScreenHeader, useTheme } from '@ui';
+import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
 
 /** A chosen recipient chip: an address plus its best display name. */
@@ -434,7 +434,9 @@ export default function NewChatScreen(): React.JSX.Element {
                     accessibilityRole="button"
                     accessibilityLabel={`Remove ${r.name}${avail === false ? ' (SMS only)' : ''}`}
                   >
-                    <Text style={styles.chipText}>{r.name} ✕</Text>
+                    <Text style={[styles.chipText, { color: readableTextOn(chipColor) }]}>
+                      {r.name} ✕
+                    </Text>
                   </Pressable>
                 );
               })}
@@ -497,7 +499,12 @@ export default function NewChatScreen(): React.JSX.Element {
                   },
                 ]}
               >
-                <Text style={{ color: service === s ? '#fff' : theme.color.label, fontSize: 14 }}>
+                <Text
+                  style={{
+                    color: service === s ? readableTextOn(theme.color.tint) : theme.color.label,
+                    fontSize: 14,
+                  }}
+                >
                   {s}
                 </Text>
               </Pressable>
@@ -601,7 +608,7 @@ const styles = StyleSheet.create({
   toLabel: { fontSize: 16, marginRight: 8, marginTop: 6 },
   chipsWrap: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
   chip: { borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
-  chipText: { color: '#fff', fontSize: 14 },
+  chipText: { fontSize: 14 },
   toInput: { flexGrow: 1, minWidth: 120, fontSize: 16, paddingVertical: 4 },
   existing: { borderRadius: 10, padding: 12 },
   existingText: { fontSize: 14, fontWeight: '500' },

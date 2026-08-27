@@ -24,7 +24,7 @@ import {
 } from '@utils';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon } from '../primitives';
-import { useTheme, withAlpha } from '../theme';
+import { readableTextOn, useTheme, withAlpha } from '../theme';
 import type { Recurrence } from '@core/schedule';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
 import { EffectPicker } from './effects';
@@ -601,7 +601,7 @@ export const Composer = React.memo(function Composer({
             accessibilityLabel="Send message"
             accessibilityHint="Long-press to send with an effect"
           >
-            <Icon name="arrow-up" size={20} color="#fff" />
+            <Icon name="arrow-up" size={20} color={readableTextOn(theme.color.tint)} />
           </Pressable>
         ) : null}
         {!canSend && !isEditing && onStartVoice ? (

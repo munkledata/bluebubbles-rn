@@ -9,7 +9,7 @@ import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { parseVLocation, resolveDisplayPoint, safeOpenUrl, type VLocationData } from '@utils';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { readBoundedTextAttachment } from './readBoundedTextAttachment';
 
 interface LocationCardProps {
@@ -195,9 +195,9 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
     >
       <View style={[styles.icon, { backgroundColor: theme.color.tint }]}>
         {!contentUnavailable && status === 'downloading' ? (
-          <ActivityIndicator color="#fff" size="small" />
+          <ActivityIndicator color={readableTextOn(theme.color.tint)} size="small" />
         ) : (
-          <Icon name="location-outline" size={22} color="#fff" />
+          <Icon name="location-outline" size={22} color={readableTextOn(theme.color.tint)} />
         )}
       </View>
       <View style={styles.meta}>

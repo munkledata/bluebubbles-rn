@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useContactSearch } from '@features/contacts/useContactSearch';
 import { useFaceTime } from '@features/facetime/useFaceTime';
-import { Screen, ScreenHeader, useTheme } from '@ui';
+import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
 
 /**
@@ -71,7 +71,12 @@ export default function FaceTimeScreen(): React.JSX.Element {
                 },
               ]}
             >
-              <Text style={{ color: video === v ? '#fff' : theme.color.label, fontSize: 14 }}>
+              <Text
+                style={{
+                  color: video === v ? readableTextOn(theme.color.tint) : theme.color.label,
+                  fontSize: 14,
+                }}
+              >
                 {label}
               </Text>
             </Pressable>
@@ -88,7 +93,14 @@ export default function FaceTimeScreen(): React.JSX.Element {
           accessibilityRole="button"
           accessibilityLabel="Start FaceTime call"
         >
-          <Text style={[styles.callText, { color: canCall ? '#fff' : theme.color.tertiaryLabel }]}>
+          <Text
+            style={[
+              styles.callText,
+              {
+                color: canCall ? readableTextOn(theme.color.tint) : theme.color.tertiaryLabel,
+              },
+            ]}
+          >
             📹 FaceTime
           </Text>
         </Pressable>

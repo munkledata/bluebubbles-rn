@@ -756,10 +756,11 @@ outside this candidate's supported product, not as proof for `ANDROID-02` or `AN
       media/upload presentation, reaction/action menus, and Theme Studio. Record clipping, hidden
       controls, contrast, touch-target, or focus-order defects individually; do not award a global
       `UI-01`/`THEME-01A` pass from host ratios.
-- [ ] **`STATIC/HOST`:** Record the known `THEME-02` limitation: Theme Studio validates a name and
-      hex syntax but gives no contrast warning, affected-role explanation, confirmation, or
-      auto-fix. Never save an unreadable theme to demonstrate it. Legacy light-theme continuity
-      needs an approved natural Play-update baseline and otherwise remains `BLOCKED/OPEN`.
+- [x] **`STATIC/HOST` / `THEME-02`:** Theme Studio now measures its editable text roles against all
+      applicable surfaces, previews each failing pair and exact ratio, offers a safe foreground
+      auto-fix, and requires a separate confirmation before an unresolved theme can be saved.
+      Legacy light-theme continuity needs an approved natural Play-update baseline and otherwise
+      remains `BLOCKED/OPEN`.
 - [ ] **`STATIC/HOST`:** Record the known `A11Y-01` gaps: visual `TextField` labels are not associated
       with inputs, the manual HTTP switch lacks a programmatic label, and message bubbles expose no
       TalkBack accessibility action for their long-press menu. These are findings, not candidate
@@ -863,7 +864,7 @@ do not infer them visually or manufacture a native failure.
 | Claim or boundary                                             | Required evidence / current disposition                                                                                                                        |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Native permission dialogs, limited media, IME/insets, intents | Exact Play-candidate observation on each applicable Android/API/navigation branch; host mocks cannot prove them                                                |
-| Theme readability and accessibility                           | Exact-device screenshots/Scanner/TalkBack plus host contrast/semantic evidence; known `THEME-02` and `A11Y-01..03` gaps prevent a universal pass               |
+| Theme readability and accessibility                           | Exact-device screenshots/Scanner/TalkBack plus completed `THEME-02` host contrast/semantic evidence; remaining `A11Y-01..03` device gaps prevent a universal pass |
 | Embedded WebView/network absence                              | Static source plus controlled target/network observation; visual placeholder/browser handoff alone cannot prove traffic or hostile-navigation behavior         |
 | Account work cancellation and local wipe internals            | Host/native DB, file, notification, log, FCM, query, and lifecycle proof; visible B isolation cannot identify every deleted row/file or recalled native intent |
 | State that deliberately survives Disconnect                   | Device-wide themes/settings/contacts/App Lock/OS grants and user-created external copies; remove synthetic contacts/copies separately in their owning systems  |

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { useTheme } from '../theme';
+import { contrastRatio, readableTextOn, useTheme } from '../theme';
 
 interface ServiceBadgeProps {
   /** Badge label, e.g. "RCS". */
@@ -19,13 +19,15 @@ interface ServiceBadgeProps {
 export function ServiceBadge({ label, color, textColor }: ServiceBadgeProps): React.JSX.Element {
   const theme = useTheme();
   const bg = color ?? theme.color.bubble.rcsBackground ?? theme.color.bubble.smsBackground;
+  const foreground =
+    textColor && contrastRatio(textColor, bg) >= 4.5 ? textColor : readableTextOn(bg);
   return (
     <View
       style={[styles.badge, { backgroundColor: bg }]}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Text style={[styles.text, textColor ? { color: textColor } : null]}>{label}</Text>
+      <Text style={[styles.text, { color: foreground }]}>{label}</Text>
     </View>
   );
 }
@@ -38,7 +40,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   text: {
-    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.4,
