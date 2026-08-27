@@ -14,6 +14,35 @@ jest.mock('react-native-safe-area-context', () => ({
 import StoragePrivacyScreen from '../../../app/(app)/storage-privacy';
 
 describe('StoragePrivacyScreen', () => {
+  it('explains what leaves the device, where it goes, and what disconnect does not delete', async () => {
+    await renderWithTheme(<StoragePrivacyScreen />);
+
+    expect(screen.getByText(/self-hosted server you connect/)).toBeTruthy();
+    expect(screen.getByText(/HTTP does not protect this traffic/)).toBeTruthy();
+    expect(
+      screen.getByText(/does not delete conversations or files stored by your server/),
+    ).toBeTruthy();
+    expect(screen.getByText(/Deleting a chat or message in Gator is also local-only/)).toBeTruthy();
+    expect(screen.getByText(/up to 64 existing chat phone or email addresses/)).toBeTruthy();
+    expect(screen.getByText(/does not upload your whole address book/)).toBeTruthy();
+    expect(screen.getByText(/the device contact photo is not sent/)).toBeTruthy();
+    expect(screen.getByText(/contact entries.*remain after Disconnect/)).toBeTruthy();
+    expect(screen.getByText(/clear its app data or uninstall it/)).toBeTruthy();
+    expect(screen.getByText(/FCM.*token and device label/)).toBeTruthy();
+    expect(screen.getByText(/passes from that server through Google FCM/)).toBeTruthy();
+    expect(screen.getByText(/push-payload encryption.*not always enabled/)).toBeTruthy();
+    expect(screen.getByText(/new or unset installation.*starts off/)).toBeTruthy();
+    expect(screen.getByText(/not the original error message or stack trace/)).toBeTruthy();
+    expect(
+      screen.getByText(/does not download third-party link previews or map tiles/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/external provider may receive the URL or precise coordinates/),
+    ).toBeTruthy();
+    expect(screen.getByText(/no longer has a configurable Redacted Mode/)).toBeTruthy();
+    expect(screen.getByText(/does not guarantee protection from screenshots/)).toBeTruthy();
+  });
+
   it('names both the encrypted rows and every plaintext file class', async () => {
     await renderWithTheme(<StoragePrivacyScreen />);
 
@@ -42,8 +71,10 @@ describe('StoragePrivacyScreen', () => {
     expect(
       screen.getByText(/does not delete copies exported to Photos or the Gator album/),
     ).toBeTruthy();
+    expect(screen.getByText(/encrypts it before writing a temporary share file/)).toBeTruthy();
     expect(
-      screen.getByText(/encrypts a backup before writing its temporary share file/),
+      screen.getByText(/not messages, drafts, diagnostic consent, or credentials/),
     ).toBeTruthy();
+    expect(screen.getByText(/attempts to delete that file/)).toBeTruthy();
   });
 });
