@@ -1,6 +1,12 @@
 # UI Coverage → 70% Plan
 
-**Goal:** raise statement coverage of `src/ui/**` from the measured baseline **23.3%
+> **STATUS (2026-08-27): COMPLETED HISTORICAL ROLLOUT PLAN — NOT A CURRENT WORK ORDER.** The
+> 70% floor and `coverage:ui` command produced by this plan are already part of the repository.
+> Preserve the batches and measurements below as implementation history; do not rerun them as open
+> remediation. Current coverage-hardening scope is owned only by `TEST-01` in
+> `WORK_PLAN_2026-08-03.md`, and current test rules live in `AGENTS.md`.
+
+**Historical goal:** raise statement coverage of `src/ui/**` from the measured baseline **23.3%
 (547/2347)** to **≥ 70%**, using the existing two-project jest setup (node + jest-expo
 components). Successor to `docs/COMPONENT_TESTING_PLAN.md` (all 4 phases of which are merged:
 harness, primitives, behavior components, regression guards — 141 suites / 807 tests green;
