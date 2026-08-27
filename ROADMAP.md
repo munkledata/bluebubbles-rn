@@ -1,6 +1,12 @@
-# Parity Roadmap — closing the gap with Flutter `development`
+# Parity roadmap — historical 2026-06-21 plan (retired)
 
-> **STATUS UPDATE (2026-06-30):** Phases 1–3 are largely delivered (socket backoff, list throttle,
+> **RETIRED — NOT CURRENT SEQUENCING.** This roadmap is retained as product/implementation rationale; do not use
+> its phases, “still open” list, file paths, package proposals, effort estimates, or suggested sequence to choose
+> work. Current status, priority, dependencies, and acceptance criteria live in
+> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Current RN/server protocol evidence lives in
+> [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md).
+
+> **HISTORICAL UPDATE RECORDED 2026-06-30:** Phases 1–3 are largely delivered (socket backoff, list throttle,
 > reactive membership, per-page sync, contact-link, media sections, delivered tiers, mid-queue
 > cancel, friendly error titles, notification reactions, Theme Studio + per-chat + adaptive). The
 > Phase-4 tail was partly closed on 2026-06-30 — settings search, download-concurrency config, and

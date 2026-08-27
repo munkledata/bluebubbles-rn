@@ -8,10 +8,13 @@
 
 ## Where to look now
 
-- **[`AUDIT_REPORT.md`](./AUDIT_REPORT.md)** — the current, authoritative gap / security / code-smell
-  analysis (76 findings, each adversarially verified), with the P0/P1/P2 prioritization.
-- **[`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md)** — the remaining build/credential steps
-  (EAS, Sentry DSN, Google Maps key, server-side Firebase).
+- **[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md)** — authoritative task status,
+  priorities, dependencies, blockers, and acceptance criteria.
+- **[`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md)** — current protocol evidence and
+  explicit parity dispositions; the work plan remains its implementation-status authority.
+- **[`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md)** — exact-candidate release operations and
+  device/external evidence fields.
+- **[`AUDIT_REPORT.md`](./AUDIT_REPORT.md)** — preserved dated audit evidence, not a parallel tracker.
 
 ## What changed since the snapshot
 
@@ -27,4 +30,4 @@ The audit's prioritized recommendations have since been implemented:
 
 FCM is wired and compiled into the EAS dev builds; SQLCipher DB encryption, Keystore-backed
 credentials, header-auth, and the libsodium AEAD backend are all active. For anything specific,
-**trust the code**, then `AUDIT_REPORT.md`.
+**trust the code**, then follow the current-status and evidence ownership above.

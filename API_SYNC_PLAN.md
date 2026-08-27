@@ -1,13 +1,19 @@
-# API model sync plan — RN app ⇄ Gator server
+# API model sync plan — historical 2026-06-21 implementation record
 
-> **STATUS UPDATE (2026-06-30):** The app-side Phase A + endpoint-shape reconciliation + outgoing
+> **RETIRED AS A STATUS TRACKER.** This plan preserves the reasoning and wire-shape discoveries from its
+> June/July implementation passes; its phases, “still open” text, branch claims, paths, and test counts are not
+> current work selection. Current task status and ownership live in
+> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Current app/server protocol evidence and
+> intentional nonalignments live in [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md).
+
+> **HISTORICAL UPDATE RECORDED 2026-06-30:** The app-side Phase A + endpoint-shape reconciliation + outgoing
 > reconcile + contract fixtures/tests are DONE, and the server contacts endpoint (P2#12) IS wired
 > (`POST /contact/query` + avatar backfill). Remaining are low-severity schema-hygiene items
 > (client-only wire fields P2#10, error/metadata envelope P2#11; `hideAttachment` P1#9 is now DONE — present in `src/core/models/attachment.ts`) plus the
 > server-repo / device-verifiable half. NOTE: `repositories.ts` was split into a
 > **`src/db/repositories/` directory** — file paths below may point at the moved location.
 >
-> **STATUS UPDATE (2026-07-17):** The server's schema-gap features (SCHEMA_GAPS_PLAN.md, shipped
+> **HISTORICAL UPDATE RECORDED 2026-07-17:** The server's schema-gap features (SCHEMA_GAPS_PLAN.md, shipped
 > 2026-07-16) are wired app-side end-to-end — `dateRetracted` notification withdrawal,
 > `isScheduled` (badged as `isScheduled && !isSent`), Genmoji `emojiImage*`, `messageSummaryInfo`
 > (partially resolves P1#8 — the server now emits it in a *parsed* `{editedParts, retractedParts}`
@@ -99,7 +105,7 @@ frozen contract → fix server). Where Gator **intentionally** changed/renamed, 
 
 > **Note (2026-07-17):** the table cells below are the ORIGINAL 2026-06-21 divergence snapshot and
 > predate the status headers at the top — several rows (e.g. P0 #1/#3, P1 #7, P1 #9) are now
-> resolved. The status headers are authoritative for current state.
+> resolved. The dated headers describe that checkpoint; use the current authorities linked at the top today.
 
 ### 🔴 P0 — the app cannot work against Gator until these are fixed
 
