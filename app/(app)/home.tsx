@@ -2,10 +2,13 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { logger } from '@core/secure';
-import { disconnectFailureMessage, forget, http } from '@/services';
-import { getDatabase } from '@db/database';
+import { disconnectFailureMessage, forget } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { fireDueScheduled, recoverOutgoing, runDueScheduled } from '@/services/send';
+import {
+  fireDueScheduled,
+  fireDueScheduledWithDevelopmentSender,
+  recoverOutgoing,
+} from '@/services/send';
 import {
   devInjectIncomingFaceTime,
   devQueueIncomingMessageWithoutDrain,
@@ -63,19 +66,12 @@ export default function Home(): React.JSX.Element {
           if (!accountLease.isCurrent()) return;
         }
         if (useDevFixtures) {
-          // Unlike fireDueScheduled(), this injected DEV path does not own a coordinator slot.
-          // Track it here and pass the mount lease into its DB guards.
-          await runTrackedRealtimeWork(accountLease, () =>
-            runDueScheduled(
-              getDatabase(),
-              http,
-              Date.now(),
-              (g, t, s) =>
-                s
-                  ? devSendFakeReply(g, t, s, undefined, accountLease)
-                  : devSendFake(g, t, undefined, accountLease),
-              accountLease,
-            ),
+          await fireDueScheduledWithDevelopmentSender(
+            (g, t, s) =>
+              s
+                ? devSendFakeReply(g, t, s, undefined, accountLease)
+                : devSendFake(g, t, undefined, accountLease),
+            accountLease,
           );
         } else {
           await fireDueScheduled();

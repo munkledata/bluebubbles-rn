@@ -61,6 +61,14 @@ export type ManualRetryResult =
 
 export type DiscardMessageResult = 'discarded' | 'message-changed' | 'stale';
 
+/** Development sender injected into the scheduled runner instead of the real HTTP send path. */
+export type ScheduledDevelopmentSender = (
+  chatGuid: string,
+  text: string,
+  selectedMessageGuid: string | undefined,
+  onQueued: () => Promise<void>,
+) => Promise<void>;
+
 function snapshotPickedImage(image: PickedImage): PickedImage {
   return { ...image };
 }
@@ -629,6 +637,22 @@ export async function fireDueScheduled(now = Date.now()): Promise<number> {
   try {
     return await runScheduledAccountOperation(accountLease, () =>
       runDueScheduled(getDatabase(), http, now, undefined, accountLease),
+    );
+  } catch (error) {
+    if (error instanceof ScheduledSessionChangedError) return 0;
+    throw error;
+  }
+}
+
+/** Fire due rows through a local development sender without exposing DB/transport composition. */
+export async function fireDueScheduledWithDevelopmentSender(
+  sender: ScheduledDevelopmentSender,
+  accountLease: RealtimeDeliveryLease,
+  now = Date.now(),
+): Promise<number> {
+  try {
+    return await runScheduledAccountOperation(accountLease, () =>
+      runDueScheduled(getDatabase(), http, now, sender, accountLease),
     );
   } catch (error) {
     if (error instanceof ScheduledSessionChangedError) return 0;

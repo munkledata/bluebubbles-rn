@@ -28,7 +28,6 @@ import {
   dispatchRealtimeEvent,
   ensureChatSynced,
   ensureSyncedBackgroundForChat,
-  http,
   markRead,
   saveChatDraft,
   sendTyping,
@@ -45,12 +44,12 @@ import {
 import {
   editText,
   fireDueScheduled,
+  fireDueScheduledWithDevelopmentSender,
   hasLogicalSendCapacity,
   isContactsPermissionDeniedError,
   pickAndSendContact,
   recoverOutgoing,
   reply,
-  runDueScheduled,
   schedule,
   send,
   sendImage,
@@ -478,17 +477,12 @@ function ChatScreenInner({
       firingRef.current = true;
       try {
         if (isDev()) {
-          await runTrackedRealtimeWork(accountLease, () =>
-            runDueScheduled(
-              getDatabase(),
-              http,
-              Date.now(),
-              (g, t, s) =>
-                s
-                  ? devSendFakeReply(g, t, s, undefined, accountLease)
-                  : devSendFake(g, t, undefined, accountLease),
-              accountLease,
-            ),
+          await fireDueScheduledWithDevelopmentSender(
+            (g, t, s) =>
+              s
+                ? devSendFakeReply(g, t, s, undefined, accountLease)
+                : devSendFake(g, t, undefined, accountLease),
+            accountLease,
           );
         } else {
           await fireDueScheduled();
