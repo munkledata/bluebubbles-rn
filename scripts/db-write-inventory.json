@@ -5022,7 +5022,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:3d0e0e711df1",
       "path": "src/db/repositories/backup.ts",
-      "line": 88,
+      "line": 100,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>",
@@ -5035,7 +5035,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:95a28f5a24c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 88,
+      "line": 100,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5048,7 +5048,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>:mutator-call:cbbc55ccf1c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 90,
+      "line": 102,
       "symbol": "restoreKv.<callback:5188e54620>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -5061,7 +5061,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:097cd820cdfa",
       "path": "src/db/repositories/backup.ts",
-      "line": 145,
+      "line": 157,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5074,7 +5074,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:08312684c164",
       "path": "src/db/repositories/backup.ts",
-      "line": 162,
+      "line": 174,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreThemes.<callback:4ed79282ca>",
@@ -5087,7 +5087,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:c87f5cedf55d",
       "path": "src/db/repositories/backup.ts",
-      "line": 162,
+      "line": 174,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5100,7 +5100,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-update:365048ad07a1",
       "path": "src/db/repositories/backup.ts",
-      "line": 180,
+      "line": 192,
       "symbol": "restoreThemes",
       "operation": "sql-update",
       "target": "themes",
@@ -5113,7 +5113,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-insert:22d3eacb4b53",
       "path": "src/db/repositories/backup.ts",
-      "line": 185,
+      "line": 197,
       "symbol": "restoreThemes",
       "operation": "sql-insert",
       "target": "themes",
@@ -5126,7 +5126,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction:drizzle-update:5be60b42a201",
       "path": "src/db/repositories/backup.ts",
-      "line": 213,
+      "line": 225,
       "symbol": "restoreChatCustomizationWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -5137,9 +5137,61 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts"
     },
     {
+      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e",
+      "path": "src/db/repositories/backup.ts",
+      "line": 254,
+      "symbol": "restorePreparedBackupWithinTransaction",
+      "operation": "sql-insert",
+      "target": "kv",
+      "detectedContext": "withDbTransaction",
+      "owner": "restorePreparedBackupWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
+    },
+    {
+      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977",
+      "path": "src/db/repositories/backup.ts",
+      "line": 263,
+      "symbol": "restorePreparedBackupWithinTransaction",
+      "operation": "sql-update",
+      "target": "themes",
+      "detectedContext": "withDbTransaction",
+      "owner": "restorePreparedBackupWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
+    },
+    {
+      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0",
+      "path": "src/db/repositories/backup.ts",
+      "line": 302,
+      "symbol": "restorePreparedBackupWithinTransaction",
+      "operation": "sql-insert",
+      "target": "themes",
+      "detectedContext": "withDbTransaction",
+      "owner": "restorePreparedBackupWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
+    },
+    {
+      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1fc6d694801e",
+      "path": "src/db/repositories/backup.ts",
+      "line": 345,
+      "symbol": "restorePreparedBackupWithinTransaction",
+      "operation": "sql-update",
+      "target": "chats",
+      "detectedContext": "withDbTransaction",
+      "owner": "restorePreparedBackupWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
+    },
+    {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:b8f4ecd73be2",
       "path": "src/db/repositories/backup.ts",
-      "line": 240,
+      "line": 396,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5152,7 +5204,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:cfe21ece36c0",
       "path": "src/db/repositories/backup.ts",
-      "line": 240,
+      "line": 396,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>",
@@ -5165,7 +5217,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>:mutator-call:9ffade814657",
       "path": "src/db/repositories/backup.ts",
-      "line": 242,
+      "line": 398,
       "symbol": "restoreChatCustomizations.<callback:b943573fc5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction",
@@ -11429,35 +11481,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/syncedBackgroundAccountScope.test.ts; test/services/syncedBackgroundTransaction.test.ts; test/db/chatTheme.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:b150379b8c1d",
+      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc",
       "path": "src/services/backup/backup.ts",
-      "line": 111,
-      "symbol": "restoreBackup",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/backup.ts#restoreKv",
-      "detectedContext": "coordinated-delegation",
-      "owner": "restoreBackup",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
-    },
-    {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:a77881a84393",
-      "path": "src/services/backup/backup.ts",
-      "line": 113,
-      "symbol": "restoreBackup",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/backup.ts#restoreThemes",
-      "detectedContext": "coordinated-delegation",
-      "owner": "restoreBackup",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
-    },
-    {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:1b7bfb7ae406",
-      "path": "src/services/backup/backup.ts",
-      "line": 125,
+      "line": 118,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -11468,12 +11494,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:29a6a3b1dcc7",
+      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115",
       "path": "src/services/backup/backup.ts",
-      "line": 125,
+      "line": 118,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
-      "target": "src/services/backup/backup.ts#restoreBackup.<callback:4a8c451f06>",
+      "target": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>",
       "detectedContext": "withDbTransaction",
       "owner": "restoreBackup",
       "transactionContext": "withDbTransaction",
@@ -11481,12 +11507,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup.<callback:4a8c451f06>:mutator-call:e45b4f9b1e4d",
+      "id": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875",
       "path": "src/services/backup/backup.ts",
-      "line": 127,
-      "symbol": "restoreBackup.<callback:4a8c451f06>",
+      "line": 120,
+      "symbol": "restoreBackup.<callback:0154bc3d51>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction",
+      "target": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "restoreBackup",
       "transactionContext": "withDbTransaction",

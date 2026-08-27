@@ -202,7 +202,7 @@ describe('restoreBackup round-trip', () => {
     });
   });
 
-  it('ignores retired keys and stops a KV restore at a revoked supported item', async () => {
+  it('ignores retired keys and rolls back every KV row when ownership is revoked', async () => {
     const t = await createTestDb();
     let current = true;
     t.raw.function('revoke_backup_during_kv_restore', () => {
@@ -236,52 +236,44 @@ describe('restoreBackup round-trip', () => {
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
 
-    expect(t.raw.prepare('SELECT key, value FROM kv ORDER BY key').all()).toEqual([
-      { key: 'theme.preset', value: 'nord' },
-    ]);
+    expect(t.raw.prepare('SELECT key, value FROM kv ORDER BY key').all()).toEqual([]);
     expect(t.raw.prepare('SELECT name FROM themes').all()).toEqual([]);
   });
 
-  it('stops a theme restore at a revoked later item while keeping earlier phases and rows', async () => {
+  it('rolls back KV and every theme when a later theme write fails', async () => {
     const t = await createTestDb();
-    let current = true;
-    t.raw.function('revoke_backup_during_theme_restore', () => {
-      current = false;
-      return 0;
-    });
     t.raw.exec(`
-      CREATE TRIGGER revoke_backup_on_second_theme
-      AFTER INSERT ON themes
+      CREATE TRIGGER fail_backup_on_second_theme
+      BEFORE INSERT ON themes
       WHEN NEW.name = 'revoke-here'
       BEGIN
-        SELECT revoke_backup_during_theme_restore();
+        SELECT RAISE(ABORT, 'simulated backup restore failure');
       END
     `);
 
-    await expect(
-      restoreBackup(
-        t.db,
-        {
-          version: 1,
-          exportedAt: 1,
-          kv: [{ key: 'theme.preset', value: 'nord' }],
-          themes: [
-            { name: 'committed-prefix', mode: 'dark', tokens: '{"a":1}', isPreset: 0 },
-            { name: 'revoke-here', mode: 'dark', tokens: '{"b":2}', isPreset: 0 },
-            { name: 'must-not-run', mode: 'dark', tokens: '{"c":3}', isPreset: 0 },
-          ],
-          chatCustomizations: [],
-        },
-        () => current,
-      ),
-    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    let failure: unknown;
+    try {
+      await restoreBackup(t.db, {
+        version: 1,
+        exportedAt: 1,
+        kv: [{ key: 'theme.preset', value: 'nord' }],
+        themes: [
+          { name: 'committed-prefix', mode: 'dark', tokens: '{"a":1}', isPreset: 0 },
+          { name: 'revoke-here', mode: 'dark', tokens: '{"b":2}', isPreset: 0 },
+          { name: 'must-not-run', mode: 'dark', tokens: '{"c":3}', isPreset: 0 },
+        ],
+        chatCustomizations: [],
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error & { cause?: unknown }).cause).toEqual(
+      expect.objectContaining({ message: 'simulated backup restore failure' }),
+    );
 
-    expect(t.raw.prepare('SELECT name, tokens FROM themes ORDER BY id').all()).toEqual([
-      { name: 'committed-prefix', tokens: '{"a":1}' },
-    ]);
-    expect(t.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toEqual({
-      value: 'nord',
-    });
+    expect(t.raw.prepare('SELECT name, tokens FROM themes ORDER BY id').all()).toEqual([]);
+    expect(t.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toBeUndefined();
   });
 
   it('tracks duplicate-theme cursors per name and mode when identities are interleaved', async () => {
@@ -624,7 +616,7 @@ describe('restoreBackup round-trip', () => {
     });
   });
 
-  it('rolls back a same-GUID customization when account ownership changes during its UPDATE', async () => {
+  it('rolls back KV, themes, and chat changes when ownership changes during chat apply', async () => {
     const t = await createTestDb();
     await seedChat(t, 'iMessage;-;same-guid');
     await setChatCustomization(t.db, 'iMessage;-;same-guid', {
@@ -651,8 +643,8 @@ describe('restoreBackup round-trip', () => {
         {
           version: 1,
           exportedAt: 1,
-          kv: [],
-          themes: [],
+          kv: [{ key: 'theme.preset', value: 'nord' }],
+          themes: [{ name: 'A imported theme', mode: 'dark', tokens: '{}', isPreset: 0 }],
           chatCustomizations: [
             {
               guid: 'iMessage;-;same-guid',
@@ -677,6 +669,10 @@ describe('restoreBackup round-trip', () => {
         )
         .get('iMessage;-;same-guid'),
     ).toEqual({ customName: 'B local name', customColor: '#00bb00', isPinned: 0 });
+    expect(t.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toBeUndefined();
+    expect(
+      t.raw.prepare("SELECT id FROM themes WHERE name = 'A imported theme'").get(),
+    ).toBeUndefined();
   });
 });
 

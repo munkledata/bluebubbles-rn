@@ -2,9 +2,7 @@ import {
   getAllKv,
   getAllThemes,
   getChatCustomizations,
-  restoreChatCustomizationWithinTransaction,
-  restoreKv,
-  restoreThemes,
+  restorePreparedBackupWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -107,29 +105,22 @@ export async function restoreBackup(
   ownershipGuard?: DbCommitGuard,
 ): Promise<RestoreResult> {
   const kv = backup.kv.filter((p) => isBackupKey(p.key));
+  const themes = backup.themes.map((theme) => ({ ...theme, isPreset: 0 }));
+  // Serialize the already-bounded, fully validated input before taking the global DB mutex. The
+  // repository then applies it with a fixed number of set-based SQLite statements, so a failure or
+  // account revocation rolls back every settings/theme/chat change without an unbounded JS loop.
+  const prepared = {
+    kvJson: JSON.stringify(kv),
+    themesJson: JSON.stringify(themes),
+    chatCustomizationsJson: JSON.stringify(backup.chatCustomizations),
+  };
   assertRestoreOwned(ownershipGuard);
-  await restoreKv(db, kv, ownershipGuard);
-  assertRestoreOwned(ownershipGuard);
-  await restoreThemes(
+  const applied = await withDbTransaction(
     db,
-    backup.themes.map((t) => ({ ...t, isPreset: 0 })),
+    (context) => restorePreparedBackupWithinTransaction(context, prepared),
     ownershipGuard,
   );
-  assertRestoreOwned(ownershipGuard);
-
-  // Chat GUIDs are server-account identities even though two servers can emit the same bytes.
-  // Own one short transaction per row (guarded when this import is account-bound), so neither an
-  // ordinary restore nor an untrusted large backup can join/hold a neighbouring lock.
-  let applied = 0;
-  for (const customization of backup.chatCustomizations) {
-    applied += await withDbTransaction(
-      db,
-      (context) => restoreChatCustomizationWithinTransaction(context, customization),
-      ownershipGuard,
-    );
-  }
-  assertRestoreOwned(ownershipGuard);
-  return { kv: kv.length, themes: backup.themes.length, chatCustomizations: applied };
+  return { kv: kv.length, themes: themes.length, chatCustomizations: applied };
 }
 
 /** Parse + validate bounded raw JSON text into a Backup (throws on size, JSON, or schema errors). */

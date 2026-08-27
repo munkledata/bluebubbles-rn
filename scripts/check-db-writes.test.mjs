@@ -2367,7 +2367,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 18);
-  assert.equal(intentionalBoundaries.length, 20);
+  assert.equal(intentionalBoundaries.length, 18);
   assert.equal(scheduledStateMachine.length, 9);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2394,8 +2394,6 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c189a52293cc',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:a77881a84393',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:b150379b8c1d',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
@@ -5428,6 +5426,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'revertLocalUnsendWithinTransaction',
     'reconcileOutgoingSuccessWithinTransaction',
     'reconcileReadMarkersFromTimestamps',
+    'restorePreparedBackupWithinTransaction',
     'setChatAppearanceWithinTransaction',
     'setChatArchiveWithinTransaction',
     'setChatCustomizationWithinTransaction',
@@ -5730,6 +5729,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf',
       'src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction:drizzle-update:69b01aa5bda9',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1fc6d694801e',
       'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction:drizzle-insert:cc8ec01847ce',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
@@ -5774,21 +5777,19 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
       'src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:a77881a84393',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:b150379b8c1d',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48',
       'src/services/chat/groupManagement.ts#renameGroupChat.<callback:c13ecdb63a>:mutator-call:2e89e3325c50',
       'src/services/chat/groupManagement.ts#updateGroupParticipant.<callback:50428f1bde>:mutator-call:4e81064f65bb',
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 74);
+  assert.equal(selected.length, 76);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/backup/backup.ts#restoreBackup.<callback:4a8c451f06>:mutator-call:e45b4f9b1e4d',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:1b7bfb7ae406',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:29a6a3b1dcc7',
+      'src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115',
     ].sort(),
   );
   assert.deepEqual(

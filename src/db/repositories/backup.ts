@@ -31,6 +31,18 @@ export interface ChatCustomizationRow {
 }
 
 /**
+ * Validated backup rows serialized before the caller takes the process-wide DB lock.
+ *
+ * Keeping the bounded JSON preparation outside the transaction lets the transaction execute a
+ * fixed number of set-based statements instead of holding the mutex across a JavaScript row loop.
+ */
+export interface PreparedBackupRestore {
+  kvJson: string;
+  themesJson: string;
+  chatCustomizationsJson: string;
+}
+
+/**
  * Every kv pair, unfiltered. `kv` also holds per-chat composer drafts and device-local sync
  * bookkeeping, so the CALLER decides what may leave the device — `buildBackup` gates this through
  * the `isBackupKey` allow-list (`src/services/backup/backupSchema.ts`). Nothing here may import
@@ -222,6 +234,150 @@ export async function restoreChatCustomizationWithinTransaction(
       .where(eq(chats.guid, customization.guid))
       .returning({ id: chats.id });
     return rows.length;
+  });
+}
+
+/**
+ * Atomically apply one fully validated backup with a fixed number of set-based statements.
+ *
+ * JSON input is bounded and serialized by the service before it enters the transaction. Theme
+ * occurrence ranks preserve the existing id-ordered twin pairing: the first backed-up `(name,
+ * mode)` row updates the first matching local row, and only unmatched occurrences are inserted.
+ * Duplicate chat GUIDs retain the old sequential behavior by applying the final occurrence while
+ * the returned count still reports every backed-up occurrence whose chat exists locally.
+ */
+export function restorePreparedBackupWithinTransaction(
+  context: DbTransactionContext,
+  input: PreparedBackupRestore,
+): Promise<number> {
+  return runInTransactionContext(context, async (db) => {
+    await db.run(sql`
+      INSERT INTO kv (key, value)
+      SELECT json_extract(entry.value, '$.key'), json_extract(entry.value, '$.value')
+        FROM json_each(${input.kvJson}) AS entry
+       WHERE json_extract(entry.value, '$.value') IS NOT NULL
+       ORDER BY CAST(entry.key AS INTEGER)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `);
+
+    await db.run(sql`
+      WITH source_rows AS (
+        SELECT CAST(entry.key AS INTEGER) AS source_index,
+               json_extract(entry.value, '$.name') AS name,
+               json_extract(entry.value, '$.mode') AS mode,
+               json_extract(entry.value, '$.tokens') AS tokens
+          FROM json_each(${input.themesJson}) AS entry
+      ),
+      source AS (
+        SELECT source_index, name, mode, tokens,
+               ROW_NUMBER() OVER (
+                 PARTITION BY name, mode
+                 ORDER BY source_index
+               ) AS occurrence
+          FROM source_rows
+      ),
+      existing AS (
+        SELECT id, name, mode,
+               ROW_NUMBER() OVER (
+                 PARTITION BY name, mode
+                 ORDER BY id
+               ) AS occurrence
+          FROM themes
+         WHERE is_preset = 0
+      ),
+      matched AS (
+        SELECT existing.id, source.tokens
+          FROM source
+          JOIN existing
+            ON existing.name = source.name
+           AND existing.mode = source.mode
+           AND existing.occurrence = source.occurrence
+      )
+      UPDATE themes
+         SET tokens = (SELECT matched.tokens FROM matched WHERE matched.id = themes.id)
+       WHERE id IN (SELECT id FROM matched)
+         AND is_preset = 0
+    `);
+
+    await db.run(sql`
+      WITH source_rows AS (
+        SELECT CAST(entry.key AS INTEGER) AS source_index,
+               json_extract(entry.value, '$.name') AS name,
+               json_extract(entry.value, '$.mode') AS mode,
+               json_extract(entry.value, '$.tokens') AS tokens
+          FROM json_each(${input.themesJson}) AS entry
+      ),
+      source AS (
+        SELECT source_index, name, mode, tokens,
+               ROW_NUMBER() OVER (
+                 PARTITION BY name, mode
+                 ORDER BY source_index
+               ) AS occurrence
+          FROM source_rows
+      ),
+      existing AS (
+        SELECT id, name, mode,
+               ROW_NUMBER() OVER (
+                 PARTITION BY name, mode
+                 ORDER BY id
+               ) AS occurrence
+          FROM themes
+         WHERE is_preset = 0
+      )
+      INSERT INTO themes (name, mode, tokens, is_preset)
+      SELECT source.name, source.mode, source.tokens, 0
+        FROM source
+        LEFT JOIN existing
+          ON existing.name = source.name
+         AND existing.mode = source.mode
+         AND existing.occurrence = source.occurrence
+       WHERE existing.id IS NULL
+       ORDER BY source.source_index
+    `);
+
+    const appliedRows = await db.all<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+        FROM json_each(${input.chatCustomizationsJson}) AS entry
+        JOIN chats
+          ON chats.guid = json_extract(entry.value, '$.guid')
+    `);
+
+    await db.run(sql`
+      WITH source_rows AS (
+        SELECT CAST(entry.key AS INTEGER) AS source_index,
+               json_extract(entry.value, '$.guid') AS guid,
+               json_extract(entry.value, '$.customName') AS custom_name,
+               json_extract(entry.value, '$.customColor') AS custom_color,
+               json_extract(entry.value, '$.muteType') AS mute_type,
+               json_extract(entry.value, '$.isPinned') AS is_pinned,
+               json_extract(entry.value, '$.isArchived') AS is_archived
+          FROM json_each(${input.chatCustomizationsJson}) AS entry
+      ),
+      ranked AS (
+        SELECT *,
+               ROW_NUMBER() OVER (
+                 PARTITION BY guid
+                 ORDER BY source_index DESC
+               ) AS latest_rank
+          FROM source_rows
+      ),
+      source AS (
+        SELECT * FROM ranked WHERE latest_rank = 1
+      )
+      UPDATE chats
+         SET custom_name = (SELECT source.custom_name FROM source WHERE source.guid = chats.guid),
+             custom_color = (SELECT source.custom_color FROM source WHERE source.guid = chats.guid),
+             mute_type = (SELECT source.mute_type FROM source WHERE source.guid = chats.guid),
+             is_pinned = (SELECT source.is_pinned FROM source WHERE source.guid = chats.guid),
+             is_archived = (SELECT source.is_archived FROM source WHERE source.guid = chats.guid)
+       WHERE guid IN (SELECT guid FROM source)
+    `);
+
+    const applied = appliedRows[0]?.count ?? 0;
+    if (!Number.isSafeInteger(applied) || applied < 0) {
+      throw new Error('Backup restore returned an invalid chat count.');
+    }
+    return applied;
   });
 }
 
