@@ -160,11 +160,7 @@ Gator is not affiliated with, endorsed by, or sponsored by Apple.
 
 - [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md) — authoritative remediation plan
 - [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) — exact-candidate release gate
-- [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md) — device evidence
-- [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md) — client/server contract
-- [`docs/CACHE_ARCHITECTURE.md`](./docs/CACHE_ARCHITECTURE.md) — persistence architecture
-- [`docs/UPLOAD_PROGRESS.md`](./docs/UPLOAD_PROGRESS.md) — attachment upload behavior
-- [`docs/SHARE_INTENT_RELIABILITY.md`](./docs/SHARE_INTENT_RELIABILITY.md) — Android share handling
+- [`docs/README.md`](./docs/README.md) — subsystem contracts, runbooks, focused research, and historical-evidence map
 
 ## License
 

@@ -1,7 +1,7 @@
 # DB-02A final handoff
 
-`DB-02A` is complete. This short file records the frozen result; the Work Plan and Audit Report remain
-the authoritative project documents.
+`DB-02A` is complete. This short file records the frozen result; the Work Plan remains the task-status
+authority, while the Audit Report is dated supporting evidence.
 
 ## Frozen result — 2026-08-21
 
