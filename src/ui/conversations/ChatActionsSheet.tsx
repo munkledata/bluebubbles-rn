@@ -2,21 +2,17 @@ import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getDatabase } from '@db/database';
+import type { InboxRow, InboxSenderFilter } from '@db/repositories';
 import {
-  setChatArchiveWithinTransaction,
-  setChatMuteWithinTransaction,
-  setChatPinWithinTransaction,
-  swapPinnedChatOrder,
-  type InboxRow,
-  type InboxSenderFilter,
-} from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
-import { deleteChat, markRead, markUnread } from '@/services';
-import {
-  captureRealtimeDeliveryLease,
-  runAccountScopedLocalMutation,
-} from '@/services/realtime/deliveryCoordinator';
+  deleteChat,
+  markRead,
+  markUnread,
+  movePinnedChat,
+  setChatArchived,
+  setChatMuted,
+  setChatPinned,
+} from '@/services';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import { useTheme } from '../theme';
 
@@ -128,18 +124,7 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() =>
-                    runAccountScopedLocalMutation(accountLease, async () => {
-                      const db = getDatabase();
-                      const guid = target.guid;
-                      const pinned = !target.isPinned;
-                      await withDbTransaction(
-                        db,
-                        (context) => setChatPinWithinTransaction(context, guid, pinned),
-                        () => accountLease.isCurrent(),
-                      );
-                    }),
-                  )
+                  run(() => setChatPinned(target.guid, !target.isPinned, accountLease))
                 }
               />
               {target.isPinned && target.moveEarlierGuid ? (
@@ -149,19 +134,15 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                   sep={theme.color.separator}
                   onPress={() =>
                     run(() =>
-                      runAccountScopedLocalMutation(accountLease, async () => {
-                        const db = getDatabase();
-                        const guid = target.guid;
-                        const adjacentGuid = target.moveEarlierGuid!;
-                        await swapPinnedChatOrder(
-                          db,
-                          guid,
-                          adjacentGuid,
-                          'earlier',
-                          () => accountLease.isCurrent(),
-                          target.pinSenderFilter ?? 'any',
-                        );
-                      }),
+                      movePinnedChat(
+                        {
+                          chatGuid: target.guid,
+                          adjacentChatGuid: target.moveEarlierGuid!,
+                          direction: 'earlier',
+                          sender: target.pinSenderFilter ?? 'any',
+                        },
+                        accountLease,
+                      ),
                     )
                   }
                 />
@@ -173,19 +154,15 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                   sep={theme.color.separator}
                   onPress={() =>
                     run(() =>
-                      runAccountScopedLocalMutation(accountLease, async () => {
-                        const db = getDatabase();
-                        const guid = target.guid;
-                        const adjacentGuid = target.moveLaterGuid!;
-                        await swapPinnedChatOrder(
-                          db,
-                          guid,
-                          adjacentGuid,
-                          'later',
-                          () => accountLease.isCurrent(),
-                          target.pinSenderFilter ?? 'any',
-                        );
-                      }),
+                      movePinnedChat(
+                        {
+                          chatGuid: target.guid,
+                          adjacentChatGuid: target.moveLaterGuid!,
+                          direction: 'later',
+                          sender: target.pinSenderFilter ?? 'any',
+                        },
+                        accountLease,
+                      ),
                     )
                   }
                 />
@@ -194,38 +171,14 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 label={target.muted ? 'Unmute' : 'Mute'}
                 color={theme.color.tint}
                 sep={theme.color.separator}
-                onPress={() =>
-                  run(() =>
-                    runAccountScopedLocalMutation(accountLease, async () => {
-                      const db = getDatabase();
-                      const guid = target.guid;
-                      const muteType = target.muted ? null : 'mute';
-                      await withDbTransaction(
-                        db,
-                        (context) => setChatMuteWithinTransaction(context, guid, muteType),
-                        () => accountLease.isCurrent(),
-                      );
-                    }),
-                  )
-                }
+                onPress={() => run(() => setChatMuted(target.guid, !target.muted, accountLease))}
               />
               <Row
                 label={target.isArchived ? 'Unarchive' : 'Archive'}
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() =>
-                    runAccountScopedLocalMutation(accountLease, async () => {
-                      const db = getDatabase();
-                      const guid = target.guid;
-                      const archived = !target.isArchived;
-                      await withDbTransaction(
-                        db,
-                        (context) => setChatArchiveWithinTransaction(context, guid, archived),
-                        () => accountLease.isCurrent(),
-                      );
-                    }),
-                  )
+                  run(() => setChatArchived(target.guid, !target.isArchived, accountLease))
                 }
               />
               <Row

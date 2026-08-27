@@ -11,7 +11,19 @@ export { computeBackgroundIsLight } from './backgrounds/luminance';
 
 export { vault, http, getSecretBox, runCryptoSelfTest } from './clients';
 export { ensureDatabase, rotateDatabaseKey } from './databaseControl';
-export { createNewChat, sendTyping, markRead, markUnread, deleteChat } from './chatActions';
+export {
+  createNewChat,
+  sendTyping,
+  markRead,
+  markUnread,
+  markAllChatsRead,
+  setChatMuted,
+  setChatArchived,
+  setChatPinned,
+  movePinnedChat,
+  deleteChat,
+  type MovePinnedChatOptions,
+} from './chatActions';
 export { hydrateLock, setAppLockEnabled, completeUnlock } from './lock';
 export {
   startSync,

@@ -14,20 +14,10 @@ import {
 } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { refreshInbox } from '@/services';
-import {
-  captureRealtimeDeliveryLease,
-  runAccountScopedLocalMutation,
-} from '@/services/realtime/deliveryCoordinator';
+import { markAllChatsRead, movePinnedChat, refreshInbox } from '@/services';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { useChats } from '@features/conversations/useChats';
-import { getDatabase } from '@db/database';
-import {
-  markAllChatsReadLocalWithinTransaction,
-  swapPinnedChatOrder,
-  type InboxRow,
-  type PinnedOrderMoveDirection,
-} from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import type { InboxRow, PinnedOrderMoveDirection } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
@@ -103,15 +93,7 @@ export function ConversationListScreen(): React.JSX.Element {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Mark All Read',
-        onPress: () =>
-          void runAccountScopedLocalMutation(accountLease, async () => {
-            const db = getDatabase();
-            await withDbTransaction(
-              db,
-              (context) => markAllChatsReadLocalWithinTransaction(context),
-              () => accountLease.isCurrent(),
-            );
-          }),
+        onPress: () => void markAllChatsRead(accountLease),
       },
     ]);
   }, [accountLease]);
@@ -132,17 +114,15 @@ export function ConversationListScreen(): React.JSX.Element {
   const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
   const onMovePinned = useCallback(
     (guid: string, adjacentGuid: string, direction: PinnedOrderMoveDirection): void => {
-      void runAccountScopedLocalMutation(accountLease, async () => {
-        const db = getDatabase();
-        await swapPinnedChatOrder(
-          db,
-          guid,
-          adjacentGuid,
+      void movePinnedChat(
+        {
+          chatGuid: guid,
+          adjacentChatGuid: adjacentGuid,
           direction,
-          () => accountLease.isCurrent(),
-          pinSenderFilter,
-        );
-      });
+          sender: pinSenderFilter,
+        },
+        accountLease,
+      );
     },
     [accountLease, pinSenderFilter],
   );

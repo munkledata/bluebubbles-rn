@@ -1,18 +1,9 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { getDatabase } from '@db/database';
-import {
-  setChatArchiveWithinTransaction,
-  setChatMuteWithinTransaction,
-  type InboxRow,
-} from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
-import { deleteChat, markRead, markUnread } from '@/services';
-import {
-  captureRealtimeDeliveryLease,
-  runAccountScopedLocalMutation,
-} from '@/services/realtime/deliveryCoordinator';
+import type { InboxRow } from '@db/repositories';
+import { deleteChat, markRead, markUnread, setChatArchived, setChatMuted } from '@/services';
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
   avatarSeed,
@@ -110,34 +101,14 @@ export const ConversationTile = React.memo(function ConversationTile({
       label: muted ? 'Unmute' : 'Mute',
       icon: muted ? 'notifications-outline' : 'notifications-off-outline',
       color: '#FF9500',
-      onPress: () =>
-        void runAccountScopedLocalMutation(accountLease, async () => {
-          const db = getDatabase();
-          const guid = row.guid;
-          const muteType = muted ? null : 'mute';
-          await withDbTransaction(
-            db,
-            (context) => setChatMuteWithinTransaction(context, guid, muteType),
-            () => accountLease.isCurrent(),
-          );
-        }),
+      onPress: () => void setChatMuted(row.guid, !muted, accountLease),
     },
     {
       key: 'archive',
       label: row.isArchived ? 'Unarchive' : 'Archive',
       icon: 'archive-outline',
       color: '#8E8E93',
-      onPress: () =>
-        void runAccountScopedLocalMutation(accountLease, async () => {
-          const db = getDatabase();
-          const guid = row.guid;
-          const archived = !row.isArchived;
-          await withDbTransaction(
-            db,
-            (context) => setChatArchiveWithinTransaction(context, guid, archived),
-            () => accountLease.isCurrent(),
-          );
-        }),
+      onPress: () => void setChatArchived(row.guid, !row.isArchived, accountLease),
     },
     {
       key: 'delete',

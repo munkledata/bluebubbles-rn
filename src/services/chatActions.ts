@@ -11,11 +11,18 @@ import {
   listChatAttachmentGuids,
   listReminders,
   listScheduledByChat,
+  markAllChatsReadLocalWithinTransaction,
   resumeChatPurges,
+  setChatArchiveWithinTransaction,
+  setChatMuteWithinTransaction,
+  setChatPinWithinTransaction,
   setChatUnreadLocalWithinTransaction,
   setLastReadMessageGuidWithinTransaction,
+  swapPinnedChatOrder,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
+  type InboxSenderFilter,
+  type PinnedOrderMoveDirection,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import {
@@ -70,6 +77,114 @@ async function runChatAction(
     if (error === STALE_CHAT_ACTION || !lease.isCurrent()) return;
     throw error;
   }
+}
+
+/** Set or clear the device-local mute preference for one conversation. */
+export function setChatMuted(
+  chatGuid: string,
+  muted: boolean,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatMuteWithinTransaction(context, chatGuid, muted ? 'mute' : null);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Move a conversation into or out of the device-local archive. */
+export function setChatArchived(
+  chatGuid: string,
+  archived: boolean,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatArchiveWithinTransaction(context, chatGuid, archived);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Set or clear the device-local pinned state for one conversation. */
+export function setChatPinned(
+  chatGuid: string,
+  pinned: boolean,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatPinWithinTransaction(context, chatGuid, pinned);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+export interface MovePinnedChatOptions {
+  readonly chatGuid: string;
+  readonly adjacentChatGuid: string;
+  readonly direction: PinnedOrderMoveDirection;
+  readonly sender?: InboxSenderFilter;
+}
+
+/** Swap a pinned conversation with its current visible neighbor. */
+export function movePinnedChat(
+  options: MovePinnedChatOptions,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await swapPinnedChatOrder(
+      db,
+      options.chatGuid,
+      options.adjacentChatGuid,
+      options.direction,
+      () => activeLease.isCurrent(),
+      options.sender ?? 'any',
+    );
+  });
+}
+
+/** Clear every local inbox unread marker without sending server read receipts. */
+export function markAllChatsRead(
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await markAllChatsReadLocalWithinTransaction(context);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /**
