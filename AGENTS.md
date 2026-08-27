@@ -42,13 +42,13 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 | Authoritative plan and audit history | `docs/WORK_PLAN_2026-08-03.md`, `AUDIT_REPORT.md`               |
 | Phase/release dependencies           | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`            |
 | App/server event and API parity      | `docs/APP_SERVER_PARITY.md`                                     |
-| Device-only verification             | `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md`       |
+| Device proof runbook and history      | `docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`, `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md` |
 | Push/headless delivery               | `docs/PUSH_DELIVERY.md`                                         |
 | Upload behavior                      | `docs/UPLOAD_PROGRESS.md`                                       |
 | Attachment cache                     | `docs/CACHE_ARCHITECTURE.md`                                    |
 | Share intake                         | `docs/SHARE_INTENT_RELIABILITY.md`                              |
 | Session/account isolation            | `docs/SESSION_SCOPED_STATE_INVENTORY.md`                        |
-| UI coverage/testing                  | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md` |
+| Historical UI-test rollouts           | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md` |
 
 ## Architecture contracts
 
