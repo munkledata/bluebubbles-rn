@@ -19,14 +19,17 @@ import {
   getChatParticipants,
   getChatTheme,
   listChatAttachmentsByKind,
-  setChatAppearanceWithinTransaction,
-  setChatCustomizationWithinTransaction,
-  setChatMuteWithinTransaction,
   type ChatMediaByKind,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { computeBackgroundIsLight, startChatRepair } from '@/services';
+import {
+  computeBackgroundIsLight,
+  resetChatLocalPreferences,
+  setChatMuted,
+  startChatRepair,
+  updateChatAppearance,
+  updateChatCustomization,
+} from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import {
   clearGroupPhoto,
@@ -221,34 +224,33 @@ function ChatSettingsScreen({
     };
   }, [lifetime]);
 
-  const runScreenAccountTask = async (
+  const runScreenAccountTask = async <T,>(
     grant: ChatSettingsGrant,
-    task: (activeLease: RealtimeDeliveryLease) => Promise<void>,
-  ): Promise<boolean> => {
-    if (!grantIsCurrent(grant)) return false;
+    task: (activeLease: RealtimeDeliveryLease) => Promise<T | null>,
+  ): Promise<T | null> => {
+    if (!grantIsCurrent(grant)) return null;
     let completed = false;
+    let value: T | null = null;
     try {
       const status = await runTrackedRealtimeWork(accountLease, async (lease) => {
         if (!lease.isCurrent()) return;
-        await task(lease);
+        const nextValue = await task(lease);
         if (!lease.isCurrent()) return;
+        value = nextValue;
         completed = true;
       });
-      return status === 'delivered' && completed && accountLease.isCurrent();
+      return status === 'delivered' && completed && accountLease.isCurrent() ? value : null;
     } catch (error) {
       // A revoked screen should not surface its write error in the replacement account.
-      if (!accountLease.isCurrent()) return false;
+      if (!accountLease.isCurrent()) return null;
       throw error;
     }
   };
-  const queueScreenAccountTask = (
-    grant: ChatSettingsGrant,
-    task: (activeLease: RealtimeDeliveryLease) => Promise<void>,
-  ): void => {
+  const queueScreenCommand = (grant: ChatSettingsGrant, command: () => Promise<void>): void => {
     if (!grantIsCurrent(grant)) return;
-    void runScreenAccountTask(grant, task).catch(() => {
-      // These local preference writes have always been best-effort; account ownership is the
-      // important invariant. A later reactive read continues to show the durable value.
+    void command().catch(() => {
+      // Local preference commands remain best-effort. Their service owner suppresses work for a
+      // retired account, and the reactive read continues to show the last durable value.
     });
   };
 
@@ -333,15 +335,9 @@ function ChatSettingsScreen({
     if (!grantIsCurrent(operationGrant)) return;
     setStudioAnimation(null);
     const appearance = { themeTokens: JSON.stringify(tokens) };
-    queueScreenAccountTask(operationGrant, async (activeLease) => {
-      const db = getDatabase();
-      const chatGuid = operationGrant.chatGuid;
-      await withDbTransaction(
-        db,
-        (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
-        () => activeLease.isCurrent(),
-      );
-    });
+    queueScreenCommand(operationGrant, () =>
+      updateChatAppearance(operationGrant.chatGuid, appearance, operationGrant.accountLease),
+    );
   };
 
   const pickBackground = (): void => {
@@ -364,24 +360,20 @@ function ChatSettingsScreen({
         if (!res || res.canceled || res.assets.length === 0 || !pickerIsCurrent()) return;
         const pickedUri = res.assets[0]!.uri;
         try {
-          await runScreenAccountTask(pickerGrant, async (activeLease) => {
-            const db = getDatabase();
+          const appearance = await runScreenAccountTask(pickerGrant, async (activeLease) => {
             const chatGuid = pickerGrant.chatGuid;
             // Copy out of the purgeable ImagePicker cache into a stable app dir before storing.
             // The tracked task drains for its exact chat once admitted; only later UI publication
             // is revoked if this keyed screen is replaced.
             const stableUri = await persistBackground(chatGuid, pickedUri);
-            if (!activeLease.isCurrent()) return;
+            if (!activeLease.isCurrent()) return null;
             // Record the wallpaper's luminance so overlay text stays legible on it.
             const backgroundIsLight = await computeBackgroundIsLight(stableUri);
-            if (!activeLease.isCurrent()) return;
-            const appearance = { backgroundUri: stableUri, backgroundIsLight };
-            await withDbTransaction(
-              db,
-              (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
-              () => activeLease.isCurrent(),
-            );
+            if (!activeLease.isCurrent()) return null;
+            return { backgroundUri: stableUri, backgroundIsLight };
           });
+          if (!appearance) return;
+          await updateChatAppearance(pickerGrant.chatGuid, appearance, pickerGrant.accountLease);
         } catch {
           if (pickerIsCurrent()) {
             showDialog('Background', 'Couldn’t finish updating this conversation’s background.');
@@ -416,32 +408,33 @@ function ChatSettingsScreen({
         });
         if (!res || res.canceled || res.assets.length === 0 || !pickerIsCurrent()) return;
         const pickedUri = res.assets[0]!.uri;
-        let generated = false;
         try {
-          const completed = await runScreenAccountTask(pickerGrant, async (activeLease) => {
-            const db = getDatabase();
+          const prepared = await runScreenAccountTask(pickerGrant, async (activeLease) => {
             const chatGuid = pickerGrant.chatGuid;
             // Extract the seed colour from the picked asset, THEN copy it into a stable dir
             // (the ImagePicker cache path is purgeable) and persist that path.
             const tokens = await adaptiveTokensFromImage(pickedUri, 'dark');
-            if (!activeLease.isCurrent()) return;
+            if (!activeLease.isCurrent()) return null;
             const uri = await persistBackground(chatGuid, pickedUri);
-            if (!activeLease.isCurrent()) return;
+            if (!activeLease.isCurrent()) return null;
             const backgroundIsLight = await computeBackgroundIsLight(uri);
-            if (!activeLease.isCurrent()) return;
-            generated = tokens != null;
-            const appearance = {
-              ...(tokens ? { themeTokens: JSON.stringify(tokens) } : {}),
-              backgroundUri: uri,
-              backgroundIsLight,
+            if (!activeLease.isCurrent()) return null;
+            return {
+              generated: tokens != null,
+              appearance: {
+                ...(tokens ? { themeTokens: JSON.stringify(tokens) } : {}),
+                backgroundUri: uri,
+                backgroundIsLight,
+              },
             };
-            await withDbTransaction(
-              db,
-              (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
-              () => activeLease.isCurrent(),
-            );
           });
-          if (completed && !generated && pickerIsCurrent()) {
+          if (!prepared) return;
+          await updateChatAppearance(
+            pickerGrant.chatGuid,
+            prepared.appearance,
+            pickerGrant.accountLease,
+          );
+          if (!prepared.generated && pickerIsCurrent()) {
             showDialog(
               'Background set',
               'Adaptive theming needs an app update before it can colour-match this image. The background was applied.',
@@ -462,17 +455,11 @@ function ChatSettingsScreen({
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
     const appearance = { themeTokens: null, backgroundUri: null, backgroundIsLight: null };
-    queueScreenAccountTask(operationGrant, async (activeLease) => {
-      const db = getDatabase();
-      const chatGuid = operationGrant.chatGuid;
-      // Cleared the local override → drop its luminance; the synced background (if any) recomputes
-      // its own on the next chat open (ensureSyncedBackground).
-      await withDbTransaction(
-        db,
-        (context) => setChatAppearanceWithinTransaction(context, chatGuid, appearance),
-        () => activeLease.isCurrent(),
-      );
-    });
+    // Cleared the local override → drop its luminance; the synced background (if any) recomputes
+    // its own on the next chat open (ensureSyncedBackground).
+    queueScreenCommand(operationGrant, () =>
+      updateChatAppearance(operationGrant.chatGuid, appearance, operationGrant.accountLease),
+    );
   };
 
   const [renaming, setRenaming] = useState(false);
@@ -549,44 +536,31 @@ function ChatSettingsScreen({
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
     setName(text);
-    queueScreenAccountTask(operationGrant, async (activeLease) => {
-      const db = getDatabase();
-      const chatGuid = operationGrant.chatGuid;
-      const customization = { customName: text };
-      await withDbTransaction(
-        db,
-        (context) => setChatCustomizationWithinTransaction(context, chatGuid, customization),
-        () => activeLease.isCurrent(),
-      );
-    });
+    queueScreenCommand(operationGrant, () =>
+      updateChatCustomization(
+        operationGrant.chatGuid,
+        { customName: text },
+        operationGrant.accountLease,
+      ),
+    );
   };
   const pickColor = (color: string | null): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
-    queueScreenAccountTask(operationGrant, async (activeLease) => {
-      const db = getDatabase();
-      const chatGuid = operationGrant.chatGuid;
-      const customization = { customColor: color };
-      await withDbTransaction(
-        db,
-        (context) => setChatCustomizationWithinTransaction(context, chatGuid, customization),
-        () => activeLease.isCurrent(),
-      );
-    });
+    queueScreenCommand(operationGrant, () =>
+      updateChatCustomization(
+        operationGrant.chatGuid,
+        { customColor: color },
+        operationGrant.accountLease,
+      ),
+    );
   };
   const toggleMute = (on: boolean): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
-    queueScreenAccountTask(operationGrant, async (activeLease) => {
-      const db = getDatabase();
-      const chatGuid = operationGrant.chatGuid;
-      const muteType = on ? 'mute' : null;
-      await withDbTransaction(
-        db,
-        (context) => setChatMuteWithinTransaction(context, chatGuid, muteType),
-        () => activeLease.isCurrent(),
-      );
-    });
+    queueScreenCommand(operationGrant, () =>
+      setChatMuted(operationGrant.chatGuid, on, operationGrant.accountLease),
+    );
   };
   // Pick a new group photo and upload it to the server (Private API sends it to everyone).
   const onChangeGroupPhoto = (): void => {
@@ -660,21 +634,9 @@ function ChatSettingsScreen({
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
     setName('');
-    queueScreenAccountTask(operationGrant, async (activeLease) => {
-      const db = getDatabase();
-      const chatGuid = operationGrant.chatGuid;
-      const customization = { customName: null, customColor: null };
-      await withDbTransaction(
-        db,
-        (context) => setChatCustomizationWithinTransaction(context, chatGuid, customization),
-        () => activeLease.isCurrent(),
-      );
-      await withDbTransaction(
-        db,
-        (context) => setChatMuteWithinTransaction(context, chatGuid, null),
-        () => activeLease.isCurrent(),
-      );
-    });
+    queueScreenCommand(operationGrant, () =>
+      resetChatLocalPreferences(operationGrant.chatGuid, operationGrant.accountLease),
+    );
   };
 
   const repairConversation = (): void => {

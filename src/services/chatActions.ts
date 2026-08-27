@@ -13,7 +13,9 @@ import {
   listScheduledByChat,
   markAllChatsReadLocalWithinTransaction,
   resumeChatPurges,
+  setChatAppearanceWithinTransaction,
   setChatArchiveWithinTransaction,
+  setChatCustomizationWithinTransaction,
   setChatMuteWithinTransaction,
   setChatPinWithinTransaction,
   setChatUnreadLocalWithinTransaction,
@@ -21,6 +23,7 @@ import {
   swapPinnedChatOrder,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
+  type ChatAppearancePatch,
   type InboxSenderFilter,
   type PinnedOrderMoveDirection,
 } from '@db/repositories';
@@ -135,6 +138,79 @@ export function setChatPinned(
       async (context) => {
         assertChatActionLease(activeLease);
         await setChatPinWithinTransaction(context, chatGuid, pinned);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Local name/color fields accepted by the chat-settings command boundary. */
+export interface ChatCustomizationPatch {
+  readonly customName?: string | null;
+  readonly customColor?: string | null;
+}
+
+/** Update one or more device-local name/color overrides for a conversation. */
+export function updateChatCustomization(
+  chatGuid: string,
+  patch: ChatCustomizationPatch,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatCustomizationWithinTransaction(context, chatGuid, patch);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Update one or more device-local theme/background fields for a conversation. */
+export function updateChatAppearance(
+  chatGuid: string,
+  patch: ChatAppearancePatch,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatAppearanceWithinTransaction(context, chatGuid, patch);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Atomically clear the local name, accent color, and mute preference for one conversation. */
+export function resetChatLocalPreferences(
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatCustomizationWithinTransaction(context, chatGuid, {
+          customName: null,
+          customColor: null,
+        });
+        assertChatActionLease(activeLease);
+        await setChatMuteWithinTransaction(context, chatGuid, null);
         assertChatActionLease(activeLease);
       },
       () => activeLease.isCurrent(),

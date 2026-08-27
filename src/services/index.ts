@@ -20,8 +20,12 @@ export {
   setChatMuted,
   setChatArchived,
   setChatPinned,
+  updateChatAppearance,
+  updateChatCustomization,
+  resetChatLocalPreferences,
   movePinnedChat,
   deleteChat,
+  type ChatCustomizationPatch,
   type MovePinnedChatOptions,
 } from './chatActions';
 export { hydrateLock, setAppLockEnabled, completeUnlock } from './lock';
