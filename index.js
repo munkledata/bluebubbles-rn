@@ -41,6 +41,6 @@ import './src/services/background/backgroundSync';
 // setBackgroundMessageHandler(...) — killed-app FCM push delivery.
 import './src/services/notifications/fcmMessaging';
 // Constant-work cleanup for at most eight abandoned native download partials after process death.
-import './src/services/download/boundedNativeDownload';
+import './src/services/download/registerBoundedNativeDownloadCleanup';
 
 import 'expo-router/entry';

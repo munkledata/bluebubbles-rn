@@ -59,8 +59,9 @@ async function runBoundedNativeFile(
 ): Promise<BoundedNativeDownloadResult> {
   const destinationKey = options.destination.uri;
   if (activeDestinations.has(destinationKey)) throw new BoundedDownloadError('unavailable');
-  // Startup normally prepared this root. Retry here if the native filesystem was unavailable
-  // during module evaluation; no request has been registered yet, so cleanup cannot race us.
+  // The bundle entry normally prepares this root. Retry here if the native filesystem was
+  // unavailable during process-start cleanup; no request is registered yet, so cleanup cannot
+  // race us.
   if (!partialRootPrepared) cleanupAbandonedBoundedDownloadPartials();
   activeDestinations.add(destinationKey);
 
@@ -248,13 +249,4 @@ export function deleteOwnedFile(file: File): void {
   } catch {
     // A later retry/startup sweep gets another chance.
   }
-}
-
-// App startup imports the service barrel before rendering. Sweep a process-killed request now,
-// not only when the user happens to start another download. Retry at transfer time if native
-// filesystem setup is not ready during this early import.
-try {
-  cleanupAbandonedBoundedDownloadPartials();
-} catch {
-  partialRootPrepared = false;
 }
