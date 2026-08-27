@@ -35,9 +35,19 @@ export type BackgroundRunOutcome =
         | 'revoked'
         | 'account-changed';
     }
-  | { result: 'retry'; reason: 'durable-state-unavailable' | 'work-failed' };
+  | {
+      result: 'retry';
+      reason: 'durable-state-unavailable' | 'work-failed' | 'wake-budget-exhausted';
+    };
 
 export interface BackgroundSyncDependencies<Database, Client, ServerInfo> {
+  /**
+   * Stop admitting new deadline-aware work after this much elapsed time. A phase already inside
+   * one bounded native or HTTP operation may settle, but no later phase is admitted.
+   */
+  wakeBudgetMs: number;
+  /** Injectable elapsed-time clock for deterministic boundary tests. */
+  now?: () => number;
   vault: Pick<SecureVault, 'get'>;
   revocationMarker: Pick<AccountRevocationMarker, 'isRevoked'>;
   captureAccountScope(): BackgroundAccountScope;
@@ -127,6 +137,7 @@ export async function inspectBackgroundSession(
 function stoppedOutcome(
   baseScope: BackgroundAccountScope,
   marker: Pick<AccountRevocationMarker, 'isRevoked'>,
+  budgetExpired: () => boolean = () => false,
 ): BackgroundRunOutcome | null {
   if (!baseScope.isCurrent()) return { result: 'success', reason: 'account-changed' };
   const revocation = readAccountRevocationState(marker);
@@ -134,6 +145,7 @@ function stoppedOutcome(
     return { result: 'retry', reason: 'durable-state-unavailable' };
   }
   if (revocation === 'revoked') return { result: 'success', reason: 'revoked' };
+  if (budgetExpired()) return { result: 'retry', reason: 'wake-budget-exhausted' };
   return null;
 }
 
@@ -154,26 +166,55 @@ function inspectionOutcome(inspection: BackgroundSessionInspection): BackgroundR
   }
 }
 
+function elapsedTimeMs(): number {
+  return globalThis.performance?.now() ?? Date.now();
+}
+
 /**
  * Deterministic, store-free background bootstrap and work ordering.
  *
  * Only `ready` durable state reaches `createClient`; that client captures one coherent credential
  * pair before the encrypted DB is opened. Sync runs in the sync teardown slot. The schedule and
- * outgoing implementations retain their own realtime-account barriers and receive the same
- * marker-bound scope, so a rapid Disconnect/reconnect cannot turn account-A continuations into
- * account-B work.
+ * outgoing implementations retain their own realtime-account barriers and receive marker-bound
+ * scopes, so a rapid Disconnect/reconnect cannot turn account-A continuations into account-B
+ * work. Deadline-aware phases additionally stop admitting work when this wake's budget expires.
  */
 export async function runBackgroundSync<Database, Client, ServerInfo>(
   deps: BackgroundSyncDependencies<Database, Client, ServerInfo>,
 ): Promise<BackgroundRunOutcome> {
+  if (!Number.isFinite(deps.wakeBudgetMs) || deps.wakeBudgetMs <= 0) {
+    throw new RangeError('Background wake budget must be a positive finite number');
+  }
+
+  const now = deps.now ?? elapsedTimeMs;
+  const deadlineAt = now() + deps.wakeBudgetMs;
+  const budgetExpired = (): boolean => now() >= deadlineAt;
   const baseScope = deps.captureAccountScope();
-  const scope: BackgroundAccountScope = {
+  let budgetScopeRejectedWork = false;
+  const accountScope: BackgroundAccountScope = {
     generation: baseScope.generation,
     isCurrent: () =>
       baseScope.isCurrent() && readAccountRevocationState(deps.revocationMarker) === 'clear',
   };
+  const budgetScope: BackgroundAccountScope = {
+    generation: accountScope.generation,
+    isCurrent: () => {
+      // Account revocation wins classification. Record a budget stop only when this exact
+      // deadline-aware scope was consulted while the account was otherwise still authorized.
+      if (!accountScope.isCurrent()) return false;
+      if (!budgetExpired()) return true;
+      budgetScopeRejectedWork = true;
+      return false;
+    },
+  };
 
-  const stoppedAtEntry = stoppedOutcome(baseScope, deps.revocationMarker);
+  const stoppedAfterFailure = (): BackgroundRunOutcome | null => {
+    const accountStopped = stoppedOutcome(baseScope, deps.revocationMarker);
+    if (accountStopped) return accountStopped;
+    return budgetScopeRejectedWork ? { result: 'retry', reason: 'wake-budget-exhausted' } : null;
+  };
+
+  const stoppedAtEntry = stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired);
   if (stoppedAtEntry) return stoppedAtEntry;
 
   let context: { db: Database; client: Client; serverInfo: ServerInfo } | undefined;
@@ -181,37 +222,42 @@ export async function runBackgroundSync<Database, Client, ServerInfo>(
 
   try {
     await deps.runTrackedSync(async () => {
-      terminalOutcome = stoppedOutcome(baseScope, deps.revocationMarker) ?? undefined;
+      terminalOutcome =
+        stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;
 
       const inspection = await inspectBackgroundSession(deps.vault, deps.revocationMarker);
       terminalOutcome = inspectionOutcome(inspection) ?? undefined;
       if (terminalOutcome || inspection.kind !== 'ready') return;
 
-      terminalOutcome = stoppedOutcome(baseScope, deps.revocationMarker) ?? undefined;
+      terminalOutcome =
+        stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;
 
       // No await between the final durable authorization and constructing this immutable session
       // client. Every later request therefore snapshots this one tuple, never a Zustand mirror.
       const client = deps.createClient(inspection.session);
       const db = await deps.openDatabase();
-      terminalOutcome = stoppedOutcome(baseScope, deps.revocationMarker) ?? undefined;
+      terminalOutcome =
+        stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;
 
       // Keep the scope check and request creation in one synchronous turn so HttpClient snapshots
       // the captured account before any response await can cross Disconnect.
       const serverInfoPromise = deps.fetchServerInfo(client);
       const serverInfo = await serverInfoPromise;
-      terminalOutcome = stoppedOutcome(baseScope, deps.revocationMarker) ?? undefined;
+      terminalOutcome =
+        stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;
 
-      await deps.synchronize(db, client, deps.serverVersion(serverInfo), scope);
-      terminalOutcome = stoppedOutcome(baseScope, deps.revocationMarker) ?? undefined;
+      await deps.synchronize(db, client, deps.serverVersion(serverInfo), budgetScope);
+      terminalOutcome =
+        stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;
       context = { db, client, serverInfo };
     });
   } catch (error) {
-    const stopped = stoppedOutcome(baseScope, deps.revocationMarker);
+    const stopped = stoppedAfterFailure();
     if (stopped) return stopped;
     deps.onWorkError?.(error);
     return { result: 'retry', reason: 'work-failed' };
@@ -224,25 +270,29 @@ export async function runBackgroundSync<Database, Client, ServerInfo>(
   }
 
   try {
-    const stopped = stoppedOutcome(baseScope, deps.revocationMarker);
+    const stopped = stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired);
     if (stopped) return stopped;
-    await deps.recoverAndDrainSchedules(context.db, context.client, scope);
+    // Scheduled recovery caches one successful reset per account generation so a concurrent
+    // ticker cannot reset another runner's live claim. Give this already-small phase the pure
+    // account scope, then enforce the wake budget at its boundary; expiring that same scope
+    // mid-claim would turn a normal deadline into a false crash remnant.
+    await deps.recoverAndDrainSchedules(context.db, context.client, accountScope);
 
-    const afterSchedules = stoppedOutcome(baseScope, deps.revocationMarker);
+    const afterSchedules = stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired);
     if (afterSchedules) return afterSchedules;
-    await deps.drainOutgoing(context.db, context.client, scope);
+    await deps.drainOutgoing(context.db, context.client, budgetScope);
   } catch (error) {
-    const stopped = stoppedOutcome(baseScope, deps.revocationMarker);
+    const stopped = stoppedAfterFailure();
     if (stopped) return stopped;
     deps.onWorkError?.(error);
     return { result: 'retry', reason: 'work-failed' };
   }
 
-  const beforeDiagnostics = stoppedOutcome(baseScope, deps.revocationMarker);
+  const beforeDiagnostics = stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired);
   if (beforeDiagnostics) return beforeDiagnostics;
   if (deps.flushDiagnostics) {
     try {
-      await deps.flushDiagnostics(context.db, context.client, context.serverInfo, scope);
+      await deps.flushDiagnostics(context.db, context.client, context.serverInfo, budgetScope);
     } catch (error) {
       // Diagnostics are deliberately secondary: consent-gated telemetry must never turn a
       // successful message/schedule recovery into WorkManager retry churn.
@@ -251,7 +301,7 @@ export async function runBackgroundSync<Database, Client, ServerInfo>(
   }
 
   return (
-    stoppedOutcome(baseScope, deps.revocationMarker) ?? {
+    stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? {
       result: 'success',
       reason: 'completed',
     }

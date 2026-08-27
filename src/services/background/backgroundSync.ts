@@ -30,8 +30,17 @@ export const BG_SYNC_TASK = 'gator-bg-sync';
 
 /** Explicit per-wake ceilings: WorkManager timing is inexact and one wake must not drain forever. */
 export const BACKGROUND_SYNC_MAX_PAGES = 4;
-export const BACKGROUND_SCHEDULE_MAX_ROWS = 10;
+// Schedule handoff can include one bounded HTTP settlement per row. Keep this phase short enough
+// to finish cleanly instead of revoking its crash-recovery scope midway through a live claim.
+export const BACKGROUND_SCHEDULE_MAX_ROWS = 2;
 export const BACKGROUND_OUTGOING_MAX_ROWS = 10;
+/**
+ * Stop admitting new phases/rows after four minutes. The small scheduled-handoff slice finishes
+ * cleanly and deadline-aware work rejects later commits. This is an admission cutoff, not a hard
+ * task-return timer: an already-started HTTP/native operation or DB wait still settles. Later work
+ * is deferred and Android is asked to retry it on another wake.
+ */
+export const BACKGROUND_WAKE_ADMISSION_BUDGET_MS = 4 * 60_000;
 /** Per attachment attempt; safely below the queue row's 120-second ownership lease. */
 export const BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS = 60_000;
 
@@ -108,6 +117,7 @@ async function flushBackgroundDiagnostics(
 export async function executeBackgroundSyncTask(): Promise<BackgroundTask.BackgroundTaskResult> {
   try {
     const outcome = await runBackgroundSync({
+      wakeBudgetMs: BACKGROUND_WAKE_ADMISSION_BUDGET_MS,
       vault,
       revocationMarker: accountRevocationMarker,
       captureAccountScope: captureRealtimeDeliveryLease,

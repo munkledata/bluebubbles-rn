@@ -11,6 +11,7 @@ import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordi
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
+import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatTime } from '@utils';
 
 /** Edit a still-pending scheduled message: change the text and/or the fire time. */
@@ -126,6 +127,9 @@ export default function ScheduledEditScreen(): React.JSX.Element {
               {when != null ? `${formatChatDate(when)} ${formatTime(when)}` : 'Pick a time'}
             </Text>
           </Pressable>
+          <Text style={[styles.timingNote, { color: theme.color.secondaryLabel }]}>
+            {SCHEDULE_DELIVERY_TIMING_NOTE}
+          </Text>
           <Text style={[styles.repeatLabel, { color: theme.color.secondaryLabel }]}>Repeat</Text>
           <RecurrencePicker value={recurrence} onChange={setRecurrence} />
         </View>
@@ -149,5 +153,6 @@ const styles = StyleSheet.create({
   },
   timeLabel: { fontSize: 16 },
   timeValue: { fontSize: 16 },
+  timingNote: { fontSize: 13, lineHeight: 18, marginHorizontal: 4 },
   repeatLabel: { fontSize: 13, marginTop: 4, marginLeft: 4 },
 });

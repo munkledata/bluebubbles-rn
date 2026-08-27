@@ -166,6 +166,7 @@ describe('ScheduledEditScreen', () => {
     const weekly = screen.getByLabelText('Repeat weekly');
     expect(weekly.props.accessibilityState?.selected).toBe(true);
     expect(screen.getByLabelText('Repeat none').props.accessibilityState?.selected).toBe(false);
+    expect(screen.getByText(/Android background work/)).toBeTruthy();
   });
 
   it('saves id 42 with trimmed text, exact time and recurrence through the original lease', async () => {

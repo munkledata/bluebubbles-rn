@@ -208,6 +208,7 @@ describe('ScheduledScreen', () => {
   it('shows the empty placeholder when there are no scheduled messages', async () => {
     setRows([]);
     await renderWithTheme(<ScheduledScreen />);
+    expect(screen.getByText(/Scheduled delivery is best effort, not exact/)).toBeTruthy();
     expect(screen.getByText('No scheduled messages')).toBeTruthy();
   });
 

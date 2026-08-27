@@ -19,6 +19,9 @@ const CHOICES: { label: string; value: Recurrence | null }[] = [
   { label: 'Repeat monthly', value: 'monthly' },
 ];
 
+export const SCHEDULE_DELIVERY_TIMING_NOTE =
+  'Scheduled delivery is best effort, not exact. One-time messages ask the server to schedule when available. Repeating messages, replies, and offline fallbacks rely on Android background work; sleep, battery limits, connectivity, or an unavailable Mac/server can delay them.';
+
 /**
  * Third step of the schedule flow (after the native date + time pickers): choose whether
  * the message repeats. Same plain Modal + Pressable bottom sheet as {@link FailedMessageSheet}.
@@ -45,7 +48,7 @@ export function RecurrenceSheet({
           <View style={styles.header}>
             <Text style={[styles.title, { color: theme.color.label }]}>Repeat</Text>
             <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-              Send this message once, or on a schedule.
+              {SCHEDULE_DELIVERY_TIMING_NOTE}
             </Text>
           </View>
           {CHOICES.map((choice) => (

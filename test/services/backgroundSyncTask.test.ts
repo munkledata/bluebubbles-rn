@@ -88,6 +88,7 @@ import {
   BACKGROUND_OUTGOING_MAX_ROWS,
   BACKGROUND_SCHEDULE_MAX_ROWS,
   BACKGROUND_SYNC_MAX_PAGES,
+  BACKGROUND_WAKE_ADMISSION_BUDGET_MS,
   BG_SYNC_TASK,
   registerBackgroundSync,
 } from '@/services/background/backgroundSync';
@@ -150,6 +151,10 @@ describe('the Expo background task adapter', () => {
     });
 
     await task?.();
+
+    expect(mockRunBackgroundSync).toHaveBeenCalledWith(
+      expect.objectContaining({ wakeBudgetMs: BACKGROUND_WAKE_ADMISSION_BUDGET_MS }),
+    );
 
     expect(mockIncrementalSync).toHaveBeenCalledWith(
       db,

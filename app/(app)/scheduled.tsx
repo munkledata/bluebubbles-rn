@@ -19,6 +19,7 @@ import {
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
+import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatTime } from '@utils';
 
 /** One flat-list item: a scheduled row or the COMPLETED section header. */
@@ -76,6 +77,9 @@ export default function ScheduledScreen(): React.JSX.Element {
   return (
     <Screen>
       <ScreenHeader title="Scheduled" onBack={() => router.back()} />
+      <Text style={[styles.timingNote, { color: theme.color.secondaryLabel }]}>
+        {SCHEDULE_DELIVERY_TIMING_NOTE}
+      </Text>
 
       <FlashList
         data={items}
@@ -154,6 +158,7 @@ export default function ScheduledScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  timingNote: { fontSize: 13, lineHeight: 18, paddingHorizontal: 16, paddingVertical: 12 },
   sectionLabel: { fontSize: 13, marginTop: 24, marginBottom: 4, marginLeft: 16 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 15 },
 });

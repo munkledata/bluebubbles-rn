@@ -36,6 +36,7 @@ function makeDependencies(
 ): BackgroundSyncDependencies<TestDb, TestClient, TestServerInfo> {
   const scope: BackgroundAccountScope = { generation: 7, isCurrent: () => true };
   return {
+    wakeBudgetMs: 240_000,
     vault,
     revocationMarker: marker,
     captureAccountScope: () => scope,
@@ -218,7 +219,9 @@ describe('headless background bootstrap', () => {
     };
     deps.drainOutgoing = async (_db, client, scope) => {
       outgoingClient = client;
-      expect(scope).toBe(scheduledScope);
+      expect(scope.generation).toBe(scheduledScope?.generation);
+      expect(scope.isCurrent()).toBe(true);
+      expect(scheduledScope?.isCurrent()).toBe(true);
       events.push('outgoing-after-handoff');
     };
 
@@ -228,6 +231,98 @@ describe('headless background bootstrap', () => {
     expect(events.indexOf('schedule-handoff')).toBeLessThan(
       events.indexOf('outgoing-after-handoff'),
     );
+  });
+
+  it('lets the bounded schedule phase settle, then expires shared admission for later work', async () => {
+    const vault = new InMemoryVault();
+    await setValidSession(vault);
+    const events: string[] = [];
+    const deps = makeDependencies(vault, new TestRevocationMarker(), events);
+    let now = 1_000;
+    deps.wakeBudgetMs = 400;
+    deps.now = () => now;
+    let syncScope: BackgroundAccountScope | undefined;
+    deps.synchronize = async (_db, _client, version, scope) => {
+      syncScope = scope;
+      events.push(`sync:${version}`);
+    };
+    deps.recoverAndDrainSchedules = async (_db, _client, scope) => {
+      events.push(`schedule-scope-before:${String(scope.isCurrent())}`);
+      now = 1_400;
+      events.push(`schedule-scope-at-deadline:${String(scope.isCurrent())}`);
+      events.push(`admission-scope-at-deadline:${String(syncScope?.isCurrent())}`);
+    };
+
+    await expect(runBackgroundSync(deps)).resolves.toEqual({
+      result: 'retry',
+      reason: 'wake-budget-exhausted',
+    });
+
+    expect(events).toEqual([
+      'tracked',
+      'client',
+      'db',
+      'server-info',
+      'sync:1.9.0',
+      'schedule-scope-before:true',
+      'schedule-scope-at-deadline:true',
+      'admission-scope-at-deadline:false',
+    ]);
+  });
+
+  it('reports a genuine schedule failure even when its bounded phase crosses the cutoff', async () => {
+    const vault = new InMemoryVault();
+    await setValidSession(vault);
+    const deps = makeDependencies(vault, new TestRevocationMarker());
+    const failure = new Error('scheduled handoff database failure');
+    const onWorkError = jest.fn();
+    let now = 1_000;
+    deps.wakeBudgetMs = 400;
+    deps.now = () => now;
+    deps.onWorkError = onWorkError;
+    deps.recoverAndDrainSchedules = async () => {
+      now = 1_400;
+      throw failure;
+    };
+
+    await expect(runBackgroundSync(deps)).resolves.toEqual({
+      result: 'retry',
+      reason: 'work-failed',
+    });
+    expect(onWorkError).toHaveBeenCalledWith(failure);
+  });
+
+  it('classifies an error caused by the deadline-aware scope as budget exhaustion', async () => {
+    const vault = new InMemoryVault();
+    await setValidSession(vault);
+    const deps = makeDependencies(vault, new TestRevocationMarker());
+    const onWorkError = jest.fn();
+    let now = 1_000;
+    deps.wakeBudgetMs = 400;
+    deps.now = () => now;
+    deps.onWorkError = onWorkError;
+    deps.synchronize = async (_db, _client, _version, scope) => {
+      now = 1_400;
+      expect(scope.isCurrent()).toBe(false);
+      throw new Error('deadline commit guard rejected');
+    };
+
+    await expect(runBackgroundSync(deps)).resolves.toEqual({
+      result: 'retry',
+      reason: 'wake-budget-exhausted',
+    });
+    expect(onWorkError).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing or nonsensical wake budget before touching durable state', async () => {
+    const events: string[] = [];
+    const deps = makeDependencies(new InMemoryVault(), new TestRevocationMarker(), events);
+    deps.wakeBudgetMs = 0;
+
+    await expect(runBackgroundSync(deps)).rejects.toThrow(
+      'Background wake budget must be a positive finite number',
+    );
+    expect(events).toEqual([]);
   });
 
   it('retires quietly when revocation lands during a cold database open', async () => {
