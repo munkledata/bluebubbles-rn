@@ -52,7 +52,7 @@ relays to Google in the background, and reports a send-phase failure asynchronou
 `message-send-error`. The ack marks the bubble sent and deletes the queue row — so an async
 failure needs its own path back into the ladder:
 
-- `applyServerSendError` (`src/db/repositories/outgoing.ts`) routes every `message-send-error`:
+- `applyServerSendError` (`src/db/repositories/outgoingRetry.ts`) routes every `message-send-error`:
   queue row still present → bump attempts + reschedule backoff; queue row gone AND the event
   carries **`retryable: true`** → `reEnqueueOutgoingFromMessage` rebuilds a fresh queue row from
   the message/attachment tables (attempts=1, so it skips the grace window). Either way the

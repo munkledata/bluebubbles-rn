@@ -11,7 +11,7 @@ import type { AppDatabase } from '../types';
 /**
  * Durable buffer for captured error reports awaiting upload to the server.
  *
- * Mirrors the outgoing-queue lease pattern (see `outgoing.ts`): rows are inserted by the capture
+ * Mirrors the outgoing-queue lease pattern (see `outgoingRetry.ts`): rows are inserted by the capture
  * sink, atomically LEASED for an upload attempt (so two concurrent runners never double-upload),
  * DELETED on success, and marked with an exponential backoff on failure — retired once they hit
  * the attempt cap so a permanently un-uploadable report can't lease forever. Pure SQL (no RN),
