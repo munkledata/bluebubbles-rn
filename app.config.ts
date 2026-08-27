@@ -14,9 +14,9 @@ const config: ExpoConfig = {
   // EAS account/org that owns the build/project (matches the app package + Firebase
   // project naming; your personal `bluegreengator` account is the alternative).
   owner: 'bluegreengatorapps',
-  // Single source of truth for the user-visible version is package.json. Run the explicit
-  // release:prepare:patch step only after choosing the release version; build commands never
-  // mutate it implicitly. The Play versionCode is managed remotely by EAS (autoIncrement).
+  // Single source of truth for the user-visible version is package.json. The release runner applies
+  // the chosen version only inside an isolated Git worktree; it never mutates the shared checkout.
+  // The Play versionCode is managed remotely by EAS (autoIncrement).
   version: pkg.version,
   orientation: 'portrait',
   icon: './assets/icon.png',

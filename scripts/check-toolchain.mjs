@@ -10,6 +10,14 @@ export const REQUIRED_NODE_VERSION = '24.19.0';
 export const REQUIRED_NODE_ENGINE = '>=24.19.0 <25';
 export const REQUIRED_NPM_VERSION = '11.17.0';
 export const REQUIRED_EAS_CLI_VERSION = '21.5.0';
+const EAS_NPX_ENV_UNSET =
+  'unset npm_config_ignore_scripts npm_config_call npm_config_package npm_config_yes; ';
+export const REQUIRED_ANDROID_RELEASE_POLICY = Object.freeze({
+  easCliPackage: `eas-cli@${REQUIRED_EAS_CLI_VERSION}`,
+  localBuildPluginPackage: `eas-cli-local-build-plugin@${REQUIRED_EAS_CLI_VERSION}`,
+  buildCommand: `${EAS_NPX_ENV_UNSET}exec eas build -p android --profile production --local --output "$GATOR_RELEASE_OUTPUT" --non-interactive --freeze-credentials`,
+  submitCommand: `${EAS_NPX_ENV_UNSET}exec eas submit -p android --profile production --path "$GATOR_RELEASE_ARTIFACT" --non-interactive --wait`,
+});
 export const REQUIRED_EAS_SUBMIT_CONFIG = Object.freeze({
   production: Object.freeze({
     android: Object.freeze({
@@ -18,20 +26,76 @@ export const REQUIRED_EAS_SUBMIT_CONFIG = Object.freeze({
     }),
   }),
 });
-export const REQUIRED_RELEASE_SCRIPTS = {
-  'release:android': 'npm run release:android:local',
-  'release:android:local':
-    'npm run check:toolchain && GOOGLE_SERVICES_JSON="${GOOGLE_SERVICES_JSON:-$PWD/google-services.json}" && test -f "$GOOGLE_SERVICES_JSON" && export GOOGLE_SERVICES_JSON && EAS_LOCAL_BUILD_PLUGIN_PATH="$(npx --yes --ignore-scripts --package eas-cli-local-build-plugin@21.5.0 -c \'command -v eas-cli-local-build-plugin\')" && test -x "$EAS_LOCAL_BUILD_PLUGIN_PATH" && export EAS_LOCAL_BUILD_PLUGIN_PATH && npx --yes --ignore-scripts --package eas-cli@21.5.0 -c \'unset npm_config_ignore_scripts npm_config_call npm_config_package npm_config_yes; exec eas build -p android --profile production --local --output ./gator-release.aab\'',
-};
-const REVIEWED_RELEASE_SCRIPT_NAMES = new Set([
-  'release:prepare:patch',
-  ...Object.keys(REQUIRED_RELEASE_SCRIPTS),
-]);
+export const REQUIRED_RELEASE_SCRIPTS = Object.freeze({
+  'release:android': 'node scripts/release-android.mjs help',
+  'release:android:preflight': 'node scripts/release-android.mjs preflight',
+  'release:android:prepare': 'node scripts/release-android.mjs prepare',
+  'release:android:build': 'node scripts/release-android.mjs build',
+  'release:android:validate': 'node scripts/release-android.mjs validate',
+  'release:android:promote': 'node scripts/release-android.mjs promote',
+  'release:android:submit': 'node scripts/release-android.mjs submit',
+  'release:android:status': 'node scripts/release-android.mjs status',
+  'release:android:reconcile': 'node scripts/release-android.mjs reconcile',
+  'release:android:cleanup': 'node scripts/release-android.mjs cleanup',
+});
+const REVIEWED_RELEASE_SCRIPT_NAMES = new Set(Object.keys(REQUIRED_RELEASE_SCRIPTS));
 const EAS_BUILD_OR_SUBMIT_PATTERN =
   /(?:(?:\beas\b|\beas-cli(?:@[^\s'\"]+)?\b)[^\n]*(?:\bbuild\b|\bsubmit\b)|--auto-submit\b)/;
-
 export function npmVersionFromUserAgent(userAgent) {
   return userAgent?.match(/(?:^|\s)npm\/([^ ]+)/)?.[1];
+}
+
+export function reviewedEasNpxArgs(phase) {
+  const command =
+    phase === 'build'
+      ? REQUIRED_ANDROID_RELEASE_POLICY.buildCommand
+      : phase === 'submit'
+        ? REQUIRED_ANDROID_RELEASE_POLICY.submitCommand
+        : null;
+  if (!command) throw new Error(`unreviewed EAS release phase: ${String(phase)}`);
+  return [
+    '--yes',
+    '--ignore-scripts',
+    '--package',
+    REQUIRED_ANDROID_RELEASE_POLICY.easCliPackage,
+    '-c',
+    command,
+  ];
+}
+
+export function reviewedLocalBuildPluginNpxArgs() {
+  return [
+    '--yes',
+    '--ignore-scripts',
+    '--package',
+    REQUIRED_ANDROID_RELEASE_POLICY.localBuildPluginPackage,
+    '-c',
+    'command -v eas-cli-local-build-plugin',
+  ];
+}
+
+export function validateReleaseRunnerSource(source) {
+  if (typeof source !== 'string') return ['Android release runner source is unavailable'];
+  const errors = [];
+  for (const marker of [
+    "reviewedEasNpxArgs('build')",
+    "reviewedEasNpxArgs('submit')",
+    'reviewedLocalBuildPluginNpxArgs()',
+  ]) {
+    if (source.split(marker).length !== 2) {
+      errors.push(`Android release runner must use exactly one ${marker} invocation`);
+    }
+  }
+  if (
+    /exec eas (?:build|submit)\b|eas-cli(?:-local-build-plugin)?@|--auto-submit\b|--latest\b/.test(
+      source,
+    )
+  ) {
+    errors.push(
+      'Android release runner must obtain EAS commands and package pins only from the reviewed policy helpers',
+    );
+  }
+  return errors;
 }
 
 export function validateToolchain({
@@ -68,30 +132,18 @@ export function validateToolchain({
     errors.push(`invoking npm is ${invokingNpm}, but npm ${REQUIRED_NPM_VERSION} is required`);
   }
 
-  if (
-    packageJson?.scripts?.['release:prepare:patch'] !== 'npm version patch --no-git-tag-version'
-  ) {
-    errors.push('release:prepare:patch must be the explicit package-version preparation command');
-  }
   for (const [scriptName, expected] of Object.entries(REQUIRED_RELEASE_SCRIPTS)) {
     if (packageJson?.scripts?.[scriptName] !== expected) {
-      errors.push(`${scriptName} must equal the reviewed local-build-only command: ${expected}`);
+      errors.push(`${scriptName} must equal the reviewed phased-release command: ${expected}`);
     }
   }
   for (const [scriptName, script] of Object.entries(packageJson?.scripts ?? {})) {
     if (scriptName.startsWith('release:') && !REVIEWED_RELEASE_SCRIPT_NAMES.has(scriptName)) {
       errors.push(`${scriptName} is not a reviewed release command`);
     }
-    if (
-      typeof script === 'string' &&
-      EAS_BUILD_OR_SUBMIT_PATTERN.test(script) &&
-      !(
-        scriptName === 'release:android:local' &&
-        script === REQUIRED_RELEASE_SCRIPTS['release:android:local']
-      )
-    ) {
+    if (typeof script === 'string' && EAS_BUILD_OR_SUBMIT_PATTERN.test(script)) {
       errors.push(
-        `${scriptName} must not invoke an unreviewed EAS build or submit command; use release:android`,
+        `${scriptName} must not invoke EAS directly; use the reviewed release:android phase commands`,
       );
     }
   }
@@ -141,18 +193,22 @@ function readNpmVersion() {
 export function runToolchainCheck({ root = process.cwd() } = {}) {
   const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
   const eas = JSON.parse(readFileSync(resolve(root, 'eas.json'), 'utf8'));
+  const releaseRunnerSource = readFileSync(resolve(root, 'scripts/release-android.mjs'), 'utf8');
   const nvmNode = readFileSync(resolve(root, '.nvmrc'), 'utf8').trim();
   const actualNode = process.versions.node;
   const childNpm = readNpmVersion();
   const invokingNpm = npmVersionFromUserAgent(process.env.npm_config_user_agent);
-  const errors = validateToolchain({
-    actualNode,
-    childNpm,
-    eas,
-    invokingNpm,
-    nvmNode,
-    packageJson,
-  });
+  const errors = [
+    ...validateToolchain({
+      actualNode,
+      childNpm,
+      eas,
+      invokingNpm,
+      nvmNode,
+      packageJson,
+    }),
+    ...validateReleaseRunnerSource(releaseRunnerSource),
+  ];
 
   if (errors.length > 0) throw new Error(`Toolchain drift:\n- ${errors.join('\n- ')}`);
   return {

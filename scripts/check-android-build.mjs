@@ -368,6 +368,49 @@ function listBundleEntries(bundlePath) {
   return new Set(result.stdout.split(/\r?\n/).filter(Boolean));
 }
 
+/**
+ * Inspect one built Android App Bundle without requiring a generated native tree.
+ *
+ * This is the release-tool boundary: it applies the same packaged manifest/shortcuts/DEX contract
+ * as the full Android build guard, then returns only the finite identity fields needed to bind an
+ * artifact to its release record.
+ */
+export function inspectPackagedAndroidBundle(bundlePath) {
+  const bundleEntries = listBundleEntries(bundlePath);
+  const manifestProto = readBundleEntry(bundlePath, PACKAGED_MANIFEST_ENTRY);
+  const errors = validatePackagedAndroidBundle({
+    manifestProto,
+    shortcutsProto: bundleEntries.has(PACKAGED_SHORTCUTS_ENTRY)
+      ? readBundleEntry(bundlePath, PACKAGED_SHORTCUTS_ENTRY)
+      : undefined,
+    // The package/lock/autolinking checks prevent a clean build from linking the removed module.
+    // This additionally rejects a stale or otherwise contaminated release artifact.
+    dexBytes: readBundleEntry(bundlePath, PACKAGED_DEX_PATTERN, 256 * 1024 * 1024),
+  });
+  if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
+
+  const manifest = decodeProtoXml(manifestProto).find(
+    (element) => element.name === 'manifest' && element.parent == null,
+  );
+  if (!manifest) throw new Error('packaged manifest identity is missing its root element');
+  const applicationId = manifest.attributes.get('package');
+  const versionName =
+    manifest.attributes.get('android:versionName') ?? manifest.attributes.get('versionName');
+  const versionCodeText =
+    manifest.attributes.get('android:versionCode') ?? manifest.attributes.get('versionCode');
+  if (!applicationId) throw new Error('packaged manifest identity is missing package');
+  if (!versionName) throw new Error('packaged manifest identity is missing versionName');
+  if (!versionCodeText || !/^[1-9]\d*$/.test(versionCodeText)) {
+    throw new Error('packaged manifest identity has an invalid versionCode');
+  }
+  const versionCode = Number(versionCodeText);
+  if (!Number.isSafeInteger(versionCode)) {
+    throw new Error('packaged manifest identity versionCode exceeds the safe integer range');
+  }
+
+  return { applicationId, versionName, versionCode };
+}
+
 function validateManifestElements(elements, { debug = false } = {}) {
   const errors = [];
   const permissionElements = permissionElementsOf(elements);
@@ -518,19 +561,7 @@ export function runAndroidBuildCheck({
     errors.push(`release AAB is missing or empty: ${bundlePath}`);
   } else {
     try {
-      const bundleEntries = listBundleEntries(bundlePath);
-      errors.push(
-        ...validatePackagedAndroidBundle({
-          manifestProto: readBundleEntry(bundlePath, PACKAGED_MANIFEST_ENTRY),
-          shortcutsProto: bundleEntries.has(PACKAGED_SHORTCUTS_ENTRY)
-            ? readBundleEntry(bundlePath, PACKAGED_SHORTCUTS_ENTRY)
-            : undefined,
-          // The package/lock/autolinking checks prevent a clean build from linking the removed
-          // module. This DEX marker check additionally rejects a stale or otherwise contaminated
-          // release artifact built from an old native tree.
-          dexBytes: readBundleEntry(bundlePath, PACKAGED_DEX_PATTERN, 256 * 1024 * 1024),
-        }),
-      );
+      inspectPackagedAndroidBundle(bundlePath);
     } catch (error) {
       errors.push(
         `release AAB inspection failed: ${error instanceof Error ? error.message : String(error)}`,

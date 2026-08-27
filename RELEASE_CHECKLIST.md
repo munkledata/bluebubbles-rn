@@ -32,9 +32,10 @@ Play Internal Testing. `STORE-01A-UGC-SAFETY`, production listing assets, and la
 completion do not block this internal test; they are not waived and become gates before any Closed,
 Open, or Production promotion, or earlier if Play flags the internal app.
 
-- [ ] `eas.json` still declares `track: "internal"` as the only explicit submission track; release
-      scripts stop after building, and Play Console confirms no Closed, Open, or Production release is
-      active before a separate reviewed submission.
+- [ ] `eas.json` still declares `track: "internal"` as the only explicit submission track. The local
+      build phase cannot submit; the separate submit phase previews by default and requires `--execute`,
+      an interactive candidate-specific phrase, and reviewed operator approval. Play Console confirms
+      no Closed, Open, or Production release is active before submission.
 - [ ] Version/build, commit, AAB SHA-256, build provenance, tester devices, and test date are recorded
       above.
 - [ ] The intended tester list, opt-in link, feedback destination, and named response owner work.
@@ -106,6 +107,28 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
       there is no hidden telemetry or placeholder credential.
 
 ## 4. Clean native candidate
+
+For a future candidate only—not to rebuild the frozen candidate recorded above—run each phase
+separately and review its receipt before continuing:
+
+```sh
+npm run release:android:preflight -- --version <x.y.z> --source <full-sha>
+npm run release:android:prepare -- --run <run-id>
+npm run release:android:build -- --run <run-id> --execute --confirm-remote-version-increment
+npm run release:android:validate -- --run <run-id>
+npm run release:android:promote -- --run <run-id>
+npm run release:android:submit -- --run <run-id>
+# Only after explicit upload approval:
+npm run release:android:submit -- --run <run-id> --execute
+```
+
+Use `dist/release/<run-id>/validation.json` and `promotion.json` for the version, exact source,
+environment, size, SHA-256, and upload-certificate record. Do not infer identity from a filename or
+from the remote EAS version counter. A local build still contacts EAS and may consume a remote
+`versionCode` before compilation finishes, so a failed build run is never retried silently.
+If preparation, build, or submission is interrupted, use
+`npm run release:android:reconcile -- --run <run-id>`. Safely rerun validation or promotion from
+their recorded state. Reconciliation never invokes EAS or submits an artifact.
 
 Build from a clean generated Android project. CI must perform the equivalent checks before release:
 
