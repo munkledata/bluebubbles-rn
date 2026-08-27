@@ -8,7 +8,7 @@ import { setSyncMarkerWithinTransaction } from './sync';
 
 /**
  * kv key holding the deletion catch-up watermark. Duplicated from `DELETIONS_SYNCED_AT_KEY`
- * (`src/services/sync/engine.ts`) rather than imported, because `src/db` must never import
+ * (`src/services/sync/deletionSync.ts`) rather than imported, because `src/db` must never import
  * `src/services` — the sync engine imports THIS layer, so the reverse edge would be a cycle.
  * `test/db/clearLocalCache.test.ts` asserts the two strings still agree.
  */

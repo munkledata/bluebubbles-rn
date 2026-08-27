@@ -339,7 +339,7 @@ export class DbEventSink implements EventSink {
         //
         // A delete event missed while the app was DEAD or APP-LOCKED (deliverRespectingLock does
         // not touch the DB while locked) is reconciled by the R1 CATCH-UP SYNC (2026-07-23): every
-        // boot/reconnect sync runs syncDeletedMessages (sync/engine.ts), which pages
+        // boot/reconnect sync runs syncDeletedMessages (sync/deletionSync.ts), which pages
         // GET /message/deleted after the persisted `sync.deletionsSyncedAt` watermark and applies
         // each row through this same markMessageDeleted tombstone (idempotent, so a row this live
         // event already handled re-applying is a no-op). This live event is the FAST path, no
