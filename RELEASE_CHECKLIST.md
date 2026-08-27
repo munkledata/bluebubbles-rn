@@ -226,7 +226,7 @@ At minimum:
 ### Historical pre-v57 DEV host evidence
 
 These four DEV results stop at the then-current migration head `0038`; they do not include migration
-`0039_message_error_message` and give no current-v57 or exact-AAB credit.
+`0039_message_error_message` and give no replacement-candidate or exact-AAB credit.
 
 - The local API-35 arm64 DEV V3 lane passed the disposable SQLCipher/op-sqlite/Drizzle contract:
   exact then-current production migrations `0001`–`0038`, per-migration `0030` rollback/retry over an
@@ -251,7 +251,7 @@ These four DEV results stop at the then-current migration head `0038`; they do n
   the exact original head-`0037` state read-only, then retries exact `[0038]`, verifies persistence,
   and cleans all eight fixed paths. This is not statement-in-flight evidence.
 
-### Current v57 native/device proof
+### Future replacement native/device proof
 
 - [ ] The exact release candidate and a supported physical device repeat the native contract and
       pass the crypto self-test, fresh install plus an actual signed prior-build install-over,
