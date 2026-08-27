@@ -2,6 +2,10 @@ import type { ExpoConfig } from 'expo/config';
 
 import pkg from './package.json';
 
+const DEVELOPMENT_ANDROID_ARCHITECTURES = 'arm64-v8a,x86_64';
+const androidArchitectures =
+  process.env.GATOR_ANDROID_ARCHITECTURES ?? DEVELOPMENT_ANDROID_ARCHITECTURES;
+
 /**
  * Expo app config (Android-only target, iOS-styled UI).
  *
@@ -107,12 +111,11 @@ const config: ExpoConfig = {
     // performs provider reads and an unbounded cache copy before JavaScript can enforce file,
     // aggregate, or time limits. Until an owned bounded native intake replaces it, the release
     // manifest must contain neither ACTION_SEND filters nor a Direct Share declaration (IPC-01).
-    // Build arm64-v8a ONLY. `android/` is regenerated on every build, so the ABI list has to be
-    // pinned here rather than in gradle.properties. Cuts the native compile (RN, Hermes,
-    // op-sqlite/SQLCipher, libsodium, the local modules) to a quarter of its work and peak memory —
-    // this machine has OOM-killed the release build before, and a killed build still burns a Play
-    // versionCode. Drops 32-bit ARM devices and x86 emulators. See plugins/withArm64Only.js.
-    './plugins/withArm64Only',
+    // Keep production arm64-v8a-only to bound the release compile, but retain x86_64 in
+    // development/preview so the supported emulator path actually exists. EAS profile `env`
+    // values are available while this dynamic config is evaluated; a plain local prebuild has no
+    // selected profile and deliberately defaults to the development list above.
+    ['./plugins/withArm64Only', { architectures: androidArchitectures }],
     // FCM push: the firebase plugin wires google-services.json + the messaging SDK
     // into the native build (the receive pipeline is already in JS).
     '@react-native-firebase/app',

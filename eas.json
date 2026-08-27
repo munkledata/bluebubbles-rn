@@ -11,6 +11,7 @@
     "development": {
       "extends": "base",
       "environment": "development",
+      "env": { "GATOR_ANDROID_ARCHITECTURES": "arm64-v8a,x86_64" },
       "developmentClient": true,
       "distribution": "internal",
       "android": { "buildType": "apk" }
@@ -18,12 +19,14 @@
     "preview": {
       "extends": "base",
       "environment": "preview",
+      "env": { "GATOR_ANDROID_ARCHITECTURES": "arm64-v8a,x86_64" },
       "distribution": "internal",
       "android": { "buildType": "apk" }
     },
     "production": {
       "extends": "base",
       "environment": "production",
+      "env": { "GATOR_ANDROID_ARCHITECTURES": "arm64-v8a" },
       "autoIncrement": true,
       "android": { "buildType": "app-bundle" }
     }
