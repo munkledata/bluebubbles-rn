@@ -2,7 +2,6 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getDatabase } from '@db/database';
 import {
   getContactsPermissionState,
   isContactsPermissionDeniedError,
@@ -19,12 +18,12 @@ import {
   requestNotificationPermission,
   type NotificationPermissionState,
 } from '@/services/notifications/notifeeService';
+import { finishPermissionOnboarding } from '@/services/featureSettingsCommands';
 import {
   openContactsPermissionSettings,
   showContactsPermissionRecovery,
 } from '@ui/permissions/contactsPermission';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { completePermissionOnboarding } from '@state/featureSettingsStore';
 import { Button, Screen, useTheme } from '@ui';
 
 type NotificationUiState = NotificationPermissionState | 'loading' | 'unavailable';
@@ -177,10 +176,7 @@ export default function PermissionsScreen(): React.JSX.Element {
     continueStartedRef.current = true;
     setContinueBusy(true);
     try {
-      const completed = await completePermissionOnboarding({
-        db: getDatabase(),
-        shouldCommit: isCurrent,
-      });
+      const completed = await finishPermissionOnboarding(accountLease, isCurrent);
       if (completed && isCurrent()) router.replace('/home');
     } catch {
       if (isCurrent()) {

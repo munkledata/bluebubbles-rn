@@ -3,7 +3,6 @@ import Constants from 'expo-constants';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { logger } from '@core/secure';
-import { getDatabase } from '@db/database';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
@@ -14,6 +13,7 @@ import {
 } from '@native/screenSecurity';
 import { disconnectFailureMessage, forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { requestDisableBatteryOptimization } from '@/services/battery';
+import { setErrorReportingConsent } from '@/services/featureSettingsCommands';
 import {
   getContactsPermissionState,
   isContactsAccountChangedError,
@@ -114,7 +114,6 @@ export default function SettingsScreen(): React.JSX.Element {
   const filterUnknownSenders = useFeatureSettingsStore((s) => s.filterUnknownSenders);
   const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
   const errorReportingEnabled = useFeatureSettingsStore((s) => s.errorReportingEnabled);
-  const setErrorReportingConsent = useFeatureSettingsStore((s) => s.setErrorReportingConsent);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
   const messagesPerChat = useSyncSettingsStore((s) => s.messagesPerChat);
   const setMessagesPerChat = useSyncSettingsStore((s) => s.setMessagesPerChat);
@@ -413,11 +412,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const persistErrorReportingConsent = async (next: boolean): Promise<void> => {
     if (!accountLease.isCurrent()) return;
     try {
-      const db = getDatabase();
-      await setErrorReportingConsent(next, {
-        db,
-        shouldCommit: () => accountLease.isCurrent(),
-      });
+      await setErrorReportingConsent(next, accountLease);
     } catch {
       if (!accountLease.isCurrent()) return;
       showDialog(
