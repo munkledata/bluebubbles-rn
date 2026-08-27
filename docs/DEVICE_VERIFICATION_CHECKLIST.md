@@ -1,22 +1,21 @@
-# Device Verification Checklist
+# Device Verification Checklist — historical version-code-56 preparation
 
-> **Status (2026-08-23): PREPARED ONLY — NO VERSION-CODE-56 DEVICE OR PLAY RESULTS.** This
-> document does not authorize or prove an upload, submission, tester invitation, server deployment,
-> Play install, or device result. `DEVICE-01B1-NOTIFICATION-LIFECYCLE-MATRIX` and
-> `DEVICE-01B2-DATA-NATIVE-MATRIX` have reconciled the current notification/lifecycle and
-> data/native guidance below, but every result remains open until the external prerequisites and
-> separate execution approvals exist. `DEVICE-01B3-UI-ACCESSIBILITY-MATRIX` has now reconciled the
-> remaining permission, UI, accessibility, browser, theme, and account-transition guidance.
-> `DEVICE-01B4-A11Y-02-MOTION-MATRIX` refines its Reduce Motion evidence, but that matrix is blocked
-> on a later eligible candidate because frozen version code `56` predates the completed host work.
-> The old behavior matrix remains historical and permanently non-executable.
+> **STATUS (2026-08-27): RETIRED V56 PREPARATION — NOT THE CURRENT V57 EXECUTION MATRIX.**
+> This file preserves the prepared `0.1.40` / version-code-`56` ledger and its synthetic-safe matrix history. It
+> contains no Play or device result. Do not execute its rows, fill its result fields, or transfer any checkmark or
+> evidence to version code `57`.
+>
+> The frozen current candidate is `0.1.41` / version code `57`; use [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md)
+> §0 and [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) for identity and
+> readiness. `DEVICE-01` in [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until this matrix
+> is refreshed row-by-row for v57 and later-source applicability.
 
-This is the evidence record for the exact Google Play Internal Testing candidate. Host tests can
+This was prepared as the evidence record for the retired Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
 bridges, process death, and Play delivery need evidence from the exact installed candidate. Never
 copy a result from a development build or an older Play build into the candidate record.
 
-## Exact version-code-56 candidate boundary
+## Historical exact version-code-56 candidate boundary
 
 | Field                      | Frozen value                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------------- |

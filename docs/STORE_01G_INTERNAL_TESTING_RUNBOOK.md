@@ -51,9 +51,10 @@ requires history. Put progress in the evidence ledger below and consolidate the 
 ## 2. Current proven state
 
 - `eas.json` has one Android submission target: Google Play track `internal`.
-- Release scripts build candidate artifacts locally and contain no submission step. The existing
-  GitHub Actions native lane can compile disposable fixture/debug-signed APK/AAB verification
-  artifacts; those are not release candidates and do not use EAS Build or submit to Play.
+- The release build phase is local-only and cannot submit. A separate submit phase previews by default and requires
+  `--execute` plus an interactive candidate-specific phrase; no upload or submission was run for v57. The existing
+  GitHub Actions native lane can compile disposable fixture/debug-signed APK/AAB verification artifacts; those are
+  not release candidates and do not use EAS Build or submit to Play.
 - The approved local production build incremented the EAS remote Android counter from `56` to `57`,
   fetched the existing managed keystore, and stopped after writing the local AAB. It did not create a
   hosted build or submission.
