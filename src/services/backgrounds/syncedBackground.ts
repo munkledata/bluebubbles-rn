@@ -94,6 +94,7 @@ const perChatWork = new Map<string, PerChatWork>();
 let quotaRepairTimer: ReturnType<typeof setTimeout> | null = null;
 let quotaRepairAttemptsRemaining = 0;
 let quotaRepairGeneration = 0;
+let startupCacheMaintenance: Promise<void> | null = null;
 
 async function withBackgroundWorkSlot<T>(task: () => Promise<T>): Promise<T> {
   if (activeWork < SYNCED_BACKGROUND_MAX_CONCURRENT) {
@@ -479,8 +480,16 @@ function armSyncedBackgroundQuotaRepair(generation: number): void {
   }, SYNCED_BACKGROUND_CACHE_REPAIR_DELAY_MS);
 }
 
-// The service barrel is imported during app startup. This restart pass repairs stale generations
-// even when the user never re-opens the chat whose old wallpaper pushed the cache over quota. It
-// shares the same slot as promotion; the postcommit prune above stays direct because it is already
-// inside that slot and nesting would deadlock the one-slot queue.
-void withBackgroundWorkSlot(() => pruneSyncedBackgroundCacheBestEffort(null));
+/**
+ * Explicit foreground-start maintenance for stale cache generations.
+ *
+ * It shares the same slot as promotion and starts at most once per JS process. The postcommit prune
+ * above stays direct because it is already inside that slot and nesting would deadlock the one-slot
+ * queue.
+ */
+export function startSyncedBackgroundCacheMaintenance(): Promise<void> {
+  startupCacheMaintenance ??= withBackgroundWorkSlot(() =>
+    pruneSyncedBackgroundCacheBestEffort(null),
+  );
+  return startupCacheMaintenance;
+}

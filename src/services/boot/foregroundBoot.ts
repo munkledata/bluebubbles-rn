@@ -3,6 +3,7 @@ import { logger } from '@core/secure';
 import { DB_DRIVER_CONTRACT_INTERNAL_FAILURE, runDbDriverSelfTest } from '@db/database';
 import { checkDeviceIntegrity } from '@native/deviceIntegrity';
 import { useLockStore } from '@state/lockStore';
+import { startSyncedBackgroundCacheMaintenance } from '../backgrounds/syncedBackground';
 import { registerBackgroundSync } from '../background/backgroundSync';
 import {
   activateForegroundBootSession,
@@ -234,6 +235,9 @@ function startProcessWork(): void {
   );
   void checkDeviceIntegrity().catch((error) =>
     reportOptionalFailure('device-integrity', 'device-integrity-check-failed', undefined, error),
+  );
+  void startSyncedBackgroundCacheMaintenance().catch((error) =>
+    logger.warn('[boot] synced-background cache maintenance failed', error),
   );
   void registerBackgroundSync()
     .then((result) => {
