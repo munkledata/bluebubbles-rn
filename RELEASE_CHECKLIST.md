@@ -5,11 +5,23 @@ engineering backlog and release dispositions live in
 [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Current Internal Testing preparation
 lives in [`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md);
 [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md) is retired v56
-history and is not executable evidence for v57. Do not copy status from an older build into this
-file. Section 0 is the current private Internal Testing gate; Sections 1–7 remain the broader
-Closed/Open/Production release gate.
+history and is not executable evidence for a replacement candidate. Do not copy status from an older
+build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
+broader Closed/Open/Production release gate.
 
-Record the candidate before testing:
+No conforming current candidate is frozen. Record the replacement before testing:
+
+- Version/build number: `__________`
+- Git commit containing `9046e27`: `__________`
+- Local AAB: `__________` — ignored; never commit it
+- AAB SHA-256: `__________`
+- Upload certificate SHA-256: `__________`
+- EAS build URL or local build log: `__________`
+- Tester/device/Android versions: `__________`
+- Test date: `__________`
+
+Frozen nonconforming candidate — static proof only; do not upload, submit, or use it as current
+runtime evidence because it predates the approved `PLAY-02` removal in `9046e27`:
 
 - Version/build number: `0.1.41 (versionCode 57)`
 - Git commit: `8564b348d02c4e218e8a75a6a36e265ec5740772`
@@ -18,14 +30,12 @@ Record the candidate before testing:
 - Upload certificate SHA-256: `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
 - EAS build URL or local build log: local EAS production build on 2026-08-25; Gradle
   `BUILD SUCCESSFUL` (1,227 tasks in 4m40s); no hosted build, Play upload, or submission
-- Tester/device/Android versions: `__________`
-- Test date: `__________`
 
 Retired historical candidate — static proof only: `0.1.40` / versionCode `56`, source
 `5d367eb58e38126258423f1cd9ce0da42b179f7f`, AAB
 `gator-release-0.1.40-v56-5d367eb.aab`, SHA-256
 `926ce40c8ada2b69b093aaafb7a5f3a2a08bd7f5ae061c526c8a33b5462b9eac`. Its Play, tester,
-install/update, device, notification, and cleanup evidence never transfers to the current candidate.
+install/update, device, notification, and cleanup evidence never transfers to a replacement candidate.
 
 ## 0. Private Google Play Internal Testing gate
 
@@ -256,8 +266,9 @@ These four DEV results stop at the then-current migration head `0038`; they do n
       third-party-server-client product accurately.
 - [ ] Privacy policy/data-safety answers match observed network, notification, contact, file, crash,
       backup, and telemetry behavior.
-- [ ] Contacts, full-screen intent/call behavior, foreground service, and notification declarations
-      have current Play-policy justification; inbound share-target declarations are absent.
+- [ ] Contacts, foreground service, and notification declarations have current Play-policy
+      justification; `USE_FULL_SCREEN_INTENT` and inbound share-target declarations are absent, and
+      incoming-call copy promises only heads-up capability.
 - [ ] Play pre-launch/device-catalog results have been reviewed; unsupported device classes are
       excluded or clearly documented.
 - [ ] Internal testing receives the hashed candidate first; rollout follows the rehearsed staged plan.

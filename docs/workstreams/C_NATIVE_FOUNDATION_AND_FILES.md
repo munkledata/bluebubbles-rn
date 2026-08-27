@@ -117,7 +117,7 @@ accurately describes that handoff.
 
 <a id="play-02"></a>
 
-## `PLAY-02` — truthful full-screen incoming-call behavior
+## `PLAY-02` — truthful incoming-call notification behavior
 
 First decide whether incoming calling is genuinely a core product function eligible for Play's
 full-screen-intent declaration. If eligible, check runtime capability, explain the setting, and route
@@ -126,6 +126,12 @@ where feasible.
 
 In either case, retain an actionable heads-up notification fallback so denied or unavailable
 full-screen access does not make an incoming call unusable.
+
+The owner selected the removal branch on 2026-08-27. Durable Expo config must explicitly block
+`USE_FULL_SCREEN_INTENT`, and neither generic locked nor detailed incoming-call notification may set
+`fullScreenAction`. Retain high importance, call category, body tap, Answer, and Decline behavior.
+Describe the notification as heads-up-capable because Android or the user can suppress heads-up
+presentation through channel policy.
 
 <a id="dl-01"></a>
 

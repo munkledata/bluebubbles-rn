@@ -263,8 +263,8 @@ Before a notify-kit upgrade, verify all of the following against the pinned Expo
 - permission state/request behavior and app/per-chat channel creation, deletion, and settings handoff;
 - foreground action/body events, background/headless actions, killed-start `getInitialNotification`, and pending-tap
   navigation after App Lock;
-- displayed/trigger/all/targeted cancellation truth, trigger scheduling, messaging-style rendering, and full-screen
-  FaceTime behavior.
+- displayed/trigger/all/targeted cancellation truth, trigger scheduling, messaging-style rendering, actionable
+  high-importance FaceTime heads-up behavior, and continued absence of `USE_FULL_SCREEN_INTENT`.
 
 Replace the package behind the adapter when it becomes incompatible with the pinned Expo/RN toolchain, loses a safe
 maintained release path, develops an unresolved security/licensing problem, or cannot meet the lifecycle/cancellation
