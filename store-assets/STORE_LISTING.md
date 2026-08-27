@@ -7,13 +7,15 @@ screenshots, and the hashed-AAB checks in [`RELEASE_CHECKLIST.md`](../RELEASE_CH
 reuse screenshots or answers from an older build.
 
 **Current distribution boundary (owner decision 2026-08-21):** Gator is currently intended only for
-private testers through Google Play Internal Testing. The only explicit submission track configured in
-`eas.json` is `internal`, and release scripts stop after building for a separate reviewed submission.
-This document is retained as preparation for any later Closed, Open, or Production promotion. A
-`Blocked` label below means blocked before that promotion unless the row explicitly says it also
-blocks Internal Testing. Internal tests may not receive standard policy/security review and are Data
-Safety-exempt while exclusively internal, but no UGC-policy exemption is claimed. Confirm in Play
-Console that no other track is active before relying on this boundary.
+private testers through Google Play Internal Testing. The only explicit submission track configured
+in `eas.json` is `internal`. The local release build phase stops after building; the separate submit
+phase previews by default and requires `--execute`, interactive candidate confirmation, and reviewed
+operator approval before it can upload. This document is retained as preparation for any later
+Closed, Open, or Production promotion. A `Blocked` label below means blocked before that promotion
+unless the row explicitly says it also blocks Internal Testing. Internal tests may not receive
+standard policy/security review and are Data Safety-exempt while exclusively internal, but no
+UGC-policy exemption is claimed. Confirm in Play Console that no other track is active before relying
+on this boundary.
 
 Recheck these requirements when the candidate is frozen:
 
