@@ -17,6 +17,9 @@ const syncAllChats = jest.fn();
 const syncChatMessages = jest.fn();
 const getSyncMarker = jest.fn();
 const setSyncMarkerWithinTransaction = jest.fn();
+const captureFullRepairPruneExposure = jest.fn();
+const reconcileFullRepairPruneExposure = jest.fn();
+const sameFullSyncServerView = jest.fn();
 const syncContacts = jest.fn();
 const serverVersion = jest.fn();
 const mockSyncDb = { testId: 'sync-control-db' };
@@ -65,13 +68,19 @@ jest.mock('@/services/sync', () => ({
   fullSync,
   httpSyncApi: () => ({ serverVersion }),
   incrementalSync,
+  sameFullSyncServerView,
   syncAllChats,
   syncChatMessages,
   syncDeletedMessages: jest.fn(async () => 0),
 }));
 // The stores syncControl pulls in reach `@db/database`, which loads op-sqlite's native binding.
 jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
-jest.mock('@db/repositories', () => ({ getSyncMarker, setSyncMarkerWithinTransaction }));
+jest.mock('@db/repositories', () => ({
+  captureFullRepairPruneExposure,
+  getSyncMarker,
+  reconcileFullRepairPruneExposure,
+  setSyncMarkerWithinTransaction,
+}));
 
 import type { ServerInfo } from '@core/models';
 import { useSessionStore } from '@state/sessionStore';
@@ -111,6 +120,21 @@ beforeEach(() => {
   syncAllChats.mockResolvedValue([]);
   incrementalSync.mockResolvedValue({ chats: 0, messages: 0 });
   fullSync.mockResolvedValue({ chats: 0, messages: 0 });
+  captureFullRepairPruneExposure.mockResolvedValue({
+    capturedAt: 0,
+    attachmentIdHighWater: 0,
+    chats: [],
+    messages: [],
+    attachments: [],
+  });
+  reconcileFullRepairPruneExposure.mockResolvedValue({
+    messagesRemoved: 0,
+    attachmentsRemoved: 0,
+    chatsRemoved: 0,
+    chatShellsRetired: 0,
+    chatsPreservedForLocalWork: 0,
+  });
+  sameFullSyncServerView.mockReturnValue(true);
   syncChatMessages.mockResolvedValue(0);
   syncContacts.mockResolvedValue({ contacts: 0, matched: 0 });
   serverVersion.mockResolvedValue('1.9.0');

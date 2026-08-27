@@ -1,6 +1,12 @@
 import { logger } from '@core/secure';
 import type { SyncMarker } from '@core/sync';
-import { getSyncMarker, setSyncMarkerWithinTransaction } from '@db/repositories';
+import {
+  captureFullRepairPruneExposure,
+  getSyncMarker,
+  reconcileFullRepairPruneExposure,
+  setSyncMarkerWithinTransaction,
+  type FullRepairPruneExposure,
+} from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
@@ -19,9 +25,11 @@ import {
   fullSync,
   httpSyncApi,
   incrementalSync,
+  sameFullSyncServerView,
   syncAllChats,
   syncChatMessages,
   syncDeletedMessages,
+  type FullSyncServerView,
 } from './sync';
 
 /**
@@ -313,6 +321,10 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
   let outcome: SyncRunOutcome = 'running';
   let failureMessage = 'Sync failed';
   let rebuiltRepairMarker: SyncMarker | null = null;
+  const repairReconciliation: {
+    exposure: FullRepairPruneExposure | null;
+    confirmedView: FullSyncServerView | null;
+  } = { exposure: null, confirmedView: null };
 
   try {
     if (shouldAbort()) {
@@ -363,7 +375,22 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       // Honor the "Messages per Chat" initial-sync cap (0 = all). Full history still backfills on
       // demand when a chat is opened, so a cap only bounds the first bulk pass.
       const perChat = useSyncSettingsStore.getState().messagesPerChat;
-      const result = await fullSync(db, api, {
+      if (repair) {
+        repairReconciliation.exposure = await captureFullRepairPruneExposure(
+          db,
+          () => !shouldAbort(),
+        );
+        if (shouldAbort()) {
+          outcome = stoppedOutcome();
+          return;
+        }
+      }
+
+      const firstRepair: {
+        view: FullSyncServerView | null;
+        marker: SyncMarker | null;
+      } = { view: null, marker: null };
+      let result = await fullSync(db, api, {
         onProgress: (p) => {
           if (!shouldAbort()) sync.progress(p);
         },
@@ -377,7 +404,12 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         signal: options.signal,
         onServerMarker: repair
           ? (nextMarker) => {
-              rebuiltRepairMarker = nextMarker;
+              firstRepair.marker = nextMarker;
+            }
+          : undefined,
+        onServerView: repair
+          ? (view) => {
+              firstRepair.view = view;
             }
           : undefined,
       });
@@ -386,9 +418,47 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         return;
       }
       if (repair) {
-        if (rebuiltRepairMarker == null) {
+        if (firstRepair.marker == null || firstRepair.view == null) {
           throw new Error('Repair finished without a server-derived sync marker.');
         }
+        sync.noteRepair(
+          'Confirming a stable server view',
+          'A second complete pass must match before stale local rows can be removed.',
+        );
+        const secondRepair: {
+          view: FullSyncServerView | null;
+          marker: SyncMarker | null;
+        } = { view: null, marker: null };
+        result = await fullSync(db, api, {
+          onProgress: (p) => {
+            if (!shouldAbort()) sync.progress(p);
+          },
+          shouldAbort,
+          maxMessagesPerChat: 0,
+          failOnChatError: true,
+          commitMarker: false,
+          signal: options.signal,
+          onServerMarker: (nextMarker) => {
+            secondRepair.marker = nextMarker;
+          },
+          onServerView: (view) => {
+            secondRepair.view = view;
+          },
+        });
+        if (shouldAbort()) {
+          outcome = stoppedOutcome();
+          return;
+        }
+        if (secondRepair.marker == null || secondRepair.view == null) {
+          throw new Error('Repair validation finished without a complete server view.');
+        }
+        if (!sameFullSyncServerView(firstRepair.view, secondRepair.view)) {
+          throw new Error(
+            'The server changed while repair was reading it. Restart repair to avoid removing current data.',
+          );
+        }
+        rebuiltRepairMarker = secondRepair.marker;
+        repairReconciliation.confirmedView = secondRepair.view;
         sync.noteRepair('Reconciling deletions', 'Chat and message download finished.');
       } else {
         sync.done(result);
@@ -466,7 +536,41 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       return;
     }
     if (repair) {
-      sync.noteRepair('Finalizing local cache', 'Deletion catch-up and cache cleanup finished.');
+      const repairExposure = repairReconciliation.exposure;
+      const confirmedRepairView = repairReconciliation.confirmedView;
+      if (repairExposure == null || confirmedRepairView == null) {
+        throw new Error('Repair finished without a confirmed reconciliation view.');
+      }
+      sync.noteRepair(
+        'Removing stale local rows',
+        'The two complete server passes matched; only pre-existing absent rows are eligible.',
+      );
+      const reconciliation = await reconcileFullRepairPruneExposure(
+        db,
+        repairExposure,
+        {
+          chatGuids: new Set(confirmedRepairView.chats.keys()),
+          messageGuids: new Set(confirmedRepairView.messages.keys()),
+          attachmentGuidsByMessage: confirmedRepairView.attachmentsByMessage,
+        },
+        () => !shouldAbort(),
+      );
+      if (shouldAbort()) {
+        outcome = stoppedOutcome();
+        return;
+      }
+      // Reconciliation can orphan cached attachment paths. Let the existing short DB owners mark
+      // and settle those exact files; all native delete work remains outside their transactions.
+      await attachmentCacheCoordinator.retireInactiveEntries(db, {
+        scope: attachmentCacheScope,
+      });
+      await attachmentCacheCoordinator.drainDueRetirements(db, {
+        scope: attachmentCacheScope,
+      });
+      sync.noteRepair(
+        'Finalizing local cache',
+        `Removed ${reconciliation.messagesRemoved} messages, ${reconciliation.attachmentsRemoved} attachments, and ${reconciliation.chatsRemoved} chats; retained ${reconciliation.chatShellsRetired} customized chat shells and ${reconciliation.chatsPreservedForLocalWork} chats with local work.`,
+      );
       if (rebuiltRepairMarker == null) {
         throw new Error('Repair finished without a server-derived sync marker.');
       }

@@ -79,6 +79,9 @@ export function upsertAttachmentsWithinTransaction(
       .onConflictDoUpdate({
         target: attachments.guid,
         set: {
+          // A message repair can correct a corrupt local parent link without replacing the row and
+          // losing its already-downloaded local path.
+          messageId: sql`excluded.message_id`,
           mimeType: sql`excluded.mime_type`,
           totalBytes: sql`excluded.total_bytes`,
           blurhash: sql`excluded.blurhash`,

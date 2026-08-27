@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Chat, ChatSummary } from '@core/models';
 import { chatHandles, chats, kv, outgoingQueue, scheduledMessages } from '../schema';
 import {
@@ -11,7 +11,7 @@ import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { linkHandlesToContacts } from './contacts';
 import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
-import { DRAFT_KV_PREFIX } from './maintenance';
+import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
 
 /**
  * Transaction-only chat ingestion. Upserts chats by guid, reconciles participant/read-marker
@@ -32,6 +32,17 @@ export function upsertChatsWithinTransaction(
       (c) => c.guid,
     );
     if (deduped.length === 0) return map;
+
+    const retirementKeyByGuid = new Map(
+      deduped.map(
+        (chat) => [chat.guid, `${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}${chat.guid}`] as const,
+      ),
+    );
+    const retirementRows = await db
+      .select({ key: kv.key, value: kv.value })
+      .from(kv)
+      .where(inArray(kv.key, [...retirementKeyByGuid.values()]));
+    const retirementFloorByKey = new Map(retirementRows.map((row) => [row.key, row.value]));
 
     const rows = await db
       .insert(chats)
@@ -54,6 +65,9 @@ export function upsertChatsWithinTransaction(
       .onConflictDoUpdate({
         target: chats.guid,
         set: {
+          // A full repair may encounter a locally corrupt/stale identity. Prefer a present server
+          // ROWID, but never let a partial payload that omits it erase a previously learned value.
+          originalRowId: sql`COALESCE(excluded.original_row_id, ${chats.originalRowId})`,
           displayName: sql`excluded.display_name`,
           chatIdentifier: sql`excluded.chat_identifier`,
           style: sql`excluded.style`,
@@ -71,6 +85,23 @@ export function upsertChatsWithinTransaction(
       .returning({ id: chats.id, guid: chats.guid });
 
     for (const r of rows) map.set(r.guid, r.id);
+
+    // A server-returned chat may be a customized shell retained by Full Repair. Clear only the
+    // synthetic tombstone that repair itself installed. If the user deleted the chat afterward,
+    // deleted_at no longer equals the stored floor and the compare-and-set preserves their choice.
+    for (const [guid, key] of retirementKeyByGuid) {
+      if (!retirementFloorByKey.has(key)) continue;
+      const rawFloor = retirementFloorByKey.get(key);
+      const floor = rawFloor == null ? Number.NaN : Number(rawFloor);
+      const chatId = map.get(guid);
+      if (chatId != null && Number.isSafeInteger(floor) && floor >= 0) {
+        await db
+          .update(chats)
+          .set({ deletedAt: null })
+          .where(and(eq(chats.id, chatId), eq(chats.deletedAt, floor)));
+      }
+      await db.delete(kv).where(eq(kv.key, key));
+    }
 
     // Reconcile participant links per chat. When a chat's payload INCLUDES a participants
     // list, REPLACE its links so a removed member is pruned (not just additively kept — the

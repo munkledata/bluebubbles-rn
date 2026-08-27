@@ -21,6 +21,7 @@ export * from './themes';
 export * from './backup';
 export * from './urlPreviews';
 export * from './sync';
+export * from './repair';
 export * from './contacts';
 export * from './scheduled';
 export * from './reminders';

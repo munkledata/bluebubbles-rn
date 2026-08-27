@@ -44,6 +44,24 @@ export function upsertMessagesWithinTransaction(
       .filter((x): x is { m: Message; chatId: number } => x.chatId != null);
     if (withChat.length === 0) return map;
 
+    const destinationChatByGuid = new Map(withChat.map(({ m, chatId }) => [m.guid, chatId]));
+    const existingLocations = await db
+      .select({
+        guid: messages.guid,
+        chatId: messages.chatId,
+        dateCreated: messages.dateCreated,
+      })
+      .from(messages)
+      .where(
+        inArray(
+          messages.guid,
+          withChat.map(({ m }) => m.guid),
+        ),
+      );
+    const movedLocations = existingLocations.filter(
+      (row) => destinationChatByGuid.get(row.guid) !== row.chatId,
+    );
+
     // Read retained deletion knowledge BEFORE the insert so an out-of-order/backfilled message is
     // born tombstoned. Insert-then-UPDATE is observably unsafe: reactive queries flush after each
     // statement and could briefly render or notify on server-deleted content.
@@ -133,6 +151,11 @@ export function upsertMessagesWithinTransaction(
       .onConflictDoUpdate({
         target: messages.guid,
         set: {
+          // GUID is the durable identity. A hydrated repair page is authoritative about the
+          // message's chat/ROWID, so it can correct a locally mis-linked or poisoned projection;
+          // partial events that omit ROWID retain the value already learned from the server.
+          chatId: sql`excluded.chat_id`,
+          originalRowId: sql`COALESCE(excluded.original_row_id, ${messages.originalRowId})`,
           // An EDIT empties the text column and re-fills it (server-side decode, or our local
           // attributedBody fallback above), so `excluded.text` carries the new body on a re-sync.
           // COALESCE-preserve so a later event that legitimately omits text (e.g. a delivery/read
@@ -243,6 +266,29 @@ export function upsertMessagesWithinTransaction(
 
     for (const r of rows) map.set(r.guid, r.id);
 
+    // A full repair can correct a GUID that was attached to the wrong chat. Hand any source-chat
+    // read floor off before recomputing its sort key; otherwise that chat keeps a marker pointing
+    // at a row it no longer owns and can miscount every remaining message as unread.
+    for (const moved of movedLocations) {
+      await db.run(sql`
+        UPDATE chats
+           SET last_read_message_guid = (
+             SELECT replacement.guid
+               FROM messages replacement
+              WHERE replacement.chat_id = ${moved.chatId}
+                AND replacement.is_from_me = 0
+                AND replacement.date_deleted IS NULL
+                AND ${moved.dateCreated} IS NOT NULL
+                AND replacement.date_created IS NOT NULL
+                AND replacement.date_created <= ${moved.dateCreated}
+              ORDER BY replacement.date_created DESC, replacement.id DESC
+              LIMIT 1
+           )
+         WHERE id = ${moved.chatId}
+           AND last_read_message_guid = ${moved.guid}
+      `);
+    }
+
     // Link message SENDERS into chat_handles (additive) so a chat shows participant names even
     // when its participants were never synced via chat/query — e.g. a realtime-created group that
     // would otherwise render as "Group" / a raw chat-guid. Only received messages carry a sender
@@ -312,8 +358,11 @@ export function upsertMessagesWithinTransaction(
     // DESC` in listChatsForInbox, i.e. exactly the "sinks to the bottom of the inbox" outcome that
     // upsert exists to prevent. So fall back to the unfiltered MAX: a reaction may not OUTRANK a real
     // message, but it may hold a position nothing else is holding.
-    const touched = [...new Set(withChat.map((x) => x.chatId))];
-    if (touched.length > 0) {
+    const destinationChatIds = [...new Set(withChat.map((x) => x.chatId))];
+    const latestDateChatIds = [
+      ...new Set([...destinationChatIds, ...movedLocations.map((row) => row.chatId)]),
+    ];
+    if (latestDateChatIds.length > 0) {
       await db
         .update(chats)
         .set({
@@ -321,7 +370,7 @@ export function upsertMessagesWithinTransaction(
           (SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL AND associated_message_type IS NULL),
           (SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL))`,
         })
-        .where(inArray(chats.id, touched));
+        .where(inArray(chats.id, latestDateChatIds));
       // Retire a local deletion tombstone the moment real new content lands, rather than leaving the
       // chat's visibility to be re-derived on every read. Deriving it is not enough on its own: a chat
       // brought back by one message would silently vanish AGAIN if that single message were later
@@ -329,7 +378,7 @@ export function upsertMessagesWithinTransaction(
       // chat-ingestion one, and a chat can be revived by either. The CAS applies the same predicate
       // `chatVisible` reads with, so re-synced history, a tapback and an unsent row still cannot
       // resurrect a conversation the user deleted.
-      await clearSupersededTombstonesWithinTransaction(context, touched);
+      await clearSupersededTombstonesWithinTransaction(context, destinationChatIds);
     }
     return map;
   });

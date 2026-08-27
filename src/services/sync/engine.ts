@@ -33,6 +33,60 @@ export interface SyncProgress {
   messages: number;
 }
 
+export interface FullSyncServerMessageIdentity {
+  readonly chatGuid: string;
+  readonly originalRowId: number | null;
+}
+
+/**
+ * Server-owned identities observed during one complete all-history crawl. Repair compares two of
+ * these before it permits any destructive reconciliation; ordinary initial sync never allocates it.
+ */
+export interface FullSyncServerView {
+  readonly chats: ReadonlyMap<string, number | null>;
+  readonly messages: ReadonlyMap<string, FullSyncServerMessageIdentity>;
+  /** A key is present only when the server explicitly returned a complete attachment array. */
+  readonly attachmentsByMessage: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) if (!right.has(value)) return false;
+  return true;
+}
+
+/** Exact identity/set equality; payload fields are refreshed by the second crawl itself. */
+export function sameFullSyncServerView(
+  left: FullSyncServerView,
+  right: FullSyncServerView,
+): boolean {
+  if (
+    left.chats.size !== right.chats.size ||
+    left.messages.size !== right.messages.size ||
+    left.attachmentsByMessage.size !== right.attachmentsByMessage.size
+  ) {
+    return false;
+  }
+  for (const [guid, rowId] of left.chats) {
+    if (!right.chats.has(guid) || right.chats.get(guid) !== rowId) return false;
+  }
+  for (const [guid, identity] of left.messages) {
+    const other = right.messages.get(guid);
+    if (
+      other == null ||
+      other.chatGuid !== identity.chatGuid ||
+      other.originalRowId !== identity.originalRowId
+    ) {
+      return false;
+    }
+  }
+  for (const [messageGuid, attachmentGuids] of left.attachmentsByMessage) {
+    const other = right.attachmentsByMessage.get(messageGuid);
+    if (other == null || !sameStringSet(attachmentGuids, other)) return false;
+  }
+  return true;
+}
+
 /** A chat this sync stored, plus enough of its payload to finish reconciling it. */
 export interface StoredChat {
   guid: string;
@@ -129,6 +183,8 @@ export interface FullSyncOptions {
   commitMarker?: boolean;
   /** Highest cursor observed in SERVER responses during this run (never derived from local rows). */
   onServerMarker?: (marker: SyncMarker) => void;
+  /** Repair-only identity view used for the two-crawl destructive-reconciliation fence. */
+  onServerView?: (view: FullSyncServerView) => void;
 }
 
 /**
@@ -143,7 +199,11 @@ export async function syncAllChats(
   chatPageSize = 200,
   shouldAbort?: () => boolean,
   signal?: AbortSignal,
-  onServerMessages?: (messages: readonly Message[]) => void,
+  onServerMessages?: (
+    messages: readonly Message[],
+    chatGuidByMessage: ReadonlyMap<string, string>,
+  ) => void,
+  onServerChats?: (chats: readonly Chat[]) => void,
 ): Promise<StoredChat[]> {
   const boundedPageSize =
     Number.isFinite(chatPageSize) && chatPageSize > 0 ? Math.min(Math.floor(chatPageSize), 200) : 0;
@@ -158,6 +218,7 @@ export async function syncAllChats(
     if (!shouldContinue()) break;
     if (batch.length === 0) break;
     const pageRows = batch.slice(0, boundedPageSize);
+    onServerChats?.(pageRows);
     const pageContactAddresses = new Set<string>();
     for (let i = 0; i < pageRows.length; i += CHAT_TX_CHUNK) {
       const slice = pageRows.slice(i, i + CHAT_TX_CHUNK);
@@ -183,6 +244,7 @@ export async function syncAllChats(
       // the bottom of the inbox with no date/preview.
       const lastMsgs: Message[] = [];
       const chatIdByMsgGuid = new Map<string, number>();
+      const chatGuidByMsgGuid = new Map<string, string>();
       const storedSlice: StoredChat[] = [];
       for (const chat of slice) {
         const chatId = chatMap.get(chat.guid);
@@ -195,6 +257,7 @@ export async function syncAllChats(
         if (chat.lastMessage != null) {
           lastMsgs.push(chat.lastMessage);
           chatIdByMsgGuid.set(chat.lastMessage.guid, chatId);
+          chatGuidByMsgGuid.set(chat.lastMessage.guid, chat.guid);
         }
       }
       if (lastMsgs.length > 0) {
@@ -231,7 +294,7 @@ export async function syncAllChats(
           commitGuard,
         );
         if (!shouldContinue()) return stored;
-        onServerMessages?.(lastMsgs);
+        onServerMessages?.(lastMsgs, chatGuidByMsgGuid);
       }
       stored.push(...storedSlice);
     }
@@ -274,6 +337,63 @@ export async function fullSync(
   const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
   let messages = 0;
   let serverMarker: SyncMarker = { lastSyncedRowId: null, lastSyncedTimestamp: null };
+  const serverChats = opts.onServerView ? new Map<string, number | null>() : null;
+  const serverMessages = opts.onServerView
+    ? new Map<string, FullSyncServerMessageIdentity>()
+    : null;
+  const serverAttachments = opts.onServerView ? new Map<string, ReadonlySet<string>>() : null;
+  const serverMessageSources = opts.onServerView ? new Map<string, 'last' | 'page'>() : null;
+  const recordServerChats =
+    serverChats == null
+      ? undefined
+      : (rows: readonly Chat[]): void => {
+          for (const chat of rows) {
+            if (serverChats.has(chat.guid)) {
+              throw new Error('The server repeated a chat while building the repair view.');
+            }
+            serverChats.set(chat.guid, chat.originalROWID ?? null);
+          }
+        };
+  const recordServerMessages = (
+    chatGuid: string,
+    rows: readonly Message[],
+    source: 'last' | 'page',
+  ): void => {
+    if (serverMessages == null || serverAttachments == null || serverMessageSources == null) return;
+    for (const message of rows) {
+      const identity: FullSyncServerMessageIdentity = {
+        chatGuid,
+        originalRowId: message.originalROWID ?? null,
+      };
+      const existing = serverMessages.get(message.guid);
+      if (existing != null) {
+        if (
+          existing.chatGuid !== identity.chatGuid ||
+          existing.originalRowId !== identity.originalRowId ||
+          (source === 'page' && serverMessageSources.get(message.guid) === 'page')
+        ) {
+          throw new Error('The server repeated a message while building the repair view.');
+        }
+      } else {
+        serverMessages.set(message.guid, identity);
+      }
+      serverMessageSources.set(message.guid, source === 'page' ? 'page' : 'last');
+      if (message.attachments != null) {
+        const attachmentGuids = new Set<string>();
+        for (const attachment of message.attachments) {
+          if (attachmentGuids.has(attachment.guid)) {
+            throw new Error('The server repeated an attachment while building the repair view.');
+          }
+          attachmentGuids.add(attachment.guid);
+        }
+        const existingAttachments = serverAttachments.get(message.guid);
+        if (existingAttachments != null && !sameStringSet(existingAttachments, attachmentGuids)) {
+          throw new Error('The server changed an attachment list during the repair pass.');
+        }
+        serverAttachments.set(message.guid, attachmentGuids);
+      }
+    }
+  };
   const advanceServerMarker = (rows: readonly Message[]): void => {
     serverMarker = advanceMarker(
       serverMarker,
@@ -282,6 +402,19 @@ export async function fullSync(
         timestamp: message.dateCreated ?? null,
       })),
     );
+  };
+  const recordServerLastMessages = (
+    rows: readonly Message[],
+    chatGuidByMessage: ReadonlyMap<string, string>,
+  ): void => {
+    advanceServerMarker(rows);
+    for (const message of rows) {
+      const chatGuid = chatGuidByMessage.get(message.guid);
+      if (chatGuid == null) {
+        throw new Error('The server returned a repair message without a chat identity.');
+      }
+      recordServerMessages(chatGuid, [message], 'last');
+    }
   };
 
   // Phase 1: store ALL chats first (fast — just the list + participants). This guarantees every
@@ -292,7 +425,8 @@ export async function fullSync(
     opts.chatPageSize ?? 200,
     opts.shouldAbort,
     opts.signal,
-    advanceServerMarker,
+    recordServerLastMessages,
+    recordServerChats,
   );
   const chats = stored.length;
   if (shouldContinue()) opts.onProgress?.({ chats, messages });
@@ -332,6 +466,7 @@ export async function fullSync(
         }
         seenPageFingerprints.add(pageFingerprint);
         advanceServerMarker(pageRows);
+        recordServerMessages(guid, pageRows, 'page');
         const pageHandles = pageRows.flatMap((message) => (message.handle ? [message.handle] : []));
         for (let i = 0; i < pageRows.length; i += INCREMENTAL_TX_CHUNK) {
           const slice = pageRows.slice(i, i + INCREMENTAL_TX_CHUNK);
@@ -406,6 +541,16 @@ export async function fullSync(
     stored.map((s) => s.chat),
     commitGuard,
   );
+
+  if (serverChats != null && serverMessages != null && serverAttachments != null) {
+    opts.onServerView?.({
+      chats: new Map(serverChats),
+      messages: new Map(serverMessages),
+      attachmentsByMessage: new Map(
+        [...serverAttachments].map(([guid, attachmentGuids]) => [guid, new Set(attachmentGuids)]),
+      ),
+    });
+  }
 
   opts.onServerMarker?.(serverMarker);
   if (opts.commitMarker !== false) {

@@ -22,6 +22,12 @@ export const DELETIONS_WATERMARK_KV_KEY = 'sync.deletionsSyncedAt';
 export const DRAFT_KV_PREFIX = 'draft.';
 
 /**
+ * Account-scoped marker for a customized chat shell hidden by Full Repair. A later authoritative
+ * chat upsert uses it to distinguish the synthetic visibility floor from a real user deletion.
+ */
+export const FULL_REPAIR_RETIRED_CHAT_KV_PREFIX = 'sync.fullRepair.retiredChat.';
+
+/**
  * Prefix of encrypted FaceTime notification routes. Defined in the DB layer so notification
  * routing can import the same value without reversing the dependency: these rows contain an old
  * server's call UUID and must not survive when native notification cleanup is unavailable.
@@ -336,6 +342,26 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
     });
   }
 
+  // Full Repair may retain a customized, server-absent chat shell behind a synthetic tombstone.
+  // Its marker is account authority and must never survive into the next connected server.
+  let deletedRepairRetirements = CACHE_DELETE_BATCH_SIZE;
+  while (deletedRepairRetirements === CACHE_DELETE_BATCH_SIZE) {
+    deletedRepairRetirements = await withDbWriteLock(async () => {
+      const rows = await db.all<{ rowid: number }>(sql`
+        DELETE FROM kv
+         WHERE rowid IN (
+           SELECT rowid
+             FROM kv
+            WHERE key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
+            ORDER BY rowid
+            LIMIT ${CACHE_DELETE_BATCH_SIZE}
+         )
+        RETURNING rowid
+      `);
+      return rows.length;
+    });
+  }
+
   // Account-bound call UUIDs used to resolve privacy-safe native notification tokens.
   let deletedNotificationRoutes = CACHE_DELETE_BATCH_SIZE;
   while (deletedNotificationRoutes === CACHE_DELETE_BATCH_SIZE) {
@@ -400,6 +426,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
           OR EXISTS (SELECT 1 FROM kv
                        WHERE key = ${DELETIONS_WATERMARK_KV_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}
+                          OR key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
                           OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`})
         THEN 1 ELSE 0 END AS dirty
     `);
