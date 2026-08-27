@@ -238,14 +238,47 @@ one-to-one RCS conversations.
   to arrive through the incremental path. No app change needed (the app already backfills on
   chat-open); noted so a future sync refactor doesn't "fix" the missing RCS rows there.
 
-## ⚠️ Intentionally NOT aligned (documented, no action)
+## ⚠️ Historical intentional non-alignment context
 
-These are genuine divergences, each for a concrete reason — not oversights:
+These are genuine divergences, each for a concrete reason — not oversights. The historical explanations below
+remain useful context, but the `PARITY-01` register that follows is the current disposition authority:
 
 - **`imessage-aliases-removed`** — the app is fully wired to handle it (listener + notification), but the **Gator server has no detection source** for Apple-ID alias deregistration (not even declared in `DomainEvents`; 0 hits server-wide). The app handler is harmless + forward-compatible with an upstream server that does emit it; adding a fake server emission with no real source would be misleading. Left as app-ready.
 - **`scheduled-message-update`** — the app now prefers server-side scheduling for eligible one-shot messages and uses local rows for replies, recurrence, offline, and older-server fallback. The signal is still unwired, so a server-side change made elsewhere does not live-refresh the app's hybrid schedule list. Track that explicit parity decision under `PARITY-01` rather than calling the whole model local-only.
 - **`group-icon-changed` / `group-icon-removed`** — the app renders group avatars as **participant collages** (`GroupAvatar`) and does not display a server-supplied custom group photo, so there's nothing to refresh. Wiring it would be a no-op until group-photo display is added. Deferred with the (still-open) group-photo feature.
 - **The remaining admin / config surface** (set-config/get-config writes, TLS/zrok/VAPID/Cloudflare **management**, webhooks, FCM **setup**, device purge) — still untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. The read-only **diagnostics** subset (private-API/keys/push/env/tunnel/TLS/alerts) is now surfaced by the **Server Health screen** (see Closed above). What remains are the _write_/management ops, which belong on the trusted local server console, not a remote app.
+
+### `PARITY-01` authoritative disposition register — proposed, owner approval pending
+
+This register accounts for all **18** open records: the one `PARTIAL` record already owned by
+`DELETE-SYNC-01`, plus all 17 historical `CONFIRMED` records below. `DEFER` and `DROP` entries are proposals,
+not approved product decisions; `PARITY-01` remains open until the owner reviews them. The historical directional
+tables remain protocol evidence and do not override this register.
+
+| Open record/capability | Proposed disposition | Reason / authoritative owner |
+| --- | --- | --- |
+| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns exact-device proof and server/helper investigation. |
+| `imessage-aliases-removed` | DEFER | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source. |
+| Stubbed `GET /server/update/check` | DROP | The app fails closed without issuing the nonexistent request; release/update truth is owned by the release workflow. |
+| Admin `set-config` | DROP | Full server configuration writes require local admin authentication and belong in the trusted server console. |
+| macOS permission status and prompts | DEFER | A future Server Health slice must separate safe status reads from prompt-causing actions on the Mac. |
+| Admin `get-devices` / `purge-devices` | DEFER | Revisit with push-device administration; prefer least-destructive per-device removal and exclude admin-wide purge unless separately approved. |
+| REST list/remove device | DEFER | Revisit with the same push-device administration slice; keep per-device ownership and stale-token behavior explicit. |
+| Bulk `GET /contact` | TASK | `FEAT-06` owns identity/privacy research; this is distinct from completed per-address lookup and contact-card sending. |
+| Bulk `POST /handle/query` | TASK | `FEAT-06` owns bounded bootstrap and identity research before any sync/schema work. |
+| `group-icon-changed` / `group-icon-removed` | DEFER | Participant collages are the selected product today; open a group-photo feature task before wiring refresh events. |
+| Webhook REST/admin operations | DROP | Webhooks are server-to-server integration management, not Android client parity. |
+| `get-group-message-counts` / `get-best-friend` | DROP | Novelty statistics do not justify remediation scope or a new mobile surface. |
+| VAPID/Web Push administration | DROP | This Android client uses FCM; Web Push provisioning is outside its platform scope. |
+| REST `GET /config` | DROP | Existing Server Health diagnostics already expose the useful sanitized status without adding a duplicate config surface. |
+| `toggle-tutorial` | DROP | This local admin preference has no mobile parity requirement. |
+| `config-update` | DEFER | Reconsider only with an accepted live-config feature; `RT-01A` remains the sole owner of server-origin rotation. |
+| `scheduled-message-update` | DEFER | Reopen when cross-device live refresh is required for the current hybrid server/local scheduling model. |
+| `firebase-setup-status` | DROP | The app does not drive Firebase provisioning, so provisioning-progress events have no consumer journey. |
+
+Residual management operations embedded in rows whose read-only portions are already closed are also proposed
+**DROP** for mobile parity: FCM setup/clear/OAuth, helper reinjection, Find My key import, zrok/TLS/ACME/Cloudflare
+management, REST admin config writes, and admin-wide device purge. They remain local-console responsibilities.
 
 ## App → Server (does the app call anything the server can't serve?)
 
@@ -298,10 +331,11 @@ mobile value or local-console-only; the genuinely app-relevant ones are ranked H
 
 ## Bottom line
 
-- **App → Server: clean.** The app never calls anything the server can't handle — nothing would 404 a user. The only drift is the app being wired for the `imessage-aliases-removed` realtime event that this server never emits (dead listener; the _server_ is what's missing the emission), plus an already-stubbed `checkUpdate`.
-- **Server → App: mostly wired now.** The app uses the core data/action APIs fully, and the previously-untapped realtime + diagnostics surface has largely been closed (see the _✅ Closed (2026-07-01)_ section above): `message-send-error` and the admin/diagnostics reads (`get-private-api-status`, `get-env`→`findmyNeedsKeys`, `get-findmy-keys-status`, `get-fcm-status`, `get-alerts`, `get-config`) are handled — the diagnostics reads are surfaced by the in-app **Server Health** screen. The post-v56 `new-server` approval/reconfirmation flow is implemented and remains quarantined from SQLite; exact Android network and SecureStore interruption proof is still open. The app-relevant message/chat event differences intentionally left unresolved are:
-  1. **`group-icon-changed` / `group-icon-removed`** — the app renders participant-collage group avatars, so there's no server group photo to refresh (deferred with the group-photo feature).
-  2. **`scheduled-message-update`** — the hybrid server/local schedule list does not yet consume this server refresh signal; `PARITY-01` owns the implement/defer decision.
-- The historical table also retains lower-value unwired signals such as `config-update` and
-  `firebase-setup-status`; they are not silently reclassified as wired by the summary above.
-- **Not worth wiring** (low mobile value / local-console-only): webhooks, zrok/TLS/VAPID/Cloudflare management, `set-config` writes (all admin-only, 403 to remote clients).
+- **App → Server has no user-facing breakage.** The only drift is a harmless listener for an event this server
+  cannot emit and a fail-closed update-check stub; their proposed dispositions are explicit above.
+- **Server → App uses the core data/action APIs and the selected diagnostic reads.** The remaining open
+  capabilities are all accounted for in the `PARITY-01` register rather than being informally called wired,
+  deferred, or unworthy here.
+- The post-v56 `new-server` approval/reconfirmation flow is implemented and remains quarantined from SQLite;
+  exact Android network and SecureStore interruption proof remains with `RT-01A`.
+- No proposed `DEFER` or `DROP` becomes final until owner approval is recorded in the register and master plan.
