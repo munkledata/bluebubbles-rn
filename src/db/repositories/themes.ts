@@ -34,6 +34,19 @@ export async function getCustomThemeById(
   return rows[0] ?? null;
 }
 
+/** Re-read one custom theme while the caller's existing transaction owns the database. */
+export async function getCustomThemeByIdWithinTransaction(
+  context: DbTransactionContext,
+  id: number,
+): Promise<CustomThemeRow | null> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<CustomThemeRow>(
+      sql`SELECT id, name, mode, tokens FROM themes WHERE id = ${id} AND is_preset = 0 LIMIT 1`,
+    );
+    return rows[0] ?? null;
+  });
+}
+
 /** Transaction-only half used when the theme row must commit with another domain write. */
 export async function createCustomThemeWithinTransaction(
   context: DbTransactionContext,

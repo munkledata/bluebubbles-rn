@@ -3,18 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
+import { listCustomThemes, type CustomThemeRow } from '@db/repositories';
 import {
-  createCustomThemeWithinTransaction,
-  deleteCustomThemeWithinTransaction,
-  getCustomThemeById,
-  kvGet,
-  kvSetWithinTransaction,
-  listCustomThemes,
-  THEME_CUSTOM_KEY,
-  updateCustomThemeWithinTransaction,
-  type CustomThemeRow,
-} from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+  deleteCustomTheme,
+  revertCustomTheme,
+  saveCustomTheme,
+  selectCustomTheme,
+} from '@/services/themeCommands';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -36,14 +31,14 @@ type Editing = { row: CustomThemeRow | null; animationType: 'none' | 'slide' };
 type AccountTaskResult<T> = { owned: true; value: T } | { owned: false };
 
 /**
- * Attach a Themes-screen read/write to the account that mounted the screen.
+ * Attach a Themes-screen read to the account that mounted the screen.
  *
  * A dialog or Modal callback can run much later than the tap that created it. The captured lease
  * makes that old callback a quiet no-op after Disconnect, while the tracked slot makes Disconnect
- * wait for a short DB operation that was already admitted. Callers still use a DB commit guard for
- * writes so a lease revoked while SQLite is awaiting a statement rolls the transaction back.
+ * wait for a short DB operation that was already admitted. Writes cross the theme-command service
+ * boundary below, which owns its transaction and commit guard.
  */
-async function runThemesAccountTask<T>(
+async function runThemesAccountRead<T>(
   lease: RealtimeDeliveryLease,
   task: (activeLease: RealtimeDeliveryLease) => Promise<T>,
 ): Promise<AccountTaskResult<T>> {
@@ -59,8 +54,7 @@ async function runThemesAccountTask<T>(
     if (status === 'paused' || !completed || !lease.isCurrent()) return { owned: false };
     return { owned: true, value: value as T };
   } catch (error) {
-    // A commit-guard rejection is expected when Disconnect wins the race. Never surface that old
-    // screen's error as a dialog (or ThemeStudio save error) in the replacement account.
+    // Never let a read failure from the retired screen surface in the replacement account.
     if (!lease.isCurrent()) return { owned: false };
     throw error;
   }
@@ -89,7 +83,7 @@ export default function ThemesScreen(): React.JSX.Element {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await runThemesAccountTask(accountLease, () =>
+      const result = await runThemesAccountRead(accountLease, () =>
         listCustomThemes(getDatabase()),
       );
       if (result.owned) setRows(result.value);
@@ -100,7 +94,7 @@ export default function ThemesScreen(): React.JSX.Element {
 
   useEffect(() => {
     let mounted = true;
-    void runThemesAccountTask(accountLease, () => listCustomThemes(getDatabase()))
+    void runThemesAccountRead(accountLease, () => listCustomThemes(getDatabase()))
       .then((result) => {
         if (mounted && result.owned) setRows(result.value);
       })
@@ -128,45 +122,20 @@ export default function ThemesScreen(): React.JSX.Element {
     // editor open with the user's edits. On success setEditing(null) closes it; refresh is
     // fire-and-forget (the theme is already saved, a refresh hiccup must not report a false error).
     const editingRow = editing?.row ?? null;
-    const result = await runThemesAccountTask(accountLease, async (lease) => {
-      const db = getDatabase();
-      if (editingRow == null) {
-        const id = await withDbTransaction(
-          db,
-          async (context) => {
-            const createdId = await createCustomThemeWithinTransaction(context, {
-              name,
-              mode: tokens.mode,
-              tokens: blob,
-            });
-            // Creating a theme also activates it. Keep the row + pointer in ONE guarded commit so
-            // neither a failed write nor an account transition can leave a dangling selection.
-            await kvSetWithinTransaction(context, THEME_CUSTOM_KEY, String(createdId));
-            return createdId;
-          },
-          () => lease.isCurrent(),
-        );
-        return { id, activate: true };
-      }
+    const result = await saveCustomTheme(
+      {
+        id: editingRow?.id ?? null,
+        name,
+        mode: tokens.mode,
+        tokens: blob,
+      },
+      accountLease,
+    );
+    if (result.status === 'stale') return;
 
-      const id = editingRow.id;
-      await withDbTransaction(
-        db,
-        (context) =>
-          updateCustomThemeWithinTransaction(context, id, {
-            name,
-            mode: tokens.mode,
-            tokens: blob,
-          }),
-        () => lease.isCurrent(),
-      );
-      return { id, activate: useThemeStore.getState().customThemeId === id };
-    });
-    if (!result.owned) return;
-
-    // Zustand's state write is synchronous. The account check in runThemesAccountTask and this
-    // assignment therefore cannot be interleaved by Disconnect.
-    if (result.value.activate) {
+    const activate =
+      result.value.created || useThemeStore.getState().customThemeId === result.value.id;
+    if (activate) {
       useThemeStore.setState({
         customThemeId: result.value.id,
         customTokens: tokens,
@@ -185,24 +154,8 @@ export default function ThemesScreen(): React.JSX.Element {
         style: 'destructive',
         onPress: async () => {
           try {
-            const result = await runThemesAccountTask(accountLease, async (lease) => {
-              const db = getDatabase();
-              await withDbTransaction(
-                db,
-                async (context) => {
-                  // The persisted pointer, not a Zustand snapshot, decides what this DB commit
-                  // clears. Memory can legitimately move to a newer selection while a retained
-                  // confirmation waits for the mutex.
-                  const persistedActiveId = await kvGet(db, THEME_CUSTOM_KEY);
-                  await deleteCustomThemeWithinTransaction(context, row.id);
-                  if (persistedActiveId === String(row.id)) {
-                    await kvSetWithinTransaction(context, THEME_CUSTOM_KEY, '');
-                  }
-                },
-                () => lease.isCurrent(),
-              );
-            });
-            if (!result.owned) return;
+            const result = await deleteCustomTheme(row.id, accountLease);
+            if (result.status === 'stale') return;
             // Re-check memory independently after commit: preserve a newer in-memory choice,
             // but retire the deleted row if memory still points at it even when DB already moved.
             if (useThemeStore.getState().customThemeId === row.id) {
@@ -219,29 +172,15 @@ export default function ThemesScreen(): React.JSX.Element {
     ]);
   };
 
-  const onSelect = (row: CustomThemeRow): void => {
+  const onSelect = (row: CustomThemeRow, tokens: ThemeTokens): void => {
     void (async () => {
       try {
-        const result = await runThemesAccountTask(accountLease, async (lease) => {
-          const db = getDatabase();
-          return withDbTransaction(
-            db,
-            async (context) => {
-              // Re-read under the same guarded commit instead of trusting a row retained by an
-              // old render. It may have been edited/deleted while this callback was queued.
-              const currentRow = await getCustomThemeById(db, row.id);
-              const currentTokens = currentRow ? safeParseTokens(currentRow.tokens) : null;
-              if (!isDarkThemeTokens(currentTokens)) {
-                throw new Error('Theme is missing, corrupt, or unavailable.');
-              }
-              await kvSetWithinTransaction(context, THEME_CUSTOM_KEY, String(row.id));
-              return currentTokens;
-            },
-            () => lease.isCurrent(),
-          );
-        });
-        if (!result.owned) return;
-        useThemeStore.setState({ customThemeId: row.id, customTokens: result.value });
+        const result = await selectCustomTheme(
+          { id: row.id, expectedTokens: row.tokens },
+          accountLease,
+        );
+        if (result.status === 'stale') return;
+        useThemeStore.setState({ customThemeId: row.id, customTokens: tokens });
       } catch {
         if (accountLease.isCurrent()) {
           showDialog('Theme', 'Couldn’t apply the theme.');
@@ -253,15 +192,8 @@ export default function ThemesScreen(): React.JSX.Element {
   const onRevert = (): void => {
     void (async () => {
       try {
-        const result = await runThemesAccountTask(accountLease, async (lease) => {
-          const db = getDatabase();
-          await withDbTransaction(
-            db,
-            (context) => kvSetWithinTransaction(context, THEME_CUSTOM_KEY, ''),
-            () => lease.isCurrent(),
-          );
-        });
-        if (!result.owned) return;
+        const result = await revertCustomTheme(accountLease);
+        if (result.status === 'stale') return;
         useThemeStore.setState({ customThemeId: null, customTokens: null });
       } catch {
         if (accountLease.isCurrent()) {
@@ -333,7 +265,7 @@ export default function ThemesScreen(): React.JSX.Element {
                       );
                       return;
                     }
-                    onSelect(row);
+                    onSelect(row, storedTokens);
                   }}
                 >
                   <Text style={[styles.rowLabel, { color: theme.color.label }]}>{row.name}</Text>

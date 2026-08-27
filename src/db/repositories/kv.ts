@@ -20,6 +20,19 @@ export async function kvGet(db: AppDatabase, key: string): Promise<string | null
   return rows[0]?.value ?? null;
 }
 
+/** Read a key while the caller's existing transaction owns the database connection. */
+export async function kvGetWithinTransaction(
+  context: DbTransactionContext,
+  key: string,
+): Promise<string | null> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<{ value: string | null }>(
+      sql`SELECT value FROM kv WHERE key = ${key} LIMIT 1`,
+    );
+    return rows[0]?.value ?? null;
+  });
+}
+
 /**
  * Transaction-scoped key/value upsert. Use only when the caller already owns the process-wide DB
  * transaction and needs this setting to commit atomically with related rows.
