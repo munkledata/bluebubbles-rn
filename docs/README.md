@@ -29,6 +29,12 @@ Start with the root [`README.md`](../README.md) for the product and architecture
 | RCS bridge/send behavior | [`RCS_BRIDGE_PLAN.md`](./RCS_BRIDGE_PLAN.md), [`RCS_SEND_RELIABILITY.md`](./RCS_SEND_RELIABILITY.md), [`RCS_FORWARD_RECONCILE_PLAN.md`](./RCS_FORWARD_RECONCILE_PLAN.md) |
 | UGC/public-track safety | [`UGC_SAFETY_CONTRACT.md`](./UGC_SAFETY_CONTRACT.md) |
 
+## Workstream implementation specs
+
+- [`Workstream K — architecture and documentation`](./workstreams/K_ARCHITECTURE_AND_DOCUMENTATION.md) owns stable
+  design and sequencing for `REL-011`, `REL-012`, `DOCS-01`, `PARITY-01`, and `PKG-KEEP-01`. Mutable task status and
+  evidence remain only in the master work plan.
+
 ## Focused research and historical verification design
 
 - [`SPIKES.md`](./SPIKES.md) — native/device proof goals and recorded spikes.
