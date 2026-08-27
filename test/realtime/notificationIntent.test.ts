@@ -184,7 +184,13 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
 
     await router.handle('message-deleted', { ...deletion, dateDeleted: 300 }, 'socket');
 
-    expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cDeleteCancel' }]);
+    expect(intents).toEqual([
+      {
+        kind: 'message-withdraw',
+        chatGuid: 'cDeleteCancel',
+        messageGuid: deletion.guid,
+      },
+    ]);
   });
 
   it('shows an attachment label (not a U+FFFC box) for an attachment-only message', async () => {
@@ -440,7 +446,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cC' }]);
   });
 
-  it('withdraws the chat notification when a message is unsent (updated-message with dateRetracted)', async () => {
+  it('withdraws only the unsent message line (updated-message with dateRetracted)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
     // Seed the chat with an inbound message (creates the chat + its notify intent).
@@ -469,7 +475,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
       'fcm',
     );
-    expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cU' }]);
+    expect(intents).toEqual([{ kind: 'message-withdraw', chatGuid: 'cU', messageGuid: 'u1' }]);
   });
 
   it('does NOT touch notifications for an ordinary updated-message (edit / receipt, no dateRetracted)', async () => {

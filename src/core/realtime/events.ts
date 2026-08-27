@@ -191,6 +191,9 @@ export type NotificationIntent =
   | { kind: 'send-failure'; chatGuid: string; messageGuid: string }
   /** Withdraw that fixed-copy notice after success/echo reconciliation. */
   | { kind: 'send-failure-cancel'; chatGuid: string; messageGuid: string }
+  /** Remove one retracted/deleted line while preserving unrelated messages in the chat notice. */
+  | { kind: 'message-withdraw'; chatGuid: string; messageGuid: string }
+  /** Whole-chat cancellation remains reserved for read/dismiss semantics. */
   | { kind: 'cancel'; chatGuid: string }
   | {
       kind: 'facetime-call';

@@ -477,6 +477,7 @@ describe('postNotification — detailed message', () => {
       chatId: '1',
       messageId: '101',
       messageDate: '1700000000000',
+      messageHistoryIds: '101',
     });
     expect(JSON.stringify({ id: n.id, data: n.data })).not.toMatch(/chat-1|msg-1|alice@x\.com/);
     expect(n.android?.channelId).toBe(CHANNEL_NEW_MESSAGE);
@@ -513,6 +514,75 @@ describe('postNotification — detailed message', () => {
   it('marks the MESSAGING style as a group for a group chat', async () => {
     await postNotification(messageIntent({ isGroup: true }));
     expect(lastNotif().android?.style.group).toBe(true);
+  });
+
+  it('serializes concurrent chat updates and withdraws only the matching history line', async () => {
+    let displayed: ReturnType<typeof lastNotif> | undefined;
+    mockGetDisplayed.mockImplementation(async () =>
+      displayed ? [{ id: displayed.id, notification: displayed }] : [],
+    );
+    mockDisplay.mockImplementation(async (notification) => {
+      displayed = notification;
+    });
+
+    try {
+      await Promise.all([
+        postNotification(messageIntent()),
+        postNotification(
+          messageIntent({
+            messageGuid: 'msg-2',
+            body: 'second line',
+            senderName: 'Bob',
+            timestamp: 1700000000001,
+          }),
+        ),
+      ]);
+
+      expect(displayed?.data?.messageHistoryIds).toBe('101,199');
+      expect(displayed?.android?.style.messages.map((line: { text: string }) => line.text)).toEqual(
+        ['secret plans', 'second line'],
+      );
+
+      await postNotification({
+        kind: 'message-withdraw',
+        chatGuid: 'chat-1',
+        messageGuid: 'msg-1',
+      });
+
+      expect(displayed?.data).toEqual(
+        expect.objectContaining({ messageId: '199', messageHistoryIds: '199' }),
+      );
+      expect(displayed?.android?.style.messages).toHaveLength(1);
+      expect(displayed?.android?.style.messages[0].text).toBe('second line');
+      expect(displayed?.android?.onlyAlertOnce).toBe(true);
+      expect(mockCancel).not.toHaveBeenCalledWith('gator-message-1');
+      expect(mockCancel).toHaveBeenCalledWith('chat-1');
+
+      // If Android cannot replace the tray notice after a withdrawal, privacy wins: remove the
+      // original notice rather than leave the withdrawn line visible, even if account ownership
+      // changes during the failed native replacement.
+      await postNotification(messageIntent());
+      let current = true;
+      const lease = { generation: 27, isCurrent: () => current };
+      mockDisplay.mockImplementationOnce(async () => {
+        current = false;
+        throw new Error('native replacement failed');
+      });
+      await expect(
+        postNotification(
+          {
+            kind: 'message-withdraw',
+            chatGuid: 'chat-1',
+            messageGuid: 'msg-1',
+          },
+          lease,
+        ),
+      ).rejects.toThrow('the old notification was cancelled');
+      expect(mockCancel).toHaveBeenCalledWith('gator-message-1');
+    } finally {
+      mockGetDisplayed.mockImplementation(async () => []);
+      mockDisplay.mockImplementation(async () => undefined);
+    }
   });
 
   it('suppresses only the exact visible chat at the native presentation boundary', async () => {
@@ -1396,6 +1466,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
           chatId: '10',
           messageId: '110',
           messageDate: '1700000000000',
+          messageHistoryIds: '110',
         },
       }),
     );

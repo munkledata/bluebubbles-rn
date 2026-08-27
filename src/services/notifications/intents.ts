@@ -124,12 +124,12 @@ export async function buildMessageIntents(
     }
     case 'message-deleted': {
       // The DB tombstone is authoritative, but a notification already posted to Android is
-      // separate OS state. Withdraw it so deleted content cannot remain visible or deep-link to a
-      // hidden message. Notifications are keyed per chat, so this shares the same accepted
-      // whole-chat cancellation limitation as retraction below.
+      // separate OS state. Remove only this line so unrelated unread messages remain visible.
       const chatGuid =
         (await getChatGuidByMessageGuid(db, event.payload.guid)) || event.payload.chatGuid;
-      return chatGuid ? [{ kind: 'cancel', chatGuid }] : [];
+      return chatGuid
+        ? [{ kind: 'message-withdraw', chatGuid, messageGuid: event.payload.guid }]
+        : [];
     }
     case 'chat-read-status-changed':
       // Read elsewhere → clear any pending notification for this chat.
@@ -145,12 +145,7 @@ export async function buildMessageIntents(
       // message guid, so use the same fallback to withdraw a notification after a lean unsend.
       const chatGuid = resolveMessageChatGuid(m) ?? (await getChatGuidByMessageGuid(db, m.guid));
       if (!chatGuid) return [];
-      // KNOWN CONSTRAINT (accepted for v1): notifications are keyed per CHAT — the Notifee id is the
-      // chatGuid (see notifeeService.displayNotification / cancelForChat → notifee.cancelNotification
-      // (chatGuid)). So withdrawing cancels the WHOLE chat's notification, including any newer unread
-      // messages folded into it. Per-message removal would require rebuilding the Android MESSAGING
-      // messages[] array minus this guid — out of scope. Mirrors the read-status cancel above.
-      return [{ kind: 'cancel', chatGuid }];
+      return [{ kind: 'message-withdraw', chatGuid, messageGuid: m.guid }];
     }
     case 'incoming-facetime': {
       // Legacy incoming event (carries `caller`).

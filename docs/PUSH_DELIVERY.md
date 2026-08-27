@@ -270,3 +270,21 @@ Replace the package behind the adapter when it becomes incompatible with the pin
 maintained release path, develops an unresolved security/licensing problem, or cannot meet the lifecycle/cancellation
 matrix above. Host mocks and the import boundary prove ownership, not Android delivery or cancellation timing; those
 remain exact-device evidence.
+
+## 6. Bounded per-chat message history
+
+Ordinary message notifications use one Android `MessagingStyle` notice per chat. The notification mutation queue owns
+the complete native read-merge-post operation, so concurrent deliveries cannot overwrite one another. A pure merge
+keeps the newest six lines, replaces duplicate local message ids deterministically, and ignores a delayed delivery
+that has already fallen outside the retained window instead of alerting again.
+
+The schema-2 native payload stores only the parallel opaque local SQLite message ids. Server message GUIDs, chat GUIDs,
+addresses, and sender handles do not enter that routing data. Existing native history is adopted only when its owner,
+schema, chat id, line count, local-id list, and `MessagingStyle` shape all validate exactly; malformed state is never
+merged.
+
+Delete and retraction events resolve the target to its local id and rebuild the notice without only that line. A read
+event still clears the whole chat. If Android cannot enumerate safe history, the adapter cancels the chat notice; if
+Android rejects a withdrawal rebuild, it cancels the original notice before reporting the failure so withdrawn text
+is not knowingly left visible. These are host-verified contracts. Foreground/background/killed-process ordering and
+rendering still require the `NOTIF-03D` Android candidate matrix.
