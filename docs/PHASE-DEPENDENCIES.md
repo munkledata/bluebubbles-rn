@@ -37,8 +37,7 @@ on package-manager layout instead of this app's manifest.
 | `react-native-screens` | Expo Router/React Navigation native screen hosts used by every `Stack` route | Router declares it as both a dependency and peer; keeping the SDK-bundled root version makes autolinking and native navigation explicit |
 
 All five remain required at the root and within Expo SDK 57 compatibility ranges. `npm explain` confirms the owner edges
-above. The 2026-08-27 `npx expo install --check` run separately found newer SDK 57 patches for `expo-asset`,
-`expo-linking`, and `expo-system-ui` (along with other packages); that broader patch-alignment work remains owned by
-open item `SDK-01` and is not a reason to remove these dependencies. No package was removed in `DEPS-02`, so no clean
-prebuild/rebuild gate was triggered; any future removal must be isolated and run through Expo Doctor, Metro export,
-clean prebuild/build, and the directly affected runtime flow.
+above. The 2026-08-27 `SDK-01` host milestone aligned the newer SDK 57 patches for `expo-asset`, `expo-linking`, and
+`expo-system-ui` (along with the rest of Expo's expected patch set); dependency ownership did not change. No package was
+removed in `DEPS-02`, so no removal-specific prebuild/rebuild gate was triggered; any future removal must be isolated
+and run through Expo Doctor, Metro export, clean prebuild/build, and the directly affected runtime flow.
