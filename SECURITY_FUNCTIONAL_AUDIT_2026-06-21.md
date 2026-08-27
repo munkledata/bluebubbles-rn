@@ -1,6 +1,12 @@
-# Security & Functional Audit — Gator RN app ↔ Gator server
+# Security & Functional Audit — historical 2026-06-21 evidence
 
-> **STATUS UPDATE (2026-06-30):** Every APP-SIDE finding is remediated or a documented intentional
+> **RETIRED AS A STATUS TRACKER.** This cross-repository audit preserves its dated findings and remediation
+> rationale. Its risk verdict, “open” wording, SDK/source descriptions, and server state are not current. Current app
+> tasks and dispositions live in [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); current protocol
+> evidence lives in [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md). Server-only status must be checked in
+> the server repository.
+
+> **HISTORICAL UPDATE RECORDED 2026-06-30:** Every APP-SIDE finding is remediated or a documented intentional
 > decision — F1 chat-association fallback, F2–F7 send/edit/unsend/reaction/attachment wire shapes,
 > F12–F14 server-mgmt/typing/ping, F20–F22 / F24–F25 / F30–F32, encrypted-FCM decrypt, and the F10
 > vault-custody decision. The ~12 SERVER-only findings (F8, F9, F11, F15–F19, F23, F26–F29) live in

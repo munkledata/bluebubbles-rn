@@ -1,5 +1,12 @@
 # Gator RN — Audit Report (rebuild vs. Flutter original)
 
+> **EVIDENCE ARCHIVE — NOT CURRENT STATUS.** This append-only report preserves dated audit findings,
+> implementation notes, and verification checkpoints. A later checkpoint does not make the whole file current, and
+> none of its suite counts, migration heads, inventory totals, branch descriptions, or “remains open” wording should
+> select present work. Current tasks, status, blockers, dependencies, and acceptance criteria live only in
+> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); release operations live in
+> [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md).
+
 > **STATUS UPDATE (2026-07-17):** The tables below are a FROZEN 2026-06-20 snapshot — do not read
 > them as current status. Since then: **F-2 (group add/remove/rename UI, `chat-settings/[guid].tsx`),
 > F-3 (audio playback — `AudioAttachment.tsx` + expo-audio), F-4 (voice recording —
