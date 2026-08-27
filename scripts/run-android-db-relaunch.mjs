@@ -263,6 +263,10 @@ const ACTIVE_MIGRATION_DEATH_REPORT_DIR = resolve(
   ROOT,
   'android/app/build/reports/db-active-migration-death',
 );
+const RUNTIME_CONCURRENCY_REPORT_DIR = resolve(
+  ROOT,
+  'android/app/build/reports/db-runtime-concurrency',
+);
 const REQUEST_FILE = 'files/.gator-db-relaunch-request-v1';
 const WAL_WRITE_DEATH_REQUEST_FILE = 'files/.gator-db-wal-write-death-request-v1';
 const ACTIVE_MIGRATION_DEATH_REQUEST_FILE = 'files/.gator-db-active-migration-death-request-v1';
@@ -2080,6 +2084,22 @@ function writeActiveMigrationDeathArtifact(outcome, target, recordedAt = new Dat
   return path;
 }
 
+function runtimeConcurrencyReportPath(recordedAt) {
+  const stamp = recordedAt.toISOString().replace(/[:.]/g, '-');
+  return resolve(RUNTIME_CONCURRENCY_REPORT_DIR, `android-db-runtime-concurrency-${stamp}.json`);
+}
+
+function writeRuntimeConcurrencyArtifact(outcome, target, recordedAt = new Date()) {
+  const artifact = buildRuntimeConcurrencyPrivacySafeArtifact(outcome, target, recordedAt);
+  const path = runtimeConcurrencyReportPath(recordedAt);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(artifact, null, 2)}\n`, {
+    encoding: 'utf8',
+    flag: 'wx',
+  });
+  return path;
+}
+
 function checkMetro(timeoutMs = 3_000) {
   return new Promise((resolveCheck, rejectCheck) => {
     const request = get(METRO_STATUS_URL, (response) => {
@@ -2465,19 +2485,101 @@ export async function runAndroidDbActiveMigrationDeath() {
   return { path, outcome };
 }
 
-export async function main(args = process.argv.slice(2)) {
+export async function runAndroidDbRuntimeConcurrency() {
+  runCommand('adb', ['version'], { code: 'adb-unavailable', label: 'adb' });
+  const deviceOutput = runCommand('adb', ['devices'], {
+    code: 'adb-devices-failed',
+    label: 'adb devices',
+  });
+  const serial = selectAdbDevice(parseAdbDevices(deviceOutput), process.env.ANDROID_SERIAL);
+  const installedPath = runAdb(serial, ['shell', 'pm', 'path', APP_PACKAGE], {
+    code: 'app-not-installed',
+    label: 'Installed Gator package check',
+  });
+  if (!installedPath.startsWith('package:')) {
+    throw new HarnessError('app-not-installed', 'The Gator Android package is not installed.');
+  }
+  const target = parseTargetMetadata({
+    packageDump: runAdb(serial, ['shell', 'dumpsys', 'package', APP_PACKAGE], {
+      code: 'target-metadata-unavailable',
+      label: 'Installed Gator version check',
+    }),
+    androidApi: runAdb(serial, ['shell', 'getprop', 'ro.build.version.sdk'], {
+      code: 'target-metadata-unavailable',
+      label: 'Android API check',
+    }),
+    abi: runAdb(serial, ['shell', 'getprop', 'ro.product.cpu.abi'], {
+      code: 'target-metadata-unavailable',
+      label: 'Android ABI check',
+    }),
+  });
+  runAdb(serial, ['shell', 'run-as', APP_PACKAGE, 'true'], {
+    code: 'app-not-debuggable',
+    label: 'Debuggable Gator package check',
+  });
+  await checkMetro();
+  runAdb(serial, ['reverse', 'tcp:8081', 'tcp:8081'], {
+    code: 'adb-reverse-failed',
+    label: 'adb reverse for Metro',
+  });
+
+  const logBoundary = `${LOGCAT_BOUNDARY_PREFIX}${randomUUID()}`;
+  runAdb(serial, ['shell', 'log', '-p', 'i', '-t', 'GatorDbHarness', logBoundary], {
+    code: 'log-boundary-failed',
+    label: 'Runtime-concurrency log boundary',
+  });
+  const outcome = await executeRuntimeConcurrencySequence({
+    resetTestState: () => resetTestState(serial),
+    createRequest: () =>
+      runAdb(serial, CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS, {
+        code: 'request-create-failed',
+        label: 'Runtime-concurrency request creation',
+      }),
+    launchApp: () => launchApp(serial),
+    stopApp: () => stopApp(serial),
+    verifyPrivateStateClean: () =>
+      privateTestStateClean(serial, RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES),
+    readLogs: () =>
+      logsAfterRelaunchBoundary(
+        runAdb(
+          serial,
+          ['logcat', '-d', '-v', 'threadtime', 'GatorDbHarness:I', 'ReactNativeJS:I', '*:S'],
+          { code: 'logcat-read-failed', label: 'filtered Gator logcat' },
+        ),
+        logBoundary,
+      ),
+    getProcessIdentity: () => currentProcessIdentity(serial),
+  });
+
+  const path = writeRuntimeConcurrencyArtifact(outcome, target);
+  if (outcome.result.status !== 'pass') {
+    throw new HarnessError(
+      'runtime-concurrency-contract-failed',
+      `Android runtime-concurrency contract failed [${outcome.result.failureCode}]. Safe artifact: ${path}`,
+    );
+  }
+  return { path, outcome };
+}
+
+export function parseRelaunchHarnessMode(args) {
   const mode = args[0];
   if (
     args.length > 1 ||
     (mode !== undefined &&
       mode !== '--active-wal-write-death' &&
-      mode !== '--active-migration-death')
+      mode !== '--active-migration-death' &&
+      mode !== '--runtime-concurrency')
   ) {
     throw new HarnessError(
       'invalid-harness-arguments',
-      'Use no argument for migration relaunch, --active-wal-write-death for active WAL, or --active-migration-death for active migration.',
+      'Use no argument for migration relaunch, --active-wal-write-death for active WAL, --active-migration-death for active migration, or --runtime-concurrency for the one-launch DB-02C wave.',
     );
   }
+  return mode;
+}
+
+export async function main(args = process.argv.slice(2)) {
+  const mode = parseRelaunchHarnessMode(args);
   let path;
   let label;
   if (mode === '--active-wal-write-death') {
@@ -2486,6 +2588,9 @@ export async function main(args = process.argv.slice(2)) {
   } else if (mode === '--active-migration-death') {
     ({ path } = await runAndroidDbActiveMigrationDeath());
     label = 'Android active-migration death';
+  } else if (mode === '--runtime-concurrency') {
+    ({ path } = await runAndroidDbRuntimeConcurrency());
+    label = 'Android DB runtime-concurrency';
   } else {
     ({ path } = await runAndroidDbRelaunch());
     label = 'Android DB relaunch';

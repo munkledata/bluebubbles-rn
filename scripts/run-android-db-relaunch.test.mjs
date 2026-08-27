@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -31,6 +32,7 @@ import {
   LAUNCH_APP_ADB_ARGS,
   logsAfterRelaunchBoundary,
   MIGRATION_RELAUNCH_PRIVATE_TEST_FILES,
+  parseRelaunchHarnessMode,
   parseProcessStartTicks,
   parseSingleProcessPid,
   PREPARE_CHECKS,
@@ -259,6 +261,27 @@ const target = {
   androidApi: 35,
   abi: 'arm64-v8a',
 };
+
+test('pins every supported host mode and rejects ambiguous arguments', () => {
+  assert.equal(parseRelaunchHarnessMode([]), undefined);
+  assert.equal(parseRelaunchHarnessMode(['--active-wal-write-death']), '--active-wal-write-death');
+  assert.equal(parseRelaunchHarnessMode(['--active-migration-death']), '--active-migration-death');
+  assert.equal(parseRelaunchHarnessMode(['--runtime-concurrency']), '--runtime-concurrency');
+  for (const args of [['--unknown'], ['--runtime-concurrency', '--active-wal-write-death']]) {
+    assert.throws(
+      () => parseRelaunchHarnessMode(args),
+      (error) => error instanceof HarnessError && error.code === 'invalid-harness-arguments',
+    );
+  }
+});
+
+test('package script exposes the exact runtime-concurrency host command', () => {
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(
+    packageJson.scripts['test:android:db:runtime-concurrency'],
+    'node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --runtime-concurrency',
+  );
+});
 
 test('pins zero-byte request creation and exact non-glob cleanup targets', () => {
   assert.deepEqual(MIGRATION_RELAUNCH_PRIVATE_TEST_FILES, [

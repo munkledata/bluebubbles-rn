@@ -4,12 +4,14 @@ import {
   cleanupDbActiveMigrationDeathSelfTestDatabase,
   cleanupDbActiveWalWriteDeathSelfTestDatabase,
   cleanupDbProcessRelaunchSelfTestDatabase,
+  cleanupDbRuntimeConcurrencySelfTestDatabase,
   prepareDbActiveMigrationDeathSelfTest,
   prepareDbActiveWalWriteDeathSelfTest,
   prepareDbProcessRelaunchSelfTest,
   resumeDbActiveMigrationDeathSelfTest,
   resumeDbActiveWalWriteDeathSelfTest,
   resumeDbProcessRelaunchSelfTest,
+  runDbRuntimeConcurrencySelfTest,
   type DbActiveMigrationDeathPrepareChecks,
   type DbActiveMigrationDeathPrepareFailureCode,
   type DbActiveMigrationDeathResumeFailureCode,
@@ -22,14 +24,21 @@ import {
   type DbProcessRelaunchPrepareFailureCode,
   type DbProcessRelaunchResumeFailureCode,
   type DbProcessRelaunchResumeResult,
+  type DbRuntimeConcurrencyDatabaseChecks,
+  type DbRuntimeConcurrencyDatabaseFailureCode,
+  type DbRuntimeConcurrencyDatabaseResult,
 } from '@db/database';
+import { runDbRuntimeConcurrencyWave } from '@/services/boot/dbRuntimeConcurrencyWave';
 
 const DB_RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 const DB_WAL_WRITE_DEATH_MARKER_PREFIX = 'GATOR_DB_WAL_WRITE_DEATH_V1 ';
 const DB_ACTIVE_MIGRATION_DEATH_MARKER_PREFIX = 'GATOR_DB_ACTIVE_MIGRATION_DEATH_V1 ';
+const DB_RUNTIME_CONCURRENCY_MARKER_PREFIX = 'GATOR_DB_RUNTIME_CONCURRENCY_V1 ';
 const DB_RELAUNCH_REQUEST_FILE = '.gator-db-relaunch-request-v1';
 const DB_WAL_WRITE_DEATH_REQUEST_FILE = '.gator-db-wal-write-death-request-v1';
 const DB_ACTIVE_MIGRATION_DEATH_REQUEST_FILE = '.gator-db-active-migration-death-request-v1';
+const DB_RUNTIME_CONCURRENCY_REQUEST_FILE = '.gator-db-runtime-concurrency-request-v1';
+const DB_RUNTIME_CONCURRENCY_RUNNING_FILE = '.gator-db-runtime-concurrency-running-v1';
 const DB_RELAUNCH_PREPARING_FILE = '.gator-db-relaunch-preparing-v1';
 const DB_RELAUNCH_READY_FILE = '.gator-db-relaunch-ready-v1';
 const DB_RELAUNCH_RESUMING_FILE = '.gator-db-relaunch-resuming-v1';
@@ -47,6 +56,8 @@ type DbRelaunchMarkerFileName =
   | typeof DB_RELAUNCH_REQUEST_FILE
   | typeof DB_WAL_WRITE_DEATH_REQUEST_FILE
   | typeof DB_ACTIVE_MIGRATION_DEATH_REQUEST_FILE
+  | typeof DB_RUNTIME_CONCURRENCY_REQUEST_FILE
+  | typeof DB_RUNTIME_CONCURRENCY_RUNNING_FILE
   | typeof DB_RELAUNCH_PREPARING_FILE
   | typeof DB_RELAUNCH_READY_FILE
   | typeof DB_RELAUNCH_RESUMING_FILE
@@ -120,6 +131,12 @@ interface DbActiveMigrationDeathFinalMarkerChecks {
   stateCleanup: boolean;
 }
 
+interface DbRuntimeConcurrencyMarkerChecks extends DbRuntimeConcurrencyDatabaseChecks {
+  requestValid: boolean;
+  runStatePersisted: boolean;
+  stateCleanup: boolean;
+}
+
 export type DbRelaunchFailureCode =
   | DbProcessRelaunchPrepareFailureCode
   | DbProcessRelaunchResumeFailureCode
@@ -151,6 +168,15 @@ export type DbActiveMigrationDeathFailureCode =
   | 'interrupted-resume'
   | 'orphaned-state'
   | 'ready-state'
+  | 'state-cleanup';
+
+export type DbRuntimeConcurrencyFailureCode =
+  | DbRuntimeConcurrencyDatabaseFailureCode
+  | 'request-invalid'
+  | 'phase-invalid'
+  | 'interrupted-run'
+  | 'orphaned-state'
+  | 'run-state'
   | 'state-cleanup';
 
 type DbRelaunchPrepareMarker =
@@ -263,12 +289,33 @@ type DbActiveMigrationDeathFinalMarker =
       failureCode: DbActiveMigrationDeathFailureCode;
     };
 
+type DbRuntimeConcurrencyMarker =
+  | {
+      schema: 1;
+      suite: 'android-db-runtime-concurrency';
+      status: 'pass';
+      migrationCount: typeof DB_RELAUNCH_MIGRATION_COUNT;
+      migrationHead: typeof DB_RELAUNCH_MIGRATION_HEAD;
+      checks: DbRuntimeConcurrencyMarkerChecks;
+    }
+  | {
+      schema: 1;
+      suite: 'android-db-runtime-concurrency';
+      status: 'fail';
+      migrationCount: typeof DB_RELAUNCH_MIGRATION_COUNT;
+      migrationHead: typeof DB_RELAUNCH_MIGRATION_HEAD;
+      checks: DbRuntimeConcurrencyMarkerChecks;
+      failureCode: DbRuntimeConcurrencyFailureCode;
+    };
+
 type MarkerPresence = 'absent' | 'zero-byte' | 'invalid';
 
 interface DurableMarkerSnapshot {
   request: MarkerPresence;
   walWriteDeathRequest: MarkerPresence;
   activeMigrationDeathRequest: MarkerPresence;
+  runtimeConcurrencyRequest: MarkerPresence;
+  runtimeConcurrencyRunning: MarkerPresence;
   preparing: MarkerPresence;
   ready: MarkerPresence;
   resuming: MarkerPresence;
@@ -281,7 +328,10 @@ interface DurableMarkerSnapshot {
 }
 
 type DbRelaunchScenario =
-  'migration-relaunch' | 'active-wal-write-death' | 'active-migration-death';
+  | 'migration-relaunch'
+  | 'active-wal-write-death'
+  | 'active-migration-death'
+  | 'runtime-concurrency';
 type DbRelaunchStateFailureCode =
   | 'request-invalid'
   | 'phase-invalid'
@@ -289,6 +339,7 @@ type DbRelaunchStateFailureCode =
   | 'interrupted-resume'
   | 'orphaned-state'
   | 'internal';
+type DbAnyRelaunchStateFailureCode = DbRelaunchStateFailureCode | 'interrupted-run';
 
 type DbRelaunchStartMode =
   | { kind: 'none' }
@@ -297,7 +348,7 @@ type DbRelaunchStartMode =
   | {
       kind: 'recovery';
       scenario: DbRelaunchScenario;
-      failureCode: DbRelaunchStateFailureCode;
+      failureCode: DbAnyRelaunchStateFailureCode;
       requestValid: boolean;
     };
 
@@ -316,6 +367,8 @@ function inspectDurableMarkers(): DurableMarkerSnapshot {
     request: markerPresence(DB_RELAUNCH_REQUEST_FILE),
     walWriteDeathRequest: markerPresence(DB_WAL_WRITE_DEATH_REQUEST_FILE),
     activeMigrationDeathRequest: markerPresence(DB_ACTIVE_MIGRATION_DEATH_REQUEST_FILE),
+    runtimeConcurrencyRequest: markerPresence(DB_RUNTIME_CONCURRENCY_REQUEST_FILE),
+    runtimeConcurrencyRunning: markerPresence(DB_RUNTIME_CONCURRENCY_RUNNING_FILE),
     preparing: markerPresence(DB_RELAUNCH_PREPARING_FILE),
     ready: markerPresence(DB_RELAUNCH_READY_FILE),
     resuming: markerPresence(DB_RELAUNCH_RESUMING_FILE),
@@ -326,6 +379,58 @@ function inspectDurableMarkers(): DurableMarkerSnapshot {
     activeMigrationDeathReady: markerPresence(DB_ACTIVE_MIGRATION_DEATH_READY_FILE),
     activeMigrationDeathResuming: markerPresence(DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE),
   };
+}
+
+function classifyRuntimeConcurrencyState(
+  request: MarkerPresence,
+  running: MarkerPresence,
+): DbRelaunchStartMode {
+  if (request === 'invalid' || running === 'invalid') {
+    return {
+      kind: 'recovery',
+      scenario: 'runtime-concurrency',
+      failureCode: request === 'invalid' ? 'request-invalid' : 'phase-invalid',
+      requestValid: request === 'zero-byte',
+    };
+  }
+  if (request === 'absent') {
+    return {
+      kind: 'recovery',
+      scenario: 'runtime-concurrency',
+      failureCode: 'orphaned-state',
+      requestValid: false,
+    };
+  }
+  if (running === 'zero-byte') {
+    return {
+      kind: 'recovery',
+      scenario: 'runtime-concurrency',
+      failureCode: 'interrupted-run',
+      requestValid: true,
+    };
+  }
+  return { kind: 'prepare', scenario: 'runtime-concurrency' };
+}
+
+function runtimeConcurrencyRecoveryFailureCode(
+  failureCode: DbAnyRelaunchStateFailureCode,
+): DbRuntimeConcurrencyFailureCode {
+  if (
+    failureCode === 'request-invalid' ||
+    failureCode === 'phase-invalid' ||
+    failureCode === 'interrupted-run' ||
+    failureCode === 'orphaned-state' ||
+    failureCode === 'internal'
+  ) {
+    return failureCode;
+  }
+  return 'phase-invalid';
+}
+
+function standardRelaunchRecoveryFailureCode(
+  failureCode: DbAnyRelaunchStateFailureCode,
+): DbRelaunchStateFailureCode {
+  return failureCode === 'interrupted-run' ? 'phase-invalid' : failureCode;
 }
 
 function classifyScenarioState(
@@ -397,25 +502,40 @@ function classifyStartMode(snapshot: DurableMarkerSnapshot): DbRelaunchStartMode
     snapshot.activeMigrationDeathReady,
     snapshot.activeMigrationDeathResuming,
   ] as const;
+  const runtimeConcurrencyState = [
+    snapshot.runtimeConcurrencyRequest,
+    snapshot.runtimeConcurrencyRunning,
+  ] as const;
   const hasRelaunchState = relaunchState.some((presence) => presence !== 'absent');
   const hasWalWriteDeathState = walWriteDeathState.some((presence) => presence !== 'absent');
   const hasActiveMigrationDeathState = activeMigrationDeathState.some(
+    (presence) => presence !== 'absent',
+  );
+  const hasRuntimeConcurrencyState = runtimeConcurrencyState.some(
     (presence) => presence !== 'absent',
   );
   const activeScenarioCount = [
     hasRelaunchState,
     hasWalWriteDeathState,
     hasActiveMigrationDeathState,
+    hasRuntimeConcurrencyState,
   ].filter(Boolean).length;
 
   if (activeScenarioCount === 0) return { kind: 'none' };
   if (activeScenarioCount > 1) {
     return {
       kind: 'recovery',
-      scenario: hasActiveMigrationDeathState ? 'active-migration-death' : 'active-wal-write-death',
+      scenario: hasRuntimeConcurrencyState
+        ? 'runtime-concurrency'
+        : hasActiveMigrationDeathState
+          ? 'active-migration-death'
+          : 'active-wal-write-death',
       failureCode: 'phase-invalid',
       requestValid: false,
     };
+  }
+  if (hasRuntimeConcurrencyState) {
+    return classifyRuntimeConcurrencyState(...runtimeConcurrencyState);
   }
   if (hasWalWriteDeathState) {
     return classifyScenarioState('active-wal-write-death', ...walWriteDeathState);
@@ -462,6 +582,7 @@ function cleanupDurableMarkers(): boolean {
   if (!deleteMarkerIfPresent(DB_RELAUNCH_REQUEST_FILE)) return false;
   if (!deleteMarkerIfPresent(DB_WAL_WRITE_DEATH_REQUEST_FILE)) return false;
   if (!deleteMarkerIfPresent(DB_ACTIVE_MIGRATION_DEATH_REQUEST_FILE)) return false;
+  if (!deleteMarkerIfPresent(DB_RUNTIME_CONCURRENCY_REQUEST_FILE)) return false;
   const resuming = deleteMarkerIfPresent(DB_RELAUNCH_RESUMING_FILE);
   const ready = deleteMarkerIfPresent(DB_RELAUNCH_READY_FILE);
   const preparing = deleteMarkerIfPresent(DB_RELAUNCH_PREPARING_FILE);
@@ -475,6 +596,7 @@ function cleanupDurableMarkers(): boolean {
   const activeMigrationDeathPreparing = deleteMarkerIfPresent(
     DB_ACTIVE_MIGRATION_DEATH_PREPARING_FILE,
   );
+  const runtimeConcurrencyRunning = deleteMarkerIfPresent(DB_RUNTIME_CONCURRENCY_RUNNING_FILE);
   return (
     resuming &&
     ready &&
@@ -484,7 +606,8 @@ function cleanupDurableMarkers(): boolean {
     walWriteDeathPreparing &&
     activeMigrationDeathResuming &&
     activeMigrationDeathReady &&
-    activeMigrationDeathPreparing
+    activeMigrationDeathPreparing &&
+    runtimeConcurrencyRunning
   );
 }
 
@@ -584,6 +707,37 @@ function emptyActiveMigrationDeathFinalMarkerChecks(): DbActiveMigrationDeathFin
   };
 }
 
+type MutableDbRuntimeConcurrencyMarkerChecks = {
+  -readonly [K in keyof DbRuntimeConcurrencyMarkerChecks]: DbRuntimeConcurrencyMarkerChecks[K];
+};
+
+function emptyRuntimeConcurrencyMarkerChecks(): MutableDbRuntimeConcurrencyMarkerChecks {
+  return {
+    requestValid: false,
+    runStatePersisted: false,
+    preCleanup: false,
+    encryptedOpen: false,
+    migrationLedger: false,
+    rollbackIsolation: false,
+    syncChunks: false,
+    liveMessages: false,
+    attachmentConstruction: false,
+    uploadOutsideDbOwner: false,
+    rekeyExclusive: false,
+    queuedWritersBlocked: false,
+    rekeyApplied: false,
+    queuedWritersResumed: false,
+    uploadSettlement: false,
+    queueDrained: false,
+    sentinelCommit: false,
+    newKeyReopen: false,
+    oldKeyRejected: false,
+    integrity: false,
+    databaseCleanup: false,
+    stateCleanup: false,
+  };
+}
+
 function logPrepareMarker(marker: DbRelaunchPrepareMarker): void {
   logger.info(`${DB_RELAUNCH_MARKER_PREFIX}${JSON.stringify(marker)}`);
 }
@@ -608,8 +762,118 @@ function logActiveMigrationDeathFinalMarker(marker: DbActiveMigrationDeathFinalM
   logger.info(`${DB_ACTIVE_MIGRATION_DEATH_MARKER_PREFIX}${JSON.stringify(marker)}`);
 }
 
+function logRuntimeConcurrencyMarker(marker: DbRuntimeConcurrencyMarker): void {
+  logger.info(`${DB_RUNTIME_CONCURRENCY_MARKER_PREFIX}${JSON.stringify(marker)}`);
+}
+
 async function waitForHostKill(): Promise<never> {
   return WAIT_FOR_HOST_PROCESS_KILL;
+}
+
+async function finishRuntimeConcurrencyFailure(
+  checks: MutableDbRuntimeConcurrencyMarkerChecks,
+  failureCode: DbRuntimeConcurrencyFailureCode,
+  knownDatabaseCleanup?: boolean,
+): Promise<never> {
+  checks.databaseCleanup = knownDatabaseCleanup ?? cleanupDbRuntimeConcurrencySelfTestDatabase();
+  if (checks.databaseCleanup) checks.stateCleanup = cleanupDurableMarkers();
+  const finalFailureCode: DbRuntimeConcurrencyFailureCode = !checks.databaseCleanup
+    ? 'database-cleanup'
+    : !checks.stateCleanup
+      ? 'state-cleanup'
+      : failureCode;
+  logRuntimeConcurrencyMarker({
+    schema: 1,
+    suite: 'android-db-runtime-concurrency',
+    status: 'fail',
+    migrationCount: DB_RELAUNCH_MIGRATION_COUNT,
+    migrationHead: DB_RELAUNCH_MIGRATION_HEAD,
+    checks,
+    failureCode: finalFailureCode,
+  });
+  return waitForHostKill();
+}
+
+async function runRuntimeConcurrencyPhase(): Promise<never> {
+  const checks = emptyRuntimeConcurrencyMarkerChecks();
+  checks.requestValid = true;
+  try {
+    createZeroByteMarker(DB_RUNTIME_CONCURRENCY_RUNNING_FILE);
+    checks.runStatePersisted = true;
+  } catch {
+    return finishRuntimeConcurrencyFailure(checks, 'run-state');
+  }
+
+  let result: DbRuntimeConcurrencyDatabaseResult;
+  try {
+    result = await runDbRuntimeConcurrencySelfTest(runDbRuntimeConcurrencyWave);
+  } catch {
+    return finishRuntimeConcurrencyFailure(checks, 'internal');
+  }
+  Object.assign(checks, result.checks);
+  if (checks.databaseCleanup) checks.stateCleanup = cleanupDurableMarkers();
+
+  const failureCode: DbRuntimeConcurrencyFailureCode | undefined = !checks.databaseCleanup
+    ? 'database-cleanup'
+    : !checks.stateCleanup
+      ? 'state-cleanup'
+      : result.status === 'fail'
+        ? result.failureCode
+        : undefined;
+  if (!failureCode && Object.values(checks).every(Boolean)) {
+    logRuntimeConcurrencyMarker({
+      schema: 1,
+      suite: 'android-db-runtime-concurrency',
+      status: 'pass',
+      migrationCount: DB_RELAUNCH_MIGRATION_COUNT,
+      migrationHead: DB_RELAUNCH_MIGRATION_HEAD,
+      checks,
+    });
+  } else {
+    logRuntimeConcurrencyMarker({
+      schema: 1,
+      suite: 'android-db-runtime-concurrency',
+      status: 'fail',
+      migrationCount: DB_RELAUNCH_MIGRATION_COUNT,
+      migrationHead: DB_RELAUNCH_MIGRATION_HEAD,
+      checks,
+      failureCode: failureCode ?? 'internal',
+    });
+  }
+  return waitForHostKill();
+}
+
+async function runRuntimeConcurrencyRecoveryPhase(
+  failureCode: DbRuntimeConcurrencyFailureCode,
+  requestValid: boolean,
+): Promise<never> {
+  const checks = emptyRuntimeConcurrencyMarkerChecks();
+  checks.requestValid = requestValid;
+  const relaunchCleanup = cleanupDbProcessRelaunchSelfTestDatabase();
+  const walWriteDeathCleanup = cleanupDbActiveWalWriteDeathSelfTestDatabase();
+  const activeMigrationDeathCleanup = cleanupDbActiveMigrationDeathSelfTestDatabase();
+  const runtimeConcurrencyCleanup = cleanupDbRuntimeConcurrencySelfTestDatabase();
+  checks.databaseCleanup =
+    relaunchCleanup &&
+    walWriteDeathCleanup &&
+    activeMigrationDeathCleanup &&
+    runtimeConcurrencyCleanup;
+  if (checks.databaseCleanup) checks.stateCleanup = cleanupDurableMarkers();
+  const finalFailureCode: DbRuntimeConcurrencyFailureCode = !checks.databaseCleanup
+    ? 'database-cleanup'
+    : !checks.stateCleanup
+      ? 'state-cleanup'
+      : failureCode;
+  logRuntimeConcurrencyMarker({
+    schema: 1,
+    suite: 'android-db-runtime-concurrency',
+    status: 'fail',
+    migrationCount: DB_RELAUNCH_MIGRATION_COUNT,
+    migrationHead: DB_RELAUNCH_MIGRATION_HEAD,
+    checks,
+    failureCode: finalFailureCode,
+  });
+  return waitForHostKill();
 }
 
 async function finishPrepareFailure(
@@ -746,7 +1010,12 @@ async function runRecoveryPhase(
   const relaunchCleanup = cleanupDbProcessRelaunchSelfTestDatabase();
   const walWriteDeathCleanup = cleanupDbActiveWalWriteDeathSelfTestDatabase();
   const activeMigrationDeathCleanup = cleanupDbActiveMigrationDeathSelfTestDatabase();
-  checks.databaseCleanup = relaunchCleanup && walWriteDeathCleanup && activeMigrationDeathCleanup;
+  const runtimeConcurrencyCleanup = cleanupDbRuntimeConcurrencySelfTestDatabase();
+  checks.databaseCleanup =
+    relaunchCleanup &&
+    walWriteDeathCleanup &&
+    activeMigrationDeathCleanup &&
+    runtimeConcurrencyCleanup;
   if (checks.databaseCleanup) checks.stateCleanup = cleanupDurableMarkers();
   const finalFailureCode: DbRelaunchFailureCode = !checks.databaseCleanup
     ? 'database-cleanup'
@@ -898,7 +1167,12 @@ async function runWalWriteDeathRecoveryPhase(
   const relaunchCleanup = cleanupDbProcessRelaunchSelfTestDatabase();
   const walWriteDeathCleanup = cleanupDbActiveWalWriteDeathSelfTestDatabase();
   const activeMigrationDeathCleanup = cleanupDbActiveMigrationDeathSelfTestDatabase();
-  checks.databaseCleanup = relaunchCleanup && walWriteDeathCleanup && activeMigrationDeathCleanup;
+  const runtimeConcurrencyCleanup = cleanupDbRuntimeConcurrencySelfTestDatabase();
+  checks.databaseCleanup =
+    relaunchCleanup &&
+    walWriteDeathCleanup &&
+    activeMigrationDeathCleanup &&
+    runtimeConcurrencyCleanup;
   if (checks.databaseCleanup) checks.stateCleanup = cleanupDurableMarkers();
   const finalFailureCode: DbWalWriteDeathFailureCode = !checks.databaseCleanup
     ? 'database-cleanup'
@@ -1054,7 +1328,12 @@ async function runActiveMigrationDeathRecoveryPhase(
   const relaunchCleanup = cleanupDbProcessRelaunchSelfTestDatabase();
   const walWriteDeathCleanup = cleanupDbActiveWalWriteDeathSelfTestDatabase();
   const activeMigrationDeathCleanup = cleanupDbActiveMigrationDeathSelfTestDatabase();
-  checks.databaseCleanup = relaunchCleanup && walWriteDeathCleanup && activeMigrationDeathCleanup;
+  const runtimeConcurrencyCleanup = cleanupDbRuntimeConcurrencySelfTestDatabase();
+  checks.databaseCleanup =
+    relaunchCleanup &&
+    walWriteDeathCleanup &&
+    activeMigrationDeathCleanup &&
+    runtimeConcurrencyCleanup;
   if (checks.databaseCleanup) checks.stateCleanup = cleanupDurableMarkers();
   const finalFailureCode: DbActiveMigrationDeathFailureCode = !checks.databaseCleanup
     ? 'database-cleanup'
@@ -1103,13 +1382,23 @@ export function startDevDbRelaunchContractIfRequested(): Promise<never> | undefi
     return undefined;
   }
 
-  if (mode.scenario === 'active-migration-death') {
+  if (mode.scenario === 'runtime-concurrency') {
+    if (mode.kind === 'prepare') activeDbRelaunchContract = runRuntimeConcurrencyPhase();
+    else if (mode.kind === 'recovery') {
+      activeDbRelaunchContract = runRuntimeConcurrencyRecoveryPhase(
+        runtimeConcurrencyRecoveryFailureCode(mode.failureCode),
+        mode.requestValid,
+      );
+    } else {
+      activeDbRelaunchContract = runRuntimeConcurrencyRecoveryPhase('phase-invalid', false);
+    }
+  } else if (mode.scenario === 'active-migration-death') {
     if (mode.kind === 'prepare') activeDbRelaunchContract = runActiveMigrationDeathPreparePhase();
     else if (mode.kind === 'resume') {
       activeDbRelaunchContract = runActiveMigrationDeathResumePhase();
     } else {
       activeDbRelaunchContract = runActiveMigrationDeathRecoveryPhase(
-        mode.failureCode,
+        standardRelaunchRecoveryFailureCode(mode.failureCode),
         mode.requestValid,
       );
     }
@@ -1117,10 +1406,18 @@ export function startDevDbRelaunchContractIfRequested(): Promise<never> | undefi
     if (mode.kind === 'prepare') activeDbRelaunchContract = runWalWriteDeathPreparePhase();
     else if (mode.kind === 'resume') activeDbRelaunchContract = runWalWriteDeathResumePhase();
     else {
-      activeDbRelaunchContract = runWalWriteDeathRecoveryPhase(mode.failureCode, mode.requestValid);
+      activeDbRelaunchContract = runWalWriteDeathRecoveryPhase(
+        standardRelaunchRecoveryFailureCode(mode.failureCode),
+        mode.requestValid,
+      );
     }
   } else if (mode.kind === 'prepare') activeDbRelaunchContract = runPreparePhase();
   else if (mode.kind === 'resume') activeDbRelaunchContract = runResumePhase();
-  else activeDbRelaunchContract = runRecoveryPhase(mode.failureCode, mode.requestValid);
+  else {
+    activeDbRelaunchContract = runRecoveryPhase(
+      standardRelaunchRecoveryFailureCode(mode.failureCode),
+      mode.requestValid,
+    );
+  }
   return activeDbRelaunchContract;
 }

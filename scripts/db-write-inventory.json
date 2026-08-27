@@ -979,7 +979,7 @@
     {
       "id": "src/db/database.ts#exec:raw-dynamic:cd5d0385470a",
       "path": "src/db/database.ts",
-      "line": 29,
+      "line": 33,
       "symbol": "exec",
       "operation": "raw-dynamic",
       "target": "<dynamic>",
@@ -992,7 +992,7 @@
     {
       "id": "src/db/database.ts#query:raw-dynamic:65140a624a68",
       "path": "src/db/database.ts",
-      "line": 32,
+      "line": 36,
       "symbol": "query",
       "operation": "raw-dynamic",
       "target": "<dynamic>",
@@ -1005,7 +1005,7 @@
     {
       "id": "src/db/database.ts#execute:raw-dynamic:6aeb161bfea5",
       "path": "src/db/database.ts",
-      "line": 77,
+      "line": 81,
       "symbol": "execute",
       "operation": "raw-dynamic",
       "target": "<dynamic>",
@@ -1018,7 +1018,7 @@
     {
       "id": "src/db/database.ts#executeAsync:raw-dynamic:dc5075d9aedf",
       "path": "src/db/database.ts",
-      "line": 88,
+      "line": 92,
       "symbol": "executeAsync",
       "operation": "raw-dynamic",
       "target": "<dynamic>",
@@ -1031,7 +1031,7 @@
     {
       "id": "src/db/database.ts#executeRawAsync:raw-dynamic:d54c72385fdd",
       "path": "src/db/database.ts",
-      "line": 99,
+      "line": 103,
       "symbol": "executeRawAsync",
       "operation": "raw-dynamic",
       "target": "<dynamic>",
@@ -1044,7 +1044,7 @@
     {
       "id": "src/db/database.ts#initDatabase:sql-pragma:764bbe538944",
       "path": "src/db/database.ts",
-      "line": 126,
+      "line": 130,
       "symbol": "initDatabase",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1057,7 +1057,7 @@
     {
       "id": "src/db/database.ts#initDatabase:mutator-call:39511cb26ba5",
       "path": "src/db/database.ts",
-      "line": 127,
+      "line": 131,
       "symbol": "initDatabase",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1070,7 +1070,7 @@
     {
       "id": "src/db/database.ts#deleteDriverSelfTestDatabase:native-database-delete:7f88558fd106",
       "path": "src/db/database.ts",
-      "line": 354,
+      "line": 358,
       "symbol": "deleteDriverSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -1083,7 +1083,7 @@
     {
       "id": "src/db/database.ts#deleteDriverHistorySelfTestDatabase:native-database-delete:3128d7a4f737",
       "path": "src/db/database.ts",
-      "line": 433,
+      "line": 437,
       "symbol": "deleteDriverHistorySelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -1096,7 +1096,7 @@
     {
       "id": "src/db/database.ts#driverHistoryNextMigrationRolledBack:sql-pragma:5766a6aaea10",
       "path": "src/db/database.ts",
-      "line": 461,
+      "line": 465,
       "symbol": "driverHistoryNextMigrationRolledBack",
       "operation": "sql-pragma",
       "target": "table_info",
@@ -1109,7 +1109,7 @@
     {
       "id": "src/db/database.ts#driverHistoryNextMigrationRolledBack:sql-pragma:94a19b5850c9",
       "path": "src/db/database.ts",
-      "line": 463,
+      "line": 467,
       "symbol": "driverHistoryNextMigrationRolledBack",
       "operation": "sql-pragma",
       "target": "table_info",
@@ -1122,7 +1122,7 @@
     {
       "id": "src/db/database.ts#driverHistoryNextMigrationRolledBack:sql-pragma:2d6705384f85",
       "path": "src/db/database.ts",
-      "line": 464,
+      "line": 468,
       "symbol": "driverHistoryNextMigrationRolledBack",
       "operation": "sql-pragma",
       "target": "table_info",
@@ -1135,7 +1135,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:82c463341e3f",
       "path": "src/db/database.ts",
-      "line": 499,
+      "line": 503,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "chats",
@@ -1148,7 +1148,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:a3b31a6ceb94",
       "path": "src/db/database.ts",
-      "line": 510,
+      "line": 514,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "messages",
@@ -1161,7 +1161,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:90a0f5028f1b",
       "path": "src/db/database.ts",
-      "line": 523,
+      "line": 527,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "error_reports",
@@ -1174,7 +1174,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:965abd604193",
       "path": "src/db/database.ts",
-      "line": 529,
+      "line": 533,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "scheduled_messages",
@@ -1187,7 +1187,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:817f65b4527c",
       "path": "src/db/database.ts",
-      "line": 535,
+      "line": 539,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "scheduled_messages",
@@ -1200,7 +1200,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:5985a7b2bf3f",
       "path": "src/db/database.ts",
-      "line": 541,
+      "line": 545,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "scheduled_messages",
@@ -1213,7 +1213,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:929f397d7c63",
       "path": "src/db/database.ts",
-      "line": 547,
+      "line": 551,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "kv",
@@ -1226,7 +1226,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:b6b8fedfa7f7",
       "path": "src/db/database.ts",
-      "line": 551,
+      "line": 555,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "kv",
@@ -1239,7 +1239,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:17e545c79b2c",
       "path": "src/db/database.ts",
-      "line": 562,
+      "line": 566,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -1252,7 +1252,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:b449c6787aa3",
       "path": "src/db/database.ts",
-      "line": 567,
+      "line": 571,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -1265,7 +1265,7 @@
     {
       "id": "src/db/database.ts#seedDriverHistoryFixture:sql-insert:e3bae2841210",
       "path": "src/db/database.ts",
-      "line": 572,
+      "line": 576,
       "symbol": "seedDriverHistoryFixture",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -1278,7 +1278,7 @@
     {
       "id": "src/db/database.ts#verifyDriverHistoryFixture:mutator-call:851edbc94d70",
       "path": "src/db/database.ts",
-      "line": 650,
+      "line": 654,
       "symbol": "verifyDriverHistoryFixture",
       "operation": "mutator-call",
       "target": "src/db/database.ts#driverHistoryNextMigrationRolledBack",
@@ -1291,7 +1291,7 @@
     {
       "id": "src/db/database.ts#verifyDriverHistoryFts:sql-insert:105ca9af7dbb",
       "path": "src/db/database.ts",
-      "line": 791,
+      "line": 795,
       "symbol": "verifyDriverHistoryFts",
       "operation": "sql-insert",
       "target": "messages",
@@ -1304,7 +1304,7 @@
     {
       "id": "src/db/database.ts#verifyDriverHistoryFts:sql-update:aa0ced26e5fd",
       "path": "src/db/database.ts",
-      "line": 805,
+      "line": 809,
       "symbol": "verifyDriverHistoryFts",
       "operation": "sql-update",
       "target": "messages",
@@ -1317,7 +1317,7 @@
     {
       "id": "src/db/database.ts#verifyDriverHistoryFts:sql-delete:1adccbf499dd",
       "path": "src/db/database.ts",
-      "line": 819,
+      "line": 823,
       "symbol": "verifyDriverHistoryFts",
       "operation": "sql-delete",
       "target": "messages",
@@ -1330,7 +1330,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:d9302813dbdf",
       "path": "src/db/database.ts",
-      "line": 858,
+      "line": 862,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deleteDriverHistorySelfTestDatabase",
@@ -1343,7 +1343,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-pragma:cd9294d29a79",
       "path": "src/db/database.ts",
-      "line": 867,
+      "line": 871,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1356,7 +1356,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-schema:d6e06500206d",
       "path": "src/db/database.ts",
-      "line": 868,
+      "line": 872,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-schema",
       "target": "_migrations",
@@ -1369,7 +1369,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-schema:d325624455d6",
       "path": "src/db/database.ts",
-      "line": 872,
+      "line": 876,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-schema",
       "target": "driver_history_stop_after_reviewed_head",
@@ -1382,7 +1382,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:385a825e1246",
       "path": "src/db/database.ts",
-      "line": 882,
+      "line": 886,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1395,7 +1395,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:4b4ecfb48d70",
       "path": "src/db/database.ts",
-      "line": 896,
+      "line": 900,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#driverHistoryNextMigrationRolledBack",
@@ -1408,7 +1408,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-schema:29d8e103eb01",
       "path": "src/db/database.ts",
-      "line": 898,
+      "line": 902,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-schema",
       "target": "driver_history_stop_after_reviewed_head",
@@ -1421,7 +1421,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:12903965e8b2",
       "path": "src/db/database.ts",
-      "line": 899,
+      "line": 903,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#seedDriverHistoryFixture",
@@ -1434,7 +1434,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:cd8ae95f9ac5",
       "path": "src/db/database.ts",
-      "line": 900,
+      "line": 904,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#verifyDriverHistoryFixture",
@@ -1447,7 +1447,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:6a4ca47cc776",
       "path": "src/db/database.ts",
-      "line": 933,
+      "line": 937,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#verifyDriverHistoryFixture",
@@ -1460,7 +1460,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-pragma:a40ba555d13e",
       "path": "src/db/database.ts",
-      "line": 947,
+      "line": 951,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1473,7 +1473,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:781ab19f2c5a",
       "path": "src/db/database.ts",
-      "line": 948,
+      "line": 952,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#verifyDriverHistoryFixture",
@@ -1486,7 +1486,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:a62e21f28f31",
       "path": "src/db/database.ts",
-      "line": 950,
+      "line": 954,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1499,7 +1499,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:9561f47c420a",
       "path": "src/db/database.ts",
-      "line": 971,
+      "line": 975,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#verifyDriverHistoryFts",
@@ -1512,7 +1512,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-pragma:411fd161d3d5",
       "path": "src/db/database.ts",
-      "line": 975,
+      "line": 979,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1525,7 +1525,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-pragma:1736365e8295",
       "path": "src/db/database.ts",
-      "line": 977,
+      "line": 981,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -1538,7 +1538,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:sql-pragma:08567fdb7003",
       "path": "src/db/database.ts",
-      "line": 979,
+      "line": 983,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -1551,7 +1551,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:a62e21f28f31:2",
       "path": "src/db/database.ts",
-      "line": 990,
+      "line": 994,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1564,7 +1564,7 @@
     {
       "id": "src/db/database.ts#runDbHistoricalMigrationSelfTest:mutator-call:d9302813dbdf:2",
       "path": "src/db/database.ts",
-      "line": 1001,
+      "line": 1005,
       "symbol": "runDbHistoricalMigrationSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deleteDriverHistorySelfTestDatabase",
@@ -1577,7 +1577,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:mutator-call:6e9f462c2573",
       "path": "src/db/database.ts",
-      "line": 1085,
+      "line": 1089,
       "symbol": "runDbDriverSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deleteDriverSelfTestDatabase",
@@ -1590,7 +1590,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-pragma:c49d1a8c0add",
       "path": "src/db/database.ts",
-      "line": 1091,
+      "line": 1095,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1603,7 +1603,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-schema:4dae6e8d3a0e",
       "path": "src/db/database.ts",
-      "line": 1092,
+      "line": 1096,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-schema",
       "target": "driver_contract_migration_conflict",
@@ -1616,7 +1616,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-schema:a38a282ed9df",
       "path": "src/db/database.ts",
-      "line": 1099,
+      "line": 1103,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-schema",
       "target": "attachment_cache_entries_state_lru_idx",
@@ -1629,7 +1629,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:mutator-call:50cd95a59734",
       "path": "src/db/database.ts",
-      "line": 1126,
+      "line": 1130,
       "symbol": "runDbDriverSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1642,7 +1642,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-pragma:2e4e15afe397",
       "path": "src/db/database.ts",
-      "line": 1180,
+      "line": 1184,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1655,7 +1655,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-schema:0c978f644327",
       "path": "src/db/database.ts",
-      "line": 1196,
+      "line": 1200,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-schema",
       "target": "attachment_cache_entries_state_lru_idx",
@@ -1668,7 +1668,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-schema:1f9217b0d7ae",
       "path": "src/db/database.ts",
-      "line": 1197,
+      "line": 1201,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-schema",
       "target": "driver_contract_migration_conflict",
@@ -1681,7 +1681,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:fc639fb66318",
       "path": "src/db/database.ts",
-      "line": 1200,
+      "line": 1204,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "chats",
@@ -1694,7 +1694,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:afeb55a1b579",
       "path": "src/db/database.ts",
-      "line": 1211,
+      "line": 1215,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "handles",
@@ -1707,7 +1707,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:3222e4ca0230",
       "path": "src/db/database.ts",
-      "line": 1216,
+      "line": 1220,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "messages",
@@ -1720,7 +1720,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:95b1b00ea4f5",
       "path": "src/db/database.ts",
-      "line": 1221,
+      "line": 1225,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "messages",
@@ -1733,7 +1733,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:7e076a2d5a02",
       "path": "src/db/database.ts",
-      "line": 1226,
+      "line": 1230,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "error_reports",
@@ -1746,7 +1746,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:67cd17749f10",
       "path": "src/db/database.ts",
-      "line": 1231,
+      "line": 1235,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "scheduled_messages",
@@ -1759,7 +1759,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:ee6a3be14437",
       "path": "src/db/database.ts",
-      "line": 1237,
+      "line": 1241,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "scheduled_messages",
@@ -1772,7 +1772,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:e7736589b61c",
       "path": "src/db/database.ts",
-      "line": 1243,
+      "line": 1247,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "scheduled_messages",
@@ -1785,7 +1785,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:957cb3abc89d",
       "path": "src/db/database.ts",
-      "line": 1249,
+      "line": 1253,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "kv",
@@ -1798,7 +1798,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:652cb2618749",
       "path": "src/db/database.ts",
-      "line": 1253,
+      "line": 1257,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "kv",
@@ -1811,7 +1811,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:73a6969ab115",
       "path": "src/db/database.ts",
-      "line": 1262,
+      "line": 1266,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -1824,7 +1824,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:f00c3a8dc7c9",
       "path": "src/db/database.ts",
-      "line": 1272,
+      "line": 1276,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -1837,7 +1837,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:da34dd2af660",
       "path": "src/db/database.ts",
-      "line": 1282,
+      "line": 1286,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -1850,7 +1850,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:mutator-call:3dfafb738cb3",
       "path": "src/db/database.ts",
-      "line": 1364,
+      "line": 1368,
       "symbol": "runDbDriverSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1863,7 +1863,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-insert:f2142ffad97d",
       "path": "src/db/database.ts",
-      "line": 1458,
+      "line": 1462,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-insert",
       "target": "messages",
@@ -1876,7 +1876,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-update:967e86a8dcad",
       "path": "src/db/database.ts",
-      "line": 1474,
+      "line": 1478,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-update",
       "target": "messages",
@@ -1889,7 +1889,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-delete:10901d46b32a",
       "path": "src/db/database.ts",
-      "line": 1490,
+      "line": 1494,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-delete",
       "target": "messages",
@@ -1902,7 +1902,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-pragma:926c7398aabf",
       "path": "src/db/database.ts",
-      "line": 1518,
+      "line": 1522,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1915,7 +1915,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-pragma:a2c4065836f3",
       "path": "src/db/database.ts",
-      "line": 1520,
+      "line": 1524,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -1928,7 +1928,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-pragma:da75d0359a58",
       "path": "src/db/database.ts",
-      "line": 1522,
+      "line": 1526,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -1941,7 +1941,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:mutator-call:3dfafb738cb3:2",
       "path": "src/db/database.ts",
-      "line": 1533,
+      "line": 1537,
       "symbol": "runDbDriverSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1954,7 +1954,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:transaction-begin:5c7a13643a31",
       "path": "src/db/database.ts",
-      "line": 1546,
+      "line": 1550,
       "symbol": "runDbDriverSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -1967,7 +1967,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-update:ce33b8faf091",
       "path": "src/db/database.ts",
-      "line": 1550,
+      "line": 1554,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-update",
       "target": "handles",
@@ -1980,7 +1980,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:transaction-commit:f6472ddd0938",
       "path": "src/db/database.ts",
-      "line": 1553,
+      "line": 1557,
       "symbol": "runDbDriverSelfTest",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -1993,7 +1993,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:transaction-rollback:49402d35bbe6",
       "path": "src/db/database.ts",
-      "line": 1560,
+      "line": 1564,
       "symbol": "runDbDriverSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2006,7 +2006,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:transaction-begin:5c7a13643a31:2",
       "path": "src/db/database.ts",
-      "line": 1571,
+      "line": 1575,
       "symbol": "runDbDriverSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2019,7 +2019,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-update:f56ba7a56007",
       "path": "src/db/database.ts",
-      "line": 1578,
+      "line": 1582,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-update",
       "target": "handles",
@@ -2032,7 +2032,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:transaction-rollback:49402d35bbe6:2",
       "path": "src/db/database.ts",
-      "line": 1581,
+      "line": 1585,
       "symbol": "runDbDriverSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2045,7 +2045,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:transaction-rollback:49402d35bbe6:3",
       "path": "src/db/database.ts",
-      "line": 1588,
+      "line": 1592,
       "symbol": "runDbDriverSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2058,7 +2058,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-update:3e7d9beac678",
       "path": "src/db/database.ts",
-      "line": 1603,
+      "line": 1607,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-update",
       "target": "handles",
@@ -2071,7 +2071,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-update:616f2665fd11",
       "path": "src/db/database.ts",
-      "line": 1617,
+      "line": 1621,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-update",
       "target": "handles",
@@ -2084,7 +2084,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:drizzle-update:d2a95e01e17b",
       "path": "src/db/database.ts",
-      "line": 1629,
+      "line": 1633,
       "symbol": "runDbDriverSelfTest",
       "operation": "drizzle-update",
       "target": "handles",
@@ -2097,7 +2097,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:sql-pragma:a1191cb9f05f",
       "path": "src/db/database.ts",
-      "line": 1642,
+      "line": 1646,
       "symbol": "runDbDriverSelfTest",
       "operation": "sql-pragma",
       "target": "rekey",
@@ -2110,7 +2110,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:mutator-call:85271bee0dcf",
       "path": "src/db/database.ts",
-      "line": 1710,
+      "line": 1714,
       "symbol": "runDbDriverSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#runDbHistoricalMigrationSelfTest",
@@ -2123,7 +2123,7 @@
     {
       "id": "src/db/database.ts#runDbDriverSelfTest:mutator-call:6e9f462c2573:2",
       "path": "src/db/database.ts",
-      "line": 1719,
+      "line": 1723,
       "symbol": "runDbDriverSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deleteDriverSelfTestDatabase",
@@ -2134,9 +2134,113 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbDriverSelfTest.test.ts; test/db/drizzleAdapterContract.test.ts; scripts/run-android-db-contract.mjs; scripts/run-android-db-contract.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
+      "id": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase:native-database-delete:c8b7acd29fe1",
+      "path": "src/db/database.ts",
+      "line": 1833,
+      "symbol": "cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "operation": "native-database-delete",
+      "target": "<database-file>",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:6d2f77f00160",
+      "path": "src/db/database.ts",
+      "line": 1893,
+      "symbol": "runDbRuntimeConcurrencySelfTest",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:e0e6e9973f0d",
+      "path": "src/db/database.ts",
+      "line": 1902,
+      "symbol": "runDbRuntimeConcurrencySelfTest",
+      "operation": "sql-pragma",
+      "target": "foreign_keys",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:98c4b223c92b",
+      "path": "src/db/database.ts",
+      "line": 1908,
+      "symbol": "runDbRuntimeConcurrencySelfTest",
+      "operation": "mutator-call",
+      "target": "src/db/migrate.ts#runMigrations",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#rawRekey:sql-pragma:ddc2470a0581",
+      "path": "src/db/database.ts",
+      "line": 1925,
+      "symbol": "rawRekey",
+      "operation": "sql-pragma",
+      "target": "rekey",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:f7abad6fe3d2",
+      "path": "src/db/database.ts",
+      "line": 1964,
+      "symbol": "runDbRuntimeConcurrencySelfTest",
+      "operation": "sql-pragma",
+      "target": "integrity_check",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:5fe2be0ec9b8",
+      "path": "src/db/database.ts",
+      "line": 1965,
+      "symbol": "runDbRuntimeConcurrencySelfTest",
+      "operation": "sql-pragma",
+      "target": "foreign_key_check",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:6d2f77f00160:2",
+      "path": "src/db/database.ts",
+      "line": 2002,
+      "symbol": "runDbRuntimeConcurrencySelfTest",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
       "id": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase:native-database-delete:860e30d458b6",
       "path": "src/db/database.ts",
-      "line": 1840,
+      "line": 2108,
       "symbol": "cleanupDbProcessRelaunchSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -2149,7 +2253,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:mutator-call:78a96f3a3bed",
       "path": "src/db/database.ts",
-      "line": 1930,
+      "line": 2198,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -2162,7 +2266,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-pragma:98ade7597ab6",
       "path": "src/db/database.ts",
-      "line": 1938,
+      "line": 2206,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2175,7 +2279,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-schema:20987ce13c0a",
       "path": "src/db/database.ts",
-      "line": 1939,
+      "line": 2207,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "driver_relaunch_contract_state",
@@ -2188,7 +2292,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-insert:d06f16054f08",
       "path": "src/db/database.ts",
-      "line": 1947,
+      "line": 2215,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-insert",
       "target": "driver_relaunch_contract_state",
@@ -2201,7 +2305,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-schema:c1f4d0d378ed",
       "path": "src/db/database.ts",
-      "line": 1953,
+      "line": 2221,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "attachment_cache_entries_state_lru_idx",
@@ -2214,7 +2318,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:mutator-call:2dc6c9d994e3",
       "path": "src/db/database.ts",
-      "line": 1963,
+      "line": 2231,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2227,7 +2331,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:mutator-call:78a96f3a3bed:2",
       "path": "src/db/database.ts",
-      "line": 1990,
+      "line": 2258,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -2240,7 +2344,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:97a60ddc35e9",
       "path": "src/db/database.ts",
-      "line": 2060,
+      "line": 2328,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2253,7 +2357,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:d39bb496244b",
       "path": "src/db/database.ts",
-      "line": 2061,
+      "line": 2329,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2266,7 +2370,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-schema:1a0dd42737ff",
       "path": "src/db/database.ts",
-      "line": 2073,
+      "line": 2341,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "attachment_cache_entries_state_lru_idx",
@@ -2279,7 +2383,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-schema:de2036f42ae3",
       "path": "src/db/database.ts",
-      "line": 2074,
+      "line": 2342,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "driver_relaunch_contract_state",
@@ -2292,7 +2396,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:mutator-call:7703c0036c7a",
       "path": "src/db/database.ts",
-      "line": 2081,
+      "line": 2349,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2305,7 +2409,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:9d9f6dc1a811",
       "path": "src/db/database.ts",
-      "line": 2096,
+      "line": 2364,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -2318,7 +2422,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:e8881cdf40b0",
       "path": "src/db/database.ts",
-      "line": 2098,
+      "line": 2366,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -2331,7 +2435,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:mutator-call:7703c0036c7a:2",
       "path": "src/db/database.ts",
-      "line": 2108,
+      "line": 2376,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2344,7 +2448,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:mutator-call:a2933f18497f",
       "path": "src/db/database.ts",
-      "line": 2118,
+      "line": 2386,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -2357,7 +2461,7 @@
     {
       "id": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase:native-database-delete:8e13e65bfb20",
       "path": "src/db/database.ts",
-      "line": 2281,
+      "line": 2549,
       "symbol": "cleanupDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -2370,7 +2474,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:sql-pragma:70acd331c2b4",
       "path": "src/db/database.ts",
-      "line": 2305,
+      "line": 2573,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2383,7 +2487,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:sql-pragma:6610a957a70e",
       "path": "src/db/database.ts",
-      "line": 2307,
+      "line": 2575,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2396,7 +2500,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:sql-pragma:e87e5387e478",
       "path": "src/db/database.ts",
-      "line": 2309,
+      "line": 2577,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2409,7 +2513,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:mutator-call:79dc019c8e8d",
       "path": "src/db/database.ts",
-      "line": 2322,
+      "line": 2590,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2422,7 +2526,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:mutator-call:bd30872c6ced",
       "path": "src/db/database.ts",
-      "line": 2342,
+      "line": 2610,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2435,7 +2539,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:da4b09e3e792",
       "path": "src/db/database.ts",
-      "line": 2354,
+      "line": 2622,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2448,7 +2552,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:842170241933",
       "path": "src/db/database.ts",
-      "line": 2355,
+      "line": 2623,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2461,7 +2565,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:94f5ed4904f1",
       "path": "src/db/database.ts",
-      "line": 2356,
+      "line": 2624,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2474,7 +2578,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-schema:c0583bd16b02",
       "path": "src/db/database.ts",
-      "line": 2363,
+      "line": 2631,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-schema",
       "target": "driver_wal_write_death_contract",
@@ -2487,7 +2591,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-begin:4424eaa0f4f3",
       "path": "src/db/database.ts",
-      "line": 2370,
+      "line": 2638,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2500,7 +2604,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-insert:0a2d70af725a",
       "path": "src/db/database.ts",
-      "line": 2372,
+      "line": 2640,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-insert",
       "target": "driver_wal_write_death_contract",
@@ -2513,7 +2617,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-commit:101ad0ef4295",
       "path": "src/db/database.ts",
-      "line": 2377,
+      "line": 2645,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -2526,7 +2630,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:d4d476c6ec97",
       "path": "src/db/database.ts",
-      "line": 2390,
+      "line": 2658,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_autocheckpoint",
@@ -2539,7 +2643,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:c21262db8e21",
       "path": "src/db/database.ts",
-      "line": 2391,
+      "line": 2659,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2552,7 +2656,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:1296d13830af",
       "path": "src/db/database.ts",
-      "line": 2396,
+      "line": 2664,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_size",
@@ -2565,7 +2669,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:6cb3197a0e7f",
       "path": "src/db/database.ts",
-      "line": 2397,
+      "line": 2665,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_spill",
@@ -2578,7 +2682,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-begin:4424eaa0f4f3:2",
       "path": "src/db/database.ts",
-      "line": 2398,
+      "line": 2666,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2591,7 +2695,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-insert:7486e5179484",
       "path": "src/db/database.ts",
-      "line": 2403,
+      "line": 2671,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-insert",
       "target": "driver_wal_write_death_contract",
@@ -2604,7 +2708,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-rollback:ff0044d35701",
       "path": "src/db/database.ts",
-      "line": 2429,
+      "line": 2697,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2617,7 +2721,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:mutator-call:bd30872c6ced:2",
       "path": "src/db/database.ts",
-      "line": 2439,
+      "line": 2707,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2630,7 +2734,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-rollback:ff0044d35701:2",
       "path": "src/db/database.ts",
-      "line": 2454,
+      "line": 2722,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2643,7 +2747,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:f02cf304acf4",
       "path": "src/db/database.ts",
-      "line": 2485,
+      "line": 2753,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2656,7 +2760,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:09713a4279c2",
       "path": "src/db/database.ts",
-      "line": 2510,
+      "line": 2778,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2669,7 +2773,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:15c65a528917",
       "path": "src/db/database.ts",
-      "line": 2513,
+      "line": 2781,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -2682,7 +2786,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:192261000ef7",
       "path": "src/db/database.ts",
-      "line": 2518,
+      "line": 2786,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2695,7 +2799,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:0fd91424ea23",
       "path": "src/db/database.ts",
-      "line": 2520,
+      "line": 2788,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -2708,7 +2812,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:transaction-begin:20fada601317",
       "path": "src/db/database.ts",
-      "line": 2530,
+      "line": 2798,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2721,7 +2825,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-insert:ccb9bc2c9d78",
       "path": "src/db/database.ts",
-      "line": 2532,
+      "line": 2800,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-insert",
       "target": "driver_wal_write_death_contract",
@@ -2734,7 +2838,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:transaction-commit:4ef08fffbb12",
       "path": "src/db/database.ts",
-      "line": 2537,
+      "line": 2805,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -2747,7 +2851,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:transaction-rollback:5973ed080e9b",
       "path": "src/db/database.ts",
-      "line": 2540,
+      "line": 2808,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2760,7 +2864,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:mutator-call:2138da1e426f",
       "path": "src/db/database.ts",
-      "line": 2577,
+      "line": 2845,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase",
@@ -2773,7 +2877,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:mutator-call:16f2286de9f7",
       "path": "src/db/database.ts",
-      "line": 2578,
+      "line": 2846,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2786,7 +2890,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:transaction-begin:0180d179a806",
       "path": "src/db/database.ts",
-      "line": 2942,
+      "line": 3210,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2799,7 +2903,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:sql-insert:5bfe29d2deac",
       "path": "src/db/database.ts",
-      "line": 2945,
+      "line": 3213,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -2812,7 +2916,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:transaction-commit:284a8b93b648",
       "path": "src/db/database.ts",
-      "line": 2951,
+      "line": 3219,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -2825,7 +2929,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:transaction-rollback:0211c22bc703",
       "path": "src/db/database.ts",
-      "line": 2954,
+      "line": 3222,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2838,7 +2942,7 @@
     {
       "id": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase:native-database-delete:ff711eb9d33c",
       "path": "src/db/database.ts",
-      "line": 2967,
+      "line": 3235,
       "symbol": "cleanupDbActiveMigrationDeathSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -2851,7 +2955,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:sql-pragma:be383f8cf826",
       "path": "src/db/database.ts",
-      "line": 2987,
+      "line": 3255,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2864,7 +2968,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:sql-pragma:0aa5a5c36cc7",
       "path": "src/db/database.ts",
-      "line": 2989,
+      "line": 3257,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2877,7 +2981,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:sql-pragma:f397641246bb",
       "path": "src/db/database.ts",
-      "line": 2991,
+      "line": 3259,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2890,7 +2994,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:mutator-call:19e578aa2615",
       "path": "src/db/database.ts",
-      "line": 3003,
+      "line": 3271,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -2903,7 +3007,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:141d9a18377f",
       "path": "src/db/database.ts",
-      "line": 3023,
+      "line": 3291,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -2916,7 +3020,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:a67fc9cbd417",
       "path": "src/db/database.ts",
-      "line": 3035,
+      "line": 3303,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2929,7 +3033,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:35ad534021f8",
       "path": "src/db/database.ts",
-      "line": 3036,
+      "line": 3304,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2942,7 +3046,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:d5bda51e292b",
       "path": "src/db/database.ts",
-      "line": 3037,
+      "line": 3305,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2955,7 +3059,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:eaa28d9b10fc",
       "path": "src/db/database.ts",
-      "line": 3041,
+      "line": 3309,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_autocheckpoint",
@@ -2968,7 +3072,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:254b29b633bb",
       "path": "src/db/database.ts",
-      "line": 3048,
+      "line": 3316,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2981,7 +3085,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:3cfd0e0c8f97",
       "path": "src/db/database.ts",
-      "line": 3064,
+      "line": 3332,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#seedDbActiveMigrationFixture",
@@ -2994,7 +3098,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:3325773da814",
       "path": "src/db/database.ts",
-      "line": 3075,
+      "line": 3343,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -3007,7 +3111,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:99b1a0573820",
       "path": "src/db/database.ts",
-      "line": 3080,
+      "line": 3348,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_size",
@@ -3020,7 +3124,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:9892b3f1c7e3",
       "path": "src/db/database.ts",
-      "line": 3081,
+      "line": 3349,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_spill",
@@ -3033,7 +3137,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:c7abb8aa650a",
       "path": "src/db/database.ts",
-      "line": 3082,
+      "line": 3350,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3046,7 +3150,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:141d9a18377f:2",
       "path": "src/db/database.ts",
-      "line": 3101,
+      "line": 3369,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -3059,7 +3163,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:141d9a18377f:3",
       "path": "src/db/database.ts",
-      "line": 3111,
+      "line": 3379,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -3072,7 +3176,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:c41b1d9e3f5f",
       "path": "src/db/database.ts",
-      "line": 3140,
+      "line": 3408,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -3085,7 +3189,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:6ffd5dc1ecae",
       "path": "src/db/database.ts",
-      "line": 3153,
+      "line": 3421,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -3098,7 +3202,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:fa6f6c173b44",
       "path": "src/db/database.ts",
-      "line": 3170,
+      "line": 3438,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -3111,7 +3215,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:d603c995b313",
       "path": "src/db/database.ts",
-      "line": 3172,
+      "line": 3440,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -3124,7 +3228,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:04e15312f1b5",
       "path": "src/db/database.ts",
-      "line": 3174,
+      "line": 3442,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -3137,7 +3241,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:6f3aee398a18",
       "path": "src/db/database.ts",
-      "line": 3184,
+      "line": 3452,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3150,7 +3254,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:0b110227b222",
       "path": "src/db/database.ts",
-      "line": 3202,
+      "line": 3470,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -3163,7 +3267,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:04e15312f1b5:2",
       "path": "src/db/database.ts",
-      "line": 3204,
+      "line": 3472,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -3176,7 +3280,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:6f3aee398a18:2",
       "path": "src/db/database.ts",
-      "line": 3213,
+      "line": 3481,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3189,7 +3293,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:c2f4ef1e9fd6",
       "path": "src/db/database.ts",
-      "line": 3230,
+      "line": 3498,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -3202,7 +3306,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:5ee851488aef",
       "path": "src/db/database.ts",
-      "line": 3248,
+      "line": 3516,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase",
@@ -3215,7 +3319,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:9a802871e899",
       "path": "src/db/database.ts",
-      "line": 3249,
+      "line": 3517,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -11364,9 +11468,581 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/repositories.test.ts; test/db/readReconcile.test.ts; test/db/kv.test.ts; test/db/messagesRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/echoReconcile.test.ts; test/services/syncEngine.test.ts; test/services/searchTextBackfill.test.ts; test/services/searchTextBackfillOwner.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; test/services/groupManagementAccountScope.test.ts; test/services/serverAvatars.test.ts; test/services/createNewChatAccountScope.test.ts; test/components/routes/newChatScreen.test.tsx; test/components/hooks/useFaceTimeSessionScope.test.tsx; test/components/routes/chatScreen.test.tsx"
     },
     {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#count:raw-dynamic:194b38c0dc2f",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 117,
+      "symbol": "count",
+      "operation": "raw-dynamic",
+      "target": "<dynamic>",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:53f5e929f07d",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 138,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:c22febfc7213",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 138,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:392740b062>",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:268fc51a1761",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 139,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "sql-insert",
+      "target": "kv",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:6395b5094423",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 148,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:250c3794fc>",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:d60d21c42996",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 148,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:250c3794fc>:mutator-call:55ffe792a557",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 150,
+      "symbol": "submitOrderedCoordinatorWave.<callback:250c3794fc>",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:7418c90170ea",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 151,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "sql-insert",
+      "target": "kv",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:31b64135cad8",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 154,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbWriteLock",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:438c945711e6",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 154,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>:mutator-call:8cb85d5f3bee",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 159,
+      "symbol": "submitOrderedCoordinatorWave.<callback:7b24129e54>",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>:mutator-call:98f7f8fb4e90",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 164,
+      "symbol": "submitOrderedCoordinatorWave.<callback:7b24129e54>",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:a8582564276c",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 177,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:f7d89aaa7f>",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:e1a5e8843d07",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 177,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:9266b8d70936",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 180,
+      "symbol": "submitOrderedCoordinatorWave",
+      "operation": "sql-insert",
+      "target": "kv",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:150264484d1d",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 221,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/sync/engine.ts#syncAllChats",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:779a08232837",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 224,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/send/sendAttachmentService.ts#sendImageMessage",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 245,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6fa4b9d0433f",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 249,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 253,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45be8e671e33",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 258,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/sync/engine.ts#syncAllChats",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:75b6613ec9c7",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 263,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave.<callback:924687d0a1>:mutator-call:499477a70fe6",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 268,
+      "symbol": "runDbRuntimeConcurrencyWave.<callback:924687d0a1>",
+      "operation": "mutator-call",
+      "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:bcdace9d293d",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 284,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:189f55fb6c2e",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 288,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:3509064feb66",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 294,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:2c5121e200af",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 300,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:03e440125172",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 308,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f:2",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 312,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:95d97cd77af9",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 316,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2:2",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 324,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6f56de572180",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 329,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave.<callback:426c9f375d>",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:b78b41da9526",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 329,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:sql-insert:c225ba9768f7",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 330,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "sql-insert",
+      "target": "kv",
+      "detectedContext": "throwaway-database",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45f44e962bfd",
+      "path": "src/services/boot/dbRuntimeConcurrencyWave.ts",
+      "line": 333,
+      "symbol": "runDbRuntimeConcurrencyWave",
+      "operation": "mutator-call",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#count",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#finishRuntimeConcurrencyFailure:mutator-call:997d9112a0e0",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 778,
+      "symbol": "finishRuntimeConcurrencyFailure",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:e21f80c86ea7",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 804,
+      "symbol": "runRuntimeConcurrencyPhase",
+      "operation": "mutator-call",
+      "target": "src/services/boot/devDbRelaunchContract.ts#finishRuntimeConcurrencyFailure",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:301e5cdc6904",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 809,
+      "symbol": "runRuntimeConcurrencyPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#runDbRuntimeConcurrencySelfTest",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-reference:fec6f21ca7fe",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 809,
+      "symbol": "runRuntimeConcurrencyPhase",
+      "operation": "mutator-reference",
+      "target": "src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:ba293dc8a9a8",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 811,
+      "symbol": "runRuntimeConcurrencyPhase",
+      "operation": "mutator-call",
+      "target": "src/services/boot/devDbRelaunchContract.ts#finishRuntimeConcurrencyFailure",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:d25f21ea1dbf",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 852,
+      "symbol": "runRuntimeConcurrencyRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:85dc498ee8c3",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 853,
+      "symbol": "runRuntimeConcurrencyRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:2697cff60054",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 854,
+      "symbol": "runRuntimeConcurrencyRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:716ab824be25",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 855,
+      "symbol": "runRuntimeConcurrencyRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
       "id": "src/services/boot/devDbRelaunchContract.ts#finishPrepareFailure:mutator-call:c84e27e39a87",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 620,
+      "line": 884,
       "symbol": "finishPrepareFailure",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -11379,7 +12055,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runPreparePhase:mutator-call:0f7bb0c84df8",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 640,
+      "line": 904,
       "symbol": "runPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishPrepareFailure",
@@ -11392,7 +12068,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runPreparePhase:mutator-call:95e3c615c793",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 644,
+      "line": 908,
       "symbol": "runPreparePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#prepareDbProcessRelaunchSelfTest",
@@ -11405,7 +12081,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runPreparePhase:mutator-call:06e4b4c5d3f8",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 658,
+      "line": 922,
       "symbol": "runPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishPrepareFailure",
@@ -11418,7 +12094,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runPreparePhase:mutator-call:45d67e550f11",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 660,
+      "line": 924,
       "symbol": "runPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishPrepareFailure",
@@ -11431,7 +12107,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runResumePhase:mutator-call:67b1b319807d",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 678,
+      "line": 942,
       "symbol": "runResumePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#resumeDbProcessRelaunchSelfTest",
@@ -11444,7 +12120,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runResumePhase:mutator-call:89fb75db5aa5",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 685,
+      "line": 949,
       "symbol": "runResumePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -11457,7 +12133,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:e834a6bf82ca",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 746,
+      "line": 1010,
       "symbol": "runRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -11470,7 +12146,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:f3c815a2f8ac",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 747,
+      "line": 1011,
       "symbol": "runRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -11483,7 +12159,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:3e4b53a1402f",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 748,
+      "line": 1012,
       "symbol": "runRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -11494,9 +12170,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbProcessRelaunchSelfTest.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/foregroundBoot.test.ts; scripts/run-android-db-relaunch.mjs; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:ea193e30ffcb",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 1013,
+      "symbol": "runRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
       "id": "src/services/boot/devDbRelaunchContract.ts#finishWalWriteDeathPrepareFailure:mutator-call:31fd203d923e",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 774,
+      "line": 1043,
       "symbol": "finishWalWriteDeathPrepareFailure",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -11509,7 +12198,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathPreparePhase:mutator-call:3deb11b9fc39",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 794,
+      "line": 1063,
       "symbol": "runWalWriteDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishWalWriteDeathPrepareFailure",
@@ -11522,7 +12211,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathPreparePhase:mutator-call:58a39f6a9679",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 798,
+      "line": 1067,
       "symbol": "runWalWriteDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest",
@@ -11535,7 +12224,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathPreparePhase:mutator-call:9dfa7859a02a",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 812,
+      "line": 1081,
       "symbol": "runWalWriteDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishWalWriteDeathPrepareFailure",
@@ -11548,7 +12237,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathPreparePhase:mutator-call:c6f605742a76",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 818,
+      "line": 1087,
       "symbol": "runWalWriteDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishWalWriteDeathPrepareFailure",
@@ -11561,7 +12250,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathResumePhase:mutator-call:8d1c810b5187",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 836,
+      "line": 1105,
       "symbol": "runWalWriteDeathResumePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest",
@@ -11574,7 +12263,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathResumePhase:mutator-call:2d9378699f25",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 843,
+      "line": 1112,
       "symbol": "runWalWriteDeathResumePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -11587,7 +12276,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:da8a8b5328ee",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 898,
+      "line": 1167,
       "symbol": "runWalWriteDeathRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -11600,7 +12289,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:7a2962730f1e",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 899,
+      "line": 1168,
       "symbol": "runWalWriteDeathRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -11613,7 +12302,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:3067733c44d4",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 900,
+      "line": 1169,
       "symbol": "runWalWriteDeathRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -11624,9 +12313,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbProcessRelaunchSelfTest.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/foregroundBoot.test.ts; scripts/run-android-db-relaunch.mjs; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:0102ba91a751",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 1170,
+      "symbol": "runWalWriteDeathRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
       "id": "src/services/boot/devDbRelaunchContract.ts#finishActiveMigrationDeathPrepareFailure:mutator-call:0e8942f0e789",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 924,
+      "line": 1198,
       "symbol": "finishActiveMigrationDeathPrepareFailure",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -11639,7 +12341,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bb48d492c752",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 944,
+      "line": 1218,
       "symbol": "runActiveMigrationDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishActiveMigrationDeathPrepareFailure",
@@ -11652,7 +12354,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:05ba6bb2849a",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 948,
+      "line": 1222,
       "symbol": "runActiveMigrationDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest",
@@ -11665,7 +12367,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bf77a4004308",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 962,
+      "line": 1236,
       "symbol": "runActiveMigrationDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishActiveMigrationDeathPrepareFailure",
@@ -11678,7 +12380,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bdcec4c50149",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 968,
+      "line": 1242,
       "symbol": "runActiveMigrationDeathPreparePhase",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#finishActiveMigrationDeathPrepareFailure",
@@ -11691,7 +12393,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathResumePhase:mutator-call:6235ccc0af5a",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 986,
+      "line": 1260,
       "symbol": "runActiveMigrationDeathResumePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest",
@@ -11704,7 +12406,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathResumePhase:mutator-call:c6052b35d17e",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 993,
+      "line": 1267,
       "symbol": "runActiveMigrationDeathResumePhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -11717,7 +12419,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:c2f4a2e3929b",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1054,
+      "line": 1328,
       "symbol": "runActiveMigrationDeathRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -11730,7 +12432,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:02c4d2f06909",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1055,
+      "line": 1329,
       "symbol": "runActiveMigrationDeathRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -11743,7 +12445,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:52ec4f1e8a66",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1056,
+      "line": 1330,
       "symbol": "runActiveMigrationDeathRecoveryPhase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -11754,9 +12456,61 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbProcessRelaunchSelfTest.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/foregroundBoot.test.ts; scripts/run-android-db-relaunch.mjs; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
+      "id": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:1485d9175c3e",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 1331,
+      "symbol": "runActiveMigrationDeathRecoveryPhase",
+      "operation": "mutator-call",
+      "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:8bffa75c6fb1",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 1386,
+      "symbol": "startDevDbRelaunchContractIfRequested",
+      "operation": "mutator-call",
+      "target": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:e9ba7858d27b",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 1388,
+      "symbol": "startDevDbRelaunchContractIfRequested",
+      "operation": "mutator-call",
+      "target": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
+      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:b3653b4235b7",
+      "path": "src/services/boot/devDbRelaunchContract.ts",
+      "line": 1393,
+      "symbol": "startDevDbRelaunchContractIfRequested",
+      "operation": "mutator-call",
+      "target": "src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase",
+      "detectedContext": "throwaway-database-delegation",
+      "owner": "DB-02C fixed disposable runtime-concurrency contract",
+      "transactionContext": "throwaway-database-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/dbRuntimeConcurrencySelfTest.test.ts; test/services/dbRuntimeConcurrencyWave.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/logicalSendQueueWiring.test.ts; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
+    },
+    {
       "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:0bbcb32791e8",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1107,
+      "line": 1396,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase",
@@ -11769,7 +12523,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:9bc5c78844a2",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1109,
+      "line": 1398,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathResumePhase",
@@ -11780,9 +12534,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbProcessRelaunchSelfTest.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/foregroundBoot.test.ts; scripts/run-android-db-relaunch.mjs; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
-      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:663bedd08e77",
+      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:31aa9673996a",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1111,
+      "line": 1400,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase",
@@ -11795,7 +12549,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:ca091b398fb4",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1117,
+      "line": 1406,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathPreparePhase",
@@ -11808,7 +12562,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:8e5f8c2c6304",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1118,
+      "line": 1407,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathResumePhase",
@@ -11819,9 +12573,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbProcessRelaunchSelfTest.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/foregroundBoot.test.ts; scripts/run-android-db-relaunch.mjs; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
-      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:5597dc5f1362",
+      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:e64fa57d29fa",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1120,
+      "line": 1409,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase",
@@ -11834,7 +12588,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:326aa359317e",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1122,
+      "line": 1414,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runPreparePhase",
@@ -11847,7 +12601,7 @@
     {
       "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:67e695f5d505",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1123,
+      "line": 1415,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runResumePhase",
@@ -11858,9 +12612,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/dbProcessRelaunchSelfTest.test.ts; test/services/devDbRelaunchContract.test.ts; test/services/foregroundBoot.test.ts; scripts/run-android-db-relaunch.mjs; scripts/run-android-db-relaunch.test.mjs; docs/DEVICE_VERIFICATION_CHECKLIST.md"
     },
     {
-      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:005577ed4432",
+      "id": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:dfdc7b4be6f1",
       "path": "src/services/boot/devDbRelaunchContract.ts",
-      "line": 1124,
+      "line": 1417,
       "symbol": "startDevDbRelaunchContractIfRequested",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase",
@@ -16813,7 +17567,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:9b093f961fb2",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 84,
+      "line": 85,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16826,7 +17580,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e3118f4b101e",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 84,
+      "line": 85,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:e95fce8915>",
@@ -16839,7 +17593,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:e95fce8915>:mutator-call:0b672252f288",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 87,
+      "line": 88,
       "symbol": "sendImageMessage.<callback:e95fce8915>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction",
@@ -16850,9 +17604,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentsBranches.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendAccountScope.test.ts; test/services/sendChatIdentity.test.ts; test/services/sendOutcome.test.ts"
     },
     {
-      "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:a751966a5832",
+      "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:2e3d7266513e",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 127,
+      "line": 128,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -16863,9 +17617,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
     },
     {
-      "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d69691811e5f",
+      "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:b12265a94c42",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 133,
+      "line": 134,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure",
@@ -17177,7 +17931,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:7859b6c0463a",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 33,
+      "line": 39,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:697c6fbfc2>",
@@ -17190,7 +17944,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:e0d100734a46",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 33,
+      "line": 39,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17203,7 +17957,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:697c6fbfc2>:mutator-call:3094df649745",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 36,
+      "line": 42,
       "symbol": "reconcileSendOutcome.<callback:697c6fbfc2>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction",
@@ -17216,7 +17970,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:337ad594df75",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 44,
+      "line": 50,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17229,7 +17983,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c1122a9108a5",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 44,
+      "line": 50,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>",
@@ -17242,7 +17996,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>:mutator-call:83fb7347f21a",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 46,
+      "line": 52,
       "symbol": "reconcileSendOutcome.<callback:a142c06cb1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction",
@@ -17255,7 +18009,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:95eb83c8fd28",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 90,
+      "line": 99,
       "symbol": "handleSendFailure",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17268,7 +18022,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:adfe95b7e2a5",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 90,
+      "line": 99,
       "symbol": "handleSendFailure",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>",
@@ -17281,7 +18035,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>:mutator-call:59fd0e1ac2a7",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 93,
+      "line": 102,
       "symbol": "handleSendFailure.<callback:8a7e90a9b5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingErrorWithinTransaction",

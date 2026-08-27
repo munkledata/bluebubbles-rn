@@ -92,6 +92,24 @@ describe('reconcileSendOutcome', () => {
     expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'temp-bbbb0000', undefined);
   });
 
+  it('can suppress OS notice cancellation while retaining the durable success outcome', async () => {
+    const { db, raw } = await createTestDb();
+    await seedOutgoing(db, 'temp-harness-success', 1000);
+
+    await reconcileSendOutcome(
+      db,
+      'temp-harness-success',
+      { guid: 'real-harness-success' },
+      1000,
+      undefined,
+      { failureNoticeMode: 'suppressed' },
+    );
+
+    expect(msgRow(raw, 'real-harness-success')?.s).toBe('sent');
+    expect(queueCount(raw)).toBe(0);
+    expect(mockClearFailedSendNotice).not.toHaveBeenCalled();
+  });
+
   it('rolls back an absent-guid ack when its commit guard is revoked mid-update', async () => {
     const { db, raw } = await createTestDb();
     const tempGuid = 'temp-no-guid-guard-revoked';
@@ -295,6 +313,26 @@ describe('handleSendFailure', () => {
     await handleSendFailure(db, 'temp-missing0000', new Error('gone'), 'queue', 'c1', 5000);
 
     expect(msgCount(raw)).toBe(0);
+    expect(mockNotifyFailedSend).not.toHaveBeenCalled();
+  });
+
+  it('can suppress OS failure presentation while retaining the durable error outcome', async () => {
+    const { db, raw } = await createTestDb();
+    await seedOutgoing(db, 'temp-harness-failure', 1000);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await handleSendFailure(
+      db,
+      'temp-harness-failure',
+      new Error('synthetic harness failure'),
+      'runtime-harness',
+      'c1',
+      5000,
+      undefined,
+      { failureNoticeMode: 'suppressed' },
+    );
+
+    expect(msgRow(raw, 'temp-harness-failure')?.s).toBe('error');
     expect(mockNotifyFailedSend).not.toHaveBeenCalled();
   });
 });

@@ -1001,6 +1001,7 @@ ANDROID_SERIAL=<serial> npm run test:android:db
 ANDROID_SERIAL=<serial> npm run test:android:db:relaunch
 ANDROID_SERIAL=<serial> npm run test:android:db:wal-write-death
 ANDROID_SERIAL=<serial> npm run test:android:db:active-migration-death
+ANDROID_SERIAL=<serial> npm run test:android:db:runtime-concurrency
 ```
 
 The first harness cold-launches the debuggable app, accepts exactly one finite
@@ -1016,7 +1017,12 @@ ignored `android/app/build/reports/db-wal-write-death/` directory. The active-mi
 third distinct marker family and finite `GATOR_DB_ACTIVE_MIGRATION_DEATH_V1` schema, requires WAL
 beyond its header both before and after crashing exact A, and retains only allowlisted target/check
 and migration-head/count metadata under the ignored
-`android/app/build/reports/db-active-migration-death/` directory.
+`android/app/build/reports/db-active-migration-death/` directory. The runtime-concurrency mode uses
+one exclusive DEV launch and the finite `GATOR_DB_RUNTIME_CONCURRENCY_V1` schema against only
+`driver-runtime-concurrency-selftest.db`. It requires all 22 mixed sync/live/send/rollback/rekey,
+reopen, integrity, and cleanup checks plus all three same-process/stop/private-state host checks, and
+retains only allowlisted target/check metadata under the ignored
+`android/app/build/reports/db-runtime-concurrency/` directory.
 
 - [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Local API-35 arm64 emulator: **PASS**, schema 3,
       38 migrations at head `0038`, all 28 checks
@@ -1054,6 +1060,10 @@ and migration-head/count metadata under the ignored
       persistence, and cleans all eight fixed paths. All 11 READY, 15 final, and 6 host checks are true
       in retained artifact
       `android-db-active-migration-death-2026-08-21T09-05-01-344Z.json`.
+- [ ] **POST-V56 / FUTURE DEBUG BUILD ONLY —** DB-02C: on a supported physical Android device, run
+      `ANDROID_SERIAL=<serial> npm run test:android:db:runtime-concurrency` and require all 22 runtime
+      checks and all three host checks to be true in the retained privacy-safe artifact. Frozen
+      version code 56 predates this lane and cannot receive this evidence.
 - [ ] Parent DB-03B2B/DB-03B remains open; power-loss and torn-write recovery remain unproved.
       DB-03C/DEVICE-01 still own scheduled CI, actual signed prior-build install-over,
       production-file continuity, spontaneous process death, and repetition of the active-migration

@@ -1510,30 +1510,45 @@ function hasProjectLocalCommonJsLoad(filesByPath) {
 }
 
 /**
- * Prove the exact two-process DB-03B1 migration-relaunch, DB-03B2B1 active-WAL, and DB-03B2B2
- * active-migration disposable contracts before their database operations or boot handoffs receive
- * a throwaway context. All three database halves are limited to fixed-file entry points behind one
- * exact durable-marker state machine. Whole-function fingerprints keep process-death ordering and
- * finite assertions exact, while symbol checks below prove that no handle, runner, or production
- * capability escapes.
+ * Prove the exact DB-03B process-death contracts and the one-launch DB-02C runtime-concurrency
+ * contract before their database operations or boot handoffs receive a throwaway context. All
+ * database halves are limited to fixed-file entry points behind one exact durable-marker state
+ * machine. Whole-function fingerprints keep ordering and finite assertions exact, while symbol
+ * checks below prove that no handle, runner, rekey capability, or production capability escapes.
  */
 function dbProcessRelaunchCertificateCandidate({
   filesByPath,
   checker,
   edges,
   referenceEdges,
+  dynamicCallbacks,
+  dynamicDispatches,
   findings,
   findingCallables,
 }) {
   const databasePath = 'src/db/database.ts';
   const relaunchPath = 'src/services/boot/devDbRelaunchContract.ts';
+  const runtimeWavePath = 'src/services/boot/dbRuntimeConcurrencyWave.ts';
   const foregroundPath = 'src/services/boot/foregroundBoot.ts';
   const databaseFile = filesByPath.get(databasePath);
   const relaunchFile = filesByPath.get(relaunchPath);
+  const runtimeWaveFile = filesByPath.get(runtimeWavePath);
   const foregroundFile = filesByPath.get(foregroundPath);
-  if (!databaseFile || !relaunchFile || !foregroundFile) return undefined;
+  if (!databaseFile || !relaunchFile || !runtimeWaveFile || !foregroundFile) return undefined;
+  if (
+    createHash('sha256')
+      .update(normalizedSnippet(runtimeWaveFile, runtimeWaveFile))
+      .digest('hex') !== '20b474430d8b24dab5ee93c9fe1172bbdae80532cff2fa87060b04e22ea33553'
+  ) {
+    return undefined;
+  }
 
   const databaseCallableNames = [
+    'emptyDbRuntimeConcurrencyDatabaseChecks',
+    'cleanupDbRuntimeConcurrencySelfTestDatabase',
+    'dbRuntimeConcurrencyMigrationNames',
+    'firstDbRuntimeConcurrencyWaveFailure',
+    'runDbRuntimeConcurrencySelfTest',
     'emptyDbProcessRelaunchPrepareChecks',
     'emptyDbProcessRelaunchResumeChecks',
     'cleanupDbProcessRelaunchSelfTestDatabase',
@@ -1570,6 +1585,26 @@ function dbProcessRelaunchCertificateCandidate({
     databaseCallableNames.map((name) => [name, topLevelFunction(filesByPath, databasePath, name)]),
   );
   const expectedDatabaseFingerprints = new Map([
+    [
+      'emptyDbRuntimeConcurrencyDatabaseChecks',
+      '2392174f85d4221e9d329516dbfe62bc9fef531ff2ee00fc1523885771366d9e',
+    ],
+    [
+      'cleanupDbRuntimeConcurrencySelfTestDatabase',
+      '116c009b71f62536a358e2afd89c5e6f79f9fb7ae764f9115cbd19150db8730c',
+    ],
+    [
+      'dbRuntimeConcurrencyMigrationNames',
+      'bf93308fc49ec9fb6b3d4d66113e4db99eac92c3bd0bbebae8298d4b3680c4e2',
+    ],
+    [
+      'firstDbRuntimeConcurrencyWaveFailure',
+      '939ac9fa923f3fe00355592e6858a488fc0f9c5b418f945ce7ca19032077b0a2',
+    ],
+    [
+      'runDbRuntimeConcurrencySelfTest',
+      'fa80d5b3f51604fc400c64c3d0eb75c8ca91c0ff2dbc13814905109f1ffc10e8',
+    ],
     [
       'emptyDbProcessRelaunchPrepareChecks',
       'ab03418083f72f49ca5c16470167aa389b358407a8553eb01bda9e44f0217782',
@@ -1699,10 +1734,55 @@ function dbProcessRelaunchCertificateCandidate({
       return undefined;
     }
   }
+  const runtimeWaveCallableNames = [
+    'deferred',
+    'observe',
+    'syncChat',
+    'liveMessage',
+    'syncApi',
+    'count',
+    'submitOrderedCoordinatorWave',
+    'runDbRuntimeConcurrencyWave',
+  ];
+  const runtimeWaveCallables = new Map(
+    runtimeWaveCallableNames.map((name) => [
+      name,
+      topLevelFunction(filesByPath, runtimeWavePath, name),
+    ]),
+  );
+  const expectedRuntimeWaveFingerprints = new Map([
+    ['deferred', '749b46b1f7f78556be7dfdc72d405a2f92493d45bf2e87e990c99a25e24b45eb'],
+    ['observe', '2a1287160d12928bb5a95a0ce78bff88adf80562d831e4aedd6dd9c261f1f965'],
+    ['syncChat', '71ea327d809efd891f9196214ebb20b4149304a9c8b5e715143030ff114c30db'],
+    ['liveMessage', '4cccfc43e183566a82228df3a9689f8b217d78cfed297c6f523a6485fa05b4a6'],
+    ['syncApi', 'bc4e46fa51e2e97b812b7cd1b9473812c2edc49cde9ae414c33b3b54fe080284'],
+    ['count', '04da8112837e41f975bb09ef7205ea81050dd24c1c167eba8914b3ba69a54ef1'],
+    [
+      'submitOrderedCoordinatorWave',
+      '5bbe0ae791b6df42ec968ebfe7506e1bb2ca459500efc0e3bbd0f148ec8c6b72',
+    ],
+    [
+      'runDbRuntimeConcurrencyWave',
+      '191426b03e8950e87f8e0e4a9b7a650e9b66a2879f5ab7a822fcb700d3214a55',
+    ],
+  ]);
+  for (const [name, expected] of expectedRuntimeWaveFingerprints) {
+    const callable = runtimeWaveCallables.get(name);
+    if (
+      !callable?.body ||
+      createHash('sha256').update(normalizedSnippet(callable, runtimeWaveFile)).digest('hex') !==
+        expected
+    ) {
+      return undefined;
+    }
+  }
   const relaunchCallableNames = [
     'markerFile',
     'markerPresence',
     'inspectDurableMarkers',
+    'classifyRuntimeConcurrencyState',
+    'runtimeConcurrencyRecoveryFailureCode',
+    'standardRelaunchRecoveryFailureCode',
     'classifyScenarioState',
     'classifyStartMode',
     'createZeroByteMarker',
@@ -1714,13 +1794,18 @@ function dbProcessRelaunchCertificateCandidate({
     'emptyWalWriteDeathFinalMarkerChecks',
     'emptyActiveMigrationDeathPrepareMarkerChecks',
     'emptyActiveMigrationDeathFinalMarkerChecks',
+    'emptyRuntimeConcurrencyMarkerChecks',
     'logPrepareMarker',
     'logFinalMarker',
     'logWalWriteDeathPrepareMarker',
     'logWalWriteDeathFinalMarker',
     'logActiveMigrationDeathPrepareMarker',
     'logActiveMigrationDeathFinalMarker',
+    'logRuntimeConcurrencyMarker',
     'waitForHostKill',
+    'finishRuntimeConcurrencyFailure',
+    'runRuntimeConcurrencyPhase',
+    'runRuntimeConcurrencyRecoveryPhase',
     'finishPrepareFailure',
     'runPreparePhase',
     'finalChecksFromDatabaseResult',
@@ -1744,12 +1829,24 @@ function dbProcessRelaunchCertificateCandidate({
   const expectedRelaunchFingerprints = new Map([
     ['markerFile', 'eda1812af05ac12274d65dfd1515d39d3cce9604a5949e5d6e8757dedbf890e2'],
     ['markerPresence', '1ff240b3eb4c17304be77bf05659a48f430bb64cfd87d4d823e72b52ab0f7292'],
-    ['inspectDurableMarkers', '2b78e3f681f35e15a7d6868f4d1ef18270f1e2669621e29b816e8b9332c25a3b'],
+    ['inspectDurableMarkers', '16a6450318ed99d112f31e62adf467b41332bdd28287559f87a202f236d83b77'],
+    [
+      'classifyRuntimeConcurrencyState',
+      '40391fc1c6edd8ece3d4cf420308cb0318df0b85ca3a51254e4bf91d8abb9208',
+    ],
+    [
+      'runtimeConcurrencyRecoveryFailureCode',
+      '3458dbf03fd89fabfa6516d1b09ccb1507f20965a908e79bf025ae2bfc4a45e8',
+    ],
+    [
+      'standardRelaunchRecoveryFailureCode',
+      '0380fb3fa6059440f285130d422ef06765c9c27240910107746f3df78a385475',
+    ],
     ['classifyScenarioState', 'dff892f0d85e2400d993e8837ac38c6aa07b4bf9c112157de5129e404de94357'],
-    ['classifyStartMode', '51ff21cf3aa7e2804a37db1f9a8eba795076fe020b20e11d4940b2b983458a4f'],
+    ['classifyStartMode', 'c97367796603cc4a63c4261efa2b63a2b0850d7092dedc2552503f623810d070'],
     ['createZeroByteMarker', 'e3a4a775c111eb4efba310531ed863b7ad9d18af9aa85ad49cf5ba73d1329ae6'],
     ['deleteMarkerIfPresent', '5e846690dc0cc970d28b421b067cb4d0303d04e96fa965fc5fae174b33626dc5'],
-    ['cleanupDurableMarkers', '2d0bd1f5419881169c99fff6d35ac5fde7e364a2cf958ebb4ebce51ab68e739d'],
+    ['cleanupDurableMarkers', 'ad702babce9f4b9e3a5aae7dabceb5cb4894aac4911f4de722e92148055448a7'],
     [
       'emptyPrepareMarkerChecks',
       '19a57fcc764d8a98c1903a1f61cdbdcdbdc0518adb6dcb4651de70b0f0367533',
@@ -1771,6 +1868,10 @@ function dbProcessRelaunchCertificateCandidate({
       'emptyActiveMigrationDeathFinalMarkerChecks',
       'c187086dd48f2bd728cedb0110f3e3642a899ab2b32f39446dbf5e4d8c8e1954',
     ],
+    [
+      'emptyRuntimeConcurrencyMarkerChecks',
+      '3163635505446d32e6d59a8ad3829cca91335d792110532691d729b6b7429bfc',
+    ],
     ['logPrepareMarker', '77a5b04f3b046f29d31de9039ba5d7a53e9d5cbba0bca0e4c9bc2e27231c3751'],
     ['logFinalMarker', '94a635d8a3f96201f7b5201b5e326e3b045bd7ec81f4bae2ec79ef12f3c693b6'],
     [
@@ -1789,7 +1890,23 @@ function dbProcessRelaunchCertificateCandidate({
       'logActiveMigrationDeathFinalMarker',
       '4f586d6d11d91ee5569f7ff506b6567e99d8f8c553973c8802f34372d1bba084',
     ],
+    [
+      'logRuntimeConcurrencyMarker',
+      '282abf2b7573a308c799718ad952312a2d497860fb6f5880fdc5c1dec1f330ca',
+    ],
     ['waitForHostKill', 'c6ab060b1894631fa3bb6c8e41049159ad2412aa676b6708a489c759ac40f4bf'],
+    [
+      'finishRuntimeConcurrencyFailure',
+      '2b718c8b921c3c5a6730d2c72ff6238a50af3c2f1fc6e456c8dba024f87b8c7e',
+    ],
+    [
+      'runRuntimeConcurrencyPhase',
+      '68c22e54cdd211a9f63ed62ccb1eb510b0279f316c3707ff39f28eca3dc1e194',
+    ],
+    [
+      'runRuntimeConcurrencyRecoveryPhase',
+      '7b1be09333eacb96abfec93fd30d48ccfdced81ef2b093afcea4e5c821131a6a',
+    ],
     ['finishPrepareFailure', 'c8c195872eadf73ada6062c73e9f594c2214a5ebd7ab48a781eeeabec78ce5d7'],
     ['runPreparePhase', '7f1cfda87b5c6e2363f285a78bfaf809473285a8ac0b2a896589c4d5cbf6e621'],
     [
@@ -1797,7 +1914,7 @@ function dbProcessRelaunchCertificateCandidate({
       '79d8e8c3387379ecd02e33e728fc80149ec4b516926f3e69507876ffe231808f',
     ],
     ['runResumePhase', '85ade713071959dcd8944771c3794793682de3c15a9fbddfd79bb2feb9893828'],
-    ['runRecoveryPhase', 'c09a41966847bee33c9347e86bff6539045da65fbcab501e692c406e84cbe901'],
+    ['runRecoveryPhase', '71732a7570d6134babcbb33be3cb7a98c57ed2fe52c430940cc101faca7a3832'],
     [
       'finishWalWriteDeathPrepareFailure',
       '39dea4bb1209fa4c632a170df1abea12deaa536d50477e5a982baaa14722e184',
@@ -1816,7 +1933,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runWalWriteDeathRecoveryPhase',
-      '39755043145fa40786206c6e18c1661e7ad1350f5ff73e8777b7031185f77b2c',
+      '1c117218cf3c90b6e575f5b2bd43e43fd39396097161ba3233c347212baf0105',
     ],
     [
       'finishActiveMigrationDeathPrepareFailure',
@@ -1836,16 +1953,16 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runActiveMigrationDeathRecoveryPhase',
-      '9e92fb908ea18d254dea9718d5c946a489b726895a9039ceb7b2a23b76c90fc3',
+      '825d8ad721bb7ec93d419950ed1cd9cb7b0ebffe8193304e7272922c22d69165',
     ],
     [
       'startDevDbRelaunchContractIfRequested',
-      '7bd8674b9af4f7dc276fe9672c7ce6e0fabffe2c38fd8faf00288f0a9b27a767',
+      '33bee4d4d92e6bfe14ac5a10b79f2ddf29a50c0600a201f4818b9636bba4fabc',
     ],
   ]);
   const actualRelaunchFunctions = relaunchFile.statements.filter(ts.isFunctionDeclaration);
   if (
-    relaunchFile.statements.length !== 81 ||
+    relaunchFile.statements.length !== 98 ||
     actualRelaunchFunctions.map((callable) => callable.name?.text).join('\n') !==
       relaunchCallableNames.join('\n')
   ) {
@@ -1864,7 +1981,8 @@ function dbProcessRelaunchCertificateCandidate({
   const expectedImports = [
     "import { File, Paths } from 'expo-file-system';",
     "import { logger } from '@core/secure';",
-    "import { cleanupDbActiveMigrationDeathSelfTestDatabase, cleanupDbActiveWalWriteDeathSelfTestDatabase, cleanupDbProcessRelaunchSelfTestDatabase, prepareDbActiveMigrationDeathSelfTest, prepareDbActiveWalWriteDeathSelfTest, prepareDbProcessRelaunchSelfTest, resumeDbActiveMigrationDeathSelfTest, resumeDbActiveWalWriteDeathSelfTest, resumeDbProcessRelaunchSelfTest, type DbActiveMigrationDeathPrepareChecks, type DbActiveMigrationDeathPrepareFailureCode, type DbActiveMigrationDeathResumeFailureCode, type DbActiveMigrationDeathResumeResult, type DbActiveWalWriteDeathPrepareChecks, type DbActiveWalWriteDeathPrepareFailureCode, type DbActiveWalWriteDeathResumeFailureCode, type DbActiveWalWriteDeathResumeResult, type DbProcessRelaunchPrepareChecks, type DbProcessRelaunchPrepareFailureCode, type DbProcessRelaunchResumeFailureCode, type DbProcessRelaunchResumeResult, } from '@db/database';",
+    "import { cleanupDbActiveMigrationDeathSelfTestDatabase, cleanupDbActiveWalWriteDeathSelfTestDatabase, cleanupDbProcessRelaunchSelfTestDatabase, cleanupDbRuntimeConcurrencySelfTestDatabase, prepareDbActiveMigrationDeathSelfTest, prepareDbActiveWalWriteDeathSelfTest, prepareDbProcessRelaunchSelfTest, resumeDbActiveMigrationDeathSelfTest, resumeDbActiveWalWriteDeathSelfTest, resumeDbProcessRelaunchSelfTest, runDbRuntimeConcurrencySelfTest, type DbActiveMigrationDeathPrepareChecks, type DbActiveMigrationDeathPrepareFailureCode, type DbActiveMigrationDeathResumeFailureCode, type DbActiveMigrationDeathResumeResult, type DbActiveWalWriteDeathPrepareChecks, type DbActiveWalWriteDeathPrepareFailureCode, type DbActiveWalWriteDeathResumeFailureCode, type DbActiveWalWriteDeathResumeResult, type DbProcessRelaunchPrepareChecks, type DbProcessRelaunchPrepareFailureCode, type DbProcessRelaunchResumeFailureCode, type DbProcessRelaunchResumeResult, type DbRuntimeConcurrencyDatabaseChecks, type DbRuntimeConcurrencyDatabaseFailureCode, type DbRuntimeConcurrencyDatabaseResult, } from '@db/database';",
+    "import { runDbRuntimeConcurrencyWave } from '@/services/boot/dbRuntimeConcurrencyWave';",
   ];
   if (
     relaunchFile.statements
@@ -1881,6 +1999,10 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_MARKER_PREFIX',
       [ts.NodeFlags.Const, "'GATOR_DB_ACTIVE_MIGRATION_DEATH_V1 '"],
     ],
+    [
+      'DB_RUNTIME_CONCURRENCY_MARKER_PREFIX',
+      [ts.NodeFlags.Const, "'GATOR_DB_RUNTIME_CONCURRENCY_V1 '"],
+    ],
     ['DB_RELAUNCH_REQUEST_FILE', [ts.NodeFlags.Const, "'.gator-db-relaunch-request-v1'"]],
     [
       'DB_WAL_WRITE_DEATH_REQUEST_FILE',
@@ -1889,6 +2011,14 @@ function dbProcessRelaunchCertificateCandidate({
     [
       'DB_ACTIVE_MIGRATION_DEATH_REQUEST_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-request-v1'"],
+    ],
+    [
+      'DB_RUNTIME_CONCURRENCY_REQUEST_FILE',
+      [ts.NodeFlags.Const, "'.gator-db-runtime-concurrency-request-v1'"],
+    ],
+    [
+      'DB_RUNTIME_CONCURRENCY_RUNNING_FILE',
+      [ts.NodeFlags.Const, "'.gator-db-runtime-concurrency-running-v1'"],
     ],
     ['DB_RELAUNCH_PREPARING_FILE', [ts.NodeFlags.Const, "'.gator-db-relaunch-preparing-v1'"]],
     ['DB_RELAUNCH_READY_FILE', [ts.NodeFlags.Const, "'.gator-db-relaunch-ready-v1'"]],
@@ -1943,6 +2073,13 @@ function dbProcessRelaunchCertificateCandidate({
     return undefined;
   }
   const expectedDatabaseVariables = new Map([
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME', "'driver-runtime-concurrency-selftest.db'"],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A', "'db-02c-public-throwaway-key-a-v1'"],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B', "'db-02c-public-throwaway-key-b-v1'"],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '39 as const'],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD', "'0039_message_error_message' as const"],
+    ['DB_RUNTIME_CONCURRENCY_SENTINEL_KEY', "'gator-db-runtime-wave-sentinel'"],
+    ['DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE', "'committed'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_NAME', "'driver-relaunch-selftest.db'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_KEY', "'db-03b1-public-throwaway-key-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL', "'driver-relaunch-continuity-v1'"],
@@ -1990,6 +2127,13 @@ function dbProcessRelaunchCertificateCandidate({
     }
   }
   const cleanup = databaseCallables.get('cleanupDbProcessRelaunchSelfTestDatabase');
+  const cleanupRuntimeConcurrency = databaseCallables.get(
+    'cleanupDbRuntimeConcurrencySelfTestDatabase',
+  );
+  const runtimeConcurrencyMigrationNames = databaseCallables.get(
+    'dbRuntimeConcurrencyMigrationNames',
+  );
+  const runRuntimeConcurrencySelfTest = databaseCallables.get('runDbRuntimeConcurrencySelfTest');
   const migrationNames = databaseCallables.get('dbProcessRelaunchMigrationNames');
   const inspectPartial = databaseCallables.get('inspectDbProcessRelaunchPartialState');
   const prepare = databaseCallables.get('prepareDbProcessRelaunchSelfTest');
@@ -2009,6 +2153,11 @@ function dbProcessRelaunchCertificateCandidate({
   const prepareActiveMigration = databaseCallables.get('prepareDbActiveMigrationDeathSelfTest');
   const resumeActiveMigration = databaseCallables.get('resumeDbActiveMigrationDeathSelfTest');
   const finishPrepareFailure = relaunchCallables.get('finishPrepareFailure');
+  const finishRuntimeConcurrencyFailure = relaunchCallables.get('finishRuntimeConcurrencyFailure');
+  const runRuntimeConcurrencyPhase = relaunchCallables.get('runRuntimeConcurrencyPhase');
+  const runRuntimeConcurrencyRecoveryPhase = relaunchCallables.get(
+    'runRuntimeConcurrencyRecoveryPhase',
+  );
   const runPreparePhase = relaunchCallables.get('runPreparePhase');
   const runResumePhase = relaunchCallables.get('runResumePhase');
   const runRecoveryPhase = relaunchCallables.get('runRecoveryPhase');
@@ -2029,12 +2178,85 @@ function dbProcessRelaunchCertificateCandidate({
     'runActiveMigrationDeathRecoveryPhase',
   );
   const startContract = relaunchCallables.get('startDevDbRelaunchContractIfRequested');
+  const runtimeConcurrencyWave = runtimeWaveCallables.get('runDbRuntimeConcurrencyWave');
+  const runtimeConcurrencyCount = runtimeWaveCallables.get('count');
+  const submitOrderedCoordinatorWave = runtimeWaveCallables.get('submitOrderedCoordinatorWave');
+  const withDbTransaction = topLevelFunction(
+    filesByPath,
+    'src/db/transaction.ts',
+    'withDbTransaction',
+  );
+  const withDbWriteLock = topLevelFunction(filesByPath, 'src/db/transaction.ts', 'withDbWriteLock');
+  const syncAllChats = topLevelFunction(filesByPath, 'src/services/sync/engine.ts', 'syncAllChats');
+  const linkHandlesAfterCommit = topLevelFunction(
+    filesByPath,
+    'src/services/sync/engine.ts',
+    'linkHandlesAfterCommit',
+  );
+  const sendImageMessage = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendAttachmentService.ts',
+    'sendImageMessage',
+  );
+  const reconcileSendOutcome = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendOutcome.ts',
+    'reconcileSendOutcome',
+  );
+  const handleSendFailure = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendOutcome.ts',
+    'handleSendFailure',
+  );
+  const withCurrentDeliveryTransaction = topLevelFunction(
+    filesByPath,
+    'src/services/realtime/dbEventSink.ts',
+    'withCurrentDeliveryTransaction',
+  );
+  const dbEventSinkConstructor = topLevelClassConstructor(
+    filesByPath,
+    'src/services/realtime/dbEventSink.ts',
+    'DbEventSink',
+  );
+  const dbEventSinkLinkContacts = topLevelClassMethod(
+    filesByPath,
+    'src/services/realtime/dbEventSink.ts',
+    'DbEventSink',
+    'linkContactsAfterCommit',
+  );
+  const dbEventSinkOnEvent = topLevelClassMethod(
+    filesByPath,
+    'src/services/realtime/dbEventSink.ts',
+    'DbEventSink',
+    'onEvent',
+  );
+  // The runtime wave retains these returned promises until disposable-handle cleanup. Pin the
+  // reviewed entry bodies plus the exact contact-link bypass and send-outcome suppression closure,
+  // so internal DB/native work cannot become detached while an outer inventory id stays unchanged.
+  const runtimeProductionCalleeFingerprints = new Map([
+    [syncAllChats, 'f4d3547916c524936d78b75950eddcf545a6aae976287f401b6306b4d3bcbf57'],
+    [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
+    [sendImageMessage, 'e9be43fc0b1c8b8c6f51e7604cf40f5640d135b2b6ca1dfadb2e159c7b32d905'],
+    [reconcileSendOutcome, 'c8ef12e12a7a116289e00886b0589bfe42abfa5060d7411b650fa323f0a22c8c'],
+    [handleSendFailure, 'c7aeae6c332c61990873f7513974be7fa205e35bd422acb57e1a5b6e6e903e3b'],
+    [
+      withCurrentDeliveryTransaction,
+      '08e52d3be405df405ae6ff1f66b29922b89884b05bb0378629c0b6b040ef3330',
+    ],
+    [dbEventSinkConstructor, '087d0cd2cd9cde22afc602591260d35f760b01178c18ff22a5e9c9ff0b4e7fb6'],
+    [dbEventSinkLinkContacts, 'efeff49c6e0d6e74395d05dcf5f3e1f6774decb7fec6e773ea61761d9e01d0e9'],
+    [dbEventSinkOnEvent, 'be6e9cc9ae229bae5a2ea92e0a41b8e6c41a1c9cb28057081e25101812eab9ad'],
+  ]);
   const startForegroundBoot = topLevelFunction(filesByPath, foregroundPath, 'startForegroundBoot');
   const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
   const opRunner = topLevelFunction(filesByPath, databasePath, 'opRunner');
+  const drizzleAdapter = topLevelFunction(filesByPath, databasePath, 'drizzleAdapter');
   const runMigrations = topLevelFunction(filesByPath, 'src/db/migrate.ts', 'runMigrations');
   if (
     !cleanup?.body ||
+    !cleanupRuntimeConcurrency?.body ||
+    !runtimeConcurrencyMigrationNames?.body ||
+    !runRuntimeConcurrencySelfTest?.body ||
     !migrationNames?.body ||
     !inspectPartial?.body ||
     !prepare?.body ||
@@ -2048,6 +2270,9 @@ function dbProcessRelaunchCertificateCandidate({
     !prepareActiveMigration?.body ||
     !resumeActiveMigration?.body ||
     !finishPrepareFailure?.body ||
+    !finishRuntimeConcurrencyFailure?.body ||
+    !runRuntimeConcurrencyPhase?.body ||
+    !runRuntimeConcurrencyRecoveryPhase?.body ||
     !runPreparePhase?.body ||
     !runResumePhase?.body ||
     !runRecoveryPhase?.body ||
@@ -2060,9 +2285,25 @@ function dbProcessRelaunchCertificateCandidate({
     !runActiveMigrationResumePhase?.body ||
     !runActiveMigrationRecoveryPhase?.body ||
     !startContract?.body ||
+    !runtimeConcurrencyWave?.body ||
+    !runtimeConcurrencyCount?.body ||
+    !submitOrderedCoordinatorWave?.body ||
+    !withDbTransaction?.body ||
+    !withDbWriteLock?.body ||
+    !syncAllChats?.body ||
+    !sendImageMessage?.body ||
+    !dbEventSinkOnEvent?.body ||
+    [...runtimeProductionCalleeFingerprints].some(
+      ([callable, expected]) =>
+        !callable?.body ||
+        createHash('sha256')
+          .update(normalizedSnippet(callable, callable.getSourceFile()))
+          .digest('hex') !== expected,
+    ) ||
     !startForegroundBoot?.body ||
     !extractRows?.body ||
     !opRunner?.body ||
+    !drizzleAdapter?.body ||
     !runMigrations?.body
   ) {
     return undefined;
@@ -2152,10 +2393,33 @@ function dbProcessRelaunchCertificateCandidate({
   ) {
     return undefined;
   }
+  const runtimeConcurrencyOpenCalls = allOpenCalls
+    .filter(
+      (call) =>
+        nodeIsInside(call, cleanupRuntimeConcurrency) ||
+        nodeIsInside(call, runRuntimeConcurrencySelfTest),
+    )
+    .sort((left, right) => left.getStart(databaseFile) - right.getStart(databaseFile));
+  const expectedRuntimeConcurrencyOpenCalls = [
+    'open({ name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME })',
+    'open({ name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME, encryptionKey: DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A, })',
+    'open({ name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME, encryptionKey: DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B, readOnly: true, })',
+    'open({ name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME, encryptionKey: DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A, readOnly: true, })',
+  ];
+  if (
+    runtimeConcurrencyOpenCalls.length !== expectedRuntimeConcurrencyOpenCalls.length ||
+    runtimeConcurrencyOpenCalls.some(
+      (call, index) =>
+        normalizedSnippet(call, databaseFile) !== expectedRuntimeConcurrencyOpenCalls[index],
+    )
+  ) {
+    return undefined;
+  }
   const candidateOpenCalls = [
     ...processOpenCalls,
     ...walWriteDeathOpenCalls,
     ...activeMigrationOpenCalls,
+    ...runtimeConcurrencyOpenCalls,
   ];
 
   const migrationCalls = edges
@@ -2208,6 +2472,27 @@ function dbProcessRelaunchCertificateCandidate({
         nodeIsInside(call, prepareActiveMigration) || nodeIsInside(call, resumeActiveMigration),
     )
     .sort((left, right) => left.getStart(databaseFile) - right.getStart(databaseFile));
+  const runtimeConcurrencyMigrationCalls = edges
+    .filter(
+      (edge) =>
+        edge.callee === runMigrations &&
+        edge.node &&
+        nodeIsInside(edge.node, runRuntimeConcurrencySelfTest),
+    )
+    .map((edge) => edge.node);
+  const runtimeConcurrencyRunnerFactoryCalls = directCallsToBinding(
+    databaseFile,
+    opRunner.name,
+    checker,
+  ).filter((call) => nodeIsInside(call, runRuntimeConcurrencySelfTest));
+  const runtimeConcurrencyAdapterCalls = directCallsToBinding(
+    databaseFile,
+    drizzleAdapter.name,
+    checker,
+  ).filter((call) => nodeIsInside(call, runRuntimeConcurrencySelfTest));
+  const runtimeConcurrencyAdapterCall = runtimeConcurrencyAdapterCalls[0];
+  const runtimeConcurrencyDrizzleCall = runtimeConcurrencyAdapterCall?.parent;
+  const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
   const prefixRunner = databaseCallables.get('dbActiveMigrationPrefixRunner');
   const crashRunner = databaseCallables.get('dbActiveMigrationCrashRunner');
   const prefixRunnerCalls = directCallsToBinding(databaseFile, prefixRunner.name, checker).filter(
@@ -2258,7 +2543,32 @@ function dbProcessRelaunchCertificateCandidate({
     ) ||
     normalizedSnippet(activeMigrationCalls[2], databaseFile) !==
       'runMigrations(opRunner(reopened))' ||
-    normalizedSnippet(activeMigrationCalls[3], databaseFile) !== 'runMigrations(opRunner(reopened))'
+    normalizedSnippet(activeMigrationCalls[3], databaseFile) !==
+      'runMigrations(opRunner(reopened))' ||
+    runtimeConcurrencyMigrationCalls.length !== 1 ||
+    runtimeConcurrencyRunnerFactoryCalls.length !== 1 ||
+    runtimeConcurrencyMigrationCalls[0]?.arguments.length !== 1 ||
+    runtimeConcurrencyMigrationCalls[0]?.arguments[0] !== runtimeConcurrencyRunnerFactoryCalls[0] ||
+    runtimeConcurrencyRunnerFactoryCalls[0]?.parent !== runtimeConcurrencyMigrationCalls[0] ||
+    !ts.isAwaitExpression(runtimeConcurrencyMigrationCalls[0]?.parent) ||
+    normalizedSnippet(runtimeConcurrencyMigrationCalls[0], databaseFile) !==
+      'runMigrations(opRunner(activeHandle))' ||
+    runtimeConcurrencyAdapterCalls.length !== 1 ||
+    !runtimeConcurrencyAdapterCall ||
+    runtimeConcurrencyAdapterCall.arguments.length !== 1 ||
+    !identifierNamed(runtimeConcurrencyAdapterCall.arguments[0], 'activeHandle') ||
+    !runtimeConcurrencyDrizzleCall ||
+    !ts.isCallExpression(runtimeConcurrencyDrizzleCall) ||
+    runtimeConcurrencyDrizzleCall.arguments.length !== 1 ||
+    runtimeConcurrencyDrizzleCall.arguments[0] !== runtimeConcurrencyAdapterCall ||
+    !drizzleBinding ||
+    !sameSymbol(
+      unwrapExpression(runtimeConcurrencyDrizzleCall.expression),
+      drizzleBinding,
+      checker,
+    ) ||
+    normalizedSnippet(runtimeConcurrencyDrizzleCall, databaseFile) !==
+      'drizzle(drizzleAdapter(activeHandle))'
   ) {
     return undefined;
   }
@@ -2288,10 +2598,16 @@ function dbProcessRelaunchCertificateCandidate({
       nodeIsInside(call, prepareActiveMigration) ||
       nodeIsInside(call, resumeActiveMigration),
   );
+  const runtimeConcurrencyExtractCalls = directCallsToBinding(
+    databaseFile,
+    extractRows.name,
+    checker,
+  ).filter((call) => nodeIsInside(call, runRuntimeConcurrencySelfTest));
   if (
     processExtractCalls.length !== 8 ||
     walWriteDeathExtractCalls.length !== 11 ||
-    activeMigrationExtractCalls.length !== 15
+    activeMigrationExtractCalls.length !== 15 ||
+    runtimeConcurrencyExtractCalls.length !== 4
   ) {
     return undefined;
   }
@@ -2299,6 +2615,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...processExtractCalls,
     ...walWriteDeathExtractCalls,
     ...activeMigrationExtractCalls,
+    ...runtimeConcurrencyExtractCalls,
   ];
 
   const migrationListReferences = runtimeReferencesToBinding(
@@ -2328,14 +2645,19 @@ function dbProcessRelaunchCertificateCandidate({
   const activeMigrationNameReferences = migrationListReferences.filter((reference) =>
     nodeIsInside(reference, databaseCallables.get('dbActiveMigrationNames')),
   );
+  const runtimeConcurrencyMigrationReferences = migrationListReferences.filter((reference) =>
+    nodeIsInside(reference, runtimeConcurrencyMigrationNames),
+  );
   const processMigrationReferences = migrationListReferences.filter(
     (reference) =>
       nodeIsInside(reference, migrationNames) ||
-      nodeIsInside(reference, databaseCallables.get('dbActiveMigrationNames')),
+      nodeIsInside(reference, databaseCallables.get('dbActiveMigrationNames')) ||
+      nodeIsInside(reference, runtimeConcurrencyMigrationNames),
   );
   if (
     activeMigrationNameReferences.length !== 2 ||
-    processMigrationReferences.length !== 3 ||
+    runtimeConcurrencyMigrationReferences.length !== 1 ||
+    processMigrationReferences.length !== 4 ||
     !activeMigrationNameReferences.some(
       (reference) =>
         ts.isElementAccessExpression(reference.parent) && reference.parent.expression === reference,
@@ -2520,6 +2842,71 @@ function dbProcessRelaunchCertificateCandidate({
     startContract,
     runActiveMigrationRecoveryPhase,
   );
+  const cleanupRuntimeConcurrencyDatabaseEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencySelfTest,
+    cleanupRuntimeConcurrency,
+  );
+  const cleanupRuntimeConcurrencyFailureEdges = exactCallEdges(
+    edges,
+    finishRuntimeConcurrencyFailure,
+    cleanupRuntimeConcurrency,
+  );
+  const finishRuntimeConcurrencyEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyPhase,
+    finishRuntimeConcurrencyFailure,
+  );
+  const runRuntimeConcurrencyDatabaseEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyPhase,
+    runRuntimeConcurrencySelfTest,
+  );
+  const cleanupOldRuntimeConcurrencyRecoveryEdges = exactCallEdges(
+    edges,
+    runRecoveryPhase,
+    cleanupRuntimeConcurrency,
+  );
+  const cleanupWalRuntimeConcurrencyRecoveryEdges = exactCallEdges(
+    edges,
+    runWalWriteDeathRecoveryPhase,
+    cleanupRuntimeConcurrency,
+  );
+  const cleanupActiveRuntimeConcurrencyRecoveryEdges = exactCallEdges(
+    edges,
+    runActiveMigrationRecoveryPhase,
+    cleanupRuntimeConcurrency,
+  );
+  const cleanupRuntimeConcurrencyOldRecoveryEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyRecoveryPhase,
+    cleanup,
+  );
+  const cleanupRuntimeConcurrencyWalRecoveryEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyRecoveryPhase,
+    cleanupWalWriteDeath,
+  );
+  const cleanupRuntimeConcurrencyActiveRecoveryEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyRecoveryPhase,
+    cleanupActiveMigration,
+  );
+  const cleanupRuntimeConcurrencyRecoveryEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyRecoveryPhase,
+    cleanupRuntimeConcurrency,
+  );
+  const startRuntimeConcurrencyEdges = exactCallEdges(
+    edges,
+    startContract,
+    runRuntimeConcurrencyPhase,
+  );
+  const startRuntimeConcurrencyRecoveryEdges = exactCallEdges(
+    edges,
+    startContract,
+    runRuntimeConcurrencyRecoveryPhase,
+  );
   const foregroundEdges = exactCallEdges(edges, startForegroundBoot, startContract);
   const expectedCleanupEdges = [
     ...cleanupPrepareEdges,
@@ -2529,6 +2916,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupRecoveryEdges,
     ...cleanupOldWalWriteDeathRecoveryEdges,
     ...cleanupOldActiveMigrationRecoveryEdges,
+    ...cleanupRuntimeConcurrencyOldRecoveryEdges,
   ];
   const expectedWalWriteDeathCleanupEdges = [
     ...cleanupWalWriteDeathPrepareEdges,
@@ -2539,6 +2927,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupWalWriteDeathResumeServiceEdges,
     ...cleanupWalWriteDeathRecoveryEdges,
     ...cleanupWalActiveMigrationRecoveryEdges,
+    ...cleanupRuntimeConcurrencyWalRecoveryEdges,
   ];
   const expectedActiveMigrationCleanupEdges = [
     ...cleanupActiveMigrationPrepareEdges,
@@ -2549,6 +2938,15 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupActiveMigrationFailureEdges,
     ...cleanupActiveMigrationResumeServiceEdges,
     ...cleanupActiveMigrationRecoveryEdges,
+    ...cleanupRuntimeConcurrencyActiveRecoveryEdges,
+  ];
+  const expectedRuntimeConcurrencyCleanupEdges = [
+    ...cleanupRuntimeConcurrencyDatabaseEdges,
+    ...cleanupRuntimeConcurrencyFailureEdges,
+    ...cleanupOldRuntimeConcurrencyRecoveryEdges,
+    ...cleanupWalRuntimeConcurrencyRecoveryEdges,
+    ...cleanupActiveRuntimeConcurrencyRecoveryEdges,
+    ...cleanupRuntimeConcurrencyRecoveryEdges,
   ];
   if (
     cleanupPrepareEdges.length !== 2 ||
@@ -2622,14 +3020,127 @@ function dbProcessRelaunchCertificateCandidate({
     edges.filter((edge) => edge.callee === runActiveMigrationResumePhase).length !== 1 ||
     startActiveMigrationRecoveryEdges.length !== 1 ||
     edges.filter((edge) => edge.callee === runActiveMigrationRecoveryPhase).length !== 1 ||
+    cleanupRuntimeConcurrencyDatabaseEdges.length !== 2 ||
+    cleanupRuntimeConcurrencyFailureEdges.length !== 1 ||
+    cleanupOldRuntimeConcurrencyRecoveryEdges.length !== 1 ||
+    cleanupWalRuntimeConcurrencyRecoveryEdges.length !== 1 ||
+    cleanupActiveRuntimeConcurrencyRecoveryEdges.length !== 1 ||
+    cleanupRuntimeConcurrencyOldRecoveryEdges.length !== 1 ||
+    cleanupRuntimeConcurrencyWalRecoveryEdges.length !== 1 ||
+    cleanupRuntimeConcurrencyActiveRecoveryEdges.length !== 1 ||
+    cleanupRuntimeConcurrencyRecoveryEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === cleanupRuntimeConcurrency).length !==
+      expectedRuntimeConcurrencyCleanupEdges.length ||
+    finishRuntimeConcurrencyEdges.length !== 2 ||
+    edges.filter((edge) => edge.callee === finishRuntimeConcurrencyFailure).length !== 2 ||
+    runRuntimeConcurrencyDatabaseEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === runRuntimeConcurrencySelfTest).length !== 1 ||
+    startRuntimeConcurrencyEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === runRuntimeConcurrencyPhase).length !== 1 ||
+    startRuntimeConcurrencyRecoveryEdges.length !== 2 ||
+    edges.filter((edge) => edge.callee === runRuntimeConcurrencyRecoveryPhase).length !== 2 ||
     foregroundEdges.length !== 1 ||
     edges.filter((edge) => edge.callee === startContract).length !== 1
   ) {
     return undefined;
   }
 
+  const runtimeWaveReferences = referenceEdges.filter(
+    (reference) => reference.target === runtimeConcurrencyWave,
+  );
+  const runtimeWaveReference = runtimeWaveReferences[0];
+  if (
+    runtimeWaveReferences.length !== 1 ||
+    !runtimeWaveReference ||
+    runtimeWaveReference.caller !== runRuntimeConcurrencyPhase ||
+    runtimeWaveReference.node.parent !== runRuntimeConcurrencyDatabaseEdges[0]?.node ||
+    runRuntimeConcurrencyDatabaseEdges[0]?.node.arguments[0] !== runtimeWaveReference.node
+  ) {
+    return undefined;
+  }
+
+  const runtimeWaveOwnerIsProtected = (callable) =>
+    callable &&
+    [submitOrderedCoordinatorWave, runtimeConcurrencyWave].some((owner) =>
+      callableIsInside(callable, owner),
+    );
+  const runtimeWaveEdgesTo = (callee) =>
+    edges.filter((edge) => runtimeWaveOwnerIsProtected(edge.caller) && edge.callee === callee);
+  const runtimeWaveTransactionEdges = runtimeWaveEdgesTo(withDbTransaction);
+  const runtimeWaveLockEdges = runtimeWaveEdgesTo(withDbWriteLock);
+  const runtimeWaveCountEdges = runtimeWaveEdgesTo(runtimeConcurrencyCount);
+  const runtimeWaveSubmitEdges = runtimeWaveEdgesTo(submitOrderedCoordinatorWave);
+  const runtimeWaveSyncEdges = runtimeWaveEdgesTo(syncAllChats);
+  const runtimeWaveSendEdges = runtimeWaveEdgesTo(sendImageMessage);
+  const runtimeWaveEventEdges = runtimeWaveEdgesTo(dbEventSinkOnEvent);
+  const allSendImageEdges = edges.filter((edge) => edge.callee === sendImageMessage);
+  const isDirectUnspreadCallEdge = (edge, callee) =>
+    edge.callee === callee &&
+    callableNodeForExpression(edge.node.expression, checker) === callee &&
+    !edge.node.arguments.some(ts.isSpreadElement);
+  const allReconcileEdges = edges.filter((edge) => edge.callee === reconcileSendOutcome);
+  const allFailureEdges = edges.filter((edge) => edge.callee === handleSendFailure);
+  const directReconcileEdges = allReconcileEdges.filter((edge) =>
+    isDirectUnspreadCallEdge(edge, reconcileSendOutcome),
+  );
+  const directFailureEdges = allFailureEdges.filter((edge) =>
+    isDirectUnspreadCallEdge(edge, handleSendFailure),
+  );
+  const optionedReconcileEdges = directReconcileEdges.filter(
+    (edge) => edge.node.arguments.length >= 6,
+  );
+  const optionedFailureEdges = directFailureEdges.filter((edge) => edge.node.arguments.length >= 8);
+  const runtimeSendNode = runtimeWaveSendEdges[0]?.node;
+  const runtimeSendOptions = runtimeSendNode?.arguments[6];
+  const runtimeWaveCallNodes = [
+    ...runtimeWaveTransactionEdges,
+    ...runtimeWaveLockEdges,
+    ...runtimeWaveCountEdges,
+    ...runtimeWaveSubmitEdges,
+    ...runtimeWaveSyncEdges,
+    ...runtimeWaveSendEdges,
+    ...runtimeWaveEventEdges,
+  ].map((edge) => edge.node);
+  if (
+    runtimeWaveTransactionEdges.length !== 4 ||
+    runtimeWaveLockEdges.length !== 1 ||
+    runtimeWaveCountEdges.length !== 15 ||
+    runtimeWaveSubmitEdges.length !== 1 ||
+    runtimeWaveSyncEdges.length !== 2 ||
+    runtimeWaveSendEdges.length !== 1 ||
+    runtimeWaveEventEdges.length !== 1 ||
+    allSendImageEdges.length !== 3 ||
+    allSendImageEdges.some((edge) => edge.node.arguments.some(ts.isSpreadElement)) ||
+    allSendImageEdges.some(
+      (edge) => edge !== runtimeWaveSendEdges[0] && edge.node.arguments.length > 6,
+    ) ||
+    directReconcileEdges.length !== allReconcileEdges.length ||
+    directFailureEdges.length !== allFailureEdges.length ||
+    !runtimeSendNode ||
+    runtimeSendNode.arguments.length !== 7 ||
+    !runtimeSendOptions ||
+    normalizedSnippet(runtimeSendOptions, runtimeWaveFile) !==
+      "{ failureNoticeMode: 'suppressed' }" ||
+    optionedReconcileEdges.length !== 1 ||
+    optionedReconcileEdges[0]?.caller !== sendImageMessage ||
+    !identifierNamed(optionedReconcileEdges[0]?.node.arguments[5], 'outcomeOptions') ||
+    optionedFailureEdges.length !== 1 ||
+    optionedFailureEdges[0]?.caller !== sendImageMessage ||
+    !identifierNamed(optionedFailureEdges[0]?.node.arguments[7], 'outcomeOptions') ||
+    edges.filter((edge) => edge.callee === runtimeConcurrencyCount).length !== 15 ||
+    edges.filter((edge) => edge.callee === submitOrderedCoordinatorWave).length !== 1 ||
+    edges.filter((edge) => edge.callee === runtimeConcurrencyWave).length !== 0 ||
+    runtimeWaveCallNodes.length !== 25 ||
+    new Set(runtimeWaveCallNodes).size !== 25
+  ) {
+    return undefined;
+  }
+
   const protectedTargets = new Set([
     cleanup,
+    cleanupRuntimeConcurrency,
+    runtimeConcurrencyMigrationNames,
+    runRuntimeConcurrencySelfTest,
     prepare,
     resume,
     cleanupWalWriteDeath,
@@ -2655,16 +3166,22 @@ function dbProcessRelaunchCertificateCandidate({
     runActiveMigrationPreparePhase,
     runActiveMigrationResumePhase,
     runActiveMigrationRecoveryPhase,
+    finishRuntimeConcurrencyFailure,
+    runRuntimeConcurrencyPhase,
+    runRuntimeConcurrencyRecoveryPhase,
+    ...runtimeWaveCallables.values(),
     startContract,
   ]);
   const expectedGlobalReferenceCounts = [
-    [cleanup, 9],
+    [cleanup, 10],
+    [cleanupRuntimeConcurrency, 8],
+    [runRuntimeConcurrencySelfTest, 2],
     [prepare, 2],
     [resume, 2],
-    [cleanupWalWriteDeath, 10],
+    [cleanupWalWriteDeath, 11],
     [prepareWalWriteDeath, 2],
     [resumeWalWriteDeath, 2],
-    [cleanupActiveMigration, 11],
+    [cleanupActiveMigration, 12],
     [prepareActiveMigration, 2],
     [resumeActiveMigration, 2],
     [startContract, 2],
@@ -2675,6 +3192,9 @@ function dbProcessRelaunchCertificateCandidate({
     checker,
   );
   const expectedLocalReferenceCounts = [
+    [databaseCallables.get('emptyDbRuntimeConcurrencyDatabaseChecks'), 2],
+    [runtimeConcurrencyMigrationNames, 2],
+    [databaseCallables.get('firstDbRuntimeConcurrencyWaveFailure'), 2],
     [databaseCallables.get('emptyDbActiveWalWriteDeathPrepareChecks'), 2],
     [databaseCallables.get('emptyDbActiveWalWriteDeathResumeChecks'), 2],
     [databaseCallables.get('pragmaContainsString'), 11],
@@ -2694,6 +3214,16 @@ function dbProcessRelaunchCertificateCandidate({
     [databaseCallables.get('seedDbActiveMigrationFixture'), 2],
     [retireActiveMigration, 2],
   ];
+  const runtimeCapabilityOwners = new Set([
+    cleanupRuntimeConcurrency,
+    runRuntimeConcurrencySelfTest,
+    finishRuntimeConcurrencyFailure,
+    runRuntimeConcurrencyPhase,
+    runRuntimeConcurrencyRecoveryPhase,
+    ...runtimeWaveCallables.values(),
+  ]);
+  const runtimeCapabilityOwnerIsProtected = (callable) =>
+    callable && [...runtimeCapabilityOwners].some((owner) => callableIsInside(callable, owner));
   if (
     !globalReferences ||
     expectedGlobalReferenceCounts.some(([callable, expectedCount]) => {
@@ -2713,10 +3243,20 @@ function dbProcessRelaunchCertificateCandidate({
       );
     }) ||
     referenceEdges.some(
-      (reference) => typeof reference.target !== 'string' && protectedTargets.has(reference.target),
+      (reference) =>
+        typeof reference.target !== 'string' &&
+        protectedTargets.has(reference.target) &&
+        reference !== runtimeWaveReference,
     ) ||
+    referenceEdges.some(
+      (reference) =>
+        runtimeCapabilityOwnerIsProtected(reference.caller) && reference !== runtimeWaveReference,
+    ) ||
+    dynamicCallbacks.some((callback) => runtimeCapabilityOwnerIsProtected(callback.caller)) ||
+    dynamicDispatches.some((dispatch) => runtimeCapabilityOwnerIsProtected(dispatch.caller)) ||
     hasNonStaticModuleSpecifierOfPath(filesByPath, databasePath) ||
-    hasNonStaticModuleSpecifierOfPath(filesByPath, relaunchPath)
+    hasNonStaticModuleSpecifierOfPath(filesByPath, relaunchPath) ||
+    hasNonStaticModuleSpecifierOfPath(filesByPath, runtimeWavePath)
   ) {
     return undefined;
   }
@@ -2810,6 +3350,43 @@ function dbProcessRelaunchCertificateCandidate({
     return undefined;
   }
 
+  const runtimeRawOwners = new Set([
+    cleanupRuntimeConcurrency,
+    runRuntimeConcurrencySelfTest,
+    runtimeConcurrencyCount,
+    submitOrderedCoordinatorWave,
+    runtimeConcurrencyWave,
+  ]);
+  const runtimeRawFindings = findings.filter((finding) => {
+    const callable = findingCallables.get(finding.id);
+    return (
+      callable &&
+      [...runtimeRawOwners].some((owner) => callableIsInside(callable, owner)) &&
+      finding.operation !== 'mutator-call'
+    );
+  });
+  const runtimeFindingSignature = (finding) =>
+    `${finding.path}|${finding.symbol}|${finding.operation}|${finding.target}`;
+  const expectedRuntimeRawFindingSignatures = [
+    'src/db/database.ts|cleanupDbRuntimeConcurrencySelfTestDatabase|native-database-delete|<database-file>',
+    'src/db/database.ts|rawRekey|sql-pragma|rekey',
+    'src/db/database.ts|runDbRuntimeConcurrencySelfTest|sql-pragma|foreign_key_check',
+    'src/db/database.ts|runDbRuntimeConcurrencySelfTest|sql-pragma|foreign_keys',
+    'src/db/database.ts|runDbRuntimeConcurrencySelfTest|sql-pragma|integrity_check',
+    'src/services/boot/dbRuntimeConcurrencyWave.ts|count|raw-dynamic|<dynamic>',
+    'src/services/boot/dbRuntimeConcurrencyWave.ts|runDbRuntimeConcurrencyWave|sql-insert|kv',
+    'src/services/boot/dbRuntimeConcurrencyWave.ts|submitOrderedCoordinatorWave|sql-insert|kv',
+    'src/services/boot/dbRuntimeConcurrencyWave.ts|submitOrderedCoordinatorWave|sql-insert|kv',
+    'src/services/boot/dbRuntimeConcurrencyWave.ts|submitOrderedCoordinatorWave|sql-insert|kv',
+  ].sort();
+  if (
+    runtimeRawFindings.length !== expectedRuntimeRawFindingSignatures.length ||
+    runtimeRawFindings.map(runtimeFindingSignature).sort().join('\n') !==
+      expectedRuntimeRawFindingSignatures.join('\n')
+  ) {
+    return undefined;
+  }
+
   const databaseCallNodes = [
     ...cleanupPrepareEdges,
     ...cleanupResumeEdges,
@@ -2824,6 +3401,8 @@ function dbProcessRelaunchCertificateCandidate({
     ...retireActiveMigrationResumeEdges,
     ...cleanupActiveMigrationRetireEdges,
     ...seedActiveMigrationPrepareEdges,
+    ...cleanupRuntimeConcurrencyDatabaseEdges,
+    ...runtimeConcurrencyMigrationCalls.map((node) => ({ node })),
   ].map((edge) => edge.node);
   const orchestrationCallNodes = [
     ...cleanupFailureEdges,
@@ -2859,23 +3438,43 @@ function dbProcessRelaunchCertificateCandidate({
     ...startActiveMigrationPrepareEdges,
     ...startActiveMigrationResumeEdges,
     ...startActiveMigrationRecoveryEdges,
+    ...cleanupRuntimeConcurrencyFailureEdges,
+    ...finishRuntimeConcurrencyEdges,
+    ...runRuntimeConcurrencyDatabaseEdges,
+    ...cleanupOldRuntimeConcurrencyRecoveryEdges,
+    ...cleanupWalRuntimeConcurrencyRecoveryEdges,
+    ...cleanupActiveRuntimeConcurrencyRecoveryEdges,
+    ...cleanupRuntimeConcurrencyOldRecoveryEdges,
+    ...cleanupRuntimeConcurrencyWalRecoveryEdges,
+    ...cleanupRuntimeConcurrencyActiveRecoveryEdges,
+    ...cleanupRuntimeConcurrencyRecoveryEdges,
+    ...startRuntimeConcurrencyEdges,
+    ...startRuntimeConcurrencyRecoveryEdges,
+    { node: runtimeWaveReference.node },
+    ...runtimeWaveCallNodes.map((node) => ({ node })),
   ].map((edge) => edge.node);
   if (
-    databaseCallNodes.length !== 22 ||
-    new Set(databaseCallNodes).size !== 22 ||
-    orchestrationCallNodes.length !== 39 ||
-    new Set(orchestrationCallNodes).size !== 39
+    databaseCallNodes.length !== 25 ||
+    new Set(databaseCallNodes).size !== 25 ||
+    orchestrationCallNodes.length !== 79 ||
+    new Set(orchestrationCallNodes).size !== 79
   ) {
     return undefined;
   }
 
   return {
-    allFindingIds: new Set(rawFindings.map((finding) => finding.id)),
+    adapterCall: runtimeConcurrencyAdapterCall,
+    allFindingIds: new Set([...rawFindings, ...runtimeRawFindings].map((finding) => finding.id)),
     cleanup,
     databaseCallNodes,
+    drizzleCall: runtimeConcurrencyDrizzleCall,
     extractCalls,
     foregroundCall: foregroundEdges[0].node,
-    migrationCalls: [...migrationCalls, ...activeMigrationCalls],
+    migrationCalls: [
+      ...migrationCalls,
+      ...activeMigrationCalls,
+      ...runtimeConcurrencyMigrationCalls,
+    ],
     migrationReferences: processMigrationReferences,
     nestedRunnerAdoptions: [
       {
@@ -2891,8 +3490,12 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     openCalls: candidateOpenCalls,
     orchestrationCallNodes,
-    rawFindingIds: new Set(rawFindings.map((finding) => finding.id)),
-    runnerFactoryCalls: [...runnerFactoryCalls, ...activeMigrationRunnerFactoryCalls],
+    rawFindingIds: new Set([...rawFindings, ...runtimeRawFindings].map((finding) => finding.id)),
+    runnerFactoryCalls: [
+      ...runnerFactoryCalls,
+      ...activeMigrationRunnerFactoryCalls,
+      ...runtimeConcurrencyRunnerFactoryCalls,
+    ],
     startContract,
   };
 }
@@ -3290,7 +3893,7 @@ function driverHistorySelfTestCertificateCandidate({
 /**
  * Prove the exact disposable Android driver contract without making the private adapter a public
  * capability. This is a candidate only: the adapter certificate below must also prove the shared
- * Proxy body and both of its sole consumers before any finding receives a throwaway context.
+ * Proxy body and all three sole consumers before any finding receives a throwaway context.
  */
 function driverSelfTestCertificateCandidate({
   filesByPath,
@@ -3687,13 +4290,13 @@ function driverSelfTestCertificateCandidate({
   const historyOpenCallSet = new Set(historyCandidate.openCalls);
   const processOpenCallSet = new Set(processRelaunchCandidate.openCalls);
   if (
-    allOpenCalls.length !== 28 ||
+    allOpenCalls.length !== 32 ||
     productionOpenCalls.length !== 1 ||
     cleanupOpenCalls.length !== 1 ||
     selfTestOpenCalls.length !== 5 ||
     historyOpenCallSet.size !== 5 ||
     historyCandidate.openCalls.some((call) => !allOpenCalls.includes(call)) ||
-    processOpenCallSet.size !== 16 ||
+    processOpenCallSet.size !== 20 ||
     processRelaunchCandidate.openCalls.some((call) => !allOpenCalls.includes(call))
   ) {
     return undefined;
@@ -3764,7 +4367,7 @@ function driverSelfTestCertificateCandidate({
 
   const allDrizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker);
   const selfTestDrizzleCalls = allDrizzleCalls.filter((call) => nodeIsInside(call, selfTest));
-  if (allDrizzleCalls.length !== 2 || selfTestDrizzleCalls.length !== 1) return undefined;
+  if (allDrizzleCalls.length !== 3 || selfTestDrizzleCalls.length !== 1) return undefined;
   const selfTestDrizzleCall = selfTestDrizzleCalls[0];
   const selfTestAdapterCall = selfTestDrizzleCall.arguments[0]
     ? callableCall(selfTestDrizzleCall.arguments[0], drizzleAdapter, checker)
@@ -4675,7 +5278,7 @@ function driverSelfTestCertificateCandidate({
     conflictEdges.length !== 1 ||
     edges.filter((edge) => edge.callee === expectedConflict).length !== 2 ||
     exactColumnEdges.length !== 4 ||
-    edges.filter((edge) => edge.callee === exactStringColumn).length !== 11 ||
+    edges.filter((edge) => edge.callee === exactStringColumn).length !== 13 ||
     emptyCheckCalls.length !== 2 ||
     referenceEdges.some(
       (reference) =>
@@ -5041,6 +5644,9 @@ function startupSingleFlightDelegationTargets({
     ...(driverSelfTestCandidate
       ? [unwrapExpression(driverSelfTestCandidate.drizzleCall.expression)]
       : []),
+    ...(processRelaunchCandidate
+      ? [unwrapExpression(processRelaunchCandidate.drizzleCall.expression)]
+      : []),
   ]);
   if (
     openReferences.length !== expectedOpenReferences.size ||
@@ -5351,13 +5957,14 @@ function startupSingleFlightDelegationTargets({
 /**
  * Prove the five raw driver calls that cannot use the normal transaction-owner graph.
  *
- * The migration runner has exactly fourteen awaited call sites: the unpublished production
- * first-open handle, six same-process disposable probes, three relaunch probes, and four
- * active-migration-death probes. Twelve adopt opRunner directly; the remaining two use the exact
- * identity-bound prefix and crash wrapper triples before awaited runMigrations. The three Drizzle
- * overrides are coordinated adapter calls: a private, exact Proxy forwards one operation to the
- * sole op-sqlite handle used by each of the two exact Drizzle clients. Any escape, detached runner
- * call, extra override, dependency drift, or newly unresolved raw write empties both sets.
+ * The migration runner has exactly fifteen awaited call sites: the unpublished production
+ * first-open handle, six same-process disposable probes, three relaunch probes, four
+ * active-migration-death probes, and the fixed DB-02C runtime-concurrency probe. Thirteen adopt
+ * opRunner directly; the remaining two use the exact identity-bound prefix and crash wrapper
+ * triples before awaited runMigrations. The three Drizzle overrides are coordinated adapter calls:
+ * a private, exact Proxy forwards one operation to the sole op-sqlite handle used by each of the
+ * three exact Drizzle clients. Any escape, detached runner call, extra override, dependency drift,
+ * or newly unresolved raw write empties both sets.
  */
 function driverAdapterCertifiedCallables({
   root,
@@ -5623,8 +6230,8 @@ function driverAdapterCertifiedCallables({
   if (
     !productionRunnerCall ||
     !productionMigrationCall ||
-    expectedRunnerCalls.size !== 14 ||
-    expectedMigrationCalls.size !== 14 ||
+    expectedRunnerCalls.size !== 15 ||
+    expectedMigrationCalls.size !== 15 ||
     nestedRunnerAdoptions.length !== 2 ||
     nestedRunnerAdoptionByFactoryCall.size !== 2 ||
     runnerFactoryCalls.length !== expectedRunnerCalls.size ||
@@ -5648,7 +6255,7 @@ function driverAdapterCertifiedCallables({
         !expectedMigrationCalls.has(migrationCall)
       );
     }) ||
-    runnerFactoryReferences.length !== 15 ||
+    runnerFactoryReferences.length !== 16 ||
     runnerFactoryReferences[0] !== opRunner.name ||
     runnerFactoryReferences.slice(1).some((reference) => {
       const runnerCall = reference.parent;
@@ -5898,8 +6505,12 @@ function driverAdapterCertifiedCallables({
     ? runtimeReferencesToBinding(databaseFile, overridesDeclaration.name, checker)
     : [];
   const adapterFactoryCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker);
-  const adapterFactoryCall = adapterFactoryCalls.find(
-    (call) => call !== driverSelfTestCandidate.adapterCall,
+  const adapterFactoryCall = sole(
+    adapterFactoryCalls.filter(
+      (call) =>
+        call !== driverSelfTestCandidate.adapterCall &&
+        call !== processRelaunchCandidate.adapterCall,
+    ),
   );
   const adapterFactoryReferences = runtimeReferencesToBinding(
     databaseFile,
@@ -5926,15 +6537,19 @@ function driverAdapterCertifiedCallables({
     retireFailedRollbackReferences[0] !== retireFailedRollbackDeclaration.name ||
     overridesReferences.length !== 3 ||
     overridesReferences[0] !== overridesDeclaration.name ||
-    adapterFactoryCalls.length !== 2 ||
+    adapterFactoryCalls.length !== 3 ||
     !adapterFactoryCalls.includes(driverSelfTestCandidate.adapterCall) ||
+    !adapterFactoryCalls.includes(processRelaunchCandidate.adapterCall) ||
     !adapterFactoryCall ||
     adapterFactoryCall.arguments.length !== 1 ||
-    adapterFactoryReferences.length !== 3 ||
+    adapterFactoryReferences.length !== 4 ||
     adapterFactoryReferences[0] !== drizzleAdapter.name ||
     !adapterFactoryReferences.includes(unwrapExpression(adapterFactoryCall.expression)) ||
     !adapterFactoryReferences.includes(
       unwrapExpression(driverSelfTestCandidate.adapterCall.expression),
+    ) ||
+    !adapterFactoryReferences.includes(
+      unwrapExpression(processRelaunchCandidate.adapterCall.expression),
     )
   ) {
     return empty();
@@ -12077,6 +12692,8 @@ function scanMutatorCallSites({ root, files, findings }) {
     checker,
     edges,
     referenceEdges,
+    dynamicCallbacks,
+    dynamicDispatches,
     findings: contextualFindings,
     findingCallables,
   });

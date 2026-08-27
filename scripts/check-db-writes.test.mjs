@@ -2106,8 +2106,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e6daa15e91>:mutator-call:a1862003ebf3',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:a751966a5832',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d69691811e5f',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:2e3d7266513e',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:b12265a94c42',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:091ee2e61ccd',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f3987a155aed',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506',
@@ -3352,9 +3352,9 @@ test('certifies exactly the DB-03B1 disposable relaunch writes and handoffs', ()
     'src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:e834a6bf82ca',
     'src/services/boot/devDbRelaunchContract.ts#runResumePhase:mutator-call:67b1b319807d',
     'src/services/boot/devDbRelaunchContract.ts#runResumePhase:mutator-call:89fb75db5aa5',
-    'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:005577ed4432',
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:326aa359317e',
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:67e695f5d505',
+    'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:dfdc7b4be6f1',
     'src/services/boot/foregroundBoot.ts#startForegroundBoot:mutator-call:165c37fb47c7',
   ]);
   assert.equal(direct.length, 17);
@@ -3446,9 +3446,9 @@ test('certifies exactly the DB-03B2B1 active-WAL write-death boundary', () => {
     'src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:da8a8b5328ee',
     'src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathResumePhase:mutator-call:2d9378699f25',
     'src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathResumePhase:mutator-call:8d1c810b5187',
-    'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:5597dc5f1362',
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:8e5f8c2c6304',
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:ca091b398fb4',
+    'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:e64fa57d29fa',
   ]);
   assert.equal(direct.length, 33);
   assert.equal(delegated.length, 13);
@@ -3534,6 +3534,7 @@ test('certifies exactly the DB-03B2B2 active-migration-death boundary', () => {
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bdcec4c50149',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bf77a4004308',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:02c4d2f06909',
+    'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:1485d9175c3e',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:52ec4f1e8a66',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:c2f4a2e3929b',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathResumePhase:mutator-call:6235ccc0af5a',
@@ -3541,12 +3542,352 @@ test('certifies exactly the DB-03B2B2 active-migration-death boundary', () => {
     'src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:3e4b53a1402f',
     'src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:3067733c44d4',
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:0bbcb32791e8',
-    'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:663bedd08e77',
+    'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:31aa9673996a',
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:9bc5c78844a2',
   ]);
   assert.equal(direct.length, 34);
-  assert.equal(delegated.length, 15);
+  assert.equal(delegated.length, 16);
 });
+
+test('certifies exactly the DB-02C runtime-concurrency writes and exclusive handoffs', () => {
+  const findings = scanProjectDbWrites();
+  const databaseSymbols = new Set([
+    'cleanupDbRuntimeConcurrencySelfTestDatabase',
+    'rawRekey',
+    'runDbRuntimeConcurrencySelfTest',
+  ]);
+  const runtimeServiceSymbols = new Set([
+    'finishRuntimeConcurrencyFailure',
+    'runRuntimeConcurrencyPhase',
+    'runRuntimeConcurrencyRecoveryPhase',
+  ]);
+  const runtimeStartTargets = new Set([
+    'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase',
+    'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase',
+  ]);
+  const certified = findings.filter(
+    (finding) =>
+      (finding.path === 'src/db/database.ts' && databaseSymbols.has(finding.symbol)) ||
+      finding.path === 'src/services/boot/dbRuntimeConcurrencyWave.ts' ||
+      (finding.path === 'src/services/boot/devDbRelaunchContract.ts' &&
+        (runtimeServiceSymbols.has(finding.symbol) ||
+          finding.target === 'src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase' ||
+          (finding.symbol === 'startDevDbRelaunchContractIfRequested' &&
+            runtimeStartTargets.has(finding.target)))),
+  );
+
+  assert.deepEqual(
+    certified.map((finding) => finding.id).sort(),
+    [
+      'src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase:native-database-delete:c8b7acd29fe1',
+      'src/db/database.ts#rawRekey:sql-pragma:ddc2470a0581',
+      'src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:6d2f77f00160',
+      'src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:6d2f77f00160:2',
+      'src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:98c4b223c92b',
+      'src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:5fe2be0ec9b8',
+      'src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:e0e6e9973f0d',
+      'src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:f7abad6fe3d2',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#count:raw-dynamic:194b38c0dc2f',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave.<callback:924687d0a1>:mutator-call:499477a70fe6',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:03e440125172',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2:2',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:150264484d1d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:189f55fb6c2e',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:2c5121e200af',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:3509064feb66',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45be8e671e33',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45f44e962bfd',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6f56de572180',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6fa4b9d0433f',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:75b6613ec9c7',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:95d97cd77af9',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:b78b41da9526',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:bcdace9d293d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f:2',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:779a08232837',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:sql-insert:c225ba9768f7',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:250c3794fc>:mutator-call:55ffe792a557',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>:mutator-call:8cb85d5f3bee',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>:mutator-call:98f7f8fb4e90',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:31b64135cad8',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:438c945711e6',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:53f5e929f07d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:6395b5094423',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:a8582564276c',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:c22febfc7213',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:d60d21c42996',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:e1a5e8843d07',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:268fc51a1761',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:7418c90170ea',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:9266b8d70936',
+      'src/services/boot/devDbRelaunchContract.ts#finishRuntimeConcurrencyFailure:mutator-call:997d9112a0e0',
+      'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:1485d9175c3e',
+      'src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:ea193e30ffcb',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:301e5cdc6904',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:ba293dc8a9a8',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:e21f80c86ea7',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-reference:fec6f21ca7fe',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:2697cff60054',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:716ab824be25',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:85dc498ee8c3',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:d25f21ea1dbf',
+      'src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:0102ba91a751',
+      'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:8bffa75c6fb1',
+      'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:b3653b4235b7',
+      'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:e9ba7858d27b',
+    ].sort(),
+  );
+  assert.equal(
+    certified.filter((finding) => finding.detectedContext === 'throwaway-database').length,
+    13,
+  );
+  assert.equal(
+    certified.filter((finding) => finding.detectedContext === 'throwaway-database-delegation')
+      .length,
+    45,
+  );
+  assert.equal(certified.length, 58);
+});
+
+fullOnlyTest(
+  'DB-02C runtime-concurrency proof fails closed on capability and lifetime drift',
+  () => {
+    const databaseSymbols = new Set([
+      'cleanupDbRuntimeConcurrencySelfTestDatabase',
+      'rawRekey',
+      'runDbRuntimeConcurrencySelfTest',
+    ]);
+    const runtimeServiceSymbols = new Set([
+      'finishRuntimeConcurrencyFailure',
+      'runRuntimeConcurrencyPhase',
+      'runRuntimeConcurrencyRecoveryPhase',
+    ]);
+    const runtimeStartTargets = new Set([
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase',
+    ]);
+    const approvedCounts = (findings) => {
+      const runtime = findings.filter(
+        (finding) =>
+          (finding.path === 'src/db/database.ts' && databaseSymbols.has(finding.symbol)) ||
+          finding.path === 'src/services/boot/dbRuntimeConcurrencyWave.ts' ||
+          (finding.path === 'src/services/boot/devDbRelaunchContract.ts' &&
+            (runtimeServiceSymbols.has(finding.symbol) ||
+              finding.target === 'src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase' ||
+              (finding.symbol === 'startDevDbRelaunchContractIfRequested' &&
+                runtimeStartTargets.has(finding.target)))),
+      );
+      return {
+        direct: runtime.filter((finding) => finding.detectedContext === 'throwaway-database')
+          .length,
+        delegated: runtime.filter(
+          (finding) => finding.detectedContext === 'throwaway-database-delegation',
+        ).length,
+      };
+    };
+    const cases = [
+      {
+        label: 'fixed runtime filename redirected to production',
+        path: 'src/db/database.ts',
+        before:
+          "const DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME = 'driver-runtime-concurrency-selftest.db';",
+        after: "const DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME = 'gator.db';",
+      },
+      {
+        label: 'new rekey value reuses the old disposable key',
+        path: 'src/db/database.ts',
+        before:
+          "const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B = 'db-02c-public-throwaway-key-b-v1';",
+        after: "const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B = 'db-02c-public-throwaway-key-a-v1';",
+      },
+      {
+        label: 'runtime Drizzle client receives the production singleton',
+        path: 'src/db/database.ts',
+        before: 'const database = drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase;',
+        after: 'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as AppDatabase;',
+      },
+      {
+        label: 'runtime Drizzle client bypasses the reviewed adapter',
+        path: 'src/db/database.ts',
+        before: 'const database = drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase;',
+        after: 'const database = drizzle(activeHandle as never) as unknown as AppDatabase;',
+      },
+      {
+        label: 'runtime migration call is detached from its awaited owner',
+        path: 'src/db/database.ts',
+        before: 'const appliedMigrations = await runMigrations(opRunner(activeHandle));',
+        after:
+          'const appliedMigrations: string[] = [];\n' +
+          '    void runMigrations(opRunner(activeHandle));',
+      },
+      {
+        label: 'rekey callback attempts to reacquire the global writer lock',
+        path: 'src/services/boot/dbRuntimeConcurrencyWave.ts',
+        before: '      await rawRekey();',
+        after: '      await withDbWriteLock(rawRekey);',
+      },
+      {
+        label: 'runtime wave capability gains another exported consumer',
+        path: 'src/services/boot/dbRuntimeConcurrencyWave.ts',
+        transform(source) {
+          return `${source}\nexport const escapedRuntimeConcurrencyWave = runDbRuntimeConcurrencyWave;\n`;
+        },
+      },
+      {
+        label: 'retained DB owners are no longer awaited before native close',
+        path: 'src/services/boot/dbRuntimeConcurrencyWave.ts',
+        before: '    await Promise.allSettled(retained);',
+        after: '    void Promise.allSettled(retained);',
+      },
+      {
+        label: 'image-send callee detaches its optimistic DB owner',
+        path: 'src/services/send/sendAttachmentService.ts',
+        before: '    await withDbTransaction(\n      db,\n      (context) =>',
+        after: '    void withDbTransaction(\n      db,\n      (context) =>',
+      },
+      {
+        label: 'sync contact bypass helper detaches its reachable DB work',
+        path: 'src/services/sync/engine.ts',
+        before: '    await linkHandlesToContacts(db, unique, undefined, commitGuard);',
+        after: '    void linkHandlesToContacts(db, unique, undefined, commitGuard);',
+      },
+      {
+        label: 'realtime sink constructor installs a detached default hook',
+        path: 'src/services/realtime/dbEventSink.ts',
+        before:
+          '    private readonly onMessageStored?: (messageId: number) => void | Promise<void>,',
+        after:
+          '    private readonly onMessageStored: (messageId: number) => void | Promise<void> = async () => undefined,',
+      },
+      {
+        label: 'runtime send enables the production OS-notice namespace',
+        path: 'src/services/boot/dbRuntimeConcurrencyWave.ts',
+        before: "        { failureNoticeMode: 'suppressed' },",
+        after: "        { failureNoticeMode: 'enabled' },",
+      },
+      {
+        label: 'production image send enters the harness-only notice-suppression lane',
+        path: 'src/services/send/index.ts',
+        before:
+          '      sendImageMessage(getDatabase(), http, snapshot, expoAttachmentUploader, Date.now(), () =>\n' +
+          '        accountLease.isCurrent(),\n' +
+          '      ),',
+        after:
+          '      sendImageMessage(getDatabase(), http, snapshot, expoAttachmentUploader, Date.now(), () =>\n' +
+          '        accountLease.isCurrent(),\n' +
+          "        { failureNoticeMode: 'suppressed' },\n" +
+          '      ),',
+      },
+      {
+        label: 'production success call hides notice suppression inside a spread',
+        path: 'src/services/send/sendService.ts',
+        before: '    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard);',
+        after:
+          '    await reconcileSendOutcome(\n' +
+          '      ...([\n' +
+          '        db,\n' +
+          '        tempGuid,\n' +
+          '        server,\n' +
+          '        now,\n' +
+          '        effectiveCommitGuard,\n' +
+          "        { failureNoticeMode: 'suppressed' },\n" +
+          '      ] as const),\n' +
+          '    );',
+      },
+      {
+        label: 'production failure call hides notice suppression inside apply',
+        path: 'src/services/send/sendService.ts',
+        before:
+          '    await handleSendFailure(\n' +
+          '      db,\n' +
+          '      tempGuid,\n' +
+          '      e,\n' +
+          "      'send',\n" +
+          '      args.chatGuid,\n' +
+          '      undefined,\n' +
+          '      effectiveCommitGuard,\n' +
+          '    );',
+        after:
+          '    await handleSendFailure.apply(null, [\n' +
+          '      db,\n' +
+          '      tempGuid,\n' +
+          '      e,\n' +
+          "      'send',\n" +
+          '      args.chatGuid,\n' +
+          '      undefined,\n' +
+          '      effectiveCommitGuard,\n' +
+          "      { failureNoticeMode: 'suppressed' },\n" +
+          '    ]);',
+      },
+      {
+        label: 'success outcome ignores OS-notice suppression',
+        path: 'src/services/send/sendOutcome.ts',
+        before:
+          "  if (options?.failureNoticeMode !== 'suppressed') {\n    await clearFailedSendNotice(",
+        after: '  if (true) {\n    await clearFailedSendNotice(',
+      },
+      {
+        label: 'failure outcome ignores OS-notice suppression',
+        path: 'src/services/send/sendOutcome.ts',
+        before: "  if (reconciled && options?.failureNoticeMode !== 'suppressed') {",
+        after: '  if (reconciled) {',
+      },
+      {
+        label: 'final fixed-file cleanup is bypassed',
+        path: 'src/db/database.ts',
+        before: '    checks.databaseCleanup = cleanupDbRuntimeConcurrencySelfTestDatabase();',
+        after: '    checks.databaseCleanup = true;',
+      },
+      {
+        label: 'runtime request is dispatched into another relaunch lane',
+        path: 'src/services/boot/devDbRelaunchContract.ts',
+        before:
+          "    if (mode.kind === 'prepare') activeDbRelaunchContract = runRuntimeConcurrencyPhase();",
+        after: "    if (mode.kind === 'prepare') activeDbRelaunchContract = runPreparePhase();",
+      },
+      {
+        label: 'runtime marker prefix drifts from the host protocol',
+        path: 'src/services/boot/devDbRelaunchContract.ts',
+        before: "const DB_RUNTIME_CONCURRENCY_MARKER_PREFIX = 'GATOR_DB_RUNTIME_CONCURRENCY_V1 ';",
+        after: "const DB_RUNTIME_CONCURRENCY_MARKER_PREFIX = 'GATOR_DB_RUNTIME_CONCURRENCY_V2 ';",
+      },
+      {
+        label: 'database entry point gains another runtime capability consumer',
+        path: 'src/services/boot/devDbRelaunchContract.ts',
+        transform(source) {
+          return `${source}\nexport const escapedRuntimeDatabaseSelfTest = runDbRuntimeConcurrencySelfTest;\n`;
+        },
+      },
+    ];
+
+    const root = incomingIngressFixture();
+    try {
+      assert.deepEqual(approvedCounts(scanDbWrites({ root })), { direct: 13, delegated: 45 });
+      for (const mutation of cases) {
+        const file = resolve(root, mutation.path);
+        const original = readFileSync(file, 'utf8');
+        try {
+          if (mutation.transform) {
+            writeFileSync(file, mutation.transform(original));
+          } else {
+            replaceFixtureSource(root, mutation.path, mutation.before, mutation.after);
+          }
+          assert.deepEqual(
+            approvedCounts(scanDbWrites({ root })),
+            { direct: 0, delegated: 0 },
+            mutation.label,
+          );
+        } finally {
+          writeFileSync(file, original);
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 fullOnlyTest('DB-03B1 relaunch proof fails closed on scope and process-boundary drift', () => {
   const oldServiceSymbols = new Set(['finishPrepareFailure', 'runPreparePhase', 'runResumePhase']);
@@ -4213,10 +4554,10 @@ fullOnlyTest(
         after: '    result = await resumeDbActiveMigrationDeathSelfTest(() => undefined);',
       },
       {
-        label: 'three-family dispatcher routes active migration into the WAL lane',
+        label: 'four-family dispatcher routes active migration into the WAL lane',
         path: 'src/services/boot/devDbRelaunchContract.ts',
-        before: "  if (mode.scenario === 'active-migration-death') {",
-        after: "  if (mode.scenario === 'active-wal-write-death') {",
+        before: "  } else if (mode.scenario === 'active-migration-death') {",
+        after: "  } else if (mode.scenario === 'active-wal-write-death') {",
       },
       {
         label: 'active-migration marker protocol version drifts',
@@ -4237,7 +4578,7 @@ fullOnlyTest(
         walDirect: 33,
         walDelegated: 13,
         activeDirect: 34,
-        activeDelegated: 15,
+        activeDelegated: 16,
         history: 39,
       });
       const throwawayContexts = new Set(['throwaway-database', 'throwaway-database-delegation']);

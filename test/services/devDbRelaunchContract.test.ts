@@ -13,12 +13,15 @@ const mockLogger = {
 const mockCleanupActiveMigrationDeathDatabase = jest.fn();
 const mockCleanupWalWriteDeathDatabase = jest.fn();
 const mockCleanupDatabase = jest.fn();
+const mockCleanupRuntimeConcurrencyDatabase = jest.fn();
 const mockPrepareActiveMigrationDeathDatabase = jest.fn();
 const mockPrepareWalWriteDeathDatabase = jest.fn();
 const mockPrepareDatabase = jest.fn();
 const mockResumeActiveMigrationDeathDatabase = jest.fn();
 const mockResumeWalWriteDeathDatabase = jest.fn();
 const mockResumeDatabase = jest.fn();
+const mockRunRuntimeConcurrencyDatabase = jest.fn();
+const mockRunRuntimeConcurrencyWave = jest.fn();
 
 jest.mock('expo-file-system', () => ({
   Paths: { document: '/private-files' },
@@ -52,21 +55,28 @@ jest.mock('expo-file-system', () => ({
   },
 }));
 jest.mock('@core/secure', () => ({ logger: mockLogger }));
+jest.mock('@/services/boot/dbRuntimeConcurrencyWave', () => ({
+  runDbRuntimeConcurrencyWave: mockRunRuntimeConcurrencyWave,
+}));
 jest.mock('@db/database', () => ({
   cleanupDbActiveMigrationDeathSelfTestDatabase: mockCleanupActiveMigrationDeathDatabase,
   cleanupDbActiveWalWriteDeathSelfTestDatabase: mockCleanupWalWriteDeathDatabase,
   cleanupDbProcessRelaunchSelfTestDatabase: mockCleanupDatabase,
+  cleanupDbRuntimeConcurrencySelfTestDatabase: mockCleanupRuntimeConcurrencyDatabase,
   prepareDbActiveMigrationDeathSelfTest: mockPrepareActiveMigrationDeathDatabase,
   prepareDbActiveWalWriteDeathSelfTest: mockPrepareWalWriteDeathDatabase,
   prepareDbProcessRelaunchSelfTest: mockPrepareDatabase,
   resumeDbActiveMigrationDeathSelfTest: mockResumeActiveMigrationDeathDatabase,
   resumeDbActiveWalWriteDeathSelfTest: mockResumeWalWriteDeathDatabase,
   resumeDbProcessRelaunchSelfTest: mockResumeDatabase,
+  runDbRuntimeConcurrencySelfTest: mockRunRuntimeConcurrencyDatabase,
 }));
 
 const REQUEST = '.gator-db-relaunch-request-v1';
 const WAL_WRITE_DEATH_REQUEST = '.gator-db-wal-write-death-request-v1';
 const ACTIVE_MIGRATION_DEATH_REQUEST = '.gator-db-active-migration-death-request-v1';
+const RUNTIME_CONCURRENCY_REQUEST = '.gator-db-runtime-concurrency-request-v1';
+const RUNTIME_CONCURRENCY_RUNNING = '.gator-db-runtime-concurrency-running-v1';
 const PREPARING = '.gator-db-relaunch-preparing-v1';
 const READY = '.gator-db-relaunch-ready-v1';
 const RESUMING = '.gator-db-relaunch-resuming-v1';
@@ -79,6 +89,7 @@ const ACTIVE_MIGRATION_DEATH_RESUMING = '.gator-db-active-migration-death-resumi
 const PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 const WAL_WRITE_DEATH_PREFIX = 'GATOR_DB_WAL_WRITE_DEATH_V1 ';
 const ACTIVE_MIGRATION_DEATH_PREFIX = 'GATOR_DB_ACTIVE_MIGRATION_DEATH_V1 ';
+const RUNTIME_CONCURRENCY_PREFIX = 'GATOR_DB_RUNTIME_CONCURRENCY_V1 ';
 
 const prepareChecks = {
   preCleanup: true,
@@ -143,6 +154,27 @@ const activeMigrationDeathResumeChecks = {
   reopenPersistence: true,
   databaseCleanup: true,
 };
+const runtimeConcurrencyDatabaseChecks = {
+  preCleanup: true,
+  encryptedOpen: true,
+  migrationLedger: true,
+  rollbackIsolation: true,
+  syncChunks: true,
+  liveMessages: true,
+  attachmentConstruction: true,
+  uploadOutsideDbOwner: true,
+  rekeyExclusive: true,
+  queuedWritersBlocked: true,
+  rekeyApplied: true,
+  queuedWritersResumed: true,
+  uploadSettlement: true,
+  queueDrained: true,
+  sentinelCommit: true,
+  newKeyReopen: true,
+  oldKeyRejected: true,
+  integrity: true,
+  databaseCleanup: true,
+};
 
 function loadContract(): typeof import('@/services/boot/devDbRelaunchContract') {
   // Each load represents a fresh app process and therefore must get a fresh in-memory latch.
@@ -187,6 +219,17 @@ function parsedActiveMigrationDeathMarkers(): Array<Record<string, unknown>> {
   });
 }
 
+function parsedRuntimeConcurrencyMarkers(): Array<Record<string, unknown>> {
+  return mockLogger.info.mock.calls.map(([message]) => {
+    expect(typeof message).toBe('string');
+    expect(message).toMatch(/^GATOR_DB_RUNTIME_CONCURRENCY_V1 /);
+    return JSON.parse(String(message).slice(RUNTIME_CONCURRENCY_PREFIX.length)) as Record<
+      string,
+      unknown
+    >;
+  });
+}
+
 async function flushMicrotasks(count = 12): Promise<void> {
   for (let index = 0; index < count; index += 1) await Promise.resolve();
 }
@@ -202,6 +245,7 @@ beforeEach(() => {
   mockCleanupDatabase.mockReturnValue(true);
   mockCleanupWalWriteDeathDatabase.mockReturnValue(true);
   mockCleanupActiveMigrationDeathDatabase.mockReturnValue(true);
+  mockCleanupRuntimeConcurrencyDatabase.mockReturnValue(true);
 });
 
 describe('DEV DB relaunch durable phase orchestration', () => {
@@ -328,6 +372,137 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         },
       },
     ]);
+  });
+
+  it('runs the one-launch runtime concurrency lane before ordinary boot and emits one finite PASS', async () => {
+    createExisting(RUNTIME_CONCURRENCY_REQUEST);
+    mockRunRuntimeConcurrencyDatabase.mockImplementation(async (runWave) => {
+      expect(runWave).toBe(mockRunRuntimeConcurrencyWave);
+      expect(mockFiles.get(RUNTIME_CONCURRENCY_RUNNING)).toBe(0);
+      return { status: 'pass', checks: runtimeConcurrencyDatabaseChecks };
+    });
+    const contract = loadContract();
+
+    const first = contract.startDevDbRelaunchContractIfRequested();
+    const second = contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(first).toBe(second);
+    expect(mockRunRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
+    expect(mockPrepareDatabase).not.toHaveBeenCalled();
+    expect(mockFiles.size).toBe(0);
+    expect(parsedRuntimeConcurrencyMarkers()).toEqual([
+      {
+        schema: 1,
+        suite: 'android-db-runtime-concurrency',
+        status: 'pass',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
+        checks: {
+          requestValid: true,
+          runStatePersisted: true,
+          ...runtimeConcurrencyDatabaseChecks,
+          stateCleanup: true,
+        },
+      },
+    ]);
+  });
+
+  it('preserves the exact runtime wave failure while completing both cleanup layers', async () => {
+    createExisting(RUNTIME_CONCURRENCY_REQUEST);
+    mockRunRuntimeConcurrencyDatabase.mockResolvedValue({
+      status: 'fail',
+      checks: { ...runtimeConcurrencyDatabaseChecks, queuedWritersBlocked: false },
+      failureCode: 'queued-writers-blocked',
+    });
+    const contract = loadContract();
+
+    contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(mockFiles.size).toBe(0);
+    expect(parsedRuntimeConcurrencyMarkers()).toEqual([
+      {
+        schema: 1,
+        suite: 'android-db-runtime-concurrency',
+        status: 'fail',
+        migrationCount: 39,
+        migrationHead: '0039_message_error_message',
+        checks: {
+          requestValid: true,
+          runStatePersisted: true,
+          ...runtimeConcurrencyDatabaseChecks,
+          queuedWritersBlocked: false,
+          stateCleanup: true,
+        },
+        failureCode: 'queued-writers-blocked',
+      },
+    ]);
+  });
+
+  it('recovers an interrupted runtime wave without entering either database workflow', async () => {
+    createExisting(RUNTIME_CONCURRENCY_REQUEST, RUNTIME_CONCURRENCY_RUNNING);
+    const contract = loadContract();
+
+    contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
+    expect(mockPrepareDatabase).not.toHaveBeenCalled();
+    expect(mockCleanupRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupWalWriteDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupActiveMigrationDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockFiles.size).toBe(0);
+    expect(parsedRuntimeConcurrencyMarkers()[0]).toMatchObject({
+      status: 'fail',
+      failureCode: 'interrupted-run',
+      checks: { requestValid: true, databaseCleanup: true, stateCleanup: true },
+    });
+  });
+
+  it('maps a failed runtime running marker to run-state and never opens the database', async () => {
+    createExisting(RUNTIME_CONCURRENCY_REQUEST);
+    mockFileCreateFailures.add(RUNTIME_CONCURRENCY_RUNNING);
+    const contract = loadContract();
+
+    contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
+    expect(mockCleanupRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
+    expect(mockFiles.size).toBe(0);
+    expect(parsedRuntimeConcurrencyMarkers()[0]).toMatchObject({
+      status: 'fail',
+      failureCode: 'run-state',
+      checks: {
+        requestValid: true,
+        runStatePersisted: false,
+        databaseCleanup: true,
+        stateCleanup: true,
+      },
+    });
+  });
+
+  it('rejects a runtime request beside another lane and cleans every fixed database', async () => {
+    createExisting(RUNTIME_CONCURRENCY_REQUEST, REQUEST);
+    const contract = loadContract();
+
+    contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
+    expect(mockPrepareDatabase).not.toHaveBeenCalled();
+    expect(mockCleanupRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupWalWriteDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupActiveMigrationDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockFiles.size).toBe(0);
+    expect(parsedRuntimeConcurrencyMarkers()[0]).toMatchObject({
+      status: 'fail',
+      failureCode: 'phase-invalid',
+      checks: { requestValid: false, databaseCleanup: true, stateCleanup: true },
+    });
   });
 
   it('resumes only from ready state, arms resuming, emits PASS after exact cleanup', async () => {

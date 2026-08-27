@@ -5,7 +5,11 @@ import { drizzle } from 'drizzle-orm/op-sqlite';
 import { runMigrations, type SqlRunner } from './migrate';
 import { MIGRATIONS } from './migrations';
 import { handles } from './schema';
-import type { AppDatabase } from './types';
+import type {
+  AppDatabase,
+  DbRuntimeConcurrencyWaveChecks,
+  DbRuntimeConcurrencyWaveRunner,
+} from './types';
 
 const DB_NAME = 'gator.db';
 
@@ -1739,6 +1743,270 @@ export async function runDbDriverSelfTest(): Promise<DbDriverContractResult> {
     checks,
     failureCode: failureCode ?? 'internal',
   };
+}
+
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME = 'driver-runtime-concurrency-selftest.db';
+// These public DEV-only keys protect no user data and open only the fixed disposable file above.
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A = 'db-02c-public-throwaway-key-a-v1';
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B = 'db-02c-public-throwaway-key-b-v1';
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 39 as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;
+const DB_RUNTIME_CONCURRENCY_SENTINEL_KEY = 'gator-db-runtime-wave-sentinel';
+const DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE = 'committed';
+
+export interface DbRuntimeConcurrencyDatabaseChecks extends DbRuntimeConcurrencyWaveChecks {
+  readonly preCleanup: boolean;
+  readonly encryptedOpen: boolean;
+  readonly migrationLedger: boolean;
+  readonly newKeyReopen: boolean;
+  readonly oldKeyRejected: boolean;
+  readonly integrity: boolean;
+  readonly databaseCleanup: boolean;
+}
+
+export type DbRuntimeConcurrencyDatabaseFailureCode =
+  | 'pre-cleanup'
+  | 'encrypted-open'
+  | 'migration-ledger'
+  | 'rollback-isolation'
+  | 'sync-chunks'
+  | 'live-messages'
+  | 'attachment-construction'
+  | 'upload-outside-db-owner'
+  | 'rekey-exclusive'
+  | 'queued-writers-blocked'
+  | 'rekey-applied'
+  | 'queued-writers-resumed'
+  | 'upload-settlement'
+  | 'queue-drained'
+  | 'sentinel-commit'
+  | 'new-key-reopen'
+  | 'old-key-rejected'
+  | 'integrity'
+  | 'database-cleanup'
+  | 'internal';
+
+export type DbRuntimeConcurrencyDatabaseResult =
+  | {
+      readonly status: 'pass';
+      readonly checks: DbRuntimeConcurrencyDatabaseChecks;
+    }
+  | {
+      readonly status: 'fail';
+      readonly checks: DbRuntimeConcurrencyDatabaseChecks;
+      readonly failureCode: DbRuntimeConcurrencyDatabaseFailureCode;
+    };
+
+type MutableDbRuntimeConcurrencyDatabaseChecks = {
+  -readonly [K in keyof DbRuntimeConcurrencyDatabaseChecks]: DbRuntimeConcurrencyDatabaseChecks[K];
+};
+
+function emptyDbRuntimeConcurrencyDatabaseChecks(): MutableDbRuntimeConcurrencyDatabaseChecks {
+  return {
+    preCleanup: false,
+    encryptedOpen: false,
+    migrationLedger: false,
+    rollbackIsolation: false,
+    syncChunks: false,
+    liveMessages: false,
+    attachmentConstruction: false,
+    uploadOutsideDbOwner: false,
+    rekeyExclusive: false,
+    queuedWritersBlocked: false,
+    rekeyApplied: false,
+    queuedWritersResumed: false,
+    uploadSettlement: false,
+    queueDrained: false,
+    sentinelCommit: false,
+    newKeyReopen: false,
+    oldKeyRejected: false,
+    integrity: false,
+    databaseCleanup: false,
+  };
+}
+
+/** Delete only the fixed DB-02C disposable file; this has no production-DB capability. */
+export function cleanupDbRuntimeConcurrencySelfTestDatabase(): boolean {
+  let cleanup: RawDb | undefined;
+  try {
+    cleanup = open({ name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME });
+    cleanup.delete();
+    return true;
+  } catch {
+    try {
+      cleanup?.close();
+    } catch {
+      // The finite false result remains authoritative for this fixed disposable filename.
+    }
+    return false;
+  }
+}
+
+function dbRuntimeConcurrencyMigrationNames(): string[] {
+  const names = MIGRATIONS.map((migration) => migration.name);
+  requireDriverContract(
+    names.length === DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT &&
+      names[0] === '0001_init' &&
+      names[DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT - 1] ===
+        DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD &&
+      new Set(names).size === DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT,
+  );
+  return names;
+}
+
+function firstDbRuntimeConcurrencyWaveFailure(
+  checks: DbRuntimeConcurrencyWaveChecks,
+): DbRuntimeConcurrencyDatabaseFailureCode | undefined {
+  if (!checks.rollbackIsolation) return 'rollback-isolation';
+  if (!checks.syncChunks) return 'sync-chunks';
+  if (!checks.liveMessages) return 'live-messages';
+  if (!checks.attachmentConstruction) return 'attachment-construction';
+  if (!checks.uploadOutsideDbOwner) return 'upload-outside-db-owner';
+  if (!checks.rekeyExclusive) return 'rekey-exclusive';
+  if (!checks.queuedWritersBlocked) return 'queued-writers-blocked';
+  if (!checks.rekeyApplied) return 'rekey-applied';
+  if (!checks.queuedWritersResumed) return 'queued-writers-resumed';
+  if (!checks.uploadSettlement) return 'upload-settlement';
+  if (!checks.queueDrained) return 'queue-drained';
+  if (!checks.sentinelCommit) return 'sentinel-commit';
+  return undefined;
+}
+
+/**
+ * Run DB-02C on one fixed disposable SQLCipher database before ordinary foreground boot.
+ *
+ * The callback receives only the adapted throwaway database and one fixed-key rekey closure. The
+ * production singleton, account vault, raw handle, filenames, and keys never cross the boundary.
+ * The exclusive host harness owns the timeout by stopping this whole process; a JavaScript timeout
+ * here could otherwise close/delete the file while native SQLite work was still running.
+ */
+export async function runDbRuntimeConcurrencySelfTest(
+  runWave: DbRuntimeConcurrencyWaveRunner,
+): Promise<DbRuntimeConcurrencyDatabaseResult> {
+  const checks = emptyDbRuntimeConcurrencyDatabaseChecks();
+  let phase: DbRuntimeConcurrencyDatabaseFailureCode = 'internal';
+  let failureCode: DbRuntimeConcurrencyDatabaseFailureCode | undefined;
+  let handle: RawDb | undefined;
+
+  try {
+    phase = 'pre-cleanup';
+    requireDriverContract(cleanupDbRuntimeConcurrencySelfTestDatabase());
+    checks.preCleanup = true;
+
+    phase = 'encrypted-open';
+    handle = open({
+      name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME,
+      encryptionKey: DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A,
+    });
+    const activeHandle = handle;
+    await activeHandle.execute('PRAGMA foreign_keys = ON');
+    await activeHandle.execute('SELECT count(*) FROM sqlite_master');
+    checks.encryptedOpen = true;
+
+    phase = 'migration-ledger';
+    const expectedMigrationNames = dbRuntimeConcurrencyMigrationNames();
+    const appliedMigrations = await runMigrations(opRunner(activeHandle));
+    const ledger = extractRows(
+      await activeHandle.execute('SELECT name FROM _migrations ORDER BY name'),
+    );
+    requireDriverContract(
+      hasExactStringColumn(
+        appliedMigrations.map((name) => ({ name })),
+        'name',
+        expectedMigrationNames,
+      ) && hasExactStringColumn(ledger, 'name', expectedMigrationNames),
+    );
+    checks.migrationLedger = true;
+
+    const database = drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase;
+    phase = 'internal';
+    const waveChecks = await runWave(database, {
+      rawRekey: async () => {
+        await activeHandle.execute(`PRAGMA rekey = '${DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B}'`);
+      },
+    });
+    checks.rollbackIsolation = waveChecks.rollbackIsolation === true;
+    checks.syncChunks = waveChecks.syncChunks === true;
+    checks.liveMessages = waveChecks.liveMessages === true;
+    checks.attachmentConstruction = waveChecks.attachmentConstruction === true;
+    checks.uploadOutsideDbOwner = waveChecks.uploadOutsideDbOwner === true;
+    checks.rekeyExclusive = waveChecks.rekeyExclusive === true;
+    checks.queuedWritersBlocked = waveChecks.queuedWritersBlocked === true;
+    checks.rekeyApplied = waveChecks.rekeyApplied === true;
+    checks.queuedWritersResumed = waveChecks.queuedWritersResumed === true;
+    checks.uploadSettlement = waveChecks.uploadSettlement === true;
+    checks.queueDrained = waveChecks.queueDrained === true;
+    checks.sentinelCommit = waveChecks.sentinelCommit === true;
+    failureCode = firstDbRuntimeConcurrencyWaveFailure(checks);
+
+    phase = 'new-key-reopen';
+    activeHandle.close();
+    handle = undefined;
+    {
+      const rekeyed = open({
+        name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME,
+        encryptionKey: DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B,
+        readOnly: true,
+      });
+      try {
+        await rekeyed.execute('SELECT count(*) FROM sqlite_master');
+        const sentinel = extractRows(
+          await rekeyed.execute('SELECT value FROM kv WHERE key = ?', [
+            DB_RUNTIME_CONCURRENCY_SENTINEL_KEY,
+          ]),
+        );
+        requireDriverContract(
+          sentinel.length === 1 && sentinel[0]?.value === DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE,
+        );
+        checks.newKeyReopen = true;
+
+        phase = 'integrity';
+        const integrity = extractRows(await rekeyed.execute('PRAGMA integrity_check'));
+        const foreignKeyViolations = extractRows(await rekeyed.execute('PRAGMA foreign_key_check'));
+        requireDriverContract(
+          integrity.length === 1 &&
+            integrity[0]?.integrity_check === 'ok' &&
+            foreignKeyViolations.length === 0,
+        );
+        checks.integrity = true;
+      } finally {
+        rekeyed.close();
+      }
+    }
+
+    phase = 'old-key-rejected';
+    let oldKeyRejected = false;
+    let oldKeyHandle: RawDb | undefined;
+    try {
+      oldKeyHandle = open({
+        name: DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME,
+        encryptionKey: DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A,
+        readOnly: true,
+      });
+      await oldKeyHandle.execute('SELECT count(*) FROM sqlite_master');
+    } catch {
+      oldKeyRejected = true;
+    } finally {
+      oldKeyHandle?.close();
+    }
+    requireDriverContract(oldKeyRejected);
+    checks.oldKeyRejected = true;
+  } catch {
+    failureCode ??= phase;
+  } finally {
+    try {
+      handle?.close();
+    } catch {
+      failureCode ??= 'internal';
+    }
+    checks.databaseCleanup = cleanupDbRuntimeConcurrencySelfTestDatabase();
+    if (!checks.databaseCleanup) failureCode = 'database-cleanup';
+  }
+
+  if (!failureCode && Object.values(checks).every(Boolean)) {
+    return { status: 'pass', checks };
+  }
+  return { status: 'fail', checks, failureCode: failureCode ?? 'internal' };
 }
 
 const DB_PROCESS_RELAUNCH_SELF_TEST_NAME = 'driver-relaunch-selftest.db';

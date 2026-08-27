@@ -11,6 +11,11 @@ import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { clearFailedSendNotice, notifyFailedSend } from './sendFailureNotice';
 
+export interface SendOutcomeOptions {
+  /** Fixed disposable harnesses suppress OS presentation while retaining the full DB outcome. */
+  readonly failureNoticeMode?: 'enabled' | 'suppressed';
+}
+
 /**
  * Reconcile a send ack by tempGuid — the shared tail of every optimistic send
  * (text / attachment / reaction / queue retry). The ack carries the real GUID only on
@@ -27,6 +32,7 @@ export async function reconcileSendOutcome(
   ack: SendAck,
   now: number,
   commitGuard?: DbCommitGuard,
+  options?: SendOutcomeOptions,
 ): Promise<void> {
   const ackGuid = ack.guid;
   if (ackGuid && ackGuid !== tempGuid) {
@@ -47,11 +53,13 @@ export async function reconcileSendOutcome(
       commitGuard,
     );
   }
-  await clearFailedSendNotice(
-    db,
-    ackGuid && ackGuid !== tempGuid ? ackGuid : tempGuid,
-    commitGuard,
-  );
+  if (options?.failureNoticeMode !== 'suppressed') {
+    await clearFailedSendNotice(
+      db,
+      ackGuid && ackGuid !== tempGuid ? ackGuid : tempGuid,
+      commitGuard,
+    );
+  }
 }
 
 /**
@@ -67,6 +75,7 @@ export async function handleSendFailure(
   chatGuid: string,
   now?: number,
   commitGuard?: DbCommitGuard,
+  options?: SendOutcomeOptions,
 ): Promise<void> {
   const status = err instanceof ApiError ? (err.status ?? null) : null;
   // Local-file, cancellation, and client-side timeout failures have no HTTP status, so
@@ -93,5 +102,7 @@ export async function handleSendFailure(
       reconcileOutgoingErrorWithinTransaction(context, tempGuid, code, failedAt, serverDetail),
     commitGuard,
   );
-  if (reconciled) await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
+  if (reconciled && options?.failureNoticeMode !== 'suppressed') {
+    await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
+  }
 }

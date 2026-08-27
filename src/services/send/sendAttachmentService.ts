@@ -4,7 +4,7 @@ import { insertOutgoingAttachmentWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
-import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
+import { handleSendFailure, reconcileSendOutcome, type SendOutcomeOptions } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 
 export interface PickedImage {
@@ -58,6 +58,7 @@ export async function sendImageMessage(
   upload: AttachmentUploader,
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
+  outcomeOptions?: SendOutcomeOptions,
 ): Promise<{ tempGuid: string }> {
   // A forwarded download can share this exact cache file with its source message. Pin it before
   // the first DB await so a concurrent tombstone/quota pass cannot claim and unlink it between the
@@ -124,7 +125,7 @@ export async function sendImageMessage(
     // The server ack carries only the message GUID (no attachment guid) — the optimistic
     // attachment row keeps its local guid + local_path until the live socket `new-message`
     // echo reconciles the attachment guid in place (upsertAttachments).
-    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
+    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard, outcomeOptions);
   } catch (e) {
     // Ownership loss is not a transport failure. Leave the durable queue row for the current
     // account's recovery path instead of logging or starting a second stale-account owner.
@@ -138,6 +139,7 @@ export async function sendImageMessage(
       args.chatGuid,
       undefined,
       commitGuard,
+      outcomeOptions,
     );
   }
 

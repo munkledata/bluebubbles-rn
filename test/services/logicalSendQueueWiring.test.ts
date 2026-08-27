@@ -58,7 +58,13 @@ describe('logical send queue production wiring', () => {
       'src/services/send/index.ts',
       'src/services/send/scheduleService.ts',
     ]);
-    expect(filesCalling('sendImageMessage')).toEqual(['src/services/send/index.ts']);
+    // The first caller is a scanner-certified fixed-file DEV harness that runs exclusively before
+    // ordinary boot. It never receives user data or the production database; the second is the
+    // sole production send owner.
+    expect(filesCalling('sendImageMessage')).toEqual([
+      'src/services/boot/dbRuntimeConcurrencyWave.ts',
+      'src/services/send/index.ts',
+    ]);
     expect(filesCalling('sendContactMessage')).toEqual(['src/services/send/index.ts']);
     expect(filesCalling('sendReactionMessage')).toEqual([
       'src/services/notifications/actions.ts',

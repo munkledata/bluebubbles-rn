@@ -14,6 +14,7 @@
     "test:android:db:relaunch": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs",
     "test:android:db:wal-write-death": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --active-wal-write-death",
     "test:android:db:active-migration-death": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --active-migration-death",
+    "test:android:db:runtime-concurrency": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --runtime-concurrency",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
