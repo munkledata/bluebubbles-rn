@@ -221,6 +221,9 @@ export class SecretBox {
     if (!Number.isSafeInteger(maxPlaintextBytes) || maxPlaintextBytes < 0) {
       throw new Error('invalid secret box plaintext limit');
     }
+    if (!isCanonicalBase64Token(encoded)) {
+      throw new Error('malformed legacy secret box envelope base64');
+    }
     const { salt, nonce, body } = decodeEnvelope(encoded);
     if (body.length < SECRET_BOX_AEAD_TAG_BYTES) throw new Error('envelope body too short');
     if (body.length > maxPlaintextBytes + SECRET_BOX_AEAD_TAG_BYTES) {

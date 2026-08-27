@@ -892,6 +892,16 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
         'pp',
       ),
     ).rejects.toThrow('envelope body too short');
+
+    const canonicalV1 = encodeEnvelope({
+      salt,
+      nonce,
+      body: new Uint8Array(SECRET_BOX_AEAD_TAG_BYTES),
+    });
+    await expect(
+      openBackup(box, `${canonicalV1.slice(0, 8)}!${canonicalV1.slice(8)}`, 'pp'),
+    ).rejects.toThrow('malformed legacy secret box envelope base64');
+
     await expect(
       openBackup(
         box,
