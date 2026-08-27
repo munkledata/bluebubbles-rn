@@ -19,21 +19,38 @@ import {
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 
-/** Request READ_CONTACTS. Returns true if granted. */
-export async function requestContactsPermission(): Promise<boolean> {
-  const { status } = await Contacts.requestPermissionsAsync();
-  return status === 'granted';
+export type ContactsPermissionState = {
+  readonly status: 'granted' | 'denied' | 'undetermined';
+  /** False means Android will not show the prompt again; recovery must go through app settings. */
+  readonly canAskAgain: boolean;
+};
+
+function contactsPermissionState(permission: {
+  status: string;
+  canAskAgain?: boolean;
+}): ContactsPermissionState {
+  const status =
+    permission.status === 'granted'
+      ? 'granted'
+      : permission.status === 'undetermined'
+        ? 'undetermined'
+        : 'denied';
+  return { status, canAskAgain: permission.canAskAgain !== false };
+}
+
+/** Request READ_CONTACTS after an app-authored explanation and explicit user action. */
+export async function requestContactsPermission(): Promise<ContactsPermissionState> {
+  return contactsPermissionState(await Contacts.requestPermissionsAsync());
 }
 
 /** Check READ_CONTACTS without showing an Android permission dialog. */
-async function hasContactsPermission(): Promise<boolean> {
-  const { status } = await Contacts.getPermissionsAsync();
-  return status === 'granted';
+export async function getContactsPermissionState(): Promise<ContactsPermissionState> {
+  return contactsPermissionState(await Contacts.getPermissionsAsync());
 }
 
 /** The user declined READ_CONTACTS; distinct from closing the contact picker without a choice. */
 export class ContactsPermissionDeniedError extends Error {
-  constructor() {
+  constructor(readonly canAskAgain: boolean) {
     super('contacts-permission-denied');
     this.name = 'ContactsPermissionDeniedError';
   }
@@ -53,7 +70,10 @@ export function isContactsPermissionDeniedError(
  * intentionally left off (the server-side vCard builder omits PHOTO too).
  */
 export async function pickContact(): Promise<ContactCard | null> {
-  if (!(await requestContactsPermission())) throw new ContactsPermissionDeniedError();
+  const permission = await requestContactsPermission();
+  if (permission.status !== 'granted') {
+    throw new ContactsPermissionDeniedError(permission.canAskAgain);
+  }
   const c = await Contacts.presentContactPickerAsync();
   if (!c) return null;
   return {
@@ -238,11 +258,13 @@ async function runContactsSync(
   requestPermission: boolean,
 ): Promise<ContactsSyncResult> {
   assertCurrentAccount(accountLease);
-  const permissionGranted = requestPermission
+  const permission = requestPermission
     ? await requestContactsPermission()
-    : await hasContactsPermission();
+    : await getContactsPermissionState();
   assertCurrentAccount(accountLease);
-  if (!permissionGranted) throw new Error('contacts-permission-denied');
+  if (permission.status !== 'granted') {
+    throw new ContactsPermissionDeniedError(permission.canAskAgain);
+  }
 
   const { data } = await Contacts.getContactsAsync({
     fields: [

@@ -64,8 +64,16 @@ jest.mock('@/services', () => ({
 }));
 jest.mock('@/services/contacts/contactsService', () => ({
   syncContacts: jest.fn(),
+  getContactsPermissionState: jest.fn(),
   isContactsAccountChangedError: (error: unknown) =>
     error instanceof Error && error.name === 'ContactsAccountChangedError',
+  isContactsPermissionDeniedError: (error: unknown) =>
+    error instanceof Error && error.name === 'ContactsPermissionDeniedError',
+}));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  getNotificationPermissionState: jest.fn(),
+  openNotificationPermissionSettings: jest.fn(),
+  requestNotificationPermission: jest.fn(),
 }));
 // Keep every real repository export; only replace kvSet so we can watch the persist calls.
 jest.mock('@db/repositories', () => ({
@@ -81,7 +89,13 @@ import { isBiometricAvailable } from '@native/biometrics';
 // eslint-disable-next-line import/first
 import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 // eslint-disable-next-line import/first
-import { syncContacts } from '@/services/contacts/contactsService';
+import { getContactsPermissionState, syncContacts } from '@/services/contacts/contactsService';
+// eslint-disable-next-line import/first
+import {
+  getNotificationPermissionState,
+  openNotificationPermissionSettings,
+  requestNotificationPermission,
+} from '@/services/notifications/notifeeService';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
@@ -113,6 +127,10 @@ const mockForget = forget as jest.Mock;
 const mockRotate = rotateDatabaseKey as jest.Mock;
 const mockSetAppLock = setAppLockEnabled as jest.Mock;
 const mockSyncContacts = syncContacts as jest.Mock;
+const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
+const mockGetNotificationPermissionState = getNotificationPermissionState as jest.Mock;
+const mockOpenNotificationPermissionSettings = openNotificationPermissionSettings as jest.Mock;
+const mockRequestNotificationPermission = requestNotificationPermission as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockKvSet = kvSet as jest.Mock;
 const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
@@ -177,6 +195,10 @@ beforeEach(() => {
   mockIsBiometricAvailable.mockResolvedValue(true);
   mockForget.mockResolvedValue(undefined);
   mockSyncContacts.mockResolvedValue({ contacts: 3, matched: 2 });
+  mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
+  mockGetNotificationPermissionState.mockResolvedValue('granted');
+  mockOpenNotificationPermissionSettings.mockResolvedValue(undefined);
+  mockRequestNotificationPermission.mockResolvedValue(true);
   mockRotate.mockResolvedValue(undefined);
   mockKvSet.mockResolvedValue(undefined);
   mockKvSetWithinTransaction.mockResolvedValue(undefined);
@@ -776,16 +798,46 @@ describe('SettingsScreen — sync contacts', () => {
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Contacts synced'));
   });
 
+  it('explains optional Contacts access before the first native request', async () => {
+    mockGetContactsPermissionState.mockResolvedValueOnce({
+      status: 'undetermined',
+      canAskAgain: true,
+    });
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Sync Contacts'));
+    });
+
+    const rationale = useDialogStore.getState().current;
+    expect(rationale?.title).toBe('Allow Contacts access?');
+    expect(rationale?.message).toContain('still type phone numbers and email addresses');
+    expect(mockSyncContacts).not.toHaveBeenCalled();
+
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      rationale?.buttons.find((button) => button.text === 'Continue')?.onPress?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mockSyncContacts).toHaveBeenCalledTimes(1));
+  });
+
   it('surfaces a permission-denied error as guidance', async () => {
-    mockSyncContacts.mockRejectedValue(new Error('contacts-permission-denied'));
+    mockSyncContacts.mockRejectedValue(
+      Object.assign(new Error('contacts-permission-denied'), {
+        name: 'ContactsPermissionDeniedError',
+        canAskAgain: false,
+      }),
+    );
     await renderWithTheme(<SettingsScreen />);
     await act(async () => {
       fireEvent.press(screen.getByText('Sync Contacts'));
     });
     await waitFor(() => {
       const d = useDialogStore.getState().current;
-      expect(d?.title).toBe('Contacts');
-      expect(d?.message).toMatch(/Permission denied/);
+      expect(d?.title).toBe('Contacts access denied');
+      expect(d?.message).toMatch(/Android won’t show/);
+      expect(d?.buttons.some((button) => button.text === 'Open Settings')).toBe(true);
     });
   });
 
@@ -816,6 +868,80 @@ describe('SettingsScreen — sync contacts', () => {
     });
 
     expect(useDialogStore.getState().current).toBeNull();
+  });
+});
+
+describe('SettingsScreen — notification permission', () => {
+  it('explains an unrequested grant and requests only after Enable', async () => {
+    mockGetNotificationPermissionState.mockResolvedValue('not-determined');
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Notification Access…'));
+    });
+    const rationale = useDialogStore.getState().current;
+    expect(rationale?.title).toBe('Turn on notifications?');
+    expect(mockRequestNotificationPermission).not.toHaveBeenCalled();
+
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      rationale?.buttons.find((button) => button.text === 'Enable')?.onPress?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mockRequestNotificationPermission).toHaveBeenCalledTimes(1));
+    expect(mockOpenNotificationPermissionSettings).not.toHaveBeenCalled();
+  });
+
+  it('drops a delayed native permission result after Settings unmounts', async () => {
+    let finishRequest!: (granted: boolean) => void;
+    mockGetNotificationPermissionState.mockResolvedValue('not-determined');
+    mockRequestNotificationPermission.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishRequest = resolve;
+      }),
+    );
+    const view = await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Notification Access…'));
+    });
+    const rationale = useDialogStore.getState().current;
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      rationale?.buttons.find((button) => button.text === 'Enable')?.onPress?.();
+      await Promise.resolve();
+    });
+    expect(mockRequestNotificationPermission).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      view.unmount();
+    });
+    await act(async () => {
+      finishRequest(false);
+      await Promise.resolve();
+    });
+
+    expect(useDialogStore.getState().current).toBeNull();
+  });
+
+  it('does not launch a retained permission action after Settings unmounts', async () => {
+    mockGetNotificationPermissionState.mockResolvedValue('not-determined');
+    const view = await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Notification Access…'));
+    });
+    const rationale = useDialogStore.getState().current;
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      view.unmount();
+    });
+    await act(async () => {
+      rationale?.buttons.find((button) => button.text === 'Enable')?.onPress?.();
+      await Promise.resolve();
+    });
+
+    expect(mockRequestNotificationPermission).not.toHaveBeenCalled();
   });
 });
 

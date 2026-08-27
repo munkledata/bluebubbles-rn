@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
-import { useLayoutEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AppState, Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { showDialog } from '@ui/dialog/dialogStore';
@@ -9,7 +9,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
 import { disconnectFailureMessage, forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { requestDisableBatteryOptimization } from '@/services/battery';
-import { isContactsAccountChangedError, syncContacts } from '@/services/contacts/contactsService';
+import {
+  getContactsPermissionState,
+  isContactsAccountChangedError,
+  isContactsPermissionDeniedError,
+  syncContacts,
+} from '@/services/contacts/contactsService';
+import {
+  getNotificationPermissionState,
+  openNotificationPermissionSettings,
+  requestNotificationPermission,
+  type NotificationPermissionState,
+} from '@/services/notifications/notifeeService';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -38,6 +49,10 @@ import {
   useTheme,
 } from '@ui';
 import { transportHealthStatusLabel } from '@ui/connection';
+import {
+  showContactsPermissionRationale,
+  showContactsPermissionRecovery,
+} from '@ui/permissions/contactsPermission';
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
 
 /** Where auto-downloaded images are additionally saved (the picker in the DOWNLOADS section). */
@@ -51,6 +66,18 @@ const APP_VERSION = Constants.nativeAppVersion ?? Constants.expoConfig?.version 
 const APP_BUILD =
   Constants.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode?.toString() ?? '—';
 
+const notificationPermissionLabel = (
+  permission: NotificationPermissionState | 'loading' | 'unavailable',
+): string => {
+  if (permission === 'granted') return 'Android access is enabled.';
+  if (permission === 'denied')
+    return 'Android access is denied. Open Notification Access to enable it.';
+  if (permission === 'not-determined') return 'Android access has not been requested.';
+  return permission === 'loading'
+    ? 'Checking Android notification access…'
+    : 'Android notification status is unavailable.';
+};
+
 /** Settings: theme presets + contacts sync (more sections land in later phases). */
 export default function SettingsScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -59,6 +86,8 @@ export default function SettingsScreen(): React.JSX.Element {
   // Native permission/address-book reads can outlive this route. Keep their eventual DB result and
   // dialog bound to the account that mounted this screen instance.
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const mountedRef = useRef(true);
+  const screenCurrent = (): boolean => mountedRef.current && accountLease.isCurrent();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const preset = useThemeStore((s) => s.preset);
   const setPreset = useThemeStore((s) => s.setPreset);
@@ -103,7 +132,32 @@ export default function SettingsScreen(): React.JSX.Element {
   const visibleOrigin = accountCurrent ? origin : null;
   const visibleServerInfo = accountCurrent ? serverInfo : null;
   const [syncing, setSyncing] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermissionState | 'loading' | 'unavailable'
+  >('loading');
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    mountedRef.current = true;
+    let active = true;
+    const refresh = async (): Promise<void> => {
+      try {
+        const permission = await getNotificationPermissionState();
+        if (active && accountLease.isCurrent()) setNotificationPermission(permission);
+      } catch {
+        if (active && accountLease.isCurrent()) setNotificationPermission('unavailable');
+      }
+    };
+    void refresh();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+    return () => {
+      mountedRef.current = false;
+      active = false;
+      subscription.remove();
+    };
+  }, [accountLease]);
   const q = query.trim().toLowerCase();
   // Keyword bag per section — a section is shown when the query is empty OR matches its bag.
   const SECTIONS = {
@@ -206,7 +260,8 @@ export default function SettingsScreen(): React.JSX.Element {
     await setAppLockEnabled(next);
   };
 
-  const onSyncContacts = async (): Promise<void> => {
+  const runContactsSync = async (): Promise<void> => {
+    if (!screenCurrent()) return;
     setSyncing(true);
     try {
       // `force` because this button exists to refresh NOW: an unforced call would join whatever
@@ -216,18 +271,120 @@ export default function SettingsScreen(): React.JSX.Element {
       // SERIALIZES behind that run (two overlapping contact syncs prune each other's rows), then
       // re-reads the address book.
       const { contacts, matched } = await syncContacts({ force: true, accountLease });
-      if (!accountLease.isCurrent()) return;
+      if (!screenCurrent()) return;
       showDialog('Contacts synced', `Read ${contacts} contacts, matched ${matched}.`);
-    } catch (e) {
-      if (isContactsAccountChangedError(e) || !accountLease.isCurrent()) return;
-      showDialog(
-        'Contacts',
-        e instanceof Error && e.message === 'contacts-permission-denied'
-          ? 'Permission denied. Enable Contacts access in system settings to show names and photos.'
-          : 'Sync failed.',
-      );
+    } catch (error) {
+      if (isContactsAccountChangedError(error) || !screenCurrent()) return;
+      if (isContactsPermissionDeniedError(error)) {
+        showContactsPermissionRecovery({
+          canAskAgain: error.canAskAgain,
+          isCurrent: screenCurrent,
+          onTryAgain: () => void runContactsSync(),
+        });
+      } else {
+        showDialog(
+          'Contacts',
+          'Sync failed. You can keep using phone numbers and email addresses manually.',
+        );
+      }
     } finally {
-      if (accountLease.isCurrent()) setSyncing(false);
+      if (screenCurrent()) setSyncing(false);
+    }
+  };
+
+  const onSyncContacts = async (): Promise<void> => {
+    if (!screenCurrent()) return;
+    try {
+      const permission = await getContactsPermissionState();
+      if (!screenCurrent()) return;
+      if (permission.status === 'granted') {
+        await runContactsSync();
+        return;
+      }
+      if (permission.status === 'denied' && !permission.canAskAgain) {
+        showContactsPermissionRecovery({
+          canAskAgain: false,
+          isCurrent: screenCurrent,
+          onTryAgain: () => void runContactsSync(),
+        });
+        return;
+      }
+      showContactsPermissionRationale({
+        purpose: 'sync',
+        isCurrent: screenCurrent,
+        onContinue: () => void runContactsSync(),
+      });
+    } catch {
+      if (screenCurrent()) {
+        showDialog(
+          'Contacts',
+          'Contacts access is unavailable. You can still type phone numbers and email addresses manually.',
+        );
+      }
+    }
+  };
+
+  const openNotificationSettings = async (): Promise<void> => {
+    if (!screenCurrent()) return;
+    try {
+      await openNotificationPermissionSettings();
+    } catch {
+      if (screenCurrent()) {
+        showDialog(
+          'Notifications',
+          'Couldn’t open Android notification settings. Open Settings and select Gator.',
+        );
+      }
+    }
+  };
+
+  const requestNotificationAccess = async (): Promise<void> => {
+    if (!screenCurrent()) return;
+    try {
+      const granted = await requestNotificationPermission();
+      if (!screenCurrent()) return;
+      setNotificationPermission(granted ? 'granted' : 'denied');
+      if (!granted) {
+        showDialog(
+          'Notifications are off',
+          'Gator still works while open. To receive alerts in the background, enable notifications in Android settings.',
+          [
+            { text: 'Not Now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => void openNotificationSettings() },
+          ],
+        );
+      }
+    } catch {
+      if (screenCurrent()) {
+        setNotificationPermission('unavailable');
+        showDialog('Notifications', 'Android notification access is unavailable. Try again later.');
+      }
+    }
+  };
+
+  const onManageNotificationPermission = async (): Promise<void> => {
+    if (!screenCurrent()) return;
+    try {
+      const permission = await getNotificationPermissionState();
+      if (!screenCurrent()) return;
+      setNotificationPermission(permission);
+      if (permission !== 'not-determined') {
+        await openNotificationSettings();
+        return;
+      }
+      showDialog(
+        'Turn on notifications?',
+        'Gator uses notifications for new messages, calls, reminders, and send failures while the app is not open. You can continue without them.',
+        [
+          { text: 'Not Now', style: 'cancel' },
+          { text: 'Enable', onPress: () => void requestNotificationAccess() },
+        ],
+      );
+    } catch {
+      if (screenCurrent()) {
+        setNotificationPermission('unavailable');
+        showDialog('Notifications', 'Android notification access is unavailable. Try again later.');
+      }
     }
   };
 
@@ -424,6 +581,12 @@ export default function SettingsScreen(): React.JSX.Element {
               onValueChange={(v) => void setFlag('messageNotifications', v)}
               accessibilityLabel="Show notifications for new messages"
             />
+            <NavRow
+              label="Notification Access…"
+              onPress={() => void onManageNotificationPermission()}
+              accessibilityLabel="Manage Android notification access"
+            />
+            <NoteRow text={notificationPermissionLabel(notificationPermission)} />
             {/* Android reliability: open the general battery-optimization settings, where the
                 user can review or change Gator's treatment. This is not a direct exemption. */}
             {Platform.OS === 'android' ? (

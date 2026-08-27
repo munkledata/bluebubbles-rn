@@ -84,6 +84,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'app/(app)/scheduled.tsx',
   'app/(app)/settings.tsx',
   'app/(setup)/manual.tsx',
+  'app/(setup)/permissions.tsx',
   'app/(setup)/scan.tsx',
   'app/(setup)/welcome.tsx',
   'src/db/repositories/chats.ts',

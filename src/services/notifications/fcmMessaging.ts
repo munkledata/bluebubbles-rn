@@ -252,8 +252,8 @@ try {
  */
 export async function startFcm(): Promise<'ready' | 'failed'> {
   try {
-    // POST_NOTIFICATIONS is requested via requestNotificationPermission() in notifeeService.ts
-    // on the boot path, so the deprecated messaging().requestPermission() is redundant here.
+    // POST_NOTIFICATIONS is requested only after an explicit setup/Settings action; the deprecated
+    // Firebase request would be both redundant and an unacceptable surprise prompt on this path.
     const m = getMessaging();
     onMessage(m, (msg) => {
       void handleIncomingFcm(msg, 'foreground');

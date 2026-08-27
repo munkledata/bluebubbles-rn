@@ -18,10 +18,10 @@ export default function Syncing(): React.JSX.Element {
   const chats = useSyncStore((s) => s.chats);
   const messages = useSyncStore((s) => s.messages);
 
-  // Auto-advance to the inbox a beat after the sync finishes.
+  // Auto-advance to the explicit permission choices a beat after the sync finishes.
   useEffect(() => {
     if (status === 'done') {
-      const id = setTimeout(() => router.replace('/home'), 700);
+      const id = setTimeout(() => router.replace('/permissions'), 700);
       return () => clearTimeout(id);
     }
     return undefined;
@@ -57,8 +57,8 @@ export default function Syncing(): React.JSX.Element {
         </View>
 
         <Button
-          title={done ? 'Open Messages' : 'Continue in Background'}
-          onPress={() => router.replace('/home')}
+          title={done ? 'Continue' : 'Continue in Background'}
+          onPress={() => router.replace('/permissions')}
         />
       </View>
     </Screen>

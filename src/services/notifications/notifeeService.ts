@@ -949,10 +949,28 @@ export function openChatNotificationSettings(
   });
 }
 
-/** Request POST_NOTIFICATIONS (Android 13+). Returns true if allowed. */
+export type NotificationPermissionState = 'not-determined' | 'denied' | 'granted';
+
+function notificationPermissionState(status: AuthorizationStatus): NotificationPermissionState {
+  if (status >= AuthorizationStatus.AUTHORIZED) return 'granted';
+  return status === AuthorizationStatus.NOT_DETERMINED ? 'not-determined' : 'denied';
+}
+
+/** Read notification access without showing Android's permission prompt. */
+export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
+  const settings = await notifee.getNotificationSettings();
+  return notificationPermissionState(settings.authorizationStatus);
+}
+
+/** Request POST_NOTIFICATIONS (Android 13+) after the app has explained why. */
 export async function requestNotificationPermission(): Promise<boolean> {
   const settings = await notifee.requestPermission();
-  return settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
+  return notificationPermissionState(settings.authorizationStatus) === 'granted';
+}
+
+/** Open this app's Android notification controls for denied/permanently denied recovery. */
+export function openNotificationPermissionSettings(): Promise<void> {
+  return notifee.openNotificationSettings();
 }
 
 /**

@@ -1795,6 +1795,7 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   const paths = new Set([
     'app/(app)/chat-settings/[guid].tsx',
     'app/(app)/scheduled.tsx',
+    'app/(setup)/permissions.tsx',
     'src/state/featureSettingsStore.ts',
     'src/state/themeStore.ts',
     'src/ui/conversations/ChatActionsSheet.tsx',
@@ -1810,6 +1811,12 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       (finding.symbol.includes('.setFlag') ||
         finding.symbol.includes('.setMaxConcurrentDownloads') ||
         finding.symbol.includes('.setAutoDownloadDestination')) &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
+  const permissionOnboardingTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/state/featureSettingsStore.ts' &&
+      finding.symbol.includes('completePermissionOnboarding') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
   const customThemeTransactions = findings.filter(
@@ -1881,7 +1888,13 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
           finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
   );
 
-  assert.deepEqual(delegated.map((finding) => finding.id).sort(), []);
+  assert.deepEqual(
+    delegated.map((finding) => finding.id).sort(),
+    [
+      'app/(setup)/permissions.tsx#PermissionsScreen.<callback:814e54dd2c>:mutator-call:c473d7610e80',
+      'app/(setup)/permissions.tsx#PermissionsScreen.onContinue:mutator-call:113a3d922218',
+    ].sort(),
+  );
   assert.deepEqual(
     chatAppearanceTransactions.map((finding) => finding.id).sort(),
     [
@@ -1922,15 +1935,23 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     featureSettingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:ddd668ed728b',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setAutoDownloadDestination:mutator-call:1d1c46fcb4e6',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setAutoDownloadDestination:mutator-call:d6067a762189',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setFlag.<callback:80c80d5352>:mutator-call:ca0e30890656',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setFlag:mutator-call:36236738a484',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setFlag:mutator-call:e359122ecc79',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:afb546561ea8',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setMaxConcurrentDownloads:mutator-call:5c31eec01c95',
-      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setMaxConcurrentDownloads:mutator-call:fed2e69e833d',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:871620dfdfc6',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setAutoDownloadDestination:mutator-call:a26397b9b8de',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setAutoDownloadDestination:mutator-call:f5771ac5ff88',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setFlag.<callback:80c80d5352>:mutator-call:9ccbe5ed583b',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setFlag:mutator-call:51b5050425db',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setFlag:mutator-call:82d3c0c91fe5',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:14d9adb34146',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setMaxConcurrentDownloads:mutator-call:359ad75a4f18',
+      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setMaxConcurrentDownloads:mutator-call:35ef614f5e5b',
+    ].sort(),
+  );
+  assert.deepEqual(
+    permissionOnboardingTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/state/featureSettingsStore.ts#completePermissionOnboarding.<callback:4c0b01ae7f>:mutator-call:b1453f9eca38',
+      'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:163756f4a357',
+      'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:a81286d61932',
     ].sort(),
   );
   assert.deepEqual(

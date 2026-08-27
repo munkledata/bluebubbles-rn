@@ -63,6 +63,16 @@ export const ERROR_REPORTING_CONSENT_KEY = 'diagnostics.errorReportingConsent.v1
 export const LEGACY_ERROR_REPORTING_KEY = 'diagnostics.errorReporting';
 type ErrorReportingConsentValue = 'granted' | 'denied';
 
+/** Durable account-local marker: missing means the optional permission choices are still due. */
+export const PERMISSION_ONBOARDING_COMPLETED_KEY = 'onboarding.permissionsCompleted.v1';
+
+export interface PermissionOnboardingWriteContext extends HydrationOptions {
+  /** Exact account database captured before the completion write starts. */
+  readonly db: AppDatabase;
+  /** Required account/route authority; checked before admission, COMMIT, and state publication. */
+  readonly shouldCommit: () => boolean;
+}
+
 export interface ErrorReportingConsentWriteContext extends HydrationOptions {
   /** Exact account database captured before this choice joins the serialized tail. */
   readonly db: AppDatabase;
@@ -179,6 +189,7 @@ interface FeatureSettingsState {
   sendSubjectLines: boolean;
   filterUnknownSenders: boolean;
   errorReportingEnabled: boolean;
+  permissionOnboardingCompleted: boolean;
   maxConcurrentDownloads: number;
   autoDownloadDestination: AutoDownloadDestination;
   hydrated: boolean;
@@ -205,6 +216,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   sendSubjectLines: FLAGS.sendSubjectLines.def,
   filterUnknownSenders: FLAGS.filterUnknownSenders.def,
   errorReportingEnabled: false,
+  permissionOnboardingCompleted: false,
   maxConcurrentDownloads: VALUE_SETTINGS.maxConcurrentDownloads.def,
   autoDownloadDestination: AUTO_DOWNLOAD_DEST_DEFAULT,
   hydrated: false,
@@ -212,23 +224,25 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     const consentGenerationAtStart = errorReportingChoiceGeneration;
     try {
       const db = getDatabase();
-      const [flagEntries, valueEntries, autoDownloadRaw, consentRaw] = await Promise.all([
-        Promise.all(
-          (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
-            const v = await kvGet(db, FLAGS[f].key);
-            return [f, v == null ? FLAGS[f].def : v === '1'] as const;
-          }),
-        ),
-        Promise.all(
-          (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
-            const setting = VALUE_SETTINGS[k];
-            const value = setting.parse(await kvGet(db, setting.key));
-            return [k, value] as const;
-          }),
-        ),
-        kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
-        kvGet(db, ERROR_REPORTING_CONSENT_KEY),
-      ]);
+      const [flagEntries, valueEntries, autoDownloadRaw, consentRaw, permissionOnboardingRaw] =
+        await Promise.all([
+          Promise.all(
+            (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
+              const v = await kvGet(db, FLAGS[f].key);
+              return [f, v == null ? FLAGS[f].def : v === '1'] as const;
+            }),
+          ),
+          Promise.all(
+            (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
+              const setting = VALUE_SETTINGS[k];
+              const value = setting.parse(await kvGet(db, setting.key));
+              return [k, value] as const;
+            }),
+          ),
+          kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
+          kvGet(db, ERROR_REPORTING_CONSENT_KEY),
+          kvGet(db, PERMISSION_ONBOARDING_COMPLETED_KEY),
+        ]);
       if (!canCommitHydration(options)) return;
 
       // Only the versioned, plain-language choice can authorize capture or upload. Missing,
@@ -254,6 +268,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         ...Object.fromEntries(flagEntries),
         ...Object.fromEntries(valueEntries),
         autoDownloadDestination: parseAutoDownloadDestination(autoDownloadRaw),
+        permissionOnboardingCompleted: permissionOnboardingRaw === '1',
         hydrated: true,
       };
       // A newer explicit user choice wins over this older hydration snapshot.
@@ -329,6 +344,25 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     }
   },
 }));
+
+/**
+ * Persist the optional-permission step before routing home. Process death can therefore only
+ * replay the choices screen, never silently skip an unfinished first-connect step.
+ */
+export async function completePermissionOnboarding(
+  context: PermissionOnboardingWriteContext,
+): Promise<boolean> {
+  if (!canCommitHydration(context)) return false;
+  await withDbTransaction(
+    context.db,
+    (transactionContext) =>
+      kvSetWithinTransaction(transactionContext, PERMISSION_ONBOARDING_COMPLETED_KEY, '1'),
+    () => canCommitHydration(context),
+  );
+  if (!canCommitHydration(context)) return false;
+  useFeatureSettingsStore.setState({ permissionOnboardingCompleted: true });
+  return true;
+}
 
 /** Runtime gate used by every capture/upload boundary. Unhydrated always means no consent. */
 export function hasErrorReportingConsent(): boolean {

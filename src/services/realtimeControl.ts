@@ -44,7 +44,7 @@ import {
 } from './reachability';
 import { startDeviceNetworkWatch, stopDeviceNetworkWatch } from './networkReachability';
 import { buildMessageIntents } from './notifications/intents';
-import { postNotification, requestNotificationPermission } from './notifications/notifeeService';
+import { getNotificationPermissionState, postNotification } from './notifications/notifeeService';
 import { effectivelyLocked } from './notifications/lockGate';
 import { DbEventSink } from './realtime/dbEventSink';
 import { expoDigestBackend } from './realtime/expoDigestBackend';
@@ -128,8 +128,8 @@ async function prepareMessageNotificationSettings(
 
 let socket: SocketService | null = null;
 let stopSocketLifecycleObservation: (() => void) | null = null;
-// Guards the ONE-TIME realtime setup (notification/FCM permission + token registration) so it
-// runs on the FIRST connect only — never on a foreground reconnect. See startRealtime().
+// Guards the one-time, non-prompting notification-access check so a denied grant produces one
+// recovery hint per process instead of a toast on every foreground reconnect.
 let realtimeOneTimeSetupDone = false;
 
 export interface RealtimeStartupIssue {
@@ -750,26 +750,30 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
     });
     if (published && previous === 'offline' && state === 'online') probeReachabilityNow();
   });
-  // ONE-TIME: requesting notification permission (notifee + FCM) launches the system permission
-  // dialog, and that dialog itself fires an AppState change → the foreground `resumeRealtime()`
-  // listener → `startRealtime()` again. Doing it on EVERY (re)connect created an INFINITE
-  // permission-request loop the first time the app foregrounded (the UI froze; logcat showed
-  // GrantPermissionsActivity launched tens of thousands of times). Request it once.
+  // ONE-TIME, READ ONLY: realtime startup must never surprise-launch Android's permission prompt.
+  // Fresh setup explains the choice on /permissions, and Settings retains recovery for existing
+  // installs. This check only surfaces the current state; it cannot change OS permission state.
   if (!realtimeOneTimeSetupDone) {
     realtimeOneTimeSetupDone = true;
-    void requestNotificationPermission()
-      .then((granted) => {
-        if (!granted) {
+    void getNotificationPermissionState()
+      .then((permission) => {
+        if (permission !== 'granted') {
           reportRealtimeStartupIssue(options, {
             stage: 'notifications',
             level: 'degraded',
-            code: 'notification-permission-denied',
-            userMessage: 'Notifications are disabled; open Gator to see new messages.',
+            code:
+              permission === 'not-determined'
+                ? 'notification-permission-not-requested'
+                : 'notification-permission-denied',
+            userMessage:
+              permission === 'not-determined'
+                ? 'Notifications are off. Enable them during setup or in Settings.'
+                : 'Notifications are disabled. Open Settings to enable them.',
           });
         }
       })
       .catch((error) => {
-        logger.warn('[notify] notification permission request failed', error);
+        logger.warn('[notify] notification permission check failed', error);
         reportRealtimeStartupIssue(options, {
           stage: 'notifications',
           level: 'degraded',

@@ -71,11 +71,14 @@ beforeEach(() => {
 
 describe('pickContact permission outcome', () => {
   it('distinguishes permission denial from a canceled picker', async () => {
-    requestPermissionsAsync.mockResolvedValueOnce({ status: 'denied' });
+    requestPermissionsAsync.mockResolvedValueOnce({ status: 'denied', canAskAgain: false });
 
     const denied = pickContact();
     await expect(denied).rejects.toBeInstanceOf(ContactsPermissionDeniedError);
-    await denied.catch((error) => expect(isContactsPermissionDeniedError(error)).toBe(true));
+    await denied.catch((error) => {
+      expect(isContactsPermissionDeniedError(error)).toBe(true);
+      expect(error).toMatchObject({ canAskAgain: false });
+    });
     expect(presentContactPickerAsync).not.toHaveBeenCalled();
 
     requestPermissionsAsync.mockResolvedValueOnce({ status: 'granted' });

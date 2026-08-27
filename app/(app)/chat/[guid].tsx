@@ -34,6 +34,7 @@ import {
 } from '@/services';
 import { getDatabase } from '@db/database';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
+import { getContactsPermissionState } from '@/services/contacts/contactsService';
 import { claimActiveChat, type ActiveChatClaim } from '@/services/notifications/activeChat';
 import {
   captureRealtimeDeliveryLease,
@@ -85,6 +86,10 @@ import {
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
+import {
+  showContactsPermissionRationale,
+  showContactsPermissionRecovery,
+} from '@ui/permissions/contactsPermission';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useLockStore } from '@state/lockStore';
 import { useTypingStore } from '@state/typingStore';
@@ -665,22 +670,59 @@ function ChatScreenInner({
   );
   const onStartVoice = useCallback((): void => setRecording(true), []);
 
-  // Contact card: only offered when the server can build vCards (supports_send_contact). Opens the
-  // native picker and sends the chosen contact (optimistic bubble + reconcile inside the service).
+  // Contact card: only offered when the server can build vCards (supports_send_contact). Explain
+  // the optional Contacts grant before Android's prompt, then open the native picker and send the
+  // chosen contact (optimistic bubble + reconcile inside the service).
   const supportsSendContact = useSendContactSupported();
-  const onPickContact = useCallback((): void => {
-    pickAndSendContact(guid, accountLease).catch((e) => {
-      if (!accountLease.isCurrent()) return;
-      if (isContactsPermissionDeniedError(e)) {
-        showDialog(
-          'Contacts',
-          'Permission denied. Enable Contacts access in system settings to send a contact.',
-        );
-        return;
-      }
-      logger.warn('[chat] contact pick/send failed', e);
-    });
+  const runContactPicker = useCallback((): void => {
+    const attempt = (): void => {
+      pickAndSendContact(guid, accountLease).catch((e) => {
+        if (!accountLease.isCurrent()) return;
+        if (isContactsPermissionDeniedError(e)) {
+          showContactsPermissionRecovery({
+            canAskAgain: e.canAskAgain,
+            isCurrent: () => accountLease.isCurrent(),
+            onTryAgain: attempt,
+          });
+          return;
+        }
+        logger.warn('[chat] contact pick/send failed', e);
+      });
+    };
+    attempt();
   }, [accountLease, guid]);
+  const onPickContact = useCallback((): void => {
+    void getContactsPermissionState()
+      .then((permission) => {
+        if (!accountLease.isCurrent()) return;
+        if (permission.status === 'granted') {
+          runContactPicker();
+          return;
+        }
+        if (permission.status === 'denied' && !permission.canAskAgain) {
+          showContactsPermissionRecovery({
+            canAskAgain: false,
+            isCurrent: () => accountLease.isCurrent(),
+            onTryAgain: runContactPicker,
+          });
+          return;
+        }
+        showContactsPermissionRationale({
+          purpose: 'share',
+          isCurrent: () => accountLease.isCurrent(),
+          onContinue: runContactPicker,
+        });
+      })
+      .catch((error) => {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] contact permission check failed', error);
+          showDialog(
+            'Contacts',
+            'Contacts access is unavailable. You can keep messaging without sharing a contact card.',
+          );
+        }
+      });
+  }, [accountLease, runContactPicker]);
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.

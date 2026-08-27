@@ -195,6 +195,9 @@ jest.mock('@/services', () => ({
   sendTyping: jest.fn(),
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
+jest.mock('@/services/contacts/contactsService', () => ({
+  getContactsPermissionState: jest.fn(),
+}));
 jest.mock('@/services/notifications/remindersService', () => ({ scheduleReminder: jest.fn() }));
 jest.mock('@/services/media', () => ({
   shareAttachment: jest.fn(),
@@ -232,6 +235,8 @@ import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 import { useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 // eslint-disable-next-line import/first
 import { dispatchRealtimeEvent, ensureChatSynced, markRead, sendTyping } from '@/services';
+// eslint-disable-next-line import/first
+import { getContactsPermissionState } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
 import {
   editText,
@@ -271,6 +276,7 @@ const useNewScreenEffectMock = useNewScreenEffect as jest.Mock;
 const useChatBackgroundUriMock = useChatBackgroundUri as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
+const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
 
 /** A received text message; only the fields onLongPressMessage reads need to be right. */
 function makeMsg(overrides: Partial<EnrichedMessage> = {}): EnrichedMessage {
@@ -308,6 +314,8 @@ beforeEach(() => {
   mockGetDatabase.mockReset().mockReturnValue(undefined);
   mockKvSetWithinTransaction.mockResolvedValue(undefined);
   mockIsDevServer.mockReturnValue(false);
+  mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
+  (pickAndSendContact as jest.Mock).mockResolvedValue(null);
   mockGuid = GUID;
   mockInsetBottom = 0;
   mockKbVisible = false;
@@ -649,6 +657,7 @@ describe('ChatScreen — send routing', () => {
     useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
     const denied = Object.assign(new Error('contacts-permission-denied'), {
       name: 'ContactsPermissionDeniedError',
+      canAskAgain: false,
     });
     (pickAndSendContact as jest.Mock).mockRejectedValueOnce(denied);
     await renderWithTheme(<ChatScreen />);
@@ -657,10 +666,35 @@ describe('ChatScreen — send routing', () => {
 
     await waitFor(() =>
       expect(showDialog).toHaveBeenCalledWith(
-        'Contacts',
-        'Permission denied. Enable Contacts access in system settings to send a contact.',
+        'Contacts access denied',
+        expect.stringContaining('Android won’t show'),
+        expect.arrayContaining([expect.objectContaining({ text: 'Open Settings' })]),
       ),
     );
+  });
+
+  it('explains optional Contacts access before opening the native contact picker', async () => {
+    useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
+    mockGetContactsPermissionState.mockResolvedValueOnce({
+      status: 'undetermined',
+      canAskAgain: true,
+    });
+    await renderWithTheme(<ChatScreen />);
+
+    await run(() => mockCaptured.composer!.onPickContact());
+    await waitFor(() =>
+      expect(showDialog).toHaveBeenCalledWith(
+        'Allow Contacts access?',
+        expect.stringContaining('still type phone numbers and email addresses'),
+        expect.any(Array),
+      ),
+    );
+    expect(pickAndSendContact).not.toHaveBeenCalled();
+
+    const buttons = (showDialog as jest.Mock).mock.calls.at(-1)?.[2] as
+      Array<{ text: string; onPress?: () => void }> | undefined;
+    await run(() => buttons?.find((button) => button.text === 'Continue')?.onPress?.());
+    await waitFor(() => expect(pickAndSendContact).toHaveBeenCalledTimes(1));
   });
 
   it('keeps a canceled Send Contact picker silent', async () => {

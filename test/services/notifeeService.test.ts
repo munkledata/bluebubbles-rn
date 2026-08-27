@@ -43,7 +43,9 @@ import {
   cancelReminderNotification,
   chatChannelId,
   clearChatNotification,
+  getNotificationPermissionState,
   openChatNotificationSettings,
+  openNotificationPermissionSettings,
   postLockedNotification,
   postNotification,
   prepareNotificationPresentationState,
@@ -63,6 +65,7 @@ jest.mock('react-native-notify-kit', () => ({
   default: {
     createChannel: jest.fn(async (c: { id: string }) => c.id),
     requestPermission: jest.fn(async () => ({ authorizationStatus: 1 })),
+    getNotificationSettings: jest.fn(async () => ({ authorizationStatus: -1 })),
     displayNotification: jest.fn(async () => undefined),
     createTriggerNotification: jest.fn(async () => undefined),
     getDisplayedNotifications: jest.fn(async () => []),
@@ -199,6 +202,7 @@ const mockCancelDisplayedAll = notifee.cancelDisplayedNotifications as jest.Mock
 const mockCancelTrigger = notifee.cancelTriggerNotification as jest.Mock;
 const mockCancelTriggersAll = notifee.cancelTriggerNotifications as jest.Mock;
 const mockRequestPermission = notifee.requestPermission as jest.Mock;
+const mockGetNotificationSettings = notifee.getNotificationSettings as jest.Mock;
 const mockGetChannel = notifee.getChannel as jest.Mock;
 const mockGetChannels = notifee.getChannels as jest.Mock;
 const mockDeleteChannel = notifee.deleteChannel as jest.Mock;
@@ -280,6 +284,20 @@ describe('requestNotificationPermission', () => {
     expect(await requestNotificationPermission()).toBe(true);
     mockRequestPermission.mockResolvedValueOnce({ authorizationStatus: 0 });
     expect(await requestNotificationPermission()).toBe(false);
+  });
+
+  it('reads status without prompting and opens app-wide recovery settings', async () => {
+    mockGetNotificationSettings.mockResolvedValueOnce({ authorizationStatus: -1 });
+    expect(await getNotificationPermissionState()).toBe('not-determined');
+    expect(mockRequestPermission).not.toHaveBeenCalled();
+
+    mockGetNotificationSettings.mockResolvedValueOnce({ authorizationStatus: 0 });
+    expect(await getNotificationPermissionState()).toBe('denied');
+    mockGetNotificationSettings.mockResolvedValueOnce({ authorizationStatus: 1 });
+    expect(await getNotificationPermissionState()).toBe('granted');
+
+    await openNotificationPermissionSettings();
+    expect(mockOpenSettings).toHaveBeenCalledWith();
   });
 });
 

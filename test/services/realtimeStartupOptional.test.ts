@@ -1,5 +1,8 @@
 /* Optional native setup must report degradation without rejecting realtime startup. */
-const mockRequestNotificationPermission = jest.fn<Promise<boolean>, []>();
+const mockGetNotificationPermissionState = jest.fn<
+  Promise<'not-determined' | 'denied' | 'granted'>,
+  []
+>();
 const mockRegisterFcmToken = jest.fn<Promise<'registered' | 'skipped' | 'failed'>, []>();
 const mockWarn = jest.fn();
 type MockFeatureHydrationOptions = {
@@ -257,7 +260,7 @@ jest.mock('@/services/networkReachability', () => ({
 jest.mock('@/services/notifications/intents', () => ({ buildMessageIntents: jest.fn() }));
 jest.mock('@/services/notifications/notifeeService', () => ({
   postNotification: mockPostNotification,
-  requestNotificationPermission: mockRequestNotificationPermission,
+  getNotificationPermissionState: mockGetNotificationPermissionState,
 }));
 jest.mock('@/services/notifications/fcmMessaging', () => ({
   registerFcmToken: mockRegisterFcmToken,
@@ -429,7 +432,7 @@ beforeEach(() => {
     queueId: 41,
     claim: { id: 41, source: 'dev', attempts: 1, leaseToken: args[5] },
   }));
-  mockRequestNotificationPermission.mockResolvedValue(true);
+  mockGetNotificationPermissionState.mockResolvedValue('granted');
   mockRegisterFcmToken.mockResolvedValue('registered');
 });
 
@@ -913,16 +916,13 @@ describe('startRealtime optional setup containment', () => {
     });
   });
 
-  it('contains a native permission rejection and reports safe degraded copy', async () => {
+  it('contains a native permission-status rejection and reports safe degraded copy', async () => {
     const failure = new Error('native permission bridge failed');
-    mockRequestNotificationPermission.mockRejectedValueOnce(failure);
+    mockGetNotificationPermissionState.mockRejectedValueOnce(failure);
 
     const reportIssue = await startFreshRealtime();
 
-    expect(mockWarn).toHaveBeenCalledWith(
-      '[notify] notification permission request failed',
-      failure,
-    );
+    expect(mockWarn).toHaveBeenCalledWith('[notify] notification permission check failed', failure);
     expect(reportIssue).toHaveBeenCalledWith({
       stage: 'notifications',
       level: 'degraded',
@@ -932,7 +932,7 @@ describe('startRealtime optional setup containment', () => {
   });
 
   it('reports a denied permission without rejecting socket startup', async () => {
-    mockRequestNotificationPermission.mockResolvedValueOnce(false);
+    mockGetNotificationPermissionState.mockResolvedValueOnce('denied');
 
     const reportIssue = await startFreshRealtime();
 
@@ -942,6 +942,19 @@ describe('startRealtime optional setup containment', () => {
         code: 'notification-permission-denied',
       }),
     );
+  });
+
+  it('reports an unrequested permission without launching a native prompt', async () => {
+    mockGetNotificationPermissionState.mockResolvedValueOnce('not-determined');
+
+    const reportIssue = await startFreshRealtime();
+
+    expect(reportIssue).toHaveBeenCalledWith({
+      stage: 'notifications',
+      level: 'degraded',
+      code: 'notification-permission-not-requested',
+      userMessage: 'Notifications are off. Enable them during setup or in Settings.',
+    });
   });
 
   it('reports failed FCM token registration as degraded socket-only operation', async () => {

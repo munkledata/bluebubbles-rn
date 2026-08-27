@@ -32,7 +32,7 @@ jest.mock('@/services/reachability', () => ({
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({
   postNotification: jest.fn(async () => {}),
-  requestNotificationPermission: jest.fn(async () => {}),
+  getNotificationPermissionState: jest.fn(async () => 'granted'),
 }));
 
 // Jest mocks must be registered before importing the realtime source graph.

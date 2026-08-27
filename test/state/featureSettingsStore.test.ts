@@ -4,10 +4,12 @@ import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   AUTO_DOWNLOAD_DEST_KEY,
+  completePermissionOnboarding,
   ERROR_REPORTING_CONSENT_KEY,
   type ErrorReportingConsentWriteContext,
   LEGACY_ERROR_REPORTING_KEY,
   MAX_CONCURRENT_DOWNLOADS_KEY,
+  PERMISSION_ONBOARDING_COMPLETED_KEY,
   useFeatureSettingsStore,
 } from '@state/featureSettingsStore';
 import {
@@ -42,6 +44,7 @@ const DEFAULTS = {
   compactChatList: false,
   messageNotifications: true,
   errorReportingEnabled: false,
+  permissionOnboardingCompleted: false,
 } as const;
 
 async function openTestContext() {
@@ -202,6 +205,37 @@ describe('featureSettingsStore', () => {
     });
     await useFeatureSettingsStore.getState().setFlag('compactChatList', true);
     expect(useFeatureSettingsStore.getState().compactChatList).toBe(true);
+  });
+});
+
+describe('featureSettingsStore — permission onboarding completion', () => {
+  it('persists completion before publishing it and hydrates it after a process-style reset', async () => {
+    const db = await openTestDb();
+
+    await expect(completePermissionOnboarding({ db, shouldCommit: () => true })).resolves.toBe(
+      true,
+    );
+    expect(await kvGet(db, PERMISSION_ONBOARDING_COMPLETED_KEY)).toBe('1');
+    expect(useFeatureSettingsStore.getState().permissionOnboardingCompleted).toBe(true);
+
+    useFeatureSettingsStore.setState({ permissionOnboardingCompleted: false, hydrated: false });
+    await useFeatureSettingsStore.getState().hydrate();
+
+    expect(useFeatureSettingsStore.getState()).toMatchObject({
+      permissionOnboardingCompleted: true,
+      hydrated: true,
+    });
+  });
+
+  it('does not write or publish completion after route/account authority is revoked', async () => {
+    const db = await openTestDb();
+
+    await expect(completePermissionOnboarding({ db, shouldCommit: () => false })).resolves.toBe(
+      false,
+    );
+
+    expect(await kvGet(db, PERMISSION_ONBOARDING_COMPLETED_KEY)).toBeNull();
+    expect(useFeatureSettingsStore.getState().permissionOnboardingCompleted).toBe(false);
   });
 });
 
