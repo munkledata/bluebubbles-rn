@@ -1247,26 +1247,74 @@ export interface InboxRow {
   hasKnownSender: number;
 }
 
-/**
- * Inbox rows for the conversation list. Ordering mirrors Flutter Chat.sort:
- * pinned first, then most-recent message first. The "last message" is resolved
- * dedupe-safely (max date, then max id) so chats never appear twice.
- */
-export async function listChatsForInbox(
+export type InboxArchiveFilter = 'active' | 'archived' | 'all';
+export type InboxSenderFilter = 'any' | 'known' | 'unknown';
+
+export interface InboxPageOptions {
+  limit?: number;
+  archive?: InboxArchiveFilter;
+  sender?: InboxSenderFilter;
+}
+
+export interface InboxPage {
+  rows: InboxRow[];
+  hasMore: boolean;
+}
+
+function inboxFilterSql(options: { archive: InboxArchiveFilter; sender: InboxSenderFilter }) {
+  const archive =
+    options.archive === 'all'
+      ? sql``
+      : options.archive === 'archived'
+        ? sql`AND c.is_archived = 1`
+        : sql`AND c.is_archived = 0`;
+  const known = sql`EXISTS(
+    SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
+     WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL
+  )`;
+  const sender =
+    options.sender === 'known'
+      ? sql`AND ${known}`
+      : options.sender === 'unknown'
+        ? sql`AND NOT ${known}`
+        : sql``;
+  return { archive, sender };
+}
+
+async function queryChatsForInbox(
   db: AppDatabase,
-  opts: { includeArchived?: boolean } = {},
+  options: {
+    archive: InboxArchiveFilter;
+    sender: InboxSenderFilter;
+    limit?: number;
+  },
 ): Promise<InboxRow[]> {
-  const whereArchived = opts.includeArchived ? sql`` : sql`AND c.is_archived = 0`;
+  const filters = inboxFilterSql(options);
+  const limit = options.limit == null ? sql`` : sql`LIMIT ${options.limit}`;
   return db.all<InboxRow>(sql`
-    WITH last AS (
-      SELECT m.* FROM messages m
-      WHERE m.id = (
-        SELECT m2.id FROM messages m2
-        WHERE m2.chat_id = m.chat_id AND m2.associated_message_type IS NULL
-          AND m2.date_retracted IS NULL
-          AND m2.date_deleted IS NULL
-        ORDER BY m2.date_created DESC, m2.id DESC LIMIT 1
-      )
+    -- Bound the chat identities FIRST. Splitting pinned/unpinned lets the existing
+    -- (is_archived, latest_message_date) index produce each date-ordered branch without a
+    -- whole-inbox temporary sort. The final merge sorts at most two bounded branches.
+    WITH pinned AS (
+      SELECT c.id, c.is_pinned, c.latest_message_date
+        FROM chats c
+       WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} AND c.is_pinned = 1
+       ORDER BY c.latest_message_date DESC, c.id DESC
+       ${limit}
+    ),
+    unpinned AS (
+      SELECT c.id, c.is_pinned, c.latest_message_date
+        FROM chats c
+       WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} AND c.is_pinned = 0
+       ORDER BY c.latest_message_date DESC, c.id DESC
+       ${limit}
+    ),
+    page AS (
+      SELECT id, is_pinned, latest_message_date FROM pinned
+      UNION ALL
+      SELECT id, is_pinned, latest_message_date FROM unpinned
+      ORDER BY is_pinned DESC, latest_message_date DESC, id DESC
+      ${limit}
     )
     SELECT
       c.id, c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
@@ -1311,11 +1359,62 @@ export async function listChatsForInbox(
       ) AS unreadCount,
       EXISTS(SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
               WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL) AS hasKnownSender
-    FROM chats c
-    LEFT JOIN last l ON l.chat_id = c.id
-    WHERE ${chatVisible('c')} ${whereArchived}
-    ORDER BY c.is_pinned DESC, c.latest_message_date DESC
+    FROM page p
+    JOIN chats c ON c.id = p.id
+    LEFT JOIN messages l ON l.id = (
+      SELECT m.id FROM messages m
+       WHERE m.chat_id = c.id AND m.associated_message_type IS NULL
+         AND m.date_retracted IS NULL AND m.date_deleted IS NULL
+       ORDER BY m.date_created DESC, m.id DESC LIMIT 1
+    )
+    ORDER BY p.is_pinned DESC, p.latest_message_date DESC, p.id DESC
   `);
+}
+
+/**
+ * Inbox rows for the conversation list. Ordering mirrors Flutter Chat.sort:
+ * pinned first, then most-recent message first. The "last message" is resolved
+ * dedupe-safely (max date, then max id) so chats never appear twice.
+ */
+export async function listChatsForInbox(
+  db: AppDatabase,
+  opts: { includeArchived?: boolean } = {},
+): Promise<InboxRow[]> {
+  return queryChatsForInbox(db, {
+    archive: opts.includeArchived ? 'all' : 'active',
+    sender: 'any',
+  });
+}
+
+/** One growing-prefix page; the extra row is consumed only as the `hasMore` sentinel. */
+export async function listChatsForInboxPage(
+  db: AppDatabase,
+  opts: InboxPageOptions = {},
+): Promise<InboxPage> {
+  const requested = opts.limit ?? 50;
+  const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : 50;
+  const rows = await queryChatsForInbox(db, {
+    archive: opts.archive ?? 'active',
+    sender: opts.sender ?? 'any',
+    limit: limit + 1,
+  });
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+/** Lightweight exact count for page-external affordances such as the Unknown Senders footer. */
+export async function countChatsForInbox(
+  db: AppDatabase,
+  opts: Omit<InboxPageOptions, 'limit'> = {},
+): Promise<number> {
+  const filters = inboxFilterSql({
+    archive: opts.archive ?? 'active',
+    sender: opts.sender ?? 'any',
+  });
+  const rows = await db.all<{ count: number }>(sql`
+    SELECT COUNT(*) AS count FROM chats c
+     WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender}
+  `);
+  return rows[0]?.count ?? 0;
 }
 
 /**

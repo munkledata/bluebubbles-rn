@@ -11,6 +11,7 @@ export default function ArchivedScreen(): React.JSX.Element {
       emptyText="No archived conversations"
       filter={isArchived}
       includeArchived
+      archive="archived"
     />
   );
 }

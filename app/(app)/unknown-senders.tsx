@@ -13,6 +13,7 @@ export default function UnknownSendersScreen(): React.JSX.Element {
       title="Unknown Senders"
       emptyText="No conversations from unknown senders"
       filter={isUnknownSender}
+      sender="unknown"
     />
   );
 }

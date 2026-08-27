@@ -1,7 +1,9 @@
 import { Chat, Message } from '@core/models';
 import {
   applyLocalUnsend,
+  countChatsForInbox,
   listChatsForInbox,
+  listChatsForInboxPage,
   markMessageDeleted,
   upsertChats,
   upsertHandles,
@@ -86,6 +88,48 @@ describe('listChatsForInbox', () => {
     const rows = await listChatsForInbox(t.db);
     // pinned first (even though oldest), then unpinned newest→oldest
     expect(rows.map((r) => r.guid)).toEqual(['pinnedOld', 'newest', 'old']);
+  });
+
+  it('pages after applying archive and sender filters', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'pinned-known', {
+      participants: ['pinned@x.com'],
+      pinned: true,
+      messages: [{ guid: 'p1', text: 'pin', date: 10 }],
+    });
+    await seedChat(t, 'active-known', {
+      participants: ['known@x.com'],
+      messages: [{ guid: 'k1', text: 'known', date: 300 }],
+    });
+    await seedChat(t, 'active-unknown', {
+      participants: ['unknown@x.com'],
+      messages: [{ guid: 'u1', text: 'unknown', date: 400 }],
+    });
+    await seedChat(t, 'archived-known', {
+      participants: ['archived@x.com'],
+      archived: true,
+      messages: [{ guid: 'a1', text: 'archived', date: 500 }],
+    });
+    t.raw.prepare("UPDATE handles SET contact_id = id WHERE address != 'unknown@x.com'").run();
+
+    const first = await listChatsForInboxPage(t.db, {
+      archive: 'active',
+      sender: 'known',
+      limit: 1,
+    });
+    const second = await listChatsForInboxPage(t.db, {
+      archive: 'active',
+      sender: 'known',
+      limit: 2,
+    });
+
+    expect(first.rows.map((row) => row.guid)).toEqual(['pinned-known']);
+    expect(first.hasMore).toBe(true);
+    expect(second.rows.map((row) => row.guid)).toEqual(['pinned-known', 'active-known']);
+    expect(second.hasMore).toBe(false);
+    await expect(countChatsForInbox(t.db, { archive: 'active', sender: 'unknown' })).resolves.toBe(
+      1,
+    );
   });
 
   it('exposes the newest message as the preview fields', async () => {

@@ -39,6 +39,7 @@ import { SearchResultsView } from './SearchResultsView';
  * can never be yanked long after the message that caused it — including for a user whose scrolls
  * (TalkBack, programmatic) emit no drag to disarm it. See the convergence loop below. */
 const SCROLL_TO_TOP_WINDOW_MS = 1_000;
+const INBOX_PAGE_SIZE = 50;
 
 /** Phase 3 inbox: a live (reactive) FlashList of iOS conversation tiles, with a BOTTOM search bar
  * that swaps the list for the unified search results (chats + message hits) the moment you type. */
@@ -50,7 +51,21 @@ export function ConversationListScreen(): React.JSX.Element {
   // Keep that callback bound to the account that rendered this screen instance.
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [search, setSearch] = useState('');
-  const { data, isLoading, error } = useChats();
+  // Push the Unknown Senders split into SQL before pagination; filtering only the loaded page
+  // would silently omit known conversations that happen to sort after unknown ones.
+  const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
+  const {
+    data,
+    isLoading,
+    error,
+    hasMore = false,
+    loadMore,
+    unknownCount: queriedUnknownCount,
+  } = useChats(false, {
+    pageSize: INBOX_PAGE_SIZE,
+    sender: filterUnknown ? 'known' : 'any',
+    countUnknown: filterUnknown,
+  });
   // Memoized so the `data ?? []` fallback isn't a fresh array each render (which would defeat the
   // pinned/listData useMemos below and re-run them + re-render tiles every tick).
   const rows = useMemo(() => data ?? [], [data]);
@@ -99,12 +114,13 @@ export function ConversationListScreen(): React.JSX.Element {
   // Typing in the bottom bar replaces the conversation list with the unified search results.
   const searching = search.trim().length > 0;
   // "Filter Unknown Senders": contact-less chats leave the main inbox for the Unknown Senders list.
-  const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
+  // Keep this defensive filter for lightweight test/legacy adapters that still return an
+  // unfiltered array. Production has already filtered in SQL before applying the page limit.
   const visible = useMemo(
     () => (filterUnknown ? rows.filter((r) => r.hasKnownSender === 1) : rows),
     [rows, filterUnknown],
   );
-  const unknownCount = filterUnknown ? rows.length - visible.length : 0;
+  const unknownCount = filterUnknown ? (queriedUnknownCount ?? rows.length - visible.length) : 0;
   // Pinned chats render in a grid above the list (iOS).
   const pinned = useMemo(() => visible.filter((r) => r.isPinned), [visible]);
   const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
@@ -412,6 +428,8 @@ export function ConversationListScreen(): React.JSX.Element {
               // list back to the user.
               onContentSizeChange={onContentSizeChange}
               onScrollBeginDrag={onScrollBeginDrag}
+              onEndReached={hasMore ? loadMore : undefined}
+              onEndReachedThreshold={0.5}
               ListEmptyComponent={
                 isLoading ? (
                   <View style={styles.center}>

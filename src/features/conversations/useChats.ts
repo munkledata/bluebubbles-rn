@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { getDatabase } from '@db/database';
-import { listChatsForInbox, type InboxRow } from '@db/repositories';
+import {
+  countChatsForInbox,
+  listChatsForInbox,
+  listChatsForInboxPage,
+  type InboxArchiveFilter,
+  type InboxRow,
+  type InboxSenderFilter,
+} from '@db/repositories';
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
 import { createRowIdentityCache } from './rowIdentity';
 
@@ -9,15 +16,103 @@ import { createRowIdentityCache } from './rowIdentity';
 // chat_handles + handles (participants/titles).
 const TABLES = ['messages', 'chats', 'chat_handles', 'handles'];
 
+export interface UseChatsOptions {
+  /** Omit for the legacy unbounded search projection; visible list screens always pass 50. */
+  pageSize?: number;
+  archive?: InboxArchiveFilter;
+  sender?: InboxSenderFilter;
+  /** Exact active/unknown count for the main inbox's page-external footer. */
+  countUnknown?: boolean;
+}
+
+export interface ChatsState extends ReactiveState<InboxRow[]> {
+  /** Optional keeps existing lightweight test adapters/source consumers backward-compatible. */
+  hasMore?: boolean;
+  loadMore?: () => void;
+  unknownCount?: number;
+}
+
+interface ChatsQueryEnvelope {
+  key: string;
+  rows: InboxRow[];
+  hasMore: boolean;
+  unknownCount: number;
+}
+
 /** Live inbox rows, re-queried automatically as sync/socket writes land. */
-export function useChats(includeArchived = false): ReactiveState<InboxRow[]> {
+export function useChats(includeArchived = false, options: UseChatsOptions = {}): ChatsState {
   // Unchanged inbox rows keep their identity across reactive flushes, so the memoized
   // ConversationTile only re-renders for a real row change (see rowIdentity.ts).
   // Lazy initializer — useRef(create()) would re-invoke the factory every render.
   const [reconcile] = useState(() => createRowIdentityCache<InboxRow>((c) => c.guid));
-  return useReactiveQuery<InboxRow[]>(
-    async () => reconcile(await listChatsForInbox(getDatabase(), { includeArchived })),
+  const archive = options.archive ?? (includeArchived ? 'all' : 'active');
+  const sender = options.sender ?? 'any';
+  const requestedPageSize =
+    options.pageSize == null
+      ? null
+      : Number.isFinite(options.pageSize)
+        ? Math.max(1, Math.floor(options.pageSize))
+        : 50;
+  const queryKey = `${archive}|${sender}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
+  const [pageRequest, setPageRequest] = useState(() => ({
+    key: queryKey,
+    limit: requestedPageSize ?? 0,
+  }));
+  // A filter change starts again at one page without an effect/reset render. The envelope key
+  // below also prevents the previous filter's rows from flashing while the replacement resolves.
+  const limit =
+    requestedPageSize == null
+      ? null
+      : pageRequest.key === queryKey
+        ? pageRequest.limit
+        : requestedPageSize;
+
+  const state = useReactiveQuery<ChatsQueryEnvelope>(
+    async () => {
+      const db = getDatabase();
+      const [page, unknownCount] = await Promise.all([
+        limit == null
+          ? listChatsForInbox(db, { includeArchived }).then((rows) => ({
+              rows,
+              hasMore: false,
+            }))
+          : listChatsForInboxPage(db, { limit, archive, sender }),
+        options.countUnknown
+          ? countChatsForInbox(db, { archive: 'active', sender: 'unknown' })
+          : Promise.resolve(0),
+      ]);
+      return {
+        key: queryKey,
+        rows: reconcile(page.rows),
+        hasMore: page.hasMore,
+        unknownCount,
+      };
+    },
     TABLES,
-    [includeArchived],
+    [queryKey, limit, includeArchived],
   );
+
+  const current = state.data?.key === queryKey ? state.data : null;
+  const loadMore = useCallback((): void => {
+    if (requestedPageSize == null || !current?.hasMore) return;
+    const loaded = current.rows.length;
+    setPageRequest((previous) => {
+      const previousLimit = previous.key === queryKey ? previous.limit : requestedPageSize;
+      // FlashList may emit onEndReached twice before React paints the larger prefix. Permit only
+      // one outstanding page request so one edge event cannot jump from 50 rows to hundreds.
+      if (previousLimit > loaded) {
+        return previous.key === queryKey ? previous : { key: queryKey, limit: previousLimit };
+      }
+      return { key: queryKey, limit: previousLimit + requestedPageSize };
+    });
+  }, [current, queryKey, requestedPageSize]);
+
+  return {
+    data: current?.rows ?? null,
+    isLoading: state.isLoading || (current == null && state.error == null),
+    error: state.error,
+    hasMore: current?.hasMore ?? false,
+    loadMore,
+    unknownCount: current?.unknownCount ?? 0,
+  };
 }

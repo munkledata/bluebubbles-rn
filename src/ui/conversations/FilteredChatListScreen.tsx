@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useChats } from '@features/conversations/useChats';
-import type { InboxRow } from '@db/repositories';
+import type { InboxArchiveFilter, InboxRow, InboxSenderFilter } from '@db/repositories';
 import { Screen, ScreenHeader } from '../primitives';
 import { useTheme } from '../theme';
 import { useChatNavigator } from '../useChatNavigator';
@@ -24,6 +24,9 @@ interface FilteredChatListScreenProps {
   filter: (row: InboxRow) => boolean;
   /** Widen the reactive query to include archived chats (the Archived list needs them). */
   includeArchived?: boolean;
+  /** Matching SQL filters, applied before each 50-row page is cut. */
+  archive?: InboxArchiveFilter;
+  sender?: InboxSenderFilter;
 }
 
 /**
@@ -35,11 +38,23 @@ export function FilteredChatListScreen({
   emptyText,
   filter,
   includeArchived = false,
+  archive,
+  sender,
 }: FilteredChatListScreenProps): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const openChatNav = useChatNavigator();
-  const { data } = useChats(includeArchived);
+  const {
+    data,
+    hasMore = false,
+    loadMore,
+  } = useChats(includeArchived, {
+    pageSize: 50,
+    archive,
+    sender,
+  });
+  // Production rows are already filtered in SQL. Retain the predicate as a fail-closed adapter
+  // check and for the route's lightweight component-test data sources.
   const rows = useMemo(() => (data ?? []).filter(filter), [data, filter]);
 
   const openChat = useCallback(
@@ -62,6 +77,8 @@ export function FilteredChatListScreen({
           <ConversationTile row={item} onPress={openChat} onLongPress={onLongPress} />
         )}
         ItemSeparatorComponent={InboxSeparator}
+        onEndReached={hasMore ? loadMore : undefined}
+        onEndReachedThreshold={0.5}
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={[styles.empty, { color: theme.color.secondaryLabel }]}>{emptyText}</Text>

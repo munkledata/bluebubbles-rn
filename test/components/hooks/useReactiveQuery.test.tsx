@@ -36,6 +36,7 @@ beforeEach(() => {
 
 /** The DEBOUNCE_MS constant in the hook — a table-change burst coalesces inside this window. */
 const DEBOUNCE_MS = 24;
+const MAX_WAIT_MS = 250;
 
 /**
  * The `callback` op-sqlite would invoke when a subscribed table mutates. Grabbing it off the
@@ -113,6 +114,49 @@ describe('useReactiveQuery reactive re-run', () => {
     });
 
     expect(run).toHaveBeenCalledTimes(2); // initial + exactly ONE coalesced re-run
+  });
+
+  it('refreshes within the maximum wait and serializes a queued follow-up', async () => {
+    let resolveSlowRefresh!: (value: string) => void;
+    const slowRefresh = new Promise<string>((resolve) => {
+      resolveSlowRefresh = resolve;
+    });
+    const run = jest
+      .fn<Promise<string>, []>()
+      .mockResolvedValueOnce('INITIAL')
+      .mockReturnValueOnce(slowRefresh)
+      .mockResolvedValueOnce('FOLLOW_UP');
+    const { result } = await renderHook(() => useReactiveQuery(run, ['messages']));
+    await waitFor(() => expect(result.current.data).toBe('INITIAL'));
+    const onTableChanged = tableChangedCallback();
+
+    await act(async () => {
+      for (let elapsed = 0; elapsed < MAX_WAIT_MS; elapsed += 20) {
+        onTableChanged();
+        jest.advanceTimersByTime(Math.min(20, MAX_WAIT_MS - elapsed));
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(run).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      for (let elapsed = 0; elapsed < MAX_WAIT_MS; elapsed += 20) {
+        onTableChanged();
+        jest.advanceTimersByTime(Math.min(20, MAX_WAIT_MS - elapsed));
+      }
+      await Promise.resolve();
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveSlowRefresh('SLOW');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(result.current.data).toBe('FOLLOW_UP'));
   });
 
   it('unmounting cancels an in-flight debounce and unsubscribes', async () => {

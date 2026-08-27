@@ -11,6 +11,9 @@ export interface ReactiveState<T> {
 // Coalesce a burst of writes (e.g. a sync batch fires the reactive callback many
 // times) into a single re-query.
 const DEBOUNCE_MS = 24;
+// A sustained sync can keep resetting the short debounce forever. Force one refresh per bounded
+// window so the inbox/progress UI cannot remain stale until the final write happens to stop.
+const MAX_WAIT_MS = 250;
 
 /**
  * Runs `run()` once, then re-runs it (debounced) whenever any of `tables`
@@ -73,24 +76,45 @@ export function useReactiveQuery<T>(
     );
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let maxWaitTimer: ReturnType<typeof setTimeout> | null = null;
+    let executing = false;
+    let refreshQueued = false;
 
     const exec = async (): Promise<void> => {
-      try {
-        const data = await runRef.current();
-        if (!cancelled) setState({ data, isLoading: false, error: null });
-      } catch (e) {
-        if (!cancelled) {
-          setState({
-            data: null,
-            isLoading: false,
-            error: e instanceof Error ? e : new Error(String(e)),
-          });
-        }
+      if (executing) {
+        refreshQueued = true;
+        return;
       }
+      executing = true;
+      do {
+        refreshQueued = false;
+        try {
+          const data = await runRef.current();
+          if (!cancelled) setState({ data, isLoading: false, error: null });
+        } catch (e) {
+          if (!cancelled) {
+            setState({
+              data: null,
+              isLoading: false,
+              error: e instanceof Error ? e : new Error(String(e)),
+            });
+          }
+        }
+      } while (refreshQueued && !cancelled);
+      executing = false;
+    };
+    const flushScheduled = (): void => {
+      if (timer) clearTimeout(timer);
+      if (maxWaitTimer) clearTimeout(maxWaitTimer);
+      timer = null;
+      maxWaitTimer = null;
+      void exec();
     };
     const schedule = (): void => {
+      if (cancelled) return;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => void exec(), DEBOUNCE_MS);
+      timer = setTimeout(flushScheduled, DEBOUNCE_MS);
+      maxWaitTimer ??= setTimeout(flushScheduled, MAX_WAIT_MS);
     };
 
     void exec(); // initial load, immediate
@@ -110,6 +134,7 @@ export function useReactiveQuery<T>(
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      if (maxWaitTimer) clearTimeout(maxWaitTimer);
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
