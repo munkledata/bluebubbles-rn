@@ -1,9 +1,8 @@
 /**
- * Composition root — pure re-export barrel.
+ * Compatibility barrel for evaluation-safe operational services.
  *
- * The service layer is split into leaf modules (each a single responsibility); this barrel
- * simply re-exports their public surface so every `@/services` importer stays untouched.
- * Re-exporting from a leaf still evaluates it, so its module-eval side effects are preserved.
+ * Re-exporting evaluates every referenced leaf. Therefore entry registrations and startup work
+ * must never be added here; `index.js` and explicit boot commands own those effects.
  */
 
 export { ensureSyncedBackgroundForChat } from './backgrounds/syncedBackground';
@@ -51,11 +50,4 @@ export {
   applyNewServerUrl,
 } from './realtimeControl';
 export { connect, forget, disconnectFailureMessage } from './bootstrap';
-export {
-  startForegroundBoot,
-  retryForegroundBoot,
-  unlockForegroundBoot,
-  getForegroundBootSnapshot,
-  subscribeForegroundBoot,
-} from './boot/foregroundBoot';
 export { initErrorReporting, flushErrorReports, runErrorReportQueue } from './errors';

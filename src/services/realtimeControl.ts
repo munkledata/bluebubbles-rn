@@ -356,7 +356,12 @@ let realtimeRuntimeInstance: RealtimeRuntime | null = null;
 let realtimeForegroundActive = false;
 let realtimeLifecycleEpoch = 0;
 let fallbackOccurrenceSequence = 0;
-const fallbackOccurrenceNamespace = Crypto.randomUUID();
+let fallbackOccurrenceNamespace: string | null = null;
+
+function getFallbackOccurrenceNamespace(): string {
+  fallbackOccurrenceNamespace ??= Crypto.randomUUID();
+  return fallbackOccurrenceNamespace;
+}
 
 interface TransportHealthOwner {
   readonly accountLease: RealtimeDeliveryLease;
@@ -443,7 +448,7 @@ function getRealtimeRuntime(
   });
   const dispatcher = new DurableRealtimeDispatcher(db, expoDigestBackend, drain, {
     makeTransportOccurrenceId: (source) =>
-      `${source}:${fallbackOccurrenceNamespace}:${++fallbackOccurrenceSequence}`,
+      `${source}:${getFallbackOccurrenceNamespace()}:${++fallbackOccurrenceSequence}`,
     // `isDevServer()` safely handles runtimes (such as plain Node tests) where `__DEV__` does not
     // exist, and narrows the opt-in to the exact fixture session instead of every debug session.
     allowDevPersistWithoutDrain: isDevServer(),

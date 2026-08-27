@@ -949,20 +949,28 @@ export function prepareNotificationPresentationState(): Promise<void> {
 }
 
 // Fallback avatar for a sender with no contact photo: the Gator mark, so the notification shows
-// our icon instead of Android's generic gray silhouette. Resolved once at module load — headless-
-// safe (the require + RN asset registry are available even in the FCM wake context). Guarded:
-// resolveAssetSource can return undefined, and notify-kit throws on `icon: undefined`.
+// our icon instead of Android's generic gray silhouette. Resolve it only when the first message
+// notification needs it; importing notification operations must not touch React Native's asset
+// registry. Guarded because resolveAssetSource can return undefined and notify-kit throws on
+// `icon: undefined`.
+let gatorAvatarResolved = false;
 let gatorAvatarUri: string | undefined;
-try {
-  // Lazy require (literal strings, so Metro still bundles both) — the React-free node/jest import
-  // graph never evaluates react-native, and any failure here just leaves the fallback undefined.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- a static RN import breaks the React-free node/headless import path
-  const { Image } = require('react-native') as typeof import('react-native');
-  gatorAvatarUri = Image.resolveAssetSource(
-    require('../../../assets/notification-avatar.png') as number,
-  )?.uri;
-} catch {
-  gatorAvatarUri = undefined;
+
+function getGatorAvatarUri(): string | undefined {
+  if (gatorAvatarResolved) return gatorAvatarUri;
+  gatorAvatarResolved = true;
+  try {
+    // Literal requires keep both dependencies in Metro while avoiding a static React Native import
+    // in React-free Node graphs. Any failure simply omits the optional fallback avatar.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- static RN import breaks the React-free node/headless import path
+    const { Image } = require('react-native') as typeof import('react-native');
+    gatorAvatarUri = Image.resolveAssetSource(
+      require('../../../assets/notification-avatar.png') as number,
+    )?.uri;
+  } catch {
+    gatorAvatarUri = undefined;
+  }
+  return gatorAvatarUri;
 }
 
 let channelReady: Promise<string> | null = null;
@@ -1218,14 +1226,13 @@ async function postNotificationNow(
   if (isActiveChat(intent.chatGuid)) return;
   const existingHistory = findDisplayedMessageHistory(displayed, route.chatId)?.entries ?? [];
   const replacesExistingLine = existingHistory.some((entry) => entry.messageId === route.messageId);
+  const avatarUri = intent.avatarUri ?? getGatorAvatarUri();
   const history = mergeMessageNotificationHistory(existingHistory, {
     messageId: route.messageId,
     text: intent.body,
     timestamp: intent.timestamp,
     senderName: intent.senderName,
-    ...((intent.avatarUri ?? gatorAvatarUri)
-      ? { avatarUri: (intent.avatarUri ?? gatorAvatarUri) as string }
-      : {}),
+    ...(avatarUri ? { avatarUri } : {}),
   });
   // A delayed duplicate may already have fallen outside the six-line window. In that case the
   // merge is a no-op, so do not repost unchanged history or alert the user again.
