@@ -33,6 +33,17 @@ export function upsertChatsWithinTransaction(
     );
     if (deduped.length === 0) return map;
 
+    // The server can seed the initial pinned bit for a newly discovered chat, but it never owns
+    // this device's manual order. Append first-time pinned rows after every existing local pin;
+    // conflict rows ignore excluded.pin_order together with the other device-local fields below.
+    const hasPinnedInsert = deduped.some((chat) => chat.isPinned === true);
+    const maxPinOrder = hasPinnedInsert
+      ? await db.all<{ value: number | null }>(sql`
+          SELECT MAX(pin_order) AS value FROM chats WHERE is_pinned = 1
+        `)
+      : [];
+    let nextPinOrder = (maxPinOrder[0]?.value ?? -1) + 1;
+
     const retirementKeyByGuid = new Map(
       deduped.map(
         (chat) => [chat.guid, `${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}${chat.guid}`] as const,
@@ -55,6 +66,7 @@ export function upsertChatsWithinTransaction(
           style: c.style ?? null,
           isArchived: c.isArchived ?? false,
           isPinned: c.isPinned ?? false,
+          pinOrder: c.isPinned === true ? nextPinOrder++ : null,
           muteType: c.muteType ?? null,
           // Server-owned (macOS 26 synced background): the current channel GUID, or null when the
           // chat has no background. Refreshed on every sync (unlike the device-local columns below).
@@ -73,7 +85,8 @@ export function upsertChatsWithinTransaction(
           style: sql`excluded.style`,
           // Server-owned → refreshed on re-sync (a changed/removed background propagates).
           syncedBackgroundChannel: sql`excluded.synced_background_channel`,
-          // is_pinned, is_archived, mute_type, custom_name, custom_color are device-local:
+          // is_pinned, pin_order, is_archived, mute_type, custom_name and custom_color are
+          // device-local:
           // SEEDED on first insert from the server, but NOT overwritten on a re-sync — the
           // user toggles them locally (pin / archive / mute / customization UI), so they
           // survive. (Pin/archive have no server round-trip in this client.)
@@ -340,7 +353,104 @@ export function setChatPinWithinTransaction(
   pinned: boolean,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
-    await db.update(chats).set({ isPinned: pinned }).where(eq(chats.guid, guid));
+    const pinnedValue = pinned ? 1 : 0;
+    await db.run(sql`
+      UPDATE chats
+         SET is_pinned = ${pinnedValue},
+             pin_order = CASE
+               WHEN ${pinnedValue} = 0 THEN NULL
+               WHEN is_pinned = 1 AND pin_order IS NOT NULL THEN pin_order
+               ELSE COALESCE(
+                 (SELECT MAX(existing.pin_order) + 1
+                    FROM chats AS existing
+                   WHERE existing.is_pinned = 1),
+                 0
+               )
+             END
+       WHERE guid = ${guid}
+    `);
+  });
+}
+
+export type PinnedOrderMoveDirection = 'earlier' | 'later';
+
+/** Swap two visible, active pinned chats. The UI supplies neighboring rows from its current grid. */
+export async function swapPinnedChatOrder(
+  db: AppDatabase,
+  guid: string,
+  adjacentGuid: string,
+  direction: PinnedOrderMoveDirection,
+  commitGuard?: DbCommitGuard,
+  sender: InboxSenderFilter = 'any',
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    (context) =>
+      swapPinnedChatOrderWithinTransaction(context, guid, adjacentGuid, direction, sender),
+    commitGuard,
+  );
+}
+
+export function swapPinnedChatOrderWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  adjacentGuid: string,
+  direction: PinnedOrderMoveDirection,
+  sender: InboxSenderFilter = 'any',
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    if (guid === adjacentGuid) return false;
+    const filters = inboxFilterSql({ archive: 'active', sender });
+    type PinnedOrderCandidate = {
+      id: number;
+      guid: string;
+      pinOrder: number | null;
+      earlierGuid: string | null;
+      laterGuid: string | null;
+    };
+    const candidates = (await db.all<PinnedOrderCandidate>(sql`
+        WITH ordered AS (
+          SELECT c.id, c.guid, c.pin_order AS pinOrder,
+                 LAG(c.guid) OVER (
+                   ORDER BY COALESCE(c.pin_order, 9223372036854775807) ASC, c.id DESC
+                 ) AS earlierGuid,
+                 LEAD(c.guid) OVER (
+                   ORDER BY COALESCE(c.pin_order, 9223372036854775807) ASC, c.id DESC
+                 ) AS laterGuid
+            FROM chats AS c
+           WHERE c.is_pinned = 1 AND ${chatVisible('c')} ${filters.archive} ${filters.sender}
+        )
+        SELECT id, guid, pinOrder, earlierGuid, laterGuid
+          FROM ordered
+         WHERE guid IN (${guid}, ${adjacentGuid})
+      `)) as PinnedOrderCandidate[];
+    if (candidates.length !== 2) return false;
+
+    const current = candidates.find((row) => row.guid === guid);
+    const adjacent = candidates.find((row) => row.guid === adjacentGuid);
+    const expectedAdjacentGuid =
+      direction === 'earlier' ? current?.earlierGuid : current?.laterGuid;
+    if (
+      current?.pinOrder == null ||
+      adjacent?.pinOrder == null ||
+      current.pinOrder === adjacent.pinOrder ||
+      expectedAdjacentGuid !== adjacentGuid
+    ) {
+      return false;
+    }
+
+    const swapped = await db.all<{ id: number }>(sql`
+      UPDATE chats
+         SET pin_order = CASE id
+           WHEN ${current.id} THEN ${adjacent.pinOrder}
+           WHEN ${adjacent.id} THEN ${current.pinOrder}
+         END
+       WHERE id IN (${current.id}, ${adjacent.id})
+         AND is_pinned = 1
+         AND is_archived = 0
+      RETURNING id
+    `);
+    return swapped.length === 2;
   });
 }
 
@@ -1219,6 +1329,8 @@ export interface InboxRow {
   customColor: string | null;
   style: number | null;
   isPinned: number;
+  /** Production inbox queries always provide the persisted manual rank. */
+  pinOrder?: number | null;
   isArchived: number;
   muteType: string | null;
   latestMessageDate: number | null;
@@ -1292,34 +1404,37 @@ async function queryChatsForInbox(
   const filters = inboxFilterSql(options);
   const limit = options.limit == null ? sql`` : sql`LIMIT ${options.limit}`;
   return db.all<InboxRow>(sql`
-    -- Bound the chat identities FIRST. Splitting pinned/unpinned lets the existing
-    -- (is_archived, latest_message_date) index produce each date-ordered branch without a
-    -- whole-inbox temporary sort. The final merge sorts at most two bounded branches.
+    -- Bound the chat identities FIRST. Pinned rows use their device-local manual rank; unpinned
+    -- rows retain newest-first ordering. Splitting the branches lets each use its own index and
+    -- keeps the final merge bounded, while new pinned activity cannot perturb the manual order.
     WITH pinned AS (
-      SELECT c.id, c.is_pinned, c.latest_message_date
+      SELECT c.id, c.is_pinned,
+             COALESCE(c.pin_order, 9223372036854775807) AS pin_sort,
+             NULL AS date_sort
         FROM chats c
        WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} AND c.is_pinned = 1
-       ORDER BY c.latest_message_date DESC, c.id DESC
+       ORDER BY pin_sort ASC, c.id DESC
        ${limit}
     ),
     unpinned AS (
-      SELECT c.id, c.is_pinned, c.latest_message_date
+      SELECT c.id, c.is_pinned, NULL AS pin_sort, c.latest_message_date AS date_sort
         FROM chats c
        WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} AND c.is_pinned = 0
        ORDER BY c.latest_message_date DESC, c.id DESC
        ${limit}
     ),
     page AS (
-      SELECT id, is_pinned, latest_message_date FROM pinned
+      SELECT id, is_pinned, pin_sort, date_sort FROM pinned
       UNION ALL
-      SELECT id, is_pinned, latest_message_date FROM unpinned
-      ORDER BY is_pinned DESC, latest_message_date DESC, id DESC
+      SELECT id, is_pinned, pin_sort, date_sort FROM unpinned
+      ORDER BY is_pinned DESC, pin_sort ASC, date_sort DESC, id DESC
       ${limit}
     )
     SELECT
       c.id, c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
       c.custom_name AS customName, c.custom_color AS customColor,
-      c.style, c.is_pinned AS isPinned, c.is_archived AS isArchived, c.mute_type AS muteType,
+      c.style, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
+      c.is_archived AS isArchived, c.mute_type AS muteType,
       c.latest_message_date AS latestMessageDate, c.last_read_message_guid AS lastReadMessageGuid,
       l.text AS lastText, l.subject AS lastSubject, l.is_from_me AS lastIsFromMe,
       l.has_attachments AS lastHasAttachments, l.date_created AS lastDate, l.guid AS lastGuid,
@@ -1367,14 +1482,14 @@ async function queryChatsForInbox(
          AND m.date_retracted IS NULL AND m.date_deleted IS NULL
        ORDER BY m.date_created DESC, m.id DESC LIMIT 1
     )
-    ORDER BY p.is_pinned DESC, p.latest_message_date DESC, p.id DESC
+    ORDER BY p.is_pinned DESC, p.pin_sort ASC, p.date_sort DESC, p.id DESC
   `);
 }
 
 /**
- * Inbox rows for the conversation list. Ordering mirrors Flutter Chat.sort:
- * pinned first, then most-recent message first. The "last message" is resolved
- * dedupe-safely (max date, then max id) so chats never appear twice.
+ * Inbox rows for the conversation list: manually ordered pins first, then unpinned chats by newest
+ * message. The "last message" is resolved dedupe-safely (max date, then max id) so chats never
+ * appear twice.
  */
 export async function listChatsForInbox(
   db: AppDatabase,

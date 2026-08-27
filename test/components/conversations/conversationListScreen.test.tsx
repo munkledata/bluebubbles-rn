@@ -167,14 +167,23 @@ jest.mock('@ui/conversations/PinnedGrid', () => {
   const ReactLib = require('react');
   const { View, Pressable, Text } = require('react-native');
   return {
-    PinnedGrid: (props: { rows: { guid: string }[]; onPress: (g: string) => void }) =>
+    PinnedGrid: (props: {
+      rows: { guid: string }[];
+      onPress: (g: string) => void;
+      onLongPress: (row: { guid: string }) => void;
+    }) =>
       ReactLib.createElement(
         View,
         null,
         props.rows.map((r) =>
           ReactLib.createElement(
             Pressable,
-            { key: r.guid, testID: `pinned-${r.guid}`, onPress: () => props.onPress(r.guid) },
+            {
+              key: r.guid,
+              testID: `pinned-${r.guid}`,
+              onPress: () => props.onPress(r.guid),
+              onLongPress: () => props.onLongPress(r),
+            },
             ReactLib.createElement(Text, null, r.guid),
           ),
         ),
@@ -193,16 +202,31 @@ jest.mock('@ui/conversations/SearchResultsView', () => {
 
 jest.mock('@ui/conversations/ChatActionsSheet', () => {
   const ReactLib = require('react');
-  const { Text } = require('react-native');
+  const { Text, View } = require('react-native');
   return {
     // The screen maps rows through the REAL toChatActionTarget; only the sheet is probed.
     toChatActionTarget: jest.requireActual('@ui/conversations/ChatActionsSheet').toChatActionTarget,
-    ChatActionsSheet: (props: { target: { guid: string } | null }) =>
-      ReactLib.createElement(
-        Text,
-        { testID: 'actions' },
-        props.target ? props.target.guid : 'none',
-      ),
+    ChatActionsSheet: (props: {
+      target: {
+        guid: string;
+        moveEarlierGuid?: string | null;
+        moveLaterGuid?: string | null;
+      } | null;
+    }) =>
+      ReactLib.createElement(View, null, [
+        ReactLib.createElement(
+          Text,
+          { key: 'actions', testID: 'actions' },
+          props.target ? props.target.guid : 'none',
+        ),
+        ReactLib.createElement(
+          Text,
+          { key: 'neighbors', testID: 'pin-neighbors' },
+          props.target
+            ? `${props.target.moveEarlierGuid ?? 'none'}|${props.target.moveLaterGuid ?? 'none'}`
+            : 'none|none',
+        ),
+      ]),
   };
 });
 
@@ -513,6 +537,19 @@ describe('ConversationListScreen — navigation & actions', () => {
     fireEvent(await screen.findByTestId('tile-l1'), 'longPress');
     const actions = await screen.findByTestId('actions');
     expect(actions.props.children).toBe('l1');
+  });
+
+  it('passes the displayed pinned neighbors into the reorder sheet', async () => {
+    setChats({
+      data: [
+        makeRow({ guid: 'pin-a', isPinned: 1 }),
+        makeRow({ guid: 'pin-b', isPinned: 1 }),
+        makeRow({ guid: 'pin-c', isPinned: 1 }),
+      ],
+    });
+    await renderWithTheme(<ConversationListScreen />);
+    fireEvent(await screen.findByTestId('pinned-pin-b'), 'longPress');
+    expect((await screen.findByTestId('pin-neighbors')).props.children).toBe('pin-a|pin-c');
   });
 });
 

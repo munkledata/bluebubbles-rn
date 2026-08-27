@@ -27,6 +27,8 @@ export interface ChatCustomizationRow {
   customColor: string | null;
   muteType: string | null;
   isPinned: number;
+  /** Optional only for legacy backup callers that predate PIN-01. */
+  pinOrder?: number | null;
   isArchived: number;
 }
 export interface PortableChatParticipant {
@@ -45,6 +47,7 @@ export interface PortableChatCustomizationRow {
   customColor: string | null;
   muteType: string | null;
   isPinned: number;
+  pinOrder: number | null;
   isArchived: number;
 }
 
@@ -170,7 +173,8 @@ export async function getChatCustomizations(
   const rows = await db.all<ChatCustomizationExportRow>(sql`
     SELECT c.id AS chatId, c.guid, c.chat_identifier AS chatIdentifier, c.style,
            c.custom_name AS customName, c.custom_color AS customColor,
-           c.mute_type AS muteType, c.is_pinned AS isPinned, c.is_archived AS isArchived,
+           c.mute_type AS muteType, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
+           c.is_archived AS isArchived,
            h.address AS participantAddress, h.service AS participantService
       FROM chats AS c
       LEFT JOIN chat_handles AS ch ON ch.chat_id = c.id
@@ -205,6 +209,7 @@ export async function getChatCustomizations(
           customColor: row.customColor,
           muteType: row.muteType,
           isPinned: row.isPinned,
+          pinOrder: row.pinOrder ?? null,
           isArchived: row.isArchived,
         },
         participants: new Set(),
@@ -373,6 +378,17 @@ export async function restoreChatCustomizationWithinTransaction(
   customization: ChatCustomizationRow,
 ): Promise<number> {
   return runInTransactionContext(context, async (db) => {
+    let pinOrder: number | null = null;
+    if (customization.isPinned === 1) {
+      if (customization.pinOrder != null) {
+        pinOrder = customization.pinOrder;
+      } else {
+        const rows = await db.all<{ value: number | null }>(sql`
+          SELECT MAX(pin_order) AS value FROM chats WHERE is_pinned = 1
+        `);
+        pinOrder = (rows[0]?.value ?? -1) + 1;
+      }
+    }
     const rows = await db
       .update(chats)
       .set({
@@ -380,6 +396,7 @@ export async function restoreChatCustomizationWithinTransaction(
         customColor: customization.customColor,
         muteType: customization.muteType,
         isPinned: customization.isPinned === 1,
+        pinOrder,
         isArchived: customization.isArchived === 1,
       })
       .where(eq(chats.guid, customization.guid))
@@ -516,6 +533,7 @@ export function restorePreparedBackupWithinTransaction(
                json_extract(entry.value, '$.customColor') AS custom_color,
                json_extract(entry.value, '$.muteType') AS mute_type,
                json_extract(entry.value, '$.isPinned') AS is_pinned,
+               json_extract(entry.value, '$.pinOrder') AS pin_order,
                json_extract(entry.value, '$.isArchived') AS is_archived
           FROM json_each(${input.chatCustomizationsJson}) AS entry
       ),
@@ -896,12 +914,39 @@ export function restorePreparedBackupWithinTransaction(
         SELECT source_rows.*, resolved.chat_id
           FROM source_rows
           JOIN resolved ON resolved.source_index = source_rows.source_index
+      ),
+      source_pin_ranked AS (
+        SELECT source_index, chat_id,
+               ROW_NUMBER() OVER (
+                 ORDER BY CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END,
+                          pin_order ASC,
+                          source_index ASC
+               ) - 1 AS normalized_pin_order
+          FROM source
+         WHERE is_pinned = 1
+      ),
+      untouched_pin_base AS (
+        SELECT COALESCE(MAX(c.pin_order), -1) + 1 AS next_pin_order
+          FROM chats AS c
+         WHERE c.is_pinned = 1
+           AND NOT EXISTS (SELECT 1 FROM source WHERE source.chat_id = c.id)
       )
       UPDATE chats
          SET custom_name = (SELECT source.custom_name FROM source WHERE source.chat_id = chats.id),
              custom_color = (SELECT source.custom_color FROM source WHERE source.chat_id = chats.id),
              mute_type = (SELECT source.mute_type FROM source WHERE source.chat_id = chats.id),
              is_pinned = (SELECT source.is_pinned FROM source WHERE source.chat_id = chats.id),
+             pin_order = (
+               SELECT CASE
+                 WHEN source.is_pinned != 1 THEN NULL
+                 ELSE (SELECT next_pin_order FROM untouched_pin_base)
+                      + (SELECT source_pin_ranked.normalized_pin_order
+                           FROM source_pin_ranked
+                          WHERE source_pin_ranked.chat_id = source.chat_id)
+               END
+                 FROM source
+                WHERE source.chat_id = chats.id
+             ),
              is_archived = (SELECT source.is_archived FROM source WHERE source.chat_id = chats.id)
        WHERE id IN (SELECT chat_id FROM source)
       RETURNING id

@@ -102,6 +102,8 @@ const ChatCustomizationShape = {
   customColor: z.string().max(BACKUP_LIMITS.chatColorCharacters).nullable(),
   muteType: z.string().max(BACKUP_LIMITS.muteTypeCharacters).nullable(),
   isPinned: z.number().int().min(0).max(1),
+  // Optional keeps pre-PIN-01 v1/v2 backups importable. Restore assigns legacy pins a stable rank.
+  pinOrder: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   isArchived: z.number().int().min(0).max(1),
 } as const;
 

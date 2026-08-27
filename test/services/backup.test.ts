@@ -1,8 +1,11 @@
 import { Chat } from '@core/models';
 import {
   kvSet,
+  listChatsForInbox,
   restoreThemes,
   setChatCustomization,
+  setChatPin,
+  swapPinnedChatOrder,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
@@ -172,6 +175,42 @@ describe('buildBackup', () => {
 });
 
 describe('restoreBackup round-trip', () => {
+  it('preserves manual pinned-chat order across a portable backup', async () => {
+    const src = await createTestDb();
+    for (const guid of ['pin-a', 'pin-b', 'pin-c']) await seedChat(src, guid);
+    await setChatPin(src.db, 'pin-a', true);
+    await setChatPin(src.db, 'pin-b', true);
+    await setChatPin(src.db, 'pin-c', true);
+    await swapPinnedChatOrder(src.db, 'pin-c', 'pin-b', 'earlier');
+
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    expect(
+      backup.chatCustomizations
+        .filter((row) => row.isPinned === 1)
+        .sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0))
+        .map((row) => row.identity.serverChatIdentifier),
+    ).toEqual(['pin-a', 'pin-c', 'pin-b']);
+
+    const dst = await createTestDb();
+    await seedChat(dst, 'local-pin');
+    await setChatPin(dst.db, 'local-pin', true);
+    for (const guid of ['pin-a', 'pin-b', 'pin-c']) await seedChat(dst, guid);
+    await restoreBackup(dst.db, backup);
+    expect((await listChatsForInbox(dst.db)).map((row) => row.guid)).toEqual([
+      'local-pin',
+      'pin-a',
+      'pin-c',
+      'pin-b',
+    ]);
+    await expect(swapPinnedChatOrder(dst.db, 'pin-c', 'pin-a', 'earlier')).resolves.toBe(true);
+    expect((await listChatsForInbox(dst.db)).map((row) => row.guid)).toEqual([
+      'local-pin',
+      'pin-c',
+      'pin-a',
+      'pin-b',
+    ]);
+  });
+
   it('round-trips lowercase SMS service identities', async () => {
     const t = await createTestDb();
     const guid = 'iMessage;-;5551234567';

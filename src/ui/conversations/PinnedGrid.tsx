@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { InboxRow } from '@db/repositories';
+import { type AccessibilityActionEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { InboxRow, PinnedOrderMoveDirection } from '@db/repositories';
 import {
   avatarSeed,
   dedupeParticipantDetails,
@@ -18,6 +18,7 @@ interface PinnedGridProps {
   rows: InboxRow[];
   onPress: (guid: string) => void;
   onLongPress: (row: InboxRow) => void;
+  onMove?: (guid: string, adjacentGuid: string, direction: PinnedOrderMoveDirection) => void;
 }
 
 /** iOS pinned-conversations grid: large circular avatars above the inbox list. */
@@ -25,6 +26,7 @@ export function PinnedGrid({
   rows,
   onPress,
   onLongPress,
+  onMove,
 }: PinnedGridProps): React.JSX.Element | null {
   const theme = useTheme();
   if (rows.length === 0) return null;
@@ -39,6 +41,26 @@ export function PinnedGrid({
           participantAvatars(row.participantAvatars),
           colors,
         );
+        const earlierGuid = rows[index - 1]?.guid ?? null;
+        const laterGuid = rows[index + 1]?.guid ?? null;
+        const accessibilityActions = [
+          { name: 'longpress', label: 'Show conversation actions' },
+          ...(onMove && earlierGuid ? [{ name: 'moveEarlier', label: 'Move earlier' }] : []),
+          ...(onMove && laterGuid ? [{ name: 'moveLater', label: 'Move later' }] : []),
+        ];
+        const handleAccessibilityAction = (event: AccessibilityActionEvent): void => {
+          switch (event.nativeEvent.actionName) {
+            case 'longpress':
+              onLongPress(row);
+              break;
+            case 'moveEarlier':
+              if (earlierGuid) onMove?.(row.guid, earlierGuid, 'earlier');
+              break;
+            case 'moveLater':
+              if (laterGuid) onMove?.(row.guid, laterGuid, 'later');
+              break;
+          }
+        };
         return (
           <Pressable
             key={row.guid}
@@ -47,6 +69,9 @@ export function PinnedGrid({
             onLongPress={() => onLongPress(row)}
             delayLongPress={350}
             accessibilityRole="button"
+            accessibilityActions={accessibilityActions}
+            accessibilityHint="Double tap and hold for conversation actions"
+            onAccessibilityAction={handleAccessibilityAction}
             // Unread belongs IN the label: the dot below is the only unread signal in the grid and
             // a decorative view announces nothing, so TalkBack users would otherwise never hear it.
             accessibilityLabel={`Pinned conversation: ${title}${unread ? ', unread' : ''}`}

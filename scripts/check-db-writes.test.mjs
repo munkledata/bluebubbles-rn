@@ -1893,6 +1893,9 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
     [
       'app/(setup)/permissions.tsx#PermissionsScreen.<callback:814e54dd2c>:mutator-call:c473d7610e80',
       'app/(setup)/permissions.tsx#PermissionsScreen.onContinue:mutator-call:113a3d922218',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:7b83b677ec>.<callback:d758981261>.<callback:9975393adf>:mutator-call:93bdac05cd12',
+      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:e20ad7afab>.<callback:41af360d2a>.<callback:27c63caa7a>:mutator-call:4fe4315961cd',
+      'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:0eeed6d4ea>.<callback:0421ed26e1>:mutator-call:8891386a8ca2',
     ].sort(),
   );
   assert.deepEqual(
@@ -4562,16 +4565,14 @@ fullOnlyTest(
           '      });',
       },
       {
-        label: '0038+0039 retry accepts an inexact migration result',
+        label: 'active-migration retry accepts an inexact migration result',
         path: 'src/db/database.ts',
         before:
-          '          retriedMigrations.length === 2 &&\n' +
-          '            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET &&\n' +
-          '            retriedMigrations[1] === DB_ACTIVE_MIGRATION_DEATH_HEAD,',
+          '          retriedMigrations.length === expectedTailNames.length &&\n' +
+          '            retriedMigrations.every((name, index) => name === expectedTailNames[index]),',
         after:
-          '          retriedMigrations.length >= 2 &&\n' +
-          '            retriedMigrations[0] === DB_ACTIVE_MIGRATION_DEATH_TARGET &&\n' +
-          '            retriedMigrations[1] === DB_ACTIVE_MIGRATION_DEATH_HEAD,',
+          '          retriedMigrations.length >= expectedTailNames.length &&\n' +
+          '            retriedMigrations.every((name, index) => name === expectedTailNames[index]),',
       },
       {
         label: 'post-persistence active-migration retirement is bypassed',
@@ -4897,8 +4898,8 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0040_chats_pin_order' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0038_scrub_reaction_selected_message_text' as const;",
         );
       },
     },
@@ -5432,6 +5433,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'setChatCustomizationWithinTransaction',
     'setChatMuteWithinTransaction',
     'setChatPinWithinTransaction',
+    'swapPinnedChatOrderWithinTransaction',
     'setChatUnreadLocalWithinTransaction',
     'setHandleServerAvatarWithinTransaction',
     'setSyncedBackgroundLuminanceIfCurrentWithinTransaction',
@@ -5716,9 +5718,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
       'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction:drizzle-update:eb8d843c171a',
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
-      'src/db/repositories/chats.ts#setChatPinWithinTransaction:drizzle-update:90be45ecc8db',
+      'src/db/repositories/chats.ts#setChatPinWithinTransaction:sql-update:600d385756f7',
       'src/db/repositories/chats.ts#setSyncedBackgroundLuminanceIfCurrentWithinTransaction:drizzle-update:076320f3beec',
       'src/db/repositories/chats.ts#setSyncedBackgroundUriIfCurrentWithinTransaction:drizzle-update:653f97744cea',
+      'src/db/repositories/chats.ts#swapPinnedChatOrderWithinTransaction:sql-update:b0faceaf9bcd',
       'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
       'src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction:sql-update:a6cadd1370ec',
       'src/db/repositories/errorReports.ts#deleteErrorReportsWithinTransaction:sql-delete:bb847c13001b',
@@ -5732,7 +5735,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977',
-      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:2b1732f10190',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:22e3903ba5ed',
       'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction:drizzle-insert:cc8ec01847ce',
       'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction:drizzle-delete:7419c1ff4890',
       'src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction:drizzle-delete:8fead5d6c602',
@@ -5783,7 +5786,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 76);
+  assert.equal(selected.length, 77);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

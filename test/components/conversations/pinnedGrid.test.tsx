@@ -114,6 +114,39 @@ describe('PinnedGrid', () => {
     expect(onLongPress).toHaveBeenCalledWith(row);
   });
 
+  it('exposes boundary-aware TalkBack move actions with exact neighboring chats', async () => {
+    const onMove = jest.fn();
+    const rows = [
+      makeRow({ guid: 'pin-a', participantNames: 'Alice' }),
+      makeRow({ guid: 'pin-b', participantNames: 'Bob' }),
+      makeRow({ guid: 'pin-c', participantNames: 'Carol' }),
+    ];
+    await renderWithTheme(
+      <PinnedGrid rows={rows} onPress={() => {}} onLongPress={() => {}} onMove={onMove} />,
+    );
+
+    const first = screen.getByLabelText('Pinned conversation: Alice');
+    const middle = screen.getByLabelText('Pinned conversation: Bob');
+    expect(first.props.accessibilityActions).toEqual([
+      { name: 'longpress', label: 'Show conversation actions' },
+      { name: 'moveLater', label: 'Move later' },
+    ]);
+    expect(middle.props.accessibilityActions).toEqual([
+      { name: 'longpress', label: 'Show conversation actions' },
+      { name: 'moveEarlier', label: 'Move earlier' },
+      { name: 'moveLater', label: 'Move later' },
+    ]);
+
+    await fireEvent(middle, 'accessibilityAction', {
+      nativeEvent: { actionName: 'moveEarlier' },
+    });
+    await fireEvent(middle, 'accessibilityAction', {
+      nativeEvent: { actionName: 'moveLater' },
+    });
+    expect(onMove).toHaveBeenNthCalledWith(1, 'pin-b', 'pin-a', 'earlier');
+    expect(onMove).toHaveBeenNthCalledWith(2, 'pin-b', 'pin-c', 'later');
+  });
+
   // The grid has no preview, timestamp or badge, so before the dot a pinned chat gave the user no
   // signal at all that it had unread messages — and it's the ListHeaderComponent, i.e. the first
   // thing they look at.

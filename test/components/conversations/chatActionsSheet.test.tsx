@@ -35,6 +35,7 @@ import {
   setChatArchiveWithinTransaction,
   setChatMuteWithinTransaction,
   setChatPinWithinTransaction,
+  swapPinnedChatOrder,
 } from '@db/repositories';
 import { getDatabase } from '@db/database';
 import { deleteChat, markRead, markUnread } from '@/services';
@@ -53,6 +54,7 @@ jest.mock('@db/repositories', () => ({
   setChatPinWithinTransaction: jest.fn(() => Promise.resolve()),
   setChatMuteWithinTransaction: jest.fn(() => Promise.resolve()),
   setChatArchiveWithinTransaction: jest.fn(() => Promise.resolve()),
+  swapPinnedChatOrder: jest.fn(() => Promise.resolve(true)),
 }));
 
 jest.mock('@/services', () => ({
@@ -67,6 +69,7 @@ const mockGetDatabase = getDatabase as jest.Mock;
 const mockSetChatPinWithinTransaction = setChatPinWithinTransaction as jest.Mock;
 const mockSetChatMuteWithinTransaction = setChatMuteWithinTransaction as jest.Mock;
 const mockSetChatArchiveWithinTransaction = setChatArchiveWithinTransaction as jest.Mock;
+const mockSwapPinnedChatOrder = swapPinnedChatOrder as jest.Mock;
 const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
@@ -159,6 +162,7 @@ beforeEach(() => {
   mockSetChatPinWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatArchiveWithinTransaction.mockReset().mockResolvedValue(undefined);
+  mockSwapPinnedChatOrder.mockReset().mockResolvedValue(true);
   ACCOUNT_A_DATABASE.run.mockReset().mockResolvedValue(undefined);
   ACCOUNT_B_DATABASE.run.mockReset().mockResolvedValue(undefined);
   mockMarkUnread.mockClear();
@@ -257,6 +261,34 @@ describe('ChatActionsSheet — Pin', () => {
       await Promise.allSettled([pause]);
       resumeRealtimeDeliveries();
     }
+  });
+});
+
+describe('ChatActionsSheet — pinned order', () => {
+  it('shows only available directions and swaps with the exact neighbor', async () => {
+    const target = makeTarget({
+      isPinned: true,
+      moveEarlierGuid: 'earlier-guid',
+      moveLaterGuid: null,
+    });
+    const onClose = await renderSheet(target);
+
+    expect(screen.getByText('Move Earlier')).toBeTruthy();
+    expect(screen.queryByText('Move Later')).toBeNull();
+    fireEvent.press(screen.getByText('Move Earlier'));
+
+    await waitFor(() =>
+      expect(mockSwapPinnedChatOrder).toHaveBeenCalledWith(
+        ACCOUNT_A_DATABASE,
+        target.guid,
+        'earlier-guid',
+        'earlier',
+        expect.any(Function),
+        'any',
+      ),
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
   });
 });
 

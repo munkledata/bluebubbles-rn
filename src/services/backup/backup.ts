@@ -117,13 +117,40 @@ export async function restoreBackup(
 ): Promise<RestoreResult> {
   const kv = backup.kv.filter((p) => isBackupKey(p.key));
   const themes = backup.themes.map((theme) => ({ ...theme, isPreset: 0 }));
+  // A backup is untrusted and older files have no rank. Canonicalize the bounded pinned subset
+  // outside the DB mutex: explicit ranks keep their relative order, duplicates tie by file order,
+  // and legacy pins append in file order. Dense ranks prevent hostile gaps/collisions while keeping
+  // every backed-up pinned chat in the same relative position after restore. The repository rebases
+  // this dense subset after any unmatched local pins so restored and local ranks cannot collide.
+  const pinnedRows = backup.chatCustomizations
+    .map((customization, sourceIndex) => ({
+      sourceIndex,
+      isPinned: customization.isPinned === 1,
+      requestedOrder: customization.isPinned === 1 ? (customization.pinOrder ?? null) : null,
+    }))
+    .filter((row) => row.isPinned)
+    .sort((a, b) => {
+      if (a.requestedOrder == null && b.requestedOrder == null) {
+        return a.sourceIndex - b.sourceIndex;
+      }
+      if (a.requestedOrder == null) return 1;
+      if (b.requestedOrder == null) return -1;
+      return a.requestedOrder - b.requestedOrder || a.sourceIndex - b.sourceIndex;
+    });
+  const normalizedPinOrder = new Map(
+    pinnedRows.map((row, index) => [row.sourceIndex, index] as const),
+  );
+  const chatCustomizations = backup.chatCustomizations.map((customization, sourceIndex) => ({
+    ...customization,
+    pinOrder: customization.isPinned === 1 ? (normalizedPinOrder.get(sourceIndex) ?? null) : null,
+  }));
   // Serialize the already-bounded, fully validated input before taking the global DB mutex. The
   // repository then applies it with a fixed number of set-based SQLite statements, so a failure or
   // account revocation rolls back every settings/theme/chat change without an unbounded JS loop.
   const prepared = {
     kvJson: JSON.stringify(kv),
     themesJson: JSON.stringify(themes),
-    chatCustomizationsJson: JSON.stringify(backup.chatCustomizations),
+    chatCustomizationsJson: JSON.stringify(chatCustomizations),
   };
   assertRestoreOwned(ownershipGuard);
   const applied = await withDbTransaction(

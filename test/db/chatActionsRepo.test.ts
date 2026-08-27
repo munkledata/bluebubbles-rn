@@ -28,6 +28,7 @@ import {
   setChatPin,
   setChatPinWithinTransaction,
   setChatTheme,
+  swapPinnedChatOrder,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -143,13 +144,47 @@ function errorMessageChain(error: unknown): unknown[] {
 }
 
 describe('chat actions repo', () => {
-  it('pins and unpins a chat locally', async () => {
+  it('appends new pins, swaps neighboring ranks, and unpins without rewriting survivors', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
+    await seedChat(db, 'c2');
+    await seedChat(db, 'c3');
     await setChatPin(db, 'c1', true);
-    expect(col(raw, 'c1', 'is_pinned')).toBe(1);
-    await setChatPin(db, 'c1', false);
-    expect(col(raw, 'c1', 'is_pinned')).toBe(0);
+    await setChatPin(db, 'c2', true);
+    await setChatPin(db, 'c3', true);
+    expect(
+      raw.prepare('SELECT guid, pin_order AS pinOrder FROM chats ORDER BY pin_order').all(),
+    ).toEqual([
+      { guid: 'c1', pinOrder: 0 },
+      { guid: 'c2', pinOrder: 1 },
+      { guid: 'c3', pinOrder: 2 },
+    ]);
+
+    // Idempotent pinning must not send an existing pin to the end.
+    await setChatPin(db, 'c1', true);
+    expect(col(raw, 'c1', 'pin_order')).toBe(0);
+
+    await expect(swapPinnedChatOrder(db, 'c3', 'c2', 'earlier')).resolves.toBe(true);
+    expect((await listChatsForInbox(db)).map((row) => row.guid)).toEqual(['c1', 'c3', 'c2']);
+
+    // A stale UI snapshot must not jump over the current middle pin.
+    await expect(swapPinnedChatOrder(db, 'c1', 'c2', 'later')).resolves.toBe(false);
+    expect((await listChatsForInbox(db)).map((row) => row.guid)).toEqual(['c1', 'c3', 'c2']);
+
+    // Replaying the same queued move cannot swap the pair back in the opposite direction.
+    await expect(swapPinnedChatOrder(db, 'c3', 'c2', 'earlier')).resolves.toBe(false);
+    expect((await listChatsForInbox(db)).map((row) => row.guid)).toEqual(['c1', 'c3', 'c2']);
+
+    await setChatPin(db, 'c3', false);
+    expect(col(raw, 'c3', 'is_pinned')).toBe(0);
+    expect(col(raw, 'c3', 'pin_order')).toBeNull();
+    expect(col(raw, 'c1', 'pin_order')).toBe(0);
+    expect(col(raw, 'c2', 'pin_order')).toBe(2);
+
+    // Re-pinning is a defined append, not an activity-date reorder.
+    await setChatPin(db, 'c3', true);
+    expect(col(raw, 'c3', 'pin_order')).toBe(3);
+    expect((await listChatsForInbox(db)).map((row) => row.guid)).toEqual(['c1', 'c2', 'c3']);
   });
 
   it('archives a chat locally', async () => {
@@ -256,6 +291,7 @@ describe('chat actions repo', () => {
     await seedChat(db, 'c1', { displayName: 'New', isPinned: false, isArchived: false });
 
     expect(col(raw, 'c1', 'is_pinned')).toBe(1); // local pin survived
+    expect(col(raw, 'c1', 'pin_order')).toBe(0); // manual order survived
     expect(col(raw, 'c1', 'is_archived')).toBe(1); // local archive survived
     expect(col(raw, 'c1', 'display_name')).toBe('New'); // server-authoritative field updated
   });

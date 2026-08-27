@@ -57,6 +57,8 @@ export const chats = sqliteTable(
     style: integer('style'),
     isArchived: integer('is_archived', { mode: 'boolean' }).default(false),
     isPinned: integer('is_pinned', { mode: 'boolean' }).default(false),
+    /** Stable device-local order for pinned chats. Null whenever the chat is not pinned. */
+    pinOrder: integer('pin_order'),
     muteType: text('mute_type'),
     /** Local per-chat customizations (never overwritten by a server re-sync). */
     customName: text('custom_name'),
@@ -87,6 +89,11 @@ export const chats = sqliteTable(
   (t) => ({
     guidIdx: uniqueIndex('chats_guid_idx').on(t.guid),
     sortIdx: index('chats_sort_idx').on(t.isArchived, t.latestMessageDate),
+    pinOrderIdx: index('chats_pin_order_idx').on(t.isPinned, t.pinOrder, t.id),
+    pinOrderNonnegative: check(
+      'chats_pin_order_nonnegative',
+      sql`${t.pinOrder} IS NULL OR (typeof(${t.pinOrder}) = 'integer' AND ${t.pinOrder} >= 0)`,
+    ),
   }),
 );
 

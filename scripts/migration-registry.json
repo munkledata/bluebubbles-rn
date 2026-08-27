@@ -100,6 +100,16 @@
       "upgradeTest": "test/db/migrations/0039_message_error_message.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 40,
+      "name": "0040_chats_pin_order",
+      "task": "PIN-01",
+      "branchPr": "release/store-01-0.1.41",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0040_chats_pin_order.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

@@ -21,7 +21,12 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { useChats } from '@features/conversations/useChats';
 import { getDatabase } from '@db/database';
-import { markAllChatsReadLocalWithinTransaction, type InboxRow } from '@db/repositories';
+import {
+  markAllChatsReadLocalWithinTransaction,
+  swapPinnedChatOrder,
+  type InboxRow,
+  type PinnedOrderMoveDirection,
+} from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
@@ -122,8 +127,38 @@ export function ConversationListScreen(): React.JSX.Element {
   );
   const unknownCount = filterUnknown ? (queriedUnknownCount ?? rows.length - visible.length) : 0;
   // Pinned chats render in a grid above the list (iOS).
+  const pinSenderFilter = filterUnknown ? ('known' as const) : ('any' as const);
   const pinned = useMemo(() => visible.filter((r) => r.isPinned), [visible]);
   const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
+  const onMovePinned = useCallback(
+    (guid: string, adjacentGuid: string, direction: PinnedOrderMoveDirection): void => {
+      void runAccountScopedLocalMutation(accountLease, async () => {
+        const db = getDatabase();
+        await swapPinnedChatOrder(
+          db,
+          guid,
+          adjacentGuid,
+          direction,
+          () => accountLease.isCurrent(),
+          pinSenderFilter,
+        );
+      });
+    },
+    [accountLease, pinSenderFilter],
+  );
+  const onPinnedLongPress = useCallback(
+    (row: InboxRow): void => {
+      const index = pinned.findIndex((candidate) => candidate.guid === row.guid);
+      setActionTarget(
+        toChatActionTarget(row, {
+          earlierGuid: index > 0 ? pinned[index - 1]?.guid : null,
+          laterGuid: index >= 0 ? pinned[index + 1]?.guid : null,
+          sender: pinSenderFilter,
+        }),
+      );
+    },
+    [pinSenderFilter, pinned],
+  );
 
   // Reveal the bumped thread when ANY chat gets a NEWER message — yours or incoming — instead of
   // letting it land above a scrolled-down viewport (FlashList v2 anchors scroll position by
@@ -320,7 +355,12 @@ export function ConversationListScreen(): React.JSX.Element {
   const listHeader =
     pinned.length > 0 ? (
       <View style={styles.pinnedWrap}>
-        <PinnedGrid rows={pinned} onPress={openChat} onLongPress={onLongPress} />
+        <PinnedGrid
+          rows={pinned}
+          onPress={openChat}
+          onLongPress={onPinnedLongPress}
+          onMove={onMovePinned}
+        />
       </View>
     ) : null;
 

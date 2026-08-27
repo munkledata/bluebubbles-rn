@@ -69,7 +69,7 @@ async function seedChat(
 }
 
 describe('listChatsForInbox', () => {
-  it('orders pinned chats first, then by latest message desc', async () => {
+  it('keeps manual pin order stable across activity and growing-prefix pages', async () => {
     const t = await createTestDb();
     await seedChat(t, 'old', {
       participants: ['a@x.com'],
@@ -79,15 +79,40 @@ describe('listChatsForInbox', () => {
       participants: ['b@x.com'],
       messages: [{ guid: 'n1', text: 'new', date: 9000 }],
     });
-    await seedChat(t, 'pinnedOld', {
+    await seedChat(t, 'pinned-first', {
       participants: ['c@x.com'],
       pinned: true,
       messages: [{ guid: 'p1', text: 'pin', date: 50 }],
     });
+    await seedChat(t, 'pinned-second', {
+      participants: ['d@x.com'],
+      pinned: true,
+      messages: [{ guid: 'p2', text: 'pin', date: 5_000 }],
+    });
 
-    const rows = await listChatsForInbox(t.db);
-    // pinned first (even though oldest), then unpinned newest→oldest
-    expect(rows.map((r) => r.guid)).toEqual(['pinnedOld', 'newest', 'old']);
+    // New activity changes the date but must not move the first manually ordered pin.
+    t.raw
+      .prepare('UPDATE chats SET latest_message_date = ? WHERE guid = ?')
+      .run(20_000, 'pinned-first');
+    expect((await listChatsForInbox(t.db)).map((row) => row.guid)).toEqual([
+      'pinned-first',
+      'pinned-second',
+      'newest',
+      'old',
+    ]);
+    await expect(listChatsForInboxPage(t.db, { limit: 2 })).resolves.toMatchObject({
+      rows: [{ guid: 'pinned-first' }, { guid: 'pinned-second' }],
+      hasMore: true,
+    });
+    await expect(listChatsForInboxPage(t.db, { limit: 4 })).resolves.toMatchObject({
+      rows: [
+        { guid: 'pinned-first' },
+        { guid: 'pinned-second' },
+        { guid: 'newest' },
+        { guid: 'old' },
+      ],
+      hasMore: false,
+    });
   });
 
   it('pages after applying archive and sender filters', async () => {

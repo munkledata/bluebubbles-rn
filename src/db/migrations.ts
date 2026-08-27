@@ -718,4 +718,27 @@ export const MIGRATIONS: Migration[] = [
         )`,
     ],
   },
+  {
+    // Pinning used to be only a boolean, so new activity silently reordered pinned conversations.
+    // Preserve the exact pre-upgrade visible order once, then let local pin/reorder actions own the
+    // rank. A nullable integer keeps unpinning non-destructive: remaining ranks never need rewriting.
+    name: '0040_chats_pin_order',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN pin_order INTEGER
+        CONSTRAINT chats_pin_order_nonnegative
+        CHECK (
+          pin_order IS NULL OR (typeof(pin_order) = 'integer' AND pin_order >= 0)
+        )`,
+      `WITH ranked AS (
+         SELECT id,
+                ROW_NUMBER() OVER (ORDER BY latest_message_date DESC, id DESC) - 1 AS pin_order
+           FROM chats
+          WHERE is_pinned = 1
+       )
+       UPDATE chats
+          SET pin_order = (SELECT ranked.pin_order FROM ranked WHERE ranked.id = chats.id)
+        WHERE is_pinned = 1`,
+      `CREATE INDEX chats_pin_order_idx ON chats (is_pinned, pin_order, id)`,
+    ],
+  },
 ];

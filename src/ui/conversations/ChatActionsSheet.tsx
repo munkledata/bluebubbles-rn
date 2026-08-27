@@ -7,7 +7,9 @@ import {
   setChatArchiveWithinTransaction,
   setChatMuteWithinTransaction,
   setChatPinWithinTransaction,
+  swapPinnedChatOrder,
   type InboxRow,
+  type InboxSenderFilter,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { deleteChat, markRead, markUnread } from '@/services';
@@ -25,10 +27,20 @@ export interface ChatActionTarget {
   isArchived: boolean;
   muted: boolean;
   unread: boolean;
+  moveEarlierGuid?: string | null;
+  moveLaterGuid?: string | null;
+  pinSenderFilter?: InboxSenderFilter;
 }
 
 /** Map an inbox row to the sheet's target (shared by every conversation list's long-press). */
-export function toChatActionTarget(row: InboxRow): ChatActionTarget {
+export function toChatActionTarget(
+  row: InboxRow,
+  movement: {
+    earlierGuid?: string | null;
+    laterGuid?: string | null;
+    sender?: InboxSenderFilter;
+  } = {},
+): ChatActionTarget {
   return {
     guid: row.guid,
     title: resolveTitle(row),
@@ -36,6 +48,9 @@ export function toChatActionTarget(row: InboxRow): ChatActionTarget {
     isArchived: !!row.isArchived,
     muted: row.muteType === 'mute',
     unread: (row.unreadCount ?? 0) > 0,
+    moveEarlierGuid: movement.earlierGuid ?? null,
+    moveLaterGuid: movement.laterGuid ?? null,
+    pinSenderFilter: movement.sender ?? 'any',
   };
 }
 
@@ -127,6 +142,54 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                   )
                 }
               />
+              {target.isPinned && target.moveEarlierGuid ? (
+                <Row
+                  label="Move Earlier"
+                  color={theme.color.tint}
+                  sep={theme.color.separator}
+                  onPress={() =>
+                    run(() =>
+                      runAccountScopedLocalMutation(accountLease, async () => {
+                        const db = getDatabase();
+                        const guid = target.guid;
+                        const adjacentGuid = target.moveEarlierGuid!;
+                        await swapPinnedChatOrder(
+                          db,
+                          guid,
+                          adjacentGuid,
+                          'earlier',
+                          () => accountLease.isCurrent(),
+                          target.pinSenderFilter ?? 'any',
+                        );
+                      }),
+                    )
+                  }
+                />
+              ) : null}
+              {target.isPinned && target.moveLaterGuid ? (
+                <Row
+                  label="Move Later"
+                  color={theme.color.tint}
+                  sep={theme.color.separator}
+                  onPress={() =>
+                    run(() =>
+                      runAccountScopedLocalMutation(accountLease, async () => {
+                        const db = getDatabase();
+                        const guid = target.guid;
+                        const adjacentGuid = target.moveLaterGuid!;
+                        await swapPinnedChatOrder(
+                          db,
+                          guid,
+                          adjacentGuid,
+                          'later',
+                          () => accountLease.isCurrent(),
+                          target.pinSenderFilter ?? 'any',
+                        );
+                      }),
+                    )
+                  }
+                />
+              ) : null}
               <Row
                 label={target.muted ? 'Unmute' : 'Mute'}
                 color={theme.color.tint}
