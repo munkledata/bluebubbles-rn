@@ -1922,15 +1922,15 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     featureSettingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:bf0c20884e95',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setAutoDownloadDestination:mutator-call:04a9c99c751e',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setAutoDownloadDestination:mutator-call:43aa7c2a27d2',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setFlag.<callback:80c80d5352>:mutator-call:2b38d4952ff7',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setFlag:mutator-call:800766996029',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setFlag:mutator-call:dc6111e4cedb',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:54668f771385',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setMaxConcurrentDownloads:mutator-call:0c60fd27ca09',
-      'src/state/featureSettingsStore.ts#<callback:7301bed9cd>.setMaxConcurrentDownloads:mutator-call:bda7342cda63',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:ddd668ed728b',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setAutoDownloadDestination:mutator-call:1d1c46fcb4e6',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setAutoDownloadDestination:mutator-call:d6067a762189',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setFlag.<callback:80c80d5352>:mutator-call:ca0e30890656',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setFlag:mutator-call:36236738a484',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setFlag:mutator-call:e359122ecc79',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:afb546561ea8',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setMaxConcurrentDownloads:mutator-call:5c31eec01c95',
+      'src/state/featureSettingsStore.ts#<callback:17dcab410d>.setMaxConcurrentDownloads:mutator-call:fed2e69e833d',
     ].sort(),
   );
   assert.deepEqual(

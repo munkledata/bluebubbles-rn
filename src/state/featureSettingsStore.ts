@@ -59,7 +59,7 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
 
 /** Versioned, device-local record of informed error-reporting consent. */
 export const ERROR_REPORTING_CONSENT_KEY = 'diagnostics.errorReportingConsent.v1';
-/** Pre-consent toggle key. A persisted 0/1 is an existing explicit choice and is migrated once. */
+/** Pre-consent toggle key. Its old 0/1 values are never informed versioned consent. */
 export const LEGACY_ERROR_REPORTING_KEY = 'diagnostics.errorReporting';
 type ErrorReportingConsentValue = 'granted' | 'denied';
 
@@ -212,41 +212,41 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     const consentGenerationAtStart = errorReportingChoiceGeneration;
     try {
       const db = getDatabase();
-      const [flagEntries, valueEntries, autoDownloadRaw, consentRaw, legacyConsentRaw] =
-        await Promise.all([
-          Promise.all(
-            (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
-              const v = await kvGet(db, FLAGS[f].key);
-              return [f, v == null ? FLAGS[f].def : v === '1'] as const;
-            }),
-          ),
-          Promise.all(
-            (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
-              const setting = VALUE_SETTINGS[k];
-              const value = setting.parse(await kvGet(db, setting.key));
-              return [k, value] as const;
-            }),
-          ),
-          kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
-          kvGet(db, ERROR_REPORTING_CONSENT_KEY),
-          kvGet(db, LEGACY_ERROR_REPORTING_KEY),
-        ]);
+      const [flagEntries, valueEntries, autoDownloadRaw, consentRaw] = await Promise.all([
+        Promise.all(
+          (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
+            const v = await kvGet(db, FLAGS[f].key);
+            return [f, v == null ? FLAGS[f].def : v === '1'] as const;
+          }),
+        ),
+        Promise.all(
+          (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
+            const setting = VALUE_SETTINGS[k];
+            const value = setting.parse(await kvGet(db, setting.key));
+            return [k, value] as const;
+          }),
+        ),
+        kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
+        kvGet(db, ERROR_REPORTING_CONSENT_KEY),
+      ]);
       if (!canCommitHydration(options)) return;
 
-      // A versioned value is authoritative. Missing/corrupt consent fails closed; the only legacy
-      // value preserved as ON is an explicit persisted `1` from the old toggle.
-      const errorReportingEnabled =
-        consentRaw === 'granted' || (consentRaw == null && legacyConsentRaw === '1');
+      // Only the versioned, plain-language choice can authorize capture or upload. Missing,
+      // corrupt, and pre-consent legacy values all fail closed and are sealed as denied below.
+      const hasValidVersionedConsent = consentRaw === 'granted' || consentRaw === 'denied';
+      const errorReportingEnabled = consentRaw === 'granted';
 
-      // Seal the migration (including the missing-key -> denied case) without making hydration
-      // depend on this best-effort write. The generation + shared tail prevent it from overwriting
-      // an explicit choice made while the reads were in flight.
-      if (consentRaw == null && consentGenerationAtStart === errorReportingChoiceGeneration) {
-        await enqueueErrorReportingConsentWrite(
-          errorReportingEnabled ? 'granted' : 'denied',
-          consentGenerationAtStart,
-          { db, shouldCommit: () => canCommitHydration(options) },
-        ).catch(() => undefined);
+      // Seal migration/corrupt-state recovery as denied without making hydration depend on this
+      // best-effort write. The generation + shared tail prevent it from overwriting an explicit
+      // choice made while the reads were in flight.
+      if (
+        !hasValidVersionedConsent &&
+        consentGenerationAtStart === errorReportingChoiceGeneration
+      ) {
+        await enqueueErrorReportingConsentWrite('denied', consentGenerationAtStart, {
+          db,
+          shouldCommit: () => canCommitHydration(options),
+        }).catch(() => undefined);
       }
       if (!canCommitHydration(options)) return;
 

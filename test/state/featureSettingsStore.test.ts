@@ -218,21 +218,46 @@ describe('featureSettingsStore — versioned error-reporting consent', () => {
     expect(await kvGet(db, ERROR_REPORTING_CONSENT_KEY)).toBe('denied');
   });
 
-  it.each([
-    ['1', true, 'granted'],
-    ['0', false, 'denied'],
-  ] as const)(
-    'preserves and migrates an explicit legacy %s choice',
-    async (legacy, enabled, migrated) => {
-      const db = await openTestDb();
-      await kvSet(db, LEGACY_ERROR_REPORTING_KEY, legacy);
+  it('rejects a legacy enabled toggle as informed consent and purges its old queue', async () => {
+    const { db, raw } = await openTestContext();
+    await kvSet(db, LEGACY_ERROR_REPORTING_KEY, '1');
+    await insertErrorReport(db, {
+      level: 'error',
+      message: '[consent] captured under the pre-consent toggle',
+      createdAt: Date.now(),
+    });
 
-      await useFeatureSettingsStore.getState().hydrate();
+    await useFeatureSettingsStore.getState().hydrate();
 
-      expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(enabled);
-      expect(await kvGet(db, ERROR_REPORTING_CONSENT_KEY)).toBe(migrated);
-    },
-  );
+    expect(useFeatureSettingsStore.getState()).toMatchObject({
+      errorReportingEnabled: false,
+      hydrated: true,
+    });
+    expect(await kvGet(db, ERROR_REPORTING_CONSENT_KEY)).toBe('denied');
+    expect(
+      (raw.prepare('SELECT COUNT(*) AS count FROM error_reports').get() as { count: number }).count,
+    ).toBe(0);
+  });
+
+  it('seals a legacy disabled toggle as denied', async () => {
+    const db = await openTestDb();
+    await kvSet(db, LEGACY_ERROR_REPORTING_KEY, '0');
+
+    await useFeatureSettingsStore.getState().hydrate();
+
+    expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(false);
+    expect(await kvGet(db, ERROR_REPORTING_CONSENT_KEY)).toBe('denied');
+  });
+
+  it('replaces a corrupt versioned choice with denied', async () => {
+    const db = await openTestDb();
+    await kvSet(db, ERROR_REPORTING_CONSENT_KEY, '1');
+
+    await useFeatureSettingsStore.getState().hydrate();
+
+    expect(useFeatureSettingsStore.getState().errorReportingEnabled).toBe(false);
+    expect(await kvGet(db, ERROR_REPORTING_CONSENT_KEY)).toBe('denied');
+  });
 
   it('treats the versioned choice as authoritative over conflicting legacy state', async () => {
     const db = await openTestDb();
