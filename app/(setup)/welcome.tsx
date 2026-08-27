@@ -1,30 +1,42 @@
 import { useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ensureDatabase } from '@/services';
-import { resumeRealtimeDeliveries } from '@/services/realtime/deliveryCoordinator';
-import { seedFixtures } from '@features/conversations/devSeed';
-import { useSessionStore } from '@state/sessionStore';
+import { startDevFixtureSession } from '@features/conversations/devFixtureSession';
+import { showDialog } from '@ui/dialog/dialogStore';
 import { Button, Screen, useTheme } from '@ui';
-import { DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD } from '@utils/isDev';
 
 export default function Welcome(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const mountedRef = useRef(true);
+  const devStartedRef = useRef(false);
+  const [devBusy, setDevBusy] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // DEV: seed fixtures and jump straight to the inbox without a live server.
   const devSeedAndOpen = async (): Promise<void> => {
-    await ensureDatabase();
-    await seedFixtures();
-    useSessionStore
-      .getState()
-      .connected(DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD, { server_version: '1.9.0' });
-    // Normal connected boot reopens this gate after durable-session validation. This DEV-only
-    // shortcut deliberately bypasses that boot path, so reopen it here before Home captures its
-    // account lease; otherwise the visible Inject/FaceTime fixture controls silently do nothing.
-    resumeRealtimeDeliveries();
-    router.replace('/home');
+    if (devStartedRef.current) return;
+    devStartedRef.current = true;
+    setDevBusy(true);
+    try {
+      await startDevFixtureSession();
+      if (mountedRef.current) router.replace('/home');
+    } catch {
+      if (mountedRef.current) {
+        showDialog('Developer fixtures', 'Gator could not prepare the local fixture session.');
+      }
+    } finally {
+      devStartedRef.current = false;
+      if (mountedRef.current) setDevBusy(false);
+    }
   };
 
   return (
@@ -42,11 +54,12 @@ export default function Welcome(): React.JSX.Element {
             Your Mac’s messages, on Android.
           </Text>
         </View>
-        <Button title="Get Started" onPress={() => router.push('/connect')} />
+        <Button title="Get Started" disabled={devBusy} onPress={() => router.push('/connect')} />
         {__DEV__ ? (
           <Button
             title="Dev: seed & open inbox"
             variant="tinted"
+            loading={devBusy}
             onPress={() => void devSeedAndOpen()}
             style={styles.devBtn}
           />
