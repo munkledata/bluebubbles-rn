@@ -94,10 +94,10 @@ The single tool for answering "is push working?" was therefore incapable of ever
 this investigation it had to be bypassed entirely (logcat was used instead). A diagnostic that can
 only produce false negatives is worse than none — it actively misleads.
 
-**Fix.** `test-notification` is now a fully handled event through all six touch points. It renders
-even under redacted mode (it carries no user content, and seeing it _is_ the passing result) and
-deliberately bypasses the "Message Notifications" toggle and unknown-sender filter, since it is a
-user-initiated diagnostic rather than a message.
+**Fix.** `test-notification` is now a fully handled event through all six touch points. It carries no
+conversation content, and seeing it _is_ the passing result. It deliberately bypasses the "Message
+Notifications" toggle and unknown-sender filter because it is a user-initiated diagnostic rather
+than a message.
 
 ### 2.3 The server was blind to its own push failures
 

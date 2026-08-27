@@ -183,12 +183,15 @@ npm run check:android-build
       record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
-- [ ] Logs, notifications, channels, alarms, Recents, and screenshots expose no hidden identity,
-      message text, server URL, credential, or raw internal identifier in privacy mode.
+- [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
+      notifications, channels, and alarms honor App Lock's generic-notification boundary, while
+      Recents and screenshots honor its protected-screen boundary without leaking identity or message
+      content.
 
 ## 6. Android/device matrix
 
-Complete the detailed device checklist using the exact AAB. At minimum:
+Before device work begins, `DEVICE-01` must create a candidate-specific v57 matrix for the exact AAB.
+At minimum:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
 - [ ] Connect, full sync, send, receive, edit/unsend, react, attach, retry, search, and local delete work.
