@@ -12,9 +12,9 @@ TypeScript, and a compatible self-hosted Mac server.
 ## What is in the app
 
 The codebase includes conversation sync, sending and retry, reactions/replies, group management,
-search, contacts, attachments and voice messages, scheduled messages/reminders, Android
-notifications, FaceTime entry points, Find My views, dark themes, backups, redacted mode, and an
-optional App Lock screen. Receiving text/files from Android's share sheet is deliberately disabled
+search, contacts, attachments and voice messages, scheduled messages/reminders, privacy-aware
+Android notifications, FaceTime entry points, Find My views, dark themes, backups, and an optional
+App Lock screen. Receiving text/files from Android's share sheet is deliberately disabled
 until Gator owns a native intake that can cap bytes and time while streaming.
 
 Many capabilities depend on a compatible server version or private server APIs. Native behavior

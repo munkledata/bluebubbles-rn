@@ -55,7 +55,7 @@ After `WEB-02`, show visible OpenStreetMap contributor attribution and explain t
 can observe the device IP and requested map region. Where the selected stack permits it, send stable
 app-identifying headers and honor response caching; otherwise establish a bounded cache policy. Do
 not bulk-download or prefetch public tiles, and define behavior for provider throttling or outage.
-Redacted mode must instantiate neither the map nor a tile request.
+When a privacy boundary withholds Find My content, instantiate neither the map nor a tile request.
 
 If public-tile policy cannot be satisfied reliably, select a managed provider instead of weakening
 the privacy or attribution contract.

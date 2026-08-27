@@ -2,10 +2,12 @@
 
 This is the short, operational checklist for one Android release candidate. The authoritative
 engineering backlog and release dispositions live in
-[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); device evidence belongs in
-[`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md). Do not copy
-status from an older build into this file. Section 0 is the current private Internal Testing gate;
-Sections 1–7 remain the broader Closed/Open/Production release gate.
+[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Current Internal Testing preparation
+lives in [`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md);
+[`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md) is retired v56
+history and is not executable evidence for v57. Do not copy status from an older build into this
+file. Section 0 is the current private Internal Testing gate; Sections 1–7 remain the broader
+Closed/Open/Production release gate.
 
 Record the candidate before testing:
 
@@ -194,7 +196,8 @@ Complete the detailed device checklist using the exact AAB. At minimum:
       writes to the encrypted DB and posts the expected notification.
 - [ ] Notification privacy transitions, actions, reminders, channels, killed/background/foreground
       taps, and FaceTime alerts pass with no stale private system state.
-- [ ] App Lock, redacted mode, Android Recents, biometric resume, account switch, and forget/wipe pass.
+- [ ] App Lock, generic locked notifications, Android Recents, biometric resume, account switch, and
+      forget/wipe pass.
 - [ ] IPC-01 containment passes: the exact candidate's merged manifest, AAB, and autolinking contain
       no inbound `SEND`/`SEND_MULTIPLE` filter, Direct Share target, or `expo-share-intent`; after
       startup clears shortcuts cached by an older build, neither Gator nor conversation chips appear
