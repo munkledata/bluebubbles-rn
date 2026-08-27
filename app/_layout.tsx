@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef } from 'react';
 import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { completeUnlock } from '@/services';
+import { completeUnlock } from '@/services/lock';
 import {
   getForegroundBootSnapshot,
   invalidateForegroundBootRun,
@@ -12,16 +12,6 @@ import {
   startForegroundBoot,
   unlockForegroundBoot,
 } from '@/services/boot/foregroundBoot';
-// Side-effect registrations that MUST run at module top level (before React mounts):
-// the headless Notifee background handler, the WorkManager background-sync task, and
-// the FCM background message handler (registers killed-app push delivery).
-//
-// NOTE: these are ALSO imported from `index.js` (the bundle entry), and THAT is the copy that
-// actually matters. This file is a ROUTE module — expo-router loads it lazily at RENDER time, so
-// a headless wake (FCM push / background task), which never renders, would not evaluate it and
-// the handlers would go unregistered. See the comment in `index.js`. Kept here as a harmless
-// no-op (module cache) so the app still works if the entry is ever changed.
-import '@/services/notifications/backgroundEvents';
 import { logger } from '@core/secure';
 import { prepareNotificationPresentationState } from '@/services/notifications/notifeeService';
 import { installServicePresentationAdapter } from '@/services/presentationAdapter';

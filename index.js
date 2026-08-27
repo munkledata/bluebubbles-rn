@@ -19,8 +19,8 @@
  * reclaimed the process, every notification vanished until the app was manually reopened.
  *
  * Importing them HERE — from the bundle entry, which every headless wake evaluates — is what
- * actually registers them. `app/_layout.tsx` keeps its own imports (the module cache makes them
- * a no-op) so the app still works if this entry is ever changed.
+ * actually registers them. This entry is the sole registration owner; a route module cannot be a
+ * fallback because Android never evaluates routes during a killed-app wake.
  *
  * RULES:
  *   • `expo-router/entry` MUST be imported LAST (it registers the root component and starts the app).
@@ -39,7 +39,7 @@ import './src/services/notifications/backgroundEvents';
 // TaskManager.defineTask('gator-bg-sync') — the background sync/outgoing-queue drain.
 import './src/services/background/registerBackgroundSyncHeadlessTask';
 // setBackgroundMessageHandler(...) — killed-app FCM push delivery.
-import './src/services/notifications/fcmMessaging';
+import './src/services/notifications/registerFcmBackgroundHandler';
 // Constant-work cleanup for at most eight abandoned native download partials after process death.
 import './src/services/download/registerBoundedNativeDownloadCleanup';
 

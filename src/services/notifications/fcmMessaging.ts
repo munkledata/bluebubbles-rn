@@ -1,6 +1,5 @@
 import {
   getMessaging,
-  setBackgroundMessageHandler,
   onMessage,
   onTokenRefresh,
   getToken,
@@ -29,7 +28,8 @@ import { postLockedNotification } from './notifeeService';
 
 /**
  * FCM glue. The receive pipeline (durable intake → EventRouter → DbEventSink → Notifee) already
- * exists; this connects Firebase to it. Imported for side-effect from the bundle entry.
+ * exists; this connects Firebase to it. The bundle entry registers the background callback through
+ * `registerFcmBackgroundHandler.ts`; importing this operational module alone is inert.
  *
  * GOTCHA: `setBackgroundMessageHandler` MUST be registered at MODULE TOP LEVEL — it has
  * to run in the headless killed-app wake context (which re-evaluates the entry but has
@@ -225,7 +225,7 @@ async function handleIncomingFcm(
   }
 }
 
-async function handleBackgroundFcm(msg: RemoteMessage): Promise<void> {
+export async function handleBackgroundFcm(msg: RemoteMessage): Promise<void> {
   try {
     await handleIncomingFcm(msg, 'background');
   } finally {
@@ -234,19 +234,10 @@ async function handleBackgroundFcm(msg: RemoteMessage): Promise<void> {
   }
 }
 
-// Killed-app / background delivery — registered at entry eval (see gotcha above). Wrapped
-// in try/catch so a misconfigured Firebase project degrades to socket-only instead of
-// crashing app boot (the import + this call run on the startup path).
-try {
-  setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);
-} catch (e) {
-  logger.warn('[fcm] setBackgroundMessageHandler unavailable — push disabled', e);
-}
-
 /**
  * Foreground FCM: request notification permission and handle messages while the app
- * is open. Called once at boot when FCM is enabled (the background handler above is
- * already registered by importing this module). Also re-registers our device token
+ * is open. Called once at boot when FCM is enabled (the background handler is already
+ * registered by the bundle-entry wrapper). Also re-registers our device token
  * with the server whenever Firebase rotates it. Guarded so a Firebase failure degrades
  * to socket-only rather than throwing on the boot path.
  */
