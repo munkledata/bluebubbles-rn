@@ -29,6 +29,94 @@ export interface ChatCustomizationRow {
   isPinned: number;
   isArchived: number;
 }
+export interface PortableChatParticipant {
+  service: string;
+  address: string;
+}
+export interface PortableChatCustomizationRow {
+  identity: {
+    version: 1;
+    service: string;
+    kind: 'direct' | 'group' | 'unknown';
+    serverChatIdentifier: string | null;
+    participants: PortableChatParticipant[];
+  };
+  customName: string | null;
+  customColor: string | null;
+  muteType: string | null;
+  isPinned: number;
+  isArchived: number;
+}
+
+interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> {
+  chatId: number;
+  guid: string;
+  chatIdentifier: string | null;
+  style: number | null;
+  participantAddress: string | null;
+  participantService: string | null;
+}
+
+/** SQL fragments are composed into the single restore statement below. */
+const BACKUP_PHONE_COMPACT_SQL = sql`
+  REPLACE(
+    REPLACE(
+      REPLACE(
+        REPLACE(REPLACE(REPLACE(raw_address, ' ', ''), '+', ''), '-', ''),
+        '(',
+        ''
+      ),
+      ')',
+      ''
+    ),
+    '.',
+    ''
+  )
+`;
+
+const BACKUP_NORMALIZED_ADDRESS_SQL = sql`
+  CASE
+    WHEN INSTR(raw_address, '@') > 0 THEN LOWER(raw_address)
+    WHEN phone_compact <> '' AND phone_compact NOT GLOB '*[^0-9]*'
+      THEN CASE
+        WHEN LENGTH(phone_compact) = 11 AND SUBSTR(phone_compact, 1, 1) = '1'
+          THEN SUBSTR(phone_compact, 2)
+        ELSE phone_compact
+      END
+    ELSE raw_address
+  END
+`;
+
+function portableChatKind(
+  style: number | null,
+  guid: string,
+  participantCount: number,
+): 'direct' | 'group' | 'unknown' {
+  if (style === 43) return 'group';
+  if (style === 45) return 'direct';
+  const marker = guid.split(';', 3)[1];
+  if (marker === '+') return 'group';
+  if (marker === '-') return 'direct';
+  if (participantCount > 1) return 'group';
+  if (participantCount === 1) return 'direct';
+  return 'unknown';
+}
+
+/** Keep export service identity byte-for-byte aligned with the case-insensitive restore SQL. */
+function portableChatService(
+  guid: string,
+  participantServices: readonly string[],
+): 'iMessage' | 'SMS' | 'RCS' {
+  const guidPrefix = guid.slice(0, 6).toLowerCase();
+  if (guidPrefix === 'rcs;-;') return 'RCS';
+  if (guidPrefix === 'sms;-;') return 'SMS';
+
+  const namedServices = participantServices
+    .map((service) => service.trim().toLowerCase())
+    .filter((service) => service.length > 0);
+  if (namedServices.length > 0 && namedServices.every((service) => service === 'sms')) return 'SMS';
+  return 'iMessage';
+}
 
 /**
  * Validated backup rows serialized before the caller takes the process-wide DB lock.
@@ -76,14 +164,77 @@ export async function getAllThemes(db: AppDatabase): Promise<ThemeRow[]> {
  * conversation the user had deleted since. Same reasoning that keeps both columns out of
  * `upsertChats`' conflict set — a foreign source of truth must not get a vote on them.
  */
-export async function getChatCustomizations(db: AppDatabase): Promise<ChatCustomizationRow[]> {
-  return db.all<ChatCustomizationRow>(sql`
-    SELECT guid, custom_name AS customName, custom_color AS customColor,
-           mute_type AS muteType, is_pinned AS isPinned, is_archived AS isArchived
-      FROM chats
-     WHERE custom_name IS NOT NULL OR custom_color IS NOT NULL OR mute_type IS NOT NULL
-        OR is_pinned = 1 OR is_archived = 1
+export async function getChatCustomizations(
+  db: AppDatabase,
+): Promise<PortableChatCustomizationRow[]> {
+  const rows = await db.all<ChatCustomizationExportRow>(sql`
+    SELECT c.id AS chatId, c.guid, c.chat_identifier AS chatIdentifier, c.style,
+           c.custom_name AS customName, c.custom_color AS customColor,
+           c.mute_type AS muteType, c.is_pinned AS isPinned, c.is_archived AS isArchived,
+           h.address AS participantAddress, h.service AS participantService
+      FROM chats AS c
+      LEFT JOIN chat_handles AS ch ON ch.chat_id = c.id
+      LEFT JOIN handles AS h ON h.id = ch.handle_id
+     WHERE c.custom_name IS NOT NULL OR c.custom_color IS NOT NULL OR c.mute_type IS NOT NULL
+        OR c.is_pinned = 1 OR c.is_archived = 1
+     ORDER BY c.id, h.id
   `);
+
+  const grouped = new Map<
+    number,
+    {
+      customization: PortableChatCustomizationRow;
+      participants: Set<string>;
+      guid: string;
+      style: number | null;
+    }
+  >();
+  for (const row of rows) {
+    let group = grouped.get(row.chatId);
+    if (!group) {
+      group = {
+        customization: {
+          identity: {
+            version: 1,
+            service: 'iMessage',
+            kind: 'unknown',
+            serverChatIdentifier: row.chatIdentifier?.trim() || null,
+            participants: [],
+          },
+          customName: row.customName,
+          customColor: row.customColor,
+          muteType: row.muteType,
+          isPinned: row.isPinned,
+          isArchived: row.isArchived,
+        },
+        participants: new Set(),
+        guid: row.guid,
+        style: row.style,
+      };
+      grouped.set(row.chatId, group);
+    }
+
+    if (row.participantAddress !== null && row.participantAddress.length > 0) {
+      const participant = {
+        service: row.participantService ?? '',
+        address: row.participantAddress,
+      };
+      const key = JSON.stringify([participant.service, participant.address]);
+      if (!group.participants.has(key)) {
+        group.participants.add(key);
+        group.customization.identity.participants.push(participant);
+      }
+    }
+  }
+  return [...grouped.values()].map(({ customization, guid, style }) => {
+    const participants = customization.identity.participants;
+    customization.identity.service = portableChatService(
+      guid,
+      participants.map((participant) => participant.service),
+    );
+    customization.identity.kind = portableChatKind(style, guid, participants.length);
+    return customization;
+  });
 }
 
 export async function restoreKv(
@@ -212,7 +363,7 @@ export async function restoreThemes(
 /**
  * Apply backed-up customizations to chats that exist locally (UPDATE only).
  *
- * The `set` list is exactly the columns `getChatCustomizations` reads — no `deleted_at`, no
+ * The `set` list is exactly the customizable columns the backup reads — no `deleted_at`, no
  * `marked_unread_at`, so a restore can neither resurrect a locally-deleted conversation nor hide a
  * live one behind a tombstone copied from another device.
  */
@@ -243,8 +394,13 @@ export async function restoreChatCustomizationWithinTransaction(
  * JSON input is bounded and serialized by the service before it enters the transaction. Theme
  * occurrence ranks preserve the existing id-ordered twin pairing: the first backed-up `(name,
  * mode)` row updates the first matching local row, and only unmatched occurrences are inserted.
- * Duplicate chat GUIDs retain the old sequential behavior by applying the final occurrence while
- * the returned count still reports every backed-up occurrence whose chat exists locally.
+ *
+ * Chat matching happens inside this same transaction. V2 combines service, direct/group kind, an
+ * exact normalized participant set, and the stable server chat identifier when present. Conflicting
+ * evidence, zero/multiple candidates, or multiple backup rows targeting one local chat all skip.
+ * V1 can safely derive only direct `service;-;address` identities; group/opaque GUID rows skip
+ * instead of risking customization of an unrelated group on another Mac. The caller reports every
+ * skip to the user.
  */
 export function restorePreparedBackupWithinTransaction(
   context: DbTransactionContext,
@@ -335,17 +491,27 @@ export function restorePreparedBackupWithinTransaction(
        ORDER BY source.source_index
     `);
 
-    const appliedRows = await db.all<{ count: number }>(sql`
-      SELECT COUNT(*) AS count
-        FROM json_each(${input.chatCustomizationsJson}) AS entry
-        JOIN chats
-          ON chats.guid = json_extract(entry.value, '$.guid')
-    `);
-
-    await db.run(sql`
-      WITH source_rows AS (
+    const appliedRows = await db.all<{ id: number }>(sql`
+      WITH source_rows_raw AS (
         SELECT CAST(entry.key AS INTEGER) AS source_index,
+               entry.value AS source_json,
+               json_extract(entry.value, '$.identity.version') AS identity_version,
                json_extract(entry.value, '$.guid') AS guid,
+               CASE
+                 WHEN INSTR(COALESCE(json_extract(entry.value, '$.guid'), ''), ';') > 0
+                   THEN SUBSTR(
+                     json_extract(entry.value, '$.guid'),
+                     INSTR(json_extract(entry.value, '$.guid'), ';') + 1
+                   )
+                 ELSE ''
+               END AS legacy_remainder,
+               LOWER(TRIM(COALESCE(json_extract(entry.value, '$.identity.service'), '')))
+                 AS portable_service,
+               json_extract(entry.value, '$.identity.kind') AS portable_kind,
+               NULLIF(
+                 TRIM(json_extract(entry.value, '$.identity.serverChatIdentifier')),
+                 ''
+               ) AS server_chat_identifier,
                json_extract(entry.value, '$.customName') AS custom_name,
                json_extract(entry.value, '$.customColor') AS custom_color,
                json_extract(entry.value, '$.muteType') AS mute_type,
@@ -353,27 +519,395 @@ export function restorePreparedBackupWithinTransaction(
                json_extract(entry.value, '$.isArchived') AS is_archived
           FROM json_each(${input.chatCustomizationsJson}) AS entry
       ),
-      ranked AS (
-        SELECT *,
-               ROW_NUMBER() OVER (
-                 PARTITION BY guid
-                 ORDER BY source_index DESC
-               ) AS latest_rank
+      source_rows AS (
+        SELECT source_rows_raw.*,
+               CASE
+                 WHEN identity_version = 1 THEN portable_service
+                 WHEN LOWER(SUBSTR(COALESCE(guid, ''), 1, 6)) = 'rcs;-;' THEN 'rcs'
+                 WHEN LOWER(SUBSTR(COALESCE(guid, ''), 1, 6)) = 'sms;-;' THEN 'sms'
+                 ELSE 'imessage'
+               END AS service,
+               CASE
+                 WHEN identity_version = 1 THEN portable_kind
+                 WHEN INSTR(legacy_remainder, ';') > 0
+                   THEN CASE SUBSTR(legacy_remainder, 1, INSTR(legacy_remainder, ';') - 1)
+                     WHEN '-' THEN 'direct'
+                     WHEN '+' THEN 'group'
+                     ELSE 'unknown'
+                   END
+                 ELSE 'unknown'
+               END AS kind,
+               TRIM(
+                 CASE
+                   WHEN INSTR(legacy_remainder, ';') > 0
+                     THEN SUBSTR(legacy_remainder, INSTR(legacy_remainder, ';') + 1)
+                   ELSE ''
+                 END
+               ) AS legacy_raw_address
+          FROM source_rows_raw
+      ),
+      source_participant_raw AS (
+        SELECT source_rows.source_index,
+               LOWER(TRIM(COALESCE(json_extract(participant.value, '$.service'), ''))) AS service,
+               TRIM(COALESCE(json_extract(participant.value, '$.address'), '')) AS raw_address
           FROM source_rows
+          JOIN json_each(source_rows.source_json, '$.identity.participants') AS participant
+            ON TRUE
+         WHERE source_rows.identity_version = 1
+      ),
+      source_participant_cleaned AS (
+        SELECT source_index, service, raw_address,
+               ${BACKUP_PHONE_COMPACT_SQL} AS phone_compact
+          FROM source_participant_raw
+         WHERE raw_address <> ''
+      ),
+      source_participants AS (
+        SELECT DISTINCT source_index, service,
+               ${BACKUP_NORMALIZED_ADDRESS_SQL} AS normalized_address
+          FROM source_participant_cleaned
+      ),
+      source_participant_counts AS (
+        SELECT source_index, COUNT(*) AS participant_count
+          FROM source_participants
+         GROUP BY source_index
+      ),
+      source_address_identity_raw AS (
+        SELECT source_index, 'stable' AS identity_role,
+               server_chat_identifier AS raw_address
+          FROM source_rows
+         WHERE identity_version = 1
+           AND kind = 'direct'
+           AND server_chat_identifier IS NOT NULL
+        UNION ALL
+        SELECT source_index, 'legacy' AS identity_role,
+               legacy_raw_address AS raw_address
+          FROM source_rows
+         WHERE identity_version IS NULL
+           AND kind = 'direct'
+           AND legacy_raw_address <> ''
+      ),
+      source_address_identity_cleaned AS (
+        SELECT source_index, identity_role, raw_address,
+               ${BACKUP_PHONE_COMPACT_SQL} AS phone_compact
+          FROM source_address_identity_raw
+      ),
+      source_address_identities AS (
+        SELECT source_index, identity_role,
+               ${BACKUP_NORMALIZED_ADDRESS_SQL} AS normalized_address
+          FROM source_address_identity_cleaned
+      ),
+      local_participant_raw AS (
+        SELECT chat_handles.chat_id,
+               LOWER(TRIM(COALESCE(handles.service, ''))) AS service,
+               TRIM(handles.address) AS raw_address
+          FROM chat_handles
+          JOIN handles ON handles.id = chat_handles.handle_id
+      ),
+      local_participant_cleaned AS (
+        SELECT chat_id, service, raw_address,
+               ${BACKUP_PHONE_COMPACT_SQL} AS phone_compact
+          FROM local_participant_raw
+         WHERE raw_address <> ''
+      ),
+      local_participants AS (
+        SELECT DISTINCT chat_id, service,
+               ${BACKUP_NORMALIZED_ADDRESS_SQL} AS normalized_address
+          FROM local_participant_cleaned
+      ),
+      local_participant_counts AS (
+        SELECT chat_id, COUNT(*) AS participant_count
+          FROM local_participants
+         GROUP BY chat_id
+      ),
+      local_service_summary AS (
+        SELECT chat_id,
+               SUM(CASE WHEN service <> '' THEN 1 ELSE 0 END) AS named_service_count,
+               SUM(CASE WHEN service = 'sms' THEN 1 ELSE 0 END) AS sms_service_count
+          FROM local_participant_raw
+         GROUP BY chat_id
+      ),
+      local_chats_raw AS (
+        SELECT chats.id AS chat_id, chats.guid, chats.style,
+               CASE
+                 WHEN INSTR(chats.guid, ';') > 0
+                   THEN SUBSTR(chats.guid, INSTR(chats.guid, ';') + 1)
+                 ELSE ''
+               END AS guid_remainder,
+               NULLIF(TRIM(chats.chat_identifier), '') AS server_chat_identifier,
+               COALESCE(local_participant_counts.participant_count, 0) AS participant_count,
+               COALESCE(local_service_summary.named_service_count, 0) AS named_service_count,
+               COALESCE(local_service_summary.sms_service_count, 0) AS sms_service_count
+          FROM chats
+          LEFT JOIN local_participant_counts
+            ON local_participant_counts.chat_id = chats.id
+          LEFT JOIN local_service_summary
+            ON local_service_summary.chat_id = chats.id
+      ),
+      local_chats AS (
+        SELECT local_chats_raw.*,
+               CASE
+                 WHEN LOWER(SUBSTR(guid, 1, 6)) = 'rcs;-;' THEN 'rcs'
+                 WHEN LOWER(SUBSTR(guid, 1, 6)) = 'sms;-;' THEN 'sms'
+                 WHEN named_service_count > 0 AND named_service_count = sms_service_count THEN 'sms'
+                 ELSE 'imessage'
+               END AS service,
+               CASE
+                 WHEN style = 43 THEN 'group'
+                 WHEN style = 45 THEN 'direct'
+                 WHEN INSTR(guid_remainder, ';') > 0
+                   THEN CASE SUBSTR(guid_remainder, 1, INSTR(guid_remainder, ';') - 1)
+                     WHEN '-' THEN 'direct'
+                     WHEN '+' THEN 'group'
+                     ELSE 'unknown'
+                   END
+                 WHEN participant_count > 1 THEN 'group'
+                 WHEN participant_count = 1 THEN 'direct'
+                 ELSE 'unknown'
+               END AS kind,
+               TRIM(
+                 CASE
+                   WHEN INSTR(guid_remainder, ';') > 0
+                     THEN SUBSTR(guid_remainder, INSTR(guid_remainder, ';') + 1)
+                   ELSE ''
+                 END
+               ) AS guid_raw_address
+          FROM local_chats_raw
+      ),
+      local_address_identity_raw AS (
+        SELECT chat_id, 'stable' AS identity_role,
+               server_chat_identifier AS raw_address
+          FROM local_chats
+         WHERE kind = 'direct'
+           AND server_chat_identifier IS NOT NULL
+        UNION ALL
+        SELECT chat_id, 'legacy' AS identity_role,
+               guid_raw_address AS raw_address
+          FROM local_chats
+         WHERE kind = 'direct'
+           AND INSTR(guid_remainder, ';') > 0
+           AND SUBSTR(guid_remainder, 1, INSTR(guid_remainder, ';') - 1) = '-'
+           AND guid_raw_address <> ''
+      ),
+      local_address_identity_cleaned AS (
+        SELECT chat_id, identity_role, raw_address,
+               ${BACKUP_PHONE_COMPACT_SQL} AS phone_compact
+          FROM local_address_identity_raw
+      ),
+      local_address_identities AS (
+        SELECT chat_id, identity_role,
+               ${BACKUP_NORMALIZED_ADDRESS_SQL} AS normalized_address
+          FROM local_address_identity_cleaned
+      ),
+      legacy_candidates AS (
+        SELECT source_rows.source_index, local_chats.chat_id
+          FROM source_address_identities
+          JOIN source_rows
+            ON source_rows.source_index = source_address_identities.source_index
+          JOIN local_address_identities
+            ON local_address_identities.identity_role = 'legacy'
+           AND local_address_identities.normalized_address =
+             source_address_identities.normalized_address
+          JOIN local_chats ON local_chats.chat_id = local_address_identities.chat_id
+         WHERE source_address_identities.identity_role = 'legacy'
+           AND source_rows.identity_version IS NULL
+           AND source_rows.kind = 'direct'
+           AND local_chats.kind = 'direct'
+           AND local_chats.service = source_rows.service
+      ),
+      legacy_summary AS (
+        SELECT source_index, COUNT(*) AS candidate_count, MIN(chat_id) AS chat_id
+          FROM legacy_candidates
+         GROUP BY source_index
+      ),
+      legacy_resolved AS (
+        SELECT source_index, chat_id
+          FROM legacy_summary
+         WHERE candidate_count = 1
+      ),
+      participant_match_counts AS (
+        SELECT source_participants.source_index, local_participants.chat_id,
+               COUNT(*) AS matched_count
+          FROM source_participants
+          JOIN local_participants
+            ON local_participants.service = source_participants.service
+           AND local_participants.normalized_address =
+             source_participants.normalized_address
+         GROUP BY source_participants.source_index, local_participants.chat_id
+      ),
+      participant_candidates AS (
+        SELECT participant_match_counts.source_index, participant_match_counts.chat_id
+          FROM participant_match_counts
+          JOIN source_participant_counts
+            ON source_participant_counts.source_index =
+              participant_match_counts.source_index
+          JOIN local_participant_counts
+            ON local_participant_counts.chat_id = participant_match_counts.chat_id
+          JOIN source_rows
+            ON source_rows.source_index = participant_match_counts.source_index
+          JOIN local_chats
+            ON local_chats.chat_id = participant_match_counts.chat_id
+         WHERE participant_match_counts.matched_count =
+               source_participant_counts.participant_count
+           AND participant_match_counts.matched_count =
+               local_participant_counts.participant_count
+           AND source_rows.identity_version = 1
+           AND source_rows.service <> ''
+           AND source_rows.kind <> 'unknown'
+           AND local_chats.service = source_rows.service
+           AND local_chats.kind = source_rows.kind
+      ),
+      stable_direct_matches AS (
+        SELECT source_rows.source_index, local_chats.chat_id
+          FROM source_address_identities
+          JOIN source_rows
+            ON source_rows.source_index = source_address_identities.source_index
+          JOIN local_address_identities
+            ON local_address_identities.identity_role = 'stable'
+           AND local_address_identities.normalized_address =
+             source_address_identities.normalized_address
+          JOIN local_chats ON local_chats.chat_id = local_address_identities.chat_id
+         WHERE source_address_identities.identity_role = 'stable'
+           AND source_rows.identity_version = 1
+           AND source_rows.service <> ''
+           AND source_rows.kind = 'direct'
+           AND local_chats.service = source_rows.service
+           AND local_chats.kind = 'direct'
+      ),
+      stable_group_matches AS (
+        SELECT source_rows.source_index, local_chats.chat_id
+          FROM source_rows
+          JOIN local_chats
+            ON local_chats.service = source_rows.service
+           AND local_chats.kind = 'group'
+           AND local_chats.server_chat_identifier =
+             source_rows.server_chat_identifier
+         WHERE source_rows.identity_version = 1
+           AND source_rows.service <> ''
+           AND source_rows.kind = 'group'
+           AND source_rows.server_chat_identifier IS NOT NULL
+      ),
+      stable_identity_matches AS (
+        SELECT source_index, chat_id FROM stable_direct_matches
+        UNION
+        SELECT source_index, chat_id FROM stable_group_matches
+      ),
+      stable_candidates AS (
+        SELECT stable_identity_matches.source_index, stable_identity_matches.chat_id
+          FROM stable_identity_matches
+          LEFT JOIN source_participant_counts
+            ON source_participant_counts.source_index =
+              stable_identity_matches.source_index
+          LEFT JOIN local_participant_counts
+            ON local_participant_counts.chat_id = stable_identity_matches.chat_id
+         WHERE source_participant_counts.participant_count IS NULL
+            OR local_participant_counts.participant_count IS NULL
+            OR EXISTS (
+              SELECT 1
+                FROM participant_candidates
+               WHERE participant_candidates.source_index =
+                       stable_identity_matches.source_index
+                 AND participant_candidates.chat_id =
+                       stable_identity_matches.chat_id
+            )
+      ),
+      stable_summary AS (
+        SELECT source_index, COUNT(*) AS candidate_count, MIN(chat_id) AS chat_id
+          FROM stable_candidates
+         GROUP BY source_index
+      ),
+      participant_summary AS (
+        SELECT participant_candidates.source_index, COUNT(*) AS candidate_count,
+               MIN(participant_candidates.chat_id) AS chat_id,
+               SUM(
+                 CASE
+                   WHEN source_rows.server_chat_identifier IS NULL
+                     OR local_chats.server_chat_identifier IS NULL
+                     OR EXISTS (
+                       SELECT 1
+                         FROM stable_identity_matches
+                        WHERE stable_identity_matches.source_index =
+                                participant_candidates.source_index
+                          AND stable_identity_matches.chat_id =
+                                participant_candidates.chat_id
+                     )
+                     THEN 1
+                   ELSE 0
+                 END
+               ) AS compatible_count
+          FROM participant_candidates
+          JOIN source_rows ON source_rows.source_index = participant_candidates.source_index
+          JOIN local_chats ON local_chats.chat_id = participant_candidates.chat_id
+         GROUP BY participant_candidates.source_index
+      ),
+      intersection_summary AS (
+        SELECT stable_candidates.source_index, COUNT(*) AS candidate_count,
+               MIN(stable_candidates.chat_id) AS chat_id
+          FROM stable_candidates
+          JOIN participant_candidates
+            ON participant_candidates.source_index = stable_candidates.source_index
+           AND participant_candidates.chat_id = stable_candidates.chat_id
+         GROUP BY stable_candidates.source_index
+      ),
+      portable_resolution AS (
+        SELECT source_rows.source_index,
+               CASE
+                 WHEN COALESCE(stable_summary.candidate_count, 0) > 0
+                  AND COALESCE(participant_summary.candidate_count, 0) > 0
+                   THEN CASE
+                     WHEN intersection_summary.candidate_count = 1
+                       THEN intersection_summary.chat_id
+                     ELSE NULL
+                   END
+                 WHEN stable_summary.candidate_count = 1 THEN stable_summary.chat_id
+                 WHEN participant_summary.candidate_count = 1
+                  AND participant_summary.compatible_count = 1
+                   THEN participant_summary.chat_id
+                 ELSE NULL
+               END AS chat_id
+          FROM source_rows
+          LEFT JOIN stable_summary ON stable_summary.source_index = source_rows.source_index
+          LEFT JOIN participant_summary
+            ON participant_summary.source_index = source_rows.source_index
+          LEFT JOIN intersection_summary
+            ON intersection_summary.source_index = source_rows.source_index
+         WHERE source_rows.identity_version = 1
+      ),
+      portable_resolved AS (
+        SELECT source_index, chat_id
+          FROM portable_resolution
+         WHERE chat_id IS NOT NULL
+      ),
+      resolved_candidates AS (
+        SELECT source_index, chat_id FROM legacy_resolved
+        UNION ALL
+        SELECT source_index, chat_id FROM portable_resolved
+      ),
+      resolved_ranked AS (
+        SELECT source_index, chat_id,
+               COUNT(*) OVER (PARTITION BY chat_id) AS source_count
+          FROM resolved_candidates
+      ),
+      resolved AS (
+        SELECT source_index, chat_id
+          FROM resolved_ranked
+         WHERE source_count = 1
       ),
       source AS (
-        SELECT * FROM ranked WHERE latest_rank = 1
+        SELECT source_rows.*, resolved.chat_id
+          FROM source_rows
+          JOIN resolved ON resolved.source_index = source_rows.source_index
       )
       UPDATE chats
-         SET custom_name = (SELECT source.custom_name FROM source WHERE source.guid = chats.guid),
-             custom_color = (SELECT source.custom_color FROM source WHERE source.guid = chats.guid),
-             mute_type = (SELECT source.mute_type FROM source WHERE source.guid = chats.guid),
-             is_pinned = (SELECT source.is_pinned FROM source WHERE source.guid = chats.guid),
-             is_archived = (SELECT source.is_archived FROM source WHERE source.guid = chats.guid)
-       WHERE guid IN (SELECT guid FROM source)
+         SET custom_name = (SELECT source.custom_name FROM source WHERE source.chat_id = chats.id),
+             custom_color = (SELECT source.custom_color FROM source WHERE source.chat_id = chats.id),
+             mute_type = (SELECT source.mute_type FROM source WHERE source.chat_id = chats.id),
+             is_pinned = (SELECT source.is_pinned FROM source WHERE source.chat_id = chats.id),
+             is_archived = (SELECT source.is_archived FROM source WHERE source.chat_id = chats.id)
+       WHERE id IN (SELECT chat_id FROM source)
+      RETURNING id
     `);
 
-    const applied = appliedRows[0]?.count ?? 0;
+    const applied = appliedRows.length;
     if (!Number.isSafeInteger(applied) || applied < 0) {
       throw new Error('Backup restore returned an invalid chat count.');
     }

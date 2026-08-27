@@ -12,7 +12,13 @@ import {
   type SecretBox,
 } from '@core/crypto';
 import { utf8Encode } from '@utils/bytes';
-import { BACKUP_LIMITS, BackupSchema, isBackupKey, type Backup } from './backupSchema';
+import {
+  BACKUP_LIMITS,
+  BackupSchema,
+  isBackupKey,
+  type Backup,
+  type BackupV2,
+} from './backupSchema';
 
 export type BackupInputLimitKind =
   'file-size-unavailable' | 'file-too-large' | 'encoded-too-large' | 'plaintext-too-large';
@@ -69,14 +75,14 @@ export function serializeBackup(backup: Backup, indent?: number): string {
 export async function buildBackup(
   db: AppDatabase,
   opts: { exportedAt: number; appVersion?: string },
-): Promise<Backup> {
+): Promise<BackupV2> {
   const [kv, themes, chatCustomizations] = await Promise.all([
     getAllKv(db),
     getAllThemes(db),
     getChatCustomizations(db),
   ]);
   return {
-    version: 1,
+    version: 2,
     exportedAt: opts.exportedAt,
     appVersion: opts.appVersion,
     kv: kv.filter((p) => isBackupKey(p.key)),
@@ -89,6 +95,7 @@ export interface RestoreResult {
   kv: number;
   themes: number;
   chatCustomizations: number;
+  chatCustomizationsSkipped: number;
 }
 
 /**
@@ -124,7 +131,12 @@ export async function restoreBackup(
     (context) => restorePreparedBackupWithinTransaction(context, prepared),
     ownershipGuard,
   );
-  return { kv: kv.length, themes: themes.length, chatCustomizations: applied };
+  return {
+    kv: kv.length,
+    themes: themes.length,
+    chatCustomizations: applied,
+    chatCustomizationsSkipped: backup.chatCustomizations.length - applied,
+  };
 }
 
 /** Parse + validate bounded raw JSON text into a Backup (throws on size, JSON, or schema errors). */

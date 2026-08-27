@@ -40,16 +40,33 @@ import { createTestDb } from '../support/testDb';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 
-async function seedChat(t: Db, guid: string): Promise<void> {
-  const handles = await upsertHandles(t.db, [{ address: 'a@b.com' }]);
+async function seedChat(
+  t: Db,
+  guid: string,
+  options: {
+    chatIdentifier?: string | null;
+    participants?: { address: string; service?: string | null }[];
+    style?: number | null;
+  } = {},
+): Promise<void> {
+  const participants = options.participants ?? [{ address: 'a@b.com', service: 'iMessage' }];
+  const handles = await upsertHandles(t.db, participants);
   await upsertChats(
     t.db,
     [
       Chat.parse({
         guid,
+        chatIdentifier: options.chatIdentifier === undefined ? guid : options.chatIdentifier,
         displayName: 'Server',
-        style: 43,
-        participants: [{ address: 'a@b.com' }],
+        style:
+          options.style === undefined
+            ? guid.includes(';+;')
+              ? 43
+              : guid.includes(';-;')
+                ? 45
+                : null
+            : options.style,
+        participants,
       }),
     ],
     handles,
@@ -98,18 +115,29 @@ describe('buildBackup', () => {
     t.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
       .run('Mine', 'dark', '{"x":1}');
-    await seedChat(t, 'c1');
-    await setChatCustomization(t.db, 'c1', { customName: 'Best', customColor: '#34C759' });
+    const guid = 'unprefixed-chat';
+    await seedChat(t, guid, { style: 45 });
+    await setChatCustomization(t.db, guid, { customName: 'Best', customColor: '#34C759' });
 
     const b = await buildBackup(t.db, { exportedAt: 123, appVersion: '1.0.0' });
-    expect(b.version).toBe(1);
+    expect(b.version).toBe(2);
     expect(b.exportedAt).toBe(123);
     expect(b.kv).toContainEqual({ key: 'theme.preset', value: 'oledDark' });
     expect(b.themes).toContainEqual(
       expect.objectContaining({ name: 'Mine', mode: 'dark', tokens: '{"x":1}' }),
     );
     expect(b.chatCustomizations).toContainEqual(
-      expect.objectContaining({ guid: 'c1', customName: 'Best', customColor: '#34C759' }),
+      expect.objectContaining({
+        identity: {
+          version: 1,
+          service: 'iMessage',
+          kind: 'direct',
+          serverChatIdentifier: guid,
+          participants: [{ address: 'a@b.com', service: 'iMessage' }],
+        },
+        customName: 'Best',
+        customColor: '#34C759',
+      }),
     );
   });
 
@@ -144,19 +172,37 @@ describe('buildBackup', () => {
 });
 
 describe('restoreBackup round-trip', () => {
+  it('round-trips lowercase SMS service identities', async () => {
+    const t = await createTestDb();
+    const guid = 'iMessage;-;5551234567';
+    await seedChat(t, guid, {
+      chatIdentifier: '5551234567',
+      participants: [{ address: '5551234567', service: 'sms' }],
+    });
+    await setChatCustomization(t.db, guid, { customName: 'Text thread' });
+
+    const backup = await buildBackup(t.db, { exportedAt: 1 });
+    expect(backup.chatCustomizations[0]?.identity.service).toBe('SMS');
+    await expect(restoreBackup(t.db, backup)).resolves.toMatchObject({
+      chatCustomizations: 1,
+      chatCustomizationsSkipped: 0,
+    });
+  });
+
   it('rebuilds kv/themes/chat customizations into a fresh db', async () => {
     const src = await createTestDb();
     await kvSet(src.db, 'theme.preset', 'brightWhite');
     src.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
       .run('Custom', 'light', '{"a":2}');
-    await seedChat(src, 'c1');
-    await setChatCustomization(src.db, 'c1', { customName: 'Squad', customColor: '#AF52DE' });
+    const guid = 'iMessage;-;a@b.com';
+    await seedChat(src, guid);
+    await setChatCustomization(src.db, guid, { customName: 'Squad', customColor: '#AF52DE' });
     const backup = await buildBackup(src.db, { exportedAt: 9 });
 
-    // Restore into a fresh db that already has chat c1 (customizations apply by guid).
+    // Restore into a fresh db that already has the same portable chat identity.
     const dst = await createTestDb();
-    await seedChat(dst, 'c1');
+    await seedChat(dst, guid);
     const res = await restoreBackup(dst.db, backup);
     expect(res.chatCustomizations).toBe(1);
 
@@ -168,10 +214,141 @@ describe('restoreBackup round-trip', () => {
       value: string;
     };
     expect(kv.value).toBe('brightWhite');
-    const chat = dst.raw.prepare("SELECT custom_name FROM chats WHERE guid='c1'").get() as {
+    const chat = dst.raw.prepare('SELECT custom_name FROM chats WHERE guid = ?').get(guid) as {
       custom_name: string;
     };
     expect(chat.custom_name).toBe('Squad');
+  });
+
+  it('restores across changed server GUIDs using normalized participants', async () => {
+    const sourceParticipants = [
+      { address: '+1 (555) 123-4567', service: 'iMessage' },
+      { address: 'Friend@Example.com', service: 'iMessage' },
+    ];
+    const src = await createTestDb();
+    await seedChat(src, 'iMessage;-;+1 (555) 123-4567', {
+      chatIdentifier: '+1 (555) 123-4567',
+      participants: sourceParticipants,
+    });
+    await setChatCustomization(src.db, 'iMessage;-;+1 (555) 123-4567', {
+      customName: 'Portable',
+    });
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+
+    const dst = await createTestDb();
+    await seedChat(dst, 'iMessage;-;5551234567', {
+      chatIdentifier: '5551234567',
+      participants: [
+        { address: 'friend@example.COM', service: 'IMESSAGE' },
+        { address: '5551234567', service: 'imessage' },
+      ],
+    });
+
+    await expect(restoreBackup(dst.db, backup)).resolves.toMatchObject({
+      chatCustomizations: 1,
+      chatCustomizationsSkipped: 0,
+    });
+    expect(
+      dst.raw.prepare("SELECT custom_name FROM chats WHERE guid = 'iMessage;-;5551234567'").get(),
+    ).toEqual({ custom_name: 'Portable' });
+
+    const conflict = await createTestDb();
+    await seedChat(conflict, 'iMessage;-;5551234567', {
+      chatIdentifier: '5551234567',
+      participants: [{ address: 'different@example.com', service: 'iMessage' }],
+    });
+    await expect(restoreBackup(conflict.db, backup)).resolves.toMatchObject({
+      chatCustomizations: 0,
+      chatCustomizationsSkipped: 1,
+    });
+    expect(conflict.raw.prepare('SELECT custom_name FROM chats').get()).toEqual({
+      custom_name: null,
+    });
+  });
+
+  it('skips ambiguous groups, lets a stable id disambiguate, and rejects duplicate sources', async () => {
+    const src = await createTestDb();
+    await seedChat(src, 'iMessage;+;source-group', { chatIdentifier: null });
+    await setChatCustomization(src.db, 'iMessage;+;source-group', { customName: 'Do not guess' });
+    const backup = await buildBackup(src.db, { exportedAt: 1 });
+
+    const dst = await createTestDb();
+    await seedChat(dst, 'iMessage;+;candidate-a', { chatIdentifier: null });
+    await seedChat(dst, 'iMessage;+;candidate-b', { chatIdentifier: null });
+
+    await expect(restoreBackup(dst.db, backup)).resolves.toMatchObject({
+      chatCustomizations: 0,
+      chatCustomizationsSkipped: 1,
+    });
+    expect(dst.raw.prepare('SELECT custom_name FROM chats ORDER BY guid').all()).toEqual([
+      { custom_name: null },
+      { custom_name: null },
+    ]);
+
+    dst.raw
+      .prepare('UPDATE chats SET chat_identifier = ? WHERE guid = ?')
+      .run('stable-a', 'iMessage;+;candidate-a');
+    dst.raw
+      .prepare('UPDATE chats SET chat_identifier = ? WHERE guid = ?')
+      .run('stable-b', 'iMessage;+;candidate-b');
+    const customization = backup.chatCustomizations[0]!;
+    customization.identity.serverChatIdentifier = 'stable-a';
+    await expect(restoreBackup(dst.db, backup)).resolves.toMatchObject({
+      chatCustomizations: 1,
+      chatCustomizationsSkipped: 0,
+    });
+    expect(dst.raw.prepare('SELECT custom_name FROM chats ORDER BY guid').all()).toEqual([
+      { custom_name: 'Do not guess' },
+      { custom_name: null },
+    ]);
+
+    dst.raw.prepare('UPDATE chats SET custom_name = NULL').run();
+    backup.chatCustomizations.push({ ...customization, customName: 'Duplicate source' });
+    await expect(restoreBackup(dst.db, backup)).resolves.toMatchObject({
+      chatCustomizations: 0,
+      chatCustomizationsSkipped: 2,
+    });
+    expect(dst.raw.prepare('SELECT custom_name FROM chats ORDER BY guid').all()).toEqual([
+      { custom_name: null },
+      { custom_name: null },
+    ]);
+  });
+
+  it('migrates legacy direct identities but visibly skips unportable legacy groups', async () => {
+    const dst = await createTestDb();
+    await seedChat(dst, 'iMessage;-;5551234567', { chatIdentifier: null });
+    await seedChat(dst, 'iMessage;+;legacy-group', { chatIdentifier: null });
+
+    const result = await restoreBackup(dst.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [],
+      chatCustomizations: [
+        {
+          guid: 'iMessage;-;+1 (555) 123-4567',
+          customName: 'Legacy direct',
+          customColor: null,
+          muteType: null,
+          isPinned: 0,
+          isArchived: 0,
+        },
+        {
+          guid: 'iMessage;+;legacy-group',
+          customName: 'Unsafe group guess',
+          customColor: null,
+          muteType: null,
+          isPinned: 0,
+          isArchived: 0,
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ chatCustomizations: 1, chatCustomizationsSkipped: 1 });
+    expect(dst.raw.prepare('SELECT guid, custom_name FROM chats ORDER BY guid').all()).toEqual([
+      { guid: 'iMessage;+;legacy-group', custom_name: null },
+      { guid: 'iMessage;-;5551234567', custom_name: 'Legacy direct' },
+    ]);
   });
 
   it('queues theme restore behind a rolling-back neighbour instead of joining it', async () => {
@@ -516,42 +693,44 @@ describe('restoreBackup round-trip', () => {
 
   it('does not resurrect a conversation deleted on THIS device', async () => {
     const src = await createTestDb();
-    await seedChat(src, 'c1');
-    await setChatCustomization(src.db, 'c1', { customName: 'Squad' });
+    const guid = 'iMessage;-;a@b.com';
+    await seedChat(src, guid);
+    await setChatCustomization(src.db, guid, { customName: 'Squad' });
     const backup = await buildBackup(src.db, { exportedAt: 1 });
 
     const dst = await createTestDb();
-    await seedChat(dst, 'c1');
-    dst.raw.prepare("UPDATE chats SET deleted_at = 5000 WHERE guid = 'c1'").run();
+    await seedChat(dst, guid);
+    dst.raw.prepare('UPDATE chats SET deleted_at = 5000 WHERE guid = ?').run(guid);
 
     await restoreBackup(dst.db, backup);
     expect(
       dst.raw
-        .prepare("SELECT custom_name, deleted_at, marked_unread_at FROM chats WHERE guid = 'c1'")
-        .get(),
+        .prepare('SELECT custom_name, deleted_at, marked_unread_at FROM chats WHERE guid = ?')
+        .get(guid),
     ).toEqual({ custom_name: 'Squad', deleted_at: 5000, marked_unread_at: null });
   });
 
   it('never carries a tombstone or an unread mark across devices', async () => {
     const src = await createTestDb();
-    await seedChat(src, 'c1');
-    await setChatCustomization(src.db, 'c1', { customName: 'Squad' });
+    const guid = 'iMessage;-;a@b.com';
+    await seedChat(src, guid);
+    await setChatCustomization(src.db, guid, { customName: 'Squad' });
     src.raw
-      .prepare("UPDATE chats SET deleted_at = 9000, marked_unread_at = 9000 WHERE guid = 'c1'")
-      .run();
+      .prepare('UPDATE chats SET deleted_at = 9000, marked_unread_at = 9000 WHERE guid = ?')
+      .run(guid);
     const backup = await buildBackup(src.db, { exportedAt: 1 });
     // Both columns are per-device state and are not even in the file.
     expect(backup.chatCustomizations[0]).not.toHaveProperty('deletedAt');
     expect(backup.chatCustomizations[0]).not.toHaveProperty('markedUnreadAt');
 
     const dst = await createTestDb();
-    await seedChat(dst, 'c1');
+    await seedChat(dst, guid);
     await restoreBackup(dst.db, backup);
     // The live conversation stays live and unbadged; only the customization travels.
     expect(
       dst.raw
-        .prepare("SELECT custom_name, deleted_at, marked_unread_at FROM chats WHERE guid = 'c1'")
-        .get(),
+        .prepare('SELECT custom_name, deleted_at, marked_unread_at FROM chats WHERE guid = ?')
+        .get(guid),
     ).toEqual({ custom_name: 'Squad', deleted_at: null, marked_unread_at: null });
   });
 
@@ -578,7 +757,8 @@ describe('restoreBackup round-trip', () => {
 
   it('queues an ordinary customization restore behind a rolling-back neighbour', async () => {
     const t = await createTestDb();
-    await seedChat(t, 'cQueued');
+    const guid = 'iMessage;-;a@b.com';
+    await seedChat(t, guid);
     let neighbourStarted!: () => void;
     let releaseNeighbour!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -588,7 +768,7 @@ describe('restoreBackup round-trip', () => {
       releaseNeighbour = resolve;
     });
     const neighbour = withDbTransaction(t.db, async () => {
-      t.raw.prepare("UPDATE chats SET custom_name = 'phantom' WHERE guid = 'cQueued'").run();
+      t.raw.prepare("UPDATE chats SET custom_name = 'phantom' WHERE guid = ?").run(guid);
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -602,7 +782,7 @@ describe('restoreBackup round-trip', () => {
       themes: [],
       chatCustomizations: [
         {
-          guid: 'cQueued',
+          guid,
           customName: 'restored safely',
           customColor: null,
           muteType: null,
@@ -612,14 +792,14 @@ describe('restoreBackup round-trip', () => {
       ],
     });
     await Promise.resolve();
-    expect(t.raw.prepare("SELECT custom_name FROM chats WHERE guid = 'cQueued'").get()).toEqual({
+    expect(t.raw.prepare('SELECT custom_name FROM chats WHERE guid = ?').get(guid)).toEqual({
       custom_name: 'phantom',
     });
 
     releaseNeighbour();
     await expect(neighbour).rejects.toThrow('neighbour rollback');
     await expect(restoring).resolves.toMatchObject({ chatCustomizations: 1 });
-    expect(t.raw.prepare("SELECT custom_name FROM chats WHERE guid = 'cQueued'").get()).toEqual({
+    expect(t.raw.prepare('SELECT custom_name FROM chats WHERE guid = ?').get(guid)).toEqual({
       custom_name: 'restored safely',
     });
   });

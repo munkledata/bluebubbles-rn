@@ -163,7 +163,7 @@ export default function BackupScreen(): React.JSX.Element {
       setRestorePass('');
       showDialog(
         'Restored',
-        `Settings: ${r.kv}, themes: ${r.themes}, chats: ${r.chatCustomizations}.`,
+        `Settings: ${r.kv}, themes: ${r.themes}, chats restored: ${r.chatCustomizations}, chats skipped: ${r.chatCustomizationsSkipped}.`,
       );
     } catch (e) {
       if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;

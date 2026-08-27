@@ -21,6 +21,10 @@ export const BACKUP_LIMITS = {
   themeModeCharacters: 32,
   themeTokensCharacters: 256 * 1024,
   chatGuidCharacters: 4_096,
+  chatServiceCharacters: 128,
+  chatIdentifierCharacters: 4_096,
+  chatParticipantAddressCharacters: 4_096,
+  chatParticipants: 512,
   chatNameCharacters: 1_024,
   chatColorCharacters: 128,
   muteTypeCharacters: 64,
@@ -81,44 +85,88 @@ export function getNewBackupPassphraseIssue(passphrase: string): NewBackupPassph
   return Array.from(normalized).length < MIN_NEW_BACKUP_PASSPHRASE_LENGTH ? 'too-short' : null;
 }
 
-/** Backup file format. version is bumped if the shape ever changes. */
-export const BackupSchema = z.object({
+const KvPairSchema = z.object({
+  key: z.string().max(BACKUP_LIMITS.keyCharacters),
+  value: z.string().max(BACKUP_LIMITS.valueCharacters).nullable(),
+});
+
+const ThemeSchema = z.object({
+  name: z.string().max(BACKUP_LIMITS.themeNameCharacters),
+  mode: z.string().max(BACKUP_LIMITS.themeModeCharacters),
+  tokens: z.string().max(BACKUP_LIMITS.themeTokensCharacters),
+  isPreset: z.number().int().min(0).max(1).optional(),
+});
+
+const ChatCustomizationShape = {
+  customName: z.string().max(BACKUP_LIMITS.chatNameCharacters).nullable(),
+  customColor: z.string().max(BACKUP_LIMITS.chatColorCharacters).nullable(),
+  muteType: z.string().max(BACKUP_LIMITS.muteTypeCharacters).nullable(),
+  isPinned: z.number().int().min(0).max(1),
+  isArchived: z.number().int().min(0).max(1),
+} as const;
+
+/**
+ * Version 1 is retained exactly for existing files. Restore can safely migrate a parseable direct
+ * `service;-;address` GUID; group/opaque GUIDs carry too little identity evidence and are reported
+ * as skipped instead of being guessed across Macs.
+ */
+const LegacyChatCustomizationSchema = z.object({
+  guid: z.string().max(BACKUP_LIMITS.chatGuidCharacters),
+  ...ChatCustomizationShape,
+});
+
+/**
+ * Portable chat identity v1. Matching semantics are versioned separately from the outer backup so
+ * a future normalizer can coexist with files produced today. Addresses remain lossless in the
+ * file; restore normalizes both the backed-up and local values with the same version-1 rules.
+ */
+const PortableChatIdentitySchema = z.object({
   version: z.literal(1),
+  service: z.string().max(BACKUP_LIMITS.chatServiceCharacters),
+  kind: z.enum(['direct', 'group', 'unknown']),
+  serverChatIdentifier: z.string().max(BACKUP_LIMITS.chatIdentifierCharacters).nullable(),
+  participants: z
+    .array(
+      z.object({
+        service: z.string().max(BACKUP_LIMITS.chatServiceCharacters),
+        address: z.string().min(1).max(BACKUP_LIMITS.chatParticipantAddressCharacters),
+      }),
+    )
+    .max(BACKUP_LIMITS.chatParticipants),
+});
+
+const PortableChatCustomizationSchema = z.object({
+  identity: PortableChatIdentitySchema,
+  ...ChatCustomizationShape,
+});
+
+const BackupCommonShape = {
   exportedAt: z.number(),
   appVersion: z.string().max(128).optional(),
-  kv: z
-    .array(
-      z.object({
-        key: z.string().max(BACKUP_LIMITS.keyCharacters),
-        value: z.string().max(BACKUP_LIMITS.valueCharacters).nullable(),
-      }),
-    )
-    .max(BACKUP_LIMITS.kvEntries),
-  themes: z
-    .array(
-      z.object({
-        name: z.string().max(BACKUP_LIMITS.themeNameCharacters),
-        mode: z.string().max(BACKUP_LIMITS.themeModeCharacters),
-        tokens: z.string().max(BACKUP_LIMITS.themeTokensCharacters),
-        isPreset: z.number().int().min(0).max(1).optional(),
-      }),
-    )
-    .max(BACKUP_LIMITS.themes),
+  kv: z.array(KvPairSchema).max(BACKUP_LIMITS.kvEntries),
+  themes: z.array(ThemeSchema).max(BACKUP_LIMITS.themes),
+} as const;
+
+export const BackupV1Schema = z.object({
+  version: z.literal(1),
+  ...BackupCommonShape,
+  chatCustomizations: z.array(LegacyChatCustomizationSchema).max(BACKUP_LIMITS.chatCustomizations),
+});
+
+export const BackupV2Schema = z.object({
+  version: z.literal(2),
+  ...BackupCommonShape,
   chatCustomizations: z
-    .array(
-      z.object({
-        guid: z.string().max(BACKUP_LIMITS.chatGuidCharacters),
-        customName: z.string().max(BACKUP_LIMITS.chatNameCharacters).nullable(),
-        customColor: z.string().max(BACKUP_LIMITS.chatColorCharacters).nullable(),
-        muteType: z.string().max(BACKUP_LIMITS.muteTypeCharacters).nullable(),
-        isPinned: z.number().int().min(0).max(1),
-        isArchived: z.number().int().min(0).max(1),
-      }),
-    )
+    .array(PortableChatCustomizationSchema)
     .max(BACKUP_LIMITS.chatCustomizations),
 });
 
+/** New exports are v2; v1 remains accepted for GUID-only backward compatibility. */
+export const BackupSchema = z.discriminatedUnion('version', [BackupV1Schema, BackupV2Schema]);
+
 export type Backup = z.infer<typeof BackupSchema>;
+export type BackupV1 = z.infer<typeof BackupV1Schema>;
+export type BackupV2 = z.infer<typeof BackupV2Schema>;
 
 /**
  * A kv key that might hold a secret. Backups must NEVER export these — secrets

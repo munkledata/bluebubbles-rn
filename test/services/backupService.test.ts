@@ -480,6 +480,7 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
       kv: 1,
       themes: 0,
       chatCustomizations: 0,
+      chatCustomizationsSkipped: 0,
     });
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
   });
