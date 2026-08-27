@@ -68,6 +68,12 @@ export type BootEvent =
   | { readonly type: 'unlock-completed'; readonly runId: number }
   | { readonly type: 'setup-ready'; readonly runId: number }
   | { readonly type: 'issue'; readonly runId: number; readonly issue: BootIssue }
+  | {
+      readonly type: 'issue-resolved';
+      readonly runId: number;
+      readonly stage: BootStage;
+      readonly code: string;
+    }
   | { readonly type: 'failed'; readonly runId: number; readonly failure: BootFailure }
   | { readonly type: 'retry'; readonly runId: number }
   | { readonly type: 'invalidate'; readonly runId: number };
@@ -124,6 +130,16 @@ function retainIssue(state: BootState, issue: BootIssue): BootState {
   return { ...state, issues };
 }
 
+/** Remove only the exact issue that a successful runtime remediation proved is no longer true. */
+function resolveIssue(state: BootState, stage: BootStage, code: string): BootState {
+  const index = state.issues.findIndex((issue) => issue.stage === stage && issue.code === code);
+  if (index < 0) return state;
+  return {
+    ...state,
+    issues: state.issues.filter((_, issueIndex) => issueIndex !== index),
+  };
+}
+
 /**
  * Apply one boot event. Every stale, duplicate, or out-of-order core event is an identity-stable
  * no-op. Never replace an active state with `initialBootState()` while its work can still settle;
@@ -139,6 +155,9 @@ export function transitionBoot(state: BootState, event: BootEvent): BootState {
     return state.status === 'idle' ? state : { status: 'idle', runId: state.runId, issues: [] };
   }
   if (event.type === 'issue') return retainIssue(state, event.issue);
+  if (event.type === 'issue-resolved') {
+    return resolveIssue(state, event.stage, event.code);
+  }
 
   if (state.status === 'loading') {
     if (event.type === 'lock-required' && state.stage === 'lock') {

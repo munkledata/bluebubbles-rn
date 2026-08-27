@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { memoryLogSink, projectErrorReportTimestamp, type LogEntry } from '@core/secure';
 import { useForegroundBootState } from '@features/boot/useForegroundBootState';
+import { resolvePersistentLogCleanupIssue } from '@/services/boot/foregroundBoot';
 import { fileLogSink } from '@/services/logging/fileLogSink';
 import { formatErrorLogsForShare } from '@/services/logging/shareLogs';
 import { formatTime } from '@utils';
@@ -37,7 +38,6 @@ export default function LogsScreen(): React.JSX.Element {
   const [filter, setFilter] = useState<LevelFilter>('all');
   const [isClearing, setIsClearing] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
-  const [cleanupConfirmed, setCleanupConfirmed] = useState(() => fileLogSink.hasConfirmedCleanup());
   // The buffer isn't reactive — snapshot on mount / after clear; Refresh re-snapshots.
   const [entries, setEntries] = useState<LogEntry[]>(() => memoryLogSink.entries());
   const refresh = useCallback(() => setEntries(memoryLogSink.entries()), []);
@@ -47,9 +47,8 @@ export default function LogsScreen(): React.JSX.Element {
   const persistentCleanupIssue = bootState.issues.some(
     (issue) => issue.stage === 'persistent-logs' && issue.code === 'persistent-log-init-failed',
   );
-  const cleanupMessage = cleanupConfirmed
-    ? 'Saved App Logs were removed. Fully close and reopen Gator to finish verifying the cleanup.'
-    : 'Older App Logs could not be verified safely. Tap Clear, then fully close and reopen Gator.';
+  const cleanupMessage =
+    'Older App Logs could not be verified safely. Tap Clear to remove the saved log file.';
 
   const levelColor = (level: LogEntry['level']): string =>
     level === 'error'
@@ -81,9 +80,9 @@ export default function LogsScreen(): React.JSX.Element {
           // file is gone. A failed Clear must not make the UI claim success.
           memoryLogSink.clear();
           refresh();
-          // Record success even if the boot issue appears while native Clear is pending. The sink
-          // retains the confirmation across route remounts until a real process restart.
-          setCleanupConfirmed(true);
+          // Retire the process-owned issue even if it appeared while native Clear was pending.
+          // A late boot-time rejection also observes the sink's confirmed-cleanup fence.
+          resolvePersistentLogCleanupIssue();
         } else {
           showDialog(
             'App Logs',
@@ -129,7 +128,7 @@ export default function LogsScreen(): React.JSX.Element {
           ]}
         >
           <Text style={[styles.cleanupTitle, { color: theme.color.destructive }]}>
-            {cleanupConfirmed ? 'Restart needed' : 'Cleanup needed'}
+            Cleanup needed
           </Text>
           <Text style={[styles.cleanupMessage, { color: theme.color.label }]}>
             {cleanupMessage}

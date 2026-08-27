@@ -17,7 +17,7 @@ import {
 import { runCryptoSelfTest } from '../clients';
 import { initErrorReporting } from '../errors';
 import { InvalidAppLockSettingError, hydrateLock } from '../lock';
-import { initPersistentLogs } from '../logging/fileLogSink';
+import { fileLogSink, initPersistentLogs } from '../logging/fileLogSink';
 import { startFcm } from '../notifications/fcmMessaging';
 import { clearShareShortcuts } from '../shortcuts/shareShortcuts';
 import {
@@ -39,6 +39,8 @@ const SESSION_TIMEOUT_MS = 10_000;
 const DATABASE_TIMEOUT_MS = 30_000;
 const SETTINGS_TIMEOUT_MS = 15_000;
 const ACTIVATE_TIMEOUT_MS = 60_000;
+const PERSISTENT_LOG_STAGE = 'persistent-logs';
+const PERSISTENT_LOG_INIT_FAILURE = 'persistent-log-init-failed';
 
 const RETRY_MESSAGES: Record<CoreBootStage, string> = {
   lock: 'Gator could not read the App Lock setting. Try again.',
@@ -167,6 +169,15 @@ function reportOptionalFailure(
   userMessage: string | undefined,
   error?: unknown,
 ): void {
+  // A successful manual Clear is stronger evidence than a late rejection from the boot-time read.
+  // Do not recreate the process issue after native storage positively confirmed the file is gone.
+  if (
+    stage === PERSISTENT_LOG_STAGE &&
+    code === PERSISTENT_LOG_INIT_FAILURE &&
+    fileLogSink.hasConfirmedCleanup()
+  ) {
+    return;
+  }
   if (error !== undefined) logger.warn(`[boot] optional ${stage} setup failed`, error);
   const issue: BootIssue = {
     stage,
@@ -181,6 +192,20 @@ function reportOptionalFailure(
   // Process setup belongs to the process, not whichever boot generation happened to start it.
   // If that generation has already failed, start/retry replays this retained safe issue.
   replayProcessIssues();
+}
+
+/** Retire the process-owned warning only after native storage confirms file deletion. */
+export function resolvePersistentLogCleanupIssue(): boolean {
+  if (!fileLogSink.hasConfirmedCleanup()) return false;
+
+  const retained = processIssues.get(PERSISTENT_LOG_STAGE);
+  if (retained?.code === PERSISTENT_LOG_INIT_FAILURE) {
+    processIssues.delete(PERSISTENT_LOG_STAGE);
+  }
+
+  const state = coordinator.getState();
+  coordinator.resolveIssue(state.runId, PERSISTENT_LOG_STAGE, PERSISTENT_LOG_INIT_FAILURE);
+  return true;
 }
 
 function startProcessWork(): void {
@@ -201,8 +226,8 @@ function startProcessWork(): void {
   }
   void initPersistentLogs().catch((error) =>
     reportOptionalFailure(
-      'persistent-logs',
-      'persistent-log-init-failed',
+      PERSISTENT_LOG_STAGE,
+      PERSISTENT_LOG_INIT_FAILURE,
       'Older App Logs could not be removed safely. Open Settings → App Logs and tap Clear.',
       error,
     ),

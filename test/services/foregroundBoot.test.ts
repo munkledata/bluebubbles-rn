@@ -14,6 +14,7 @@ const mockCheckDeviceIntegrity = jest.fn();
 const mockRegisterBackgroundSync = jest.fn();
 const mockInitErrorReporting = jest.fn();
 const mockInitPersistentLogs = jest.fn();
+const mockHasConfirmedPersistentLogCleanup = jest.fn();
 const mockStartFcm = jest.fn();
 const mockClearShareShortcuts = jest.fn();
 
@@ -153,7 +154,10 @@ jest.mock('@/services/lock', () => {
 
   return { InvalidAppLockSettingError, hydrateLock: mockHydrateLock };
 });
-jest.mock('@/services/logging/fileLogSink', () => ({ initPersistentLogs: mockInitPersistentLogs }));
+jest.mock('@/services/logging/fileLogSink', () => ({
+  fileLogSink: { hasConfirmedCleanup: mockHasConfirmedPersistentLogCleanup },
+  initPersistentLogs: mockInitPersistentLogs,
+}));
 jest.mock('@/services/notifications/fcmMessaging', () => ({ startFcm: mockStartFcm }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   clearShareShortcuts: mockClearShareShortcuts,
@@ -263,6 +267,7 @@ beforeEach(() => {
   mockRegisterBackgroundSync.mockResolvedValue('registered');
   mockInitErrorReporting.mockReturnValue(undefined);
   mockInitPersistentLogs.mockResolvedValue(undefined);
+  mockHasConfirmedPersistentLogCleanup.mockReturnValue(false);
   mockStartFcm.mockResolvedValue('started');
   mockClearShareShortcuts.mockReturnValue(true);
 });
@@ -599,6 +604,50 @@ describe('production foreground boot singleton', () => {
       ],
     });
     expect(mockRegisterBackgroundSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires a confirmed persistent-log cleanup issue without restarting the process', async () => {
+    const initialization = Promise.withResolvers<void>();
+    mockInitPersistentLogs.mockReturnValueOnce(initialization.promise);
+    const { foreground } = loadForegroundBoot();
+
+    await expect(foreground.startForegroundBoot()).resolves.toMatchObject({
+      status: 'ready',
+      runId: 1,
+    });
+    initialization.reject(new Error('private legacy log cleanup failure'));
+    await flushMicrotasks();
+    expect(foreground.getForegroundBootSnapshot().issues).toContainEqual({
+      stage: 'persistent-logs',
+      level: 'degraded',
+      code: 'persistent-log-init-failed',
+      userMessage:
+        'Older App Logs could not be removed safely. Open Settings → App Logs and tap Clear.',
+    });
+
+    expect(foreground.resolvePersistentLogCleanupIssue()).toBe(false);
+    expect(foreground.getForegroundBootSnapshot().issues).toHaveLength(1);
+
+    mockHasConfirmedPersistentLogCleanup.mockReturnValue(true);
+    expect(foreground.resolvePersistentLogCleanupIssue()).toBe(true);
+    expect(foreground.getForegroundBootSnapshot().issues).toEqual([]);
+  });
+
+  it('does not recreate the cleanup issue when boot initialization rejects after confirmed Clear', async () => {
+    const initialization = Promise.withResolvers<void>();
+    mockInitPersistentLogs.mockReturnValueOnce(initialization.promise);
+    const { foreground } = loadForegroundBoot();
+
+    await expect(foreground.startForegroundBoot()).resolves.toMatchObject({
+      status: 'ready',
+      runId: 1,
+    });
+    mockHasConfirmedPersistentLogCleanup.mockReturnValue(true);
+    expect(foreground.resolvePersistentLogCleanupIssue()).toBe(true);
+
+    initialization.reject(new Error('late private legacy log cleanup failure'));
+    await flushMicrotasks();
+    expect(foreground.getForegroundBootSnapshot().issues).toEqual([]);
   });
 
   it('replays a process issue that settles while no foreground generation owns state', async () => {

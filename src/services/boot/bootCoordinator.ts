@@ -81,6 +81,8 @@ export interface BootCoordinator {
   invalidate(runId: number): BootState;
   /** Report a safe optional/core issue under the reducer's run and stage rules. */
   reportIssue(runId: number, issue: BootIssue): BootState;
+  /** Retire only the exact issue whose runtime remediation has been positively confirmed. */
+  resolveIssue(runId: number, stage: BootStage, code: string): BootState;
 }
 
 export const BOOT_CLASSIFIER_FAILURE_CODE = 'boot-classifier-failed';
@@ -313,6 +315,11 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
     return safeIssue
       ? this.publish(transitionBoot(this.state, { type: 'issue', runId, issue: safeIssue }))
       : this.state;
+  }
+
+  resolveIssue(runId: number, stage: BootStage, code: string): BootState {
+    if (!BOOT_STAGES.has(stage) || typeof code !== 'string' || !code.trim()) return this.state;
+    return this.publish(transitionBoot(this.state, { type: 'issue-resolved', runId, stage, code }));
   }
 
   /**

@@ -221,6 +221,55 @@ describe('boot state machine', () => {
     expect(state.issues).toEqual([degraded, fcmIssue]);
   });
 
+  it('resolves only the exact same-run issue and preserves unrelated degradation', () => {
+    const persistentLogs: BootIssue = {
+      stage: 'persistent-logs',
+      level: 'degraded',
+      code: 'persistent-log-init-failed',
+    };
+    const fcm: BootIssue = {
+      stage: 'fcm',
+      level: 'degraded',
+      code: 'foreground-fcm-start-failed',
+    };
+    let state: BootState = begin();
+    state = transitionBoot(state, { type: 'issue', runId: 1, issue: persistentLogs });
+    state = transitionBoot(state, { type: 'issue', runId: 1, issue: fcm });
+
+    expect(
+      transitionBoot(state, {
+        type: 'issue-resolved',
+        runId: 1,
+        stage: 'persistent-logs',
+        code: 'different-failure',
+      }),
+    ).toBe(state);
+    expect(
+      transitionBoot(state, {
+        type: 'issue-resolved',
+        runId: 999,
+        stage: 'persistent-logs',
+        code: 'persistent-log-init-failed',
+      }),
+    ).toBe(state);
+
+    const resolved = transitionBoot(state, {
+      type: 'issue-resolved',
+      runId: 1,
+      stage: 'persistent-logs',
+      code: 'persistent-log-init-failed',
+    });
+    expect(resolved.issues).toEqual([fcm]);
+    expect(
+      transitionBoot(resolved, {
+        type: 'issue-resolved',
+        runId: 1,
+        stage: 'persistent-logs',
+        code: 'persistent-log-init-failed',
+      }),
+    ).toBe(resolved);
+  });
+
   it('keeps one priority-aware issue per stage so one noisy stage cannot starve another', () => {
     let state: BootState = begin();
     for (let index = 0; index < 100; index += 1) {

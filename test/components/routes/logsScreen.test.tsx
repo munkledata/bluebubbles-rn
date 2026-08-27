@@ -5,8 +5,8 @@ import type { LogEntry } from '@core/secure';
 
 const mockBack = jest.fn();
 const mockClearLogs = jest.fn<Promise<boolean>, []>();
+const mockResolvePersistentLogCleanupIssue = jest.fn();
 const mockShowDialog = jest.fn();
-let mockCleanupConfirmed = false;
 let mockBootIssues: Array<{
   stage: string;
   level: 'degraded' | 'diagnostic';
@@ -61,6 +61,9 @@ jest.mock('@features/boot/useForegroundBootState', () => ({
     issues: mockBootIssues,
   }),
 }));
+jest.mock('@/services/boot/foregroundBoot', () => ({
+  resolvePersistentLogCleanupIssue: () => mockResolvePersistentLogCleanupIssue(),
+}));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
@@ -71,12 +74,7 @@ jest.mock('@ui', () => ({
 }));
 jest.mock('@/services/logging/fileLogSink', () => ({
   fileLogSink: {
-    clear: async () => {
-      const cleared = await mockClearLogs();
-      if (cleared) mockCleanupConfirmed = true;
-      return cleared;
-    },
-    hasConfirmedCleanup: () => mockCleanupConfirmed,
+    clear: () => mockClearLogs(),
   },
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({
@@ -112,8 +110,13 @@ describe('LogsScreen error-only sharing', () => {
 
   beforeEach(() => {
     mockBootIssues = [];
-    mockCleanupConfirmed = false;
     mockClearLogs.mockResolvedValue(true);
+    mockResolvePersistentLogCleanupIssue.mockImplementation(() => {
+      mockBootIssues = mockBootIssues.filter(
+        (issue) => issue.stage !== 'persistent-logs' || issue.code !== 'persistent-log-init-failed',
+      );
+      return true;
+    });
     entriesSpy = jest.spyOn(memoryLogSink, 'entries');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     shareSpy = jest.spyOn(require('react-native').Share, 'share').mockResolvedValue({
@@ -194,7 +197,7 @@ describe('LogsScreen error-only sharing', () => {
     );
   });
 
-  it('keeps cleanup remediation visible and confirms the restart step after Clear', async () => {
+  it('retires the cleanup warning after native storage confirms Clear', async () => {
     mockBootIssues = [cleanupIssue];
     entriesSpy.mockReturnValueOnce([errorEntry]).mockReturnValue([]);
     await renderWithTheme(<LogsScreen />);
@@ -205,32 +208,22 @@ describe('LogsScreen error-only sharing', () => {
 
     await fireEvent.press(screen.getByRole('button', { name: 'Clear' }));
 
-    await waitFor(() =>
-      expect(screen.getByRole('alert').props.accessibilityLabel).toContain(
-        'Saved App Logs were removed',
-      ),
-    );
-    expect(screen.getByText('Restart needed')).toBeTruthy();
-    expect(screen.getByRole('alert').props.accessibilityLabel).toContain(
-      'Fully close and reopen Gator',
-    );
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(mockResolvePersistentLogCleanupIssue).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves the confirmed restart step after the route remounts', async () => {
+  it('keeps the resolved cleanup issue retired after the route remounts', async () => {
     mockBootIssues = [cleanupIssue];
     entriesSpy.mockReturnValue([errorEntry]);
     const first = await renderWithTheme(<LogsScreen />);
 
     await fireEvent.press(screen.getByRole('button', { name: 'Clear' }));
-    await waitFor(() => expect(screen.getByText('Restart needed')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 
     await first.unmount();
     await renderWithTheme(<LogsScreen />);
 
-    expect(screen.getByText('Restart needed')).toBeTruthy();
-    expect(screen.getByRole('alert').props.accessibilityLabel).toContain(
-      'Fully close and reopen Gator',
-    );
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('confirms a successful Clear when the cleanup issue appears while Clear is pending', async () => {
@@ -249,7 +242,8 @@ describe('LogsScreen error-only sharing', () => {
       await pending.promise;
     });
 
-    await waitFor(() => expect(screen.getByText('Restart needed')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(mockResolvePersistentLogCleanupIssue).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the cleanup warning unresolved when native Clear rejects', async () => {
@@ -268,6 +262,7 @@ describe('LogsScreen error-only sharing', () => {
     );
     expect(screen.getByText('Cleanup needed')).toBeTruthy();
     expect(screen.getByRole('alert').props.accessibilityLabel).toContain('Tap Clear');
+    expect(mockResolvePersistentLogCleanupIssue).not.toHaveBeenCalled();
     expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain('private native clear failure');
   });
 
