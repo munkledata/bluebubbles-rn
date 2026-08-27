@@ -166,13 +166,6 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
   }
 }
 
-/**
- * Background catch-up, local-schedule recovery, and outgoing retry. This module is imported by
- * `index.js`, so `defineTask` runs when Android starts a killed/headless JS context, before any
- * Expo Router layout or Zustand hydration.
- */
-TaskManager.defineTask(BG_SYNC_TASK, executeBackgroundSyncTask);
-
 export type BackgroundSyncRegistration = 'registered' | 'unavailable' | 'failed';
 
 /** Register the catch-up task (idempotent). Called once from process-owned foreground setup. */

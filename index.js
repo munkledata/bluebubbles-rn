@@ -37,7 +37,7 @@ import './src/services/logging/registerPersistentLogs';
 // Headless notify-kit background events (notification taps/actions while killed).
 import './src/services/notifications/backgroundEvents';
 // TaskManager.defineTask('gator-bg-sync') — the background sync/outgoing-queue drain.
-import './src/services/background/backgroundSync';
+import './src/services/background/registerBackgroundSyncHeadlessTask';
 // setBackgroundMessageHandler(...) — killed-app FCM push delivery.
 import './src/services/notifications/fcmMessaging';
 // Constant-work cleanup for at most eight abandoned native download partials after process death.
