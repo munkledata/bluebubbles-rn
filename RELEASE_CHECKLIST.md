@@ -187,8 +187,9 @@ npm run check:android-build
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. The host flow is included in source commit `8564b34` and candidate versionCode
-      `57`; exact Android network and SecureStore behavior remains unproven.
+      credentials. The host flow is included in source commit `8564b34`; an eligible replacement
+      must include that work plus post-v57 removal commit `9046e27`. Exact Android network and
+      SecureStore behavior remains unproven.
 - [ ] URL previews make no automatic third-party request. Exercise the enabled preview fallback and
       record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
@@ -200,7 +201,7 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Before device work begins, `DEVICE-01` must create a candidate-specific v57 matrix for the exact AAB.
+Before device work begins, `DEVICE-01` must create a candidate-specific matrix for the exact replacement AAB.
 At minimum:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
