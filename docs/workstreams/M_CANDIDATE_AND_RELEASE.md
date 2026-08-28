@@ -82,6 +82,12 @@ offer percentage staging for the initial production launch. An update defines te
 production percentages/cadence, and halt/resume ownership. Both branches require objective crash/ANR,
 delivery, support, and feedback thresholds plus a corrective-build procedure.
 
+This task does not apply while the owner-approved distribution scope remains private Google Play
+Internal Testing only. `STORE-01G` owns that scope's halt and cleanup procedure. Activate
+`RELEASE-02` before any Closed, Open, or Production promotion; select the then-applicable branch and
+record real owners, access, thresholds, launch scope, and rehearsal evidence rather than inventing
+future operational values.
+
 <a id="release-gate-01"></a>
 
 ## `RELEASE-GATE-01` — final release decision
