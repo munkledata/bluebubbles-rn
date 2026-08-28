@@ -248,14 +248,15 @@ remain useful context, but the `PARITY-01` register that follows is the current 
 - **`group-icon-changed` / `group-icon-removed`** — the app renders group avatars as **participant collages** (`GroupAvatar`) and does not display a server-supplied custom group photo, so there's nothing to refresh. Wiring it would be a no-op until group-photo display is added. Deferred with the (still-open) group-photo feature.
 - **The remaining admin / config surface** (set-config/get-config writes, TLS/zrok/VAPID/Cloudflare **management**, webhooks, FCM **setup**, device purge) — still untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. The read-only **diagnostics** subset (private-API/keys/push/env/tunnel/TLS/alerts) is now surfaced by the **Server Health screen** (see Closed above). What remains are the _write_/management ops, which belong on the trusted local server console, not a remote app.
 
-### `PARITY-01` authoritative disposition register — proposed, owner approval pending
+### `PARITY-01` authoritative disposition register — approved 2026-08-27
 
 This register accounts for all **18** open records: the one `PARTIAL` record already owned by
-`DELETE-SYNC-01`, plus all 17 historical `CONFIRMED` records below. `DEFER` and `DROP` entries are proposals,
-not approved product decisions; `PARITY-01` remains open until the owner reviews them. The historical directional
-tables remain protocol evidence and do not override this register.
+`DELETE-SYNC-01`, plus all 17 historical `CONFIRMED` records below. Three records remain assigned to existing
+primary tasks. The project owner approved the other 15 dispositions as written on 2026-08-27: seven `DEFER` and
+eight `DROP`. These are Android-client scope decisions; `DROP` does not remove the corresponding server behavior.
+The historical directional tables remain protocol evidence and do not override this register.
 
-| Open record/capability | Proposed disposition | Reason / authoritative owner |
+| Open record/capability | Approved disposition | Reason / authoritative owner |
 | --- | --- | --- |
 | Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns exact-device proof and server/helper investigation. |
 | `imessage-aliases-removed` | DEFER | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source. |
@@ -276,7 +277,7 @@ tables remain protocol evidence and do not override this register.
 | `scheduled-message-update` | DEFER | Reopen when cross-device live refresh is required for the current hybrid server/local scheduling model. |
 | `firebase-setup-status` | DROP | The app does not drive Firebase provisioning, so provisioning-progress events have no consumer journey. |
 
-Residual management operations embedded in rows whose read-only portions are already closed are also proposed
+Residual management operations embedded in rows whose read-only portions are already closed are also approved
 **DROP** for mobile parity: FCM setup/clear/OAuth, helper reinjection, Find My key import, zrok/TLS/ACME/Cloudflare
 management, REST admin config writes, and admin-wide device purge. They remain local-console responsibilities.
 
@@ -332,10 +333,11 @@ mobile value or local-console-only; the genuinely app-relevant ones are ranked H
 ## Bottom line
 
 - **App → Server has no user-facing breakage.** The only drift is a harmless listener for an event this server
-  cannot emit and a fail-closed update-check stub; their proposed dispositions are explicit above.
+  cannot emit and a fail-closed update-check stub; their approved dispositions are explicit above.
 - **Server → App uses the core data/action APIs and the selected diagnostic reads.** The remaining open
   capabilities are all accounted for in the `PARITY-01` register rather than being informally called wired,
   deferred, or unworthy here.
 - The post-v56 `new-server` approval/reconfirmation flow is implemented and remains quarantined from SQLite;
   exact Android network and SecureStore interruption proof remains with `RT-01A`.
-- No proposed `DEFER` or `DROP` becomes final until owner approval is recorded in the register and master plan.
+- The 15 `DEFER`/`DROP` decisions are final for the current remediation scope. Changing one requires a new explicit
+  product-owner decision and, for deferred features, selection of the owning implementation task.
