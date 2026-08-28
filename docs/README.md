@@ -13,6 +13,8 @@ Start with the root [`README.md`](../README.md) for the product and architecture
   ledger. It is not executable for a replacement candidate; `DEVICE-01` owns the candidate-specific rewrite.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the private Internal Testing
   procedure; Play/EAS/server writes still require explicit owner approval.
+- [`PUBLIC_RELEASE_LICENSING.md`](./PUBLIC_RELEASE_LICENSING.md) records the private/no-public-license decision and
+  the ownership, notice, distribution-terms, and approval gate required before broader distribution.
 
 ## Architecture and owned contracts
 

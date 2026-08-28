@@ -164,6 +164,12 @@ Gator is not affiliated with, endorsed by, or sponsored by Apple.
 
 ## License
 
-Project ownership/license selection and the complete third-party notice inventory are still an
-explicit release decision (`DEC-02` / `LEGAL-01`). Do not treat the inherited template copyright in
-the current `LICENSE` file as final project ownership or publish until the owner resolves it.
+Gator is currently a private project. The root [`LICENSE`](./LICENSE) grants no public license for
+Gator-authored code or assets. Confirmed inherited licensing text is preserved separately in
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
+
+The current private scope is binary distribution through Google Play Internal Testing only to
+owner-approved private testers. Before publishing source or distributing outside that scope,
+complete the ownership, exact dependency/asset notice, distribution-terms, and approval checklist in
+[`docs/PUBLIC_RELEASE_LICENSING.md`](./docs/PUBLIC_RELEASE_LICENSING.md). Private testing does not
+waive third-party license terms.

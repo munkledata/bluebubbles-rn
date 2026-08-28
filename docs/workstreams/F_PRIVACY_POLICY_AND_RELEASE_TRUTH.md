@@ -90,10 +90,15 @@ design provenance; they do not become separate long-term policy switches.
 
 ## `LEGAL-01` — accurate project license and third-party notices
 
-Record an explicit project license and copyright decision instead of presenting template ownership as
-project ownership. Retain required Expo, React Native, Leaflet, OpenStreetMap, and other dependency
-notices in the appropriate notices artifact. Repository and About links consume the same approved
-license and notices source.
+Record an explicit distribution decision instead of presenting template ownership as project
+ownership: either an approved public project license or a private project with no public license
+grant. Preserve confirmed inherited notices regardless of that choice. Before broader distribution,
+inventory the exact release's dependencies and assets, satisfy their applicable terms, and obtain
+owner/legal approval; conditional components such as Leaflet or OpenStreetMap require review only if
+they are actually restored or distributed.
+
+Repository, About, and store links must describe the same approved scope and consume the same notices
+source. A private project must not advertise an inherited third-party license as the project's own.
 
 This decision precedes the final license/notices links in `SUPPORT-01`.
 

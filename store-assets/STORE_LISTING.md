@@ -1,10 +1,12 @@
 # Gator — Google Play listing draft
 
 This is the repository-side store pack, not proof that the listing is release-ready. It removes
-known-false claims and records source-backed draft answers. Before promotion beyond Internal
-Testing, complete the owner/license decision, privacy policy, Play declarations, exact-candidate
-screenshots, and the hashed-AAB checks in [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). Do not
-reuse screenshots or answers from an older build.
+known-false claims and records source-backed draft answers. The owner selected a private project with
+no public license grant and an Internal Testing scope limited to owner-approved private testers.
+Before any broader distribution, complete the licensing/notice gate, privacy policy, Play
+declarations, exact-candidate screenshots, and the hashed-AAB checks in
+[`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). Do not reuse screenshots or answers from an older
+build.
 
 **Current distribution boundary (owner decision 2026-08-21):** Gator is currently intended only for
 private testers through Google Play Internal Testing. The only explicit submission track configured
@@ -40,7 +42,7 @@ Recheck these requirements when the candidate is frozen:
 | Feature graphic           | Technical checks pass: `play-feature-1024x500.png` is a 1024×500, 8-bit RGB PNG with no alpha; candidate visual approval remains |
 | Phone screenshots         | **Blocked:** capture from the exact candidate with staged data; none are stored here yet                                         |
 | Privacy-policy URL        | **Blocked:** no owner-approved policy URL is recorded in this repository                                                         |
-| License/notices           | **Blocked:** `DEC-02`/`LEGAL-01` require the owner's decision and notice inventory                                               |
+| License/notices           | **Private Internal Testing posture selected:** Expo's inherited notice is preserved; third-party terms still apply; broader distribution awaits an exact inventory and owner/legal approval |
 | Data safety               | **Blocked:** reconcile the candidate, third-party SDKs, active non-internal Play artifacts, and approved privacy policy          |
 | App access                | **Blocked:** provide a stable non-production Mac server, reviewer credentials or setup QR, and step-by-step instructions         |
 | UGC safeguards            | **Deferred for Internal Testing; blocked before promotion:** required safety work is not implemented                             |
@@ -160,9 +162,10 @@ Source facts that informed these notes:
 1. Freeze the release AAB, commit, version, version code, signing identity, and supported device set.
 2. Inspect the AAB's merged manifest, SDK inventory, network behavior, storage behavior, and all
    Play-distributed non-internal versions that affect Data safety.
-3. Before promotion beyond Internal Testing, resolve `PRIV-01`, `LEGAL-01`,
-   `STORE-01A-UGC-SAFETY`, and owner-approved support/contact
-   destinations; publish the privacy policy and terms/user policy.
+3. Before promotion beyond Internal Testing, resolve `PRIV-01`, `STORE-01A-UGC-SAFETY`, and
+   owner-approved support/contact destinations; publish the privacy policy and terms/user policy,
+   and complete [`PUBLIC_RELEASE_LICENSING.md`](../docs/PUBLIC_RELEASE_LICENSING.md), including the
+   exact notice inventory and owner/legal approval.
 4. Provide and test a stable non-production reviewer server/account or QR/manual setup with no
    production-user data.
 5. Capture at least two—and preferably the four planned—portrait screenshots from that exact
