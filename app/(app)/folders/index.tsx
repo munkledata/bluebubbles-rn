@@ -147,9 +147,9 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
-          Folders are private to this device. They organize conversations without changing them on
-          your Mac or server. This version manages folder membership only; browsing, search, and
-          unread totals for folders are not available yet.
+          Folders are private to this device and do not change your Mac or server. Tap a folder to
+          browse it, or Manage its membership. Open a folder and use Edit to rename or delete it.
+          Folder search and folder-wide unread totals are not available yet.
         </Text>
 
         {loadFailed && rows.length > 0 ? (
@@ -206,11 +206,11 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
                   <View style={[styles.row, controlsDisabled && !busy ? styles.dimmed : null]}>
                     <Pressable
                       style={styles.rowMain}
-                      onPress={() => router.push(`/folders/${row.id}`)}
+                      onPress={() => router.push(`/folders/${row.id}/browse`)}
                       disabled={controlsDisabled}
                       accessibilityRole="button"
-                      accessibilityLabel={`${row.name}, ${row.chatCount} ${row.chatCount === 1 ? 'conversation' : 'conversations'}`}
-                      accessibilityHint="Opens the membership editor"
+                      accessibilityLabel={`${row.name}, ${row.chatCount} saved ${row.chatCount === 1 ? 'conversation' : 'conversations'}`}
+                      accessibilityHint="Opens conversations currently available in this folder"
                       accessibilityState={{ disabled: controlsDisabled }}
                     >
                       <Text numberOfLines={1} style={[styles.name, { color: theme.color.label }]}>
@@ -218,7 +218,8 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
                       </Text>
                       <Text style={[styles.count, { color: theme.color.secondaryLabel }]}>
                         {row.chatCount.toLocaleString()}{' '}
-                        {row.chatCount === 1 ? 'conversation' : 'conversations'} · Manage membership
+                        {row.chatCount === 1 ? 'saved conversation' : 'saved conversations'} · Tap
+                        to browse
                       </Text>
                     </Pressable>
 
@@ -268,11 +269,11 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
                       </Text>
                     </Pressable>
                     <Pressable
-                      onPress={() => router.push(`/folders/edit?folderId=${row.id}`)}
+                      onPress={() => router.push(`/folders/${row.id}`)}
                       disabled={controlsDisabled}
                       hitSlop={6}
                       accessibilityRole="button"
-                      accessibilityLabel={`Rename or delete ${row.name}`}
+                      accessibilityLabel={`Manage membership for ${row.name}`}
                       accessibilityState={{ disabled: controlsDisabled, busy }}
                       style={styles.edit}
                     >

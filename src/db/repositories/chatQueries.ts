@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters } from '@core/models';
 import { chats } from '../schema';
+import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 import {
   chatVisible,
@@ -8,6 +9,7 @@ import {
   type InboxArchiveFilter,
   type InboxSenderFilter,
 } from './chatVisibility';
+import { MAX_CUSTOM_FOLDER_MEMBERS, type CustomFolderRow } from './customFolders';
 
 export type { InboxArchiveFilter, InboxSenderFilter } from './chatVisibility';
 
@@ -93,6 +95,27 @@ export interface InboxPage {
   hasMore: boolean;
 }
 
+export interface CustomFolderInboxPage extends InboxPage {
+  folder: CustomFolderRow;
+  /** Visible chat rows in the complete folder, not only the currently loaded prefix. */
+  availableCount: number;
+}
+
+function requireCustomFolderId(folderId: number): void {
+  if (!Number.isSafeInteger(folderId) || folderId <= 0) {
+    throw new RangeError('Folder id must be a positive safe integer.');
+  }
+}
+
+function customFolderMembershipSql(folderId: number | undefined) {
+  if (folderId == null) return sql``;
+  requireCustomFolderId(folderId);
+  return sql`AND EXISTS(
+    SELECT 1 FROM custom_folder_members cfm
+     WHERE cfm.folder_id = ${folderId} AND cfm.chat_guid = c.guid
+  )`;
+}
+
 async function queryChatsForInbox(
   db: AppDatabase,
   options: {
@@ -100,9 +123,11 @@ async function queryChatsForInbox(
     sender: InboxSenderFilter;
     filters?: InboxFilters;
     limit?: number;
+    folderId?: number;
   },
 ): Promise<InboxRow[]> {
   const filters = inboxFilterSql(options);
+  const folderMembership = customFolderMembershipSql(options.folderId);
   const limit = options.limit == null ? sql`` : sql`LIMIT ${options.limit}`;
   return db.all<InboxRow>(sql`
     -- Bound the chat identities FIRST. Pinned rows use their device-local manual rank; unpinned
@@ -112,16 +137,18 @@ async function queryChatsForInbox(
       SELECT c.id, c.is_pinned,
              COALESCE(c.pin_order, 9223372036854775807) AS pin_sort,
              NULL AS date_sort
-        FROM chats c
+       FROM chats c
        WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
+         ${folderMembership}
          AND c.is_pinned = 1
        ORDER BY pin_sort ASC, c.id DESC
        ${limit}
     ),
     unpinned AS (
       SELECT c.id, c.is_pinned, NULL AS pin_sort, c.latest_message_date AS date_sort
-        FROM chats c
+       FROM chats c
        WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
+         ${folderMembership}
          AND c.is_pinned = 0
        ORDER BY c.latest_message_date DESC, c.id DESC
        ${limit}
@@ -228,6 +255,70 @@ export async function listChatsForInboxPage(
     limit: limit + 1,
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+/**
+ * Transaction-only folder browse snapshot. Folder identity/counts and the decorated growing page
+ * share the exact membership state, so add-before-prune replacement cannot leak its intermediate
+ * superset to the UI.
+ */
+export function listCustomFolderInboxPageWithinTransaction(
+  context: DbTransactionContext,
+  folderId: number,
+  requestedLimit = 50,
+): Promise<CustomFolderInboxPage | null> {
+  return runInTransactionContext(context, async (db) => {
+    requireCustomFolderId(folderId);
+    const finiteLimit = Number.isFinite(requestedLimit)
+      ? Math.max(1, Math.floor(requestedLimit))
+      : 50;
+    const limit = Math.min(finiteLimit, MAX_CUSTOM_FOLDER_MEMBERS);
+    const folderRows = await db.all<CustomFolderRow>(sql`
+      SELECT f.id, f.name, f.sort_order AS sortOrder, COUNT(m.chat_guid) AS chatCount
+        FROM custom_folders f
+        LEFT JOIN custom_folder_members m ON m.folder_id = f.id
+       WHERE f.id = ${folderId}
+       GROUP BY f.id, f.name, f.sort_order
+       LIMIT 1
+    `);
+    const folder = folderRows[0];
+    if (!folder) return null;
+    if (
+      !Number.isSafeInteger(folder.chatCount) ||
+      folder.chatCount < 0 ||
+      folder.chatCount > MAX_CUSTOM_FOLDER_MEMBERS
+    ) {
+      throw new Error('Custom folder membership exceeds its safety bound.');
+    }
+
+    const membership = customFolderMembershipSql(folderId);
+    const availableRows = await db.all<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+        FROM chats c
+       WHERE ${chatVisible('c')} ${membership}
+    `);
+    const availableCount = availableRows[0]?.count ?? 0;
+    if (
+      !Number.isSafeInteger(availableCount) ||
+      availableCount < 0 ||
+      availableCount > folder.chatCount
+    ) {
+      throw new Error('Custom folder availability count is invalid.');
+    }
+
+    const rows = await queryChatsForInbox(db, {
+      archive: 'all',
+      sender: 'any',
+      folderId,
+      limit: limit + 1,
+    });
+    return {
+      folder,
+      availableCount,
+      rows: rows.slice(0, limit),
+      hasMore: rows.length > limit,
+    };
+  });
 }
 
 /** Lightweight exact count for page-external affordances such as the Unknown Senders footer. */

@@ -44,6 +44,7 @@ function folderNameError(error: unknown): string {
 type PendingEditOutcome =
   | { readonly type: 'created'; readonly folderId: number }
   | { readonly type: 'return' }
+  | { readonly type: 'deleted' }
   | { readonly type: 'missing' }
   | { readonly type: 'error'; readonly message: string };
 
@@ -155,6 +156,8 @@ export default function ConversationFolderEditScreen(): React.JSX.Element {
       setError('This folder no longer exists.');
     } else if (outcome.type === 'created') {
       navigateWithoutPrompt(() => router.replace(`/folders/${outcome.folderId}`));
+    } else if (outcome.type === 'deleted') {
+      navigateWithoutPrompt(() => router.dismissTo('/folders'));
     } else {
       navigateWithoutPrompt(() => router.back());
     }
@@ -257,7 +260,7 @@ export default function ConversationFolderEditScreen(): React.JSX.Element {
                   applyPendingOutcome();
                   return;
                 }
-                pendingOutcomeRef.current = { type: 'return' };
+                pendingOutcomeRef.current = { type: 'deleted' };
                 applyPendingOutcome();
               })
               .catch(() => {

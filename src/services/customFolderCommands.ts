@@ -2,10 +2,12 @@ import {
   createCustomFolderWithinTransaction,
   deleteCustomFolderWithinTransaction,
   listCustomFolderChatGuidsWithinTransaction,
+  listCustomFolderInboxPageWithinTransaction,
   listCustomFoldersWithinTransaction,
   renameCustomFolderWithinTransaction,
   reorderCustomFoldersWithinTransaction,
   replaceCustomFolderMembershipWithinTransaction,
+  type CustomFolderInboxPage,
   type CustomFolderRow,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
@@ -74,6 +76,26 @@ export function loadCustomFolderMembership(
     return withDbTransaction(
       db,
       (context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/**
+ * Read one exact folder identity/count snapshot and its growing conversation prefix. The shared
+ * transaction queue keeps add-before-prune membership replacement invisible to this UI read.
+ */
+export function loadCustomFolderInboxPage(
+  folderId: number,
+  limit: number,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<CustomFolderCommandResult<CustomFolderInboxPage | null>> {
+  return runCustomFolderCommand(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertCustomFolderCommandLease(activeLease);
+    return withDbTransaction(
+      db,
+      (context) => listCustomFolderInboxPageWithinTransaction(context, folderId, limit),
       () => activeLease.isCurrent(),
     );
   });
