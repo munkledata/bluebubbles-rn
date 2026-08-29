@@ -2339,7 +2339,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 18);
-  assert.equal(intentionalBoundaries.length, 22);
+  assert.equal(intentionalBoundaries.length, 24);
   assert.equal(scheduledStateMachine.length, 9);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2347,6 +2347,8 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
       'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
+      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:5111af2df56f',
+      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
       'src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3',
       'src/features/conversations/devSeed.ts#devSendFake.<callback:3603f2d977>:mutator-call:5f9f1755f5ee',
@@ -4897,7 +4899,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0042_message_part_identity' as const;",
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0043_custom_folders' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },

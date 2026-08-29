@@ -199,7 +199,7 @@ export default function SettingsScreen(): React.JSX.Element {
       // identical across servers, so keeping it would hand it to the next account).
       'Forget this server and clear stored credentials?\n\n' +
         'Conversations, messages and downloaded attachments are deleted from this device and re-sync when you reconnect.\n\n' +
-        'Pins, mutes, custom chat names, chat themes and wallpapers, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently.',
+        'Pins, mutes, custom chat names, chat themes and wallpapers, custom folders, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

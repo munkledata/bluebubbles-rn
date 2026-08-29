@@ -788,4 +788,41 @@ export const MIGRATIONS: Migration[] = [
         )`,
     ],
   },
+  {
+    // Device-local folder membership points at stable chat GUIDs rather than chat-row ids. A Full
+    // Repair or ordinary resync can therefore temporarily remove/recreate a chat without erasing
+    // the user's classification. Disconnect explicitly wipes both account-private tables.
+    name: '0043_custom_folders',
+    statements: [
+      `CREATE TABLE custom_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL
+          CONSTRAINT custom_folders_name_valid
+          CHECK (
+            length(name) BETWEEN 1 AND 64
+            AND length(CAST(name AS BLOB)) <= 256
+            AND name = trim(name)
+            AND instr(name, char(0)) = 0
+          ),
+        sort_order INTEGER NOT NULL
+          CONSTRAINT custom_folders_sort_order_nonnegative
+          CHECK (typeof(sort_order) = 'integer' AND sort_order >= 0)
+      )`,
+      `CREATE UNIQUE INDEX custom_folders_name_idx ON custom_folders (name)`,
+      `CREATE INDEX custom_folders_order_idx ON custom_folders (sort_order, id)`,
+      `CREATE TABLE custom_folder_members (
+        folder_id INTEGER NOT NULL REFERENCES custom_folders(id) ON DELETE CASCADE,
+        chat_guid TEXT NOT NULL
+          CONSTRAINT custom_folder_members_chat_guid_valid
+          CHECK (
+            length(chat_guid) BETWEEN 1 AND 4096
+            AND length(CAST(chat_guid AS BLOB)) <= 16384
+            AND instr(chat_guid, char(0)) = 0
+          ),
+        PRIMARY KEY (folder_id, chat_guid)
+      )`,
+      `CREATE INDEX custom_folder_members_chat_guid_idx
+        ON custom_folder_members (chat_guid, folder_id)`,
+    ],
+  },
 ];

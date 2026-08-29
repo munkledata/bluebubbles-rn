@@ -36,6 +36,32 @@ export const NOTIFICATION_ROUTE_KV_PREFIX = 'notification.route.v2.facetime.';
 /** Maximum rows one cache-delete statement may hold the shared write queue for. */
 const CACHE_DELETE_BATCH_SIZE = 500;
 
+async function deleteCustomFolderMembersBatch(db: AppDatabase): Promise<number> {
+  return withDbWriteLock(async () => {
+    const rows = await db.all<{ rowid: number }>(sql`
+      DELETE FROM custom_folder_members
+       WHERE rowid IN (
+         SELECT rowid FROM custom_folder_members ORDER BY rowid LIMIT ${CACHE_DELETE_BATCH_SIZE}
+       )
+      RETURNING rowid
+    `);
+    return rows.length;
+  });
+}
+
+async function deleteCustomFoldersBatch(db: AppDatabase): Promise<number> {
+  return withDbWriteLock(async () => {
+    const rows = await db.all<{ rowid: number }>(sql`
+      DELETE FROM custom_folders
+       WHERE rowid IN (
+         SELECT rowid FROM custom_folders ORDER BY rowid LIMIT ${CACHE_DELETE_BATCH_SIZE}
+       )
+      RETURNING rowid
+    `);
+    return rows.length;
+  });
+}
+
 /**
  * Drop every row this device cached FROM a server, so the next connection starts clean.
  *
@@ -61,8 +87,9 @@ const CACHE_DELETE_BATCH_SIZE = 500;
  * `service;-;address`, i.e. byte-identical across servers, so the NEXT account's thread with the
  * same number would inherit the previous user's custom name, colour and wallpaper — the exact
  * cross-account leak this wipe exists to close. Reminders, scheduled messages, queued unsent
- * messages and composer drafts are destroyed for the same reason. The Disconnect confirmation
- * (`app/(app)/settings.tsx`) names all of it, so the destruction is at least consented to.
+ * messages, composer drafts, and custom folder names/memberships are destroyed for the same
+ * reason. The Disconnect confirmation (`app/(app)/settings.tsx`) names the local-data reset, so
+ * the destruction is at least consented to.
  *
  * `messages_fts` needs no explicit pass — the `messages_ad` AFTER DELETE trigger removes each row
  * from the FTS index, and SQLite's truncate optimization (which would skip triggers on a bare
@@ -208,6 +235,18 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
       `);
       return rows.length;
     });
+  }
+
+  // Folder names and their stable chat GUIDs describe the old account's conversations even when
+  // the chats themselves are absent. Remove members first, then their owning folders.
+  let deletedCustomFolderMembers = CACHE_DELETE_BATCH_SIZE;
+  while (deletedCustomFolderMembers === CACHE_DELETE_BATCH_SIZE) {
+    deletedCustomFolderMembers = await deleteCustomFolderMembersBatch(db);
+  }
+
+  let deletedCustomFolders = CACHE_DELETE_BATCH_SIZE;
+  while (deletedCustomFolders === CACHE_DELETE_BATCH_SIZE) {
+    deletedCustomFolders = await deleteCustomFoldersBatch(db);
   }
 
   let deletedChats = CACHE_DELETE_BATCH_SIZE;
@@ -412,6 +451,8 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
           OR EXISTS (SELECT 1 FROM attachment_cache_entries)
           OR EXISTS (SELECT 1 FROM messages)
           OR EXISTS (SELECT 1 FROM chat_handles)
+          OR EXISTS (SELECT 1 FROM custom_folder_members)
+          OR EXISTS (SELECT 1 FROM custom_folders)
           OR EXISTS (SELECT 1 FROM chats)
           OR EXISTS (SELECT 1 FROM handles)
           OR EXISTS (SELECT 1 FROM outgoing_queue)

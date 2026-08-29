@@ -19,6 +19,8 @@ describe('migrations', () => {
       'chats',
       'chat_handles',
       'contacts',
+      'custom_folder_members',
+      'custom_folders',
       'error_reports',
       'handles',
       'incoming_event_queue',

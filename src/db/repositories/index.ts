@@ -18,6 +18,7 @@ export * from './incomingEvents';
 export * from './errorReports';
 export * from './kv';
 export * from './themes';
+export * from './customFolders';
 export * from './backup';
 export * from './urlPreviews';
 export * from './sync';

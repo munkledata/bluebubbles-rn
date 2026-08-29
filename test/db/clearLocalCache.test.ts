@@ -13,6 +13,7 @@ import {
   DRAFT_KV_PREFIX,
   NOTIFICATION_ROUTE_KV_PREFIX,
   clearLocalCache,
+  createCustomFolder,
   createReminder,
   enqueueIncomingEvent,
   getSyncMarker,
@@ -23,6 +24,7 @@ import {
   kvSet,
   localCacheDirty,
   recordAttachmentCacheEntry,
+  replaceCustomFolderMembership,
   searchMessages,
   setSyncMarker,
   setUrlPreview,
@@ -118,6 +120,8 @@ async function seed(db: AppDatabase): Promise<void> {
       lastUsedAt: 5000,
     }),
   );
+  const folder = await createCustomFolder(db, 'Private plans');
+  await replaceCustomFolderMembership(db, folder.id, ['c1', 'temporarily-missing-chat']);
 
   await setSyncMarker(db, { lastSyncedRowId: 4321, lastSyncedTimestamp: 1000 });
   await kvSet(db, DELETIONS_WATERMARK_KV_KEY, '1234');
@@ -222,6 +226,8 @@ describe('clearLocalCache', () => {
       'attachments',
       'messages',
       'chat_handles',
+      'custom_folder_members',
+      'custom_folders',
       'chats',
       'handles',
       'outgoing_queue',
@@ -724,6 +730,10 @@ describe('clearLocalCache', () => {
         'message GUID alias',
         `INSERT INTO message_guid_aliases (alias_guid, canonical_guid)
          VALUES ('temp-isolated-alias', 'real-isolated-alias')`,
+      ],
+      [
+        'custom folder',
+        `INSERT INTO custom_folders (name, sort_order) VALUES ('Isolated folder', 0)`,
       ],
       [
         'composer draft',

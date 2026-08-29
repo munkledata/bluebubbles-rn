@@ -97,6 +97,55 @@ export const chats = sqliteTable(
   }),
 );
 
+/** Device-local, account-private conversation folders. Server sync never owns these rows. */
+export const customFolders = sqliteTable(
+  'custom_folders',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    sortOrder: integer('sort_order').notNull(),
+  },
+  (t) => ({
+    nameIdx: uniqueIndex('custom_folders_name_idx').on(t.name),
+    orderIdx: index('custom_folders_order_idx').on(t.sortOrder, t.id),
+    nameValid: check(
+      'custom_folders_name_valid',
+      sql`length(${t.name}) BETWEEN 1 AND 64
+          AND length(CAST(${t.name} AS BLOB)) <= 256
+          AND ${t.name} = trim(${t.name})
+          AND instr(${t.name}, char(0)) = 0`,
+    ),
+    sortOrderNonnegative: check(
+      'custom_folders_sort_order_nonnegative',
+      sql`typeof(${t.sortOrder}) = 'integer' AND ${t.sortOrder} >= 0`,
+    ),
+  }),
+);
+
+/**
+ * Folder membership deliberately stores the stable chat GUID without an FK to `chats`.
+ * A repair/resync may temporarily remove a chat row; that must not erase the user's folder choice.
+ */
+export const customFolderMembers = sqliteTable(
+  'custom_folder_members',
+  {
+    folderId: integer('folder_id')
+      .notNull()
+      .references(() => customFolders.id, { onDelete: 'cascade' }),
+    chatGuid: text('chat_guid').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.folderId, t.chatGuid] }),
+    chatGuidIdx: index('custom_folder_members_chat_guid_idx').on(t.chatGuid, t.folderId),
+    chatGuidValid: check(
+      'custom_folder_members_chat_guid_valid',
+      sql`length(${t.chatGuid}) BETWEEN 1 AND 4096
+          AND length(CAST(${t.chatGuid} AS BLOB)) <= 16384
+          AND instr(${t.chatGuid}, char(0)) = 0`,
+    ),
+  }),
+);
+
 /** Many-to-many: chats <-> participant handles. */
 export const chatHandles = sqliteTable(
   'chat_handles',
@@ -632,6 +681,8 @@ export const reminders = sqliteTable(
 export const schema = {
   handles,
   chats,
+  customFolders,
+  customFolderMembers,
   chatHandles,
   messages,
   messageDeletionLedger,

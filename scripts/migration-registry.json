@@ -130,6 +130,16 @@
       "upgradeTest": "test/db/migrations/0042_message_part_identity.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 43,
+      "name": "0043_custom_folders",
+      "task": "FEAT-04A",
+      "branchPr": "release/store-01-0.1.41",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0043_custom_folders.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

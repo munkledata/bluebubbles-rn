@@ -121,29 +121,29 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           <Text style={textStyle}>
             Deleting a chat removes Gator-owned downloaded files after its database purge when
             possible. Disconnecting clears the account’s database contents, attachments, contact
-            images, wallpapers, and app logs before another account can connect. If required cleanup
-            cannot be confirmed, Gator blocks the next connection so the cleanup can be retried. It
-            does not delete copies exported to Photos or the Gator album; remove those in your
-            Photos app. Temporary cache files may remain until Gator or Android removes them. Clear
-            App Logs deletes the saved log and tells you if Android cannot confirm removal. Release
-            builds retain structured error diagnostics, including an opaque crash-site code without
-            a filename, function name, or original stack, plus a small push-receipt record
-            containing a minute-rounded receipt time, the server event category, and whether
-            delivery was foreground or background. Development builds may keep extra local
-            diagnostics, but Share diagnostics exports only the structured errors and finite receipt
-            events. Clearing app data or uninstalling removes Gator’s app-private files but not
-            exported media copies.
+            images, wallpapers, custom folder names and memberships, and app logs before another
+            account can connect. If required cleanup cannot be confirmed, Gator blocks the next
+            connection so the cleanup can be retried. It does not delete copies exported to Photos
+            or the Gator album; remove those in your Photos app. Temporary cache files may remain
+            until Gator or Android removes them. Clear App Logs deletes the saved log and tells you
+            if Android cannot confirm removal. Release builds retain structured error diagnostics,
+            including an opaque crash-site code without a filename, function name, or original
+            stack, plus a small push-receipt record containing a minute-rounded receipt time, the
+            server event category, and whether delivery was foreground or background. Development
+            builds may keep extra local diagnostics, but Share diagnostics exports only the
+            structured errors and finite receipt events. Clearing app data or uninstalling removes
+            Gator’s app-private files but not exported media copies.
           </Text>
         </SettingsSection>
 
         <SettingsSection label="BACKUPS" style={styles.gap}>
           <Text style={textStyle}>
             A backup contains your theme, selected app settings, and per-chat customizations—not
-            messages, drafts, diagnostic consent, or credentials. The current export flow encrypts
-            it before writing a temporary share file and attempts to delete that file after the
-            share sheet closes. A copy you save to Files, Drive, or another app remains there until
-            you delete it. Gator can still import older plaintext backup files but does not offer
-            plaintext export in the app.
+            custom folders, messages, drafts, diagnostic consent, or credentials. The current export
+            flow encrypts it before writing a temporary share file and attempts to delete that file
+            after the share sheet closes. A copy you save to Files, Drive, or another app remains
+            there until you delete it. Gator can still import older plaintext backup files but does
+            not offer plaintext export in the app.
           </Text>
         </SettingsSection>
       </ScrollView>
