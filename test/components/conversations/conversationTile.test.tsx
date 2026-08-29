@@ -15,23 +15,17 @@
  * pinned-state affordance in the tile to assert; the "isPinned is inert here" contract is pinned
  * by a test below.
  *
- * Mocks declared in-file: `@/services` supplies the swipe services; `@db/repositories` exposes
- * Mute and Archive as context-only helpers. Account-A/account-B fake databases make their
- * transaction boundaries, rollback, and cross-account isolation visible.
+ * Mocks declared in-file: `@/services` supplies the account-scoped swipe commands. This row suite
+ * verifies the component boundary: exact guid, requested state, and captured account lease.
  */
 import React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { ConversationTile } from '@ui/conversations/ConversationTile';
-import {
-  setChatArchiveWithinTransaction,
-  setChatMuteWithinTransaction,
-  type InboxRow,
-} from '@db/repositories';
-import { getDatabase } from '@db/database';
+import type { InboxRow } from '@db/repositories';
 import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { darkTheme } from '@ui/theme/tokens';
-import { deleteChat, markRead, markUnread } from '@/services';
+import { deleteChat, markRead, markUnread, setChatArchived, setChatMuted } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 import {
   pauseRealtimeDeliveries,
@@ -43,10 +37,8 @@ jest.mock('@/services', () => ({
   markRead: jest.fn(),
   markUnread: jest.fn(),
   deleteChat: jest.fn(),
-}));
-jest.mock('@db/repositories', () => ({
-  setChatMuteWithinTransaction: jest.fn(() => Promise.resolve()),
-  setChatArchiveWithinTransaction: jest.fn(() => Promise.resolve()),
+  setChatArchived: jest.fn(() => Promise.resolve()),
+  setChatMuted: jest.fn(() => Promise.resolve()),
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 
@@ -54,9 +46,8 @@ const mockMarkRead = markRead as jest.Mock;
 const mockMarkUnread = markUnread as jest.Mock;
 const mockDeleteChat = deleteChat as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
-const mockGetDatabase = getDatabase as jest.Mock;
-const mockSetChatMuteWithinTransaction = setChatMuteWithinTransaction as jest.Mock;
-const mockSetChatArchiveWithinTransaction = setChatArchiveWithinTransaction as jest.Mock;
+const mockSetChatMuted = setChatMuted as jest.Mock;
+const mockSetChatArchived = setChatArchived as jest.Mock;
 
 // The ServiceBadge marks its label accessibilityElementsHidden (decorative), so RNTL's default
 // query excludes it — opt hidden elements in when asserting the badge text.
@@ -69,43 +60,6 @@ const SECOND_PRIVATE_PARTICIPANT = 'private-avatar-person-b80c-+15557654321';
 const SECOND_PRIVATE_AVATAR_URI = 'file:///private-avatar-993a-second-photo.jpg';
 const GENERIC_DELETE_MESSAGE =
   'Delete this conversation? This removes it from this device (not from the server).';
-const ACCOUNT_A_DATABASE = {
-  kind: 'conversation-tile-account-a-db',
-  run: jest.fn(async (_statement: unknown) => undefined),
-};
-const ACCOUNT_B_DATABASE = {
-  kind: 'conversation-tile-account-b-db',
-  run: jest.fn(async (_statement: unknown) => undefined),
-};
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve(value: T): void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-function sqlStatementText(value: unknown): string {
-  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
-  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
-  return chunks
-    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
-    .filter((part): part is string => typeof part === 'string')
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
-  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
-}
-
 interface DialogButton {
   style?: 'default' | 'cancel' | 'destructive';
   onPress?: () => void;
@@ -181,15 +135,12 @@ function titleWeight(title: string): TextStyle['fontWeight'] {
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
-  mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DATABASE);
   mockMarkRead.mockClear();
   mockMarkUnread.mockClear();
   mockDeleteChat.mockClear();
   mockShowDialog.mockClear();
-  mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
-  mockSetChatArchiveWithinTransaction.mockReset().mockResolvedValue(undefined);
-  ACCOUNT_A_DATABASE.run.mockReset().mockResolvedValue(undefined);
-  ACCOUNT_B_DATABASE.run.mockReset().mockResolvedValue(undefined);
+  mockSetChatMuted.mockReset().mockResolvedValue(undefined);
+  mockSetChatArchived.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -433,16 +384,16 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     const staleArchive = retainConfiguredPress(screen.getByRole('button', { name: 'Archive' }));
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
-    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
 
     await invokeConfiguredPress(staleMute);
     await invokeConfiguredPress(staleArchive);
 
-    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
-    expect(mockSetChatArchiveWithinTransaction).not.toHaveBeenCalled();
-    expect(mockGetDatabase).not.toHaveBeenCalled();
-    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
-    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    const staleMuteLease = mockSetChatMuted.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    const staleArchiveLease = mockSetChatArchived.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    expect(mockSetChatMuted).toHaveBeenCalledWith(guid, true, staleMuteLease);
+    expect(mockSetChatArchived).toHaveBeenCalledWith(guid, true, staleArchiveLease);
+    expect(staleMuteLease).toBe(staleArchiveLease);
+    expect(staleMuteLease.isCurrent()).toBe(false);
 
     await first.unmount();
     await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
@@ -451,84 +402,13 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     await invokeConfiguredPress(freshMute);
     await invokeConfiguredPress(freshArchive);
 
-    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(expect.any(Object), guid, 'mute');
-    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
-      guid,
-      true,
-    );
-    expectDbRunSequence(ACCOUNT_B_DATABASE, [
-      'BEGIN IMMEDIATE',
-      'COMMIT',
-      'BEGIN IMMEDIATE',
-      'COMMIT',
-    ]);
-  });
-
-  it('rolls back an admitted A-account Mute without touching B', async () => {
-    const guid = 'same-guid';
-    const write = deferred<void>();
-    mockSetChatMuteWithinTransaction.mockReturnValueOnce(write.promise);
-    await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
-
-    await fireEvent.press(screen.getByLabelText('Mute'));
-    await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE']);
-
-    let drain: Promise<void> | undefined;
-    try {
-      let drained = false;
-      drain = pauseRealtimeDeliveries().then(() => {
-        drained = true;
-      });
-      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
-      await Promise.resolve();
-      expect(drained).toBe(false);
-
-      write.resolve(undefined);
-      await drain;
-      expect(drained).toBe(true);
-      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
-    } finally {
-      write.resolve(undefined);
-      drain ??= pauseRealtimeDeliveries();
-      await Promise.allSettled([drain]);
-      resumeRealtimeDeliveries();
-    }
-  });
-
-  it('rolls back an admitted A-account Archive without touching B', async () => {
-    const guid = 'same-guid';
-    const write = deferred<void>();
-    mockSetChatArchiveWithinTransaction.mockReturnValueOnce(write.promise);
-    await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
-
-    await fireEvent.press(screen.getByLabelText('Archive'));
-    await waitFor(() => expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE']);
-
-    let drain: Promise<void> | undefined;
-    try {
-      let drained = false;
-      drain = pauseRealtimeDeliveries().then(() => {
-        drained = true;
-      });
-      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
-      await Promise.resolve();
-      expect(drained).toBe(false);
-
-      write.resolve(undefined);
-      await drain;
-      expect(drained).toBe(true);
-      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
-    } finally {
-      write.resolve(undefined);
-      drain ??= pauseRealtimeDeliveries();
-      await Promise.allSettled([drain]);
-      resumeRealtimeDeliveries();
-    }
+    const freshMuteLease = mockSetChatMuted.mock.calls[1]?.[2] as { isCurrent(): boolean };
+    const freshArchiveLease = mockSetChatArchived.mock.calls[1]?.[2] as { isCurrent(): boolean };
+    expect(mockSetChatMuted).toHaveBeenLastCalledWith(guid, true, freshMuteLease);
+    expect(mockSetChatArchived).toHaveBeenLastCalledWith(guid, true, freshArchiveLease);
+    expect(freshMuteLease).toBe(freshArchiveLease);
+    expect(freshMuteLease).not.toBe(staleMuteLease);
+    expect(freshMuteLease.isCurrent()).toBe(true);
   });
 
   it('keeps visible Mute and Archive actions on the exact row guid', async () => {
@@ -538,19 +418,13 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     await fireEvent.press(screen.getByLabelText('Mute'));
     await fireEvent.press(screen.getByLabelText('Archive'));
 
-    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(expect.any(Object), guid, 'mute');
-    await waitFor(() => expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
-      guid,
-      true,
-    );
-    expectDbRunSequence(ACCOUNT_A_DATABASE, [
-      'BEGIN IMMEDIATE',
-      'COMMIT',
-      'BEGIN IMMEDIATE',
-      'COMMIT',
-    ]);
+    const muteLease = mockSetChatMuted.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    const archiveLease = mockSetChatArchived.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    expect(mockSetChatMuted).toHaveBeenCalledWith(guid, true, muteLease);
+    await waitFor(() => expect(mockSetChatArchived).toHaveBeenCalledTimes(1));
+    expect(mockSetChatArchived).toHaveBeenCalledWith(guid, true, archiveLease);
+    expect(muteLease).toBe(archiveLease);
+    expect(muteLease.isCurrent()).toBe(true);
   });
 
   it('keeps visible Unmute on the exact row guid and clears the mute value', async () => {
@@ -561,9 +435,12 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
 
     await fireEvent.press(screen.getByLabelText('Unmute'));
 
-    await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(expect.any(Object), guid, null);
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
+    await waitFor(() => expect(mockSetChatMuted).toHaveBeenCalledTimes(1));
+    expect(mockSetChatMuted).toHaveBeenCalledWith(
+      guid,
+      false,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
   });
 
   it('keeps repeated Delete dialogs generic while both callbacks retain the exact guid and original lease', async () => {

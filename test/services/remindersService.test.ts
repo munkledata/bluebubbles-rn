@@ -29,6 +29,7 @@ import { createTestDb } from '../support/testDb';
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => '7f000000-0000-4000-8000-000000000001'),
 }));
+jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn() }));
 
 const reminderId = (scheduledFor: number): string =>
   `gator-reminder-random-7f000000-0000-4000-8000-000000000001-${scheduledFor}`;

@@ -338,15 +338,23 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     );
     expect(mockAccountADb.run).toHaveBeenCalledTimes(1);
 
+    let pauseFinished = false;
+    let pause!: Promise<void>;
     await act(async () => {
-      await pauseRealtimeDeliveries();
-    });
-    resumeRealtimeDeliveries();
-    mockGetDatabase.mockReturnValue(mockAccountBDb);
-    await act(async () => {
-      finishWrite();
+      pause = pauseRealtimeDeliveries().then(() => {
+        pauseFinished = true;
+      });
       await Promise.resolve();
     });
+    expect(pauseFinished).toBe(false);
+
+    await act(async () => {
+      finishWrite();
+      await pause;
+    });
+    expect(pauseFinished).toBe(true);
+    resumeRealtimeDeliveries();
+    mockGetDatabase.mockReturnValue(mockAccountBDb);
     await waitFor(() => expect(mockAccountADb.run).toHaveBeenCalledTimes(3));
     expectDbRunSequence(mockAccountADb, [
       'BEGIN IMMEDIATE',

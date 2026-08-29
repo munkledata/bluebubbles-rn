@@ -5,7 +5,8 @@
  * suite tests the SCREEN'S own behavior rather than the reactive DB plumbing:
  *   - it reconciles server-scheduled rows on mount (`syncScheduledFromServer`);
  *   - each row renders its text + schedule and routes to the editor on tap;
- *   - Cancel calls `cancelScheduled(item)`, and a rejected cancel surfaces a dialog;
+ *   - Cancel calls `cancelScheduled(item)`, Clear calls `clearScheduledHistoryItem(id)`, and a
+ *     rejected current-account command surfaces a dialog;
  *   - the empty list shows the "No scheduled messages" placeholder.
  *
  * Mock note: a jest.mock factory must NOT dereference an outer `const mock…` at factory-eval
@@ -63,12 +64,9 @@ jest.mock('@ui', () => ({
 }));
 jest.mock('@db/useReactiveQuery', () => ({ useReactiveQuery: jest.fn() }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(() => ({ testDb: true })) }));
-jest.mock('@db/repositories', () => ({
-  ...jest.requireActual('@db/repositories'),
-  deleteScheduledHistoryWithinTransaction: jest.fn(),
-}));
 jest.mock('@/services/send', () => ({
   cancelScheduled: jest.fn(),
+  clearScheduledHistoryItem: jest.fn(),
   syncScheduledFromServer: jest.fn(),
 }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, back: mockBack }) }));
@@ -79,13 +77,15 @@ jest.mock('react-native-safe-area-context', () => ({
 // eslint-disable-next-line import/first
 import ScheduledScreen from '../../../app/(app)/scheduled';
 // eslint-disable-next-line import/first
-import { getDatabase } from '@db/database';
-// eslint-disable-next-line import/first
-import { deleteScheduledHistoryWithinTransaction, type ScheduledRow } from '@db/repositories';
+import type { ScheduledRow } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { useReactiveQuery } from '@db/useReactiveQuery';
 // eslint-disable-next-line import/first
-import { cancelScheduled, syncScheduledFromServer } from '@/services/send';
+import {
+  cancelScheduled,
+  clearScheduledHistoryItem,
+  syncScheduledFromServer,
+} from '@/services/send';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
@@ -95,38 +95,12 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const mockUseReactiveQuery = useReactiveQuery as jest.Mock;
-const mockGetDatabase = getDatabase as jest.Mock;
 const mockCancelScheduled = cancelScheduled as jest.Mock;
+const mockClearScheduledHistoryItem = clearScheduledHistoryItem as jest.Mock;
 const mockSyncScheduled = syncScheduledFromServer as jest.Mock;
-const mockDeleteScheduledHistoryWithinTransaction =
-  deleteScheduledHistoryWithinTransaction as jest.Mock;
 
 const PRIVATE_PENDING_BODY = 'scheduled-private-pending-body-4fd2';
 const PRIVATE_HISTORY_BODY = 'scheduled-private-history-body-a91c';
-const TEST_DATABASE = {
-  kind: 'scheduled-screen-account-a-db',
-  run: jest.fn(async (_statement: unknown) => undefined),
-};
-const ACCOUNT_B_DATABASE = {
-  kind: 'scheduled-screen-account-b-db',
-  run: jest.fn(async (_statement: unknown) => undefined),
-};
-
-function sqlStatementText(value: unknown): string {
-  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
-  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
-  return chunks
-    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
-    .filter((part): part is string => typeof part === 'string')
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
-  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
-}
-
 function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
   const responder = node.props.onStartShouldSetResponder;
   if (typeof responder !== 'function') {
@@ -143,19 +117,6 @@ function retainConfiguredPress(node: { props: Record<string, unknown> }): () => 
   const onPress = readConfig().onPress;
   if (typeof onPress !== 'function') throw new Error('Expected configured Pressable onPress');
   return () => onPress({ nativeEvent: {} });
-}
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve(value: T): void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
 }
 
 function makeRow(overrides: Partial<ScheduledRow> = {}): ScheduledRow {
@@ -183,12 +144,9 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
   setRows([]);
-  mockGetDatabase.mockReturnValue(TEST_DATABASE);
   mockCancelScheduled.mockResolvedValue(undefined);
+  mockClearScheduledHistoryItem.mockResolvedValue(undefined);
   mockSyncScheduled.mockResolvedValue(undefined);
-  mockDeleteScheduledHistoryWithinTransaction.mockResolvedValue(undefined);
-  TEST_DATABASE.run.mockResolvedValue(undefined);
-  ACCOUNT_B_DATABASE.run.mockResolvedValue(undefined);
   useDialogStore.setState({ current: null, queue: [] });
 });
 
@@ -322,18 +280,12 @@ describe('ScheduledScreen', () => {
       fireEvent.press(screen.getByRole('button', { name: 'Remove from history' }));
     });
     await waitFor(() =>
-      expect(mockDeleteScheduledHistoryWithinTransaction).toHaveBeenCalledWith(
-        expect.any(Object),
-        history.id,
-      ),
+      expect(mockClearScheduledHistoryItem).toHaveBeenCalledWith(history.id, originalLease),
     );
-    expectDbRunSequence(TEST_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
-    mockDeleteScheduledHistoryWithinTransaction.mockClear();
-    TEST_DATABASE.run.mockClear();
+    mockClearScheduledHistoryItem.mockClear();
 
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
-    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
     expect(originalLease.isCurrent()).toBe(false);
     mockCancelScheduled.mockRejectedValueOnce(new Error('stale account cancel'));
     await act(async () => {
@@ -344,17 +296,13 @@ describe('ScheduledScreen', () => {
     });
 
     expect(mockCancelScheduled).toHaveBeenCalledWith(pending, originalLease);
-    expect(mockDeleteScheduledHistoryWithinTransaction).not.toHaveBeenCalled();
-    expect(TEST_DATABASE.run).not.toHaveBeenCalled();
-    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    expect(mockClearScheduledHistoryItem).toHaveBeenCalledWith(history.id, originalLease);
     expect(useDialogStore.getState().current).toBeNull();
   });
 
   it('shows the fixed Scheduled dialog when a current Clear fails', async () => {
     const history = makeRow({ id: 801, text: 'clear failure row', status: 'error' });
-    mockDeleteScheduledHistoryWithinTransaction.mockRejectedValueOnce(
-      new Error('private database failure'),
-    );
+    mockClearScheduledHistoryItem.mockRejectedValueOnce(new Error('private service failure'));
     setRows([], [history]);
     await renderWithTheme(<ScheduledScreen />);
 
@@ -364,49 +312,5 @@ describe('ScheduledScreen', () => {
 
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Scheduled'));
     expect(useDialogStore.getState().current?.message).toBe('Couldn’t clear that history item.');
-    expectDbRunSequence(TEST_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-  });
-
-  it('rolls back an admitted Clear when Disconnect retires its account mid-write', async () => {
-    const history = makeRow({ id: 901, text: 'deferred clear row', status: 'sent' });
-    const deletion = deferred<void>();
-    mockDeleteScheduledHistoryWithinTransaction.mockReturnValueOnce(deletion.promise);
-    setRows([], [history]);
-    await renderWithTheme(<ScheduledScreen />);
-
-    let drain: Promise<void> | undefined;
-    try {
-      await act(async () => {
-        fireEvent.press(screen.getByRole('button', { name: 'Remove from history' }));
-      });
-      await waitFor(() =>
-        expect(mockDeleteScheduledHistoryWithinTransaction).toHaveBeenCalledWith(
-          expect.any(Object),
-          history.id,
-        ),
-      );
-
-      let drained = false;
-      drain = pauseRealtimeDeliveries().then(() => {
-        drained = true;
-      });
-      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
-      await Promise.resolve();
-      expect(drained).toBe(false);
-
-      await act(async () => {
-        deletion.resolve(undefined);
-        await drain;
-      });
-      expect(drained).toBe(true);
-      expectDbRunSequence(TEST_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
-      expect(useDialogStore.getState().current).toBeNull();
-    } finally {
-      deletion.resolve(undefined);
-      drain ??= pauseRealtimeDeliveries();
-      await Promise.allSettled([drain]);
-      resumeRealtimeDeliveries();
-    }
   });
 });

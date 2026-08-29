@@ -83,6 +83,8 @@ jest.mock('@/services/background/backgroundSyncOrchestrator', () => ({
 }));
 
 // eslint-disable-next-line import/first -- native/task dependencies above must be mocked first
+import '@/services/background/registerBackgroundSyncHeadlessTask';
+// eslint-disable-next-line import/first -- native/task dependencies above must be mocked first
 import {
   BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
   BACKGROUND_OUTGOING_MAX_ROWS,

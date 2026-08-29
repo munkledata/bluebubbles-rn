@@ -114,6 +114,9 @@ jest.mock('@state/lockStore', () => ({
 jest.mock('@/services/background/backgroundSync', () => ({
   registerBackgroundSync: mockRegisterBackgroundSync,
 }));
+jest.mock('@/services/backgrounds/syncedBackground', () => ({
+  startSyncedBackgroundCacheMaintenance: jest.fn(async () => undefined),
+}));
 jest.mock('@/services/bootstrap', () => {
   class ForegroundBootOperationalError extends Error {
     constructor(

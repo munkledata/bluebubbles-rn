@@ -155,6 +155,7 @@ describe('useMessageActions — DEV reaction account scope', () => {
         selectedMessageText: 'hi',
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+      expect.any(Function),
     );
     const expectedReply = {
       guid: 'message-a',

@@ -21,10 +21,7 @@ function validInput() {
     packageJson: {
       packageManager: `npm@${REQUIRED_NPM_VERSION}`,
       engines: { node: REQUIRED_NODE_ENGINE },
-      scripts: {
-        'release:prepare:patch': 'npm version patch --no-git-tag-version',
-        ...REQUIRED_RELEASE_SCRIPTS,
-      },
+      scripts: { ...REQUIRED_RELEASE_SCRIPTS },
     },
     eas: {
       cli: { version: REQUIRED_EAS_CLI_VERSION },
@@ -96,8 +93,8 @@ test('rejects drift in every executable and declarative toolchain boundary', () 
     'npm on PATH',
     'invoking npm',
     'release:prepare:patch',
-    'release:android must equal the reviewed local-build-only command',
-    'release:android:local must equal the reviewed local-build-only command',
+    'release:android must equal the reviewed phased-release command',
+    'release:android:local is not a reviewed release command',
     'EAS CLI',
     'EAS base',
     'preview profile must extend base',
@@ -259,14 +256,14 @@ test('rejects hosted, missing, indirect, wrong-target, submitting, and unpinned 
     const errors = validateToolchain(input);
     assert.ok(
       errors.some((error) =>
-        error.includes('release:android must equal the reviewed local-build-only command'),
+        error.includes('release:android must equal the reviewed phased-release command'),
       ),
       String(script),
     );
   }
 });
 
-test('rejects hosted or submitting drift in the local release implementation', () => {
+test('rejects hosted or submitting drift in the phased release commands', () => {
   const variants = [
     "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production'",
     "npx --yes --ignore-scripts --package eas-cli@21.5.0 -c 'unset npm_config_ignore_scripts; exec eas build -p android --profile production --local --auto-submit'",
@@ -275,11 +272,11 @@ test('rejects hosted or submitting drift in the local release implementation', (
 
   for (const script of variants) {
     const input = validInput();
-    input.packageJson.scripts['release:android:local'] = script;
+    input.packageJson.scripts['release:android:build'] = script;
     const errors = validateToolchain(input);
     assert.ok(
       errors.some((error) =>
-        error.includes('release:android:local must equal the reviewed local-build-only command'),
+        error.includes('release:android:build must equal the reviewed phased-release command'),
       ),
       script,
     );

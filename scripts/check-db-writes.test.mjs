@@ -1458,7 +1458,8 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     {
       'app/(app)/chat/[guid].tsx': 1,
       'src/features/conversations/devSeed.ts': 5,
-      'src/services/notifications/fcmMessaging.ts': 7,
+      'src/services/notifications/fcmMessaging.ts': 6,
+      'src/services/notifications/registerFcmBackgroundHandler.ts': 1,
       'src/services/realtimeControl.ts': 9,
     },
   );
@@ -1792,16 +1793,7 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
 
 test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   const findings = scanProjectDbWrites();
-  const paths = new Set([
-    'app/(app)/chat-settings/[guid].tsx',
-    'app/(app)/scheduled.tsx',
-    'app/(setup)/permissions.tsx',
-    'src/state/featureSettingsStore.ts',
-    'src/state/themeStore.ts',
-    'src/ui/conversations/ChatActionsSheet.tsx',
-    'src/ui/conversations/ConversationListScreen.tsx',
-    'src/ui/conversations/ConversationTile.tsx',
-  ]);
+  const paths = new Set(['src/services/featureSettingsCommands.ts']);
   const delegated = findings.filter(
     (finding) => paths.has(finding.path) && finding.detectedContext === 'coordinated-delegation',
   );
@@ -1828,111 +1820,90 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   );
   const scheduledHistoryTransactions = findings.filter(
     (finding) =>
-      finding.path === 'app/(app)/scheduled.tsx' &&
+      finding.path === 'src/services/send/index.ts' &&
+      finding.symbol.startsWith('clearScheduledHistoryItem') &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
           'src/db/repositories/scheduled.ts#deleteScheduledHistoryWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('app/(app)/scheduled.tsx#ScheduledScreen.<callback:'))),
+          finding.target.startsWith('src/services/send/index.ts#clearScheduledHistoryItem.'))),
   );
   const markAllReadTransactions = findings.filter(
     (finding) =>
-      finding.path === 'src/ui/conversations/ConversationListScreen.tsx' &&
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('markAllChatsRead') &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:',
-          ))),
+          finding.target.startsWith('src/services/chatActions.ts#markAllChatsRead.'))),
   );
   const inboxPreferenceTransactions = findings.filter(
     (finding) =>
-      [
-        'src/ui/conversations/ChatActionsSheet.tsx',
-        'src/ui/conversations/ConversationTile.tsx',
-      ].includes(finding.path) &&
+      finding.path === 'src/services/chatActions.ts' &&
+      ['setChatArchived', 'setChatMuted', 'setChatPinned'].some((symbol) =>
+        finding.symbol.startsWith(symbol),
+      ) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#setChatPinWithinTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#setChatMuteWithinTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#setChatArchiveWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(`${finding.path}#`))),
+          finding.target.startsWith('src/services/chatActions.ts#'))),
   );
   const chatSettingsPreferenceTransactions = findings.filter(
     (finding) =>
-      finding.path === 'app/(app)/chat-settings/[guid].tsx' &&
-      ['.saveName', '.pickColor', '.toggleMute', '.resetAll'].some((symbol) =>
-        finding.symbol.includes(symbol),
+      finding.path === 'src/services/chatActions.ts' &&
+      ['resetChatLocalPreferences', 'setChatMuted', 'updateChatCustomization'].some((symbol) =>
+        finding.symbol.startsWith(symbol),
       ) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction' ||
+        finding.target ===
+          'src/db/repositories/chatAppearance.ts#setChatCustomizationWithinTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#setChatMuteWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
+          finding.target.startsWith('src/services/chatActions.ts#'))),
   );
   const chatAppearanceTransactions = findings.filter(
     (finding) =>
-      finding.path === 'app/(app)/chat-settings/[guid].tsx' &&
-      [
-        '.applyChatTheme',
-        '.pickBackground',
-        '.generateThemeFromBackground',
-        '.clearChatTheme',
-      ].some((symbol) => finding.symbol.includes(symbol)) &&
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('updateChatAppearance') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/chats.ts#setChatAppearanceWithinTransaction' ||
+        finding.target ===
+          'src/db/repositories/chatAppearance.ts#setChatAppearanceWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('app/(app)/chat-settings/[guid].tsx#'))),
+          finding.target.startsWith('src/services/chatActions.ts#'))),
   );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(setup)/permissions.tsx#PermissionsScreen.<callback:814e54dd2c>:mutator-call:c473d7610e80',
-      'app/(setup)/permissions.tsx#PermissionsScreen.onContinue:mutator-call:113a3d922218',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:7b83b677ec>.<callback:d758981261>.<callback:9975393adf>:mutator-call:93bdac05cd12',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:e20ad7afab>.<callback:41af360d2a>.<callback:27c63caa7a>:mutator-call:4fe4315961cd',
-      'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:0eeed6d4ea>.<callback:0421ed26e1>:mutator-call:8891386a8ca2',
+      'src/services/featureSettingsCommands.ts#finishPermissionOnboarding.<callback:709a896369>:mutator-call:4fd32f61a8df',
     ].sort(),
   );
   assert.deepEqual(
     chatAppearanceTransactions.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:81aecf5e35>.<callback:6b01fc7e2b>:mutator-call:14fed4ae1a29',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:81aecf5e35>:mutator-call:84affc8a5f51',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.applyChatTheme.<callback:81aecf5e35>:mutator-call:cbf9700c70c0',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:e3f0749c7c>.<callback:6b01fc7e2b>:mutator-call:a83c37875f34',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:e3f0749c7c>:mutator-call:3f2c1290c4d4',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.clearChatTheme.<callback:e3f0749c7c>:mutator-call:ef2087c1c54c',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:d83e3424ef>.<callback:e7c50ac4bd>.<callback:6b01fc7e2b>:mutator-call:2db48f1a23c5',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:d83e3424ef>.<callback:e7c50ac4bd>:mutator-call:187683c88c89',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.generateThemeFromBackground.<callback:d83e3424ef>.<callback:e7c50ac4bd>:mutator-call:3cd8197f2073',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:3fa069faab>.<callback:e408448774>.<callback:6b01fc7e2b>:mutator-call:10192214cce8',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:3fa069faab>.<callback:e408448774>:mutator-call:5d0dc88e2de2',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickBackground.<callback:3fa069faab>.<callback:e408448774>:mutator-call:f06f4f9d1722',
+      'src/services/chatActions.ts#updateChatAppearance.<callback:a52e69008e>.<callback:a4a4f489ab>:mutator-call:a3e90d5b284c',
+      'src/services/chatActions.ts#updateChatAppearance.<callback:a52e69008e>:mutator-call:a9658d09049c',
+      'src/services/chatActions.ts#updateChatAppearance.<callback:a52e69008e>:mutator-call:e718c205d92d',
     ].sort(),
   );
   assert.deepEqual(
     chatSettingsPreferenceTransactions.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:0830c96e70>.<callback:caabd546ce>:mutator-call:6014973f0edc',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:0830c96e70>:mutator-call:0c901a134016',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.pickColor.<callback:0830c96e70>:mutator-call:b2afc42499ef',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>.<callback:86a20f484f>:mutator-call:ee58c9c3c8e6',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>.<callback:caabd546ce>:mutator-call:824eb594e9f3',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:2926c0c87307',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:301ef98393d4',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:52ed08c8e3a5',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.resetAll.<callback:66243437de>:mutator-call:53845581a78d',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:f17f133722>.<callback:caabd546ce>:mutator-call:7d07009f125f',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:f17f133722>:mutator-call:37523a49c16f',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.saveName.<callback:f17f133722>:mutator-call:632d18be24bf',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>.<callback:6c5110fdb6>:mutator-call:1bbda7a3a183',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:baa1ef9f5b7c',
-      'app/(app)/chat-settings/[guid].tsx#ChatSettingsScreen.toggleMute.<callback:f1ebd673c1>:mutator-call:d5e45d9ed904',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>.<callback:63de6d5552>:mutator-call:3cbd76759ff2',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>.<callback:63de6d5552>:mutator-call:672a4295bae0',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>:mutator-call:7392b85d41c5',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>:mutator-call:a9cd1d0d27f5',
+      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>.<callback:df7eb4dfd5>:mutator-call:fff2c3df103d',
+      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:45188afd5c9d',
+      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:ff21837237be',
+      'src/services/chatActions.ts#updateChatCustomization.<callback:f581c08ebb>.<callback:1b5bbbd65e>:mutator-call:730a44cfe2b8',
+      'src/services/chatActions.ts#updateChatCustomization.<callback:f581c08ebb>:mutator-call:d10f1cc01664',
+      'src/services/chatActions.ts#updateChatCustomization.<callback:f581c08ebb>:mutator-call:fcfcd294d82a',
     ].sort(),
   );
   assert.deepEqual(
@@ -1971,37 +1942,31 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     scheduledHistoryTransactions.map((finding) => finding.id).sort(),
     [
-      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>.<callback:60a2bf7f5f>:mutator-call:3494b6fa045d',
-      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>:mutator-call:4f94f522cacc',
-      'app/(app)/scheduled.tsx#ScheduledScreen.<callback:380fd11c85>.onPress.<callback:5e4f9da9d2>:mutator-call:668be87a17e0',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>.<callback:be2a685944>:mutator-call:211114e3d101',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:2a14c566d346',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:a18389a7fa4c',
     ].sort(),
   );
   assert.deepEqual(
     markAllReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>.<callback:408993bad6>:mutator-call:cb0097bc8e7b',
-      'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>:mutator-call:64dcea224823',
-      'src/ui/conversations/ConversationListScreen.tsx#ConversationListScreen.<callback:cf67dbe581>.onPress.<callback:776029553e>:mutator-call:d64ee82fedf5',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>.<callback:ce8558bae3>:mutator-call:06b61d4ce067',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:b2a54e1ab9af',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:f44a034cf669',
     ].sort(),
   );
   assert.deepEqual(
     inboxPreferenceTransactions.map((finding) => finding.id).sort(),
     [
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:11ea819a72>.<callback:ccc6733d3a>.<callback:198c55def5>.<callback:b679cdc6bb>:mutator-call:8ad9f425ae42',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:11ea819a72>.<callback:ccc6733d3a>.<callback:198c55def5>:mutator-call:92fb447a6d69',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:11ea819a72>.<callback:ccc6733d3a>.<callback:198c55def5>:mutator-call:e3eafe9eef3a',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:1f36aef127>.<callback:c28f8ec3ea>.<callback:63e74079de>.<callback:3861af4d53>:mutator-call:4a12c0ea73c9',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:1f36aef127>.<callback:c28f8ec3ea>.<callback:63e74079de>:mutator-call:59990e819739',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:1f36aef127>.<callback:c28f8ec3ea>.<callback:63e74079de>:mutator-call:df84dc65e20a',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:3dd28de2a7>.<callback:fad8e30e8f>.<callback:cfb8a2a150>.<callback:d8e6d790bf>:mutator-call:c917e315df15',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:3dd28de2a7>.<callback:fad8e30e8f>.<callback:cfb8a2a150>:mutator-call:9650748719af',
-      'src/ui/conversations/ChatActionsSheet.tsx#ChatActionsSheet.<callback:3dd28de2a7>.<callback:fad8e30e8f>.<callback:cfb8a2a150>:mutator-call:e842566c531e',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:2af56543e2>.<callback:3861af4d53>:mutator-call:c6bf082a5ed1',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:2af56543e2>:mutator-call:4cac51146d83',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:2af56543e2>:mutator-call:6fa69c344de2',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:bb5d1dd988>.<callback:d8e6d790bf>:mutator-call:4dcfd2af3f82',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:bb5d1dd988>:mutator-call:77a9070f5354',
-      'src/ui/conversations/ConversationTile.tsx#ConversationTile.onPress.<callback:bb5d1dd988>:mutator-call:a8b919562f7a',
+      'src/services/chatActions.ts#setChatArchived.<callback:addd45115f>.<callback:c406ab49dc>:mutator-call:c5b362dfbac5',
+      'src/services/chatActions.ts#setChatArchived.<callback:addd45115f>:mutator-call:11e8006fa75c',
+      'src/services/chatActions.ts#setChatArchived.<callback:addd45115f>:mutator-call:f55d0850873e',
+      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>.<callback:df7eb4dfd5>:mutator-call:fff2c3df103d',
+      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:45188afd5c9d',
+      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:ff21837237be',
+      'src/services/chatActions.ts#setChatPinned.<callback:292474dbe8>.<callback:610d973b6a>:mutator-call:d069f0ae2e74',
+      'src/services/chatActions.ts#setChatPinned.<callback:292474dbe8>:mutator-call:ee9a99c798bf',
+      'src/services/chatActions.ts#setChatPinned.<callback:292474dbe8>:mutator-call:f67fba6bccda',
     ].sort(),
   );
 });
@@ -2048,7 +2013,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
-          'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction' ||
+          'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
             'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:',
@@ -2163,7 +2128,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingQueueClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>.<callback:ef896ff493>:mutator-call:ae9ded5a6343',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>.<callback:ef896ff493>:mutator-call:3273a288d180',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:7b452e2c0efa',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:a62d23d465c7',
     ].sort(),
@@ -2206,7 +2171,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>:mutator-call:59fd0e1ac2a7',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>:mutator-call:cbfdaadfa96f',
       'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:95eb83c8fd28',
       'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:adfe95b7e2a5',
     ].sort(),
@@ -2370,7 +2335,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 18);
-  assert.equal(intentionalBoundaries.length, 18);
+  assert.equal(intentionalBoundaries.length, 22);
   assert.equal(scheduledStateMachine.length, 9);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2399,6 +2364,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
+      'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
       'src/services/paste/pasteInput.ts#loadPastedAttachmentProtectionPaths:mutator-call:2756cd6e5177',
@@ -2419,7 +2385,10 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:04c64cabafc4',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
-      'src/services/sync/engine.ts#syncChatMessages:mutator-call:aed16e5f8245',
+      'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
+      'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
+      'src/services/syncControl.ts#runSync:mutator-call:1c0575e425d1',
+      'src/services/syncControl.ts#runSync:mutator-call:3cf984fb6208',
     ].sort(),
   );
 });
@@ -2458,6 +2427,11 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('src/services/send/index.ts#discardMessage.<callback:'))),
   );
+  const clearScheduledHistoryTransaction = sendFrontDoorFindings.filter(
+    (finding) =>
+      finding.symbol.startsWith('clearScheduledHistoryItem.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
   const editScheduledTransaction = sendFrontDoorFindings.filter(
     (finding) =>
       finding.symbol.includes('.persistPatch') &&
@@ -2471,13 +2445,14 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:3cd21b60f497',
-      'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:a287fba2e403',
+      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:62b0ffba8707',
+      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:bba07d1c582e',
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c',
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c:2',
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:b3039aaa43d0',
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:bdc77bdcd522',
       'src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861',
+      'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:0d6a663823>:mutator-call:a9efdbe22d70',
       'src/services/send/index.ts#pickAndSendContact.<callback:4a34f6e20d>:mutator-call:3494b022ac25',
       'src/services/send/index.ts#react.<callback:2a9e50aa06>:mutator-call:51ae9ba2c80c',
       'src/services/send/index.ts#reply.<callback:82d8d37cdf>:mutator-call:5af837449254',
@@ -2502,18 +2477,26 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:d6c267db00>.<callback:4478d45b13>:mutator-call:79c21958dac0',
-      'src/services/send/index.ts#retry.<callback:d6c267db00>:mutator-call:0e58141daeb9',
-      'src/services/send/index.ts#retry.<callback:d6c267db00>:mutator-call:20c356da5ff4',
+      'src/services/send/index.ts#retry.<callback:eca51ea93a>.<callback:4478d45b13>:mutator-call:32d6ff39e45d',
+      'src/services/send/index.ts#retry.<callback:eca51ea93a>:mutator-call:3092ba25376d',
+      'src/services/send/index.ts#retry.<callback:eca51ea93a>:mutator-call:e8b1ba719cf4',
     ].sort(),
   );
   assert.deepEqual(
     discardMessageTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>:mutator-call:1f31b2d9fe97',
-      'src/services/send/index.ts#discardMessage.<callback:9332f399c0>.<callback:5fed71ee07>:mutator-call:1f44a4de7c48',
-      'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:661ea9e4ed57',
-      'src/services/send/index.ts#discardMessage.<callback:9332f399c0>:mutator-call:c673563accd3',
+      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>.<callback:5fed71ee07>:mutator-call:986b92faa7d9',
+      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>.<callback:5fed71ee07>:mutator-call:a8d83da321cf',
+      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:1abb626333b6',
+      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:d2b77772e5ec',
+    ].sort(),
+  );
+  assert.deepEqual(
+    clearScheduledHistoryTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>.<callback:be2a685944>:mutator-call:211114e3d101',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:2a14c566d346',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:a18389a7fa4c',
     ].sort(),
   );
   assert.deepEqual(
@@ -2524,7 +2507,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:9a5e1dfb2592',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 30);
+  assert.equal(sendFrontDoorFindings.length, 34);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -2589,6 +2572,7 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:d3a2be781833',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
+      'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
     ].sort(),
   );
   assert.deepEqual(
@@ -2648,20 +2632,30 @@ test('certifies exactly the reviewed sync delegation edges', () => {
     [
       'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:23a950f7cc3a',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:c05c5f67e9>:mutator-call:d0fa0a16f072',
-      'src/services/sync/engine.ts#fullSync:mutator-call:7505c95ec9fe',
+      'src/services/sync/engine.ts#fullSync:mutator-call:9cbcacf70584',
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
-      'src/services/sync/engine.ts#syncChatMessages:mutator-call:aed16e5f8245',
+      'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
+      'src/services/sync/engine.ts#syncChatMessages:mutator-call:2b2df2741e83',
+      'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
       'src/services/syncControl.ts#ensureChatSynced.<callback:910670867e>:mutator-call:c1b6e98cef19',
-      'src/services/syncControl.ts#runSync:mutator-call:0f68cade8370',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',
-      'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2',
-      'src/services/syncControl.ts#runSync:mutator-call:4cf8dde6a27c',
-      'src/services/syncControl.ts#runSync:mutator-call:85765adf74a9',
-      'src/services/syncControl.ts#runSync:mutator-call:c12b03390704',
+      'src/services/syncControl.ts#runSync:mutator-call:1c0575e425d1',
+      'src/services/syncControl.ts#runSync:mutator-call:3cf984fb6208',
+      'src/services/syncControl.ts#runSync:mutator-call:471d6b8fb139',
+      'src/services/syncControl.ts#runSync:mutator-call:60ab7d89146f',
+      'src/services/syncControl.ts#runSync:mutator-call:62e252e57364',
+      'src/services/syncControl.ts#runSync:mutator-call:62e252e57364:2',
+      'src/services/syncControl.ts#runSync:mutator-call:ab6c20d59676',
+      'src/services/syncControl.ts#runSync:mutator-call:c0d8b5d51637',
+      'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83',
+      'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83:2',
+      'src/services/syncControl.ts#runSync:mutator-call:e410b409f997',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
-      'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
-      'src/services/syncControl.ts#startSync:mutator-reference:e7fd2b62d1e0',
+      'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
+      'src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:a243d0b024>:mutator-call:dfe6a528cca3',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:a243d0b024>:mutator-call:fd59b1934680',
     ].sort(),
   );
   assert.deepEqual(
@@ -2670,13 +2664,13 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>.<callback:7387e3781d>:mutator-call:6bcf163c0bcb',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:7428789aa7d4',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:e6f6b158199c',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>:mutator-call:b90babad5788',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>:mutator-call:b6873ce22c57',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:17a5f7a01d73',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:e796b0707ded',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>:mutator-call:0ea9aab320ef',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>:mutator-call:b1c4bd00d1c9',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:65c8511e514c',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:bc9bdf219775',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>:mutator-call:ac2d0c7e4da7',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>:mutator-call:4c9290858373',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:331132e4ce88',
       'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:fcfa941fe19e',
     ].sort(),
@@ -2910,10 +2904,10 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   const findings = scanProjectDbWrites();
   const reviewedPaths = new Set([
     'app/(app)/_layout.tsx',
-    'app/(app)/home.tsx',
     'app/(setup)/manual.tsx',
     'app/(setup)/scan.tsx',
     'app/(setup)/welcome.tsx',
+    'src/features/conversations/devFixtureSession.ts',
     'src/services/boot/foregroundBoot.ts',
     'src/services/bootstrap.ts',
     'src/services/lock.ts',
@@ -2927,15 +2921,16 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:7e6190c78f>.<callback:d4acdc9f71>:mutator-call:fca9d9775500',
-      'app/(app)/home.tsx#Home.<callback:8a86953568>.<callback:b23736ce91>.<callback:30afe351c6>:mutator-call:f50a8b54a2d0',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>:mutator-call:9c6ba7fb690a',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2',
       'app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495',
       'app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3',
       'app/(setup)/welcome.tsx#Welcome.<callback:b1fa990a01>:mutator-call:7469e4d131fc',
-      'app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:1b1c2b49f053',
+      'app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d',
+      'src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:a9dbc72121>:mutator-call:b9b130735b2c',
+      'src/features/conversations/devFixtureSession.ts#startDevFixtureSession:mutator-call:82b309039516',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ace67f713c95',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ca17968027de',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:fcf356fa69c2',
@@ -2961,7 +2956,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#resumeRealtime:mutator-call:602dd63b9e5a',
     ].sort(),
   );
-  assert.equal(delegated.length, 32);
+  assert.equal(delegated.length, 33);
 
   for (const suffix of [
     '8c40f7e0add0',
@@ -5215,8 +5210,8 @@ test('certifies exactly the reviewed foreground-boot lifecycle boundary', () => 
       'app/_layout.tsx#RootLayout.<callback:f429780a18>.<callback:a6d63425a0>:mutator-call:246367c31649',
       'app/_layout.tsx#RootLayout.<callback:f429780a18>:mutator-call:09b9cd24cd8c',
       'app/_layout.tsx#RootLayout:mutator-reference:8e2aa31388d0',
-      'src/services/boot/foregroundBoot.ts#<callback:3745c8b485>:mutator-call:7d9fa3cabd8f',
-      'src/services/boot/foregroundBoot.ts#<callback:58f904a832>:mutator-call:6ecd3706cddd',
+      'src/services/boot/foregroundBoot.ts#initializeForegroundBootComposition.<callback:3745c8b485>:mutator-call:60bff6bb7fec',
+      'src/services/boot/foregroundBoot.ts#initializeForegroundBootComposition.<callback:58f904a832>:mutator-call:f6945f73aad5',
       'src/services/boot/foregroundBoot.ts#startForegroundBoot:mutator-call:0337c4c095d4',
     ].sort(),
   );
@@ -5276,6 +5271,7 @@ fullOnlyTest(
           '              bootState={bootState}\n' +
           '              lockHydrated={lockHydrated}\n' +
           '              locked={locked}\n' +
+          '              foregroundUnlockId={foregroundUnlockId}\n' +
           '              onColdUnlock={completeColdUnlock}\n' +
           '              onWarmUnlock={completeUnlock}',
         after:
@@ -5285,6 +5281,7 @@ fullOnlyTest(
           '              bootState={bootState}\n' +
           '              lockHydrated={lockHydrated}\n' +
           '              locked={locked}\n' +
+          '              foregroundUnlockId={foregroundUnlockId}\n' +
           '              onColdUnlock={completeColdUnlock}\n' +
           '              onWarmUnlock={async () => undefined}',
       },
@@ -5351,7 +5348,7 @@ test('certifies exactly the reviewed account-transition delegation boundary', ()
     ].sort(),
   );
   assert.equal(delegated.length, 5);
-  for (const suffix of ['f50a8b54a2d0', '602dd63b9e5a']) {
+  for (const suffix of ['a9efdbe22d70', '602dd63b9e5a']) {
     assert.equal(
       findings.find((finding) => finding.id.endsWith(suffix))?.detectedContext,
       'coordinated-delegation',
@@ -5468,11 +5465,12 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   );
   const chatDraftTransaction = findings.filter(
     (finding) =>
-      finding.path === 'app/(app)/chat/[guid].tsx' &&
+      finding.path === 'src/services/chatActions.ts' &&
+      finding.symbol.startsWith('saveChatDraft.') &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target === 'src/db/repositories/kv.ts#kvSetWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:'))),
+          finding.target.startsWith('src/services/chatActions.ts#saveChatDraft.<callback:'))),
   );
   const serverAvatarTransaction = findings.filter(
     (finding) =>
@@ -5565,16 +5563,16 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   );
   const automaticClaimTransactions = findings.filter(
     (finding) =>
-      finding.path === 'src/db/repositories/outgoing.ts' &&
+      finding.path === 'src/db/repositories/outgoingRetry.ts' &&
       finding.symbol.startsWith('claimOutgoingForSend') &&
       !finding.symbol.startsWith('claimOutgoingForSendWithinTransaction') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
-          'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction' ||
+          'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
-            'src/db/repositories/outgoing.ts#claimOutgoingForSend.<callback:',
+            'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend.<callback:',
           ))),
   );
   const discardOutgoingTransactions = findings.filter(
@@ -5707,20 +5705,19 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:ea34ea031e>.tick.<callback:30afe351c6>:mutator-call:cc2cb67d4f22',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:4838a450d3a7',
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
-      'src/db/repositories/chats.ts#setChatAppearanceWithinTransaction:drizzle-update:1f23b5c32ece',
+      'src/db/repositories/chatAppearance.ts#setChatAppearanceWithinTransaction:drizzle-update:dcdfc8b2ae2e',
       'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
-      'src/db/repositories/chats.ts#setChatCustomizationWithinTransaction:drizzle-update:eb8d843c171a',
+      'src/db/repositories/chatAppearance.ts#setChatCustomizationWithinTransaction:drizzle-update:619f3250f770',
       'src/db/repositories/chats.ts#setChatMuteWithinTransaction:drizzle-update:467399acf638',
       'src/db/repositories/chats.ts#setChatPinWithinTransaction:sql-update:600d385756f7',
-      'src/db/repositories/chats.ts#setSyncedBackgroundLuminanceIfCurrentWithinTransaction:drizzle-update:076320f3beec',
-      'src/db/repositories/chats.ts#setSyncedBackgroundUriIfCurrentWithinTransaction:drizzle-update:653f97744cea',
+      'src/db/repositories/chatAppearance.ts#setSyncedBackgroundLuminanceIfCurrentWithinTransaction:drizzle-update:3887cf9f4044',
+      'src/db/repositories/chatAppearance.ts#setSyncedBackgroundUriIfCurrentWithinTransaction:drizzle-update:0ac7abb5b110',
       'src/db/repositories/chats.ts#swapPinnedChatOrderWithinTransaction:sql-update:b0faceaf9bcd',
       'src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c',
       'src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction:sql-update:a6cadd1370ec',
@@ -5742,12 +5739,12 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/scheduled.ts#updateScheduledWithinTransaction:drizzle-update:65c7e3fe2055',
       'src/db/repositories/handles.ts#upsertHandlesWithinTransaction:drizzle-insert:147fd2d8dc47',
       'src/db/repositories/kv.ts#kvSetWithinTransaction:drizzle-insert:0fe9d15a2010',
-      'src/db/repositories/outgoing.ts#markMessageSendErrorWithinTransaction:drizzle-update:478b582fccdc',
+      'src/db/repositories/outgoingRetry.ts#markMessageSendErrorWithinTransaction:drizzle-update:254ffd3887c5',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86:2',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:21d3ccc056b3',
-      'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:drizzle-update:fef9b2b45b05',
-      'src/db/repositories/outgoing.ts#claimOutgoingForSendWithinTransaction:sql-update:a0d6d4f1bcbc',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:25d36f3569c3',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6',
       'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358',
@@ -5786,7 +5783,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 77);
+  assert.equal(selected.length, 76);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -5806,9 +5803,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     chatDraftTransaction.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>.<callback:a80ea9b156>:mutator-call:83902feadfb3',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>:mutator-call:1eb11ff329b4',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:9ffa6ce258>.<callback:7a2a12df77>:mutator-call:440ae4dc518b',
+      'src/services/chatActions.ts#saveChatDraft.<callback:9ae03f03fc>.<callback:126fc1e56e>:mutator-call:bc0d1a9ae9ce',
+      'src/services/chatActions.ts#saveChatDraft.<callback:9ae03f03fc>:mutator-call:641f69856a73',
+      'src/services/chatActions.ts#saveChatDraft.<callback:9ae03f03fc>:mutator-call:6d954968e9f8',
     ].sort(),
   );
   assert.deepEqual(
@@ -5876,9 +5873,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     automaticClaimTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#claimOutgoingForSend.<callback:8b54a95643>:mutator-call:aebe0c09810d',
-      'src/db/repositories/outgoing.ts#claimOutgoingForSend:mutator-call:68730b3fe11a',
-      'src/db/repositories/outgoing.ts#claimOutgoingForSend:mutator-call:d7146317172c',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend.<callback:8b54a95643>:mutator-call:4da8b89b721a',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend:mutator-call:1dbbf9522fdd',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend:mutator-call:6041bba0203c',
     ].sort(),
   );
   assert.deepEqual(
@@ -6365,20 +6362,20 @@ fullOnlyTest(
       },
       {
         label: 'conditional background registration',
-        path: 'src/services/notifications/fcmMessaging.ts',
+        path: 'src/services/notifications/registerFcmBackgroundHandler.ts',
         before: 'setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);',
         after: 'if (false) setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);',
       },
       {
         label: 'second background registration overrides the durable handler',
-        path: 'src/services/notifications/fcmMessaging.ts',
+        path: 'src/services/notifications/registerFcmBackgroundHandler.ts',
         transform: (source) =>
           `${source}\nsetBackgroundMessageHandler(getMessaging(), async () => undefined);\n`,
       },
       {
         label: 'killed-app entry import removed',
         path: 'index.js',
-        before: "import './src/services/notifications/fcmMessaging';",
+        before: "import './src/services/notifications/registerFcmBackgroundHandler';",
         after: "import './src/services/notifications/fcmPayload';",
       },
       {

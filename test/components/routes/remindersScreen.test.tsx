@@ -55,8 +55,8 @@ jest.mock('@db/useReactiveQuery', () => ({ useReactiveQuery: jest.fn() }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@db/repositories', () => ({ listReminders: jest.fn() }));
 jest.mock('@/services/notifications/remindersService', () => ({
-  cancelReminder: jest.fn(),
-  rescheduleReminder: jest.fn(),
+  cancelMessageReminder: jest.fn(),
+  rescheduleMessageReminder: jest.fn(),
 }));
 jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack }) }));
@@ -71,7 +71,10 @@ import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { useReactiveQuery } from '@db/useReactiveQuery';
 // eslint-disable-next-line import/first
-import { cancelReminder, rescheduleReminder } from '@/services/notifications/remindersService';
+import {
+  cancelMessageReminder,
+  rescheduleMessageReminder,
+} from '@/services/notifications/remindersService';
 // eslint-disable-next-line import/first
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 // eslint-disable-next-line import/first
@@ -86,8 +89,8 @@ import { reminderSubtitle } from '@utils';
 
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockUseReactiveQuery = useReactiveQuery as jest.Mock;
-const mockCancelReminder = cancelReminder as jest.Mock;
-const mockRescheduleReminder = rescheduleReminder as jest.Mock;
+const mockCancelReminder = cancelMessageReminder as jest.Mock;
+const mockRescheduleReminder = rescheduleMessageReminder as jest.Mock;
 const mockPickReminderTime = pickReminderTime as jest.Mock;
 
 const TEST_DATABASE = { kind: 'reminders-screen-test-db' };
@@ -198,16 +201,10 @@ describe('RemindersScreen', () => {
       fireEvent.press(screen.getByRole('button', { name: reminderA11yName(row) }));
     });
     await waitFor(() => expect(mockRescheduleReminder).toHaveBeenCalledTimes(1));
-    const originalLease = mockRescheduleReminder.mock.calls[0]?.[4];
+    const originalLease = mockRescheduleReminder.mock.calls[0]?.[2];
     expect(originalLease).toEqual(expect.objectContaining({ isCurrent: expect.any(Function) }));
     expect(originalLease.isCurrent()).toBe(true);
-    expect(mockRescheduleReminder).toHaveBeenCalledWith(
-      TEST_DATABASE,
-      row,
-      PICKED_TIME,
-      undefined,
-      originalLease,
-    );
+    expect(mockRescheduleReminder).toHaveBeenCalledWith(row, PICKED_TIME, originalLease);
 
     const secondDelete = screen.getAllByRole('button', { name: 'Delete' })[1];
     if (!secondDelete) throw new Error('Expected a second reminder Delete control');
@@ -215,9 +212,7 @@ describe('RemindersScreen', () => {
     await act(async () => {
       fireEvent.press(secondDelete);
     });
-    await waitFor(() =>
-      expect(mockCancelReminder).toHaveBeenCalledWith(TEST_DATABASE, row, undefined, originalLease),
-    );
+    await waitFor(() => expect(mockCancelReminder).toHaveBeenCalledWith(row, originalLease));
   });
 
   it('does nothing when the reminder picker is canceled', async () => {
@@ -293,26 +288,17 @@ describe('RemindersScreen', () => {
       fireEvent.press(screen.getByRole('button', { name: reminderA11yName(accountB) }));
     });
     await waitFor(() => expect(mockRescheduleReminder).toHaveBeenCalledTimes(1));
-    const accountBLease = mockRescheduleReminder.mock.calls[0]?.[4];
+    const accountBLease = mockRescheduleReminder.mock.calls[0]?.[2];
     expect(accountBLease.isCurrent()).toBe(true);
     expect(mockRescheduleReminder).toHaveBeenCalledWith(
-      TEST_DATABASE,
       accountB,
       PICKED_TIME + 1_000,
-      undefined,
       accountBLease,
     );
     await act(async () => {
       fireEvent.press(screen.getByRole('button', { name: 'Delete' }));
     });
-    await waitFor(() =>
-      expect(mockCancelReminder).toHaveBeenCalledWith(
-        TEST_DATABASE,
-        accountB,
-        undefined,
-        accountBLease,
-      ),
-    );
+    await waitFor(() => expect(mockCancelReminder).toHaveBeenCalledWith(accountB, accountBLease));
   });
 
   it.each(['success', 'error'] as const)(
@@ -403,10 +389,10 @@ describe('RemindersScreen', () => {
     });
 
     await waitFor(() => expect(mockCancelReminder).toHaveBeenCalledTimes(1));
-    const originalLease = mockCancelReminder.mock.calls[0]?.[3];
+    const originalLease = mockCancelReminder.mock.calls[0]?.[1];
     expect(originalLease).toEqual(expect.objectContaining({ isCurrent: expect.any(Function) }));
     expect(originalLease.isCurrent()).toBe(true);
-    expect(mockCancelReminder).toHaveBeenCalledWith(TEST_DATABASE, row, undefined, originalLease);
+    expect(mockCancelReminder).toHaveBeenCalledWith(row, originalLease);
     await waitFor(() =>
       expect(useDialogStore.getState().current).toEqual(
         expect.objectContaining({

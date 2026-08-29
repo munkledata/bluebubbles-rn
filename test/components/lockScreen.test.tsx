@@ -15,7 +15,7 @@ import { renderWithTheme, fireEvent, waitFor, screen } from './support/renderWit
 import { LockScreen } from '@features/lock/LockScreen';
 import { useLockStore } from '@state/lockStore';
 import { authenticate } from '@native/biometrics';
-import { logger } from '@core/secure';
+import { ERROR_DIAGNOSTIC_SITES, logger } from '@core/secure';
 
 jest.mock('@native/biometrics', () => ({ authenticate: jest.fn() }));
 const mockAuthenticate = authenticate as jest.Mock;
@@ -345,6 +345,7 @@ describe('LockScreen', () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith(
       '[lock] unlock failed after successful auth',
+      ERROR_DIAGNOSTIC_SITES.lockUnlock,
       expect.any(Error),
     );
   });

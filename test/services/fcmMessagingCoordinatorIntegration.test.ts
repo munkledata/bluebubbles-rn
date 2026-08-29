@@ -71,7 +71,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
-import '@/services/notifications/fcmMessaging';
+import '@/services/notifications/registerFcmBackgroundHandler';
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;

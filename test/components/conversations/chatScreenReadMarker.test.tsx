@@ -40,9 +40,11 @@ jest.mock('expo-router', () => {
     useFocusEffect: (callback: () => void | (() => void)) =>
       R.useEffect(() => (mockRouteFocused ? callback() : undefined), [callback, mockRouteFocused]),
     useLocalSearchParams: () => ({ guid: mockGuid }),
+    useNavigation: () => ({ dispatch: jest.fn() }),
     useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
   };
 });
+jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -123,10 +125,13 @@ jest.mock('@db/repositories', () => ({
 jest.mock('@/services', () => ({
   dispatchRealtimeEvent: jest.fn(),
   ensureChatSynced: jest.fn(),
-  ensureSyncedBackground: jest.fn(),
+  ensureSyncedBackgroundForChat: jest.fn(),
   http: {},
   markRead: jest.fn(),
   sendTyping: jest.fn(),
+}));
+jest.mock('@/services/contacts/contactsService', () => ({
+  getContactsPermissionState: jest.fn(),
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
 jest.mock('@/services/notifications/remindersService', () => ({ scheduleReminder: jest.fn() }));

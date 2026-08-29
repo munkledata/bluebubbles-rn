@@ -60,6 +60,9 @@ jest.mock('@/services/backgrounds/luminance', () => ({
   computeBackgroundIsLight: mockComputeBackgroundIsLight,
 }));
 
+jest.mock('@/services/clients', () => ({ http: {} }));
+jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn() }));
+
 jest.mock('expo-file-system', () => ({
   Paths: { cache: '/cache', document: '/documents' },
   Directory: class {

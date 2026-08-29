@@ -253,7 +253,10 @@ describe('incoming event drain', () => {
     clock = START + 30_000;
     await drain.kick(lease());
     expect(messageNotificationAttempts).toBe(1);
-    expect(notify.mock.calls.map(([intent]) => intent.kind)).toEqual(['message', 'cancel']);
+    expect(notify.mock.calls.map(([intent]) => intent.kind)).toEqual([
+      'message',
+      'message-withdraw',
+    ]);
     expect(
       raw
         .prepare(

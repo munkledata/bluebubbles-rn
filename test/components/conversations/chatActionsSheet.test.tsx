@@ -4,8 +4,8 @@
  *   - the heading shows the exact target chat title;
  *   - each row's LABEL flips on the target's current state (Pin↔Unpin, Mute↔Unmute,
  *     Archive↔Unarchive, Mark as Read↔Mark as Unread);
- *   - pressing a row calls the RIGHT device-local mutation with the row guid + toggled value,
- *     then closes the sheet (run() → fn().finally(onClose));
+ *   - pressing a row calls the RIGHT service command with the row guid + toggled value and the
+ *     account lease captured by this sheet, then closes the sheet (run() → fn().finally(onClose));
  *   - Mark as Read routes to the service `markRead(guid)`; Mark as Unread to `markUnread(guid)`
  *     (local flip + best-effort server sync — the service owns the RCS/Private-API gating);
  *   - Delete does NOT mutate directly — it closes the sheet and opens a confirm dialog whose
@@ -16,15 +16,10 @@
  *   - a null target renders no rows.
  *
  * In-file mocks:
- *   - `@db/repositories`: Pin/Mute/Archive use context-only helpers inside guarded transactions.
- *     Stub each as a jest.fn resolving void.
- *   - `@/services`: `markRead`/`markUnread`/`deleteChat` are referenced; its barrel loads native
- *     modules at import.
+ *   - `@/services`: every action command is a jest.fn resolving void. Repository/transaction
+ *     behavior belongs to the service tests; this suite proves the sheet calls that boundary.
  *   - `@ui/dialog/dialogStore`: spy `showDialog` so the Delete-confirm can be asserted without
  *     driving the real dialog store/Modal.
- *   - `@db/database`: route Pin/Archive through account-A/account-B fake databases so the suite can
- *     assert the transaction boundary, rollback, and absence of cross-account SQL.
- *
  * run() is async (fn().finally(onClose)); after each press we `await waitFor` on onClose so the
  * deferred close never bleeds into the next test's act environment.
  */
@@ -32,13 +27,14 @@ import React from 'react';
 import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { ChatActionsSheet, type ChatActionTarget } from '@ui/conversations/ChatActionsSheet';
 import {
-  setChatArchiveWithinTransaction,
-  setChatMuteWithinTransaction,
-  setChatPinWithinTransaction,
-  swapPinnedChatOrder,
-} from '@db/repositories';
-import { getDatabase } from '@db/database';
-import { deleteChat, markRead, markUnread } from '@/services';
+  deleteChat,
+  markRead,
+  markUnread,
+  movePinnedChat,
+  setChatArchived,
+  setChatMuted,
+  setChatPinned,
+} from '@/services';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -50,26 +46,22 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
-jest.mock('@db/repositories', () => ({
-  setChatPinWithinTransaction: jest.fn(() => Promise.resolve()),
-  setChatMuteWithinTransaction: jest.fn(() => Promise.resolve()),
-  setChatArchiveWithinTransaction: jest.fn(() => Promise.resolve()),
-  swapPinnedChatOrder: jest.fn(() => Promise.resolve(true)),
-}));
-
 jest.mock('@/services', () => ({
   markRead: jest.fn(() => Promise.resolve()),
   markUnread: jest.fn(() => Promise.resolve()),
   deleteChat: jest.fn(() => Promise.resolve()),
+  movePinnedChat: jest.fn(() => Promise.resolve()),
+  setChatArchived: jest.fn(() => Promise.resolve()),
+  setChatMuted: jest.fn(() => Promise.resolve()),
+  setChatPinned: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 
-const mockGetDatabase = getDatabase as jest.Mock;
-const mockSetChatPinWithinTransaction = setChatPinWithinTransaction as jest.Mock;
-const mockSetChatMuteWithinTransaction = setChatMuteWithinTransaction as jest.Mock;
-const mockSetChatArchiveWithinTransaction = setChatArchiveWithinTransaction as jest.Mock;
-const mockSwapPinnedChatOrder = swapPinnedChatOrder as jest.Mock;
+const mockSetChatPinned = setChatPinned as jest.Mock;
+const mockSetChatMuted = setChatMuted as jest.Mock;
+const mockSetChatArchived = setChatArchived as jest.Mock;
+const mockMovePinnedChat = movePinnedChat as jest.Mock;
 const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
@@ -77,14 +69,6 @@ const mockDeleteChat = deleteChat as jest.Mock;
 const PRIVATE_TITLE = 'private-conversation-title-7c91@example.test';
 const GENERIC_DELETE_MESSAGE =
   'Delete this conversation? This removes it from this device (not from the server).';
-const ACCOUNT_A_DATABASE = {
-  kind: 'chat-actions-sheet-account-a-db',
-  run: jest.fn(async (_statement: unknown) => undefined),
-};
-const ACCOUNT_B_DATABASE = {
-  kind: 'chat-actions-sheet-account-b-db',
-  run: jest.fn(async (_statement: unknown) => undefined),
-};
 
 /** The `buttons` array handed to showDialog by the last call (dialogStore's 3rd arg). */
 interface DialogButton {
@@ -102,21 +86,6 @@ function deferred<T = void>() {
     resolve = r;
   });
   return { promise, resolve };
-}
-
-function sqlStatementText(value: unknown): string {
-  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
-  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
-  return chunks
-    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
-    .filter((part): part is string => typeof part === 'string')
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function expectDbRunSequence(db: { run: jest.Mock }, expected: string[]): void {
-  expect(db.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual(expected);
 }
 
 function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
@@ -158,17 +127,14 @@ function makeTarget(overrides: Partial<ChatActionTarget> = {}): ChatActionTarget
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
-  mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DATABASE);
-  mockSetChatPinWithinTransaction.mockReset().mockResolvedValue(undefined);
-  mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
-  mockSetChatArchiveWithinTransaction.mockReset().mockResolvedValue(undefined);
-  mockSwapPinnedChatOrder.mockReset().mockResolvedValue(true);
-  ACCOUNT_A_DATABASE.run.mockReset().mockResolvedValue(undefined);
-  ACCOUNT_B_DATABASE.run.mockReset().mockResolvedValue(undefined);
-  mockMarkUnread.mockClear();
-  mockMarkRead.mockClear();
+  mockSetChatPinned.mockReset().mockResolvedValue(undefined);
+  mockSetChatMuted.mockReset().mockResolvedValue(undefined);
+  mockSetChatArchived.mockReset().mockResolvedValue(undefined);
+  mockMovePinnedChat.mockReset().mockResolvedValue(undefined);
+  mockMarkUnread.mockReset().mockResolvedValue(undefined);
+  mockMarkRead.mockReset().mockResolvedValue(undefined);
   mockShowDialog.mockClear();
-  mockDeleteChat.mockClear();
+  mockDeleteChat.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -199,10 +165,13 @@ describe('ChatActionsSheet — Pin', () => {
     const t = makeTarget({ isPinned: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Pin'));
-    await waitFor(() => expect(mockSetChatPinWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatPinWithinTransaction).toHaveBeenCalledWith(expect.any(Object), t.guid, true);
+    await waitFor(() => expect(mockSetChatPinned).toHaveBeenCalledTimes(1));
+    expect(mockSetChatPinned).toHaveBeenCalledWith(
+      t.guid,
+      true,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('shows "Unpin" for a pinned chat and unpins it on press', async () => {
@@ -210,57 +179,42 @@ describe('ChatActionsSheet — Pin', () => {
     const onClose = await renderSheet(t);
     expect(screen.queryByText('Pin')).toBeNull();
     fireEvent.press(screen.getByText('Unpin'));
-    await waitFor(() => expect(mockSetChatPinWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatPinWithinTransaction).toHaveBeenCalledWith(expect.any(Object), t.guid, false);
+    await waitFor(() => expect(mockSetChatPinned).toHaveBeenCalledTimes(1));
+    expect(mockSetChatPinned).toHaveBeenCalledWith(
+      t.guid,
+      false,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
-  it('drops a retained A-account Pin callback after reconnecting B', async () => {
+  it('keeps a retained Pin callback bound to the account that rendered it', async () => {
     const t = makeTarget({ isPinned: false });
     const onClose = await renderSheet(t);
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
-    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
 
     fireEvent.press(screen.getByText('Pin'));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(mockSetChatPinWithinTransaction).not.toHaveBeenCalled();
-    expect(mockGetDatabase).not.toHaveBeenCalled();
-    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
-    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    const retainedLease = mockSetChatPinned.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    expect(mockSetChatPinned).toHaveBeenCalledWith(t.guid, true, retainedLease);
+    expect(retainedLease.isCurrent()).toBe(false);
   });
 
-  it('waits for an admitted A-account Pin and rolls it back without touching B', async () => {
+  it('waits for the Pin service command to settle before closing', async () => {
     const gate = deferred();
-    mockSetChatPinWithinTransaction.mockReturnValueOnce(gate.promise);
+    mockSetChatPinned.mockReturnValueOnce(gate.promise);
     const onClose = await renderSheet(makeTarget({ isPinned: false }));
 
-    let pause: Promise<void> | undefined;
-    try {
-      fireEvent.press(screen.getByText('Pin'));
-      await waitFor(() => expect(mockSetChatPinWithinTransaction).toHaveBeenCalledTimes(1));
-      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE']);
-      let pauseSettled = false;
-      pause = pauseRealtimeDeliveries().then(() => {
-        pauseSettled = true;
-      });
-      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
-      await Promise.resolve();
-      expect(pauseSettled).toBe(false);
-
+    fireEvent.press(screen.getByText('Pin'));
+    await waitFor(() => expect(mockSetChatPinned).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => {
       gate.resolve();
-      await pause;
-      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
-    } finally {
-      gate.resolve();
-      pause ??= pauseRealtimeDeliveries();
-      await Promise.allSettled([pause]);
-      resumeRealtimeDeliveries();
-    }
+      await gate.promise;
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -277,75 +231,60 @@ describe('ChatActionsSheet — pinned order', () => {
     expect(screen.queryByText('Move Later')).toBeNull();
     fireEvent.press(screen.getByText('Move Earlier'));
 
-    await waitFor(() =>
-      expect(mockSwapPinnedChatOrder).toHaveBeenCalledWith(
-        ACCOUNT_A_DATABASE,
-        target.guid,
-        'earlier-guid',
-        'earlier',
-        expect.any(Function),
-        'any',
-      ),
+    await waitFor(() => expect(mockMovePinnedChat).toHaveBeenCalledTimes(1));
+    expect(mockMovePinnedChat).toHaveBeenCalledWith(
+      {
+        chatGuid: target.guid,
+        adjacentChatGuid: 'earlier-guid',
+        direction: 'earlier',
+        sender: 'any',
+      },
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
   });
 });
 
 describe('ChatActionsSheet — Mute', () => {
-  it('shows "Mute" and sets muteType to "mute" on press', async () => {
+  it('shows "Mute" and enables mute through the service command', async () => {
     const t = makeTarget({ muted: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Mute'));
-    await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
+    await waitFor(() => expect(mockSetChatMuted).toHaveBeenCalledTimes(1));
+    expect(mockSetChatMuted).toHaveBeenCalledWith(
       t.guid,
-      'mute',
+      true,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
-  it('shows "Unmute" and clears the muteType (null) on press', async () => {
+  it('shows "Unmute" and disables mute through the service command', async () => {
     const t = makeTarget({ muted: true });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Unmute'));
-    await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(expect.any(Object), t.guid, null);
+    await waitFor(() => expect(mockSetChatMuted).toHaveBeenCalledTimes(1));
+    expect(mockSetChatMuted).toHaveBeenCalledWith(
+      t.guid,
+      false,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+    );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
-  it('waits for an admitted A-account Mute and rolls it back without touching B', async () => {
+  it('waits for the Mute service command to settle before closing', async () => {
     const gate = deferred();
-    mockSetChatMuteWithinTransaction.mockReturnValueOnce(gate.promise);
+    mockSetChatMuted.mockReturnValueOnce(gate.promise);
     const onClose = await renderSheet(makeTarget({ muted: false }));
 
-    let pause: Promise<void> | undefined;
-    try {
-      fireEvent.press(screen.getByText('Mute'));
-      await waitFor(() => expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1));
-      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE']);
-      let pauseSettled = false;
-      pause = pauseRealtimeDeliveries().then(() => {
-        pauseSettled = true;
-      });
-      mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
-      await Promise.resolve();
-      expect(pauseSettled).toBe(false);
-
+    fireEvent.press(screen.getByText('Mute'));
+    await waitFor(() => expect(mockSetChatMuted).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => {
       gate.resolve();
-      await pause;
-      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-      expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-      expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
-    } finally {
-      gate.resolve();
-      pause ??= pauseRealtimeDeliveries();
-      await Promise.allSettled([pause]);
-      resumeRealtimeDeliveries();
-    }
+      await gate.promise;
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -354,31 +293,29 @@ describe('ChatActionsSheet — Archive', () => {
     const t = makeTarget({ isArchived: false });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Archive'));
-    await waitFor(() => expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
+    await waitFor(() => expect(mockSetChatArchived).toHaveBeenCalledTimes(1));
+    expect(mockSetChatArchived).toHaveBeenCalledWith(
       t.guid,
       true,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
   it('shows "Unarchive" and unarchives on press', async () => {
     const t = makeTarget({ isArchived: true });
     const onClose = await renderSheet(t);
     fireEvent.press(screen.getByText('Unarchive'));
-    await waitFor(() => expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledTimes(1));
-    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
+    await waitFor(() => expect(mockSetChatArchived).toHaveBeenCalledTimes(1));
+    expect(mockSetChatArchived).toHaveBeenCalledWith(
       t.guid,
       false,
+      expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expectDbRunSequence(ACCOUNT_A_DATABASE, ['BEGIN IMMEDIATE', 'COMMIT']);
   });
 
-  it('drops retained A-account Mute and Archive callbacks while fresh B controls remain exact', async () => {
+  it('keeps retained Mute and Archive callbacks bound to their original account', async () => {
     const target = makeTarget({
       guid: 'iMessage;-;+15557654321',
       muted: false,
@@ -391,16 +328,16 @@ describe('ChatActionsSheet — Archive', () => {
 
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
-    mockGetDatabase.mockReturnValue(ACCOUNT_B_DATABASE);
     await invokeConfiguredPress(oldMute);
     await waitFor(() => expect(oldClose).toHaveBeenCalledTimes(1));
     await invokeConfiguredPress(oldArchive);
     await waitFor(() => expect(oldClose).toHaveBeenCalledTimes(2));
-    expect(mockSetChatMuteWithinTransaction).not.toHaveBeenCalled();
-    expect(mockSetChatArchiveWithinTransaction).not.toHaveBeenCalled();
-    expect(mockGetDatabase).not.toHaveBeenCalled();
-    expect(ACCOUNT_A_DATABASE.run).not.toHaveBeenCalled();
-    expect(ACCOUNT_B_DATABASE.run).not.toHaveBeenCalled();
+    const oldMuteLease = mockSetChatMuted.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    const oldArchiveLease = mockSetChatArchived.mock.calls[0]?.[2] as { isCurrent(): boolean };
+    expect(mockSetChatMuted).toHaveBeenCalledWith(target.guid, true, oldMuteLease);
+    expect(mockSetChatArchived).toHaveBeenCalledWith(target.guid, true, oldArchiveLease);
+    expect(oldMuteLease).toBe(oldArchiveLease);
+    expect(oldMuteLease.isCurrent()).toBe(false);
 
     await oldView.unmount();
     const freshClose = await renderSheet(target);
@@ -411,22 +348,13 @@ describe('ChatActionsSheet — Archive', () => {
     await invokeConfiguredPress(freshArchive);
     await waitFor(() => expect(freshClose).toHaveBeenCalledTimes(2));
 
-    expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
-      target.guid,
-      'mute',
-    );
-    expect(mockSetChatArchiveWithinTransaction).toHaveBeenCalledWith(
-      expect.any(Object),
-      target.guid,
-      true,
-    );
-    expectDbRunSequence(ACCOUNT_B_DATABASE, [
-      'BEGIN IMMEDIATE',
-      'COMMIT',
-      'BEGIN IMMEDIATE',
-      'COMMIT',
-    ]);
+    const freshMuteLease = mockSetChatMuted.mock.calls[1]?.[2] as { isCurrent(): boolean };
+    const freshArchiveLease = mockSetChatArchived.mock.calls[1]?.[2] as { isCurrent(): boolean };
+    expect(mockSetChatMuted).toHaveBeenNthCalledWith(2, target.guid, true, freshMuteLease);
+    expect(mockSetChatArchived).toHaveBeenNthCalledWith(2, target.guid, true, freshArchiveLease);
+    expect(freshMuteLease).toBe(freshArchiveLease);
+    expect(freshMuteLease).not.toBe(oldMuteLease);
+    expect(freshMuteLease.isCurrent()).toBe(true);
   });
 });
 
@@ -485,7 +413,6 @@ describe('ChatActionsSheet — Delete', () => {
     // the sheet wired the RIGHT guid through the confirm dialog.
     destructive!.onPress?.();
     expect(mockDeleteChat).toHaveBeenCalledTimes(1);
-    // `getDatabase()` is stubbed to undefined by the shared setup.
     expect(mockDeleteChat).toHaveBeenCalledWith(
       'iMessage;-;+15559998888',
       expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),

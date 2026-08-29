@@ -121,6 +121,8 @@ export function useComposerAuthoringSession({
     if (editingText != null) {
       if (!editingActiveRef.current) preEditRef.current = draftStateRef.current.text;
       editingActiveRef.current = true;
+      // Editing is an explicit prop-to-local-state transition; mirroring it here is intentional.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setText(editingText);
       return;
     }
@@ -151,12 +153,14 @@ export function useComposerAuthoringSession({
     seededRef.current = true;
     setPending((current) => (current.length > 0 ? current : initialAttachments));
     setTrayOpen(true);
-  }, [initialAttachments]);
+  }, [initialAttachments, setPending, setTrayOpen]);
 
   // Draft persistence: debounced while typing; flushed on unmount so the last keystrokes aren't
   // lost when backing out of the chat. Editing an existing message never persists as a draft.
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftStateRef = useRef({ text: '', isEditing: false, onDraftChange });
+  // The unmount cleanup needs the latest committed render, not the values from its first closure.
+  // eslint-disable-next-line react-hooks/immutability
   draftStateRef.current = { text, isEditing, onDraftChange };
 
   // Body text already flushes to the per-chat DB draft below. Report only the authored pieces
@@ -223,6 +227,8 @@ export function useComposerAuthoringSession({
     // otherwise re-persist the stale text from the ref.
     if (draftTimer.current) clearTimeout(draftTimer.current);
     if (!isEditing) onDraftChange?.('');
+    // Keep an immediate unmount from restoring the just-consumed draft before React rerenders.
+    // eslint-disable-next-line react-hooks/immutability
     draftStateRef.current = { ...draftStateRef.current, text: postText };
     emitTyping(false);
   };
@@ -230,6 +236,8 @@ export function useComposerAuthoringSession({
   const cancelEdit = (): void => {
     // Restore whatever draft the edit displaced (not blank) so cancelling an edit keeps the draft.
     setText(preEditRef.current);
+    // Keep an immediate unmount from flushing the edited message as the user's saved draft.
+    // eslint-disable-next-line react-hooks/immutability
     draftStateRef.current = { ...draftStateRef.current, text: preEditRef.current };
     onCancelEdit?.();
   };

@@ -6,7 +6,8 @@
  *     hydrate runs pre-connect and silently fails — see src/state/themeStore.ts). Each fires once.
  *   - recovers optimistic-send rows, then catches up on due scheduled sends; each scheduled runner
  *     owns its once-per-account crash recovery. The branch is gated by `isDevServer()` (dev →
- *     local fake send via runDueScheduled; prod → recoverOutgoing + fireDueScheduled).
+ *     local fake send via fireDueScheduledWithDevelopmentSender; prod → recoverOutgoing +
+ *     fireDueScheduled).
  *   - the whole catch-up is best-effort: a rejected recovery is swallowed (logger.debug), never
  *     crashing the inbox.
  *   - all side-effects run ONCE on mount (useEffect []), not per re-render.
@@ -14,7 +15,7 @@
  *     replaces to /welcome.
  *
  * In-file mocks: @ui (ConversationListScreen probe), expo-router (push/replace), @/services
- * (forget/http), @/services/send (the 4 recovery fns), @features/conversations/devSeed (the dev
+ * (forget), @/services/send (the 3 recovery fns), @features/conversations/devSeed (the dev
  * helpers), @utils/isDev (isDevServer). The stores stay REAL — their `hydrate` action is spied
  * so we assert the call without running the DB-backed body.
  */
@@ -41,13 +42,12 @@ jest.mock('@/services', () => ({
       'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.',
   ),
   forget: jest.fn().mockResolvedValue(undefined),
-  http: {},
 }));
 
 jest.mock('@/services/send', () => ({
   fireDueScheduled: jest.fn().mockResolvedValue(0),
+  fireDueScheduledWithDevelopmentSender: jest.fn().mockResolvedValue(0),
   recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
-  runDueScheduled: jest.fn().mockResolvedValue(0),
 }));
 
 jest.mock('@features/conversations/devSeed', () => ({
@@ -79,7 +79,11 @@ import Home from '../../../app/(app)/home';
 // eslint-disable-next-line import/first
 import { forget } from '@/services';
 // eslint-disable-next-line import/first
-import { fireDueScheduled, recoverOutgoing, runDueScheduled } from '@/services/send';
+import {
+  fireDueScheduled,
+  fireDueScheduledWithDevelopmentSender,
+  recoverOutgoing,
+} from '@/services/send';
 // eslint-disable-next-line import/first
 import {
   devInjectIncomingFaceTime,
@@ -94,8 +98,9 @@ import { isDevServer } from '@utils/isDev';
 
 const isDevServerMock = isDevServer as jest.Mock;
 const fireDueScheduledMock = fireDueScheduled as jest.Mock;
+const fireDueScheduledWithDevelopmentSenderMock =
+  fireDueScheduledWithDevelopmentSender as jest.Mock;
 const recoverOutgoingMock = recoverOutgoing as jest.Mock;
-const runDueScheduledMock = runDueScheduled as jest.Mock;
 const forgetMock = forget as jest.Mock;
 const injectMessageMock = injectMessage as jest.Mock;
 const devQueueIncomingMessageMock = devQueueIncomingMessageWithoutDrain as jest.Mock;
@@ -113,8 +118,8 @@ beforeEach(() => {
   forgetMock.mockResolvedValue(undefined);
   isDevServerMock.mockReturnValue(false);
   fireDueScheduledMock.mockResolvedValue(0);
+  fireDueScheduledWithDevelopmentSenderMock.mockResolvedValue(0);
   recoverOutgoingMock.mockResolvedValue({ eligible: 0, sent: 0 });
-  runDueScheduledMock.mockResolvedValue(0);
   injectMessageMock.mockResolvedValue(undefined);
   devQueueIncomingMessageMock.mockResolvedValue(undefined);
   devResumeQueuedMessagesMock.mockResolvedValue(undefined);
@@ -183,13 +188,13 @@ describe('Home route — boot-completion side-effects', () => {
     // real server path; fireDueScheduled owns crash-row recovery before it claims anything.
     await waitFor(() => expect(recoverOutgoing).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(fireDueScheduled).toHaveBeenCalledTimes(1));
-    expect(runDueScheduled).not.toHaveBeenCalled();
+    expect(fireDueScheduledWithDevelopmentSender).not.toHaveBeenCalled();
   });
 
-  it('takes the dev-fixture branch (runDueScheduled, no real send) when isDevServer is true', async () => {
+  it('takes the dev-fixture scheduled branch with no real send when isDevServer is true', async () => {
     isDevServerMock.mockReturnValue(true);
     await renderWithTheme(<Home />);
-    await waitFor(() => expect(runDueScheduled).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
     // The injected runner owns its own recovery; the real-server catch-up does NOT run.
     expect(devResumeQueuedIncomingMessages).toHaveBeenCalledWith(
       expect.objectContaining({ isCurrent: expect.any(Function) }),
@@ -200,20 +205,17 @@ describe('Home route — boot-completion side-effects', () => {
 
   it('threads the Home mount lease into DEV scheduled send and reply fixtures', async () => {
     isDevServerMock.mockReturnValue(true);
-    runDueScheduledMock.mockImplementationOnce(
+    fireDueScheduledWithDevelopmentSenderMock.mockImplementationOnce(
       async (
-        _db: unknown,
-        _http: unknown,
-        _now: number,
         sender: (
           chatGuid: string,
           text: string,
           selectedMessageGuid: string | undefined,
           onQueued: () => Promise<void>,
         ) => Promise<void>,
-        scope: { isCurrent(): boolean },
+        accountLease: { isCurrent(): boolean },
       ) => {
-        expect(scope.isCurrent()).toBe(true);
+        expect(accountLease.isCurrent()).toBe(true);
         await sender('plain-chat', 'plain', undefined, async () => undefined);
         await sender('reply-chat', 'reply', 'reply-target', async () => undefined);
         return 2;
@@ -221,8 +223,8 @@ describe('Home route — boot-completion side-effects', () => {
     );
 
     await renderWithTheme(<Home />);
-    await waitFor(() => expect(runDueScheduled).toHaveBeenCalledTimes(1));
-    const accountLease = runDueScheduledMock.mock.calls[0]![4];
+    await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
+    const accountLease = fireDueScheduledWithDevelopmentSenderMock.mock.calls[0]![1];
 
     expect(devSendFakeMock).toHaveBeenCalledWith('plain-chat', 'plain', undefined, accountLease);
     expect(devSendFakeReplyMock).toHaveBeenCalledWith(
@@ -352,7 +354,7 @@ describe('Home route — DEV overlay actions', () => {
   it('quietly drops retained account-A DEV callbacks after account B is admitted', async () => {
     isDevServerMock.mockReturnValue(true);
     await renderWithTheme(<Home />);
-    await waitFor(() => expect(runDueScheduled).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
 

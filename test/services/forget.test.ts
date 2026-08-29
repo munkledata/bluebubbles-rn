@@ -265,7 +265,7 @@ jest.mock('expo-file-system', () => ({
 import { useSessionStore } from '@state/sessionStore';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
-import { logger, memoryLogSink, SERVER_SESSION_STATE } from '@core/secure';
+import { ERROR_DIAGNOSTIC_SITES, logger, memoryLogSink, SERVER_SESSION_STATE } from '@core/secure';
 import {
   activateForegroundBootSession,
   connect,
@@ -452,7 +452,11 @@ describe('foreground boot production adapters', () => {
       name: 'ForegroundBootOperationalError',
       code: 'database-open-failed',
     });
-    expect(errorLog).toHaveBeenCalledWith('[db] initialization failed', databaseFailure);
+    expect(errorLog).toHaveBeenCalledWith(
+      '[db] initialization failed',
+      ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
+      databaseFailure,
+    );
 
     ensureDatabase.mockResolvedValueOnce({});
     await openForegroundBootDatabase(context, attempt);

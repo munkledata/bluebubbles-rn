@@ -25,6 +25,9 @@ jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(),
   expoFileExists: jest.fn(async () => true),
 }));
+jest.mock('@/services/send/outgoingPasteOwnership', () => ({
+  createOutgoingPasteOwnershipPreparer: jest.fn(),
+}));
 jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
 jest.mock('@core/api/endpoints/scheduled', () => ({
   getScheduled: jest.fn(),

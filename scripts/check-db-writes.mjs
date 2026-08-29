@@ -91,6 +91,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/db/repositories/errorReports.ts',
   'src/db/repositories/maintenance.ts',
   'src/db/repositories/outgoing.ts',
+  'src/features/conversations/devFixtureSession.ts',
   'src/features/facetime/useFaceTime.ts',
   'src/services/backup/backup.ts',
   'src/services/backup/backupService.ts',
@@ -103,6 +104,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/errors/errorReportSink.ts',
   'src/services/errors/globalErrorHandlers.ts',
   'src/services/errors/index.ts',
+  'src/services/featureSettingsCommands.ts',
   'src/services/lock.ts',
   'src/services/notifications/notifeeService.ts',
   'src/services/notifications/remindersService.ts',
@@ -1367,10 +1369,11 @@ function directCallsToBinding(file, binding, checker) {
 }
 
 function projectModuleBasePath(importerPath, specifier) {
+  const canonical = (path) => normalizePath(resolve('/', path)).slice(1);
   if (specifier.startsWith('.')) {
-    return normalizePath(resolve('/', dirname(importerPath), specifier)).slice(1);
+    return canonical(resolve('/', dirname(importerPath), specifier));
   }
-  if (specifier.startsWith('@/')) return `src/${specifier.slice(2)}`;
+  if (specifier.startsWith('@/')) return canonical(`src/${specifier.slice(2)}`);
   for (const [prefix, target] of [
     ['@core/', 'src/core/'],
     ['@db/', 'src/db/'],
@@ -1380,14 +1383,17 @@ function projectModuleBasePath(importerPath, specifier) {
     ['@native/', 'src/native/'],
     ['@utils/', 'src/utils/'],
   ]) {
-    if (specifier.startsWith(prefix)) return `${target}${specifier.slice(prefix.length)}`;
+    if (specifier.startsWith(prefix)) {
+      return canonical(`${target}${specifier.slice(prefix.length)}`);
+    }
   }
-  return {
+  const mapped = {
     '@core': 'src/core/index',
     '@db': 'src/db/schema',
     '@ui': 'src/ui/index',
     '@utils': 'src/utils/index',
   }[specifier];
+  return mapped ? canonical(mapped) : undefined;
 }
 
 function projectModulePathCandidates(importerPath, specifier) {
@@ -1440,16 +1446,28 @@ function moduleSpecifierTargetsPath(importerPath, specifier, targetPath) {
 
 function runtimeModuleSpecifier(node) {
   if (!ts.isStringLiteralLike(node)) return false;
-  const parent = node.parent;
+  let expression = node;
+  while (
+    expression.parent &&
+    (ts.isAsExpression(expression.parent) ||
+      ts.isParenthesizedExpression(expression.parent) ||
+      ts.isSatisfiesExpression(expression.parent) ||
+      ts.isTypeAssertionExpression(expression.parent) ||
+      ts.isNonNullExpression(expression.parent)) &&
+    expression.parent.expression === expression
+  ) {
+    expression = expression.parent;
+  }
+  const parent = expression.parent;
   if (
     ts.isCallExpression(parent) &&
-    parent.arguments[0] === node &&
+    parent.arguments[0] === expression &&
     (parent.expression.kind === ts.SyntaxKind.ImportKeyword ||
       identifierNamed(parent.expression, 'require'))
   ) {
     return true;
   }
-  return ts.isExternalModuleReference(parent) && parent.expression === node;
+  return ts.isExternalModuleReference(parent) && parent.expression === expression;
 }
 
 function hasNonStaticModuleSpecifierOfPath(filesByPath, targetPath) {
@@ -1724,7 +1742,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'resumeDbActiveMigrationDeathSelfTest',
-      '45508ad877417fcaebe756986a93d83096aa361d3198790fbf47df107068128b',
+      '1ced26b353c26e170e11a8cfcc04bc23d7f51c25f40e8df593f219dc6175d018',
     ],
   ]);
   for (const [name, expected] of expectedDatabaseFingerprints) {
@@ -2237,7 +2255,7 @@ function dbProcessRelaunchCertificateCandidate({
   // reviewed entry bodies plus the exact contact-link bypass and send-outcome suppression closure,
   // so internal DB/native work cannot become detached while an outer inventory id stays unchanged.
   const runtimeProductionCalleeFingerprints = new Map([
-    [syncAllChats, 'f4d3547916c524936d78b75950eddcf545a6aae976287f401b6306b4d3bcbf57'],
+    [syncAllChats, 'e1ae59d2c2e53c2c758eddfcfaca8626e281feaae298237c5f2681f0acf33294'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
     [sendImageMessage, '360a1f755ec516935f104ced3e5225ffc6e14b645f536be03e7b00704dca7f5d'],
     [reconcileSendOutcome, 'c8ef12e12a7a116289e00886b0589bfe42abfa5060d7411b650fa323f0a22c8c'],
@@ -2248,7 +2266,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [dbEventSinkConstructor, '087d0cd2cd9cde22afc602591260d35f760b01178c18ff22a5e9c9ff0b4e7fb6'],
     [dbEventSinkLinkContacts, 'efeff49c6e0d6e74395d05dcf5f3e1f6774decb7fec6e773ea61761d9e01d0e9'],
-    [dbEventSinkOnEvent, 'be6e9cc9ae229bae5a2ea92e0a41b8e6c41a1c9cb28057081e25101812eab9ad'],
+    [dbEventSinkOnEvent, '30dc8ee01f193a59b8424e1324aac5acc98224209d5d153cb409d0c4ab32d691'],
   ]);
   const startForegroundBoot = topLevelFunction(filesByPath, foregroundPath, 'startForegroundBoot');
   const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
@@ -2314,7 +2332,7 @@ function dbProcessRelaunchCertificateCandidate({
   if (
     createHash('sha256')
       .update(normalizedSnippet(startForegroundBoot, foregroundFile))
-      .digest('hex') !== 'd82a07c4e128e800fe352ecbb9ab75f696b79988864eb362a30133a0e9e640d1'
+      .digest('hex') !== 'f9bcb633c6ebc27b8342f226fdf9832e0d057def7ff48d419d599e8d982d3236'
   ) {
     return undefined;
   }
@@ -3213,7 +3231,7 @@ function dbProcessRelaunchCertificateCandidate({
     [retireWalWriteDeath, 2],
     [databaseCallables.get('emptyDbActiveMigrationDeathPrepareChecks'), 2],
     [databaseCallables.get('emptyDbActiveMigrationDeathResumeChecks'), 2],
-    [databaseCallables.get('dbActiveMigrationNames'), 3],
+    [databaseCallables.get('dbActiveMigrationNames'), 4],
     [databaseCallables.get('dbActiveMigrationFixtureRows'), 3],
     [databaseCallables.get('hasExactDbActiveMigrationFixture'), 3],
     [databaseCallables.get('evaluateDbActiveMigrationState'), 3],
@@ -6690,6 +6708,341 @@ function exactCallEdges(edges, caller, callee) {
   return edges.filter((edge) => edge.caller === caller && edge.callee === callee);
 }
 
+/** Shared fail-closed proof for the synchronous, process-wide foreground-boot composition. */
+function foregroundBootCompositionCandidate(root, filesByPath, checker, edges, dynamicDispatches) {
+  const foregroundPath = 'src/services/boot/foregroundBoot.ts';
+  const invalidationPath = 'src/services/boot/foregroundBootInvalidation.ts';
+  const foregroundFile = filesByPath.get(foregroundPath);
+  const invalidationFile = filesByPath.get(invalidationPath);
+  const initializeForegroundBootComposition = topLevelFunction(
+    filesByPath,
+    foregroundPath,
+    'initializeForegroundBootComposition',
+  );
+  const startForegroundBoot = topLevelFunction(filesByPath, foregroundPath, 'startForegroundBoot');
+  const subscribeForegroundBoot = topLevelFunction(
+    filesByPath,
+    foregroundPath,
+    'subscribeForegroundBoot',
+  );
+  const compositionInitialized = foregroundFile
+    ? topLevelVariable(foregroundFile, 'compositionInitialized')
+    : undefined;
+  if (
+    !foregroundFile ||
+    !invalidationFile ||
+    !initializeForegroundBootComposition?.body ||
+    !startForegroundBoot?.body ||
+    !subscribeForegroundBoot?.body ||
+    !compositionInitialized?.declaration.initializer
+  ) {
+    return undefined;
+  }
+
+  const entryPath = resolve(root, 'index.js');
+  const packagePath = resolve(root, 'package.json');
+  if (!existsSync(entryPath) || !existsSync(packagePath)) return undefined;
+  let packageMain;
+  try {
+    packageMain = JSON.parse(readFileSync(packagePath, 'utf8'))?.main;
+  } catch {
+    return undefined;
+  }
+  const entryFile = ts.createSourceFile(
+    entryPath,
+    readFileSync(entryPath, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const expectedEntryImports = [
+    './src/services/errors/registerReactNativeExceptionPrivacy',
+    './src/services/logging/registerPersistentLogs',
+    './src/services/notifications/backgroundEvents',
+    './src/services/background/registerBackgroundSyncHeadlessTask',
+    './src/services/notifications/registerFcmBackgroundHandler',
+    './src/services/download/registerBoundedNativeDownloadCleanup',
+    'expo-router/entry',
+  ];
+  const entryImports = entryFile.statements.map((statement) =>
+    ts.isImportDeclaration(statement) &&
+    !statement.importClause &&
+    ts.isStringLiteral(statement.moduleSpecifier)
+      ? statement.moduleSpecifier.text
+      : undefined,
+  );
+  if (
+    packageMain !== 'index.js' ||
+    entryImports.length !== expectedEntryImports.length ||
+    entryImports.some((specifier, index) => specifier !== expectedEntryImports[index])
+  ) {
+    return undefined;
+  }
+
+  const compositionStatements = initializeForegroundBootComposition.body.statements;
+  const compositionGuard = compositionStatements[0];
+  const compositionClaimStatement = compositionStatements[1];
+  const compositionClaim =
+    compositionClaimStatement && ts.isExpressionStatement(compositionClaimStatement)
+      ? unwrapExpression(compositionClaimStatement.expression)
+      : undefined;
+  if (
+    !(compositionInitialized.declarationList.flags & ts.NodeFlags.Let) ||
+    compositionInitialized.declaration.initializer.kind !== ts.SyntaxKind.FalseKeyword ||
+    !hasExactIdentifierParameters(initializeForegroundBootComposition, []) ||
+    compositionStatements.length !== 6 ||
+    createHash('sha256')
+      .update(normalizedSnippet(initializeForegroundBootComposition, foregroundFile))
+      .digest('hex') !== '860764eab237d7ef345ce11ff24eac3181805d55b80ce28090fcd01ffecf7105' ||
+    !compositionGuard ||
+    !ts.isIfStatement(compositionGuard) ||
+    !sameSymbol(
+      unwrapExpression(compositionGuard.expression),
+      compositionInitialized.declaration.name,
+      checker,
+    ) ||
+    !ts.isReturnStatement(compositionGuard.thenStatement) ||
+    compositionGuard.thenStatement.expression ||
+    compositionGuard.elseStatement ||
+    !compositionClaim ||
+    !ts.isBinaryExpression(compositionClaim) ||
+    compositionClaim.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !sameSymbol(
+      unwrapExpression(compositionClaim.left),
+      compositionInitialized.declaration.name,
+      checker,
+    ) ||
+    compositionClaim.right.kind !== ts.SyntaxKind.TrueKeyword ||
+    assignmentWritesTo(foregroundFile, compositionInitialized.declaration.name, checker).length !==
+      1 ||
+    assignmentWritesTo(foregroundFile, compositionInitialized.declaration.name, checker)[0] !==
+      compositionClaim
+  ) {
+    return undefined;
+  }
+
+  const installerSpecs = [
+    {
+      name: 'installForegroundBootInvalidator',
+      statementIndex: 3,
+      hash: 'd2c36b418e464d48ddeb084c13edb216546d502fa3447308312e1f02e5b9ab55',
+      slotName: 'invalidateOwner',
+      consumerName: 'invalidateForegroundBootForAccountTransition',
+      consumerHash: '66c339c7277629a5fc2fd50c7656db22406a62487997ddf237fdbd883fe163f6',
+    },
+    {
+      name: 'installForegroundBootRestarter',
+      statementIndex: 4,
+      hash: '0ff75f4e7d8c9a2f22d0fba835517132ce724bafcac16fd8b66ea291b33f4a9e',
+      slotName: 'restartOwner',
+      consumerName: 'restartForegroundBootAfterAccountTransition',
+      consumerHash: 'f59466864e9b8758856e02e1eb7cef4b5be90636d4b2ccdda6bcbacbd6492a1e',
+    },
+    {
+      name: 'installForegroundBootIssueReporter',
+      statementIndex: 5,
+      hash: 'fcc8b07d30866399c39431ec78019ccac9393dd59efc0990b37af74c786bd525',
+      slotName: 'issueOwner',
+      consumerName: 'reportForegroundBootIssue',
+      consumerHash: 'a2b0f54ca212e58a247694e2ae2555d51556dd425145bb66bedc10713f7e6dcf',
+    },
+  ].map((spec) => ({
+    ...spec,
+    target: topLevelFunction(filesByPath, invalidationPath, spec.name),
+    binding: namedImportBinding(foregroundFile, './foregroundBootInvalidation', spec.name),
+    slot: topLevelVariable(invalidationFile, spec.slotName),
+    consumer: topLevelFunction(filesByPath, invalidationPath, spec.consumerName),
+  }));
+  if (
+    installerSpecs.some(
+      (spec) =>
+        !spec.target?.body ||
+        !spec.binding ||
+        !spec.slot?.declaration.initializer ||
+        !spec.consumer?.body,
+    )
+  ) {
+    return undefined;
+  }
+
+  const protectedTargets = new Set([
+    initializeForegroundBootComposition,
+    ...installerSpecs.map((spec) => spec.target),
+  ]);
+  const symbolExposesProtectedTarget = (symbol, seen = new Set()) => {
+    const current = unaliasSymbol(symbol, checker);
+    if (!current || seen.has(current)) return false;
+    seen.add(current);
+    const callable = callableNodeFromSymbol(current, checker);
+    if (callable && protectedTargets.has(callable)) return true;
+    return Boolean(
+      current.flags & ts.SymbolFlags.Module &&
+      checker
+        .getExportsOfModule(current)
+        .some((exported) => symbolExposesProtectedTarget(exported, seen)),
+    );
+  };
+  const moduleExportsProtectedTarget = (file) => {
+    const moduleSymbol = checker.getSymbolAtLocation(file) ?? file.symbol;
+    return symbolExposesProtectedTarget(moduleSymbol);
+  };
+  let hasProtectedRuntimeModuleLoad = false;
+  for (const [importerPath, file] of filesByPath) {
+    function visit(node) {
+      if (hasProtectedRuntimeModuleLoad) return;
+      if (ts.isCallExpression(node)) {
+        const loader = unwrapExpression(node.expression);
+        if (loader.kind === ts.SyntaxKind.ImportKeyword || identifierNamed(loader, 'require')) {
+          const argument = node.arguments[0] ? unwrapExpression(node.arguments[0]) : undefined;
+          if (!argument || !ts.isStringLiteralLike(argument)) {
+            hasProtectedRuntimeModuleLoad = true;
+            return;
+          }
+          if (
+            projectModulePathCandidates(importerPath, argument.text)
+              .map((path) => filesByPath.get(path))
+              .filter(Boolean)
+              .some(moduleExportsProtectedTarget)
+          ) {
+            hasProtectedRuntimeModuleLoad = true;
+            return;
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(file);
+    if (hasProtectedRuntimeModuleLoad) break;
+  }
+  const hasProtectedNamespaceReference = [...filesByPath.values()].some((file) =>
+    file.statements.some((statement) => {
+      const bindings = [];
+      if (ts.isImportDeclaration(statement) && statement.importClause) {
+        if (statement.importClause.name) bindings.push(statement.importClause.name);
+        const namedBindings = statement.importClause.namedBindings;
+        if (namedBindings && ts.isNamespaceImport(namedBindings)) {
+          bindings.push(namedBindings.name);
+        } else if (namedBindings && ts.isNamedImports(namedBindings)) {
+          bindings.push(...namedBindings.elements.map((element) => element.name));
+        }
+      } else if (ts.isImportEqualsDeclaration(statement)) {
+        bindings.push(statement.name);
+      }
+      return bindings.some((binding) => {
+        const importedSymbol = unaliasSymbol(checker.getSymbolAtLocation(binding), checker);
+        if (
+          !importedSymbol ||
+          !(importedSymbol.flags & ts.SymbolFlags.Module) ||
+          !symbolExposesProtectedTarget(importedSymbol)
+        ) {
+          return false;
+        }
+        return runtimeReferencesToBinding(file, binding, checker).some(
+          (reference) => reference !== binding,
+        );
+      });
+    }),
+  );
+  if (
+    hasProtectedRuntimeModuleLoad ||
+    hasProtectedNamespaceReference ||
+    dynamicDispatches.some((dispatch) =>
+      dispatch.possibleCallees.some((callable) => protectedTargets.has(callable)),
+    )
+  ) {
+    return undefined;
+  }
+
+  const compositionStartEdges = exactCallEdges(
+    edges,
+    startForegroundBoot,
+    initializeForegroundBootComposition,
+  );
+  const compositionSubscribeEdges = exactCallEdges(
+    edges,
+    subscribeForegroundBoot,
+    initializeForegroundBootComposition,
+  );
+  const referencesByBinding = runtimeReferencesToBindings(
+    filesByPath.values(),
+    [
+      initializeForegroundBootComposition.name,
+      ...installerSpecs.flatMap((spec) => [spec.target.name, spec.slot.declaration.name]),
+    ],
+    checker,
+  );
+  const compositionReferences = referencesByBinding?.get(initializeForegroundBootComposition.name);
+  if (
+    compositionStartEdges.length !== 1 ||
+    compositionSubscribeEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === initializeForegroundBootComposition).length !== 2 ||
+    !compositionReferences ||
+    compositionReferences.length !== 3 ||
+    !compositionReferences.includes(initializeForegroundBootComposition.name) ||
+    !compositionReferences.includes(unwrapExpression(compositionStartEdges[0]?.node.expression)) ||
+    !compositionReferences.includes(unwrapExpression(compositionSubscribeEdges[0]?.node.expression))
+  ) {
+    return undefined;
+  }
+
+  const installers = [];
+  for (const spec of installerSpecs) {
+    const calls = directCallsToBinding(foregroundFile, spec.binding, checker);
+    const call = calls[0];
+    const callEdges = exactCallEdges(edges, initializeForegroundBootComposition, spec.target);
+    const references = referencesByBinding?.get(spec.target.name);
+    const slotWrites = assignmentWritesTo(invalidationFile, spec.slot.declaration.name, checker);
+    const slotReferences = referencesByBinding?.get(spec.slot.declaration.name);
+    const slotStatement = spec.slot.declarationList.parent;
+    if (
+      !sameSymbol(spec.binding, spec.target.name, checker) ||
+      createHash('sha256')
+        .update(normalizedSnippet(spec.target, invalidationFile))
+        .digest('hex') !== spec.hash ||
+      !(spec.slot.declarationList.flags & ts.NodeFlags.Let) ||
+      spec.slot.declaration.initializer.kind !== ts.SyntaxKind.NullKeyword ||
+      !ts.isVariableStatement(slotStatement) ||
+      Boolean(slotStatement.modifiers?.length) ||
+      createHash('sha256')
+        .update(normalizedSnippet(spec.consumer, invalidationFile))
+        .digest('hex') !== spec.consumerHash ||
+      slotWrites.length !== 2 ||
+      slotWrites.some((write) => !nodeIsInside(write, spec.target)) ||
+      !slotReferences ||
+      !slotReferences.includes(spec.slot.declaration.name) ||
+      slotReferences.some(
+        (reference) =>
+          reference !== spec.slot.declaration.name &&
+          !nodeIsInside(reference, spec.target) &&
+          !nodeIsInside(reference, spec.consumer),
+      ) ||
+      calls.length !== 1 ||
+      !call ||
+      call.parent !== compositionStatements[spec.statementIndex] ||
+      call.arguments.length !== 1 ||
+      callEdges.length !== 1 ||
+      callEdges[0]?.node !== call ||
+      edges.filter((edge) => edge.callee === spec.target).length !== 1 ||
+      !references ||
+      references.length !== 2 ||
+      !references.includes(spec.target.name) ||
+      !references.includes(unwrapExpression(call.expression))
+    ) {
+      return undefined;
+    }
+    installers.push({ ...spec, call });
+  }
+
+  return {
+    initializeForegroundBootComposition,
+    compositionStatements,
+    compositionStartEdges,
+    compositionSubscribeEdges,
+    compositionReferences,
+    installers,
+  };
+}
+
 function nestedCallEdges(edges, owner, callee) {
   return edges.filter(
     (edge) => edge.caller && callableIsInside(edge.caller, owner) && edge.callee === callee,
@@ -6728,12 +7081,14 @@ function incomingIngressRoots(filesByPath) {
  */
 function incomingIngressCertifiedNodes({
   root,
+  program,
   filesByPath,
   checker,
   edges,
   referenceEdges,
   dynamicCallbacks,
   dynamicDispatches,
+  foregroundBootComposition,
   mutators,
   findings,
   findingCallables,
@@ -6747,6 +7102,7 @@ function incomingIngressCertifiedNodes({
   const coordinatorPath = 'src/services/realtime/deliveryCoordinator.ts';
   const socketPath = 'src/services/realtime/socketService.ts';
   const fcmPath = 'src/services/notifications/fcmMessaging.ts';
+  const fcmRegistrationPath = 'src/services/notifications/registerFcmBackgroundHandler.ts';
   const foregroundBootPath = 'src/services/boot/foregroundBoot.ts';
   const devPath = 'src/features/conversations/devSeed.ts';
   const chatPath = 'app/(app)/chat/[guid].tsx';
@@ -6759,6 +7115,7 @@ function incomingIngressCertifiedNodes({
   const coordinatorFile = filesByPath.get(coordinatorPath);
   const socketFile = filesByPath.get(socketPath);
   const fcmFile = filesByPath.get(fcmPath);
+  const fcmRegistrationFile = filesByPath.get(fcmRegistrationPath);
   const foregroundBootFile = filesByPath.get(foregroundBootPath);
   const devFile = filesByPath.get(devPath);
   const chatFile = filesByPath.get(chatPath);
@@ -6771,6 +7128,7 @@ function incomingIngressCertifiedNodes({
     !coordinatorFile ||
     !socketFile ||
     !fcmFile ||
+    !fcmRegistrationFile ||
     !foregroundBootFile ||
     !devFile ||
     !chatFile ||
@@ -6786,6 +7144,7 @@ function incomingIngressCertifiedNodes({
   const applyNewServerUrl = fn(controlPath, 'applyNewServerUrl');
   const resetRealtimeRuntime = fn(controlPath, 'resetRealtimeRuntime');
   const getRealtimeRuntime = fn(controlPath, 'getRealtimeRuntime');
+  const getFallbackOccurrenceNamespace = fn(controlPath, 'getFallbackOccurrenceNamespace');
   const realtimeSink = fn(controlPath, 'realtimeSink');
   const sharedRouter = fn(controlPath, 'sharedRouter');
   const realtimeIntakeLocked = fn(controlPath, 'realtimeIntakeLocked');
@@ -6868,6 +7227,10 @@ function incomingIngressCertifiedNodes({
   const handleBackgroundFcm = fn(fcmPath, 'handleBackgroundFcm');
   const startFcm = fn(fcmPath, 'startFcm');
   const startProcessWork = fn(foregroundBootPath, 'startProcessWork');
+  const initializeForegroundBootComposition = fn(
+    foregroundBootPath,
+    'initializeForegroundBootComposition',
+  );
   const startForegroundBoot = fn(foregroundBootPath, 'startForegroundBoot');
   const readFcmSessionState = fn(
     'src/services/notifications/fcmSessionGate.ts',
@@ -6894,6 +7257,7 @@ function incomingIngressCertifiedNodes({
     applyNewServerUrl,
     resetRealtimeRuntime,
     getRealtimeRuntime,
+    getFallbackOccurrenceNamespace,
     realtimeSink,
     sharedRouter,
     realtimeIntakeLocked,
@@ -6952,6 +7316,7 @@ function incomingIngressCertifiedNodes({
     handleBackgroundFcm,
     startFcm,
     startProcessWork,
+    initializeForegroundBootComposition,
     startForegroundBoot,
     readFcmSessionState,
     postLockedNotification,
@@ -6964,7 +7329,13 @@ function incomingIngressCertifiedNodes({
     injectEffect,
     chatScreen,
   ];
-  if (required.some((callable) => !callable?.body)) return empty();
+  if (
+    required.some((callable) => !callable?.body) ||
+    foregroundBootComposition?.initializeForegroundBootComposition !==
+      initializeForegroundBootComposition
+  ) {
+    return empty();
+  }
   const parametersAreExact =
     hasExactIdentifierParameters(dispatchRealtimeEvent, [
       { name: 'eventName' },
@@ -6987,6 +7358,7 @@ function incomingIngressCertifiedNodes({
     ]) &&
     hasExactIdentifierParameters(resetRealtimeRuntime, [{ name: 'expected', optional: true }]) &&
     hasExactIdentifierParameters(getRealtimeRuntime, [{ name: 'db' }, { name: 'context' }]) &&
+    hasExactIdentifierParameters(getFallbackOccurrenceNamespace, []) &&
     hasExactIdentifierParameters(realtimeSink, [{ name: 'db' }]) &&
     hasExactIdentifierParameters(sharedRouter, [{ name: 'db' }]) &&
     hasExactIdentifierParameters(realtimeIntakeLocked, []) &&
@@ -7037,6 +7409,7 @@ function incomingIngressCertifiedNodes({
     hasExactIdentifierParameters(handleBackgroundFcm, [{ name: 'msg' }]) &&
     hasExactIdentifierParameters(startFcm, []) &&
     hasExactIdentifierParameters(startProcessWork, []) &&
+    hasExactIdentifierParameters(initializeForegroundBootComposition, []) &&
     hasExactIdentifierParameters(startForegroundBoot, []) &&
     hasExactIdentifierParameters(readFcmSessionState, [
       { name: 'vault' },
@@ -7126,39 +7499,9 @@ function incomingIngressCertifiedNodes({
       }),
     );
 
-  // Killed-app registration must stay in the real bundle entry, before Expo Router starts, while
-  // foreground registration remains reachable from the one process-work gate. These mixed boot
-  // callers stay unresolved; they are prerequisites, not promoted ingress edges.
-  const entryPath = resolve(root, 'index.js');
-  const packagePath = resolve(root, 'package.json');
-  if (!existsSync(entryPath) || !existsSync(packagePath)) return empty();
-  let packageMain;
-  try {
-    const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
-    packageMain = packageJson?.main;
-  } catch {
-    return empty();
-  }
-  const entryFile = ts.createSourceFile(
-    entryPath,
-    readFileSync(entryPath, 'utf8'),
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.JS,
-  );
-  const entryImports = entryFile.statements.filter(ts.isImportDeclaration);
-  const entryFcmImports = entryImports.filter(
-    (statement) =>
-      !statement.importClause &&
-      ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === './src/services/notifications/fcmMessaging',
-  );
-  const entryRouterImports = entryImports.filter(
-    (statement) =>
-      !statement.importClause &&
-      ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === 'expo-router/entry',
-  );
+  // The shared boot candidate pins the real entry and registration order. Foreground registration
+  // must also remain reachable from the one process-work gate. These mixed boot callers stay
+  // unresolved; they are prerequisites, not promoted ingress edges.
   const startFcmBinding = namedImportBinding(
     foregroundBootFile,
     '../notifications/fcmMessaging',
@@ -7171,8 +7514,16 @@ function incomingIngressCertifiedNodes({
       )
     : [];
   const foregroundStartFcmCall = sole(foregroundStartFcmCalls);
-  const foregroundRelaunchStatement = startForegroundBoot.body.statements[0];
-  const foregroundProcessWorkStatement = startForegroundBoot.body.statements[2];
+  const foregroundCompositionStatement = startForegroundBoot.body.statements[0];
+  const foregroundCompositionCall = ts.isExpressionStatement(foregroundCompositionStatement)
+    ? callableCall(
+        foregroundCompositionStatement.expression,
+        initializeForegroundBootComposition,
+        checker,
+      )
+    : undefined;
+  const foregroundRelaunchStatement = startForegroundBoot.body.statements[1];
+  const foregroundProcessWorkStatement = startForegroundBoot.body.statements[3];
   const foregroundProcessWorkCall = ts.isExpressionStatement(foregroundProcessWorkStatement)
     ? callableCall(foregroundProcessWorkStatement.expression, startProcessWork, checker)
     : undefined;
@@ -7207,10 +7558,6 @@ function incomingIngressCertifiedNodes({
     ? callAccess(foregroundFcmThen.expression)
     : undefined;
   if (
-    packageMain !== 'index.js' ||
-    entryFcmImports.length !== 1 ||
-    entryRouterImports.length !== 1 ||
-    entryFcmImports[0].getStart(entryFile) >= entryRouterImports[0].getStart(entryFile) ||
     !startFcmBinding ||
     !fcmEnabledBinding ||
     foregroundStartFcmCalls.length !== 1 ||
@@ -7233,7 +7580,9 @@ function incomingIngressCertifiedNodes({
     foregroundFcmThenAccess.method !== 'then' ||
     foregroundFcmThen.arguments.length !== 1 ||
     callExpression(foregroundFcmThenAccess.receiver) !== foregroundStartFcmCall ||
-    startForegroundBoot.body.statements.length !== 5 ||
+    startForegroundBoot.body.statements.length !== 6 ||
+    !foregroundCompositionCall ||
+    foregroundCompositionCall.arguments.length !== 0 ||
     !foregroundRelaunchStatement ||
     normalizedSnippet(foregroundRelaunchStatement, foregroundBootFile) !==
       "if (typeof __DEV__ !== 'undefined' && __DEV__) { const relaunchContract = startDevDbRelaunchContractIfRequested(); if (relaunchContract) return relaunchContract; }" ||
@@ -8034,12 +8383,34 @@ function incomingIngressCertifiedNodes({
     'fallbackOccurrenceNamespace',
   );
   const cryptoNamespaceBinding = namespaceImportBinding(controlFile, 'expo-crypto');
-  const fallbackNamespaceCall = fallbackOccurrenceNamespaceState?.declaration.initializer
-    ? callExpression(fallbackOccurrenceNamespaceState.declaration.initializer)
+  const fallbackNamespaceAssignmentStatement = getFallbackOccurrenceNamespace.body.statements[0];
+  const fallbackNamespaceAssignment = ts.isExpressionStatement(fallbackNamespaceAssignmentStatement)
+    ? unwrapExpression(fallbackNamespaceAssignmentStatement.expression)
     : undefined;
+  const fallbackNamespaceCall =
+    fallbackNamespaceAssignment && ts.isBinaryExpression(fallbackNamespaceAssignment)
+      ? callExpression(fallbackNamespaceAssignment.right)
+      : undefined;
   const fallbackNamespaceAccess = fallbackNamespaceCall
     ? callAccess(fallbackNamespaceCall.expression)
     : undefined;
+  const fallbackNamespaceReturn = getFallbackOccurrenceNamespace.body.statements[1];
+  const fallbackNamespaceWrites = fallbackOccurrenceNamespaceState
+    ? assignmentWritesTo(controlFile, fallbackOccurrenceNamespaceState.declaration.name, checker)
+    : [];
+  const fallbackNamespaceReferences = fallbackOccurrenceNamespaceState
+    ? runtimeReferencesToBinding(
+        controlFile,
+        fallbackOccurrenceNamespaceState.declaration.name,
+        checker,
+      )
+    : [];
+  const fallbackNamespaceGetterCalls = directCallsToBinding(
+    controlFile,
+    getFallbackOccurrenceNamespace.name,
+    checker,
+  );
+  const fallbackNamespaceGetterCall = fallbackNamespaceGetterCalls[0];
   const runtimeDbParameter = getRealtimeRuntime.parameters[0];
   const runtimeContextParameter = getRealtimeRuntime.parameters[1];
   const sharedRouterDbParameter = sharedRouter.parameters[0];
@@ -8347,13 +8718,42 @@ function incomingIngressCertifiedNodes({
     !ts.isNumericLiteral(fallbackOccurrenceSequenceState.declaration.initializer) ||
     fallbackOccurrenceSequenceState.declaration.initializer.text !== '0' ||
     !fallbackOccurrenceNamespaceState ||
-    !(fallbackOccurrenceNamespaceState.declarationList.flags & ts.NodeFlags.Const) ||
+    !(fallbackOccurrenceNamespaceState.declarationList.flags & ts.NodeFlags.Let) ||
+    fallbackOccurrenceNamespaceState.declaration.initializer?.kind !== ts.SyntaxKind.NullKeyword ||
+    getFallbackOccurrenceNamespace.body.statements.length !== 2 ||
+    !fallbackNamespaceAssignment ||
+    !ts.isBinaryExpression(fallbackNamespaceAssignment) ||
+    fallbackNamespaceAssignment.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionEqualsToken ||
+    !sameSymbol(
+      unwrapExpression(fallbackNamespaceAssignment.left),
+      fallbackOccurrenceNamespaceState.declaration.name,
+      checker,
+    ) ||
     !fallbackNamespaceCall ||
     !fallbackNamespaceAccess ||
     fallbackNamespaceAccess.method !== 'randomUUID' ||
     !cryptoNamespaceBinding ||
     !sameSymbol(fallbackNamespaceAccess.receiver, cryptoNamespaceBinding, checker) ||
     fallbackNamespaceCall.arguments.length !== 0 ||
+    fallbackNamespaceWrites.length !== 1 ||
+    fallbackNamespaceWrites[0] !== fallbackNamespaceAssignment ||
+    !fallbackNamespaceReturn ||
+    !ts.isReturnStatement(fallbackNamespaceReturn) ||
+    !fallbackNamespaceReturn.expression ||
+    !sameSymbol(
+      unwrapExpression(fallbackNamespaceReturn.expression),
+      fallbackOccurrenceNamespaceState.declaration.name,
+      checker,
+    ) ||
+    fallbackNamespaceReferences.length !== 3 ||
+    fallbackNamespaceReferences.some(
+      (reference) =>
+        reference !== fallbackOccurrenceNamespaceState.declaration.name &&
+        !nodeIsInside(reference, getFallbackOccurrenceNamespace),
+    ) ||
+    fallbackNamespaceGetterCalls.length !== 1 ||
+    !fallbackNamespaceGetterCall ||
+    fallbackNamespaceGetterCall.arguments.length !== 0 ||
     !expoDigestBinding ||
     !expoDigestState ||
     !(expoDigestState.declarationList.flags & ts.NodeFlags.Const) ||
@@ -8524,7 +8924,10 @@ function incomingIngressCertifiedNodes({
     !ts.isObjectLiteralExpression(dispatcherOptions) ||
     dispatcherOptions.properties.length !== 4 ||
     normalizedSnippet(dispatcherOptions.properties[0], controlFile) !==
-      'makeTransportOccurrenceId: (source) => `${source}:${fallbackOccurrenceNamespace}:${++fallbackOccurrenceSequence}`' ||
+      'makeTransportOccurrenceId: (source) => `${source}:${getFallbackOccurrenceNamespace()}:${++fallbackOccurrenceSequence}`' ||
+    !nodeIsInside(fallbackNamespaceGetterCall, dispatcherOptions.properties[0]) ||
+    runtimeReferencesToBinding(controlFile, getFallbackOccurrenceNamespace.name, checker).length !==
+      2 ||
     fallbackSequenceWrites.length !== 1 ||
     !nodeIsInside(fallbackSequenceWrites[0], dispatcherOptions.properties[0]) ||
     normalizedSnippet(dispatcherOptions.properties[1], controlFile) !==
@@ -10741,24 +11144,43 @@ function incomingIngressCertifiedNodes({
     '@react-native-firebase/messaging',
     'onMessage',
   );
-  const getMessagingBinding = namedImportBinding(
+  const foregroundGetMessagingBinding = namedImportBinding(
     fcmFile,
     '@react-native-firebase/messaging',
     'getMessaging',
   );
+  const backgroundGetMessagingBinding = namedImportBinding(
+    fcmRegistrationFile,
+    '@react-native-firebase/messaging',
+    'getMessaging',
+  );
   const backgroundHandlerBinding = namedImportBinding(
-    fcmFile,
+    fcmRegistrationFile,
     '@react-native-firebase/messaging',
     'setBackgroundMessageHandler',
   );
+  const backgroundFcmBinding = namedImportBinding(
+    fcmRegistrationFile,
+    './fcmMessaging',
+    'handleBackgroundFcm',
+  );
+  const backgroundLoggerBinding = namedImportBinding(fcmRegistrationFile, '@core/secure', 'logger');
   const backgroundHandlerCalls = backgroundHandlerBinding
-    ? directCallsToBinding(fcmFile, backgroundHandlerBinding, checker)
+    ? directCallsToBinding(fcmRegistrationFile, backgroundHandlerBinding, checker)
     : [];
+  const backgroundHandlerReferences = backgroundHandlerBinding
+    ? runtimeReferencesToBindings(filesByPath.values(), [backgroundHandlerBinding], checker)?.get(
+        backgroundHandlerBinding,
+      )
+    : undefined;
   const onMessageCalls = onMessageBinding
     ? directCallsToBinding(fcmFile, onMessageBinding, checker)
     : [];
-  const getMessagingCalls = getMessagingBinding
-    ? directCallsToBinding(fcmFile, getMessagingBinding, checker)
+  const foregroundGetMessagingCalls = foregroundGetMessagingBinding
+    ? directCallsToBinding(fcmFile, foregroundGetMessagingBinding, checker)
+    : [];
+  const backgroundGetMessagingCalls = backgroundGetMessagingBinding
+    ? directCallsToBinding(fcmRegistrationFile, backgroundGetMessagingBinding, checker)
     : [];
   const foregroundMessagingDeclaration = ts.isTryStatement(startFcmTry)
     ? singleConstDeclaration(startFcmTry.tryBlock.statements[0], 'm')
@@ -10766,10 +11188,352 @@ function incomingIngressCertifiedNodes({
   const foregroundMessagingCall = foregroundMessagingDeclaration?.initializer
     ? callExpression(foregroundMessagingDeclaration.initializer)
     : undefined;
+  const tokenRegistration = topLevelFunction(filesByPath, fcmPath, 'registerFcmToken');
+  const tokenMessagingCall = foregroundGetMessagingCalls.find(
+    (call) => call !== foregroundMessagingCall,
+  );
+  const tokenLookupCall = tokenMessagingCall?.parent;
   const backgroundMessagingCall =
     ts.isCallExpression(backgroundRegistration) && backgroundRegistration.arguments[0]
       ? callExpression(backgroundRegistration.arguments[0])
       : undefined;
+  const staticGetMessagingReferences = backgroundGetMessagingBinding
+    ? runtimeReferencesToBindings(
+        filesByPath.values(),
+        [backgroundGetMessagingBinding],
+        checker,
+      )?.get(backgroundGetMessagingBinding)
+    : undefined;
+  const allowedStaticGetMessagingReferences = new Set(
+    [foregroundMessagingCall, tokenMessagingCall, backgroundMessagingCall]
+      .filter(Boolean)
+      .map((call) => unwrapExpression(call.expression)),
+  );
+  const firebaseRuntimeLoads = [];
+  const compilerOptions = program.getCompilerOptions();
+  const moduleResolutionCache = ts.createModuleResolutionCache(
+    root,
+    (fileName) => fileName,
+    compilerOptions,
+  );
+  const realPath = (path) => {
+    try {
+      return normalizePath(ts.sys.realpath?.(path) ?? path);
+    } catch {
+      return normalizePath(path);
+    }
+  };
+  const firebasePackageRoots = new Map(
+    [
+      ['app', '@react-native-firebase/app'],
+      ['messaging', '@react-native-firebase/messaging'],
+    ].map(([packageKind, packageName]) => {
+      const lexicalRoot = resolve(root, 'node_modules', packageName);
+      return [packageKind, new Set([normalizePath(lexicalRoot), realPath(lexicalRoot)])];
+    }),
+  );
+  const firebasePackageForResolvedPath = (path) => {
+    const normalized = normalizePath(path);
+    if (normalized.includes('/node_modules/@react-native-firebase/app/')) return 'app';
+    if (normalized.includes('/node_modules/@react-native-firebase/messaging/')) {
+      return 'messaging';
+    }
+    const resolvedRealPath = realPath(path);
+    for (const [packageKind, packageRoots] of firebasePackageRoots) {
+      if (
+        [...packageRoots].some(
+          (packageRoot) =>
+            resolvedRealPath === packageRoot || resolvedRealPath.startsWith(`${packageRoot}/`),
+        )
+      ) {
+        return packageKind;
+      }
+    }
+    return undefined;
+  };
+  const firebasePackageForSpecifier = (importerPath, specifier, specifierNode) => {
+    const moduleSymbol = specifierNode
+      ? unaliasSymbol(checker.getSymbolAtLocation(specifierNode), checker)
+      : undefined;
+    for (const declaration of moduleSymbol?.declarations ?? []) {
+      const resolvedPackage = firebasePackageForResolvedPath(declaration.getSourceFile().fileName);
+      if (resolvedPackage) return resolvedPackage;
+    }
+    const resolvedModule = ts.resolveModuleName(
+      specifier,
+      filesByPath.get(importerPath)?.fileName ?? resolve(root, importerPath),
+      compilerOptions,
+      ts.sys,
+      moduleResolutionCache,
+    ).resolvedModule;
+    if (resolvedModule) {
+      if (resolvedModule.packageId?.name === '@react-native-firebase/app') return 'app';
+      if (resolvedModule.packageId?.name === '@react-native-firebase/messaging') {
+        return 'messaging';
+      }
+      const resolvedPackage = firebasePackageForResolvedPath(resolvedModule.resolvedFileName);
+      if (resolvedPackage) return resolvedPackage;
+    }
+    const canonical = specifier.startsWith('.')
+      ? normalizePath(resolve('/', dirname(importerPath), specifier)).slice(1)
+      : normalizePath(specifier);
+    const matches = (packageName) =>
+      canonical === packageName ||
+      canonical.startsWith(`${packageName}/`) ||
+      canonical === `node_modules/${packageName}` ||
+      canonical.startsWith(`node_modules/${packageName}/`) ||
+      canonical.includes(`/node_modules/${packageName}/`);
+    if (matches('@react-native-firebase/app')) return 'app';
+    if (matches('@react-native-firebase/messaging')) return 'messaging';
+    return undefined;
+  };
+  let hasUnexpectedFirebaseRuntimeLoad = false;
+  for (const [importerPath, file] of filesByPath) {
+    function visit(node) {
+      if (ts.isCallExpression(node)) {
+        const loader = unwrapExpression(node.expression);
+        const argument = node.arguments[0] ? unwrapExpression(node.arguments[0]) : undefined;
+        if (loader.kind === ts.SyntaxKind.ImportKeyword || identifierNamed(loader, 'require')) {
+          if (!argument || !ts.isStringLiteralLike(argument)) {
+            hasUnexpectedFirebaseRuntimeLoad = true;
+            return;
+          }
+          const firebasePackage = firebasePackageForSpecifier(
+            importerPath,
+            argument.text,
+            argument,
+          );
+          if (
+            firebasePackage === 'messaging' &&
+            argument.text === '@react-native-firebase/messaging'
+          ) {
+            firebaseRuntimeLoads.push(node);
+          } else if (firebasePackage === 'messaging') {
+            hasUnexpectedFirebaseRuntimeLoad = true;
+          }
+          if (firebasePackage === 'app') {
+            hasUnexpectedFirebaseRuntimeLoad = true;
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(file);
+  }
+  const firebaseRuntimeLoad = firebaseRuntimeLoads[0];
+  const firebaseRuntimeLoadDeclaration = (() => {
+    for (let current = firebaseRuntimeLoad; current; current = current.parent) {
+      if (ts.isVariableStatement(current)) return current;
+      if (ts.isFunctionLike(current)) return undefined;
+    }
+    return undefined;
+  })();
+  const firebaseRuntimeLoadBlock = firebaseRuntimeLoadDeclaration?.parent;
+  const messagingInstanceType = backgroundMessagingCall
+    ? checker.getApparentType(checker.getTypeAtLocation(backgroundMessagingCall))
+    : undefined;
+  const instanceBackgroundHandlerSymbol = messagingInstanceType
+    ? checker.getPropertyOfType(messagingInstanceType, 'setBackgroundMessageHandler')
+    : undefined;
+  const modularBackgroundHandlerSymbol = backgroundHandlerBinding
+    ? unaliasSymbol(checker.getSymbolAtLocation(backgroundHandlerBinding), checker)
+    : undefined;
+  const staticSetterPropertyName = (name) => {
+    if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+    if (ts.isComputedPropertyName(name)) {
+      const expression = unwrapExpression(name.expression);
+      return ts.isStringLiteralLike(expression) ? expression.text : undefined;
+    }
+    return undefined;
+  };
+  const receiverExposesProtectedSetter = (expression) => {
+    const receiverType = checker.getApparentType(
+      checker.getTypeAtLocation(unwrapExpression(expression)),
+    );
+    const resolvedSetter = checker.getPropertyOfType(receiverType, 'setBackgroundMessageHandler');
+    return Boolean(
+      resolvedSetter &&
+      ((instanceBackgroundHandlerSymbol &&
+        symbolsMatch(resolvedSetter, instanceBackgroundHandlerSymbol, checker)) ||
+        (modularBackgroundHandlerSymbol &&
+          symbolsMatch(resolvedSetter, modularBackgroundHandlerSymbol, checker))),
+    );
+  };
+  const backgroundHandlerNameNodes = [];
+  let hasDynamicBackgroundHandlerSurface = false;
+  let hasUnreviewedInstanceBackgroundHandlerAccess = false;
+  for (const file of filesByPath.values()) {
+    function visit(node) {
+      if (hasUnreviewedInstanceBackgroundHandlerAccess) return;
+      if (
+        (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) &&
+        node.text === 'setBackgroundMessageHandler'
+      ) {
+        backgroundHandlerNameNodes.push(node);
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isElementAccessExpression(unwrapExpression(node.expression))
+      ) {
+        const access = unwrapExpression(node.expression);
+        const property = access.argumentExpression
+          ? unwrapExpression(access.argumentExpression)
+          : undefined;
+        if (!property || !ts.isStringLiteralLike(property)) {
+          hasDynamicBackgroundHandlerSurface = true;
+        }
+      }
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isObjectBindingPattern(node.name) &&
+        node.initializer
+      ) {
+        const receiverExposesSetter = receiverExposesProtectedSetter(node.initializer);
+        if (
+          node.name.elements.some((element) => {
+            const property = element.propertyName ?? element.name;
+            const staticName = staticSetterPropertyName(property);
+            return (
+              staticName === 'setBackgroundMessageHandler' ||
+              ((element.dotDotDotToken || staticName === undefined) && receiverExposesSetter)
+            );
+          })
+        ) {
+          hasUnreviewedInstanceBackgroundHandlerAccess = true;
+          return;
+        }
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isObjectLiteralExpression(unwrapExpression(node.left))
+      ) {
+        const receiverExposesSetter = receiverExposesProtectedSetter(node.right);
+        const pattern = unwrapExpression(node.left);
+        if (
+          pattern.properties.some((property) => {
+            if (ts.isSpreadAssignment(property)) return receiverExposesSetter;
+            const staticName = staticSetterPropertyName(property.name);
+            return (
+              staticName === 'setBackgroundMessageHandler' ||
+              (staticName === undefined && receiverExposesSetter)
+            );
+          })
+        ) {
+          hasUnreviewedInstanceBackgroundHandlerAccess = true;
+          return;
+        }
+      }
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+        const staticName = ts.isPropertyAccessExpression(node)
+          ? node.name.text
+          : node.argumentExpression && ts.isStringLiteralLike(node.argumentExpression)
+            ? node.argumentExpression.text
+            : undefined;
+        if (
+          staticName === 'setBackgroundMessageHandler' ||
+          (staticName === undefined &&
+            (receiverExposesProtectedSetter(node.expression) ||
+              (ts.isElementAccessExpression(node) &&
+                checker.getApparentType(checker.getTypeAtLocation(node)).getCallSignatures()
+                  .length > 0)))
+        ) {
+          hasUnreviewedInstanceBackgroundHandlerAccess = true;
+          return;
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(file);
+    if (hasUnreviewedInstanceBackgroundHandlerAccess) break;
+  }
+  const approvedMessagingImports = new Map([
+    [fcmPath, new Set(['getMessaging', 'getToken', 'onMessage', 'onTokenRefresh'])],
+    [fcmRegistrationPath, new Set(['getMessaging', 'setBackgroundMessageHandler'])],
+  ]);
+  const hasUnexpectedMessagingImport = [...filesByPath].some(([path, file]) =>
+    file.statements.some((statement) => {
+      const moduleSpecifier =
+        (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) &&
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier)
+          ? statement.moduleSpecifier.text
+          : ts.isImportEqualsDeclaration(statement) &&
+              ts.isExternalModuleReference(statement.moduleReference) &&
+              statement.moduleReference.expression &&
+              ts.isStringLiteralLike(statement.moduleReference.expression)
+            ? statement.moduleReference.expression.text
+            : undefined;
+      const moduleSpecifierNode =
+        (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) &&
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier)
+          ? statement.moduleSpecifier
+          : ts.isImportEqualsDeclaration(statement) &&
+              ts.isExternalModuleReference(statement.moduleReference) &&
+              statement.moduleReference.expression &&
+              ts.isStringLiteralLike(statement.moduleReference.expression)
+            ? statement.moduleReference.expression
+            : undefined;
+      const isTypeOnly =
+        (ts.isImportDeclaration(statement) && Boolean(statement.importClause?.isTypeOnly)) ||
+        ((ts.isExportDeclaration(statement) || ts.isImportEqualsDeclaration(statement)) &&
+          statement.isTypeOnly);
+      const firebasePackage = moduleSpecifier
+        ? firebasePackageForSpecifier(path, moduleSpecifier, moduleSpecifierNode)
+        : undefined;
+      if (firebasePackage === 'app' && !isTypeOnly) return true;
+      if (
+        firebasePackage === 'messaging' &&
+        moduleSpecifier !== '@react-native-firebase/messaging' &&
+        !isTypeOnly
+      ) {
+        return true;
+      }
+      if (
+        ts.isExportDeclaration(statement) &&
+        !statement.isTypeOnly &&
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === '@react-native-firebase/messaging'
+      ) {
+        return true;
+      }
+      if (
+        ts.isImportEqualsDeclaration(statement) &&
+        !statement.isTypeOnly &&
+        ts.isExternalModuleReference(statement.moduleReference) &&
+        statement.moduleReference.expression &&
+        ts.isStringLiteralLike(statement.moduleReference.expression) &&
+        statement.moduleReference.expression.text === '@react-native-firebase/messaging'
+      ) {
+        return true;
+      }
+      if (
+        !ts.isImportDeclaration(statement) ||
+        !ts.isStringLiteral(statement.moduleSpecifier) ||
+        statement.moduleSpecifier.text !== '@react-native-firebase/messaging' ||
+        statement.importClause?.isTypeOnly
+      ) {
+        return false;
+      }
+      const expected = approvedMessagingImports.get(path);
+      const clause = statement.importClause;
+      if (
+        !expected ||
+        !clause ||
+        clause.name ||
+        !clause.namedBindings ||
+        !ts.isNamedImports(clause.namedBindings)
+      ) {
+        return true;
+      }
+      const imported = clause.namedBindings.elements
+        .filter((element) => !element.isTypeOnly)
+        .map((element) => element.propertyName?.text ?? element.name.text);
+      return imported.length !== expected.size || imported.some((name) => !expected.has(name));
+    }),
+  );
   if (
     handleBackgroundFcm.body.statements.length !== 1 ||
     !ts.isTryStatement(backgroundTry) ||
@@ -10793,10 +11557,37 @@ function incomingIngressCertifiedNodes({
     !ts.isCallExpression(foregroundRegistration) ||
     !foregroundMessagingDeclaration ||
     !foregroundMessagingCall ||
-    !getMessagingBinding ||
+    !tokenRegistration?.body ||
+    foregroundGetMessagingCalls.length !== 2 ||
+    !tokenMessagingCall ||
+    !ts.isCallExpression(tokenLookupCall) ||
+    normalizedSnippet(tokenLookupCall, fcmFile) !== 'getToken(getMessaging())' ||
+    !nodeIsInside(tokenMessagingCall, tokenRegistration) ||
+    !staticGetMessagingReferences ||
+    staticGetMessagingReferences.length !== 3 ||
+    allowedStaticGetMessagingReferences.size !== 3 ||
+    staticGetMessagingReferences.some(
+      (reference) => !allowedStaticGetMessagingReferences.has(reference),
+    ) ||
+    firebaseRuntimeLoads.length !== 1 ||
+    hasUnexpectedFirebaseRuntimeLoad ||
+    !firebaseRuntimeLoadDeclaration ||
+    normalizedSnippet(
+      firebaseRuntimeLoadDeclaration,
+      firebaseRuntimeLoadDeclaration.getSourceFile(),
+    ) !==
+      "const { deleteToken, getMessaging } = await import('@react-native-firebase/messaging');" ||
+    !ts.isBlock(firebaseRuntimeLoadBlock) ||
+    firebaseRuntimeLoadBlock.statements.length !== 2 ||
+    firebaseRuntimeLoadBlock.statements[0] !== firebaseRuntimeLoadDeclaration ||
+    normalizedSnippet(
+      firebaseRuntimeLoadBlock.statements[1],
+      firebaseRuntimeLoadBlock.getSourceFile(),
+    ) !== 'await deleteToken(getMessaging());' ||
+    !foregroundGetMessagingBinding ||
     !sameSymbol(
       unwrapExpression(foregroundMessagingCall.expression),
-      getMessagingBinding,
+      foregroundGetMessagingBinding,
       checker,
     ) ||
     foregroundMessagingCall.arguments.length !== 0 ||
@@ -10812,37 +11603,67 @@ function incomingIngressCertifiedNodes({
     foregroundStatement !== startFcmTry.tryBlock.statements[1] ||
     !snippetIs(foregroundRegistration.arguments[0], 'm') ||
     !backgroundReference ||
+    !instanceBackgroundHandlerSymbol ||
+    !modularBackgroundHandlerSymbol ||
+    backgroundHandlerNameNodes.length !== 2 ||
+    !backgroundHandlerNameNodes.includes(backgroundHandlerBinding) ||
+    !backgroundHandlerNameNodes.includes(unwrapExpression(backgroundRegistration.expression)) ||
+    hasDynamicBackgroundHandlerSurface ||
+    hasUnreviewedInstanceBackgroundHandlerAccess ||
+    hasUnexpectedMessagingImport ||
+    fcmRegistrationFile.statements.length !== 4 ||
+    !fcmRegistrationFile.statements.slice(0, 3).every(ts.isImportDeclaration) ||
     !ts.isCallExpression(backgroundRegistration) ||
+    backgroundRegistration.arguments.length !== 2 ||
     !backgroundMessagingCall ||
+    backgroundReference.file !== fcmRegistrationFile ||
+    !backgroundFcmBinding ||
+    !sameSymbol(backgroundReference.node, backgroundFcmBinding, checker) ||
+    backgroundRegistration.arguments[1] !== backgroundReference.node ||
+    runtimeReferencesToBinding(fcmRegistrationFile, backgroundFcmBinding, checker).length !== 1 ||
+    !backgroundGetMessagingBinding ||
     !sameSymbol(
       unwrapExpression(backgroundMessagingCall.expression),
-      getMessagingBinding,
+      backgroundGetMessagingBinding,
       checker,
     ) ||
     backgroundMessagingCall.arguments.length !== 0 ||
     !backgroundHandlerBinding ||
     backgroundHandlerCalls.length !== 1 ||
     backgroundHandlerCalls[0] !== backgroundRegistration ||
-    !getMessagingCalls.includes(foregroundMessagingCall) ||
-    !getMessagingCalls.includes(backgroundMessagingCall) ||
+    !backgroundHandlerReferences ||
+    backgroundHandlerReferences.length !== 1 ||
+    !backgroundHandlerReferences.includes(unwrapExpression(backgroundRegistration.expression)) ||
+    !foregroundGetMessagingCalls.includes(foregroundMessagingCall) ||
+    backgroundGetMessagingCalls.length !== 1 ||
+    backgroundGetMessagingCalls[0] !== backgroundMessagingCall ||
     !sameSymbol(
       unwrapExpression(backgroundRegistration.expression),
       backgroundHandlerBinding,
       checker,
     ) ||
-    normalizedSnippet(backgroundRegistration, fcmFile) !==
+    normalizedSnippet(backgroundRegistration, fcmRegistrationFile) !==
       'setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm)' ||
     !ts.isExpressionStatement(backgroundStatement) ||
     !ts.isBlock(backgroundTryBlock) ||
     backgroundTryBlock.statements.length !== 1 ||
     !ts.isTryStatement(backgroundTopLevelTry) ||
     backgroundTopLevelTry.tryBlock !== backgroundTryBlock ||
-    backgroundTopLevelTry.parent !== fcmFile ||
+    backgroundTopLevelTry.parent !== fcmRegistrationFile ||
+    backgroundTopLevelTry !== fcmRegistrationFile.statements[3] ||
     !backgroundTopLevelTry.catchClause ||
     backgroundTopLevelTry.finallyBlock ||
+    !backgroundTopLevelTry.catchClause.variableDeclaration ||
+    !ts.isIdentifier(backgroundTopLevelTry.catchClause.variableDeclaration.name) ||
+    backgroundTopLevelTry.catchClause.variableDeclaration.name.text !== 'error' ||
     backgroundTopLevelTry.catchClause.block.statements.length !== 1 ||
-    normalizedSnippet(backgroundTopLevelTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn('[fcm] setBackgroundMessageHandler unavailable — push disabled', e);" ||
+    !backgroundLoggerBinding ||
+    runtimeReferencesToBinding(fcmRegistrationFile, backgroundLoggerBinding, checker).length !==
+      1 ||
+    normalizedSnippet(
+      backgroundTopLevelTry.catchClause.block.statements[0],
+      fcmRegistrationFile,
+    ) !== "logger.warn('[fcm] setBackgroundMessageHandler unavailable — push disabled', error);" ||
     !ts.isTryStatement(startFcmTry) ||
     !startFcmTry.catchClause ||
     startFcmTry.finallyBlock ||
@@ -11193,6 +12014,7 @@ function foregroundBootLifecycleDelegationNodes({
   referenceEdges,
   dynamicCallbacks,
   dynamicDispatches,
+  foregroundBootComposition,
   mutators,
   findings,
   findingCallables,
@@ -11203,10 +12025,26 @@ function foregroundBootLifecycleDelegationNodes({
   const empty = () => ({ coordinated: new Set(), temporal: new Set() });
   const rootPath = 'app/_layout.tsx';
   const foregroundPath = 'src/services/boot/foregroundBoot.ts';
+  const syncedBackgroundPath = 'src/services/backgrounds/syncedBackground.ts';
   const rootFile = filesByPath.get(rootPath);
   const foregroundFile = filesByPath.get(foregroundPath);
   const startProcessWork = topLevelFunction(filesByPath, foregroundPath, 'startProcessWork');
+  const initializeForegroundBootComposition = topLevelFunction(
+    filesByPath,
+    foregroundPath,
+    'initializeForegroundBootComposition',
+  );
   const startForegroundBoot = topLevelFunction(filesByPath, foregroundPath, 'startForegroundBoot');
+  const subscribeForegroundBoot = topLevelFunction(
+    filesByPath,
+    foregroundPath,
+    'subscribeForegroundBoot',
+  );
+  const startSyncedBackgroundCacheMaintenance = topLevelFunction(
+    filesByPath,
+    syncedBackgroundPath,
+    'startSyncedBackgroundCacheMaintenance',
+  );
   const replayProcessIssues = topLevelFunction(filesByPath, foregroundPath, 'replayProcessIssues');
   const runDbDriverSelfTest = driverSelfTestCandidate?.selfTest;
   const rootLayout = topLevelFunction(filesByPath, rootPath, 'RootLayout');
@@ -11217,8 +12055,13 @@ function foregroundBootLifecycleDelegationNodes({
   if (
     !rootFile ||
     !foregroundFile ||
+    foregroundBootComposition?.initializeForegroundBootComposition !==
+      initializeForegroundBootComposition ||
     !startProcessWork?.body ||
+    !initializeForegroundBootComposition?.body ||
     !startForegroundBoot?.body ||
+    !subscribeForegroundBoot?.body ||
+    !startSyncedBackgroundCacheMaintenance?.body ||
     !replayProcessIssues?.body ||
     !runDbDriverSelfTest?.body ||
     !processRelaunchCandidate?.startContract?.body ||
@@ -11245,11 +12088,11 @@ function foregroundBootLifecycleDelegationNodes({
       'coordinated',
     ],
     [
-      'src/services/boot/foregroundBoot.ts|<callback:3745c8b485>|mutator-call|src/services/boot/foregroundBoot.ts#startForegroundBoot',
+      'src/services/boot/foregroundBoot.ts|initializeForegroundBootComposition.<callback:3745c8b485>|mutator-call|src/services/boot/foregroundBoot.ts#startForegroundBoot',
       'coordinated',
     ],
     [
-      'src/services/boot/foregroundBoot.ts|<callback:58f904a832>|mutator-call|src/services/boot/foregroundBoot.ts#startForegroundBoot',
+      'src/services/boot/foregroundBoot.ts|initializeForegroundBootComposition.<callback:58f904a832>|mutator-call|src/services/boot/foregroundBoot.ts#startForegroundBoot',
       'coordinated',
     ],
     [
@@ -11341,6 +12184,80 @@ function foregroundBootLifecycleDelegationNodes({
     return empty();
   }
 
+  const {
+    compositionStatements,
+    compositionStartEdges,
+    compositionSubscribeEdges,
+    installers: compositionInstallers,
+  } = foregroundBootComposition;
+  const restarterInstaller = compositionInstallers.find(
+    (installer) => installer.name === 'installForegroundBootRestarter',
+  );
+  const restarterBinding = restarterInstaller?.binding;
+  const restarterCall = restarterInstaller?.call;
+  const compositionRegistration =
+    compositionStatements[2] && ts.isExpressionStatement(compositionStatements[2])
+      ? callExpression(compositionStatements[2].expression)
+      : undefined;
+  const compositionRegistrationAccess = compositionRegistration
+    ? callAccess(compositionRegistration.expression)
+    : undefined;
+  const subscribeCompositionStatement = subscribeForegroundBoot.body.statements[0];
+  const subscribeCompositionCall = ts.isExpressionStatement(subscribeCompositionStatement)
+    ? callableCall(
+        subscribeCompositionStatement.expression,
+        initializeForegroundBootComposition,
+        checker,
+      )
+    : undefined;
+  const subscribeReturn = subscribeForegroundBoot.body.statements[1];
+  const subscribeRegistration =
+    subscribeReturn && ts.isReturnStatement(subscribeReturn) && subscribeReturn.expression
+      ? callExpression(subscribeReturn.expression)
+      : undefined;
+  const subscribeRegistrationAccess = subscribeRegistration
+    ? callAccess(subscribeRegistration.expression)
+    : undefined;
+  const subscribeListener = subscribeRegistration?.arguments[0]
+    ? unwrapExpression(subscribeRegistration.arguments[0])
+    : undefined;
+  const subscribeListenerCall =
+    subscribeListener &&
+    (ts.isArrowFunction(subscribeListener) || ts.isFunctionExpression(subscribeListener))
+      ? callExpression(subscribeListener.body)
+      : undefined;
+  if (
+    !restarterInstaller ||
+    !compositionRegistration ||
+    compositionRegistration.arguments.length !== 1 ||
+    compositionRegistration.arguments[0] !== supersededCallback ||
+    !compositionRegistrationAccess ||
+    compositionRegistrationAccess.method !== 'subscribe' ||
+    !sameSymbol(compositionRegistrationAccess.receiver, coordinator.declaration.name, checker) ||
+    !hasExactIdentifierParameters(subscribeForegroundBoot, [{ name: 'listener' }]) ||
+    subscribeForegroundBoot.body.statements.length !== 2 ||
+    !subscribeCompositionCall ||
+    subscribeCompositionCall !== compositionSubscribeEdges[0]?.node ||
+    subscribeCompositionCall.arguments.length !== 0 ||
+    !subscribeRegistration ||
+    subscribeRegistration.arguments.length !== 1 ||
+    !subscribeRegistrationAccess ||
+    subscribeRegistrationAccess.method !== 'subscribe' ||
+    !sameSymbol(subscribeRegistrationAccess.receiver, coordinator.declaration.name, checker) ||
+    !subscribeListener ||
+    !(ts.isArrowFunction(subscribeListener) || ts.isFunctionExpression(subscribeListener)) ||
+    !hasExactIdentifierParameters(subscribeListener, []) ||
+    !subscribeListenerCall ||
+    subscribeListenerCall.arguments.length !== 0 ||
+    !sameSymbol(
+      unwrapExpression(subscribeListenerCall.expression),
+      subscribeForegroundBoot.parameters[0].name,
+      checker,
+    )
+  ) {
+    return empty();
+  }
+
   const processStatements = startProcessWork.body.statements;
   const processGuard = processStatements[0];
   const processClaimStatement = processStatements[1];
@@ -11352,6 +12269,7 @@ function foregroundBootLifecycleDelegationNodes({
     !(processWorkStarted.declarationList.flags & ts.NodeFlags.Let) ||
     processWorkStarted.declaration.initializer.kind !== ts.SyntaxKind.FalseKeyword ||
     !hasExactIdentifierParameters(startProcessWork, []) ||
+    processStatements.length !== 10 ||
     !processGuard ||
     !ts.isIfStatement(processGuard) ||
     !sameSymbol(
@@ -11373,6 +12291,81 @@ function foregroundBootLifecycleDelegationNodes({
     assignmentWritesTo(foregroundFile, processWorkStarted.declaration.name, checker).length !== 1 ||
     assignmentWritesTo(foregroundFile, processWorkStarted.declaration.name, checker)[0] !==
       processClaim
+  ) {
+    return empty();
+  }
+
+  const maintenanceBinding = namedImportBinding(
+    foregroundFile,
+    '../backgrounds/syncedBackground',
+    'startSyncedBackgroundCacheMaintenance',
+  );
+  const maintenanceCalls = maintenanceBinding
+    ? directCallsToBinding(foregroundFile, maintenanceBinding, checker)
+    : [];
+  const maintenanceCall = maintenanceCalls[0];
+  const maintenanceEdges = exactCallEdges(
+    edges,
+    startProcessWork,
+    startSyncedBackgroundCacheMaintenance,
+  );
+  const maintenanceCatchAccess = maintenanceCall?.parent
+    ? callAccess(maintenanceCall.parent)
+    : undefined;
+  const maintenanceCatchCall = maintenanceCall?.parent?.parent
+    ? callExpression(maintenanceCall.parent.parent)
+    : undefined;
+  const maintenanceVoid =
+    maintenanceCatchCall && ts.isVoidExpression(maintenanceCatchCall.parent)
+      ? maintenanceCatchCall.parent
+      : undefined;
+  const maintenanceStatement =
+    maintenanceVoid && ts.isExpressionStatement(maintenanceVoid.parent)
+      ? maintenanceVoid.parent
+      : undefined;
+  const maintenanceFailureCallback = maintenanceCatchCall
+    ? oneInlineCallback(maintenanceCatchCall, 0, 'error')
+    : undefined;
+  const maintenanceFailureCall = maintenanceFailureCallback
+    ? callExpression(maintenanceFailureCallback.body)
+    : undefined;
+  const maintenanceFailureAccess = maintenanceFailureCall
+    ? callAccess(maintenanceFailureCall.expression)
+    : undefined;
+  const loggerBinding = namedImportBinding(foregroundFile, '@core/secure', 'logger');
+  if (
+    !maintenanceBinding ||
+    maintenanceCalls.length !== 1 ||
+    runtimeReferencesToBinding(foregroundFile, maintenanceBinding, checker).length !== 1 ||
+    maintenanceEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === startSyncedBackgroundCacheMaintenance).length !== 1 ||
+    !maintenanceCall ||
+    maintenanceCall !== maintenanceEdges[0]?.node ||
+    maintenanceCall.arguments.length !== 0 ||
+    !maintenanceCatchAccess ||
+    maintenanceCatchAccess.method !== 'catch' ||
+    maintenanceCatchAccess.receiver !== maintenanceCall ||
+    !maintenanceCatchCall ||
+    maintenanceCatchCall.arguments.length !== 1 ||
+    !maintenanceVoid ||
+    maintenanceVoid.expression !== maintenanceCatchCall ||
+    !maintenanceStatement ||
+    maintenanceStatement !== processStatements[6] ||
+    !maintenanceFailureCallback ||
+    !maintenanceFailureCall ||
+    maintenanceFailureCall.arguments.length !== 2 ||
+    !maintenanceFailureAccess ||
+    maintenanceFailureAccess.method !== 'warn' ||
+    !loggerBinding ||
+    !sameSymbol(maintenanceFailureAccess.receiver, loggerBinding, checker) ||
+    !ts.isStringLiteralLike(maintenanceFailureCall.arguments[0]) ||
+    maintenanceFailureCall.arguments[0].text !==
+      '[boot] synced-background cache maintenance failed' ||
+    !sameSymbol(
+      unwrapExpression(maintenanceFailureCall.arguments[1]),
+      maintenanceFailureCallback.parameters[0].name,
+      checker,
+    )
   ) {
     return empty();
   }
@@ -11473,7 +12466,15 @@ function foregroundBootLifecycleDelegationNodes({
   }
 
   const bootStatements = startForegroundBoot.body.statements;
-  const relaunchIf = bootStatements[0];
+  const bootCompositionStatement = bootStatements[0];
+  const bootCompositionCall = ts.isExpressionStatement(bootCompositionStatement)
+    ? callableCall(
+        bootCompositionStatement.expression,
+        initializeForegroundBootComposition,
+        checker,
+      )
+    : undefined;
+  const relaunchIf = bootStatements[1];
   const relaunchBlock =
     relaunchIf && ts.isIfStatement(relaunchIf) && ts.isBlock(relaunchIf.thenStatement)
       ? relaunchIf.thenStatement
@@ -11490,7 +12491,7 @@ function foregroundBootLifecycleDelegationNodes({
     './devDbRelaunchContract',
     'startDevDbRelaunchContractIfRequested',
   );
-  const runDeclaration = singleConstDeclaration(bootStatements[1], 'run');
+  const runDeclaration = singleConstDeclaration(bootStatements[2], 'run');
   const coordinatorStart = runDeclaration?.initializer
     ? callExpression(runDeclaration.initializer)
     : undefined;
@@ -11498,13 +12499,16 @@ function foregroundBootLifecycleDelegationNodes({
     ? callAccess(coordinatorStart.expression)
     : undefined;
   const replayCall =
-    bootStatements[3] && ts.isExpressionStatement(bootStatements[3])
-      ? callableCall(bootStatements[3].expression, replayProcessIssues, checker)
+    bootStatements[4] && ts.isExpressionStatement(bootStatements[4])
+      ? callableCall(bootStatements[4].expression, replayProcessIssues, checker)
       : undefined;
-  const runReturn = bootStatements[4];
+  const runReturn = bootStatements[5];
   if (
     !hasExactIdentifierParameters(startForegroundBoot, []) ||
-    bootStatements.length !== 5 ||
+    bootStatements.length !== 6 ||
+    !bootCompositionCall ||
+    bootCompositionCall !== compositionStartEdges[0]?.node ||
+    bootCompositionCall.arguments.length !== 0 ||
     !relaunchIf ||
     !ts.isIfStatement(relaunchIf) ||
     normalizedSnippet(relaunchIf.expression, foregroundFile) !==
@@ -11529,8 +12533,8 @@ function foregroundBootLifecycleDelegationNodes({
     !coordinatorStartAccess ||
     coordinatorStartAccess.method !== 'start' ||
     !sameSymbol(coordinatorStartAccess.receiver, coordinator.declaration.name, checker) ||
-    !ts.isExpressionStatement(bootStatements[2]) ||
-    callExpression(bootStatements[2].expression) !== processWorkEdge.node ||
+    !ts.isExpressionStatement(bootStatements[3]) ||
+    callExpression(bootStatements[3].expression) !== processWorkEdge.node ||
     processWorkEdge.node.arguments.length !== 0 ||
     !replayCall ||
     replayCall.arguments.length !== 0 ||
@@ -11549,11 +12553,6 @@ function foregroundBootLifecycleDelegationNodes({
     ? callAccess(supersededRegistration.expression)
     : undefined;
   const supersededIf = supersededCallback.body.statements[0];
-  const installedRestarterBinding = namedImportBinding(
-    foregroundFile,
-    './foregroundBootInvalidation',
-    'installForegroundBootRestarter',
-  );
   const installedRegistration = ts.isCallExpression(installedRestartCallback.parent)
     ? installedRestartCallback.parent
     : undefined;
@@ -11570,6 +12569,8 @@ function foregroundBootLifecycleDelegationNodes({
     supersededRestartEdge.node.parent.parent !== supersededIf.thenStatement.statements[1] ||
     supersededRestartEdge.node.arguments.length !== 0 ||
     !supersededRegistration ||
+    supersededRegistration !== compositionRegistration ||
+    supersededRegistration.parent !== compositionStatements[2] ||
     supersededRegistration.arguments.length !== 1 ||
     supersededRegistration.arguments[0] !== supersededCallback ||
     !supersededRegistrationAccess ||
@@ -11580,15 +12581,13 @@ function foregroundBootLifecycleDelegationNodes({
     !ts.isVoidExpression(installedRestartEdge.node.parent) ||
     installedRestartEdge.node.parent.parent !== installedRestartCallback.body.statements[0] ||
     installedRestartEdge.node.arguments.length !== 0 ||
-    !installedRestarterBinding ||
+    !restarterBinding ||
     !installedRegistration ||
+    installedRegistration !== restarterCall ||
+    installedRegistration.parent !== compositionStatements[4] ||
     installedRegistration.arguments.length !== 1 ||
     installedRegistration.arguments[0] !== installedRestartCallback ||
-    !sameSymbol(
-      unwrapExpression(installedRegistration.expression),
-      installedRestarterBinding,
-      checker,
-    )
+    !sameSymbol(unwrapExpression(installedRegistration.expression), restarterBinding, checker)
   ) {
     return empty();
   }
@@ -11629,7 +12628,7 @@ function foregroundBootLifecycleDelegationNodes({
   const rootEffectRegistration = ts.isCallExpression(rootEffectCallback.parent)
     ? rootEffectCallback.parent
     : undefined;
-  const completeUnlockBinding = namedImportBinding(rootFile, '@/services', 'completeUnlock');
+  const completeUnlockBinding = namedImportBinding(rootFile, '@/services/lock', 'completeUnlock');
   const foregroundLockGateBinding = namedImportBinding(
     rootFile,
     '@features/lock/ForegroundLockGate',
@@ -11677,7 +12676,9 @@ function foregroundBootLifecycleDelegationNodes({
   const protectedOwners = new Set([
     ...driverSelfTestCandidate.protectedOwners,
     startProcessWork,
+    initializeForegroundBootComposition,
     startForegroundBoot,
+    subscribeForegroundBoot,
     startOwnedRun,
     appStateCallback,
     supersededCallback,
@@ -11733,7 +12734,7 @@ function foregroundBootLifecycleDelegationNodes({
  * as unresolved for review.
  */
 function errorReportLifecycleDelegationNodes({ root, edges }) {
-  const appStateOwner = 'ConnectedAppLayout.<callback:7e6190c78f>.<callback:d4acdc9f71>';
+  const appStateOwner = 'ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>';
   const appStateTarget = 'src/services/errors/index.ts#flushErrorReports';
   const appStateKey = `app/(app)/_layout.tsx|${appStateOwner}|${appStateTarget}`;
   const expectations = new Map([
@@ -12763,6 +13764,13 @@ function scanMutatorCallSites({ root, files, findings }) {
         : finding;
   });
 
+  const foregroundBootComposition = foregroundBootCompositionCandidate(
+    root,
+    filesByPath,
+    checker,
+    edges,
+    dynamicDispatches,
+  );
   const foregroundBootLifecycleNodes = foregroundBootLifecycleDelegationNodes({
     root,
     filesByPath,
@@ -12771,6 +13779,7 @@ function scanMutatorCallSites({ root, files, findings }) {
     referenceEdges,
     dynamicCallbacks,
     dynamicDispatches,
+    foregroundBootComposition,
     mutators,
     findings: contextualFindings,
     findingCallables,
@@ -12850,12 +13859,14 @@ function scanMutatorCallSites({ root, files, findings }) {
   );
   const incomingIngressNodes = incomingIngressCertifiedNodes({
     root,
+    program,
     filesByPath,
     checker,
     edges,
     referenceEdges,
     dynamicCallbacks,
     dynamicDispatches,
+    foregroundBootComposition,
     mutators,
     findings: contextualFindings,
     findingCallables,

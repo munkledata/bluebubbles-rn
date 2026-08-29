@@ -103,6 +103,8 @@ import { createNewChat } from '@/services';
 // eslint-disable-next-line import/first
 import { sendImages } from '@/services/send';
 // eslint-disable-next-line import/first
+import { presentSendIssue } from '@ui/conversations/sendNotices';
+// eslint-disable-next-line import/first
 import { searchContactAddresses, findChatByParticipantAddresses } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { checkIMessageAvailability } from '@core/api/endpoints/handles';
@@ -254,12 +256,12 @@ beforeEach(() => {
   mockSearchParams = {};
   for (const k of Object.keys(mockFiles)) delete mockFiles[k];
   mockFileInfoReads.length = 0;
-  mockSendImages.mockResolvedValue([]);
-  mockSearchContacts.mockResolvedValue([] as ContactPick[]);
-  mockFindChat.mockResolvedValue(null);
-  mockCreateNewChat.mockResolvedValue('iMessage;-;+15551234567');
+  mockSendImages.mockReset().mockResolvedValue([]);
+  mockSearchContacts.mockReset().mockResolvedValue([] as ContactPick[]);
+  mockFindChat.mockReset().mockResolvedValue(null);
+  mockCreateNewChat.mockReset().mockResolvedValue('iMessage;-;+15551234567');
   // Default: no probe resolves (helper down) → chips stay neutral, service stays iMessage.
-  mockCheckAvailability.mockRejectedValue(new Error('no helper'));
+  mockCheckAvailability.mockReset().mockRejectedValue(new Error('no helper'));
   useDialogStore.setState({ current: null, queue: [] });
   useShareIntentStore.setState({ text: null, files: [], clear: clearShareIntentStore });
   keyboardDismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
@@ -466,6 +468,7 @@ describe('NewChatScreen — forward prefill', () => {
           images: [{ uri, name: 'IMG_0001.jpeg', mimeType: 'image/jpeg', size: 1234 }],
         },
         expect.objectContaining({ isCurrent: expect.any(Function) }),
+        presentSendIssue,
       ),
     );
   });
@@ -626,6 +629,7 @@ describe('NewChatScreen — recipient entry + create', () => {
       expect(mockSendImages).toHaveBeenCalledWith(
         { chatGuid: PRIVATE_CREATED_GUID, images: [sharedPrivateImage()] },
         accountLease,
+        presentSendIssue,
       ),
     );
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_CREATED_GUID)}`);
@@ -895,6 +899,7 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       expect(mockSendImages).toHaveBeenLastCalledWith(
         { chatGuid: SECOND_CREATED_GUID, images: [sharedPrivateImage()] },
         currentLease,
+        presentSendIssue,
       );
       expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(SECOND_CREATED_GUID)}`);
       expect(currentView.toJSON()).not.toBeNull();
@@ -917,7 +922,11 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     expect(useDialogStore.getState().current?.message).toBe(
       'Couldn’t start the conversation. Check the address and your server connection.',
     );
-    expect(errorSpy).toHaveBeenCalledWith('[new-chat] createNewChat failed', expect.any(Error));
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[new-chat] createNewChat failed',
+      'sfcbzc1wod',
+      expect.any(Error),
+    );
     expect(JSON.stringify(view.toJSON())).not.toContain(rawError);
     expect(release).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue(PRIVATE_MESSAGE)).toBeTruthy();
@@ -1065,7 +1074,11 @@ describe('NewChatScreen — create failure', () => {
     expect(useDialogStore.getState().current?.message).toBe(
       'Couldn’t start the conversation. Check the address and your server connection.',
     );
-    expect(error).toHaveBeenCalledWith('[new-chat] createNewChat failed', expect.any(Error));
+    expect(error).toHaveBeenCalledWith(
+      '[new-chat] createNewChat failed',
+      'sfcbzc1wod',
+      expect.any(Error),
+    );
     expect(JSON.stringify(view.toJSON())).not.toContain(rawError);
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState).toEqual({

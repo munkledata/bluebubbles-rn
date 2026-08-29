@@ -32,7 +32,7 @@ jest.mock('@features/boot/useForegroundBootState', () => ({
   useForegroundBootState: () => mockBootState,
 }));
 
-jest.mock('@/services', () => ({
+jest.mock('@/services/lock', () => ({
   completeUnlock: () => mockCompleteUnlock(),
 }));
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -82,25 +83,29 @@ const validSendServiceSource = `
   }
 `;
 
-const validRunnerSources = [
-  {
-    path: 'app/(app)/home.tsx',
-    source: 'runDueScheduled(db, http, now, sender, accountLease);',
-  },
-  {
-    path: 'app/(app)/chat/[guid].tsx',
-    source: 'runDueScheduled(db, http, now, sender, accountLease);',
-  },
-  {
-    path: 'src/services/send/index.ts',
-    source:
-      "export { runDueScheduled } from './scheduleService'; runDueScheduled(db, http, now, undefined, accountLease);",
-  },
-  {
-    path: 'src/services/background/backgroundSync.ts',
-    source: 'runDueScheduled(db, http, now, undefined, lease, maxRows);',
-  },
+const runnerPaths = [
+  'app/(app)/home.tsx',
+  'app/(app)/chat/[guid].tsx',
+  'src/features/conversations/useChatScheduledCatchup.ts',
+  'src/services/background/backgroundSync.ts',
+  'src/services/send/index.ts',
+  'src/services/send/scheduleService.ts',
 ];
+const validRunnerSources = runnerPaths.map((path) => ({
+  path,
+  source: readFileSync(path, 'utf8'),
+}));
+
+function mutateRunnerSource(path, mutate) {
+  return validRunnerSources.map((entry) =>
+    entry.path === path ? { ...entry, source: mutate(entry.source) } : entry,
+  );
+}
+
+function replaceOnce(source, before, after) {
+  assert.equal(source.split(before).length - 1, 1, `expected one mutation target: ${before}`);
+  return source.replace(before, after);
+}
 
 const expectedFindings = [
   {
@@ -578,45 +583,49 @@ test('the reviewed sendTextMessage AST fingerprint rejects an early aliased netw
 });
 
 test('requires every reviewed production runner call to carry its explicit account scope', () => {
-  const missingScope = validRunnerSources.map((entry) =>
-    entry.path === 'app/(app)/home.tsx'
-      ? { ...entry, source: 'runDueScheduled(db, http, now, sender);' }
-      : entry,
+  const rawCall = 'runDueScheduled(getDatabase(), http, now, undefined, accountLease)';
+  const missingScope = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(source, rawCall, 'runDueScheduled(getDatabase(), http, now, undefined)'),
   );
   assert.match(scheduledRunnerUsageErrors(missingScope).join('\n'), /explicit accountLease/);
 
-  const undefinedScope = validRunnerSources.map((entry) =>
-    entry.path === 'app/(app)/home.tsx'
-      ? { ...entry, source: 'runDueScheduled(db, http, now, sender, undefined);' }
-      : entry,
+  const undefinedScope = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(source, rawCall, 'runDueScheduled(getDatabase(), http, now, undefined, undefined)'),
   );
   assert.match(scheduledRunnerUsageErrors(undefinedScope).join('\n'), /explicit accountLease/);
 
-  const optionalCall = validRunnerSources.map((entry) =>
-    entry.path === 'app/(app)/home.tsx'
-      ? { ...entry, source: entry.source.replace('runDueScheduled(', 'runDueScheduled?.(') }
-      : entry,
+  const optionalCall = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(source, rawCall, rawCall.replace('runDueScheduled(', 'runDueScheduled?.(')),
   );
   assert.match(scheduledRunnerUsageErrors(optionalCall).join('\n'), /explicit accountLease/);
 });
 
 test('rejects production runner aliases, escaped references, and unreviewed callers', () => {
-  const aliased = validRunnerSources.map((entry) =>
-    entry.path === 'app/(app)/home.tsx'
-      ? {
-          ...entry,
-          source: 'const runner = runDueScheduled; runner(db, http, now, sender, accountLease);',
-        }
-      : entry,
+  const rawCall = 'runDueScheduled(getDatabase(), http, now, undefined, accountLease)';
+
+  const commentOnlyChange = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(
+      source,
+      rawCall,
+      'runDueScheduled(/* formatting-stable */ getDatabase(), http, now, undefined, accountLease)',
+    ),
+  );
+  assert.deepEqual(scheduledRunnerUsageErrors(commentOnlyChange), []);
+
+  const aliased = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(
+      source,
+      rawCall,
+      `(runDueScheduled)(getDatabase(), http, now, undefined, accountLease)`,
+    ),
   );
   const aliasErrors = scheduledRunnerUsageErrors(aliased).join('\n');
   assert.match(aliasErrors, /references and aliases are forbidden/);
-  assert.match(aliasErrors, /exactly one direct.*found 0/);
+  assert.match(aliasErrors, /exactly one direct reviewed call.*found 0/);
 
-  const escaped = validRunnerSources.map((entry) =>
-    entry.path === 'app/(app)/home.tsx'
-      ? { ...entry, source: `${entry.source}\nvoid runDueScheduled;` }
-      : entry,
+  const escaped = mutateRunnerSource(
+    'app/(app)/home.tsx',
+    (source) => `${source}\nvoid fireDueScheduled;`,
   );
   assert.match(
     scheduledRunnerUsageErrors(escaped).join('\n'),
@@ -627,10 +636,261 @@ test('rejects production runner aliases, escaped references, and unreviewed call
     ...validRunnerSources,
     {
       path: 'src/services/send/otherRunner.ts',
-      source: 'runDueScheduled(db, http, now, undefined, lease);',
+      source: 'fireDueScheduled();',
     },
   ];
   assert.match(scheduledRunnerUsageErrors(unreviewed).join('\n'), /unreviewed production/);
+
+  const droppedPromise = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(
+      source,
+      `return await runScheduledAccountOperation(accountLease, () =>
+      ${rawCall},
+    );`,
+      `void runScheduledAccountOperation(accountLease, () =>
+      ${rawCall},
+    );
+    return 0;`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(droppedPromise).join('\n'), /fingerprint/);
+
+  const invalidSyntax = mutateRunnerSource(
+    'src/services/send/index.ts',
+    (source) => `${source}\nconst invalid = (;`,
+  );
+  assert.match(scheduledRunnerUsageErrors(invalidSyntax).join('\n'), /invalid TypeScript syntax/);
+
+  const wrongImport = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(
+      source,
+      `import {
+  ensureScheduledRecovery,
+  runDueScheduled,
+  scheduleTextMessage,
+  ScheduledSessionChangedError,
+  type ScheduleArgs,
+} from './scheduleService';`,
+      `import {
+  ensureScheduledRecovery,
+  runDueScheduled,
+  scheduleTextMessage,
+  ScheduledSessionChangedError,
+  type ScheduleArgs,
+} from './wrongScheduleService';`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(wrongImport).join('\n'), /must import runDueScheduled/);
+
+  const deadHomeBranch = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      `void (async () => {
+      try {
+        if (!accountLease.isCurrent()) return;`,
+      `void (async () => {
+      try {
+        return;
+        if (!accountLease.isCurrent()) return;`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(deadHomeBranch).join('\n'), /scheduled-effect owner/);
+
+  const sequentialBranches = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      `        } else {
+          await fireDueScheduled();
+        }`,
+      `        }
+        await fireDueScheduled();`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(sequentialBranches).join('\n'), /scheduled-effect owner/);
+
+  const shadowedLease = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      `  useEffect(() => {
+    const useDevFixtures = isDevServer();`,
+      `  useEffect(() => {
+    const accountLease = captureRealtimeDeliveryLease();
+    const useDevFixtures = isDevServer();`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(shadowedLease).join('\n'), /scheduled-effect owner/);
+
+  const earlyHomeExit = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      '  const [accountLease] = useState(() => captureRealtimeDeliveryLease());',
+      `  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  if (showDevProofControls) return null;`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(earlyHomeExit).join('\n'), /scheduled-effect owner/);
+
+  const earlyChatExit = mutateRunnerSource('app/(app)/chat/[guid].tsx', (source) =>
+    replaceOnce(
+      source,
+      '  useChatScheduledCatchup(accountLease);',
+      `  if (messagesLoading) return null;
+  useChatScheduledCatchup(accountLease);`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(earlyChatExit).join('\n'), /directly invoke/);
+
+  const blockedHome = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      '  useEffect(() => {',
+      `  while (true) {}
+  useEffect(() => {`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(blockedHome).join('\n'), /scheduled-effect owner/);
+
+  const parenthesizedBlockedHome = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      '  useEffect(() => {',
+      `  while ((true)) {}
+  useEffect(() => {`,
+    ),
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(parenthesizedBlockedHome).join('\n'),
+    /scheduled-effect owner/,
+  );
+
+  const throwingChatIife = mutateRunnerSource('app/(app)/chat/[guid].tsx', (source) =>
+    replaceOnce(
+      source,
+      '  useChatScheduledCatchup(accountLease);',
+      `  (() => { throw new Error('blocked'); })();
+  useChatScheduledCatchup(accountLease);`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(throwingChatIife).join('\n'), /directly invoke/);
+
+  const shadowedHomeHelper = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      '  const [accountLease] = useState(() => captureRealtimeDeliveryLease());',
+      `  const useEffect = () => undefined;
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(shadowedHomeHelper).join('\n'), /scheduled-effect owner/);
+
+  const shadowedChatHelper = mutateRunnerSource('app/(app)/chat/[guid].tsx', (source) =>
+    replaceOnce(
+      source,
+      '  const [accountLease] = useState(() => captureRealtimeDeliveryLease());',
+      `  const useState = () => [captureRealtimeDeliveryLease()];
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());`,
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(shadowedChatHelper).join('\n'), /directly invoke/);
+
+  const parameterShadowedHomeHelper = mutateRunnerSource('app/(app)/home.tsx', (source) =>
+    replaceOnce(
+      source,
+      'export default function Home(): React.JSX.Element {',
+      'export default function Home({ useEffect = () => undefined } = {}): React.JSX.Element {',
+    ),
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(parameterShadowedHomeHelper).join('\n'),
+    /scheduled-effect owner/,
+  );
+
+  const parameterShadowedChatHelper = mutateRunnerSource('app/(app)/chat/[guid].tsx', (source) =>
+    replaceOnce(
+      source,
+      `function ChatScreenInner({
+  guid,`,
+      `function ChatScreenInner({
+  useState,
+  guid,`,
+    ),
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(parameterShadowedChatHelper).join('\n'),
+    /directly invoke/,
+  );
+
+  const nestedDeclaration = mutateRunnerSource(
+    'src/services/send/index.ts',
+    (source) => `${source}\nfunction legacyOwner() { function fireDueScheduled() {} }\n`,
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(nestedDeclaration).join('\n'),
+    /references and aliases are forbidden/,
+  );
+
+  const elementAccess = mutateRunnerSource(
+    'app/(app)/home.tsx',
+    (source) => `${source}\nvoid legacyScheduler['fireDueScheduled']();\n`,
+  );
+  assert.match(scheduledRunnerUsageErrors(elementAccess).join('\n'), /element-access aliases/);
+
+  const templateElementAccess = mutateRunnerSource(
+    'app/(app)/home.tsx',
+    (source) => source + '\nvoid legacyScheduler[`fireDueScheduled`]();\n',
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(templateElementAccess).join('\n'),
+    /element-access aliases/,
+  );
+
+  const identifierElementAccess = mutateRunnerSource(
+    'app/(app)/home.tsx',
+    (source) =>
+      `${source}\nimport * as scheduledService from '@/services/send';\nconst scheduledKey = 'fireDueScheduled' as const;\nvoid scheduledService[scheduledKey]();\n`,
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(identifierElementAccess).join('\n'),
+    /element-access aliases/,
+  );
+
+  const deadBackgroundWiring = mutateRunnerSource(
+    'src/services/background/backgroundSync.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        'recoverAndDrainSchedules: recoverAndDrainBackgroundSchedules,',
+        'recoverAndDrainSchedules: async () => undefined,',
+      ),
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(deadBackgroundWiring).join('\n'),
+    /wire the reviewed background schedule owner directly/,
+  );
+
+  const overriddenBackgroundWiring = mutateRunnerSource(
+    'src/services/background/backgroundSync.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        'recoverAndDrainSchedules: recoverAndDrainBackgroundSchedules,',
+        `recoverAndDrainSchedules: recoverAndDrainBackgroundSchedules,
+      ...{ recoverAndDrainSchedules: async () => undefined },`,
+      ),
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(overriddenBackgroundWiring).join('\n'),
+    /wire the reviewed background schedule owner directly/,
+  );
+
+  const optionalBackgroundCall = mutateRunnerSource(
+    'src/services/background/backgroundSync.ts',
+    (source) => replaceOnce(source, 'await runBackgroundSync({', 'await runBackgroundSync?.({'),
+  );
+  assert.match(
+    scheduledRunnerUsageErrors(optionalBackgroundCall).join('\n'),
+    /wire the reviewed background schedule owner directly/,
+  );
 });
 
 test('the live repository satisfies the scheduled recovery contract', () => {

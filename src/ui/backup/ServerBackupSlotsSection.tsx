@@ -140,6 +140,8 @@ export function ServerBackupSlotsSection({
         {
           name: slotName,
           passphrase,
+          // This handler reads the clock after the user starts a save; render remains deterministic.
+          // eslint-disable-next-line react-hooks/purity
           now: Date.now(),
           existingSlotNames: slots.map((slot) => slot.name),
         },

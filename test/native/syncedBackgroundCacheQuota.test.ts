@@ -67,7 +67,7 @@ describe('synced-background global disk quota contract', () => {
   it('runs after a committed URI and queues startup pruning through the shared slot', () => {
     expect(serviceSource).toMatch(/await pruneSyncedBackgroundCacheBestEffort\(dest\.uri\)/);
     expect(serviceSource).toMatch(
-      /void withBackgroundWorkSlot\(\(\) => pruneSyncedBackgroundCacheBestEffort\(null\)\)/,
+      /startupCacheMaintenance \?\?= withBackgroundWorkSlot\(\(\) =>\s*pruneSyncedBackgroundCacheBestEffort\(null\),?\s*\)/,
     );
   });
 

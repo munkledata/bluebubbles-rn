@@ -186,35 +186,34 @@ jest.mock('@utils/isDev', () => ({
 // check needs an explicit normal-chat fixture; otherwise it receives the undefined test database,
 // takes the intentional failure fallback, and prints one misleading debug line per render.
 jest.mock('@db/repositories', () => ({
+  DRAFT_KV_PREFIX: 'draft.',
   getChatIdByGuid: jest.fn(async () => null),
   getChatParticipants: jest.fn(async () => []),
   getFirstUnreadInChat: jest.fn(async () => null),
   isChatHiddenByDeletion: jest.fn(async () => false),
   kvGet: jest.fn(async () => null),
-  kvSetWithinTransaction: jest.fn(async () => undefined),
 }));
 
 jest.mock('@/services', () => ({
   dispatchRealtimeEvent: jest.fn(async () => undefined),
   ensureChatSynced: jest.fn(),
-  ensureSyncedBackground: jest.fn(),
-  http: {},
+  ensureSyncedBackgroundForChat: jest.fn(),
   markRead: jest.fn(),
+  saveChatDraft: jest.fn().mockResolvedValue(undefined),
   sendTyping: jest.fn(),
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
 jest.mock('@/services/contacts/contactsService', () => ({
   getContactsPermissionState: jest.fn(),
 }));
-jest.mock('@/services/notifications/remindersService', () => ({ scheduleReminder: jest.fn() }));
 jest.mock('@/services/media', () => ({
   shareAttachment: jest.fn(),
   saveAttachmentsToPhotos: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({
-  cancelOutgoing: jest.fn(),
   editText: jest.fn(),
   fireDueScheduled: jest.fn(),
+  fireDueScheduledWithDevelopmentSender: jest.fn(),
   hasLogicalSendCapacity: jest.fn(() => true),
   isContactsPermissionDeniedError: jest.fn(
     (error: unknown) => error instanceof Error && error.name === 'ContactsPermissionDeniedError',
@@ -223,7 +222,6 @@ jest.mock('@/services/send', () => ({
   react: jest.fn(),
   recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
   reply: jest.fn(),
-  runDueScheduled: jest.fn(),
   schedule: jest.fn().mockResolvedValue(undefined),
   send: jest.fn(),
   sendImage: jest.fn(),
@@ -242,24 +240,32 @@ import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 // eslint-disable-next-line import/first
 import { useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 // eslint-disable-next-line import/first
-import { dispatchRealtimeEvent, ensureChatSynced, markRead, sendTyping } from '@/services';
+import {
+  dispatchRealtimeEvent,
+  ensureChatSynced,
+  markRead,
+  saveChatDraft,
+  sendTyping,
+} from '@/services';
 // eslint-disable-next-line import/first
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
 import {
   editText,
   fireDueScheduled,
+  fireDueScheduledWithDevelopmentSender,
   hasLogicalSendCapacity,
   pickAndSendContact,
   react,
   reply,
-  runDueScheduled,
   schedule,
   send,
   sendImages,
 } from '@/services/send';
 // eslint-disable-next-line import/first
 import { showToast } from '@ui';
+// eslint-disable-next-line import/first
+import { presentSendIssue } from '@ui/conversations/sendNotices';
 // eslint-disable-next-line import/first
 import { devSendFake, devSendFakeReply } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
@@ -271,9 +277,7 @@ import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useTypingStore } from '@state/typingStore';
 // eslint-disable-next-line import/first
-import { getDatabase } from '@db/database';
-// eslint-disable-next-line import/first
-import { isChatHiddenByDeletion, kvSetWithinTransaction } from '@db/repositories';
+import { isChatHiddenByDeletion } from '@db/repositories';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -285,8 +289,6 @@ const useMessagesMock = useMessages as jest.Mock;
 const useChatHeaderMock = useChatHeader as jest.Mock;
 const useNewScreenEffectMock = useNewScreenEffect as jest.Mock;
 const useChatBackgroundUriMock = useChatBackgroundUri as jest.Mock;
-const mockGetDatabase = getDatabase as jest.Mock;
-const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
 const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
 
 /** A received text message; only the fields onLongPressMessage reads need to be right. */
@@ -322,8 +324,8 @@ function reactionRow(over: Record<string, unknown>): any {
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
-  mockGetDatabase.mockReset().mockReturnValue(undefined);
-  mockKvSetWithinTransaction.mockResolvedValue(undefined);
+  (saveChatDraft as jest.Mock).mockReset().mockResolvedValue(undefined);
+  (fireDueScheduledWithDevelopmentSender as jest.Mock).mockReset().mockResolvedValue(0);
   mockIsDevServer.mockReturnValue(false);
   mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
   (pickAndSendContact as jest.Mock).mockResolvedValue(null);
@@ -419,17 +421,6 @@ function overlayStyleCounts(tree: unknown): { top: number; bottom: number } {
     if (style.bottom === 0) bottom += 1;
   });
   return { top, bottom };
-}
-
-function sqlStatementText(value: unknown): string {
-  if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
-  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
-  return chunks
-    .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
-    .filter((part): part is string => typeof part === 'string')
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function expectWallpaperPresentation(tree: unknown, uri: string | null): void {
@@ -589,6 +580,7 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
         selectedMessageText: 'hey',
       }),
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
     );
   });
 
@@ -599,6 +591,7 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: 'm1' }),
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
     );
   });
 });
@@ -621,6 +614,7 @@ describe('ChatScreen — send routing', () => {
     expect(send).toHaveBeenCalledWith(
       { chatGuid: GUID, text: 'hello', effectId: undefined },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
     );
     expect(reply).not.toHaveBeenCalled();
   });
@@ -637,6 +631,7 @@ describe('ChatScreen — send routing', () => {
         effectId: 'com.apple.MobileSMS.expressivesend.impact',
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
     );
   });
 
@@ -761,6 +756,7 @@ describe('ChatScreen — reply flow', () => {
         effectId: undefined,
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
     );
     expect(send).not.toHaveBeenCalled();
     // replyTo is cleared after the reply is sent.
@@ -1058,59 +1054,32 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     await expect(picked).resolves.toEqual([]);
   });
 
-  it('rolls back an admitted draft write when its screen account retires mid-owner', async () => {
-    const accountADb = { run: jest.fn(async (_statement: unknown) => undefined) };
-    const accountBDb = { run: jest.fn(async (_statement: unknown) => undefined) };
-    mockGetDatabase.mockReturnValue(accountADb);
-    let releasePersist!: () => void;
-    const persistHeld = new Promise<void>((resolve) => {
-      releasePersist = resolve;
-    });
-    mockKvSetWithinTransaction.mockImplementationOnce(async () => persistHeld);
-
+  it('routes an admitted draft write through the exact screen account lease', async () => {
     await renderWithTheme(<ChatScreen />);
     const flushDraft = mockCaptured.composer!.onDraftChange as (text: string) => void;
-    let pause: Promise<void> | undefined;
-    try {
-      await run(() => flushDraft('A-only admitted draft'));
-      await waitFor(() => expect(mockKvSetWithinTransaction).toHaveBeenCalledTimes(1));
+    await run(() => flushDraft('A-only admitted draft'));
+    await waitFor(() => expect(saveChatDraft).toHaveBeenCalledTimes(1));
 
-      expect(mockCaptured.composer!.initialText).toBe('A-only admitted draft');
-      expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
-        expect.any(Object),
-        `draft.${GUID}`,
-        'A-only admitted draft',
-      );
-
-      let pauseSettled = false;
-      pause = pauseRealtimeDeliveries().then(() => {
-        pauseSettled = true;
-      });
-      mockGetDatabase.mockReturnValue(accountBDb);
-      await Promise.resolve();
-      expect(pauseSettled).toBe(false);
-
-      releasePersist();
-      await pause;
-
-      expect(accountADb.run.mock.calls.map(([statement]) => sqlStatementText(statement))).toEqual([
-        'BEGIN IMMEDIATE',
-        'ROLLBACK',
-      ]);
-      expect(accountBDb.run).not.toHaveBeenCalled();
-    } finally {
-      releasePersist();
-      pause ??= pauseRealtimeDeliveries();
-      await Promise.allSettled([pause]);
-      resumeRealtimeDeliveries();
-    }
+    expect(mockCaptured.composer!.initialText).toBe('A-only admitted draft');
+    expect(saveChatDraft).toHaveBeenCalledWith(
+      GUID,
+      'A-only admitted draft',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    const accountLease = (saveChatDraft as jest.Mock).mock.calls[0]![2] as {
+      isCurrent(): boolean;
+    };
+    expect(accountLease.isCurrent()).toBe(true);
+    await pauseRealtimeDeliveries();
+    expect(accountLease.isCurrent()).toBe(false);
+    resumeRealtimeDeliveries();
   });
 
   it('drops draft-flush and typing callbacks after their screen account retires', async () => {
     await renderWithTheme(<ChatScreen />);
     const flushDraft = mockCaptured.composer!.onDraftChange as (text: string) => void;
     const emitTyping = mockCaptured.composer!.onTyping as (active: boolean) => void;
-    mockKvSetWithinTransaction.mockClear();
+    (saveChatDraft as jest.Mock).mockClear();
     (sendTyping as jest.Mock).mockClear();
 
     await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
@@ -1120,7 +1089,7 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     flushDraft('A-only draft');
     emitTyping(false);
 
-    expect(mockKvSetWithinTransaction).not.toHaveBeenCalled();
+    expect(saveChatDraft).not.toHaveBeenCalled();
     expect(sendTyping).not.toHaveBeenCalled();
   });
 
@@ -1311,26 +1280,26 @@ describe('ChatScreen — scheduled-message ticker', () => {
 
   it('threads one screen lease through the DEV ticker and its fake senders', async () => {
     mockIsDevServer.mockReturnValue(true);
-    (runDueScheduled as jest.Mock).mockImplementationOnce(
+    (fireDueScheduledWithDevelopmentSender as jest.Mock).mockImplementationOnce(
       async (
-        _db: unknown,
-        _http: unknown,
-        _now: number,
         sender: (
           chatGuid: string,
           text: string,
           selectedMessageGuid: string | undefined,
+          onQueued: () => Promise<void>,
         ) => Promise<void>,
+        accountLease: { isCurrent(): boolean },
       ) => {
-        await sender('plain-chat', 'plain', undefined);
-        await sender('reply-chat', 'reply', 'reply-target');
+        expect(accountLease.isCurrent()).toBe(true);
+        await sender('plain-chat', 'plain', undefined, async () => undefined);
+        await sender('reply-chat', 'reply', 'reply-target', async () => undefined);
         return 2;
       },
     );
 
     await renderWithTheme(<ChatScreen />);
-    await waitFor(() => expect(runDueScheduled).toHaveBeenCalledTimes(1));
-    const accountLease = (runDueScheduled as jest.Mock).mock.calls[0]![4];
+    await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
+    const accountLease = (fireDueScheduledWithDevelopmentSender as jest.Mock).mock.calls[0]![1];
     expect(devSendFake).toHaveBeenCalledWith('plain-chat', 'plain', undefined, accountLease);
     expect(devSendFakeReply).toHaveBeenCalledWith(
       'reply-chat',
@@ -1346,7 +1315,7 @@ describe('ChatScreen — scheduled-message ticker', () => {
     try {
       mockIsDevServer.mockReturnValue(true);
       await renderWithTheme(<ChatScreen />);
-      expect(runDueScheduled).toHaveBeenCalledTimes(1);
+      expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1);
 
       await pauseRealtimeDeliveries();
       resumeRealtimeDeliveries();
@@ -1354,7 +1323,7 @@ describe('ChatScreen — scheduled-message ticker', () => {
         jest.advanceTimersByTime(20_000);
       });
 
-      expect(runDueScheduled).toHaveBeenCalledTimes(1);
+      expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

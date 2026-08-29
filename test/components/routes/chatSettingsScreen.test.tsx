@@ -249,6 +249,29 @@ jest.mock('@db/repositories', () => ({
   setChatMuteWithinTransaction: (...args: unknown[]) => mockSetChatMuteWithinTransaction(...args),
 }));
 
+// Exercise the route through the real account-scoped chat command implementations while keeping
+// their unrelated network/cache dependencies inert in this host-rendered component suite.
+jest.mock('@core/api', () => ({ chatsApi: {}, scheduledApi: {} }));
+jest.mock('@/services/clients', () => ({ http: {} }));
+jest.mock('@/services/databaseControl', () => ({
+  ensureDatabase: async () =>
+    (
+      jest.requireMock('@db/database') as {
+        getDatabase: () => unknown;
+      }
+    ).getDatabase(),
+}));
+jest.mock('@/services/download/attachmentCacheAccountScope', () => ({
+  createAttachmentCacheAccountScope: jest.fn(),
+}));
+jest.mock('@/services/download/downloadService', () => ({
+  cancelAttachmentDownloads: jest.fn(),
+}));
+jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
+  attachmentCacheCoordinator: {},
+}));
+jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn() }));
+
 jest.mock('@db/useReactiveQuery', () => ({
   useReactiveQuery: (_query: unknown, tables: string[], deps: unknown[]) => {
     const ReactLib = jest.requireActual('react') as typeof import('react');
@@ -327,9 +350,19 @@ jest.mock('@utils', () => ({
   safeOpenUrl: (...args: unknown[]) => mockSafeOpenUrl(...args),
 }));
 
-jest.mock('@/services', () => ({
-  computeBackgroundIsLight: (...args: unknown[]) => mockComputeBackgroundIsLight(...args),
-}));
+jest.mock('@/services', () => {
+  const chatActions = jest.requireActual(
+    '@/services/chatActions',
+  ) as typeof import('@/services/chatActions');
+  return {
+    computeBackgroundIsLight: (...args: unknown[]) => mockComputeBackgroundIsLight(...args),
+    resetChatLocalPreferences: chatActions.resetChatLocalPreferences,
+    setChatMuted: chatActions.setChatMuted,
+    startChatRepair: jest.fn(async () => ({ messages: 0 })),
+    updateChatAppearance: chatActions.updateChatAppearance,
+    updateChatCustomization: chatActions.updateChatCustomization,
+  };
+});
 
 jest.mock('@/services/notifications/notifeeService', () => ({
   openChatNotificationSettings: (...args: unknown[]) => mockOpenNotificationSettings(...args),
@@ -451,11 +484,20 @@ jest.mock('@ui', () => {
     ThemeStudio: ({
       onCancel,
       onApply,
+      cancelRequest = 0,
     }: {
       onCancel: () => void;
       onApply: (tokens: Record<string, unknown>) => void;
-    }) =>
-      ReactLib.createElement(
+      cancelRequest?: number;
+    }) => {
+      const lastCancelRequest = ReactLib.useRef(cancelRequest);
+      ReactLib.useEffect(() => {
+        if (cancelRequest === lastCancelRequest.current) return;
+        lastCancelRequest.current = cancelRequest;
+        onCancel();
+      }, [cancelRequest, onCancel]);
+
+      return ReactLib.createElement(
         View,
         null,
         ReactLib.createElement(Text, null, PRIVATE_THEME_TOKEN),
@@ -477,7 +519,8 @@ jest.mock('@ui', () => {
           },
           ReactLib.createElement(Text, null, 'Apply test theme'),
         ),
-      ),
+      );
+    },
     useTheme: () => gatorTheme,
   };
 });
@@ -580,6 +623,7 @@ function studioModal() {
 async function requestCloseStudio(): Promise<void> {
   const onRequestClose = studioModal().props.onRequestClose as () => void;
   await act(async () => onRequestClose());
+  await waitFor(() => expect(screen.queryByTestId('chat-theme-studio-modal')).toBeNull());
 }
 
 describe('ChatSettingsScreen reduced motion', () => {
@@ -1844,14 +1888,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
         null,
       ),
     );
-    await waitFor(() =>
-      expectDbRunSequence(mockDatabaseB, [
-        'BEGIN IMMEDIATE',
-        'COMMIT',
-        'BEGIN IMMEDIATE',
-        'COMMIT',
-      ]),
-    );
+    await waitFor(() => expectDbRunSequence(mockDatabaseB, ['BEGIN IMMEDIATE', 'COMMIT']));
     expect(mockSetChatCustomizationWithinTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetChatMuteWithinTransaction.mock.invocationCallOrder[0]!,
     );
@@ -1954,7 +1991,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
     }
   });
 
-  it('commits Reset customization before its admitted mute transaction rolls back', async () => {
+  it('rolls back Reset customization and mute together after retirement', async () => {
     const oldLease = mockAccountLease;
     const pendingCustomization = deferred<void>();
     const pendingMute = deferred<void>();
@@ -1984,7 +2021,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
         null,
       ),
     );
-    expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT', 'BEGIN IMMEDIATE']);
+    expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE']);
     expect(mockSetChatCustomizationWithinTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetChatMuteWithinTransaction.mock.invocationCallOrder[0]!,
     );
@@ -2006,12 +2043,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
         await pendingMute.promise;
       });
       await pausePromise;
-      expectDbRunSequence(mockDatabase, [
-        'BEGIN IMMEDIATE',
-        'COMMIT',
-        'BEGIN IMMEDIATE',
-        'ROLLBACK',
-      ]);
+      expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'ROLLBACK']);
       expect(mockDatabaseB.run).not.toHaveBeenCalled();
       expect(JSON.stringify(view.toJSON())).not.toContain('database commit guard rejected');
     } finally {

@@ -90,6 +90,7 @@ jest.mock('@/services/realtime/deliveryCoordinator', () => ({
 
 import { logger } from '@core/secure';
 import { startFcm } from '@/services/notifications/fcmMessaging';
+import '@/services/notifications/registerFcmBackgroundHandler';
 
 const message = { messageId: 'provider-message-1', data: { type: 'new-message' } };
 let diagnosticEvent: jest.SpyInstance;
@@ -137,7 +138,7 @@ afterEach(() => {
 });
 
 describe('FCM native callback ownership', () => {
-  it('registers the killed-app handler at module evaluation and tracks its whole delivery', async () => {
+  it('registers the killed-app handler at explicit entry-module evaluation and tracks its whole delivery', async () => {
     expect(mockBackgroundHandler).toEqual(expect.any(Function));
 
     await expect(mockBackgroundHandler!(message)).resolves.toBeUndefined();

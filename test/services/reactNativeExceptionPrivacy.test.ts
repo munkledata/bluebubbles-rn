@@ -233,7 +233,7 @@ describe('React Native exception privacy boundary', () => {
       ),
     ].map((match) => match[1]);
 
-    expect(packageJson.dependencies?.['react-native']).toBe('0.86.2');
+    expect(packageJson.dependencies?.['react-native']).toBe('0.86.3');
     expect(exceptionsSource).toContain('return userExceptionDecorator(data);');
     expect(exceptionsSource.indexOf('const data = preprocessException({')).toBeLessThan(
       exceptionsSource.indexOf('NativeExceptionsManager.reportException(data);'),

@@ -90,7 +90,7 @@ const OWNED_NATIVE_LOG_FILE =
   'modules/gator-paste-input/android/src/main/java/expo/modules/gatorpasteinput/GatorPasteInputModule.kt';
 const OWNED_NATIVE_LOG_TAG = 'GatorPasteInput';
 const OWNED_NATIVE_LOG_SOURCE_CONTRACT =
-  'daa290858ac0c0046d5eff0bf713969deb6c362e14f6d47ff0009bdcc77462c3';
+  '6fe107f769937864ee7fd8dfd7930dc886409e4b74c7fd9836c9c0b3e63ff115';
 const NATIVE_LOG_METHODS = new Set(['d', 'e', 'i', 'println', 'v', 'w', 'wtf']);
 const JAVA_FORMAT_CHARACTER = /\p{Cf}/u;
 

@@ -22,11 +22,87 @@ const REVIEWED_RUN_DUE_BODY_HASH =
   '0102dd9c1bff60acd05562d68299fd5f3245f0775b0f909e0edf9031e0c352c0';
 const REVIEWED_SEND_TEXT_BODY_HASH =
   '73ad82acc8339bcf6c3322b9b47d90f50475b7833539b91daa141c329c430807';
-const EXPECTED_RUN_DUE_CALLERS = new Map([
-  ['app/(app)/home.tsx', { argumentCount: 5, scope: 'accountLease' }],
-  ['app/(app)/chat/[guid].tsx', { argumentCount: 5, scope: 'accountLease' }],
-  ['src/services/send/index.ts', { argumentCount: 5, scope: 'accountLease' }],
-  ['src/services/background/backgroundSync.ts', { argumentCount: 6, scope: 'lease' }],
+const HOME_PATH = 'app/(app)/home.tsx';
+const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
+const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
+const SEND_COMPOSITION_PATH = 'src/services/send/index.ts';
+const BACKGROUND_SYNC_PATH = 'src/services/background/backgroundSync.ts';
+const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
+  [
+    `${SEND_COMPOSITION_PATH}#fireDueScheduled`,
+    'df82985dd8da9a2ff218aee1bae441a18b29bc0570f1181cf5f386323ab834ef',
+  ],
+  [
+    `${SEND_COMPOSITION_PATH}#fireDueScheduledWithDevelopmentSender`,
+    '2aebf4a5980ef6201af855583e6ff1a85f4b3b66aa5f89cf9a727f9dc8e1b260',
+  ],
+  [
+    `${SEND_COMPOSITION_PATH}#runScheduledAccountOperation`,
+    'a6932a4ec4fa73ff4c0211e0899a67999aae43b3e1ec890f7a6d40ddbc2706bd',
+  ],
+  [
+    `${BACKGROUND_SYNC_PATH}#recoverAndDrainBackgroundSchedules`,
+    '52405b0054b7144a559751cf3c7136b849af1ab1812401a749254afbcfaebac3',
+  ],
+  [
+    `${BACKGROUND_SYNC_PATH}#asRealtimeLease`,
+    '21c06aea640ecdb4ae509a6eb4f8768b4fbffb47226a992521e0b225beb68564',
+  ],
+  [
+    `${CHAT_CATCHUP_PATH}#useChatScheduledCatchup`,
+    'c590aa8b46cf6a080e2c13304164c1a6cbdef75d6d4d2c8b7e471edf0fb19f12',
+  ],
+  [
+    `${CHAT_ROUTE_PATH}#ChatScreen`,
+    'a220c5979079ea5c0f8f8891cb04daba435d838c505898021f8f212705875dd1',
+  ],
+  [
+    `${HOME_PATH}#Home.scheduledEffect`,
+    '29770290812e8da2647f3194ff6c39d467a97d3de2fbbd6619e8fd193aa7013f',
+  ],
+]);
+const EXPECTED_SCHEDULED_CALLERS = new Map([
+  [
+    `runDueScheduled|${SEND_COMPOSITION_PATH}|fireDueScheduled`,
+    { argumentCount: 5, scopeIndex: 4, scope: 'accountLease' },
+  ],
+  [
+    `runDueScheduled|${SEND_COMPOSITION_PATH}|fireDueScheduledWithDevelopmentSender`,
+    { argumentCount: 5, scopeIndex: 4, scope: 'accountLease' },
+  ],
+  [
+    `runDueScheduled|${BACKGROUND_SYNC_PATH}|recoverAndDrainBackgroundSchedules`,
+    { argumentCount: 6, scopeIndex: 4, scope: 'lease' },
+  ],
+  [`fireDueScheduled|${HOME_PATH}|Home`, { argumentCount: 0 }],
+  [
+    `fireDueScheduledWithDevelopmentSender|${HOME_PATH}|Home`,
+    { argumentCount: 2, scopeIndex: 1, scope: 'accountLease' },
+  ],
+  [`fireDueScheduled|${CHAT_CATCHUP_PATH}|useChatScheduledCatchup`, { argumentCount: 0 }],
+  [
+    `fireDueScheduledWithDevelopmentSender|${CHAT_CATCHUP_PATH}|useChatScheduledCatchup`,
+    { argumentCount: 2, scopeIndex: 1, scope: 'accountLease' },
+  ],
+  [
+    `useChatScheduledCatchup|${CHAT_ROUTE_PATH}|ChatScreenInner`,
+    { argumentCount: 1, scopeIndex: 0, scope: 'accountLease' },
+  ],
+]);
+const SCHEDULED_DECLARATIONS = new Map([
+  ['runDueScheduled', SCHEDULE_SERVICE_PATH],
+  ['fireDueScheduled', SEND_COMPOSITION_PATH],
+  ['fireDueScheduledWithDevelopmentSender', SEND_COMPOSITION_PATH],
+  ['useChatScheduledCatchup', CHAT_CATCHUP_PATH],
+]);
+const SCHEDULED_IMPORTS = new Map([
+  [`runDueScheduled|${SEND_COMPOSITION_PATH}`, './scheduleService'],
+  [`runDueScheduled|${BACKGROUND_SYNC_PATH}`, '../send/scheduleService'],
+  [`fireDueScheduled|${HOME_PATH}`, '@/services/send'],
+  [`fireDueScheduledWithDevelopmentSender|${HOME_PATH}`, '@/services/send'],
+  [`fireDueScheduled|${CHAT_CATCHUP_PATH}`, '@/services/send'],
+  [`fireDueScheduledWithDevelopmentSender|${CHAT_CATCHUP_PATH}`, '@/services/send'],
+  [`useChatScheduledCatchup|${CHAT_ROUTE_PATH}`, '@features/conversations/useChatScheduledCatchup'],
 ]);
 
 function directCallName(node) {
@@ -60,6 +136,12 @@ function exportedFunction(sourceFile, name) {
 function functionBodyHash(declaration, sourceFile) {
   const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
   const normalized = printer.printNode(ts.EmitHint.Unspecified, declaration.body, sourceFile);
+  return createHash('sha256').update(normalized).digest('hex');
+}
+
+function syntaxHash(node, sourceFile) {
+  const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
+  const normalized = printer.printNode(ts.EmitHint.Unspecified, node, sourceFile);
   return createHash('sha256').update(normalized).digest('hex');
 }
 
@@ -941,31 +1023,507 @@ export function scheduledRecoveryCallGraphErrors(findings) {
   ];
 }
 
-function isAllowedRunDueIdentifier(identifier, path) {
+function moduleSpecifierText(declaration) {
+  return declaration?.moduleSpecifier && ts.isStringLiteral(declaration.moduleSpecifier)
+    ? declaration.moduleSpecifier.text
+    : undefined;
+}
+
+function exactNamedImportCount(sourceFile, name, module) {
+  let count = 0;
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || moduleSpecifierText(statement) !== module) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    count += bindings.elements.filter(
+      (element) => element.name.text === name && !element.propertyName,
+    ).length;
+  }
+  return count;
+}
+
+function exactNamedReexportCount(sourceFile, name, module) {
+  let count = 0;
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      moduleSpecifierText(statement) !== module ||
+      !statement.exportClause ||
+      !ts.isNamedExports(statement.exportClause)
+    ) {
+      continue;
+    }
+    count += statement.exportClause.elements.filter(
+      (element) => element.name.text === name && !element.propertyName,
+    ).length;
+  }
+  return count;
+}
+
+function topLevelFunctionOwner(node, sourceFile) {
+  let current = node.parent;
+  while (current && current !== sourceFile) {
+    if (ts.isFunctionDeclaration(current) && current.name && current.parent === sourceFile) {
+      return current.name.text;
+    }
+    current = current.parent;
+  }
+  return '<module>';
+}
+
+function uniqueTopLevelFunction(sourceFile, name) {
+  const matches = sourceFile?.statements.filter(
+    (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name,
+  );
+  return matches?.length === 1 && matches[0].body ? matches[0] : undefined;
+}
+
+function directZeroArgumentCall(node, name) {
+  return (
+    !!node &&
+    ts.isCallExpression(node) &&
+    directCallName(node) === name &&
+    !node.questionDotToken &&
+    node.arguments.length === 0
+  );
+}
+
+function hasExactMountedLease(declaration) {
+  const matches = [];
+  for (const statement of declaration.body.statements) {
+    if (
+      !ts.isVariableStatement(statement) ||
+      !(statement.declarationList.flags & ts.NodeFlags.Const) ||
+      statement.declarationList.declarations.length !== 1
+    ) {
+      continue;
+    }
+    const candidate = statement.declarationList.declarations[0];
+    const elements = ts.isArrayBindingPattern(candidate.name) ? candidate.name.elements : [];
+    const first = elements[0];
+    if (
+      elements.length === 1 &&
+      first &&
+      !ts.isOmittedExpression(first) &&
+      ts.isIdentifier(first.name) &&
+      first.name.text === 'accountLease'
+    ) {
+      matches.push(candidate);
+    }
+  }
+  if (matches.length !== 1) return false;
+  const initializer = matches[0].initializer;
+  if (
+    !initializer ||
+    !ts.isCallExpression(initializer) ||
+    directCallName(initializer) !== 'useState' ||
+    initializer.questionDotToken ||
+    initializer.arguments.length !== 1
+  ) {
+    return false;
+  }
+  const capture = initializer.arguments[0];
+  return (
+    ts.isArrowFunction(capture) &&
+    capture.parameters.length === 0 &&
+    directZeroArgumentCall(capture.body, 'captureRealtimeDeliveryLease')
+  );
+}
+
+function isAllowedScheduledIdentifier(identifier, path, sourceFile) {
   const parent = identifier.parent;
   if (ts.isCallExpression(parent) && parent.expression === identifier) {
     return true;
   }
   if (ts.isImportSpecifier(parent) && parent.name === identifier && !parent.propertyName) {
-    return true;
+    const declaration = parent.parent?.parent?.parent;
+    return (
+      ts.isImportDeclaration(declaration) &&
+      moduleSpecifierText(declaration) === SCHEDULED_IMPORTS.get(`${identifier.text}|${path}`)
+    );
   }
   if (
-    path === 'src/services/send/index.ts' &&
+    identifier.text === 'runDueScheduled' &&
+    path === SEND_COMPOSITION_PATH &&
     ts.isExportSpecifier(parent) &&
     parent.name === identifier &&
     !parent.propertyName
   ) {
-    return true;
+    const declaration = parent.parent?.parent;
+    return (
+      ts.isExportDeclaration(declaration) &&
+      moduleSpecifierText(declaration) === './scheduleService'
+    );
   }
   return (
-    path === SCHEDULE_SERVICE_PATH && ts.isFunctionDeclaration(parent) && parent.name === identifier
+    SCHEDULED_DECLARATIONS.get(identifier.text) === path &&
+    ts.isFunctionDeclaration(parent) &&
+    parent.name === identifier &&
+    parent.parent === sourceFile
   );
 }
 
-/** Enforce the reviewed, account-scoped production entry points to the scheduled runner. */
+function statementCanExitOwner(statement) {
+  let canExit = false;
+  function visit(node) {
+    if (canExit) return;
+    if (
+      (ts.isWhileStatement(node) || ts.isDoStatement(node)) &&
+      unwrapStaticExpression(node.expression).kind === ts.SyntaxKind.TrueKeyword
+    ) {
+      canExit = true;
+      return;
+    }
+    if (
+      ts.isForStatement(node) &&
+      (!node.condition || unwrapStaticExpression(node.condition).kind === ts.SyntaxKind.TrueKeyword)
+    ) {
+      canExit = true;
+      return;
+    }
+    if (ts.isCallExpression(node)) {
+      let callee = node.expression;
+      while (
+        ts.isParenthesizedExpression(callee) ||
+        ts.isAsExpression(callee) ||
+        ts.isSatisfiesExpression(callee) ||
+        ts.isTypeAssertionExpression(callee) ||
+        ts.isNonNullExpression(callee)
+      ) {
+        callee = callee.expression;
+      }
+      if (ts.isArrowFunction(callee) || ts.isFunctionExpression(callee)) {
+        canExit = true;
+        return;
+      }
+    }
+    if (node !== statement && ts.isFunctionLike(node)) return;
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
+      canExit = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(statement);
+  return canExit;
+}
+
+function bindingNameContains(name, forbidden) {
+  if (ts.isIdentifier(name)) return forbidden.has(name.text);
+  return name.elements.some(
+    (element) => !ts.isOmittedExpression(element) && bindingNameContains(element.name, forbidden),
+  );
+}
+
+function ownerShadowsBindings(owner, names) {
+  const forbidden = new Set(names);
+  if (owner.parameters.some((parameter) => bindingNameContains(parameter.name, forbidden))) {
+    return true;
+  }
+  let shadowed = false;
+  function visit(node) {
+    if (shadowed) return;
+    if (
+      (ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+      bindingNameContains(node.name, forbidden)
+    ) {
+      shadowed = true;
+      return;
+    }
+    if (
+      node !== owner &&
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name &&
+      forbidden.has(node.name.text)
+    ) {
+      shadowed = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(owner.body);
+  return shadowed;
+}
+
+function exactBackgroundScheduleWiring(sourceFile) {
+  const task = uniqueTopLevelFunction(sourceFile, 'executeBackgroundSyncTask');
+  if (
+    !task ||
+    !task.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ||
+    !task.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+    ownerShadowsBindings(task, ['recoverAndDrainBackgroundSchedules', 'runBackgroundSync'])
+  ) {
+    return false;
+  }
+  const calls = callsNamed(task.body, new Set(['runBackgroundSync']));
+  if (calls.length !== 1 || calls[0].questionDotToken || calls[0].arguments.length !== 1) {
+    return false;
+  }
+  const call = calls[0];
+  const awaited = call.parent;
+  const outcomeDeclaration = awaited?.parent;
+  const declarationList = outcomeDeclaration?.parent;
+  const outcomeStatement = declarationList?.parent;
+  const tryBlock = outcomeStatement?.parent;
+  const tryStatement = tryBlock?.parent;
+  if (
+    !ts.isAwaitExpression(awaited) ||
+    !ts.isVariableDeclaration(outcomeDeclaration) ||
+    !ts.isIdentifier(outcomeDeclaration.name) ||
+    outcomeDeclaration.name.text !== 'outcome' ||
+    outcomeDeclaration.initializer !== awaited ||
+    !ts.isVariableDeclarationList(declarationList) ||
+    !(declarationList.flags & ts.NodeFlags.Const) ||
+    declarationList.declarations.length !== 1 ||
+    !ts.isVariableStatement(outcomeStatement) ||
+    !ts.isBlock(tryBlock) ||
+    tryBlock.statements[0] !== outcomeStatement ||
+    !ts.isTryStatement(tryStatement) ||
+    tryStatement.tryBlock !== tryBlock ||
+    task.body.statements[0] !== tryStatement
+  ) {
+    return false;
+  }
+  const configuration = call.arguments[0];
+  if (!ts.isObjectLiteralExpression(configuration)) return false;
+  if (
+    configuration.properties.some(
+      (property) =>
+        ts.isSpreadAssignment(property) ||
+        ('name' in property && ts.isComputedPropertyName(property.name)),
+    )
+  ) {
+    return false;
+  }
+  const wiring = configuration.properties.filter(
+    (property) =>
+      'name' in property &&
+      (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name)) &&
+      property.name.text === 'recoverAndDrainSchedules',
+  );
+  return (
+    wiring.length === 1 &&
+    ts.isPropertyAssignment(wiring[0]) &&
+    ts.isIdentifier(wiring[0].initializer) &&
+    wiring[0].initializer.text === 'recoverAndDrainBackgroundSchedules'
+  );
+}
+
+function unwrapStaticExpression(node) {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function scheduledElementAliases(sourceFile) {
+  const aliases = new Map();
+  function visit(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isVariableDeclarationList(node.parent) &&
+      Boolean(node.parent.flags & ts.NodeFlags.Const) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      const initializer = unwrapStaticExpression(node.initializer);
+      if (
+        (ts.isStringLiteral(initializer) || ts.isNoSubstitutionTemplateLiteral(initializer)) &&
+        SCHEDULED_DECLARATIONS.has(initializer.text)
+      ) {
+        aliases.set(node.name.text, initializer.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return aliases;
+}
+
+function directHomeScheduledEffect(home) {
+  const effects = home.body.statements
+    .filter(ts.isExpressionStatement)
+    .map((statement) => statement.expression)
+    .filter(
+      (expression) => ts.isCallExpression(expression) && directCallName(expression) === 'useEffect',
+    )
+    .filter((call) => {
+      const callback = call.arguments[0];
+      if (!callback || !ts.isArrowFunction(callback) || !ts.isBlock(callback.body)) return false;
+      return (
+        callsNamed(callback.body, new Set(['fireDueScheduled'])).length === 1 &&
+        callsNamed(callback.body, new Set(['fireDueScheduledWithDevelopmentSender'])).length === 1
+      );
+    });
+  if (effects.length !== 1) return undefined;
+  const effect = effects[0];
+  const effectStatement = effect.parent;
+  const effectIndex = home.body.statements.indexOf(effectStatement);
+  const dependencies = effect.arguments[1];
+  if (
+    !ts.isExpressionStatement(effectStatement) ||
+    effectIndex < 0 ||
+    home.body.statements.slice(0, effectIndex).some(statementCanExitOwner) ||
+    effect.questionDotToken ||
+    effect.arguments.length !== 2 ||
+    !ts.isArrayLiteralExpression(dependencies) ||
+    dependencies.elements.length !== 1 ||
+    !ts.isIdentifier(dependencies.elements[0]) ||
+    dependencies.elements[0].text !== 'accountLease'
+  ) {
+    return undefined;
+  }
+  return effect.arguments[0];
+}
+
+function directChatCatchupCall(inner) {
+  const calls = callsNamed(inner.body, new Set(['useChatScheduledCatchup'])).filter((call) => {
+    const statement = call.parent;
+    return (
+      ts.isExpressionStatement(statement) &&
+      statement.expression === call &&
+      statement.parent === inner.body
+    );
+  });
+  if (
+    calls.length !== 1 ||
+    calls[0].arguments.length !== 1 ||
+    !isIdentifierArgument(calls[0], 0, 'accountLease')
+  ) {
+    return undefined;
+  }
+  const statement = calls[0].parent;
+  const index = inner.body.statements.indexOf(statement);
+  return inner.body.statements.slice(0, index).some(statementCanExitOwner) ? undefined : calls[0];
+}
+
+function reviewedScheduledOwnerErrors(sourceFiles) {
+  const errors = [];
+  const exportedNames = new Set([
+    'fireDueScheduled',
+    'fireDueScheduledWithDevelopmentSender',
+    'useChatScheduledCatchup',
+    'ChatScreen',
+  ]);
+  for (const [key, expectedHash] of REVIEWED_SCHEDULED_SYNTAX_HASHES) {
+    if (key.endsWith('#Home.scheduledEffect')) continue;
+    const separator = key.lastIndexOf('#');
+    const path = key.slice(0, separator);
+    const name = key.slice(separator + 1);
+    const sourceFile = sourceFiles.get(path);
+    const declaration = uniqueTopLevelFunction(sourceFile, name);
+    const exported = declaration?.modifiers?.some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    );
+    const actualHash = declaration ? syntaxHash(declaration, sourceFile) : '<missing>';
+    if (!declaration || (exportedNames.has(name) && !exported) || actualHash !== expectedHash) {
+      errors.push(
+        `${path}#${name} no longer matches its reviewed scheduled-owner fingerprint (expected ${expectedHash}; actual ${actualHash})`,
+      );
+    }
+  }
+
+  const homeSource = sourceFiles.get(HOME_PATH);
+  const home = uniqueTopLevelFunction(homeSource, 'Home');
+  const homeEffect = home ? directHomeScheduledEffect(home) : undefined;
+  if (
+    !home ||
+    !home.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ||
+    !home.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ||
+    !hasExactMountedLease(home) ||
+    ownerShadowsBindings(home, [
+      'captureRealtimeDeliveryLease',
+      'isDevServer',
+      'useEffect',
+      'useState',
+    ]) ||
+    !homeEffect ||
+    syntaxHash(homeEffect, homeSource) !==
+      REVIEWED_SCHEDULED_SYNTAX_HASHES.get(`${HOME_PATH}#Home.scheduledEffect`)
+  ) {
+    errors.push(`${HOME_PATH}#Home no longer matches its reviewed live scheduled-effect owner`);
+  }
+
+  const chatSource = sourceFiles.get(CHAT_ROUTE_PATH);
+  const chatInner = uniqueTopLevelFunction(chatSource, 'ChatScreenInner');
+  if (
+    !chatInner ||
+    !hasExactMountedLease(chatInner) ||
+    ownerShadowsBindings(chatInner, ['captureRealtimeDeliveryLease', 'useState']) ||
+    !directChatCatchupCall(chatInner)
+  ) {
+    errors.push(
+      `${CHAT_ROUTE_PATH}#ChatScreenInner must directly invoke the reviewed catch-up hook with its mounted account lease`,
+    );
+  }
+
+  const backgroundSource = sourceFiles.get(BACKGROUND_SYNC_PATH);
+  if (!backgroundSource || !exactBackgroundScheduleWiring(backgroundSource)) {
+    errors.push(
+      `${BACKGROUND_SYNC_PATH}#executeBackgroundSyncTask must wire the reviewed background schedule owner directly`,
+    );
+  }
+
+  const requiredImports = [
+    ...[...SCHEDULED_IMPORTS].map(([key, module]) => {
+      const separator = key.indexOf('|');
+      return [key.slice(separator + 1), key.slice(0, separator), module];
+    }),
+    [HOME_PATH, 'useEffect', 'react'],
+    [HOME_PATH, 'useState', 'react'],
+    [HOME_PATH, 'captureRealtimeDeliveryLease', '@/services/realtime/deliveryCoordinator'],
+    [HOME_PATH, 'isDevServer', '@utils/isDev'],
+    [CHAT_CATCHUP_PATH, 'useEffect', 'react'],
+    [CHAT_CATCHUP_PATH, 'useRef', 'react'],
+    [CHAT_CATCHUP_PATH, 'isDevServer', '@utils/isDev'],
+    [CHAT_ROUTE_PATH, 'useState', 'react'],
+    [CHAT_ROUTE_PATH, 'captureRealtimeDeliveryLease', '@/services/realtime/deliveryCoordinator'],
+    [SEND_COMPOSITION_PATH, 'getDatabase', '@db/database'],
+    [SEND_COMPOSITION_PATH, 'http', '../clients'],
+    [SEND_COMPOSITION_PATH, 'captureRealtimeDeliveryLease', '../realtime/deliveryCoordinator'],
+    [SEND_COMPOSITION_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
+    [BACKGROUND_SYNC_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
+    [BACKGROUND_SYNC_PATH, 'runBackgroundSync', './backgroundSyncOrchestrator'],
+  ];
+  for (const [path, name, module] of requiredImports) {
+    const sourceFile = sourceFiles.get(path);
+    if (!sourceFile || exactNamedImportCount(sourceFile, name, module) !== 1) {
+      errors.push(`${path} must import ${name} exactly once from ${module}`);
+    }
+  }
+  const sendSource = sourceFiles.get(SEND_COMPOSITION_PATH);
+  if (
+    !sendSource ||
+    exactNamedReexportCount(sendSource, 'runDueScheduled', './scheduleService') !== 1
+  ) {
+    errors.push(
+      `${SEND_COMPOSITION_PATH} must re-export runDueScheduled exactly once from ./scheduleService`,
+    );
+  }
+  for (const [name, path] of SCHEDULED_DECLARATIONS) {
+    const declaration = uniqueTopLevelFunction(sourceFiles.get(path), name);
+    if (
+      !declaration ||
+      !declaration.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    ) {
+      errors.push(`${path} must contain exactly one exported ${name} declaration`);
+    }
+  }
+  return errors;
+}
+
+/** Enforce the reviewed, account-scoped scheduled runner and its reachable foreground wrappers. */
 export function scheduledRunnerUsageErrors(sources) {
   const errors = [];
   const callCounts = new Map();
+  const sourceFiles = new Map();
 
   for (const { path, source } of sources) {
     const sourceFile = ts.createSourceFile(
@@ -975,41 +1533,69 @@ export function scheduledRunnerUsageErrors(sources) {
       true,
       path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
+    const parseDiagnostics = sourceFile.parseDiagnostics ?? [];
+    for (const diagnostic of parseDiagnostics) {
+      errors.push(
+        `${path} has invalid TypeScript syntax: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`,
+      );
+    }
+    if (sourceFiles.has(path)) errors.push(`duplicate scheduled production source: ${path}`);
+    sourceFiles.set(path, sourceFile);
+    if (parseDiagnostics.length > 0) continue;
+    const elementAliases = scheduledElementAliases(sourceFile);
     function visit(node) {
-      if (ts.isCallExpression(node) && directCallName(node) === 'runDueScheduled') {
-        const expected = EXPECTED_RUN_DUE_CALLERS.get(path);
-        callCounts.set(path, (callCounts.get(path) ?? 0) + 1);
+      const symbol = ts.isCallExpression(node) ? directCallName(node) : undefined;
+      if (symbol && SCHEDULED_DECLARATIONS.has(symbol)) {
+        const owner = topLevelFunctionOwner(node, sourceFile);
+        const key = `${symbol}|${path}|${owner}`;
+        const expected = EXPECTED_SCHEDULED_CALLERS.get(key);
+        callCounts.set(key, (callCounts.get(key) ?? 0) + 1);
         if (!expected) {
-          errors.push(`unreviewed production runDueScheduled caller: ${path}`);
+          errors.push(`unreviewed production ${symbol} caller: ${path}#${owner}`);
         } else if (
           node.arguments.length !== expected.argumentCount ||
           node.questionDotToken ||
-          !isIdentifierArgument(node, 4, expected.scope)
+          (expected.scope && !isIdentifierArgument(node, expected.scopeIndex, expected.scope))
         ) {
           errors.push(
-            `${path} must call runDueScheduled with ${expected.argumentCount} arguments and explicit ${expected.scope} account scope in position five`,
+            `${path}#${owner} must call ${symbol} with ${expected.argumentCount} arguments${expected.scope ? ` and explicit ${expected.scope} account scope` : ''}`,
           );
         }
       }
       if (
         ts.isIdentifier(node) &&
-        node.text === 'runDueScheduled' &&
-        !isAllowedRunDueIdentifier(node, path)
+        SCHEDULED_DECLARATIONS.has(node.text) &&
+        !isAllowedScheduledIdentifier(node, path, sourceFile)
       ) {
-        errors.push(`runDueScheduled references and aliases are forbidden in production (${path})`);
+        errors.push(`${node.text} references and aliases are forbidden in production (${path})`);
+      }
+      if (ts.isElementAccessExpression(node) && node.argumentExpression) {
+        const argument = unwrapStaticExpression(node.argumentExpression);
+        const scheduledName =
+          (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) &&
+          SCHEDULED_DECLARATIONS.has(argument.text)
+            ? argument.text
+            : ts.isIdentifier(argument)
+              ? elementAliases.get(argument.text)
+              : undefined;
+        if (scheduledName) {
+          errors.push(
+            `${scheduledName} element-access aliases are forbidden in production (${path})`,
+          );
+        }
       }
       ts.forEachChild(node, visit);
     }
     visit(sourceFile);
   }
 
-  for (const path of EXPECTED_RUN_DUE_CALLERS.keys()) {
-    const count = callCounts.get(path) ?? 0;
+  for (const [key] of EXPECTED_SCHEDULED_CALLERS) {
+    const count = callCounts.get(key) ?? 0;
     if (count !== 1) {
-      errors.push(`${path} must have exactly one direct runDueScheduled call (found ${count})`);
+      errors.push(`${key} must have exactly one direct reviewed call (found ${count})`);
     }
   }
-  return errors;
+  return [...errors, ...reviewedScheduledOwnerErrors(sourceFiles)];
 }
 
 function productionSources(root) {

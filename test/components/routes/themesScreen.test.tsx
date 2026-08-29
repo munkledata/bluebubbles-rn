@@ -6,11 +6,11 @@ import type { ThemeTokens } from '@ui/theme/tokens';
 const mockBack = jest.fn();
 const mockDatabase = {};
 const mockListCustomThemes = jest.fn();
-const mockGetCustomThemeById = jest.fn();
+const mockGetCustomThemeByIdWithinTransaction = jest.fn();
 const mockCreateCustomTheme = jest.fn();
 const mockUpdateCustomTheme = jest.fn();
 const mockDeleteCustomTheme = jest.fn();
-const mockKvGet = jest.fn();
+const mockKvGetWithinTransaction = jest.fn();
 const mockKvSetWithinTransaction = jest.fn();
 const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
   typeof AccessibilityInfo.isReduceMotionEnabled
@@ -75,13 +75,22 @@ jest.mock('@ui', () => {
       onCancel,
       initialName,
       title,
+      cancelRequest = 0,
     }: {
       onApply: (tokens: ThemeTokens, name: string) => Promise<void>;
       onCancel: () => void;
       initialName: string;
       title: string;
-    }) =>
-      React.createElement(
+      cancelRequest?: number;
+    }) => {
+      const lastCancelRequest = React.useRef(cancelRequest);
+      React.useEffect(() => {
+        if (cancelRequest === lastCancelRequest.current) return;
+        lastCancelRequest.current = cancelRequest;
+        onCancel();
+      }, [cancelRequest, onCancel]);
+
+      return React.createElement(
         React.Fragment,
         null,
         React.createElement(Text, { testID: 'mock-theme-identity' }, `${title}:${initialName}`),
@@ -103,7 +112,8 @@ jest.mock('@ui', () => {
           },
           React.createElement(Text, null, 'Save mock theme'),
         ),
-      ),
+      );
+    },
   };
 });
 jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack }) }));
@@ -113,11 +123,12 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
   listCustomThemes: (...args: unknown[]) => mockListCustomThemes(...args),
-  getCustomThemeById: (...args: unknown[]) => mockGetCustomThemeById(...args),
+  getCustomThemeByIdWithinTransaction: (...args: unknown[]) =>
+    mockGetCustomThemeByIdWithinTransaction(...args),
   createCustomThemeWithinTransaction: (...args: unknown[]) => mockCreateCustomTheme(...args),
   updateCustomThemeWithinTransaction: (...args: unknown[]) => mockUpdateCustomTheme(...args),
   deleteCustomThemeWithinTransaction: (...args: unknown[]) => mockDeleteCustomTheme(...args),
-  kvGet: (...args: unknown[]) => mockKvGet(...args),
+  kvGetWithinTransaction: (...args: unknown[]) => mockKvGetWithinTransaction(...args),
   kvSetWithinTransaction: (...args: unknown[]) => mockKvSetWithinTransaction(...args),
 }));
 jest.mock('@db/transaction', () => ({
@@ -128,6 +139,9 @@ jest.mock('@db/transaction', () => ({
   ) => mockWithDbTransaction(db, task, guard),
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+jest.mock('@/services/databaseControl', () => ({
+  ensureDatabase: jest.fn(async () => mockDatabase),
+}));
 
 // eslint-disable-next-line import/first
 import ThemesScreen from '../../../app/(app)/themes';
@@ -168,11 +182,11 @@ beforeEach(() => {
     return { remove: removeReduceMotionListener };
   });
   mockListCustomThemes.mockResolvedValue([ROW]);
-  mockGetCustomThemeById.mockResolvedValue(ROW);
+  mockGetCustomThemeByIdWithinTransaction.mockResolvedValue(ROW);
   mockCreateCustomTheme.mockResolvedValue(91);
   mockUpdateCustomTheme.mockResolvedValue(undefined);
   mockDeleteCustomTheme.mockResolvedValue(undefined);
-  mockKvGet.mockResolvedValue(null);
+  mockKvGetWithinTransaction.mockResolvedValue(null);
   mockKvSetWithinTransaction.mockResolvedValue(undefined);
   mockGetDatabase.mockReturnValue(mockDatabase);
   useThemeStore.setState({ customThemeId: null, customTokens: null });
@@ -201,6 +215,7 @@ function editorModal() {
 async function closeEditor(): Promise<void> {
   const onRequestClose = editorModal().props.onRequestClose as () => void;
   await act(async () => onRequestClose());
+  await waitFor(() => expect(screen.queryByTestId('global-theme-studio-modal')).toBeNull());
 }
 
 describe('ThemesScreen reduced motion', () => {
@@ -414,14 +429,9 @@ describe('ThemesScreen account ownership', () => {
     });
     resumeRealtimeDeliveries();
 
-    // The transaction callback reached its second statement, but the guard rejected the COMMIT.
-    // Real withDbTransaction rolls this whole unit back; most importantly, no stale Zustand theme
-    // is published into the replacement account.
-    expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
-      mockTransactionContext,
-      'theme.custom',
-      '91',
-    );
+    // Revocation is observed immediately after the awaited create, so the transaction never starts
+    // its second write and its guard rejects the COMMIT. No stale Zustand theme reaches account B.
+    expect(mockKvSetWithinTransaction).not.toHaveBeenCalled();
     const guard = mockWithDbTransaction.mock.calls[0]?.[2] as (() => boolean) | undefined;
     expect(guard?.()).toBe(false);
     expect(useThemeStore.getState()).toMatchObject({
@@ -441,7 +451,7 @@ describe('ThemesScreen account ownership', () => {
         '7',
       ),
     );
-    expect(mockGetCustomThemeById).toHaveBeenCalledWith(mockDatabase, 7);
+    expect(mockGetCustomThemeByIdWithinTransaction).toHaveBeenCalledWith(mockTransactionContext, 7);
     expect(useThemeStore.getState()).toMatchObject({
       customThemeId: 7,
       customTokens: gatorTheme,
@@ -449,7 +459,7 @@ describe('ThemesScreen account ownership', () => {
   });
 
   it('clears a deleted persisted pointer without overwriting a newer in-memory theme', async () => {
-    mockKvGet.mockResolvedValue('7');
+    mockKvGetWithinTransaction.mockResolvedValue('7');
     await renderWithTheme(<ThemesScreen />);
     const deleteButton = await screen.findByText('Delete');
     await act(async () => {
@@ -467,7 +477,7 @@ describe('ThemesScreen account ownership', () => {
     );
     await waitFor(() => expect(mockListCustomThemes).toHaveBeenCalledTimes(2));
 
-    expect(mockKvGet).toHaveBeenCalledWith(mockDatabase, 'theme.custom');
+    expect(mockKvGetWithinTransaction).toHaveBeenCalledWith(mockTransactionContext, 'theme.custom');
     expect(mockKvSetWithinTransaction).toHaveBeenCalledWith(
       mockTransactionContext,
       'theme.custom',
@@ -480,7 +490,7 @@ describe('ThemesScreen account ownership', () => {
   });
 
   it('preserves a different persisted pointer while clearing deleted in-memory state', async () => {
-    mockKvGet.mockResolvedValue('8');
+    mockKvGetWithinTransaction.mockResolvedValue('8');
     await renderWithTheme(<ThemesScreen />);
     const deleteButton = await screen.findByText('Delete');
     await act(async () => {

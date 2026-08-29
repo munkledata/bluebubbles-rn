@@ -389,7 +389,10 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
 
     raw.exec('DROP TRIGGER reject_deletion_cursor');
     await expect(syncDeletedMessages(db, api(fetch), { supported: true })).resolves.toBe(1);
-    expect(fetch.mock.calls).toEqual([[1000], [1000]]);
+    expect(fetch.mock.calls).toEqual([
+      [1000, undefined],
+      [1000, undefined],
+    ]);
     expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('2000');
   });
 
@@ -493,7 +496,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
 
     expect(applied).toBe(3);
     expect(fetch).toHaveBeenCalledTimes(1); // short page → no loop
-    expect(fetch).toHaveBeenCalledWith(1000);
+    expect(fetch).toHaveBeenCalledWith(1000, undefined);
     const t = tombstones(raw);
     expect(t.get('m1')).toBe(2000);
     expect(t.get('m2')).toBe(3000);
@@ -527,7 +530,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
 
     // Second run: a row at the exact advanced watermark may re-emit; it changes nothing.
     await expect(syncDeletedMessages(db, api(fetch), { supported: true })).resolves.toBe(1);
-    expect(fetch).toHaveBeenLastCalledWith(3000);
+    expect(fetch).toHaveBeenLastCalledWith(3000, undefined);
     expect(tombstones(raw)).toEqual(first);
     expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('3000');
   });

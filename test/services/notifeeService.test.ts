@@ -725,7 +725,7 @@ describe('postNotification — facetime-call', () => {
     isAudio: false,
   };
 
-  it('rings with the caller name, CALL category, ongoing + full-screen + Answer/Decline', async () => {
+  it('rings with the caller name, CALL category, ongoing + Answer/Decline', async () => {
     await postNotification(call);
     const n = lastNotif();
     expect(n.id).toBe('gator-facetime-7f000000-0000-4000-8000-000000000001');
@@ -742,7 +742,7 @@ describe('postNotification — facetime-call', () => {
     expect(n.android?.category).toBe('call');
     expect(n.android?.ongoing).toBe(true);
     expect(n.android?.autoCancel).toBe(false);
-    expect(n.android?.fullScreenAction).toEqual({ id: 'default', launchActivity: 'default' });
+    expect(n.android?.fullScreenAction).toBeUndefined();
     const actions = n.android?.actions as Array<any>;
     expect(actions.map((a) => a.pressAction.id)).toEqual([
       ACTION_DECLINE_FACETIME,
