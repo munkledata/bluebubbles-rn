@@ -13,7 +13,13 @@ import {
 } from 'react-native';
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DRAFT_KV_PREFIX, getChatParticipants, kvGet, type MessagePreview } from '@db/repositories';
+import {
+  DRAFT_KV_PREFIX,
+  getChatParticipants,
+  kvGet,
+  type MessagePreview,
+  type MessageWindowAnchor,
+} from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { dispatchRealtimeEvent, saveChatDraft, sendTyping } from '@/services';
 import { getDatabase } from '@db/database';
@@ -42,6 +48,7 @@ import {
   devSendFakeReply,
 } from '@features/conversations/devSeed';
 import { useChatHeader } from '@features/conversations/useChatHeader';
+import { useChatSearch } from '@features/conversations/useChatSearch';
 import { useMessageActions } from '@features/conversations/useMessageActions';
 import { useMessages } from '@features/conversations/useMessages';
 import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
@@ -53,6 +60,7 @@ import { useChatScheduledCatchup } from '@features/conversations/useChatSchedule
 import { isDevServer } from '@utils/isDev';
 import {
   Composer,
+  ChatSearchBar,
   ConversationHeader,
   EditHistorySheet,
   MessageActionsOverlay,
@@ -157,12 +165,7 @@ export default function ChatScreen(): React.JSX.Element {
   const screenKey = `${guid}|${focus ?? ''}|${focusDate ?? ''}|${share ?? ''}`;
   return (
     <ChatThemeProvider key={screenKey} guid={guid}>
-      <ChatScreenInner
-        guid={guid}
-        focusGuid={focus}
-        focusDate={focusDate}
-        fromShare={share === '1'}
-      />
+      <ChatScreenInner guid={guid} focusGuid={focus} fromShare={share === '1'} />
     </ChatThemeProvider>
   );
 }
@@ -170,12 +173,10 @@ export default function ChatScreen(): React.JSX.Element {
 function ChatScreenInner({
   guid,
   focusGuid,
-  focusDate,
   fromShare = false,
 }: {
   guid: string;
   focusGuid?: string;
-  focusDate?: string;
   fromShare?: boolean;
 }): React.JSX.Element {
   // This lease belongs to THIS mounted chat. Dialogs, pickers and lazy callbacks can outlive the
@@ -189,21 +190,41 @@ function ChatScreenInner({
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
-  // When focusing a search hit, load a window CENTERED on it (context on both sides) instead of the
-  // recent window; otherwise the normal recent window. ONE message subscription for the whole screen
-  // — fed to the list and the screen-effect trigger (avoids doubling the query work).
-  const anchorNum = focusDate ? Number(focusDate) : NaN;
-  const routeAnchorDate = Number.isFinite(anchorNum) ? anchorNum : undefined;
-  // "Jump to oldest unread" reuses the search-hit anchor plumbing: tapping the chip anchors the
-  // window on the first unread message (declared here, above useMessages, for hook order).
-  const [jump, setJump] = useState<{ guid: string; dateCreated: number } | null>(null);
-  const anchorDate = routeAnchorDate ?? jump?.dateCreated;
-  const effFocusGuid = focusGuid ?? jump?.guid;
+  // Search hits, reminders, unread jumps, and thread jumps all use exact message identity. The DB
+  // resolves that identity to a stable (date,id) window, so null/equal timestamps cannot strand the
+  // requested bubble outside the loaded context.
+  const [jump, setJump] = useState<MessageWindowAnchor | null>(null);
+  const routeAnchor: MessageWindowAnchor | undefined = focusGuid ? { guid: focusGuid } : undefined;
+  const anchor = jump ?? routeAnchor;
+  const effFocusGuid = jump?.guid ?? focusGuid;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchIndex, setSearchIndex] = useState(0);
+  const [searchNavigating, setSearchNavigating] = useState(false);
+  const searchOpenRef = useRef(searchOpen);
+  searchOpenRef.current = searchOpen;
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
+  const searchNavigationTokenRef = useRef(0);
+  const appliedSearchKeyRef = useRef('');
+
+  // A short debounce keeps typing responsive without querying FTS for every keypress.
+  useEffect(() => {
+    const trimmed = searchText.trim();
+    if (!searchOpen || trimmed.length < 3) {
+      setSearchQuery('');
+      return;
+    }
+    const timer = setTimeout(() => setSearchQuery(trimmed), 250);
+    return () => clearTimeout(timer);
+  }, [searchOpen, searchText]);
+  const chatSearch = useChatSearch(guid, searchQuery, accountLease);
   // The message window grows as the user scrolls back through history (see onLoadOlder). Starts at
   // one screen-worth+ and pages by PAGE_SIZE. In search-anchor mode the window is centered on the
   // hit instead (limit is ignored), so pagination is disabled there.
   const [limit, setLimit] = useState(250);
-  const { data: messagesData, error: messagesError } = useMessages(guid, limit, anchorDate);
+  const { data: messagesData, error: messagesError } = useMessages(guid, limit, anchor);
   const messages = messagesData ?? [];
   // Hold the list back until the FIRST DB read resolves, so FlashList mounts WITH data. Its
   // `startRenderingFromBottom` only anchors the newest message on the INITIAL render (verified
@@ -219,23 +240,121 @@ function ChatScreenInner({
     loadingOlderRef.current = false;
   }, [messages.length]);
   const onLoadOlder = useCallback((): void => {
-    if (anchorDate != null || loadingOlderRef.current) return;
+    if (anchor != null || loadingOlderRef.current) return;
     if (messages.length < limit) return;
     loadingOlderRef.current = true;
     setLimit((n) => n + 200);
-  }, [anchorDate, messages.length, limit]);
+  }, [anchor, messages.length, limit]);
   // The list's scroll-to-bottom button in an ANCHORED session (search hit / unread jump): exit the
   // anchor and return to the live newest window. Clearing the route params changes `screenKey`
   // (clean remount → normal bottom-anchored open); clearing only `jump` keeps the instance, and
   // the anchored→normal data swap converges to the newest row via the list's pinned follow loop.
-  // '' (not undefined) is the strict-TS-safe way to drop a param — the existing guards treat ''
-  // as absent (`focusDate ? … : NaN`, findIndex('') === -1).
+  // '' (not undefined) is the strict-TS-safe way to drop a param — the existing focus-guid guard
+  // treats it as absent (`findIndex('') === -1`). `focusDate` remains in old deep links only for
+  // compatibility; exact message identity now owns the window lookup.
   const router = useRouter();
   const navigation = useNavigation();
   const exitAnchor = useCallback((): void => {
     setJump(null);
     router.setParams({ focus: '', focusDate: '' });
   }, [router]);
+
+  const closeSearch = useCallback((): void => {
+    searchNavigationTokenRef.current += 1;
+    appliedSearchKeyRef.current = '';
+    setSearchOpen(false);
+    setSearchText('');
+    setSearchQuery('');
+    setSearchIndex(0);
+    setSearchNavigating(false);
+    // Search uses a bounded context window. Return to the live newest window before the composer
+    // becomes usable again, or a send outside that old window can look as though it disappeared.
+    exitAnchor();
+  }, [exitAnchor]);
+  const exitSearchAnchor = useCallback((): void => {
+    if (searchOpenRef.current) closeSearch();
+    else exitAnchor();
+  }, [closeSearch, exitAnchor]);
+  const onSearchTextChange = useCallback((value: string): void => {
+    searchNavigationTokenRef.current += 1;
+    appliedSearchKeyRef.current = '';
+    setSearchText(value);
+    setSearchIndex(0);
+    setSearchNavigating(false);
+    // Do not leave a stale prior-query result highlighted while the next query is debouncing.
+    setJump(null);
+  }, []);
+
+  // Select the newest hit once for each completed query. Later page loads reuse the same key and
+  // therefore cannot snap the reader back to result zero.
+  useEffect(() => {
+    if (!searchOpen || searchQuery.length < 3) return;
+    const key = `${accountLease.generation}\u0000${guid}\u0000${searchQuery}`;
+    if (chatSearch.isPending || appliedSearchKeyRef.current === key) return;
+    appliedSearchKeyRef.current = key;
+    searchNavigationTokenRef.current += 1;
+    setSearchIndex(0);
+    setSearchNavigating(false);
+    const first = chatSearch.results[0];
+    setJump(first ? { id: first.id, guid: first.guid } : null);
+  }, [
+    accountLease.generation,
+    chatSearch.isPending,
+    chatSearch.results,
+    guid,
+    searchOpen,
+    searchQuery,
+  ]);
+
+  const moveToSearchResult = useCallback(
+    async (targetIndex: number): Promise<void> => {
+      if (targetIndex < 0 || targetIndex >= chatSearch.totalCount || searchNavigating) return;
+      const key = searchQuery;
+      const token = searchNavigationTokenRef.current + 1;
+      searchNavigationTokenRef.current = token;
+      setSearchNavigating(true);
+      let available = chatSearch.results;
+      try {
+        if (!available[targetIndex] && chatSearch.hasNextPage) {
+          const next = await chatSearch.fetchNextPage();
+          available = next.data?.pages.flatMap((page) => page.results) ?? available;
+        }
+        if (
+          token !== searchNavigationTokenRef.current ||
+          !searchOpenRef.current ||
+          searchQueryRef.current !== key ||
+          !accountLease.isCurrent()
+        ) {
+          return;
+        }
+        const result = available[targetIndex];
+        if (!result) return;
+        setSearchIndex(targetIndex);
+        setJump({ id: result.id, guid: result.guid });
+      } catch {
+        // TanStack exposes the page error through the hook; keep the current result in place.
+      } finally {
+        if (token === searchNavigationTokenRef.current && searchOpenRef.current) {
+          setSearchNavigating(false);
+        }
+      }
+    },
+    [
+      accountLease,
+      chatSearch.fetchNextPage,
+      chatSearch.hasNextPage,
+      chatSearch.results,
+      chatSearch.totalCount,
+      searchNavigating,
+      searchQuery,
+    ],
+  );
+  const goToOlderSearchResult = useCallback((): void => {
+    void moveToSearchResult(searchIndex + 1);
+  }, [moveToSearchResult, searchIndex]);
+  const goToNewerSearchResult = useCallback((): void => {
+    void moveToSearchResult(searchIndex - 1);
+  }, [moveToSearchResult, searchIndex]);
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
   // Group participants for @mention autocomplete (reactive so contact-sync name updates flow in).
@@ -379,6 +498,18 @@ function ChatScreenInner({
     setEditing,
   });
 
+  const toggleSearch = useCallback((): void => {
+    if (searchOpenRef.current) {
+      closeSearch();
+      return;
+    }
+    // Search and message actions are separate modes. Dismiss action/select UI before focusing the
+    // search field, while leaving composer draft/attachment/edit state mounted and intact below.
+    setSelected(null);
+    setSelectedGuids(null);
+    setSearchOpen(true);
+  }, [closeSearch, setSelected, setSelectedGuids]);
+
   // Per-chat draft: restore on open, persist (debounced in the Composer) via kv `draft.<guid>`.
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => {
@@ -418,6 +549,7 @@ function ChatScreenInner({
   });
   const backConfirmationPendingRef = useRef(false);
   const shouldHandleBack =
+    searchOpen ||
     selectedGuids != null ||
     replyTo != null ||
     editing != null ||
@@ -426,6 +558,10 @@ function ChatScreenInner({
   // Android/Header Back peels the active chat layer before removing the route. Ordinary body text
   // is not included: Composer already flushes it to the per-chat DB draft on route removal.
   usePreventRemove(shouldHandleBack, ({ data }) => {
+    if (searchOpen) {
+      closeSearch();
+      return;
+    }
     if (selectedGuids != null) {
       setSelectedGuids(null);
       return;
@@ -581,20 +717,61 @@ function ChatScreenInner({
   // 94, not 74: the header gained a second line (the contact's number under their name), which
   // adds ~20dp for a 1:1 chat. Only governs the frames before onLayout lands on a cold mount.
   const topBar = headerH > 0 ? headerH : insets.top + 94;
-  const bottomBar = bottomBarH > 0 ? bottomBarH : insets.bottom + 54;
+  const bottomBar = searchOpen ? 0 : bottomBarH > 0 ? bottomBarH : insets.bottom + 54;
+
+  const trimmedSearchText = searchText.trim();
+  const searchWaiting =
+    trimmedSearchText.length >= 3 &&
+    (trimmedSearchText !== searchQuery || (chatSearch.isPending && !chatSearch.data));
+  const searchLoading = searchWaiting || searchNavigating || chatSearch.isFetchingNextPage;
+  // A failed older-results page must not discard results that are already on screen. Keep newer
+  // navigation available and let the older button retry; show the error only when nothing loaded.
+  const initialSearchFailed = chatSearch.isError && chatSearch.results.length === 0;
+  const searchStatus =
+    trimmedSearchText.length < 3
+      ? 'Type at least 3 characters'
+      : searchWaiting
+        ? 'Searching…'
+        : initialSearchFailed
+          ? 'Couldn’t search messages'
+          : chatSearch.totalCount === 0
+            ? 'No results'
+            : `Result ${Math.max(chatSearch.totalCount - searchIndex, 1)} of ${chatSearch.totalCount}`;
+  const canGoOlder =
+    !searchLoading && !initialSearchFailed && searchIndex + 1 < chatSearch.totalCount;
+  const canGoNewer = !searchLoading && !initialSearchFailed && searchIndex > 0;
 
   const headerNode = (
-    <ConversationHeader chatGuid={guid} data={header.data} translucent={hasWallpaper} />
+    <ConversationHeader
+      chatGuid={guid}
+      data={header.data}
+      translucent={hasWallpaper}
+      onSearchPress={toggleSearch}
+      searchActive={searchOpen}
+    />
   );
+  const searchNode = searchOpen ? (
+    <ChatSearchBar
+      value={searchText}
+      onChangeText={onSearchTextChange}
+      status={searchStatus}
+      loading={searchLoading}
+      canGoOlder={canGoOlder}
+      canGoNewer={canGoNewer}
+      onGoOlder={goToOlderSearchResult}
+      onGoNewer={goToNewerSearchResult}
+      translucent={hasWallpaper}
+    />
+  ) : null;
   const errorNode = messagesError ? (
     <Text style={styles.errorBanner}>Couldn’t load messages. Pull to refresh or reopen.</Text>
   ) : null;
   // "N unread — jump to first" chip under the header; tap anchors the list on the oldest unread.
   const unreadChipNode =
-    firstUnread && !jump ? (
+    !searchOpen && firstUnread && !jump ? (
       <Pressable
         onPress={() => {
-          setJump({ guid: firstUnread.guid, dateCreated: firstUnread.dateCreated });
+          setJump({ guid: firstUnread.guid });
           setFirstUnread(null);
         }}
         style={[styles.unreadChip, { backgroundColor: theme.color.tint }]}
@@ -620,14 +797,15 @@ function ChatScreenInner({
       hasBackground={hasWallpaper}
       topInset={hasWallpaper ? topBar + BAR_GAP : 0}
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
-      onLongPressMessage={onLongPressMessage}
-      onSwipeReply={onSwipeReply}
+      onLongPressMessage={searchOpen ? undefined : onLongPressMessage}
+      onSwipeReply={searchOpen ? undefined : onSwipeReply}
       onRefresh={() => backfillChatUnlessDeleted(guid, accountLease)}
       onLoadOlder={onLoadOlder}
       focusGuid={effFocusGuid}
-      selectedGuids={selectedGuids}
-      onToggleSelect={onToggleSelect}
-      onExitAnchor={anchorDate != null || effFocusGuid ? exitAnchor : undefined}
+      focusMessageId={jump?.id}
+      selectedGuids={searchOpen ? null : selectedGuids}
+      onToggleSelect={searchOpen ? undefined : onToggleSelect}
+      onExitAnchor={anchor != null ? exitSearchAnchor : undefined}
       accountLease={accountLease}
     />
   );
@@ -663,12 +841,13 @@ function ChatScreenInner({
     </View>
   ) : null;
 
+  const composerHidden = selectedGuids != null || searchOpen;
   const composerStack = (
     <View
-      style={selectedGuids ? styles.hiddenComposer : null}
-      pointerEvents={selectedGuids ? 'none' : 'auto'}
-      accessibilityElementsHidden={selectedGuids != null}
-      importantForAccessibility={selectedGuids ? 'no-hide-descendants' : 'auto'}
+      style={composerHidden ? styles.hiddenComposer : null}
+      pointerEvents={composerHidden ? 'none' : 'auto'}
+      accessibilityElementsHidden={composerHidden}
+      importantForAccessibility={composerHidden ? 'no-hide-descendants' : 'auto'}
     >
       {isTyping ? <TypingBubble /> : null}
       {/* Renders nothing unless this chat has an upload in flight. It lives INSIDE the measured
@@ -704,7 +883,7 @@ function ChatScreenInner({
         initialText={draft ?? sharedText ?? undefined}
         onDraftChange={onDraftChange}
         initialAttachments={sharedAttachments.length > 0 ? sharedAttachments : undefined}
-        active={selectedGuids == null && screenFocused}
+        active={!composerHidden && screenFocused}
         onRemovalStateChange={setComposerRemovalState}
       />
     </View>
@@ -756,6 +935,7 @@ function ChatScreenInner({
             onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
           >
             {headerNode}
+            {searchNode}
             {errorNode}
             {unreadChipNode}
           </View>
@@ -831,7 +1011,7 @@ function ChatScreenInner({
       <ThreadSheet
         originatorGuid={threadFor}
         onClose={() => setThreadFor(null)}
-        onJump={(m) => setJump({ guid: m.guid, dateCreated: m.dateCreated })}
+        onJump={(m) => setJump({ guid: m.guid })}
       />
       <EditHistorySheet data={editHistory} onClose={() => setEditHistory(null)} />
       <MessageDetailsSheet

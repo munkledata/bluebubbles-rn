@@ -147,8 +147,31 @@ describe('paginate + around windows', () => {
     for (const d of [10, 20, 30, 40, 50]) {
       await put(db, chatId, hm, { guid: `a${d}`, text: `t${d}`, dateCreated: d });
     }
-    const around = await listMessagesAround(db, chatId, 30, 1, 1); // 1 older(+anchor) & 1 newer
+    const around = await listMessagesAround(db, chatId, { guid: 'a30' }, 1, 1);
     expect(around.map((m) => m.guid)).toEqual(['a40', 'a30', 'a20']);
+  });
+
+  it('listMessagesAround keeps exact local identity across equal/null dates and guid promotion', async () => {
+    const { db, raw } = await createTestDb();
+    const { chatId, hm } = await seedChat(db);
+    for (const guid of ['same-1', 'same-2', 'same-3']) {
+      await put(db, chatId, hm, { guid, text: guid, dateCreated: 30 });
+    }
+    const targetId = Number(col(raw, 'same-2', 'id'));
+    expect(
+      (await listMessagesAround(db, chatId, { id: targetId, guid: 'same-2' }, 1, 1)).map(
+        (m) => m.guid,
+      ),
+    ).toEqual(['same-3', 'same-2', 'same-1']);
+
+    raw
+      .prepare("UPDATE messages SET guid = 'same-promoted', date_created = NULL WHERE id = ?")
+      .run(targetId);
+    expect(
+      (await listMessagesAround(db, chatId, { id: targetId, guid: 'same-2' }, 0, 1)).map(
+        (m) => m.guid,
+      ),
+    ).toEqual(['same-1', 'same-promoted']);
   });
 });
 

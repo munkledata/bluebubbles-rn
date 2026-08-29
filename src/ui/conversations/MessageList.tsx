@@ -68,6 +68,8 @@ interface MessageListProps {
   onLoadOlder?: () => void;
   /** A message guid to scroll to + highlight once on open (set when arriving from a search hit). */
   focusGuid?: string;
+  /** Local row identity for an in-chat hit; survives a temp-guid promotion while search is open. */
+  focusMessageId?: number;
   /** Multi-select mode: the selected guids (null/undefined = off) + the toggle callback. */
   selectedGuids?: Set<string> | null;
   onToggleSelect?: (msg: EnrichedMessage) => void;
@@ -102,6 +104,7 @@ export function MessageList({
   onRefresh,
   onLoadOlder,
   focusGuid,
+  focusMessageId,
   selectedGuids,
   onToggleSelect,
   onExitAnchor,
@@ -182,11 +185,14 @@ export function MessageList({
   // yet). Instead we REMOUNT the list keyed to the target with `initialScrollIndex` — a reliable
   // mount-time scroll — once the target is in the loaded window. If it's not loaded, the chat just
   // opens normally (no jump).
-  const focusIndex = useMemo(
-    () => (focusGuid ? rows.findIndex((m) => m.guid === focusGuid) : -1),
-    [focusGuid, rows],
-  );
-  const focusReady = focusGuid != null && focusIndex >= 0;
+  const focusIndex = useMemo(() => {
+    if (focusMessageId != null) return rows.findIndex((m) => m.id === focusMessageId);
+    return focusGuid ? rows.findIndex((m) => m.guid === focusGuid) : -1;
+  }, [focusGuid, focusMessageId, rows]);
+  const focusKey =
+    focusMessageId != null ? `id:${focusMessageId}` : focusGuid ? `guid:${focusGuid}` : null;
+  const focusedMessageGuid = focusIndex >= 0 ? rows[focusIndex]?.guid : undefined;
+  const focusReady = focusKey != null && focusedMessageGuid != null;
 
   // ---- pinned-to-bottom follow model (pure decisions in @utils scrollPin, node-tested) --------
   // `pinned` = follow the newest message: while pinned, EVERY content-size change re-scrolls to
@@ -253,9 +259,9 @@ export function MessageList({
   const focusIndexRef = useRef(focusIndex);
   focusIndexRef.current = focusIndex;
   useEffect(() => {
-    if (!focusReady || focusedRef.current === focusGuid) return;
-    focusedRef.current = focusGuid ?? null;
-    setHighlightGuid(focusGuid ?? null);
+    if (!focusReady || focusedRef.current === focusKey) return;
+    focusedRef.current = focusKey;
+    setHighlightGuid(focusedMessageGuid ?? null);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 3000);
     if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
@@ -270,7 +276,7 @@ export function MessageList({
         // initialScrollIndex already placed it; centering is best-effort.
       }
     }, 450);
-  }, [focusReady, focusGuid]);
+  }, [focusKey, focusReady, focusedMessageGuid]);
 
   // Unmount: clear all delayed one-shots so a late fire can't setState/scroll a dead list.
   useEffect(
@@ -385,7 +391,7 @@ export function MessageList({
         // Remount keyed to the focus target so initialScrollIndex (mount-time) lands on it; else
         // keyed by chat guid so a REUSED screen instance (a chat opened via replace over another
         // chat) re-mounts the list and re-runs onLoad → lands the new thread at its newest message.
-        key={focusReady ? `focus-${focusGuid}` : `list-${chatGuid}`}
+        key={focusReady ? `focus-${focusKey}` : `list-${chatGuid}`}
         ref={listRef}
         data={rows}
         keyExtractor={(m: EnrichedMessage) => m.guid}

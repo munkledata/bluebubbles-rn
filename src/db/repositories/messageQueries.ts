@@ -31,9 +31,135 @@ export async function searchMessages(
   const rows = await db.all<Record<string, unknown>>(
     // The FTS index still holds a tombstoned message's text (setting date_deleted only re-indexes
     // the unchanged text), so a deleted message must be excluded at QUERY time — it VANISHES.
-    sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ${match} AND m.date_deleted IS NULL ORDER BY rank LIMIT ${limit}`,
+    sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid
+        WHERE messages_fts MATCH ${match}
+          AND ${notAnOverlayMessage()}
+          AND m.date_retracted IS NULL
+          AND m.date_deleted IS NULL
+        ORDER BY rank LIMIT ${limit}`,
   );
   return rows;
+}
+
+export const CHAT_SEARCH_PAGE_SIZE = 50;
+
+export interface ChatSearchCursor {
+  dateCreated: number | null;
+  id: number;
+  /** Highest matching local row id observed by the initial page. */
+  maxMessageId: number;
+}
+
+export interface ChatSearchResultRow {
+  id: number;
+  guid: string;
+  /** Epoch milliseconds, or null when the server supplied no timestamp. */
+  dateCreated: number | null;
+  text: string | null;
+  /** A short, match-centered excerpt for display in the in-chat result list. */
+  snippet: string | null;
+  isFromMe: number;
+  senderName: string | null;
+  senderAddress: string | null;
+}
+
+export interface ChatSearchPage {
+  results: ChatSearchResultRow[];
+  nextCursor: ChatSearchCursor | null;
+  hasMore: boolean;
+  /** Present on the initial page; later pages avoid repeating the full count. */
+  totalCount: number | null;
+}
+
+interface ChatSearchQueryRow extends ChatSearchResultRow {
+  totalCount: number | null;
+  maxMessageId: number | null;
+}
+
+/**
+ * Search one chat's complete local FTS history in fixed-size, newest-first pages.
+ *
+ * The `(dateCreated, id)` keyset cursor gives equal-timestamp messages a deterministic order. Its
+ * initial max-id snapshot prevents newly inserted rows from shifting later pages. Null dates live
+ * in an explicit final bucket instead of being conflated with a real timestamp.
+ */
+export async function searchMessagesInChat(
+  db: AppDatabase,
+  chatGuid: string,
+  queryText: string,
+  cursor: ChatSearchCursor | null = null,
+): Promise<ChatSearchPage> {
+  const match = toFtsQuery(queryText);
+  if (!match || !chatGuid) {
+    return { results: [], nextCursor: null, hasMore: false, totalCount: cursor ? null : 0 };
+  }
+
+  const eligible = sql`
+    messages_fts MATCH ${match}
+    AND c.guid = ${chatGuid}
+    AND ${notAnOverlayMessage()}
+    AND m.date_retracted IS NULL
+    AND m.date_deleted IS NULL
+    AND ${chatVisible('c')}
+  `;
+  const cursorPredicate = !cursor
+    ? sql``
+    : cursor.dateCreated == null
+      ? sql`AND m.date_created IS NULL AND m.id < ${cursor.id}`
+      : sql`AND (
+          m.date_created IS NULL
+          OR m.date_created < ${cursor.dateCreated}
+          OR (m.date_created = ${cursor.dateCreated} AND m.id < ${cursor.id})
+        )`;
+  // FTS5 auxiliary functions such as snippet() cannot share a SELECT context with window
+  // functions. Compute the initial count/fence in a CTE so this remains one coherent read statement
+  // without putting COUNT/MAX windows beside the outer snippet(). Later pages reuse the fence.
+  const metadata = cursor
+    ? sql`SELECT ${cursor.maxMessageId} AS maxMessageId, NULL AS totalCount`
+    : sql`
+        SELECT MAX(m.id) AS maxMessageId, COUNT(*) AS totalCount
+        FROM messages_fts
+        JOIN messages m ON m.id = messages_fts.rowid
+        JOIN chats c ON c.id = m.chat_id
+        WHERE ${eligible}
+      `;
+
+  const rows = await db.all<ChatSearchQueryRow>(sql`
+    WITH search_metadata AS (${metadata})
+    SELECT m.id, m.guid, m.date_created AS dateCreated,
+           m.text, snippet(messages_fts, 0, '', '', '…', 12) AS snippet,
+           m.is_from_me AS isFromMe,
+           COALESCE(h.display_name, h.address) AS senderName,
+           h.address AS senderAddress,
+           search_metadata.maxMessageId, search_metadata.totalCount
+    FROM messages_fts
+    JOIN messages m ON m.id = messages_fts.rowid
+    JOIN chats c ON c.id = m.chat_id
+    LEFT JOIN handles h ON h.id = m.handle_id
+    CROSS JOIN search_metadata
+    WHERE ${eligible}
+      AND m.id <= search_metadata.maxMessageId
+      ${cursorPredicate}
+    ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, m.id DESC
+    LIMIT ${CHAT_SEARCH_PAGE_SIZE + 1}
+  `);
+
+  const hasMore = rows.length > CHAT_SEARCH_PAGE_SIZE;
+  const pageRows = hasMore ? rows.slice(0, CHAT_SEARCH_PAGE_SIZE) : rows;
+  const results: ChatSearchResultRow[] = pageRows.map((row: ChatSearchQueryRow) => {
+    const { totalCount: _totalCount, maxMessageId: _maxMessageId, ...result } = row;
+    return result;
+  });
+  const last = results.at(-1);
+  const maxMessageId = cursor?.maxMessageId ?? Number(rows[0]?.maxMessageId ?? 0);
+
+  return {
+    results,
+    hasMore,
+    nextCursor:
+      hasMore && last ? { dateCreated: last.dateCreated, id: last.id, maxMessageId } : null,
+    totalCount: cursor ? null : Number(rows[0]?.totalCount ?? 0),
+  };
 }
 
 export interface SearchResultRow {
@@ -93,7 +219,8 @@ export async function searchMessagesEnriched(
     JOIN chats c ON c.id = m.chat_id
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE messages_fts MATCH ${match}
-      AND m.associated_message_type IS NULL
+      AND ${notAnOverlayMessage()}
+      AND m.date_retracted IS NULL
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
     ORDER BY m.date_created DESC
@@ -344,37 +471,78 @@ export async function listMessagesWithSenders(
   );
 }
 
+export interface MessageWindowAnchor {
+  guid: string;
+  /** Local row id is available for in-chat hits; global deep links resolve by guid alone. */
+  id?: number;
+}
+
+interface ResolvedMessageWindowAnchor {
+  id: number;
+  dateCreated: number | null;
+}
+
 /**
- * Messages in a WINDOW centered on `anchorDate` (a search/jump target's date_created): up to
- * `before` messages older-or-equal (including the target itself) AND up to `after` messages newer,
- * so the thread shows context on BOTH sides of the hit. Returns newest-first (the list contract),
- * with the target roughly in the middle. This is the fix for "jump to a search hit shows nothing
- * around it" — the old path loaded the target and everything NEWER only, so a hit near the tail
- * (e.g. a recent RCS code) opened to just the one message.
+ * Messages in a WINDOW centered on one exact message: up to `before` older messages (plus the
+ * target) and up to `after` newer messages. The stable `(date_created, id)` comparisons guarantee
+ * the target is included even when its date is null or more than a full window shares its timestamp.
  */
 export async function listMessagesAround(
   db: AppDatabase,
   chatId: number,
-  anchorDate: number,
+  anchor: MessageWindowAnchor,
   before = 150,
   after = 150,
 ): Promise<MessageRow[]> {
+  const identityPredicate =
+    anchor.id != null ? sql`m.id = ${anchor.id}` : sql`m.guid = ${anchor.guid}`;
+  const anchors = await db.all<ResolvedMessageWindowAnchor>(sql`
+    SELECT m.id, m.date_created AS dateCreated
+    FROM messages m
+    WHERE m.chat_id = ${chatId}
+      AND ${identityPredicate}
+      AND ${notAnOverlayMessage()}
+      AND m.date_deleted IS NULL
+    ORDER BY m.id DESC
+    LIMIT 1
+  `);
+  const target = anchors[0];
+  if (!target) return [];
+
+  const olderPredicate =
+    target.dateCreated == null
+      ? sql`AND m.date_created IS NULL AND m.id <= ${target.id}`
+      : sql`AND (
+          m.date_created IS NULL
+          OR m.date_created < ${target.dateCreated}
+          OR (m.date_created = ${target.dateCreated} AND m.id <= ${target.id})
+        )`;
+  const newerPredicate =
+    target.dateCreated == null
+      ? sql`AND (
+          m.date_created IS NOT NULL
+          OR (m.date_created IS NULL AND m.id > ${target.id})
+        )`
+      : sql`AND m.date_created IS NOT NULL AND (
+          m.date_created > ${target.dateCreated}
+          OR (m.date_created = ${target.dateCreated} AND m.id > ${target.id})
+        )`;
+
   const older = await queryMessageRows(
     db,
     chatId,
-    sql`AND m.date_created <= ${anchorDate}`,
-    sql`ORDER BY m.date_created DESC, m.id DESC`,
+    olderPredicate,
+    sql`ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, m.id DESC`,
     before + 1, // +1 so the anchor row itself is included alongside `before` older ones
   );
   const newer = await queryMessageRows(
     db,
     chatId,
-    sql`AND m.date_created > ${anchorDate}`,
-    sql`ORDER BY m.date_created ASC, m.id ASC`,
+    newerPredicate,
+    sql`ORDER BY (m.date_created IS NULL) DESC, m.date_created ASC, m.id ASC`,
     after,
   );
-  // Newest-first: the newer set (ASC) reversed to DESC, then the older set (already DESC, with
-  // the anchor first). The two sides are disjoint (<= vs >), so no row appears twice.
+  // Newest-first: the newer set is read closest-first then reversed; older already starts at target.
   return [...newer.reverse(), ...older];
 }
 
@@ -400,7 +568,8 @@ export async function searchChatGuidsByMessage(
     JOIN messages m ON m.id = f.rowid
     JOIN chats c ON c.id = m.chat_id
     WHERE messages_fts MATCH ${match}
-      AND m.associated_message_type IS NULL
+      AND ${notAnOverlayMessage()}
+      AND m.date_retracted IS NULL
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
     LIMIT ${limit}

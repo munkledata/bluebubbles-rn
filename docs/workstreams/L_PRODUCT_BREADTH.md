@@ -17,9 +17,17 @@ tombstone, unread-floor, preview, and page-completeness rules unchanged.
 
 ## `FEAT-02` — in-chat search and safe entities
 
-Search all qualifying nondeleted messages, including unloaded pages, with stable next/previous
-navigation and highlighting. Extend entity detection only through conservative parsing and explicit
-scheme/action allowlists so a false positive cannot invoke an unsafe target.
+Deliver this as two independent slices:
+
+1. `FEAT-02A` searches every qualifying message already stored in the encrypted local database for
+   the open chat. Use newest-first keyset pages, a fixed per-search row-id fence, exact message
+   identity for navigation, and the message renderer's overlay/deletion/retraction policy. Search
+   mode preserves the mounted composer, disables conflicting message actions, and highlights each
+   selected result. Closing search returns to the live newest window before restoring the composer.
+   It does not claim to find history that still exists only on the Mac/server.
+2. `FEAT-02B` extends entity detection only through conservative parsing and explicit scheme/action
+   allowlists so a false positive cannot invoke an unsafe target. Keep it separate from search so
+   URL/phone/date action policy receives its own focused design and review.
 
 <a id="feat-03"></a>
 

@@ -27,6 +27,9 @@ interface ConversationHeaderProps {
   data: ChatHeaderRow | null;
   /** A chat wallpaper is set → tint the bar translucent so the image shows through (no black bar). */
   translucent?: boolean;
+  /** Toggle the conversation-local message search controls. */
+  onSearchPress?: () => void;
+  searchActive?: boolean;
 }
 
 /** iOS conversation nav bar: back chevron + centered avatar + title. */
@@ -34,6 +37,8 @@ export function ConversationHeader({
   chatGuid,
   data,
   translucent = false,
+  onSearchPress,
+  searchActive = false,
 }: ConversationHeaderProps): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
@@ -100,6 +105,20 @@ export function ConversationHeader({
             <Text style={[styles.back, { color: theme.color.tint }]}>‹</Text>
           </View>
         </Pressable>
+        {onSearchPress ? (
+          <Pressable
+            onPress={onSearchPress}
+            hitSlop={12}
+            style={styles.side}
+            accessibilityRole="button"
+            accessibilityLabel={searchActive ? 'Close conversation search' : 'Search conversation'}
+            accessibilityState={{ expanded: searchActive }}
+          >
+            <View style={bubble}>
+              <Icon name={searchActive ? 'close' : 'search'} size={23} color={theme.color.tint} />
+            </View>
+          </Pressable>
+        ) : null}
       </View>
       <Pressable
         onPress={() => router.push(`/chat-settings/${encodeURIComponent(chatGuid)}`)}
@@ -194,8 +213,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  // Equal-width side groups (88 = two 44 slots) keep the centered title balanced even
-  // though the left has one button and the right has two.
+  // Equal-width side groups (88 = two 44 slots) keep the centered title balanced around the
+  // back/search pair and the FaceTime/scheduled pair.
   leftGroup: {
     width: 88,
     flexDirection: 'row',

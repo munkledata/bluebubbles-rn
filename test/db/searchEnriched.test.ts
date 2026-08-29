@@ -1,8 +1,10 @@
 import { Chat, Message } from '@core/models';
 import {
   deleteChatLocal,
+  getChatIdByGuid,
   markMessageDeleted,
   searchChatGuidsByMessage,
+  searchMessagesInChat,
   searchMessagesEnriched,
   upsertChats,
   upsertHandles,
@@ -128,5 +130,64 @@ describe('searchMessagesEnriched', () => {
       'm1',
       'm9',
     ]);
+  });
+});
+
+describe('searchMessagesInChat', () => {
+  it('keeps one stable chat-scoped page set across equal/null dates and later inserts', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const chatId = (await getChatIdByGuid(db, 'c-craig'))!;
+    const matching = Array.from({ length: 52 }, (_, index) =>
+      Message.parse({ guid: `needle-${index}`, text: 'needle body', dateCreated: 1000 }),
+    );
+    matching.push(
+      Message.parse({
+        guid: 'needle-overlay',
+        text: 'needle overlay',
+        dateCreated: 1001,
+        associatedMessageGuid: 'needle-0',
+        associatedMessageType: 'love',
+      }),
+      Message.parse({
+        guid: 'needle-retracted',
+        text: 'needle revoked',
+        dateCreated: 1002,
+        dateRetracted: 1003,
+      }),
+    );
+    await upsertMessages(db, matching, () => chatId, new Map());
+    raw.prepare("UPDATE messages SET date_created = NULL WHERE guid = 'needle-0'").run();
+
+    const first = await searchMessagesInChat(db, 'c-craig', 'needle');
+    expect(first.totalCount).toBe(52);
+    expect(first.results).toHaveLength(50);
+    expect(first.hasMore).toBe(true);
+    expect(first.nextCursor).not.toBeNull();
+
+    // This matching row arrived after the initial snapshot and must not shift page two.
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'needle-late', text: 'needle late', dateCreated: 1000 })],
+      () => chatId,
+      new Map(),
+    );
+    const second = await searchMessagesInChat(db, 'c-craig', 'needle', first.nextCursor);
+    const frozen = [...first.results, ...second.results];
+    expect(second.results).toHaveLength(2);
+    expect(new Set(frozen.map((row) => row.id)).size).toBe(52);
+    expect(frozen.map((row) => row.guid)).not.toContain('needle-late');
+    expect(frozen.at(-1)?.dateCreated).toBeNull();
+
+    const otherMap = await upsertChats(db, [Chat.parse({ guid: 'c-other' })], new Map());
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'needle-other', text: 'needle elsewhere', dateCreated: 2000 })],
+      () => otherMap.get('c-other')!,
+      new Map(),
+    );
+    expect(
+      (await searchMessagesInChat(db, 'c-other', 'needle')).results.map((r) => r.guid),
+    ).toEqual(['needle-other']);
   });
 });

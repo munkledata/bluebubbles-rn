@@ -703,7 +703,7 @@ describe('conversation-view repositories', () => {
     const { db } = await createTestDb();
     const chatId = await seed(db);
     // Anchor on the middle message (m2 @ 200): both the newer (m3) and older (m1) appear.
-    const rows = await listMessagesAround(db, chatId, 200);
+    const rows = await listMessagesAround(db, chatId, { guid: 'm2' });
     expect(rows.map((r) => r.guid)).toEqual(['m3', 'm2', 'm1']); // newest-first, anchor centered
   });
 
@@ -712,7 +712,7 @@ describe('conversation-view repositories', () => {
     const chatId = await seed(db);
     // Old bug: jumping to a hit that's the newest message showed just that one message. The
     // window must still pull the older ones below it.
-    const rows = await listMessagesAround(db, chatId, 300);
+    const rows = await listMessagesAround(db, chatId, { guid: 'm3' });
     expect(rows.map((r) => r.guid)).toEqual(['m3', 'm2', 'm1']);
   });
 
@@ -720,7 +720,7 @@ describe('conversation-view repositories', () => {
     const { db } = await createTestDb();
     const chatId = await seed(db);
     // Anchor m1 (@100) with before=0, after=1 → only the anchor + one newer (m3 excluded).
-    const rows = await listMessagesAround(db, chatId, 100, 0, 1);
+    const rows = await listMessagesAround(db, chatId, { guid: 'm1' }, 0, 1);
     expect(rows.map((r) => r.guid)).toEqual(['m2', 'm1']);
   });
 

@@ -140,10 +140,10 @@ beforeEach(() => {
 });
 
 describe('useMessages', () => {
-  it('subscribes to the right tables and passes [chatGuid, limit, anchorDate] as deps', async () => {
-    await renderHook(() => useMessages('iMessage;-;c1', 100, 12345));
+  it('subscribes to the right tables and passes exact anchor primitives as deps', async () => {
+    await renderHook(() => useMessages('iMessage;-;c1', 100, { guid: 'anchor-guid', id: 12345 }));
     expect(mockReactiveArgs.tables).toEqual(['messages', 'handles', 'attachments']);
-    expect(mockReactiveArgs.deps).toEqual(['iMessage;-;c1', 100, 12345]);
+    expect(mockReactiveArgs.deps).toEqual(['iMessage;-;c1', 100, 'anchor-guid', 12345]);
   });
 
   it('returns [] and skips downstream reads for an unknown chat guid', async () => {
@@ -201,12 +201,13 @@ describe('useMessages', () => {
     expect(result.current.data![1]!.replyPreview?.guid).toBe('orig-x');
   });
 
-  it('loads the centered window (listMessagesAround) when anchorDate is set', async () => {
+  it('loads the centered window (listMessagesAround) when an exact anchor is set', async () => {
     mAround.mockResolvedValue([mkMessage({ id: 9, guid: 'msg-9' })]);
-    const { result } = await renderHook(() => useMessages('iMessage;-;c1', 100, 77777));
+    const anchor = { guid: 'msg-9', id: 9 };
+    const { result } = await renderHook(() => useMessages('iMessage;-;c1', 100, anchor));
     await waitFor(() => expect(result.current.data).toHaveLength(1));
 
-    expect(mAround).toHaveBeenCalledWith(undefined, 10, 77777);
+    expect(mAround).toHaveBeenCalledWith(undefined, 10, anchor);
     expect(mRecent).not.toHaveBeenCalled();
   });
 

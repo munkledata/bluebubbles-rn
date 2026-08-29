@@ -2,6 +2,7 @@ export * from './ConversationTile';
 export * from './ConversationListScreen';
 export * from './ChatActionsSheet';
 export * from './ConversationHeader';
+export * from './ChatSearchBar';
 export * from './MessageList';
 export * from './MessageBubble';
 export * from './MessageRow';

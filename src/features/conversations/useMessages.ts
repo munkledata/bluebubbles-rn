@@ -11,6 +11,7 @@ import {
   type AttachmentRow,
   type MessagePreview,
   type MessageRow,
+  type MessageWindowAnchor,
   type ReactionRow,
   type StickerRow,
 } from '@db/repositories';
@@ -35,15 +36,16 @@ export interface EnrichedMessage extends MessageWithAttachments {
 
 /**
  * Live, newest-first messages for a chat with attachments, reactions, and reply quotes.
- * `anchorDate` (set when opening from a search hit) loads a WINDOW centered on that message —
- * context on both sides — instead of the recent `limit` window, so the hit isn't stranded with
- * nothing around it.
+ * `anchor` identifies the exact search/reminder hit to center in a context window instead of the
+ * recent `limit` window. Global routes provide its guid; an in-chat result also supplies local id.
  */
 export function useMessages(
   chatGuid: string,
   limit = 100,
-  anchorDate?: number,
+  anchor?: MessageWindowAnchor,
 ): ReactiveState<EnrichedMessage[]> {
+  const anchorGuid = anchor?.guid;
+  const anchorId = anchor?.id;
   // Every reactive flush rebuilds every row object; reconcile against the previous pass so an
   // UNCHANGED message keeps its identity and the memoized MessageRow/MessageBubble don't re-render
   // (the same churn that caused the ImageAttachment re-download storm). Keyed by guid, fingerprinted
@@ -56,8 +58,12 @@ export function useMessages(
       const chatId = await getChatIdByGuid(db, chatGuid);
       if (chatId == null) return [];
       const msgs =
-        anchorDate != null
-          ? await listMessagesAround(db, chatId, anchorDate)
+        anchorGuid != null
+          ? await listMessagesAround(
+              db,
+              chatId,
+              anchorId == null ? { guid: anchorGuid } : { guid: anchorGuid, id: anchorId },
+            )
           : await listMessagesWithSenders(db, chatId, limit);
 
       // Load attachments by actual stored rows, NOT by gating on `hasAttachments`: the server
@@ -99,6 +105,6 @@ export function useMessages(
       );
     },
     TABLES,
-    [chatGuid, limit, anchorDate],
+    [chatGuid, limit, anchorGuid, anchorId],
   );
 }
