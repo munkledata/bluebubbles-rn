@@ -153,24 +153,25 @@ cd android
   :gator-paste-input:compileDebugKotlin \
   :gator-share-shortcuts:compileDebugKotlin \
   :gator-bounded-download:compileDebugKotlin \
+  :gator-screen-security:compileDebugKotlin \
   :app:assembleDebug \
-  :app:bundleRelease \
   --no-daemon
+./gradlew :app:bundleRelease --no-daemon
 cd ..
 npm run check:android-build
 ```
 
-- [x] All three local Expo modules are discovered by autolinking and compile through Expo's aggregate
+- [ ] All four local Expo modules are discovered by autolinking and compile through Expo's aggregate
       Android module during the app builds.
-- [x] The candidate is a new signed native build; this project does not currently ship
+- [ ] The candidate is a new signed native build; this project does not currently ship
       `expo-updates` or EAS update channels.
-- [x] The release bundle/export completes with production behavior (`__DEV__` false).
-- [x] The generated entry still registers FCM, notification, and background tasks before
+- [ ] The release bundle/export completes with production behavior (`__DEV__` false).
+- [ ] The generated entry still registers FCM, notification, and background tasks before
       `expo-router/entry`.
-- [x] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
+- [ ] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
       guard.
-- [x] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, and
-      `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
+- [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
+      `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
 - [ ] The AAB hash at the top of this file is computed after all checks and is the artifact uploaded
       to Play.
