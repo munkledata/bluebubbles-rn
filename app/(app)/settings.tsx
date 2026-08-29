@@ -171,7 +171,8 @@ export default function SettingsScreen(): React.JSX.Element {
     general: 'general app lock biometric reminders backup find my location',
     messaging: 'messaging private api typing indicators read receipts subject lines',
     conversation: 'conversation message view send with return enter delivery timestamps',
-    chatlist: 'chat list conversations compact dense appearance unknown senders filter spam',
+    chatlist:
+      'chat list conversations compact dense appearance unknown senders filter spam folders groups organize',
     notifications:
       'notifications alerts message notifications sound battery optimization background doze delivery reliable',
     downloads:
@@ -593,6 +594,13 @@ export default function SettingsScreen(): React.JSX.Element {
               value={filterUnknownSenders}
               onValueChange={(v) => void setFlag('filterUnknownSenders', v)}
               accessibilityLabel="Move chats from non-contacts to a separate list and silence their notifications"
+            />
+            <NavRow
+              label="Conversation Folders…"
+              onPress={() => {
+                if (accountCurrent) router.push('/folders');
+              }}
+              disabled={!accountCurrent}
             />
           </SettingsSection>
         )}

@@ -26,6 +26,8 @@ export interface UseChatsOptions {
   filters?: InboxFilters;
   /** Exact active/unknown count for the main inbox's page-external footer. */
   countUnknown?: boolean;
+  /** Stop the query and native subscription immediately when the owning account is retired. */
+  enabled?: boolean;
 }
 
 export interface ChatsState extends ReactiveState<InboxRow[]> {
@@ -59,6 +61,7 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
         ? Math.max(1, Math.floor(options.pageSize))
         : 50;
   const queryKey = `${archive}|${queryFilters.read}|${queryFilters.sender}|${queryFilters.kind}|${queryFilters.mute}|${queryFilters.service}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
+  const enabled = options.enabled !== false;
   const [pageRequest, setPageRequest] = useState(() => ({
     key: queryKey,
     limit: requestedPageSize ?? 0,
@@ -95,11 +98,12 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
     },
     TABLES,
     [queryKey, limit, includeArchived],
+    { enabled },
   );
 
-  const current = state.data?.key === queryKey ? state.data : null;
+  const current = enabled && state.data?.key === queryKey ? state.data : null;
   const loadMore = useCallback((): void => {
-    if (requestedPageSize == null || !current?.hasMore) return;
+    if (!enabled || requestedPageSize == null || !current?.hasMore) return;
     const loaded = current.rows.length;
     setPageRequest((previous) => {
       const previousLimit = previous.key === queryKey ? previous.limit : requestedPageSize;
@@ -110,12 +114,12 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
       }
       return { key: queryKey, limit: previousLimit + requestedPageSize };
     });
-  }, [current, queryKey, requestedPageSize]);
+  }, [current, enabled, queryKey, requestedPageSize]);
 
   return {
     data: current?.rows ?? null,
-    isLoading: state.isLoading || (current == null && state.error == null),
-    error: state.error,
+    isLoading: enabled && (state.isLoading || (current == null && state.error == null)),
+    error: enabled ? state.error : null,
     hasMore: current?.hasMore ?? false,
     loadMore,
     unknownCount: current?.unknownCount ?? 0,

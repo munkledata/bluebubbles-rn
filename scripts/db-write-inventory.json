@@ -173,7 +173,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2",
       "path": "app/(app)/settings.tsx",
-      "line": 213,
+      "line": 214,
       "symbol": "SettingsScreen.onDisconnect.onPress",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#forget",
@@ -186,7 +186,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>:mutator-call:ac9fcd609606",
       "path": "app/(app)/settings.tsx",
-      "line": 238,
+      "line": 239,
       "symbol": "SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#rotateDatabaseKey",
