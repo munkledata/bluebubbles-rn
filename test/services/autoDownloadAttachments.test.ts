@@ -95,6 +95,7 @@ describe('autoDownloadMessageAttachments', () => {
     await autoDownloadMessageAttachments(db, 1);
     expect(mockList).toHaveBeenCalledWith(db, [1], MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE, {
       excludeDeletedMessages: true,
+      excludePluginPayloads: true,
     });
     expect(mockDownload).not.toHaveBeenCalled();
   });

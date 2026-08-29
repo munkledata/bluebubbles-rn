@@ -88,6 +88,28 @@ describe('buildPreview', () => {
     ).toBe('📎 Attachment');
   });
 
+  it('uses the safe interactive label before any extension attachment description', () => {
+    expect(
+      buildPreview({
+        ...base,
+        lastText: '\uFFFC',
+        lastHasAttachments: 1,
+        lastHasVisibleAttachments: 0,
+        lastBalloonBundleId: 'com.apple.Handwriting.HandwritingProvider',
+      }),
+    ).toBe('Handwritten message');
+    expect(
+      buildPreview({
+        ...base,
+        lastText: null,
+        lastHasAttachments: 1,
+        lastHasVisibleAttachments: 1,
+        lastAttachmentDescription: 'a smiling cat',
+        lastBalloonBundleId: 'untrusted.example.extension',
+      }),
+    ).toBe('Interactive message');
+  });
+
   it('relabels reactions', () => {
     expect(buildPreview({ ...base, lastText: null, lastAssociatedType: 'love' })).toBe(
       'Loved a message',

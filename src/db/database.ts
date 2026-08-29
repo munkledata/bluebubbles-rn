@@ -161,8 +161,8 @@ export function getRawDatabase(): RawDb {
 const DRIVER_SELF_TEST_DB_NAME = 'driver-selftest.db';
 const DRIVER_SELF_TEST_KEY_BYTES = 32;
 const DRIVER_SELF_TEST_REACTIVE_TIMEOUT_MS = 5_000;
-const DRIVER_SELF_TEST_MIGRATION_COUNT = 40 as const;
-const DRIVER_SELF_TEST_MIGRATION_HEAD = '0040_chats_pin_order' as const;
+const DRIVER_SELF_TEST_MIGRATION_COUNT = 41 as const;
+const DRIVER_SELF_TEST_MIGRATION_HEAD = '0041_message_balloon_bundle_id' as const;
 const DRIVER_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DRIVER_HISTORY_SELF_TEST_DB_NAME = 'driver-history-selftest.db';
 const DRIVER_HISTORY_SELF_TEST_KEY = 'db-03b2a-public-throwaway-key-v1';
@@ -1749,8 +1749,8 @@ const DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME = 'driver-runtime-concurrency-selfte
 // These public DEV-only keys protect no user data and open only the fixed disposable file above.
 const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A = 'db-02c-public-throwaway-key-a-v1';
 const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B = 'db-02c-public-throwaway-key-b-v1';
-const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 40 as const;
-const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD = '0040_chats_pin_order' as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 41 as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD = '0041_message_balloon_bundle_id' as const;
 const DB_RUNTIME_CONCURRENCY_SENTINEL_KEY = 'gator-db-runtime-wave-sentinel';
 const DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE = 'committed';
 
@@ -2018,8 +2018,8 @@ const DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL = 'driver-relaunch-continuity-v1';
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD = '0029_chats_deleted_at';
 const DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START = '0030_attachment_cache_entries';
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 40 as const;
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0040_chats_pin_order' as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 41 as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0041_message_balloon_bundle_id' as const;
 
 export interface DbProcessRelaunchPrepareChecks {
   preCleanup: boolean;
@@ -2863,8 +2863,8 @@ const DB_ACTIVE_MIGRATION_DEATH_SELF_TEST_KEY = 'db-03b2b2-public-throwaway-key-
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT = 37;
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD = '0037_purge_legacy_redacted_mode_setting' as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET = '0038_scrub_reaction_selected_message_text' as const;
-const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0040_chats_pin_order' as const;
-const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 40 as const;
+const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0041_message_balloon_bundle_id' as const;
+const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 41 as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT = 128;
 const DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH = 8_192;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_SQL = `UPDATE outgoing_queue

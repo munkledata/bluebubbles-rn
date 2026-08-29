@@ -711,6 +711,72 @@ describe('MessageBubble text rendering', () => {
   });
 });
 
+describe('MessageBubble unsupported interactive fallback', () => {
+  it('shows a safe handwriting label, anchors reactions, and never mounts its plugin payload', async () => {
+    const balloonBundleId = 'com.apple.Handwriting.HandwritingProvider';
+    const reaction: ReactionRow = {
+      targetGuid: 'msg-1',
+      baseType: 'love',
+      emoji: null,
+      isFromMe: 0,
+      senderName: 'Bob',
+      dateCreated: 1_000,
+    };
+    await renderWithTheme(
+      <MessageBubble
+        msg={{
+          ...makeMsg({ text: '', balloonBundleId, reactions: [reaction] }),
+          // A lean notification can omit hideAttachment. The balloon identity must still keep this
+          // private extension blob out of AttachmentView.
+          attachments: [
+            {
+              guid: 'private-plugin-payload',
+              mimeType: 'application/octet-stream',
+              hideAttachment: 0,
+            } as AttachmentRow,
+          ],
+        }}
+        showTail
+      />,
+    );
+
+    expect(screen.getByText('Handwritten message')).toBeTruthy();
+    expect(screen.getByText('This message type isn’t supported yet.')).toBeTruthy();
+    expect(screen.getByText(reactionMeta('love').emoji)).toBeTruthy();
+    expect(screen.queryByText(balloonBundleId)).toBeNull();
+    expect(attachmentModuleMocks.AttachmentView).not.toHaveBeenCalled();
+    expect(attachmentModuleMocks.AttachmentGalleryGrid).not.toHaveBeenCalled();
+  });
+
+  it('anchors a tapback to a payload-backed URL card when the card is the only visible content', async () => {
+    const reaction: ReactionRow = {
+      targetGuid: 'url-balloon',
+      baseType: 'like',
+      emoji: null,
+      isFromMe: 0,
+      senderName: 'Bob',
+      dateCreated: 1_000,
+    };
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({
+          guid: 'url-balloon',
+          text: '',
+          balloonBundleId: 'com.apple.messages.URLBalloonProvider',
+          payloadData: PRIVATE_PAYLOAD,
+          reactions: [reaction],
+        })}
+        showTail
+      />,
+    );
+
+    expect(screen.getByTestId('url-preview-card')).toBeTruthy();
+    expect(screen.getByText(PRIVATE_PAYLOAD_TITLE)).toBeTruthy();
+    expect(screen.getByText(reactionMeta('like').emoji)).toBeTruthy();
+    expect(screen.queryByText('Link preview unavailable')).toBeNull();
+  });
+});
+
 describe('MessageBubble Genmoji attachment', () => {
   const genmojiMsg = () => ({
     ...makeMsg({ text: '' }),

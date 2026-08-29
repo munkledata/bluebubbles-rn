@@ -95,6 +95,10 @@ export function upsertAttachmentsWithinTransaction(
           width: sql`COALESCE(excluded.width, ${attachments.width})`,
           height: sql`COALESCE(excluded.height, ${attachments.height})`,
           transferName: sql`COALESCE(excluded.transfer_name, ${attachments.transferName})`,
+          // Notification-shaped payloads omit hideAttachment and insert it as 0. A later hydrated
+          // sync must be able to promote the row to hidden; once private plugin data is known to be
+          // hidden, a leaner re-upsert must never expose it again.
+          hideAttachment: sql`MAX(excluded.hide_attachment, ${attachments.hideAttachment})`,
           emojiImageContentIdentifier: sql`excluded.emoji_image_content_identifier`,
           emojiImageShortDescription: sql`excluded.emoji_image_short_description`,
         },
@@ -160,6 +164,8 @@ const RCS_SERVICE_CASE = sql`CASE WHEN c.guid LIKE 'RCS;-;%' THEN 'RCS' ELSE NUL
  */
 export interface ListAttachmentsByMessageIdsOptions {
   excludeDeletedMessages?: boolean;
+  /** Omit private Apple Messages extension payloads even when a lean event missed their hide bit. */
+  excludePluginPayloads?: boolean;
 }
 
 export async function listAttachmentsByMessageIds(
@@ -178,6 +184,9 @@ export async function listAttachmentsByMessageIds(
   const deletedMessageFilter = options.excludeDeletedMessages
     ? sql`AND m.date_deleted IS NULL`
     : sql``;
+  const pluginPayloadFilter = options.excludePluginPayloads
+    ? sql`AND a.hide_attachment = 0 AND m.balloon_bundle_id IS NULL`
+    : sql``;
   const rows = await db.all<AttachmentRow>(sql`
     SELECT
       a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
@@ -193,6 +202,7 @@ export async function listAttachmentsByMessageIds(
     JOIN chats c ON c.id = m.chat_id
     WHERE a.message_id IN (${inList})
       ${deletedMessageFilter}
+      ${pluginPayloadFilter}
     ORDER BY a.id ASC
     LIMIT ${rowLimit ?? -1}
   `);
@@ -286,10 +296,17 @@ export async function listStickersForTargets(
   return out;
 }
 
-export async function getAttachmentByGuid(
+async function queryAttachmentByGuid(
   db: AppDatabase,
   guid: string,
+  visibleOnly: boolean,
 ): Promise<AttachmentRow | null> {
+  const visibilityFilter = visibleOnly
+    ? sql`AND a.hide_attachment = 0
+          AND m.balloon_bundle_id IS NULL
+          AND m.date_retracted IS NULL
+          AND m.date_deleted IS NULL`
+    : sql``;
   const rows = await db.all<AttachmentRow>(sql`
     SELECT a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
       a.transfer_name AS transferName, a.total_bytes AS totalBytes, a.height, a.width, a.blurhash,
@@ -302,9 +319,27 @@ export async function getAttachmentByGuid(
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
     JOIN chats c ON c.id = m.chat_id
-    WHERE a.guid = ${guid} LIMIT 1
+    WHERE a.guid = ${guid}
+      ${visibilityFilter}
+    LIMIT 1
   `);
   return rows[0] ?? null;
+}
+
+/** Unrestricted identity lookup for internal transfer/retry bookkeeping. */
+export async function getAttachmentByGuid(
+  db: AppDatabase,
+  guid: string,
+): Promise<AttachmentRow | null> {
+  return queryAttachmentByGuid(db, guid, false);
+}
+
+/** User-visible media-route admission; private extension payloads fail closed. */
+export async function getVisibleAttachmentByGuid(
+  db: AppDatabase,
+  guid: string,
+): Promise<AttachmentRow | null> {
+  return queryAttachmentByGuid(db, guid, true);
 }
 
 /**
@@ -336,6 +371,7 @@ export async function listChatImageAttachmentsByAttachmentGuid(
       AND a.mime_type LIKE 'image/%'
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
+      AND m.balloon_bundle_id IS NULL
       AND m.date_retracted IS NULL
       AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, a.id ASC
@@ -392,6 +428,7 @@ export async function listChatAttachmentsByKind(
     WHERE c.guid = ${chatGuid}
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
+      AND m.balloon_bundle_id IS NULL
       AND m.date_retracted IS NULL
       AND m.date_deleted IS NULL
     ORDER BY m.date_created DESC, a.id DESC

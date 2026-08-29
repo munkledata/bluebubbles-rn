@@ -741,4 +741,20 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX chats_pin_order_idx ON chats (is_pinned, pin_order, id)`,
     ],
   },
+  {
+    // Preserve the server's Messages extension identity so unsupported Digital Touch,
+    // handwriting, and third-party balloons can render a safe local fallback instead of blank.
+    // Existing messages intentionally start NULL and gain the identifier on their next sync.
+    name: '0041_message_balloon_bundle_id',
+    statements: [
+      `ALTER TABLE messages ADD COLUMN balloon_bundle_id TEXT
+        CONSTRAINT messages_balloon_bundle_id_bounded
+        CHECK (
+          balloon_bundle_id IS NULL OR (
+            length(balloon_bundle_id) BETWEEN 1 AND 255
+            AND length(CAST(balloon_bundle_id AS BLOB)) <= 1024
+          )
+        )`,
+    ],
+  },
 ];

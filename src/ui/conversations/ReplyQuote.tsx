@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import type { MessagePreview } from '@db/repositories';
+import { buildMessageSnippet } from '@utils';
 import { useTheme } from '../theme';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
 
@@ -36,9 +37,14 @@ export function ReplyQuote({
     theme.color.label,
   ).color;
   const who = preview.isFromMe === 1 ? 'You' : (preview.senderName ?? 'Unknown');
-  const text =
-    (preview.text ?? '') ||
-    (preview.hasAttachments === 1 ? preview.attachmentDescription?.trim() || '📎 Attachment' : '');
+  const text = buildMessageSnippet({
+    text: preview.text,
+    subject: preview.subject,
+    hasAttachments: preview.hasAttachments,
+    hasVisibleAttachments: preview.hasVisibleAttachments,
+    attachmentDescription: preview.attachmentDescription,
+    balloonBundleId: preview.balloonBundleId,
+  });
 
   return (
     <Pressable

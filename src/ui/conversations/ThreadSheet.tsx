@@ -9,7 +9,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { getDatabase } from '@db/database';
 import { listThreadMessages, type MessageRow } from '@db/repositories';
-import { formatTime } from '@utils';
+import { buildMessageSnippet, formatTime } from '@utils';
 import { useTheme } from '../theme';
 
 interface ThreadSheetProps {
@@ -257,7 +257,14 @@ export function ThreadSheet({
                     </Text>
                   </View>
                   <Text numberOfLines={3} style={[styles.body, { color: theme.color.label }]}>
-                    {m.text ?? m.attachmentDescription ?? '📎 Attachment'}
+                    {buildMessageSnippet({
+                      text: m.text,
+                      subject: m.subject,
+                      hasAttachments: m.hasAttachments,
+                      hasVisibleAttachments: m.hasVisibleAttachments,
+                      attachmentDescription: m.attachmentDescription,
+                      balloonBundleId: m.balloonBundleId,
+                    }) || 'Message'}
                   </Text>
                 </Pressable>
               );

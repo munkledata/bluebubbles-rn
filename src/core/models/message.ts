@@ -72,6 +72,20 @@ export const PayloadData = z
   .loose();
 export type PayloadData = z.infer<typeof PayloadData>;
 
+// Keep explicit malformed/oversized values distinguishable from a genuinely absent identifier.
+// The private sentinel is persisted only to choose the generic local fallback; it is never shown.
+const UNKNOWN_BALLOON_BUNDLE_ID = 'gator.invalid-balloon-bundle-id';
+const BalloonBundleId = z.preprocess((value) => {
+  if (value == null) return value;
+  if (typeof value !== 'string') return UNKNOWN_BALLOON_BUNDLE_ID;
+  // SQLite's length(TEXT) stops at U+0000, so a raw NUL could pass this model's JavaScript length
+  // check and then violate the database constraint. Collapse it to the same safe local sentinel as
+  // every other malformed identifier before it reaches persistence.
+  return value.trim().length > 0 && value.length <= 255 && !value.includes('\0')
+    ? value
+    : UNKNOWN_BALLOON_BUNDLE_ID;
+}, z.string().max(255).nullish());
+
 /**
  * A single message (Flutter: Message). Reactions are modelled server-side as
  * "associated messages" carrying an `associatedMessageType` (e.g. "love",
@@ -127,6 +141,15 @@ export const Message = z.object({
    * read back tolerantly via {@link parsePayloadData}.
    */
   payloadData: PayloadData.nullish().catch(undefined),
+
+  /**
+   * Apple Messages extension identifier (Digital Touch, handwriting, third-party iMessage apps,
+   * and other interactive balloons). The identifier is presentation metadata only: Gator uses it
+   * to replace an otherwise blank payload with a generic local label and never displays the raw
+   * value. Invalid or oversized server values normalize to a private generic-fallback sentinel so
+   * one bad message cannot reject a whole sync page or recreate the blank-message path.
+   */
+  balloonBundleId: BalloonBundleId,
 
   hasAttachments: z.boolean().nullish(),
   attachments: z.array(Attachment).nullish(),

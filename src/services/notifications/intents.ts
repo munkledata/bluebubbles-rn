@@ -8,7 +8,7 @@ import {
   isMessageNotificationEligible,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { stripAttachmentPlaceholder } from '@utils';
+import { buildMessageSnippet } from '@utils';
 import { localFailedMessageRoute } from './notificationRouting';
 
 /**
@@ -92,12 +92,6 @@ export async function buildMessageIntents(
       const isGroup = (header?.participantCount ?? 0) > 1;
       const chatTitle =
         header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
-      // Genmoji (macOS 15.1+): a Genmoji attachment carries a natural-language description ("a
-      // smiling cat wearing a top hat") — a far better notification body than "📎 Attachment".
-      // Presence-driven, so plain images/other attachments have none. The intent carries this
-      // ordinary detailed body; the independent App Lock path substitutes a fixed generic notice
-      // before native presentation.
-      const genmojiDescription = currentPreview.attachmentDescription?.trim();
       return [
         {
           kind: 'message',
@@ -109,13 +103,17 @@ export async function buildMessageIntents(
           // draws a generic person-silhouette placeholder. The intent carries the ordinary avatar;
           // the App Lock path publishes only its fixed generic notice before native presentation.
           avatarUri: profile?.avatar ?? undefined,
-          // Attachment messages carry U+FFFC placeholder text (renders as an empty box); strip it
-          // and fall back to the Genmoji description (if any), else a generic label — so the
-          // notification never shows a bare box.
+          // Resolve from current DB truth. Text/subject and real attachments win; a hidden Messages
+          // extension payload gets a fixed local label, never its raw bundle identifier.
           body:
-            stripAttachmentPlaceholder(currentPreview.text) ||
-            genmojiDescription ||
-            '📎 Attachment',
+            buildMessageSnippet({
+              text: currentPreview.text,
+              subject: currentPreview.subject,
+              hasAttachments: currentPreview.hasAttachments,
+              hasVisibleAttachments: currentPreview.hasVisibleAttachments,
+              attachmentDescription: currentPreview.attachmentDescription,
+              balloonBundleId: currentPreview.balloonBundleId,
+            }) || 'Message',
           messageGuid: m.guid,
           timestamp: m.dateCreated ?? Date.now(),
           isGroup,

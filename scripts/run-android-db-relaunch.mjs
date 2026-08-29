@@ -19,8 +19,8 @@ import {
 export const RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 export const RELAUNCH_SUITE = 'android-db-relaunch';
 export const RELAUNCH_SCHEMA = 1;
-export const RELAUNCH_MIGRATION_COUNT = 40;
-export const RELAUNCH_MIGRATION_HEAD = '0040_chats_pin_order';
+export const RELAUNCH_MIGRATION_COUNT = 41;
+export const RELAUNCH_MIGRATION_HEAD = '0041_message_balloon_bundle_id';
 export const PREPARE_CHECKS = Object.freeze([
   'requestValid',
   'preCleanup',

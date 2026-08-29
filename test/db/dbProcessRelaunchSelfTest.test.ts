@@ -470,12 +470,13 @@ beforeEach(() => {
 
 describe('DB-03B1 fixed process-relaunch database contract', () => {
   it('pins the exact production migration boundary used across process death', () => {
-    expect(migrationNames).toHaveLength(40);
+    expect(migrationNames).toHaveLength(41);
     expect(migrationNames[28]).toBe('0029_chats_deleted_at');
     expect(migrationNames[29]).toBe('0030_attachment_cache_entries');
     expect(migrationNames[37]).toBe('0038_scrub_reaction_selected_message_text');
     expect(migrationNames[38]).toBe('0039_message_error_message');
     expect(migrationNames[39]).toBe('0040_chats_pin_order');
+    expect(migrationNames[40]).toBe('0041_message_balloon_bundle_id');
   });
 
   it('prepares exact 0001-0029 state and keeps the encrypted handle open while READY waits', async () => {
@@ -571,8 +572,8 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
 
     await expect(resumeDbProcessRelaunchSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 40,
-      migrationHead: '0040_chats_pin_order',
+      migrationCount: 41,
+      migrationHead: '0041_message_balloon_bundle_id',
       checks: {
         readOnlyContinuityOpen: true,
         sameFileState: true,
@@ -934,7 +935,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
   it('pins the exact single-statement 0038 production migration boundary', () => {
     const migrations = (jest.requireActual('@db/migrations') as typeof import('@db/migrations'))
       .MIGRATIONS;
-    expect(migrations).toHaveLength(40);
+    expect(migrations).toHaveLength(41);
     expect(migrations[36]?.name).toBe('0037_purge_legacy_redacted_mode_setting');
     expect(migrations[37]).toEqual({
       name: '0038_scrub_reaction_selected_message_text',
@@ -951,6 +952,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
     });
     expect(migrations[38]?.name).toBe('0039_message_error_message');
     expect(migrations[39]?.name).toBe('0040_chats_pin_order');
+    expect(migrations[40]?.name).toBe('0041_message_balloon_bundle_id');
   });
 
   it('runs the real migration boundary, enters READY before ledger COMMIT, then rolls back on callback rejection', async () => {
@@ -1070,8 +1072,8 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
 
     await expect(resumeDbActiveMigrationDeathSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 40,
-      migrationHead: '0040_chats_pin_order',
+      migrationCount: 41,
+      migrationHead: '0041_message_balloon_bundle_id',
       checks: {
         readOnlyRecoveryOpen: true,
         walMode: true,

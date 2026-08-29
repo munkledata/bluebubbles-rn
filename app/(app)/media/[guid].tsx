@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import {
-  getAttachmentByGuid,
+  getVisibleAttachmentByGuid,
   listChatImageAttachmentsByAttachmentGuid,
   type AttachmentRow,
 } from '@db/repositories';
@@ -200,7 +200,9 @@ export default function MediaViewer(): React.JSX.Element {
       try {
         const result = await runMediaAccountTask(accountLease, async () => {
           const db = getDatabase();
-          const attachment = await getAttachmentByGuid(db, loadRouteGuid);
+          // Route params are public input. Admit only a real visible attachment here; internal
+          // transfer/retry code keeps its separate unrestricted GUID lookup.
+          const attachment = await getVisibleAttachmentByGuid(db, loadRouteGuid);
           if (!attachment || (attachment.mimeType ?? '').startsWith('video')) {
             return { attachment, galleryResult: null };
           }

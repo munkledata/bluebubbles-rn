@@ -4897,7 +4897,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0040_chats_pin_order' as const;",
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0041_message_balloon_bundle_id' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },

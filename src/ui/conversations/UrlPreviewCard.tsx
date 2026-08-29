@@ -9,6 +9,8 @@ interface UrlPreviewCardProps {
   /** The already-fetched preview row (the parent bubble owns the hook so it runs once). */
   preview: UrlPreviewRow | null;
   isFromMe: boolean;
+  /** Optional absolutely-positioned content (for example a tapback) anchored to this card. */
+  overlay?: React.ReactNode;
 }
 
 /** A compact Open Graph link card under a message bubble; hidden until metadata loads. */
@@ -16,6 +18,7 @@ export function UrlPreviewCard({
   url,
   preview,
   isFromMe,
+  overlay,
 }: UrlPreviewCardProps): React.JSX.Element | null {
   const theme = useTheme();
   // NET-00: mounting a remote <Image> is itself an automatic in-app network request. Preserve
@@ -30,12 +33,13 @@ export function UrlPreviewCard({
     /* keep raw */
   }
 
-  return (
+  const card = (
     <Pressable
       testID="url-preview-card"
       onPress={() => void safeOpenUrl(url)}
       style={[
         styles.card,
+        overlay ? styles.anchoredCard : null,
         {
           alignSelf: isFromMe ? 'flex-end' : 'flex-start',
           backgroundColor: theme.color.secondaryBackground,
@@ -58,9 +62,26 @@ export function UrlPreviewCard({
       </View>
     </Pressable>
   );
+
+  if (!overlay) return card;
+  return (
+    <View
+      style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}
+      pointerEvents="box-none"
+    >
+      {card}
+      {overlay}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  anchor: {
+    position: 'relative',
+    width: '78%',
+    marginHorizontal: 10,
+    marginTop: 2,
+  },
   card: {
     // Keep the existing iMessage-like constant card width while preview artwork is contained.
     width: '78%',
@@ -70,6 +91,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     marginTop: 2,
   },
+  anchoredCard: { width: '100%', marginHorizontal: 0, marginTop: 0 },
   body: { padding: 10, gap: 2 },
   title: { fontSize: 14, fontWeight: '600' },
   desc: { fontSize: 13, lineHeight: 17 },

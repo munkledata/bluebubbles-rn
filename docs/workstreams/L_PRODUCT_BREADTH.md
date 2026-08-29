@@ -51,9 +51,17 @@ Deliver this as two independent slices:
 
 ## `FEAT-03` — multipart and unsupported messages
 
-Preserve and resolve message-part identity for replies, reactions, edits, unsend, live ingestion,
-sync, and retry reconciliation. Unsupported interactive balloons render a safe inspectable fallback
-instead of a blank bubble; text-plus-attachment sending remains capability-gated.
+Deliver this as three independent slices:
+
+1. `FEAT-03A` preserves a bounded Messages extension identifier and replaces only otherwise blank
+   balloons with fixed local labels across bubbles, replies, threads, notifications, and inbox
+   previews. Text, subjects, ordinary attachments, and actually rendered URL cards take precedence.
+   Raw bundle identifiers are never displayed or opened, and extension payload attachments remain
+   hidden even when a lean notification omitted their hidden flag.
+2. `FEAT-03B` preserves and resolves message-part identity for replies, reactions, edits, unsend,
+   live ingestion, sync, and retry reconciliation.
+3. `FEAT-03C` adds text-plus-attachment sending only behind an explicit negotiated capability with
+   one logical optimistic/retry identity and truthful disablement on older servers.
 
 <a id="feat-04"></a>
 

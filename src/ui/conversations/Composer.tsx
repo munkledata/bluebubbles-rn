@@ -17,7 +17,7 @@ import type { MessagePreview } from '@db/repositories';
 import { attachPasteListener } from '@/services/paste';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { showToast } from '../toast/toastStore';
-import type { MentionRange } from '@utils';
+import { buildMessageSnippet, type MentionRange } from '@utils';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme, withAlpha } from '../theme';
@@ -284,10 +284,14 @@ export const Composer = React.memo(function Composer({
       : (replyTo.senderName ?? 'Unknown')
     : '';
   const replySnippet = replyTo
-    ? replyTo.text ||
-      // Genmoji: prefer its natural-language description over the generic attachment label. The
-      // reply bar shows the exact text or description from the message the user selected.
-      (replyTo.hasAttachments === 1 ? replyTo.attachmentDescription?.trim() || '📎 Attachment' : '')
+    ? buildMessageSnippet({
+        text: replyTo.text,
+        subject: replyTo.subject,
+        hasAttachments: replyTo.hasAttachments,
+        hasVisibleAttachments: replyTo.hasVisibleAttachments,
+        attachmentDescription: replyTo.attachmentDescription,
+        balloonBundleId: replyTo.balloonBundleId,
+      })
     : '';
 
   return (

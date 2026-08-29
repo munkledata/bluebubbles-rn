@@ -34,7 +34,9 @@ jest.mock('@/services/media', () => ({
   saveAttachmentsToPhotos: jest.fn(),
   shareAttachment: jest.fn(),
 }));
-jest.mock('@/services/notifications/remindersService', () => ({ scheduleReminder: jest.fn() }));
+jest.mock('@/services/notifications/remindersService', () => ({
+  scheduleMessageReminder: jest.fn(),
+}));
 jest.mock('@features/conversations/devSeed', () => ({
   devSendFakeReaction: jest.fn(),
   devUnsendFake: jest.fn(),
@@ -65,6 +67,13 @@ import { useMessageActions } from '@features/conversations/useMessageActions';
 import { discardMessage, react } from '@/services/send';
 // eslint-disable-next-line import/first
 import { devSendFakeReaction } from '@features/conversations/devSeed';
+// eslint-disable-next-line import/first
+import { scheduleMessageReminder } from '@/services/notifications/remindersService';
+// eslint-disable-next-line import/first
+import { pickReminderTime } from '@ui/conversations/pickReminderTime';
+
+const mockScheduleMessageReminder = scheduleMessageReminder as jest.Mock;
+const mockPickReminderTime = pickReminderTime as jest.Mock;
 
 /** Press the destructive button of the last dialog that was shown. */
 function pressDestructive(): void {
@@ -115,6 +124,8 @@ async function mount(messages: EnrichedMessage[]) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsDevServer.mockReturnValue(false);
+  mockPickReminderTime.mockResolvedValue(2_000);
+  mockScheduleMessageReminder.mockResolvedValue(1);
   dialogs.length = 0;
 });
 
@@ -160,12 +171,64 @@ describe('useMessageActions — DEV reaction account scope', () => {
     const expectedReply = {
       guid: 'message-a',
       text: 'hi',
+      subject: undefined,
+      balloonBundleId: undefined,
       isFromMe: 1,
       senderName: null,
       hasAttachments: 0,
+      hasVisibleAttachments: 0,
+      attachmentDescription: undefined,
     };
     expect(setReplyTo).toHaveBeenNthCalledWith(1, expectedReply);
     expect(setReplyTo).toHaveBeenNthCalledWith(2, expectedReply);
+  });
+
+  it('keeps a lean interactive payload out of attachment actions and reply previews', async () => {
+    const target = {
+      ...msg('message-balloon', null),
+      text: null,
+      balloonBundleId: 'com.apple.Handwriting.HandwritingProvider',
+      hasAttachments: 1,
+      attachments: [
+        {
+          guid: 'private-plugin-payload',
+          mimeType: 'application/octet-stream',
+          localPath: '/private/plugin-payload',
+          hideAttachment: 0,
+        },
+      ],
+    } as unknown as EnrichedMessage;
+    const { result, setReplyTo } = await mount([target]);
+
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+      result.current.onSwipeReply(target);
+    });
+
+    expect(result.current.selected).toMatchObject({
+      balloonBundleId: 'com.apple.Handwriting.HandwritingProvider',
+      hasVisibleAttachments: 0,
+      attachments: [],
+    });
+    expect(setReplyTo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        balloonBundleId: 'com.apple.Handwriting.HandwritingProvider',
+        hasVisibleAttachments: 0,
+      }),
+    );
+
+    await act(async () => {
+      result.current.onRemindLater();
+    });
+    await waitFor(() =>
+      expect(mockScheduleMessageReminder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageGuid: 'message-balloon',
+          messagePreview: 'Handwritten message',
+        }),
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
   });
 
   it('rejects temp identities from live and DEV reactions, long-press reply, and swipe reply', async () => {

@@ -62,6 +62,7 @@ export async function autoDownloadMessageAttachments(
       (
         await listAttachmentsByMessageIds(db, [messageId], MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE, {
           excludeDeletedMessages: true,
+          excludePluginPayloads: true,
         })
       ).get(messageId) ?? [];
     if (!lease.isCurrent()) return NO_SAVED_IMAGES;
@@ -69,7 +70,15 @@ export async function autoDownloadMessageAttachments(
     let selectedBytes = 0;
     for (const attachment of rows) {
       if (eligible.length >= MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE) break;
-      if (attachment.localPath != null || !shouldAutoDownload(attachment)) continue;
+      // The query excludes extension-owned rows at the message boundary. Keep the per-row hidden
+      // bit as a second fail-closed guard for ordinary rich-link payloads without a balloon id.
+      if (
+        attachment.hideAttachment ||
+        attachment.localPath != null ||
+        !shouldAutoDownload(attachment)
+      ) {
+        continue;
+      }
       const bytes = attachment.totalBytes;
       // `shouldAutoDownload` already guarantees a positive safe integer, but keep this boundary
       // self-contained so a future eligibility change cannot silently remove the aggregate cap.

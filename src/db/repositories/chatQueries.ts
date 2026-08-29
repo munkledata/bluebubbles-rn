@@ -65,6 +65,10 @@ export interface InboxRow {
   // preview fallback in place of "📎 Attachment". Optional so hand-built InboxRow test literals need
   // not set it; the query below always provides it at runtime.
   lastAttachmentDescription?: string | null;
+  /** Latest message's extension identifier, used only for a safe local fallback label. */
+  lastBalloonBundleId?: string | null;
+  /** 1 when the latest message has an attachment the UI does not hide. */
+  lastHasVisibleAttachments?: number;
   participantCount: number;
   participantNames: string | null;
   participantAvatars: string | null;
@@ -137,10 +141,18 @@ async function queryChatsForInbox(
       c.latest_message_date AS latestMessageDate, c.last_read_message_guid AS lastReadMessageGuid,
       l.text AS lastText, l.subject AS lastSubject, l.is_from_me AS lastIsFromMe,
       l.has_attachments AS lastHasAttachments, l.date_created AS lastDate, l.guid AS lastGuid,
+      l.balloon_bundle_id AS lastBalloonBundleId,
       l.associated_message_type AS lastAssociatedType, l.error AS lastError,
       (SELECT a.emoji_image_short_description FROM attachments a
-         WHERE a.message_id = l.id AND a.emoji_image_short_description IS NOT NULL
+         WHERE a.message_id = l.id
+           AND l.balloon_bundle_id IS NULL
+           AND a.hide_attachment = 0
+           AND a.emoji_image_short_description IS NOT NULL
          ORDER BY a.id ASC LIMIT 1) AS lastAttachmentDescription,
+      CASE WHEN l.balloon_bundle_id IS NULL THEN
+        EXISTS(SELECT 1 FROM attachments a
+                 WHERE a.message_id = l.id AND a.hide_attachment = 0)
+      ELSE 0 END AS lastHasVisibleAttachments,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
       (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id

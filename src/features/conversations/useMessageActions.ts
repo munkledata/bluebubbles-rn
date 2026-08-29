@@ -19,7 +19,7 @@ import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
-import { isLocalFileUri, type BubbleRect } from '@utils';
+import { buildMessageSnippet, isLocalFileUri, type BubbleRect } from '@utils';
 import { devSendFakeReaction, devUnsendFake } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
@@ -79,6 +79,14 @@ export function useMessageActions({
     setSelected({
       guid: msg.guid,
       text: msg.text,
+      subject: msg.subject,
+      balloonBundleId: msg.balloonBundleId,
+      hasAttachments: msg.hasAttachments,
+      // A balloon payload is private extension data even when a lean notification omitted the
+      // attachment's hide flag. Ordinary photos/files have no balloon identifier.
+      hasVisibleAttachments:
+        !msg.balloonBundleId && (msg.attachments ?? []).some((a) => !a.hideAttachment) ? 1 : 0,
+      attachmentDescription: msg.attachmentDescription,
       isFromMe: msg.isFromMe === 1,
       senderName: msg.senderName,
       mine,
@@ -98,11 +106,16 @@ export function useMessageActions({
       messageSummaryInfo: parseMessageSummaryInfo(msg.messageSummaryInfo),
       isTemp: msg.guid.startsWith('temp-'),
       sendState: msg.sendState,
-      attachments: (msg.attachments ?? []).map((a) => ({
-        guid: a.guid,
-        localPath: a.localPath,
-        mimeType: a.mimeType,
-      })),
+      // Keep private Messages-extension payload blobs out of Share/Save/Forward as well as the
+      // bubble. A lean notification can report hideAttachment=0, so balloon identity is the
+      // conservative second signal. Normal photos/files have no balloon identifier.
+      attachments: (msg.attachments ?? [])
+        .filter((a) => !a.hideAttachment && !msg.balloonBundleId)
+        .map((a) => ({
+          guid: a.guid,
+          localPath: a.localPath,
+          mimeType: a.mimeType,
+        })),
       // Thread membership: this message is a reply, or something in the loaded window replies to it.
       inThread:
         !!msg.threadOriginatorGuid ||
@@ -211,9 +224,14 @@ export function useMessageActions({
       setReplyTo({
         guid: msg.guid,
         text: msg.text,
+        subject: msg.subject,
+        balloonBundleId: msg.balloonBundleId,
         isFromMe: msg.isFromMe,
         senderName: msg.senderName,
         hasAttachments: msg.hasAttachments,
+        hasVisibleAttachments:
+          !msg.balloonBundleId && (msg.attachments ?? []).some((a) => !a.hideAttachment) ? 1 : 0,
+        attachmentDescription: msg.attachmentDescription,
       });
     },
     [setReplyTo],
@@ -291,9 +309,13 @@ export function useMessageActions({
     setReplyTo({
       guid: selected.guid,
       text: selected.text,
+      subject: selected.subject,
+      balloonBundleId: selected.balloonBundleId,
       isFromMe: selected.isFromMe ? 1 : 0,
       senderName: selected.senderName,
-      hasAttachments: 0,
+      hasAttachments: selected.hasAttachments ?? 0,
+      hasVisibleAttachments: selected.hasVisibleAttachments ?? 0,
+      attachmentDescription: selected.attachmentDescription,
     });
   };
 
@@ -413,7 +435,15 @@ export function useMessageActions({
             chatGuid: guid,
             messageGuid: msg.guid,
             chatTitle,
-            messagePreview: msg.text,
+            messagePreview:
+              buildMessageSnippet({
+                text: msg.text,
+                subject: msg.subject,
+                hasAttachments: msg.hasAttachments,
+                hasVisibleAttachments: msg.hasVisibleAttachments,
+                attachmentDescription: msg.attachmentDescription,
+                balloonBundleId: msg.balloonBundleId,
+              }) || null,
             senderName: msg.senderName,
             scheduledFor: when,
             now: Date.now(),

@@ -25,6 +25,12 @@ import { useTheme } from '../theme';
 export interface SelectedMessage {
   guid: string;
   text: string | null;
+  /** Optional subject/extension metadata retained for the reply preview. */
+  subject?: string | null;
+  balloonBundleId?: string | null;
+  hasAttachments?: number;
+  hasVisibleAttachments?: number;
+  attachmentDescription?: string | null;
   isFromMe: boolean;
   senderName: string | null;
   /** Classic reaction types the current user has already applied to this message. */

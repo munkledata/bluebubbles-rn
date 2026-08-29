@@ -333,6 +333,10 @@ export interface MessageRow {
   // preview card needs the structured form). Optional so hand-built test literals need not set
   // it; the SELECT below always provides it at runtime.
   payloadData?: string | null;
+  /** Apple Messages extension identifier, used only to select a safe local fallback label. */
+  balloonBundleId?: string | null;
+  /** 1 when at least one non-hidden attachment can actually render in the message UI. */
+  hasVisibleAttachments?: number;
   error: number;
   /** Already-bounded/redacted server detail for the failed-message sheet. */
   errorMessage?: string | null;
@@ -377,6 +381,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.is_sent AS isSent,
     m.message_summary_info AS messageSummaryInfo,
     m.payload_data AS payloadData,
+    m.balloon_bundle_id AS balloonBundleId,
     m.has_attachments AS hasAttachments, m.error, m.error_message AS errorMessage,
     m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
@@ -393,8 +398,15 @@ const MESSAGE_ROW_SELECT = sql`
     (SELECT COALESCE(h2.display_name, h2.address) FROM handles h2
        WHERE h2.original_row_id = m.other_handle LIMIT 1) AS otherHandleName,
     (SELECT a.emoji_image_short_description FROM attachments a
-       WHERE a.message_id = m.id AND a.emoji_image_short_description IS NOT NULL
+       WHERE a.message_id = m.id
+         AND m.balloon_bundle_id IS NULL
+         AND a.hide_attachment = 0
+         AND a.emoji_image_short_description IS NOT NULL
        ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
+    CASE WHEN m.balloon_bundle_id IS NULL THEN
+      EXISTS(SELECT 1 FROM attachments a
+               WHERE a.message_id = m.id AND a.hide_attachment = 0)
+    ELSE 0 END AS hasVisibleAttachments,
     h.address AS senderAddress,
     COALESCE(h.display_name, h.address) AS senderName,
     h.avatar AS senderAvatar,
@@ -580,6 +592,7 @@ export async function searchChatGuidsByMessage(
 export interface MessagePreview {
   guid: string;
   text: string | null;
+  subject?: string | null;
   senderName: string | null;
   isFromMe: number;
   hasAttachments: number;
@@ -587,6 +600,10 @@ export interface MessagePreview {
   // reply-composer fallback text in place of the generic "📎 Attachment". Optional so hand-built
   // test literals need not set it; the SELECT below always provides it at runtime.
   attachmentDescription?: string | null;
+  /** Apple Messages extension identifier, never shown verbatim. */
+  balloonBundleId?: string | null;
+  /** 1 when at least one non-hidden attachment can render. */
+  hasVisibleAttachments?: number;
 }
 
 /** A compact preview of a message by guid (for the reply quote). */
@@ -595,11 +612,20 @@ export async function getMessagePreviewByGuid(
   guid: string,
 ): Promise<MessagePreview | null> {
   const rows = await db.all<MessagePreview>(sql`
-    SELECT m.guid, m.text, m.is_from_me AS isFromMe, m.has_attachments AS hasAttachments,
+    SELECT m.guid, m.text, m.subject, m.is_from_me AS isFromMe,
+           m.has_attachments AS hasAttachments,
+           m.balloon_bundle_id AS balloonBundleId,
            COALESCE(h.display_name, h.address) AS senderName,
            (SELECT a.emoji_image_short_description FROM attachments a
-              WHERE a.message_id = m.id AND a.emoji_image_short_description IS NOT NULL
-              ORDER BY a.id ASC LIMIT 1) AS attachmentDescription
+              WHERE a.message_id = m.id
+                AND m.balloon_bundle_id IS NULL
+                AND a.hide_attachment = 0
+                AND a.emoji_image_short_description IS NOT NULL
+              ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
+           CASE WHEN m.balloon_bundle_id IS NULL THEN
+             EXISTS(SELECT 1 FROM attachments a
+                      WHERE a.message_id = m.id AND a.hide_attachment = 0)
+           ELSE 0 END AS hasVisibleAttachments
     FROM messages m LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.guid = ${guid} AND m.date_deleted IS NULL LIMIT 1
   `);

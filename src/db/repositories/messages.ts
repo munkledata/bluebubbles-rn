@@ -140,6 +140,9 @@ export function upsertMessagesWithinTransaction(
             // omits it (non-URL message, placeholder, old server) so the COALESCE-preserve on
             // conflict (below) can't wipe previously-stored metadata.
             payloadData: m.payloadData ? JSON.stringify(m.payloadData) : null,
+            // Messages extension identity (Digital Touch, handwriting, third-party apps). NULL
+            // when omitted so a lean receipt/re-sync cannot wipe a value learned earlier.
+            balloonBundleId: m.balloonBundleId ?? null,
           };
         }),
       )
@@ -241,6 +244,9 @@ export function upsertMessagesWithinTransaction(
           // absence never means "the preview was removed" (a delivery/read-receipt re-upsert or a
           // leaner live projection just omits the blob), so overwrite-when-present only.
           payloadData: sql`COALESCE(excluded.payload_data, ${messages.payloadData})`,
+          // The extension identity is immutable for a message. Preserve it when a receipt-shaped
+          // update omits the field, while allowing a later hydrated sync to fill an earlier NULL.
+          balloonBundleId: sql`COALESCE(excluded.balloon_bundle_id, ${messages.balloonBundleId})`,
           // NOTE — `error` is DELIBERATELY absent from this conflict set (it IS in the insert values,
           // as the 0 seed for a brand-new row). It is not a wire-carried field: the v1 message DTO has
           // no `error` key at all — send failures travel in the separate `message-send-error` envelope

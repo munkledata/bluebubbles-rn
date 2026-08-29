@@ -110,6 +110,16 @@
       "upgradeTest": "test/db/migrations/0040_chats_pin_order.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 41,
+      "name": "0041_message_balloon_bundle_id",
+      "task": "FEAT-03",
+      "branchPr": "release/store-01-0.1.41",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0041_message_balloon_bundle_id.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

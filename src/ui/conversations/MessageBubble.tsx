@@ -27,6 +27,7 @@ import { showToast } from '@ui/toast/toastStore';
 import {
   errorTitleForCode,
   firstUrl,
+  interactiveMessageLabel,
   isBigEmoji,
   isHexColor,
   resolveBubbleColor,
@@ -129,10 +130,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isRcs = effectiveService === 'RCS';
   const isError = msg.sendState === 'error' || msg.error !== 0;
   const isSending = msg.sendState === 'sending';
+  const interactiveLabel = interactiveMessageLabel(msg.balloonBundleId);
   // Skip iMessage's hidden rich-link / plugin-payload attachments (URL previews, App Store,
-  // Apple Music, …) — they back a rich card (rendered from the message text below), not a file,
-  // so rendering them would show empty "file box" chips.
-  const atts = (msg.attachments ?? []).filter((a) => !a.hideAttachment);
+  // Apple Music, …). Lean notification payloads can omit hideAttachment, so a present balloon
+  // identifier is the conservative second signal that these rows are private extension payload,
+  // not user files. Ordinary photos/files have no balloon identifier and are unchanged.
+  const atts = (msg.attachments ?? []).filter((a) => !a.hideAttachment && !interactiveLabel);
   const reactions = msg.reactions ?? [];
   const showReactionCluster = reactions.length > 0;
   const stickers = msg.stickers ?? [];
@@ -233,6 +236,13 @@ export const MessageBubble = React.memo(function MessageBubble({
   // Emoji-only message (no attachments, no subject) → enlarged, bubble-less (matches iMessage).
   const emojiOnly = useMemo(() => isBigEmoji(bodyText), [bodyText]);
   const bigEmoji = !hasSubject && atts.length === 0 && emojiOnly;
+  const showInteractiveFallback =
+    !!interactiveLabel &&
+    !showText &&
+    !hasSubject &&
+    atts.length === 0 &&
+    !(cardUrl && previewLoaded) &&
+    stickers.length === 0;
   // Reactions anchor to the text/subject/emoji bubble when there is one; for an attachment-ONLY
   // message they must anchor to the attachment instead, or a tapback on a photo shows nothing.
   // Reactions AND stickers anchor to the text/subject/emoji bubble when there is one; for an
@@ -244,6 +254,16 @@ export const MessageBubble = React.memo(function MessageBubble({
     !showText &&
     !hasSubject &&
     !bigEmoji;
+  // A payload-backed URL card can be the message's only visible surface. In that case it owns the
+  // tapback anchor; otherwise the reaction exists in data but has no rendered bubble to attach to.
+  const cardOverlayAnchor =
+    !!cardUrl &&
+    previewLoaded &&
+    showReactionCluster &&
+    !showText &&
+    !hasSubject &&
+    atts.length === 0 &&
+    stickers.length === 0;
   // A message that is ONLY images (≥2) collapses into a single two-column gallery grid bubble
   // (iMessage-style) instead of a tall vertical stack. Mixed image+file messages keep the stack.
   const imageOnlyGallery =
@@ -301,7 +321,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   const corners = isFromMe
     ? { borderBottomRightRadius: textTail }
     : { borderBottomLeftRadius: textTail };
-  const messageActionLabel = bodyText.replace(/\s+/g, ' ').trim().slice(0, 120);
+  const messageActionLabel = (
+    bodyText.replace(/\s+/g, ' ').trim() ||
+    (showInteractiveFallback ? (interactiveLabel ?? '') : '')
+  ).slice(0, 120);
 
   const bubble = (
     <Pressable
@@ -411,6 +434,32 @@ export const MessageBubble = React.memo(function MessageBubble({
             <StickerOverlay key={stickerKey} stickers={stickers} isFromMe={isFromMe} />
           ) : null}
         </View>
+      ) : showInteractiveFallback ? (
+        <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
+          <View
+            style={[
+              styles.bubble,
+              { backgroundColor, borderRadius: theme.radius.bubble, ...corners },
+            ]}
+          >
+            <Text
+              style={[
+                styles.interactiveTitle,
+                { color: textColor, fontSize: theme.font.size.body },
+              ]}
+            >
+              {interactiveLabel}
+            </Text>
+            <Text style={[styles.interactiveDetail, { color: textColor }]}>
+              {interactiveLabel === 'Link preview unavailable'
+                ? 'The original link wasn’t included.'
+                : 'This message type isn’t supported yet.'}
+            </Text>
+          </View>
+          {showReactionCluster ? (
+            <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
+          ) : null}
+        </View>
       ) : stickers.length > 0 && atts.length === 0 ? (
         // A sticker on a message with nothing else to render (no text, no subject, no attachment)
         // still needs a positioned anchor, or the overlay has nothing to attach to and vanishes.
@@ -444,7 +493,22 @@ export const MessageBubble = React.memo(function MessageBubble({
           Scheduled
         </Text>
       ) : null}
-      {cardUrl ? <UrlPreviewCard url={cardUrl} preview={preview} isFromMe={isFromMe} /> : null}
+      {cardUrl ? (
+        <UrlPreviewCard
+          url={cardUrl}
+          preview={preview}
+          isFromMe={isFromMe}
+          overlay={
+            cardOverlayAnchor ? (
+              <ReactionCluster
+                reactions={reactions}
+                isFromMe={isFromMe}
+                onPress={onShowReactions}
+              />
+            ) : undefined
+          }
+        />
+      ) : null}
     </Pressable>
   );
 
@@ -653,6 +717,8 @@ const styles = StyleSheet.create({
   text: { lineHeight: 22 },
   // Bold subject line above the body inside a bubble.
   subject: { fontWeight: '700', marginBottom: 2 },
+  interactiveTitle: { fontWeight: '600' },
+  interactiveDetail: { fontSize: 12, lineHeight: 17, marginTop: 2, opacity: 0.82 },
   // Emoji-only message: enlarged, no bubble; sits where the bubble would.
   // Reserves the overlay's own box so a sticker-only message has something to anchor against.
   stickerOnlySpacer: { width: 72, height: 72 },

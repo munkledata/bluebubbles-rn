@@ -127,6 +127,8 @@ export const messages = sqliteTable(
     subject: text('subject'),
     /** Apple typedstream rich text, stored as base64; parsed lazily. */
     attributedBody: text('attributed_body'),
+    /** Apple Messages extension identifier. Used only for safe unsupported-content fallbacks. */
+    balloonBundleId: text('balloon_bundle_id'),
     isFromMe: integer('is_from_me', { mode: 'boolean' }).default(false),
     dateCreated: integer('date_created'),
     dateRead: integer('date_read'),
@@ -200,6 +202,10 @@ export const messages = sqliteTable(
     errorMessageBounded: check(
       'messages_error_message_bounded',
       sql`${t.errorMessage} IS NULL OR (length(${t.errorMessage}) BETWEEN 1 AND 240 AND length(CAST(${t.errorMessage} AS BLOB)) <= 512)`,
+    ),
+    balloonBundleIdBounded: check(
+      'messages_balloon_bundle_id_bounded',
+      sql`${t.balloonBundleId} IS NULL OR (length(${t.balloonBundleId}) BETWEEN 1 AND 255 AND length(CAST(${t.balloonBundleId} AS BLOB)) <= 1024)`,
     ),
   }),
 );
