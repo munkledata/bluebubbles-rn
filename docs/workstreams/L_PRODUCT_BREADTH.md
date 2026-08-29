@@ -26,8 +26,14 @@ Deliver this as two independent slices:
    selected result. Closing search returns to the live newest window before restoring the composer.
    It does not claim to find history that still exists only on the Mac/server.
 2. `FEAT-02B` extends entity detection only through conservative parsing and explicit scheme/action
-   allowlists so a false positive cannot invoke an unsafe target. Keep it separate from search so
-   URL/phone/date action policy receives its own focused design and review.
+   allowlists so a false positive cannot invoke an unsafe target. The bounded pure parser recognizes
+   only validated explicit `http(s)` URLs, strongly formatted phone numbers, and real calendar dates
+   with a four-digit year. Bare domains/digit runs, extensions, slash/relative dates, email,
+   addresses, tracking numbers, flight numbers, and ML extraction remain deliberately inert. Web
+   targets are revalidated before the existing scheme guard; phone actions construct only canonical
+   `tel:`/`sms:` targets; dates open a fixed Android all-day calendar draft that the user must save.
+   Copy is the only other entity action. No peer-controlled value can choose a scheme, intent action,
+   calendar URI, or calendar metadata field.
 
 <a id="feat-03"></a>
 

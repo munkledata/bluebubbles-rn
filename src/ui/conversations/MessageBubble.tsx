@@ -2,7 +2,12 @@ import React, { useCallback, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
 import { parsePayloadData } from '@core/models';
-import { parseAttributedRuns, type TextRun } from '@core/richtext';
+import {
+  parseAttributedRuns,
+  splitMessageEntitySpans,
+  type MessageEntity,
+  type TextRun,
+} from '@core/richtext';
 import type {
   AttachmentRow,
   MessagePreview,
@@ -12,14 +17,19 @@ import type {
   UrlPreviewRow,
 } from '@db/repositories';
 import { isSafePreviewUrl } from '@/services/urlPreview';
+import {
+  performMessageEntityAction,
+  type MessageEntityActionRequest,
+} from '@/services/messageEntityActions';
 import { useUrlPreview } from '@features/conversations/useUrlPreview';
+import { showDialog } from '@ui/dialog/dialogStore';
+import { showToast } from '@ui/toast/toastStore';
 import {
   errorTitleForCode,
   firstUrl,
   isBigEmoji,
   isHexColor,
   resolveBubbleColor,
-  safeOpenUrl,
   type BubbleRect,
 } from '@utils';
 import { contrastRatio, readableTextOn, useTheme } from '../theme';
@@ -67,7 +77,6 @@ interface MessageBubbleProps {
   hasBackground?: boolean;
 }
 
-const URL_RE = /(https?:\/\/[^\s]+)/g;
 const MESSAGE_ACTIONS = [{ name: 'longpress', label: 'Show message actions' }] as const;
 
 /** iOS message bubble: reply quote + attachments + text, with reactions + long-press.
@@ -137,10 +146,20 @@ export const MessageBubble = React.memo(function MessageBubble({
   // Memoized on the source PRIMITIVES (not the row's identity) — parsing runs a JSON.parse, so
   // it must not re-run on every render of a recycling list row.
   const { runs, bodyText } = useMemo(() => {
-    const parsed = parseAttributedRuns(msg.attributedBody, msg.text);
+    const parsed = mergeAdjacentPlainRuns(parseAttributedRuns(msg.attributedBody, msg.text));
     return { runs: parsed, bodyText: bodyTextOf(parsed) };
   }, [msg.attributedBody, msg.text]);
   const hasText = bodyText.trim().length > 0;
+  const hasActionableEntities = useMemo(
+    () =>
+      runs.some(
+        (run) =>
+          !run.mention &&
+          !run.attachment &&
+          splitMessageEntitySpans(run.text).some((span) => span.kind === 'entity'),
+      ),
+    [runs],
+  );
   const isRetracted = !!msg.dateRetracted;
   const isEdited = !isRetracted && !!msg.dateEdited;
   // Apple "Send Later": a small "Scheduled" badge under the bubble ONLY while the row is pending
@@ -282,17 +301,43 @@ export const MessageBubble = React.memo(function MessageBubble({
   const corners = isFromMe
     ? { borderBottomRightRadius: textTail }
     : { borderBottomLeftRadius: textTail };
+  const messageActionLabel = bodyText.replace(/\s+/g, ' ').trim().slice(0, 120);
 
   const bubble = (
     <Pressable
       ref={bubbleRef}
       onLongPress={onLongPress ? handleLongPress : undefined}
       delayLongPress={onLongPress ? 350 : undefined}
-      accessibilityActions={onLongPress ? MESSAGE_ACTIONS : undefined}
-      accessibilityHint={onLongPress ? 'Double tap and hold for message actions' : undefined}
-      onAccessibilityAction={onLongPress ? handleAccessibilityAction : undefined}
+      // An accessible Pressable groups all descendants on Android. Keep the existing grouping for
+      // ordinary bubbles, but let TalkBack focus actionable inline entities independently.
+      accessible={hasActionableEntities ? false : undefined}
+      accessibilityActions={onLongPress && !hasActionableEntities ? MESSAGE_ACTIONS : undefined}
+      accessibilityHint={
+        onLongPress && !hasActionableEntities
+          ? 'Double tap and hold for message actions'
+          : undefined
+      }
+      onAccessibilityAction={
+        onLongPress && !hasActionableEntities ? handleAccessibilityAction : undefined
+      }
       style={{ opacity: isSending ? 0.6 : 1 }}
     >
+      {onLongPress && hasActionableEntities ? (
+        <View
+          pointerEvents="none"
+          collapsable={false}
+          accessible
+          importantForAccessibility="yes"
+          accessibilityRole="button"
+          accessibilityLabel={
+            messageActionLabel ? `Message actions for ${messageActionLabel}` : 'Message actions'
+          }
+          accessibilityHint="Double tap and hold for message actions"
+          accessibilityActions={MESSAGE_ACTIONS}
+          onAccessibilityAction={handleAccessibilityAction}
+          style={styles.messageActionAccessibilityTarget}
+        />
+      ) : null}
       {msg.replyPreview && msg.threadOriginatorGuid ? (
         <ReplyQuote
           preview={msg.replyPreview}
@@ -431,6 +476,25 @@ export const MessageBubble = React.memo(function MessageBubble({
 
 const OBJECT_REPLACEMENT = /￼/g;
 
+/**
+ * Unknown attributed-body styling is intentionally rendered as plain text. Merge adjacent plain
+ * runs so a URL/phone/date split only by such metadata remains one entity; mentions and attachment
+ * placeholders stay as hard boundaries and keep their existing styling/ownership.
+ */
+function mergeAdjacentPlainRuns(runs: TextRun[]): TextRun[] {
+  const merged: TextRun[] = [];
+  for (const run of runs) {
+    const previous = merged.at(-1);
+    const plain = !run.mention && !run.attachment;
+    if (plain && previous && !previous.mention && !previous.attachment) {
+      merged[merged.length - 1] = { text: previous.text + run.text };
+    } else {
+      merged.push(run);
+    }
+  }
+  return merged;
+}
+
 /** Plain body text from the parsed runs (attachments excluded, U+FFFC placeholder stripped). */
 function bodyTextOf(runs: TextRun[]): string {
   return runs
@@ -441,8 +505,9 @@ function bodyTextOf(runs: TextRun[]): string {
 
 /**
  * Render the bubble text from the parsed attributedBody runs: mentions in the accent color,
- * links tappable, everything else plain. Rendering from the runs (not `msg.text`) is what makes
- * EDITED messages show — their edited text lives in attributedBody while the `text` column is empty.
+ * validated entities actionable, everything else plain. Rendering from the runs (not `msg.text`)
+ * is what makes EDITED messages show — their edited text lives in attributedBody while the `text`
+ * column is empty.
  */
 function renderRuns(runs: TextRun[], color: string, mentionColor: string): React.ReactNode {
   return runs.map((run: TextRun, i) => {
@@ -455,28 +520,130 @@ function renderRuns(runs: TextRun[], color: string, mentionColor: string): React
           {text}
         </Text>
       );
-    return <React.Fragment key={i}>{linkify(text, color)}</React.Fragment>;
+    return <React.Fragment key={i}>{renderEntityText(text, color)}</React.Fragment>;
   });
 }
 
-function linkify(text: string, color: string): React.ReactNode {
-  const parts = text.split(URL_RE);
-  return parts.map((part, i) =>
-    /^https?:\/\//.test(part) ? (
+function runMessageEntityAction(
+  request: MessageEntityActionRequest,
+  failureMessage: string,
+  successMessage?: string,
+): void {
+  void performMessageEntityAction(request).then((completed) => {
+    if (!completed) {
+      showDialog('Couldn’t complete action', failureMessage);
+    } else if (successMessage) {
+      showToast(successMessage);
+    }
+  });
+}
+
+function activateMessageEntity(entity: MessageEntity): void {
+  switch (entity.kind) {
+    case 'url':
+      runMessageEntityAction(
+        { action: 'open-url', entity },
+        'No browser on this device could open that link.',
+      );
+      return;
+    case 'phone':
+      showDialog('Phone number', entity.text, [
+        {
+          text: 'Call',
+          onPress: () =>
+            runMessageEntityAction(
+              { action: 'dial-phone', entity },
+              'No phone app on this device could open that number.',
+            ),
+        },
+        {
+          text: 'Message',
+          onPress: () =>
+            runMessageEntityAction(
+              { action: 'message-phone', entity },
+              'No messaging app on this device could open that number.',
+            ),
+        },
+        {
+          text: 'Copy',
+          onPress: () =>
+            runMessageEntityAction(
+              { action: 'copy-phone', entity },
+              'Couldn’t copy that phone number.',
+              'Phone number copied',
+            ),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+      return;
+    case 'date':
+      showDialog('Date', entity.text, [
+        {
+          text: 'Add to Calendar',
+          onPress: () =>
+            runMessageEntityAction(
+              { action: 'open-calendar-draft', entity },
+              'No calendar app on this device could create a draft.',
+            ),
+        },
+        {
+          text: 'Copy',
+          onPress: () =>
+            runMessageEntityAction(
+              { action: 'copy-date', entity },
+              'Couldn’t copy that date.',
+              'Date copied',
+            ),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+  }
+}
+
+function entityAccessibility(entity: MessageEntity): {
+  label: string;
+  hint: string;
+  role: 'button' | 'link';
+} {
+  switch (entity.kind) {
+    case 'url':
+      return { label: `Link ${entity.text}`, hint: 'Opens in your browser', role: 'link' };
+    case 'phone':
+      return {
+        label: `Phone number ${entity.text}`,
+        hint: 'Shows call, message, and copy actions',
+        role: 'link',
+      };
+    case 'date':
+      return {
+        label: `Date ${entity.text}`,
+        hint: 'Shows calendar and copy actions',
+        role: 'button',
+      };
+  }
+}
+
+function renderEntityText(text: string, color: string): React.ReactNode {
+  return splitMessageEntitySpans(text).map((span, index) => {
+    if (span.kind === 'text') return <React.Fragment key={index}>{span.text}</React.Fragment>;
+    const accessibility = entityAccessibility(span.entity);
+    return (
       <Text
-        key={i}
+        key={`${span.entity.kind}:${span.entity.start}`}
         style={{ color, textDecorationLine: 'underline' }}
-        onPress={() => void safeOpenUrl(part)}
+        onPress={() => activateMessageEntity(span.entity)}
+        accessibilityRole={accessibility.role}
+        accessibilityLabel={accessibility.label}
+        accessibilityHint={accessibility.hint}
       >
-        {part}
+        {span.entity.text}
       </Text>
-    ) : (
-      part
-    ),
-  );
+    );
+  });
 }
 
 const styles = StyleSheet.create({
+  messageActionAccessibilityTarget: StyleSheet.absoluteFill,
   anchor: { position: 'relative', marginHorizontal: 10, maxWidth: '78%' },
   bubble: {
     paddingVertical: 8,
