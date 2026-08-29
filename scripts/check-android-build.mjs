@@ -91,9 +91,9 @@ const REQUIRED_ENTRY_IMPORTS = [
   './src/services/errors/registerReactNativeExceptionPrivacy',
   './src/services/logging/registerPersistentLogs',
   './src/services/notifications/backgroundEvents',
-  './src/services/background/backgroundSync',
-  './src/services/notifications/fcmMessaging',
-  './src/services/download/boundedNativeDownload',
+  './src/services/background/registerBackgroundSyncHeadlessTask',
+  './src/services/notifications/registerFcmBackgroundHandler',
+  './src/services/download/registerBoundedNativeDownloadCleanup',
 ];
 
 function parseAttributes(source) {

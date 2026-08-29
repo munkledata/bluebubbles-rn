@@ -253,6 +253,17 @@ test('requires the local bounded-download Kotlin compile task', () => {
   );
 });
 
+test('requires the local screen-security Kotlin compile task', () => {
+  const mutated = workflow.replace(
+    ':gator-screen-security:compileDebugKotlin',
+    ':gator-screen-security:tasks',
+  );
+  assert.notEqual(mutated, workflow, 'the screen-security mutation must change the fixture');
+  assert.ok(
+    errorsFor(mutated).some((error) => error.includes(':gator-screen-security:compileDebugKotlin')),
+  );
+});
+
 test('requires the release AAB bundle task', () => {
   const mutated = workflow.replace(':app:bundleRelease', ':app:tasks');
   assert.notEqual(mutated, workflow, 'the bundleRelease mutation must change the fixture');

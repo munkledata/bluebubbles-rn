@@ -156,6 +156,7 @@ jobs:
           :gator-paste-input:compileDebugKotlin
           :gator-share-shortcuts:compileDebugKotlin
           :gator-bounded-download:compileDebugKotlin
+          :gator-screen-security:compileDebugKotlin
           --no-daemon
 
       - name: Assemble debug APK

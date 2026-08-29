@@ -20,7 +20,6 @@ const intendedPermissions = [
   'android.permission.READ_MEDIA_IMAGES',
   'android.permission.READ_MEDIA_VIDEO',
   'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
-  'android.permission.USE_FULL_SCREEN_INTENT',
   'android.permission.RECORD_AUDIO',
   'android.permission.MODIFY_AUDIO_SETTINGS',
   'android.permission.CAMERA',
@@ -51,6 +50,8 @@ const manifestNode = xmlNode(
   {
     'xmlns:android': androidNamespace,
     package: 'com.bluegreengatorapps.messages',
+    'android:versionName': '0.1.41',
+    'android:versionCode': '57',
   },
   [
     ...intendedPermissions.map((name) => xmlNode('uses-permission', { 'android:name': name })),
@@ -147,9 +148,9 @@ const entrySource = `
 import './src/services/errors/registerReactNativeExceptionPrivacy';
 import './src/services/logging/registerPersistentLogs';
 import './src/services/notifications/backgroundEvents';
-import './src/services/background/backgroundSync';
-import './src/services/notifications/fcmMessaging';
-import './src/services/download/boundedNativeDownload';
+import './src/services/background/registerBackgroundSyncHeadlessTask';
+import './src/services/notifications/registerFcmBackgroundHandler';
+import './src/services/download/registerBoundedNativeDownloadCleanup';
 import 'expo-router/entry';
 `;
 
@@ -312,13 +313,15 @@ test('rejects a bypassed or late expo-router bundle entry', () => {
 
   const missingRestartCleanup = validate({
     entrySource: entrySource.replace(
-      "import './src/services/download/boundedNativeDownload';\n",
+      "import './src/services/download/registerBoundedNativeDownloadCleanup';\n",
       '',
     ),
   });
   assert.ok(
     missingRestartCleanup.some((error) =>
-      error.includes('required startup import ./src/services/download/boundedNativeDownload'),
+      error.includes(
+        'required startup import ./src/services/download/registerBoundedNativeDownloadCleanup',
+      ),
     ),
   );
 
@@ -345,7 +348,7 @@ test('rejects a bypassed or late expo-router bundle entry', () => {
   assert.ok(latePersistentLogs.some((error) => error.includes('before headless tasks')));
 
   const lateRegistration = validate({
-    entrySource: `import 'expo-router/entry';\nimport './src/services/notifications/fcmMessaging';`,
+    entrySource: `import 'expo-router/entry';\nimport './src/services/notifications/registerFcmBackgroundHandler';`,
   });
   assert.ok(lateRegistration.some((error) => error.includes('final side-effect import')));
   assert.ok(lateRegistration.some((error) => error.includes('must load before')));

@@ -269,6 +269,7 @@ function validateAndroidJob(workflow, errors) {
     ':gator-paste-input:compileDebugKotlin',
     ':gator-share-shortcuts:compileDebugKotlin',
     ':gator-bounded-download:compileDebugKotlin',
+    ':gator-screen-security:compileDebugKotlin',
   ]) {
     if (!hasStandaloneLine(nativeBuild, task)) {
       errors.push(`The Android job must run the native build task ${task}.`);
