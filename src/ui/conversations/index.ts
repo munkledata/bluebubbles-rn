@@ -1,5 +1,6 @@
 export * from './ConversationTile';
 export * from './ConversationListScreen';
+export * from './InboxFiltersSheet';
 export * from './ChatActionsSheet';
 export * from './ConversationHeader';
 export * from './ChatSearchBar';

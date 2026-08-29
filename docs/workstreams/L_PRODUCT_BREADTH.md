@@ -13,6 +13,18 @@ Support unread, group/direct, muted, service, and known/unknown dimensions as op
 the paged database query. Persist the selected filter intentionally and leave the shared visibility,
 tombstone, unread-floor, preview, and page-completeness rules unchanged.
 
+The first slice uses one choice per axis: all/unread; all/known/unknown; all/direct/group;
+all/unmuted/muted; and all/iMessage/SMS/RCS. Apply persists one versioned account-local selection;
+Cancel writes nothing, and Reset clears the draft before Apply. Known means at least one participant
+matches a device contact, group/direct follows the authoritative chat style with participant-count
+fallback, muted means the existing exact `mute_type = 'mute'` state, and service matches the same
+GUID/participant-service resolver used by conversation tiles. Every predicate must constrain pinned
+and unpinned identities before the page limit. Filters affect only the main inbox, not unified search
+or the fixed Archived/Unknown Senders routes. The older Filter Unknown Senders preference keeps its
+separate notification policy and temporarily locks this sheet to known senders. Applying while locked
+clears the hidden FEAT-01 sender choice to All; Cancel preserves it. Hide manual pin reordering whenever
+these filters can conceal an intermediate pin.
+
 <a id="feat-02"></a>
 
 ## `FEAT-02` — in-chat search and safe entities

@@ -1,4 +1,11 @@
-import { Chat, Message } from '@core/models';
+import {
+  Chat,
+  DEFAULT_INBOX_FILTERS,
+  Message,
+  parsePersistedInboxFilters,
+  serializeInboxFilters,
+  type InboxFilters,
+} from '@core/models';
 import {
   applyLocalUnsend,
   countChatsForInbox,
@@ -69,6 +76,102 @@ async function seedChat(
 }
 
 describe('listChatsForInbox', () => {
+  it('round-trips versioned filters and defaults malformed or unknown choices independently', () => {
+    const filters: InboxFilters = {
+      read: 'unread',
+      sender: 'known',
+      kind: 'group',
+      mute: 'unmuted',
+      service: 'rcs',
+    };
+    expect(parsePersistedInboxFilters(serializeInboxFilters(filters))).toEqual(filters);
+    expect(
+      parsePersistedInboxFilters(
+        JSON.stringify({
+          version: 1,
+          filters: { ...filters, read: 'future-read-mode', service: 'future-service' },
+        }),
+      ),
+    ).toEqual({ ...filters, read: 'any', service: 'any' });
+    expect(parsePersistedInboxFilters('{broken')).toEqual(DEFAULT_INBOX_FILTERS);
+  });
+
+  it('ANDs every optional filter before cutting a growing-prefix page', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'iMessage;-;known-direct', {
+      participants: ['known-direct@example.test'],
+      style: 45,
+      messages: [{ guid: 'im1', text: 'newest', date: 500 }],
+    });
+    await seedChat(t, 'SMS;-;unknown-muted', {
+      participants: ['unknown@example.test'],
+      style: 45,
+      readGuid: 'sms1',
+      messages: [{ guid: 'sms1', text: 'read SMS', date: 400 }],
+    });
+    await seedChat(t, 'iMessage;-;sms-handles', {
+      participants: ['sms-handle@example.test'],
+      style: 45,
+      readGuid: 'smsh1',
+      messages: [{ guid: 'smsh1', text: 'resolved SMS', date: 300 }],
+    });
+    await seedChat(t, 'RCS;-;known-group', {
+      participants: ['known-a@example.test', 'known-b@example.test'],
+      style: 43,
+      messages: [{ guid: 'rcs1', text: 'oldest matching row', date: 100 }],
+    });
+    t.raw
+      .prepare(
+        `UPDATE handles SET contact_id = id
+          WHERE address IN ('known-direct@example.test', 'known-a@example.test')`,
+      )
+      .run();
+    t.raw
+      .prepare("UPDATE handles SET service = 'SMS' WHERE address = 'sms-handle@example.test'")
+      .run();
+    t.raw.prepare("UPDATE chats SET mute_type = 'mute' WHERE guid = 'SMS;-;unknown-muted'").run();
+
+    const guids = async (filters: InboxFilters): Promise<string[]> =>
+      (await listChatsForInboxPage(t.db, { limit: 10, filters })).rows.map((row) => row.guid);
+    const withAxis = <K extends keyof InboxFilters>(
+      key: K,
+      value: InboxFilters[K],
+    ): InboxFilters => ({ ...DEFAULT_INBOX_FILTERS, [key]: value });
+
+    await expect(guids(withAxis('read', 'unread'))).resolves.toEqual([
+      'iMessage;-;known-direct',
+      'RCS;-;known-group',
+    ]);
+    await expect(guids(withAxis('sender', 'unknown'))).resolves.toEqual([
+      'SMS;-;unknown-muted',
+      'iMessage;-;sms-handles',
+    ]);
+    await expect(guids(withAxis('kind', 'group'))).resolves.toEqual(['RCS;-;known-group']);
+    await expect(guids(withAxis('mute', 'muted'))).resolves.toEqual(['SMS;-;unknown-muted']);
+    await expect(guids(withAxis('service', 'imessage'))).resolves.toEqual([
+      'iMessage;-;known-direct',
+    ]);
+    await expect(guids(withAxis('service', 'sms'))).resolves.toEqual([
+      'SMS;-;unknown-muted',
+      'iMessage;-;sms-handles',
+    ]);
+    await expect(guids(withAxis('service', 'rcs'))).resolves.toEqual(['RCS;-;known-group']);
+
+    const combined: InboxFilters = {
+      read: 'unread',
+      sender: 'known',
+      kind: 'group',
+      mute: 'unmuted',
+      service: 'rcs',
+    };
+    await expect(
+      listChatsForInboxPage(t.db, { limit: 1, filters: combined }),
+    ).resolves.toMatchObject({
+      rows: [{ guid: 'RCS;-;known-group' }],
+      hasMore: false,
+    });
+  });
+
   it('keeps manual pin order stable across activity and growing-prefix pages', async () => {
     const t = await createTestDb();
     await seedChat(t, 'old', {

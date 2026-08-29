@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { activeInboxFilterCount, type InboxFilters } from '@core/models';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { markAllChatsRead, movePinnedChat, refreshInbox } from '@/services';
@@ -21,11 +22,12 @@ import type { InboxRow, PinnedOrderMoveDirection } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { useChatNavigator } from '../useChatNavigator';
 import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
+import { InboxFiltersSheet } from './InboxFiltersSheet';
 import { PinnedGrid } from './PinnedGrid';
 import { SearchResultsView } from './SearchResultsView';
 
@@ -49,6 +51,21 @@ export function ConversationListScreen(): React.JSX.Element {
   // Push the Unknown Senders split into SQL before pagination; filtering only the loaded page
   // would silently omit known conversations that happen to sort after unknown ones.
   const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
+  const inboxFilters = useFeatureSettingsStore((s) => s.inboxFilters);
+  const setInboxFilters = useFeatureSettingsStore((s) => s.setInboxFilters);
+  const effectiveInboxFilters = useMemo<InboxFilters>(
+    () => (filterUnknown ? { ...inboxFilters, sender: 'known' } : inboxFilters),
+    [filterUnknown, inboxFilters],
+  );
+  // The legacy setting owns its known-sender split + notification policy. Do not count a saved
+  // FEAT-01 sender choice while that stronger policy temporarily overrides it.
+  const displayedInboxFilters = useMemo<InboxFilters>(
+    () => (filterUnknown ? { ...inboxFilters, sender: 'any' } : inboxFilters),
+    [filterUnknown, inboxFilters],
+  );
+  const activeFilterCount = activeInboxFilterCount(displayedInboxFilters);
+  const [filtersVisible, setFiltersVisible] = useState(false);
+  const listRef = useRef<FlashListRef<InboxRow>>(null);
   const {
     data,
     isLoading,
@@ -58,7 +75,7 @@ export function ConversationListScreen(): React.JSX.Element {
     unknownCount: queriedUnknownCount,
   } = useChats(false, {
     pageSize: INBOX_PAGE_SIZE,
-    sender: filterUnknown ? 'known' : 'any',
+    filters: effectiveInboxFilters,
     countUnknown: filterUnknown,
   });
   // Memoized so the `data ?? []` fallback isn't a fresh array each render (which would defeat the
@@ -110,6 +127,7 @@ export function ConversationListScreen(): React.JSX.Element {
   const unknownCount = filterUnknown ? (queriedUnknownCount ?? rows.length - visible.length) : 0;
   // Pinned chats render in a grid above the list (iOS).
   const pinSenderFilter = filterUnknown ? ('known' as const) : ('any' as const);
+  const canReorderVisiblePins = activeFilterCount === 0;
   const pinned = useMemo(() => visible.filter((r) => r.isPinned), [visible]);
   const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
   const onMovePinned = useCallback(
@@ -131,13 +149,24 @@ export function ConversationListScreen(): React.JSX.Element {
       const index = pinned.findIndex((candidate) => candidate.guid === row.guid);
       setActionTarget(
         toChatActionTarget(row, {
-          earlierGuid: index > 0 ? pinned[index - 1]?.guid : null,
-          laterGuid: index >= 0 ? pinned[index + 1]?.guid : null,
+          earlierGuid: canReorderVisiblePins && index > 0 ? pinned[index - 1]?.guid : null,
+          laterGuid: canReorderVisiblePins && index >= 0 ? pinned[index + 1]?.guid : null,
           sender: pinSenderFilter,
         }),
       );
     },
-    [pinSenderFilter, pinned],
+    [canReorderVisiblePins, pinSenderFilter, pinned],
+  );
+
+  const applyInboxFilters = useCallback(
+    (next: InboxFilters): void => {
+      void setInboxFilters(next);
+      setFiltersVisible(false);
+      // Applying a new bounded prefix is a user-requested view change. Start at its first row
+      // instead of letting FlashList preserve a deep offset and immediately request another page.
+      listRef.current?.scrollToTop({ animated: false });
+    },
+    [setInboxFilters],
   );
 
   // Reveal the bumped thread when ANY chat gets a NEWER message — yours or incoming — instead of
@@ -151,7 +180,6 @@ export function ConversationListScreen(): React.JSX.Element {
   // An OLDER chat surfacing (the top chat was archived or deleted) LOWERS it — also no scroll.
   // The inbox stays mounted under an open chat, so sending inside a thread reorders it here in the
   // background and it's already scrolled up by the time you return.
-  const listRef = useRef<FlashListRef<InboxRow>>(null);
   const newestDate = useMemo(
     () => visible.reduce((m, r) => Math.max(m, r.latestMessageDate ?? 0), 0),
     [visible],
@@ -339,7 +367,7 @@ export function ConversationListScreen(): React.JSX.Element {
           rows={pinned}
           onPress={openChat}
           onLongPress={onPinnedLongPress}
-          onMove={onMovePinned}
+          onMove={canReorderVisiblePins ? onMovePinned : undefined}
         />
       </View>
     ) : null;
@@ -395,31 +423,63 @@ export function ConversationListScreen(): React.JSX.Element {
         },
       ]}
     >
-      <View style={styles.searchWrap}>
-        <TextInput
-          placeholder="Search messages & chats"
-          placeholderTextColor={theme.color.tertiaryLabel}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          value={search}
-          onChangeText={setSearch}
+      <View style={styles.searchRow}>
+        <View style={styles.searchWrap}>
+          <TextInput
+            placeholder="Search messages & chats"
+            placeholderTextColor={theme.color.tertiaryLabel}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            value={search}
+            onChangeText={setSearch}
+            style={[
+              styles.searchInput,
+              { color: theme.color.label, backgroundColor: theme.color.secondaryBackground },
+            ]}
+          />
+          {search.length > 0 ? (
+            <Pressable
+              onPress={() => setSearch('')}
+              hitSlop={10}
+              style={styles.clearButton}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
+              <Icon name="close" size={16} color={theme.color.tertiaryLabel} />
+            </Pressable>
+          ) : null}
+        </View>
+        <Pressable
+          onPress={() => setFiltersVisible(true)}
           style={[
-            styles.searchInput,
-            { color: theme.color.label, backgroundColor: theme.color.secondaryBackground },
+            styles.filterButton,
+            {
+              backgroundColor:
+                activeFilterCount > 0 ? `${theme.color.tint}22` : theme.color.secondaryBackground,
+            },
           ]}
-        />
-        {search.length > 0 ? (
-          <Pressable
-            onPress={() => setSearch('')}
-            hitSlop={10}
-            style={styles.clearButton}
-            accessibilityRole="button"
-            accessibilityLabel="Clear search"
-          >
-            <Icon name="close" size={16} color={theme.color.tertiaryLabel} />
-          </Pressable>
-        ) : null}
+          accessibilityRole="button"
+          accessibilityLabel={
+            activeFilterCount > 0
+              ? `Conversation filters, ${activeFilterCount} active`
+              : 'Conversation filters'
+          }
+          accessibilityHint="Filters the conversation list; search results are unchanged"
+        >
+          <Icon
+            name={activeFilterCount > 0 ? 'funnel' : 'funnel-outline'}
+            size={19}
+            color={activeFilterCount > 0 ? theme.color.tint : theme.color.secondaryLabel}
+          />
+          {activeFilterCount > 0 ? (
+            <View style={[styles.filterBadge, { backgroundColor: theme.color.tint }]}>
+              <Text style={[styles.filterBadgeText, { color: readableTextOn(theme.color.tint) }]}>
+                {activeFilterCount}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
     </View>
   );
@@ -451,14 +511,18 @@ export function ConversationListScreen(): React.JSX.Element {
               onEndReached={hasMore ? loadMore : undefined}
               onEndReachedThreshold={0.5}
               ListEmptyComponent={
-                isLoading ? (
+                pinned.length > 0 ? null : isLoading ? (
                   <View style={styles.center}>
                     <ActivityIndicator color={theme.color.tint} />
                   </View>
                 ) : (
                   <View style={styles.center}>
                     <Text style={[styles.emptyText, { color: theme.color.secondaryLabel }]}>
-                      {error ? `Couldn’t load conversations` : 'No Conversations'}
+                      {error
+                        ? `Couldn’t load conversations`
+                        : activeFilterCount > 0
+                          ? 'No conversations match these filters'
+                          : 'No Conversations'}
                     </Text>
                   </View>
                 )
@@ -470,6 +534,13 @@ export function ConversationListScreen(): React.JSX.Element {
         {searchBar}
       </KeyboardAvoidingView>
       <ChatActionsSheet target={actionTarget} onClose={() => setActionTarget(null)} />
+      <InboxFiltersSheet
+        visible={filtersVisible}
+        filters={inboxFilters}
+        senderLocked={filterUnknown}
+        onApply={applyInboxFilters}
+        onClose={() => setFiltersVisible(false)}
+      />
     </Screen>
   );
 }
@@ -486,7 +557,8 @@ const styles = StyleSheet.create({
   // Bottom search bar. Relative wrapper so the clear ✕ can overlay the field's right edge;
   // paddingRight on the input keeps typed text from running under it.
   searchBar: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
-  searchWrap: { justifyContent: 'center' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  searchWrap: { flex: 1, justifyContent: 'center' },
   searchInput: {
     // `minHeight` + explicit vertical padding, NEVER a fixed `height`: system font scaling
     // multiplies the 16pt text but cannot shrink a hard 38dp box, so at Android's larger
@@ -510,6 +582,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
+  filterButton: {
+    width: 44,
+    minHeight: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadge: {
+    position: 'absolute',
+    right: 3,
+    top: 3,
+    minWidth: 16,
+    minHeight: 16,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: { fontSize: 10, fontWeight: '700', fontVariant: ['tabular-nums'] },
   listContent: { paddingBottom: 24 },
   center: { paddingTop: 80, alignItems: 'center' },
   emptyText: { fontSize: 16 },

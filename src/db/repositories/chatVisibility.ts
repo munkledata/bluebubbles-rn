@@ -1,15 +1,18 @@
 import { sql } from 'drizzle-orm';
+import { normalizeInboxFilters, type InboxFilters, type InboxSenderFilter } from '@core/models';
 
 /** Shared chat-list visibility policy, isolated so commands and queries can depend on it. */
 
 export type InboxArchiveFilter = 'active' | 'archived' | 'all';
-export type InboxSenderFilter = 'any' | 'known' | 'unknown';
+export type { InboxSenderFilter } from '@core/models';
 
 /** Shared inbox filter fragments used by both paging queries and pinned-order commands. */
 export function inboxFilterSql(options: {
   archive: InboxArchiveFilter;
   sender: InboxSenderFilter;
+  filters?: InboxFilters;
 }) {
+  const filters = normalizeInboxFilters(options.filters);
   const archive =
     options.archive === 'all'
       ? sql``
@@ -20,13 +23,95 @@ export function inboxFilterSql(options: {
     SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
      WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL
   )`;
+  // Fixed routes may supply a sender scope without a FEAT-01 filter object. When both exist, the
+  // fixed route wins so Archived/Unknown Senders cannot accidentally become cross-filtered.
+  const senderChoice = options.sender === 'any' ? filters.sender : options.sender;
   const sender =
-    options.sender === 'known'
+    senderChoice === 'known'
       ? sql`AND ${known}`
-      : options.sender === 'unknown'
+      : senderChoice === 'unknown'
         ? sql`AND NOT ${known}`
         : sql``;
-  return { archive, sender };
+
+  // Keep this byte-for-byte aligned with queryChatsForInbox's unreadCount projection. Filtering
+  // the decorated alias after LIMIT would make sparse unread pages incomplete.
+  const unread =
+    filters.read === 'unread'
+      ? sql`AND EXISTS(
+          SELECT 1 FROM messages um
+           WHERE um.chat_id = c.id AND um.is_from_me = 0
+             AND um.associated_message_type IS NULL
+             AND um.date_retracted IS NULL
+             AND um.date_deleted IS NULL
+             AND um.date_created > COALESCE(
+               (SELECT lm.date_created FROM messages lm
+                 WHERE lm.guid = c.last_read_message_guid),
+               0
+             )
+             AND (c.deleted_at IS NULL OR um.date_created > c.deleted_at)
+        )`
+      : sql``;
+
+  // Mirror isGroupRow: a present chat.style is authoritative (43 = group); only an unknown style
+  // falls back to participant count.
+  const isGroup = sql`(
+    CASE WHEN c.style IS NOT NULL
+      THEN c.style = 43
+      ELSE (SELECT COUNT(*) FROM chat_handles cg WHERE cg.chat_id = c.id) > 1
+    END
+  )`;
+  const kind =
+    filters.kind === 'group'
+      ? sql`AND ${isGroup}`
+      : filters.kind === 'direct'
+        ? sql`AND NOT ${isGroup}`
+        : sql``;
+
+  // The current action sheet defines muted as the exact persisted 'mute' state. Other future
+  // mute modes must not silently join this filter.
+  const mute =
+    filters.mute === 'muted'
+      ? sql`AND c.mute_type = 'mute'`
+      : filters.mute === 'unmuted'
+        ? sql`AND (c.mute_type IS NULL OR c.mute_type <> 'mute')`
+        : sql``;
+
+  // Mirror resolveChatService. RCS/SMS GUIDs win. An iMessage-shaped/opaque GUID is SMS only when
+  // it has at least one non-empty handle service and every non-empty service is exactly 'SMS'.
+  const hasServiceGuid = sql`LENGTH(c.guid) > 0`;
+  const isRcs = sql`(${hasServiceGuid} AND substr(c.guid, 1, 6) = 'RCS;-;')`;
+  const isSms = sql`(
+    ${hasServiceGuid}
+    AND (
+      substr(c.guid, 1, 6) = 'SMS;-;'
+      OR (
+        substr(c.guid, 1, 6) <> 'RCS;-;'
+        AND substr(c.guid, 1, 6) <> 'SMS;-;'
+        AND EXISTS(
+          SELECT 1 FROM chat_handles cs
+          JOIN handles hs ON hs.id = cs.handle_id
+          WHERE cs.chat_id = c.id AND TRIM(COALESCE(hs.service, '')) <> ''
+        )
+        AND NOT EXISTS(
+          SELECT 1 FROM chat_handles cs
+          JOIN handles hs ON hs.id = cs.handle_id
+          WHERE cs.chat_id = c.id
+            AND TRIM(COALESCE(hs.service, '')) <> ''
+            AND TRIM(hs.service) <> 'SMS'
+        )
+      )
+    )
+  )`;
+  const service =
+    filters.service === 'rcs'
+      ? sql`AND ${isRcs}`
+      : filters.service === 'sms'
+        ? sql`AND ${isSms}`
+        : filters.service === 'imessage'
+          ? sql`AND ${hasServiceGuid} AND NOT ${isRcs} AND NOT ${isSms}`
+          : sql``;
+
+  return { archive, sender, criteria: sql`${unread} ${kind} ${mute} ${service}` };
 }
 
 /**

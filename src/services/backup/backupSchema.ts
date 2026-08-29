@@ -220,6 +220,7 @@ const BACKUP_KV_KEYS: ReadonlySet<string> = new Set([
   'conversation.showDeliveryTimestamps',
   'chatList.compact',
   'chatList.filterUnknownSenders',
+  'chatList.inboxFilters.v1',
   'notifications.messages',
   // Error-report consent is deliberately device-local and versioned. Restoring a backup must not
   // silently opt a fresh install in; current-device legacy choices migrate inside the store.

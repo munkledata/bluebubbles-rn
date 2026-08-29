@@ -1,4 +1,11 @@
 import { create } from 'zustand';
+import {
+  DEFAULT_INBOX_FILTERS,
+  normalizeInboxFilters,
+  parsePersistedInboxFilters,
+  serializeInboxFilters,
+  type InboxFilters,
+} from '@core/models';
 import { getDatabase } from '@db/database';
 import {
   clearErrorReportsWithinTransaction,
@@ -144,6 +151,9 @@ function parseAutoDownloadDestination(raw: string | null): AutoDownloadDestinati
   return raw === 'app' || raw === 'gallery' || raw === 'album' ? raw : AUTO_DOWNLOAD_DEST_DEFAULT;
 }
 
+/** Versioned account-local inbox view preference; included in settings-only backups. */
+export const INBOX_FILTERS_KEY = 'chatList.inboxFilters.v1';
+
 function clampDownloads(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_MAX_CONCURRENT_DOWNLOADS;
   return Math.max(1, Math.min(MAX_CONCURRENT_DOWNLOADS_LIMIT, Math.floor(n)));
@@ -192,6 +202,7 @@ interface FeatureSettingsState {
   permissionOnboardingCompleted: boolean;
   maxConcurrentDownloads: number;
   autoDownloadDestination: AutoDownloadDestination;
+  inboxFilters: InboxFilters;
   hydrated: boolean;
   hydrate: (options?: HydrationOptions) => Promise<void>;
   setFlag: (flag: FeatureFlag, value: boolean) => Promise<void>;
@@ -201,6 +212,7 @@ interface FeatureSettingsState {
   ) => Promise<void>;
   setMaxConcurrentDownloads: (n: number) => Promise<void>;
   setAutoDownloadDestination: (dest: AutoDownloadDestination) => Promise<void>;
+  setInboxFilters: (filters: InboxFilters) => Promise<void>;
 }
 
 export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) => ({
@@ -219,30 +231,38 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   permissionOnboardingCompleted: false,
   maxConcurrentDownloads: VALUE_SETTINGS.maxConcurrentDownloads.def,
   autoDownloadDestination: AUTO_DOWNLOAD_DEST_DEFAULT,
+  inboxFilters: { ...DEFAULT_INBOX_FILTERS },
   hydrated: false,
   hydrate: async (options) => {
     const consentGenerationAtStart = errorReportingChoiceGeneration;
     try {
       const db = getDatabase();
-      const [flagEntries, valueEntries, autoDownloadRaw, consentRaw, permissionOnboardingRaw] =
-        await Promise.all([
-          Promise.all(
-            (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
-              const v = await kvGet(db, FLAGS[f].key);
-              return [f, v == null ? FLAGS[f].def : v === '1'] as const;
-            }),
-          ),
-          Promise.all(
-            (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
-              const setting = VALUE_SETTINGS[k];
-              const value = setting.parse(await kvGet(db, setting.key));
-              return [k, value] as const;
-            }),
-          ),
-          kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
-          kvGet(db, ERROR_REPORTING_CONSENT_KEY),
-          kvGet(db, PERMISSION_ONBOARDING_COMPLETED_KEY),
-        ]);
+      const [
+        flagEntries,
+        valueEntries,
+        autoDownloadRaw,
+        consentRaw,
+        permissionOnboardingRaw,
+        inboxFiltersRaw,
+      ] = await Promise.all([
+        Promise.all(
+          (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
+            const v = await kvGet(db, FLAGS[f].key);
+            return [f, v == null ? FLAGS[f].def : v === '1'] as const;
+          }),
+        ),
+        Promise.all(
+          (Object.keys(VALUE_SETTINGS) as ValueSettingKey[]).map(async (k) => {
+            const setting = VALUE_SETTINGS[k];
+            const value = setting.parse(await kvGet(db, setting.key));
+            return [k, value] as const;
+          }),
+        ),
+        kvGet(db, AUTO_DOWNLOAD_DEST_KEY),
+        kvGet(db, ERROR_REPORTING_CONSENT_KEY),
+        kvGet(db, PERMISSION_ONBOARDING_COMPLETED_KEY),
+        kvGet(db, INBOX_FILTERS_KEY),
+      ]);
       if (!canCommitHydration(options)) return;
 
       // Only the versioned, plain-language choice can authorize capture or upload. Missing,
@@ -268,6 +288,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         ...Object.fromEntries(flagEntries),
         ...Object.fromEntries(valueEntries),
         autoDownloadDestination: parseAutoDownloadDestination(autoDownloadRaw),
+        inboxFilters: parsePersistedInboxFilters(inboxFiltersRaw),
         permissionOnboardingCompleted: permissionOnboardingRaw === '1',
         hydrated: true,
       };
@@ -341,6 +362,17 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
       );
     } catch {
       // best-effort persist; the in-memory choice still applies this session
+    }
+  },
+  setInboxFilters: async (filters) => {
+    const normalized = normalizeInboxFilters(filters);
+    set({ inboxFilters: normalized }); // optimistic: the inbox switches query keys immediately
+    try {
+      await withDbTransaction(getDatabase(), (context) =>
+        kvSetWithinTransaction(context, INBOX_FILTERS_KEY, serializeInboxFilters(normalized)),
+      );
+    } catch {
+      // Best-effort persist, matching the other non-security UI preferences in this store.
     }
   },
 }));

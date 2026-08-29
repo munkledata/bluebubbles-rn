@@ -1802,7 +1802,8 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       finding.path === 'src/state/featureSettingsStore.ts' &&
       (finding.symbol.includes('.setFlag') ||
         finding.symbol.includes('.setMaxConcurrentDownloads') ||
-        finding.symbol.includes('.setAutoDownloadDestination')) &&
+        finding.symbol.includes('.setAutoDownloadDestination') ||
+        finding.symbol.includes('.setInboxFilters')) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
   const permissionOnboardingTransactions = findings.filter(
@@ -1909,15 +1910,18 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     featureSettingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:871620dfdfc6',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setAutoDownloadDestination:mutator-call:a26397b9b8de',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setAutoDownloadDestination:mutator-call:f5771ac5ff88',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setFlag.<callback:80c80d5352>:mutator-call:9ccbe5ed583b',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setFlag:mutator-call:51b5050425db',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setFlag:mutator-call:82d3c0c91fe5',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:14d9adb34146',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setMaxConcurrentDownloads:mutator-call:359ad75a4f18',
-      'src/state/featureSettingsStore.ts#<callback:75c0086a87>.setMaxConcurrentDownloads:mutator-call:35ef614f5e5b',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:3b2bc55cacf9',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setAutoDownloadDestination:mutator-call:cbb90d573e57',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setAutoDownloadDestination:mutator-call:d856a5a4f4ca',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setFlag.<callback:80c80d5352>:mutator-call:da7ac3883c44',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setFlag:mutator-call:1ab717b8683f',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setFlag:mutator-call:877fcb8cece4',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setInboxFilters.<callback:fc105905b5>:mutator-call:60e2166d21c0',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setInboxFilters:mutator-call:50c20fed96ae',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setInboxFilters:mutator-call:a92af4d3d757',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:e56d7ff1e730',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setMaxConcurrentDownloads:mutator-call:2093dc6917c3',
+      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setMaxConcurrentDownloads:mutator-call:436e2423890e',
     ].sort(),
   );
   assert.deepEqual(

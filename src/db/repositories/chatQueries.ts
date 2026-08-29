@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { normalizeInboxFilters, type InboxFilters } from '@core/models';
 import { chats } from '../schema';
 import type { AppDatabase } from '../types';
 import {
@@ -80,6 +81,7 @@ export interface InboxPageOptions {
   limit?: number;
   archive?: InboxArchiveFilter;
   sender?: InboxSenderFilter;
+  filters?: InboxFilters;
 }
 
 export interface InboxPage {
@@ -92,6 +94,7 @@ async function queryChatsForInbox(
   options: {
     archive: InboxArchiveFilter;
     sender: InboxSenderFilter;
+    filters?: InboxFilters;
     limit?: number;
   },
 ): Promise<InboxRow[]> {
@@ -106,14 +109,16 @@ async function queryChatsForInbox(
              COALESCE(c.pin_order, 9223372036854775807) AS pin_sort,
              NULL AS date_sort
         FROM chats c
-       WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} AND c.is_pinned = 1
+       WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
+         AND c.is_pinned = 1
        ORDER BY pin_sort ASC, c.id DESC
        ${limit}
     ),
     unpinned AS (
       SELECT c.id, c.is_pinned, NULL AS pin_sort, c.latest_message_date AS date_sort
         FROM chats c
-       WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} AND c.is_pinned = 0
+       WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
+         AND c.is_pinned = 0
        ORDER BY c.latest_message_date DESC, c.id DESC
        ${limit}
     ),
@@ -187,11 +192,13 @@ async function queryChatsForInbox(
  */
 export async function listChatsForInbox(
   db: AppDatabase,
-  opts: { includeArchived?: boolean } = {},
+  opts: { includeArchived?: boolean; filters?: InboxFilters } = {},
 ): Promise<InboxRow[]> {
+  const filters = normalizeInboxFilters(opts.filters);
   return queryChatsForInbox(db, {
     archive: opts.includeArchived ? 'all' : 'active',
-    sender: 'any',
+    sender: filters.sender,
+    filters,
   });
 }
 
@@ -205,6 +212,7 @@ export async function listChatsForInboxPage(
   const rows = await queryChatsForInbox(db, {
     archive: opts.archive ?? 'active',
     sender: opts.sender ?? 'any',
+    filters: opts.filters,
     limit: limit + 1,
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
@@ -218,10 +226,11 @@ export async function countChatsForInbox(
   const filters = inboxFilterSql({
     archive: opts.archive ?? 'active',
     sender: opts.sender ?? 'any',
+    filters: opts.filters,
   });
   const rows = await db.all<{ count: number }>(sql`
     SELECT COUNT(*) AS count FROM chats c
-     WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender}
+     WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
   `);
   return rows[0]?.count ?? 0;
 }

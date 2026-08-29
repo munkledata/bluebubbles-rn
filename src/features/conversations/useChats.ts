@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { normalizeInboxFilters, type InboxFilters } from '@core/models';
 import { getDatabase } from '@db/database';
 import {
   countChatsForInbox,
@@ -21,6 +22,8 @@ export interface UseChatsOptions {
   pageSize?: number;
   archive?: InboxArchiveFilter;
   sender?: InboxSenderFilter;
+  /** Optional main-inbox predicates, all applied before each page is cut. */
+  filters?: InboxFilters;
   /** Exact active/unknown count for the main inbox's page-external footer. */
   countUnknown?: boolean;
 }
@@ -46,14 +49,16 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
   // Lazy initializer — useRef(create()) would re-invoke the factory every render.
   const [reconcile] = useState(() => createRowIdentityCache<InboxRow>((c) => c.guid));
   const archive = options.archive ?? (includeArchived ? 'all' : 'active');
-  const sender = options.sender ?? 'any';
+  const filters = normalizeInboxFilters(options.filters);
+  const sender = options.sender ?? filters.sender;
+  const queryFilters = sender === filters.sender ? filters : { ...filters, sender };
   const requestedPageSize =
     options.pageSize == null
       ? null
       : Number.isFinite(options.pageSize)
         ? Math.max(1, Math.floor(options.pageSize))
         : 50;
-  const queryKey = `${archive}|${sender}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
+  const queryKey = `${archive}|${queryFilters.read}|${queryFilters.sender}|${queryFilters.kind}|${queryFilters.mute}|${queryFilters.service}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
   const [pageRequest, setPageRequest] = useState(() => ({
     key: queryKey,
     limit: requestedPageSize ?? 0,
@@ -72,11 +77,11 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
       const db = getDatabase();
       const [page, unknownCount] = await Promise.all([
         limit == null
-          ? listChatsForInbox(db, { includeArchived }).then((rows) => ({
+          ? listChatsForInbox(db, { includeArchived, filters: queryFilters }).then((rows) => ({
               rows,
               hasMore: false,
             }))
-          : listChatsForInboxPage(db, { limit, archive, sender }),
+          : listChatsForInboxPage(db, { limit, archive, sender, filters: queryFilters }),
         options.countUnknown
           ? countChatsForInbox(db, { archive: 'active', sender: 'unknown' })
           : Promise.resolve(0),

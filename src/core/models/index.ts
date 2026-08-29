@@ -6,3 +6,4 @@ export * from './message';
 export * from './chat';
 export * from './serverInfo';
 export * from './reminder';
+export * from './inboxFilters';
