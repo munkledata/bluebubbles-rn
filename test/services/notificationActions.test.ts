@@ -19,7 +19,7 @@ import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
-import { deleteReminderByNotificationId } from '@db/repositories';
+import { deleteReminderByNotificationId, getMessageActionPartLayoutByGuid } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { ensureDatabase } from '@/services/databaseControl';
 import { markRead } from '@/services/chatActions';
@@ -88,6 +88,7 @@ jest.mock('@/services/send/sendReactionService', () => ({
 }));
 jest.mock('@db/repositories', () => ({
   deleteReminderByNotificationId: jest.fn(async () => undefined),
+  getMessageActionPartLayoutByGuid: jest.fn(async () => null),
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => false) }));
 jest.mock('@core/api', () => ({
@@ -109,6 +110,7 @@ const mockMarkRead = markRead as jest.Mock;
 const mockSendText = sendTextMessage as jest.Mock;
 const mockSendReaction = sendReactionMessage as jest.Mock;
 const mockDeleteReminder = deleteReminderByNotificationId as jest.Mock;
+const mockGetMessageActionPartLayout = getMessageActionPartLayoutByGuid as jest.Mock;
 const mockIsDevServer = isDevServer as jest.Mock;
 const mockLinkingOpen = Linking.openURL as jest.Mock;
 const mockAnswerFaceTime = faceTimeApi.answerFaceTime as jest.Mock;
@@ -304,6 +306,12 @@ describe('handleNotificationAction — mark-read', () => {
 
 describe('handleNotificationAction — love (tapback)', () => {
   it('sends a love reaction for the notification message, then clears the notif', async () => {
+    mockGetMessageActionPartLayout.mockResolvedValueOnce({
+      text: 'caption',
+      attributedBody: null,
+      partCount: 3,
+      visibleAttachmentCount: 2,
+    });
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
     );
@@ -314,6 +322,7 @@ describe('handleNotificationAction — love (tapback)', () => {
         chatGuid: 'c2',
         targetGuid: 'm2',
         reaction: 'love',
+        partIndex: 2,
       },
       expect.any(Number),
       expect.any(Function),
@@ -342,6 +351,7 @@ describe('handleNotificationAction — love (tapback)', () => {
       'm2',
       'love',
       undefined,
+      0,
       expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
     );
     expect(mockSendReaction).not.toHaveBeenCalled();

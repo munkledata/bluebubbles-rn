@@ -138,4 +138,110 @@ describe('live echo reconcile — emoji tapback', () => {
     expect(badges).toHaveLength(1);
     expect(badges[0]).toMatchObject({ baseType: 'emoji', emoji: '🫡', isFromMe: 1 });
   });
+
+  it('uses a known part to promote the matching optimistic reaction when kinds collide', async () => {
+    const { db, raw } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    await seed(db);
+    for (const partIndex of [0, 2]) {
+      await insertOutgoingReaction(db, {
+        tempGuid: `temp-part-${partIndex}`,
+        chatGuid: 'cEmo',
+        targetGuid: 'mt',
+        reaction: 'love',
+        partIndex,
+        now: 4_000 + partIndex,
+      });
+      await markOutgoingSentNoGuid(db, `temp-part-${partIndex}`);
+    }
+
+    const echo = Message.parse({
+      guid: 'react-real-part-two',
+      isFromMe: true,
+      dateCreated: 4_002,
+      chats: [{ guid: 'cEmo' }],
+      associatedMessageGuid: 'p:2/mt',
+      associatedMessageType: 'love',
+    });
+    await router.handle('new-message', JSON.stringify(echo), 'socket');
+
+    expect(
+      raw
+        .prepare('SELECT guid, associated_message_part AS part FROM messages WHERE guid LIKE ?')
+        .all('temp-part-%'),
+    ).toEqual([{ guid: 'temp-part-0', part: 0 }]);
+    expect(
+      raw
+        .prepare(
+          "SELECT associated_message_part AS part FROM messages WHERE guid = 'react-real-part-two'",
+        )
+        .get(),
+    ).toEqual({ part: 2 });
+  });
+
+  it('does not guess an unknown part and keeps custom-emoji echo matching glyph-specific', async () => {
+    const { db, raw } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    await seed(db);
+
+    for (const partIndex of [0, 2]) {
+      await insertOutgoingReaction(db, {
+        tempGuid: `temp-unknown-part-${partIndex}`,
+        chatGuid: 'cEmo',
+        targetGuid: 'mt',
+        reaction: 'love',
+        partIndex,
+        now: 5_000 + partIndex,
+      });
+      await markOutgoingSentNoGuid(db, `temp-unknown-part-${partIndex}`);
+    }
+    await router.handle(
+      'new-message',
+      JSON.stringify(
+        Message.parse({
+          guid: 'react-real-unknown-part',
+          isFromMe: true,
+          dateCreated: 5_002,
+          chats: [{ guid: 'cEmo' }],
+          associatedMessageGuid: 'mt',
+          associatedMessageType: 'love',
+        }),
+      ),
+      'socket',
+    );
+    expect(count(raw, "guid LIKE 'temp-unknown-part-%'")).toBe(2);
+
+    for (const [suffix, emoji] of [
+      ['fire', '🔥'],
+      ['salute', '🫡'],
+    ] as const) {
+      await insertOutgoingReaction(db, {
+        tempGuid: `temp-emoji-${suffix}`,
+        chatGuid: 'cEmo',
+        targetGuid: 'mt',
+        reaction: 'emoji',
+        emoji,
+        now: 6_000,
+      });
+      await markOutgoingSentNoGuid(db, `temp-emoji-${suffix}`);
+    }
+    await router.handle(
+      'new-message',
+      JSON.stringify(
+        Message.parse({
+          guid: 'react-real-salute',
+          isFromMe: true,
+          dateCreated: 6_000,
+          chats: [{ guid: 'cEmo' }],
+          associatedMessageGuid: 'mt',
+          associatedMessageType: 'emoji',
+          associatedMessageEmoji: '🫡',
+        }),
+      ),
+      'socket',
+    );
+    expect(count(raw, "guid = 'temp-emoji-fire'")).toBe(1);
+    expect(count(raw, "guid = 'temp-emoji-salute'")).toBe(0);
+    expect(count(raw, "guid = 'react-real-salute'")).toBe(1);
+  });
 });

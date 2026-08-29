@@ -193,11 +193,13 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
       text: string | null;
       subject: string | null;
       threadOriginatorGuid: string | null;
+      threadOriginatorPart: number | null;
       expressiveSendStyleId: string | null;
       chatGuid: string | null;
     }>(sql`
       SELECT m.id, m.text, m.subject,
              m.thread_originator_guid AS threadOriginatorGuid,
+             m.thread_originator_part AS threadOriginatorPart,
              m.expressive_send_style_id AS expressiveSendStyleId,
              c.guid AS chatGuid
       FROM messages m JOIN chats c ON c.id = m.chat_id
@@ -224,6 +226,7 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
       payload = JSON.stringify({
         message: msg.text ?? '',
         selectedMessageGuid: msg.threadOriginatorGuid ?? undefined,
+        partIndex: msg.threadOriginatorGuid ? (msg.threadOriginatorPart ?? undefined) : undefined,
         effectId: msg.expressiveSendStyleId ?? undefined,
         subject: msg.subject ?? undefined,
       });

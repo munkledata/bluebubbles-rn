@@ -25,9 +25,16 @@ export function useChatScheduledCatchup(accountLease: RealtimeDeliveryLease): vo
       try {
         if (isDev()) {
           await fireDueScheduledWithDevelopmentSender(
-            (guid, text, selectedMessageGuid) =>
+            (guid, text, selectedMessageGuid, _onQueued, selectedMessagePartIndex) =>
               selectedMessageGuid
-                ? devSendFakeReply(guid, text, selectedMessageGuid, undefined, accountLease)
+                ? devSendFakeReply(
+                    guid,
+                    text,
+                    selectedMessageGuid,
+                    selectedMessagePartIndex,
+                    undefined,
+                    accountLease,
+                  )
                 : devSendFake(guid, text, undefined, accountLease),
             accountLease,
           );

@@ -67,6 +67,7 @@ export type ScheduledDevelopmentSender = (
   text: string,
   selectedMessageGuid: string | undefined,
   onQueued: () => Promise<void>,
+  selectedMessagePartIndex?: number,
 ) => Promise<void>;
 
 function snapshotPickedImage(image: PickedImage): PickedImage {
@@ -187,7 +188,7 @@ export {
   type ContactCard,
 } from './sendContactService';
 export { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
-export { sendEdit, sendUnsend, type SendEditArgs } from './sendEditService';
+export { sendEdit, sendUnsend, type SendEditArgs, type SendUnsendArgs } from './sendEditService';
 export { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 
 /** UI-facing image send: bound to the composition-root DB + HttpClient. */
@@ -394,6 +395,8 @@ export function reply(
     chatGuid: string;
     text: string;
     replyToGuid: string;
+    /** Part of the selected message that this reply targets. */
+    replyToPartIndex?: number;
     effectId?: string;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
@@ -412,6 +415,7 @@ export function reply(
           chatGuid: snapshot.chatGuid,
           text: snapshot.text,
           selectedMessageGuid: snapshot.replyToGuid,
+          partIndex: snapshot.replyToPartIndex,
           effectId: snapshot.effectId,
         },
         Date.now(),
@@ -430,6 +434,7 @@ export function editText(
     messageGuid: string;
     newText: string;
     chatGuid?: string;
+    partIndex?: number;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{
@@ -442,7 +447,7 @@ export function editText(
 
 /** UI-facing unsend/retract of a sent message. */
 export function unsend(
-  args: { messageGuid: string; chatGuid?: string },
+  args: { messageGuid: string; chatGuid?: string; partIndex?: number },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ ok: boolean } | null> {
   return runUiAccountOperation(accountLease, () =>

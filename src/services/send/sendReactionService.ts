@@ -13,6 +13,8 @@ export interface SendReactionArgs {
   reaction: string;
   /** The glyph for an 'emoji'/'-emoji' tapback (required then, absent for classic types). */
   emoji?: string;
+  /** Target message part; the endpoint falls back to part 0 when omitted. */
+  partIndex?: number;
   selectedMessageText?: string;
 }
 
@@ -39,6 +41,7 @@ export async function sendReactionMessage(
         targetGuid: args.targetGuid,
         reaction: args.reaction,
         emoji: args.emoji,
+        partIndex: args.partIndex,
         selectedMessageText: args.selectedMessageText,
         now,
       }),
@@ -55,6 +58,7 @@ export async function sendReactionMessage(
       selectedMessageGuid: args.targetGuid,
       reaction: args.reaction,
       emoji: args.emoji,
+      partIndex: args.partIndex,
     });
     // Reactions require the Private API, so the ack carries the real GUID on success.
     await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);

@@ -21,6 +21,11 @@ export type ReactionBaseType = (typeof REACTION_BASE_TYPES)[number];
  */
 export type ReactionKind = ReactionBaseType | 'emoji';
 
+/** Defensive ceiling for server-controlled Apple message-part indexes/counts. */
+export const MAX_MESSAGE_PART_INDEX = 10_000;
+const ASSOCIATED_GUID_PART_PREFIX = /^b?p:(\d+)\//;
+const LEGACY_ATTACHMENT_GUID_PREFIX = 'bp:';
+
 export interface ReactionMeta {
   baseType: ReactionBaseType;
   emoji: string;
@@ -57,6 +62,11 @@ export function parseReactionType(
 
 export function reactionMeta(base: ReactionBaseType): ReactionMeta {
   return META[base];
+}
+
+/** Stable key shared by reaction collapse and the action menu's own-reaction lookup. */
+export function reactionKindKey(base: ReactionKind, emoji?: string | null): string {
+  return base === 'emoji' ? `emoji::${emoji ?? ''}` : base;
 }
 
 /**
@@ -99,16 +109,33 @@ export function isOverlayAssociatedType(t: string | null | undefined): boolean {
  * Normalize an `associatedMessageGuid` to the BARE target-message guid.
  *
  * Apple/BlueBubbles stores a reaction's linkage with a part prefix — `p:0/<guid>` (text part) or
- * `bp:0/<guid>` (attachment part) — while the target message's OWN `guid` has no prefix. Left raw,
+ * `bp:0/<guid>` (attachment part) — while the target message's own `guid` normally lacks the outer
+ * linkage wrapper. Left raw,
  * the reaction never matches its target (`WHERE associated_message_guid IN (<bare guids>)`), so
- * OTHER people's reactions store fine but attach to nothing and never render. Strip the prefix on
- * the way in — everything after the last `/`; a guid with no `/` is returned unchanged. Mirrors the
- * Flutter reference (`message.dart`: `.replaceAll("bp:", "").split("/").last`). Reaction guids carry
- * exactly one `/` and message guids never contain one, so "after the last `/`" is safe.
+ * OTHER people's reactions store fine but attach to nothing and never render. The helper also
+ * emits a legacy attachment form, `bp:<guid>`, without a part number. Strip exactly ONE recognized
+ * outer prefix. The remainder is opaque: using the last slash would corrupt a future target guid
+ * that is itself part-prefixed.
  */
 export function stripAssociatedGuidPrefix(guid: string): string {
-  const slash = guid.lastIndexOf('/');
-  return slash >= 0 ? guid.slice(slash + 1) : guid;
+  const numbered = ASSOCIATED_GUID_PART_PREFIX.exec(guid);
+  if (numbered) return guid.slice(numbered[0].length);
+  return guid.startsWith(LEGACY_ATTACHMENT_GUID_PREFIX)
+    ? guid.slice(LEGACY_ATTACHMENT_GUID_PREFIX.length)
+    : guid;
+}
+
+/**
+ * Read the exact Apple message-part id from a reaction/sticker linkage (`p:2/guid` or
+ * `bp:2/guid`). A bare or malformed linkage has UNKNOWN identity and returns null; it must not be
+ * silently conflated with the real part zero.
+ */
+export function partIndexFromAssociatedGuid(guid: string | null | undefined): number | null {
+  if (!guid) return null;
+  const match = ASSOCIATED_GUID_PART_PREFIX.exec(guid);
+  if (!match?.[1]) return null;
+  const partIndex = Number(match[1]);
+  return Number.isSafeInteger(partIndex) && partIndex <= MAX_MESSAGE_PART_INDEX ? partIndex : null;
 }
 
 /** The wire string sent to remove an existing reaction of this type/kind. */

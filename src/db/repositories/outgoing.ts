@@ -187,6 +187,8 @@ export interface InsertOutgoingTextArgs {
   text: string;
   now: number;
   selectedMessageGuid?: string;
+  /** Reply target part, persisted only when a reply target is present. */
+  partIndex?: number;
   threadOriginatorGuid?: string;
   effectId?: string;
   subject?: string;
@@ -212,6 +214,7 @@ export async function insertOutgoingTextWithinTransaction(
       payload: JSON.stringify({
         message: args.text,
         selectedMessageGuid: args.selectedMessageGuid,
+        partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
         effectId: args.effectId,
         subject: args.subject,
         // Persisted so a crash-recovery resend keeps the subject + mention spans
@@ -231,6 +234,7 @@ export async function insertOutgoingTextWithinTransaction(
       // Persist locally so an optimistic reply renders its quote + the send-effect
       // plays on the outgoing bubble before the server echo.
       threadOriginatorGuid: args.threadOriginatorGuid ?? null,
+      threadOriginatorPart: args.threadOriginatorGuid ? (args.partIndex ?? null) : null,
       expressiveSendStyleId: args.effectId ?? null,
     });
     await db
@@ -344,6 +348,8 @@ export interface InsertOutgoingReactionArgs {
   reaction: string;
   /** Glyph for an 'emoji'/'-emoji' tapback; persisted so the optimistic badge renders it. */
   emoji?: string;
+  /** Target message part; null/undefined means legacy or unknown. */
+  partIndex?: number;
   selectedMessageText?: string;
   now: number;
 }
@@ -363,6 +369,7 @@ export function insertOutgoingReactionWithinTransaction(
         selectedMessageGuid: args.targetGuid,
         reaction: args.reaction,
         ...(args.emoji ? { emoji: args.emoji } : {}),
+        partIndex: args.partIndex,
       }),
     });
     await db.insert(messages).values({
@@ -376,6 +383,7 @@ export function insertOutgoingReactionWithinTransaction(
       associatedMessageGuid: args.targetGuid,
       associatedMessageType: args.reaction,
       associatedMessageEmoji: args.emoji ?? null,
+      associatedMessagePart: args.partIndex ?? null,
     });
   });
 }
@@ -745,7 +753,11 @@ export interface EchoMatchFields {
   text?: string | null;
   dateCreated?: number | null;
   associatedMessageGuid?: string | null;
+  associatedMessagePart?: number | null;
   associatedMessageType?: string | null;
+  associatedMessageEmoji?: string | null;
+  threadOriginatorGuid?: string | null;
+  threadOriginatorPart?: number | null;
 }
 
 /** Only match a temp row sent within this window of the echo's own timestamp, so a
@@ -783,15 +795,29 @@ export async function reconcileEchoByContent(
     if (already[0]) return;
     // Match on the fields the BARE socket echo reliably carries — serializeMessage emits NO
     // has_attachments/attachments on the live event, so we must NOT gate on them. A reaction
-    // matches its target+type; everything else matches exact text. This covers attachments too:
+    // matches its target+type+known part, a reply matches its target+known part+text, and a plain
+    // message cannot claim a reply row. Unknown reaction/reply parts reconcile only when the
+    // candidate is unique. Other messages match exact text. This covers attachments too:
     // an outgoing attachment send and its echo both have null text. (Attachments are always sent
     // via the Private API — the AppleScript fallback is plain-text only — so on the ack-less
     // no-guid path only TEXT arrives here, and text matches reliably; an attachment that races
     // its ack falls back to reconcileOutgoingSuccess's dup-branch local_path carry-over.)
-    const match =
-      m.associatedMessageType != null
-        ? sql`associated_message_type = ${m.associatedMessageType} AND associated_message_guid IS ${m.associatedMessageGuid ?? null}`
-        : sql`associated_message_type IS NULL AND text IS ${m.text ?? null}`;
+    const isReactionEcho = m.associatedMessageType != null;
+    const isReplyEcho = !isReactionEcho && m.threadOriginatorGuid != null;
+    const reactionHasCustomEmoji = m.associatedMessageType?.replace(/^-/, '') === 'emoji';
+    const match = isReactionEcho
+      ? sql`associated_message_type = ${m.associatedMessageType}
+              AND associated_message_guid IS ${m.associatedMessageGuid ?? null}
+              ${reactionHasCustomEmoji ? sql`AND associated_message_emoji IS ${m.associatedMessageEmoji ?? null}` : sql``}
+              ${m.associatedMessagePart == null ? sql`` : sql`AND associated_message_part IS ${m.associatedMessagePart}`}`
+      : isReplyEcho
+        ? sql`associated_message_type IS NULL
+                AND text IS ${m.text ?? null}
+                AND thread_originator_guid IS ${m.threadOriginatorGuid}
+                ${m.threadOriginatorPart == null ? sql`` : sql`AND thread_originator_part IS ${m.threadOriginatorPart}`}`
+        : sql`associated_message_type IS NULL
+                AND thread_originator_guid IS NULL
+                AND text IS ${m.text ?? null}`;
     // Time-bound the match to a send near the echo's own timestamp (defeats a cross-device
     // identical-content hijack of an unrelated stale row).
     const echoDate = m.dateCreated ?? null;
@@ -811,12 +837,20 @@ export async function reconcileEchoByContent(
     // gone through server-side — its echo must promote the errored bubble in place (clearing the
     // queue row, which stops the retry ladder) instead of inserting a duplicate. The ±window +
     // exact-content + same-chat guards bound stale-row hijack.
+    // A legacy/bare reaction or reply echo has unknown part identity. Preserve its old
+    // single-candidate reconciliation path, but never guess between multiple otherwise-valid
+    // part-specific rows. A known incoming part remains exact and rapid identical sends retain
+    // their oldest-first rule.
+    const requiresUniqueUnknownPartMatch =
+      (isReactionEcho && m.associatedMessagePart == null) ||
+      (isReplyEcho && m.threadOriginatorPart == null);
     const rows = await db.all<{ guid: string }>(sql`
       SELECT guid FROM messages
       WHERE chat_id = ${chatId} AND is_from_me = 1 AND guid LIKE 'temp-%'
         AND send_state IN ('sending', 'sent', 'error') AND ${match} ${window}
       ORDER BY (date_deleted IS NULL) DESC, (send_state = 'sending') DESC, date_created ASC, id ASC
-      LIMIT 1`);
+      LIMIT ${requiresUniqueUnknownPartMatch ? 2 : 1}`);
+    if (requiresUniqueUnknownPartMatch && rows.length !== 1) return;
     const temp = rows[0];
     if (!temp) return;
     await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid);

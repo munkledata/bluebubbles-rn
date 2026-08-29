@@ -653,6 +653,7 @@ describe('ChatScreen — send routing', () => {
       GUID,
       'reply-dev',
       'reply-target',
+      0,
       undefined,
       accountLease,
     );
@@ -753,6 +754,7 @@ describe('ChatScreen — reply flow', () => {
         chatGuid: GUID,
         text: 'sure',
         replyToGuid: 'm1',
+        replyToPartIndex: 0,
         effectId: undefined,
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
@@ -779,6 +781,7 @@ describe('ChatScreen — edit flow', () => {
         messageGuid: 'm1',
         newText: 'edited body',
         chatGuid: GUID,
+        partIndex: 0,
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
@@ -1287,12 +1290,13 @@ describe('ChatScreen — scheduled-message ticker', () => {
           text: string,
           selectedMessageGuid: string | undefined,
           onQueued: () => Promise<void>,
+          selectedMessagePartIndex?: number,
         ) => Promise<void>,
         accountLease: { isCurrent(): boolean },
       ) => {
         expect(accountLease.isCurrent()).toBe(true);
         await sender('plain-chat', 'plain', undefined, async () => undefined);
-        await sender('reply-chat', 'reply', 'reply-target', async () => undefined);
+        await sender('reply-chat', 'reply', 'reply-target', async () => undefined, 2);
         return 2;
       },
     );
@@ -1305,6 +1309,7 @@ describe('ChatScreen — scheduled-message ticker', () => {
       'reply-chat',
       'reply',
       'reply-target',
+      2,
       undefined,
       accountLease,
     );

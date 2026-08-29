@@ -16,6 +16,29 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 **Original 2026-07-01 baseline:** 44 surface items matched on both sides (the core messaging, sync,
 group management, FaceTime, Find My, stats, and restart/logs flows all lined up).
 
+## 🟡 Partial (2026-08-29) — multipart message-part identity (`FEAT-03B`)
+
+The Gator send routes accept `partIndex` for ordinary text replies, reactions, edits, and unsend,
+and serialized messages expose a bounded aggregate `partCount`. The RN compatibility slice now
+preserves that count, derives associated-message parts from one outer `p:<n>/` or `bp:<n>/` link,
+normalizes the helper's legacy `bp:<guid>` attachment wrapper without inventing a part, and carries
+a resolved target through optimistic rows, retries, local scheduled replies, and action requests.
+Reaction removal uses its persisted part rather than guessing from the bubble.
+
+Unsend sends the resolved part to Gator, but the current local optimistic and post-echo presentation
+remains an aggregate tombstone. Preserving only the remaining visible parts cannot be implemented
+safely in the bubble alone: inbox/search/notification eligibility and attachment-cache ownership
+also treat `dateRetracted` as row-wide, and a later sync may omit enough content to make the removed
+part ambiguous. A shared aggregate-retraction classifier therefore remains separate follow-up work.
+
+This is not full cross-repository multipart parity. The normalized server message does not expose a
+stable per-part topology or incoming `thread_originator_part`, so the client can identify the common
+attachments-first caption layout only when the aggregate count proves it. Apple part identifiers can
+also change after edits, unsends, or gallery collapse. The server's mention/multipart text path must
+be verified to retain the requested reply part as well. Exact arbitrary layouts and received reply
+parts therefore remain blocked on an additive server contract plus device observation; ambiguous
+older payloads keep the compatible part-zero fallback rather than inventing an identity.
+
 ## ✅ Closed (2026-07-01)
 
 The top gaps have since been wired app-side against capabilities the server already exposed:

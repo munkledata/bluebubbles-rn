@@ -3,8 +3,14 @@ import * as Crypto from 'expo-crypto';
 import { useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Share } from 'react-native';
-import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
+import { editedPartFromSummary, resolveTargetPartIndex } from '@core/messages/partIndex';
 import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
+import {
+  parseReactionType,
+  reactionKindKey,
+  type ReactionBaseType,
+} from '@core/reactions/reactionType';
+import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
 import { type MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
@@ -25,6 +31,26 @@ import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
 import type { EnrichedMessage } from './useMessages';
 
+function actionContentOf(msg: EnrichedMessage) {
+  const bodyText = bodyTextFromRuns(parseAttributedRuns(msg.attributedBody, msg.text));
+  // Private Messages-extension payloads are not visible user attachments and therefore cannot own
+  // a part in this aggregate action target. Keep the same conservative filter as MessageBubble.
+  const visibleAttachments = msg.balloonBundleId
+    ? []
+    : (msg.attachments ?? []).filter((attachment) => !attachment.hideAttachment);
+  const visibleAttachmentCount = visibleAttachments.length;
+  return {
+    bodyText,
+    visibleAttachments,
+    visibleAttachmentCount,
+    targetPartIndex: resolveTargetPartIndex({
+      attachmentCount: visibleAttachmentCount,
+      hasText: bodyText.trim().length > 0,
+      partCount: msg.partCount,
+    }),
+  };
+}
+
 export interface MessageActionsArgs {
   guid: string;
   /** The reactive message window — read through a ref by the stable callbacks. */
@@ -35,7 +61,7 @@ export interface MessageActionsArgs {
   accountLease?: RealtimeDeliveryLease;
   /** Must be the useState setters themselves (stable) — onSwipeReply's identity rides on it. */
   setReplyTo: (preview: MessagePreview | null) => void;
-  setEditing: (editing: { guid: string; text: string } | null) => void;
+  setEditing: (editing: { guid: string; text: string; partIndex: number } | null) => void;
 }
 
 /**
@@ -69,6 +95,8 @@ export function useMessageActions({
   // Long-press a bubble → open the tapback/reply/edit menu. Stable so the
   // memoized message rows aren't re-rendered by a fresh closure each render.
   const onLongPressMessage = useCallback((msg: EnrichedMessage, rect: BubbleRect): void => {
+    const { bodyText, visibleAttachments, visibleAttachmentCount, targetPartIndex } =
+      actionContentOf(msg);
     const mine = msg.reactions
       .filter((r) => r.isFromMe && r.baseType !== 'emoji')
       .map((r) => r.baseType)
@@ -76,21 +104,29 @@ export function useMessageActions({
     const myEmojis = msg.reactions
       .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
       .map((r) => r.emoji as string);
+    const myReactionParts: Record<string, number> = {};
+    for (const reaction of msg.reactions) {
+      if (!reaction.isFromMe || reaction.targetPart == null) continue;
+      myReactionParts[reactionKindKey(reaction.baseType, reaction.emoji)] = reaction.targetPart;
+    }
+    const messageSummaryInfo = parseMessageSummaryInfo(msg.messageSummaryInfo);
     setSelected({
       guid: msg.guid,
       text: msg.text,
+      bodyText,
       subject: msg.subject,
       balloonBundleId: msg.balloonBundleId,
       hasAttachments: msg.hasAttachments,
       // A balloon payload is private extension data even when a lean notification omitted the
       // attachment's hide flag. Ordinary photos/files have no balloon identifier.
-      hasVisibleAttachments:
-        !msg.balloonBundleId && (msg.attachments ?? []).some((a) => !a.hideAttachment) ? 1 : 0,
+      hasVisibleAttachments: visibleAttachmentCount > 0 ? 1 : 0,
       attachmentDescription: msg.attachmentDescription,
       isFromMe: msg.isFromMe === 1,
       senderName: msg.senderName,
       mine,
       myEmojis,
+      myReactionParts,
+      targetPartIndex,
       dateCreated: msg.dateCreated,
       // For the "Details" sheet: delivery/read/edit timestamps + this message's own service.
       dateDelivered: msg.dateDelivered,
@@ -103,19 +139,17 @@ export function useMessageActions({
       // Parse the persisted JSON blob (raw string on the row) into the history shape, tolerantly —
       // a garbage/legacy value degrades to null (empty sheet), never throws. Threaded onto the
       // selection so the sheet needs no extra DB fetch (the row is already loaded).
-      messageSummaryInfo: parseMessageSummaryInfo(msg.messageSummaryInfo),
+      messageSummaryInfo,
       isTemp: msg.guid.startsWith('temp-'),
       sendState: msg.sendState,
       // Keep private Messages-extension payload blobs out of Share/Save/Forward as well as the
       // bubble. A lean notification can report hideAttachment=0, so balloon identity is the
       // conservative second signal. Normal photos/files have no balloon identifier.
-      attachments: (msg.attachments ?? [])
-        .filter((a) => !a.hideAttachment && !msg.balloonBundleId)
-        .map((a) => ({
-          guid: a.guid,
-          localPath: a.localPath,
-          mimeType: a.mimeType,
-        })),
+      attachments: visibleAttachments.map((a) => ({
+        guid: a.guid,
+        localPath: a.localPath,
+        mimeType: a.mimeType,
+      })),
       // Thread membership: this message is a reply, or something in the loaded window replies to it.
       inThread:
         !!msg.threadOriginatorGuid ||
@@ -221,17 +255,18 @@ export function useMessageActions({
   const onSwipeReply = useCallback(
     (msg: EnrichedMessage): void => {
       if (msg.guid.startsWith('temp-')) return;
+      const { bodyText, visibleAttachmentCount, targetPartIndex } = actionContentOf(msg);
       setReplyTo({
         guid: msg.guid,
-        text: msg.text,
+        text: bodyText,
         subject: msg.subject,
         balloonBundleId: msg.balloonBundleId,
         isFromMe: msg.isFromMe,
         senderName: msg.senderName,
         hasAttachments: msg.hasAttachments,
-        hasVisibleAttachments:
-          !msg.balloonBundleId && (msg.attachments ?? []).some((a) => !a.hideAttachment) ? 1 : 0,
+        hasVisibleAttachments: visibleAttachmentCount > 0 ? 1 : 0,
         attachmentDescription: msg.attachmentDescription,
+        targetPartIndex,
       });
     },
     [setReplyTo],
@@ -240,20 +275,26 @@ export function useMessageActions({
   const onEditSelected = (): void => {
     if (!selected) return;
     setReplyTo(null);
-    setEditing({ guid: selected.guid, text: selected.text ?? '' });
+    setEditing({
+      guid: selected.guid,
+      text: selected.bodyText ?? selected.text ?? '',
+      partIndex:
+        editedPartFromSummary(selected.messageSummaryInfo) ?? selected.targetPartIndex ?? 0,
+    });
   };
 
   const onUnsendSelected = (): void => {
     if (!selected) return;
     const g = selected.guid;
+    const partIndex = selected.targetPartIndex ?? 0;
     showDialog('Unsend message?', 'This removes it for you and retracts it.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Unsend',
         style: 'destructive',
         onPress: () => {
-          if (isDev()) void devUnsendFake(g, screenLease);
-          else void unsend({ messageGuid: g, chatGuid: guid }, screenLease);
+          if (isDev()) void devUnsendFake(g, partIndex, screenLease);
+          else void unsend({ messageGuid: g, chatGuid: guid, partIndex }, screenLease);
         },
       },
     ]);
@@ -293,14 +334,23 @@ export function useMessageActions({
 
   const onReact = (reaction: string, emoji?: string): void => {
     if (!selected || selected.isTemp) return;
+    const parsed = parseReactionType(reaction);
+    // A removal targets the exact part stored on the surviving own reaction. Old rows whose
+    // prefix was normalized before 0042 have UNKNOWN identity and must retain the legacy part-zero
+    // fallback; borrowing the bubble's nonzero caption guess could remove a different reaction.
+    const partIndex = parsed?.isRemoval
+      ? (selected.myReactionParts?.[reactionKindKey(parsed.baseType, emoji)] ?? 0)
+      : (selected.targetPartIndex ?? 0);
     const args = {
       chatGuid: guid,
       targetGuid: selected.guid,
       reaction,
       emoji,
-      selectedMessageText: selected.text ?? '',
+      partIndex,
+      selectedMessageText: selected.bodyText ?? selected.text ?? '',
     };
-    if (isDev()) void devSendFakeReaction(guid, selected.guid, reaction, emoji, screenLease);
+    if (isDev())
+      void devSendFakeReaction(guid, selected.guid, reaction, emoji, partIndex, screenLease);
     else void react(args, screenLease, presentSendIssue);
   };
 
@@ -308,7 +358,7 @@ export function useMessageActions({
     if (!selected || selected.isTemp) return;
     setReplyTo({
       guid: selected.guid,
-      text: selected.text,
+      text: selected.bodyText ?? selected.text,
       subject: selected.subject,
       balloonBundleId: selected.balloonBundleId,
       isFromMe: selected.isFromMe ? 1 : 0,
@@ -316,11 +366,13 @@ export function useMessageActions({
       hasAttachments: selected.hasAttachments ?? 0,
       hasVisibleAttachments: selected.hasVisibleAttachments ?? 0,
       attachmentDescription: selected.attachmentDescription,
+      targetPartIndex: selected.targetPartIndex ?? 0,
     });
   };
 
   const onCopySelected = (): void => {
-    if (selected?.text) void Clipboard.setStringAsync(selected.text);
+    const text = selected?.bodyText ?? selected?.text;
+    if (text) void Clipboard.setStringAsync(text);
   };
 
   // Share a message to another app via the OS share sheet: prefer a downloaded attachment file
@@ -348,7 +400,8 @@ export function useMessageActions({
         return;
       }
       try {
-        if (sel.text) await Share.share({ message: sel.text });
+        const text = sel.bodyText ?? sel.text;
+        if (text) await Share.share({ message: text });
         else showDialog('Share', 'Open the attachment first to download it, then Share again.');
       } catch {
         // user cancelled the share sheet — no-op
@@ -384,7 +437,7 @@ export function useMessageActions({
   const onForwardSelected = (): void => {
     if (!selected) return;
     const plan = buildForwardParams(
-      { text: selected.text, attachments: selected.attachments },
+      { text: selected.bodyText ?? selected.text, attachments: selected.attachments },
       (attachments) =>
         stageForwardAttachmentHandoff({
           nonce: Crypto.randomUUID(),
@@ -437,7 +490,7 @@ export function useMessageActions({
             chatTitle,
             messagePreview:
               buildMessageSnippet({
-                text: msg.text,
+                text: msg.bodyText ?? msg.text,
                 subject: msg.subject,
                 hasAttachments: msg.hasAttachments,
                 hasVisibleAttachments: msg.hasVisibleAttachments,

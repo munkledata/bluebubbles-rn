@@ -41,16 +41,18 @@ describe('scheduled messages repo', () => {
     expect(await listAllScheduled(db)).toHaveLength(0);
   });
 
-  it('round-trips a reply target (selectedMessageGuid) through the payload', async () => {
+  it('round-trips a reply target and part through the payload', async () => {
     const { db } = await createTestDb();
     await insertScheduled(db, {
       chatGuid: 'c1',
       text: 'threaded',
       scheduledFor: 1,
       selectedMessageGuid: 'orig-guid',
+      selectedMessagePartIndex: 2,
     });
     const [row] = await listDueScheduled(db, 1000);
     expect(row?.selectedMessageGuid).toBe('orig-guid');
+    expect(row?.selectedMessagePartIndex).toBe(2);
   });
 
   it('stores a uuid-STRING serverId verbatim (SQLite INTEGER affinity keeps non-numeric text)', async () => {
@@ -500,13 +502,14 @@ describe('scheduled messages repo', () => {
         text: 'fire',
         scheduledFor: 1,
         selectedMessageGuid: 'r1',
+        selectedMessagePartIndex: 2,
       });
-      const calls: Array<[string, string, string | undefined]> = [];
-      const fired = await runDueScheduled(db, noHttp, 1000, async (g, t, s) => {
-        calls.push([g, t, s]);
+      const calls: Array<[string, string, string | undefined, number | undefined]> = [];
+      const fired = await runDueScheduled(db, noHttp, 1000, async (g, t, s, _settle, p) => {
+        calls.push([g, t, s, p]);
       });
       expect(fired).toBe(1);
-      expect(calls).toEqual([['c1', 'fire', 'r1']]);
+      expect(calls).toEqual([['c1', 'fire', 'r1', 2]]);
       expect(await listAllScheduled(db)).toHaveLength(0); // now 'sent'
     });
 
@@ -958,11 +961,13 @@ describe('scheduled messages repo', () => {
         text: 'old',
         scheduledFor: 1000,
         selectedMessageGuid: 'orig',
+        selectedMessagePartIndex: 2,
       });
       await updateScheduled(db, id, { text: 'new' });
       const row = await getScheduledById(db, id);
       expect(row?.text).toBe('new');
       expect(row?.selectedMessageGuid).toBe('orig'); // JSON merge kept the reply target
+      expect(row?.selectedMessagePartIndex).toBe(2);
     });
 
     it('updates the fire time', async () => {

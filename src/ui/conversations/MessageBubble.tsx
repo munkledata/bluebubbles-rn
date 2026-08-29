@@ -4,6 +4,7 @@ import { bubbleEffectOf } from '@core/effects';
 import { parsePayloadData } from '@core/models';
 import {
   parseAttributedRuns,
+  bodyTextFromRuns,
   splitMessageEntitySpans,
   type MessageEntity,
   type TextRun,
@@ -144,13 +145,13 @@ export const MessageBubble = React.memo(function MessageBubble({
   const stickerKey = stickers.map((s) => s.stickerMessageGuid).join('|');
   // EDITED messages keep their text in attributedBody (the `text` column goes empty), so derive the
   // body from the parsed runs rather than `msg.text` alone — otherwise an edit renders as a blank
-  // bubble. `bodyTextOf` strips the U+FFFC attachment placeholder so an attachment-only message
-  // isn't a stray-glyph bubble.
+  // bubble. `bodyTextFromRuns` strips the U+FFFC attachment placeholder so an attachment-only
+  // message isn't a stray-glyph bubble.
   // Memoized on the source PRIMITIVES (not the row's identity) — parsing runs a JSON.parse, so
   // it must not re-run on every render of a recycling list row.
   const { runs, bodyText } = useMemo(() => {
     const parsed = mergeAdjacentPlainRuns(parseAttributedRuns(msg.attributedBody, msg.text));
-    return { runs: parsed, bodyText: bodyTextOf(parsed) };
+    return { runs: parsed, bodyText: bodyTextFromRuns(parsed) };
   }, [msg.attributedBody, msg.text]);
   const hasText = bodyText.trim().length > 0;
   const hasActionableEntities = useMemo(
@@ -557,14 +558,6 @@ function mergeAdjacentPlainRuns(runs: TextRun[]): TextRun[] {
     }
   }
   return merged;
-}
-
-/** Plain body text from the parsed runs (attachments excluded, U+FFFC placeholder stripped). */
-function bodyTextOf(runs: TextRun[]): string {
-  return runs
-    .filter((r) => !r.attachment)
-    .map((r) => r.text.replace(OBJECT_REPLACEMENT, ''))
-    .join('');
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   parseMessageSummaryInfo,
   parsePayloadData,
 } from '@core/models';
+import { editedPartFromSummary, resolveTargetPartIndex } from '@core/messages/partIndex';
 
 describe('Message model', () => {
   it('parses a minimal message and coerces string timestamps', () => {
@@ -25,6 +26,30 @@ describe('Message model', () => {
     expect(isReaction({ associatedMessageType: 'love' })).toBe(true);
     expect(isReaction({ associatedMessageType: '-love' })).toBe(false);
     expect(isReaction({ associatedMessageType: null })).toBe(false);
+  });
+
+  it('preserves bounded part identity and resolves only a proven caption part', () => {
+    const associated = Message.parse({
+      guid: 'reaction',
+      associatedMessageGuid: 'bp:2/p:0/target-guid',
+      associatedMessageType: 'love',
+    });
+    expect(associated.associatedMessageGuid).toBe('p:0/target-guid');
+    expect(associated.associatedMessagePart).toBe(2);
+    expect(
+      Message.parse({
+        guid: 'explicit',
+        associatedMessageGuid: 'p:2/target-guid',
+        associatedMessagePart: 4,
+      }).associatedMessagePart,
+    ).toBe(4);
+    expect(Message.parse({ guid: 'bounded', partCount: 10_001 }).partCount).toBeUndefined();
+
+    expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: true, partCount: 3 })).toBe(2);
+    expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: true, partCount: null })).toBe(0);
+    expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: false, partCount: 3 })).toBe(0);
+    expect(editedPartFromSummary({ editedParts: { '2': [] } })).toBe(2);
+    expect(editedPartFromSummary({ editedParts: { '1': [], '2': [] } })).toBeNull();
   });
 
   it('accepts and preserves a well-formed messageSummaryInfo (edit history + retracted parts)', () => {

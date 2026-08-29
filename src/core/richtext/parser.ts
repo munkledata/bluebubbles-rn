@@ -81,6 +81,14 @@ export function hasMention(runs: TextRun[]): boolean {
   return runs.some((r) => r.mention);
 }
 
+/** Renderable/editable body text: exclude attachment runs and Apple's U+FFFC placeholders. */
+export function bodyTextFromRuns(runs: TextRun[]): string {
+  return runs
+    .filter((run) => !run.attachment)
+    .map((run) => run.text.replace(/\uFFFC/g, ''))
+    .join('');
+}
+
 /**
  * Plain text recovered from a stored `attributedBody` JSON — the message's words with
  * inline-attachment placeholders dropped and U+FFFC stripped. Returns '' when there's no
@@ -89,10 +97,5 @@ export function hasMention(runs: TextRun[]): boolean {
  */
 export function plainTextFromAttributedBody(attributedBodyJson: string | null | undefined): string {
   if (!attributedBodyJson) return '';
-  return parseAttributedRuns(attributedBodyJson, '')
-    .filter((r) => !r.attachment)
-    .map((r) => r.text)
-    .join('')
-    .replace(/￼/g, '')
-    .trim();
+  return bodyTextFromRuns(parseAttributedRuns(attributedBodyJson, '')).trim();
 }

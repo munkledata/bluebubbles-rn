@@ -56,18 +56,25 @@ describe('sendReactionMessage', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-react', dateCreated: 1000 };
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', selectedMessageText: 'hi' },
+      {
+        chatGuid: 'c1',
+        targetGuid: 'mt',
+        reaction: 'love',
+        partIndex: 2,
+        selectedMessageText: 'hi',
+      },
     );
 
     // Server contract: { chatGuid, messageGuid, reactionType } (F-2).
-    expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'love', partIndex: 0 });
+    expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'love', partIndex: 2 });
     const row = one(
       raw,
-      "SELECT guid, send_state s, associated_message_type t FROM messages WHERE associated_message_guid='mt'",
+      "SELECT guid, send_state s, associated_message_type t, associated_message_part p FROM messages WHERE associated_message_guid='mt'",
     );
     expect(row.guid).toBe('real-react'); // promoted
     expect(row.s).toBe('sent');
     expect(row.t).toBe('love');
+    expect(row.p).toBe(2);
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
     expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt')).toHaveLength(1);
   });

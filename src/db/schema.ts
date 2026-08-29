@@ -129,6 +129,8 @@ export const messages = sqliteTable(
     attributedBody: text('attributed_body'),
     /** Apple Messages extension identifier. Used only for safe unsupported-content fallbacks. */
     balloonBundleId: text('balloon_bundle_id'),
+    /** Bounded Apple aggregate part count; NULL when an older/lean payload omitted it. */
+    partCount: integer('part_count'),
     isFromMe: integer('is_from_me', { mode: 'boolean' }).default(false),
     dateCreated: integer('date_created'),
     dateRead: integer('date_read'),
@@ -150,10 +152,14 @@ export const messages = sqliteTable(
     dateDeleted: integer('date_deleted'),
     hasAttachments: integer('has_attachments', { mode: 'boolean' }).default(false),
     associatedMessageGuid: text('associated_message_guid'),
+    /** Exact target part parsed from an associated message's outer p:N/ or bp:N/ prefix. */
+    associatedMessagePart: integer('associated_message_part'),
     associatedMessageType: text('associated_message_type'),
     /** Glyph of an arbitrary-emoji tapback (associatedMessageType 'emoji'/'-emoji'). */
     associatedMessageEmoji: text('associated_message_emoji'),
     threadOriginatorGuid: text('thread_originator_guid'),
+    /** Reply target part retained locally for optimistic and reconstructed retry payloads. */
+    threadOriginatorPart: integer('thread_originator_part'),
     expressiveSendStyleId: text('expressive_send_style_id'),
     /** iMessage group/chat-event metadata. item_type 0 = a normal message; >0 = a system event
         (1 add/remove participant, 2 rename, 3 leave/photo/chat-background change, 4 location,

@@ -675,8 +675,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 41,
-      migrationHead: '0041_message_balloon_bundle_id',
+      migrationCount: 42,
+      migrationHead: '0042_message_part_identity',
       checks: passingChecks,
     });
 
@@ -946,8 +946,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 41,
-      migrationHead: '0041_message_balloon_bundle_id',
+      migrationCount: 42,
+      migrationHead: '0042_message_part_identity',
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

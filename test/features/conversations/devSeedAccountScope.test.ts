@@ -122,8 +122,8 @@ describe('DEV fake sends — account ownership', () => {
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
 
-    await devEditFake('message-a', 'A-only edit', accountA);
-    await devUnsendFake('message-a', accountA);
+    await devEditFake('message-a', 'A-only edit', undefined, accountA);
+    await devUnsendFake('message-a', undefined, accountA);
 
     expect(mockApplyLocalEdit).not.toHaveBeenCalled();
     expect(mockApplyLocalUnsend).not.toHaveBeenCalled();
@@ -133,7 +133,7 @@ describe('DEV fake sends — account ownership', () => {
     const editA = deferred();
     mockApplyLocalEdit.mockReturnValueOnce(editA.promise);
     const accountA = captureRealtimeDeliveryLease();
-    const write = devEditFake('message-a', 'edited in A', accountA);
+    const write = devEditFake('message-a', 'edited in A', undefined, accountA);
     await Promise.resolve();
     expect(mockApplyLocalEdit).toHaveBeenCalledTimes(1);
 
@@ -166,7 +166,7 @@ describe('DEV fake sends — account ownership', () => {
     const reconcileA = deferred();
     mockReconcile.mockReturnValueOnce(reconcileA.promise);
     const accountA = captureRealtimeDeliveryLease();
-    await devSendFakeReply('chat-a', 'reply', 'message-a', undefined, accountA);
+    await devSendFakeReply('chat-a', 'reply', 'message-a', undefined, undefined, accountA);
 
     await jest.advanceTimersByTimeAsync(700);
     expect(mockReconcile).toHaveBeenCalledTimes(1);
@@ -199,7 +199,7 @@ describe('DEV fake sends — account ownership', () => {
     const reconcileA = deferred();
     mockReconcile.mockReturnValueOnce(reconcileA.promise);
     const accountA = captureRealtimeDeliveryLease();
-    await devSendFakeReaction('chat-a', 'message-a', 'love', undefined, accountA);
+    await devSendFakeReaction('chat-a', 'message-a', 'love', undefined, undefined, accountA);
     expect(mockInsertReaction).toHaveBeenCalledTimes(1);
 
     await jest.advanceTimersByTimeAsync(599);

@@ -32,6 +32,8 @@ export interface SendTextArgs {
   chatGuid: string;
   text: string;
   selectedMessageGuid?: string;
+  /** Reply target part. Ignored when there is no selected message. */
+  partIndex?: number;
   effectId?: string;
   /** Private-API iMessage subject line (bold header above the body). */
   subject?: string;
@@ -83,6 +85,7 @@ export async function sendTextMessage(
     text: args.text,
     now,
     selectedMessageGuid: args.selectedMessageGuid,
+    partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
     // A reply targets the selected message; persist it locally so the optimistic
     // bubble shows its quote before the server echo.
     threadOriginatorGuid: args.selectedMessageGuid,
@@ -131,6 +134,7 @@ export async function sendTextMessage(
       tempGuid,
       message: args.text,
       selectedMessageGuid: args.selectedMessageGuid,
+      partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
       effectId: args.effectId,
       subject: args.subject,
       mentions: args.mentions,

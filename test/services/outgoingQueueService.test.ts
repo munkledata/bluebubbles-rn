@@ -1073,7 +1073,7 @@ describe('applyServerSendError', () => {
     expect(queueCount(raw)).toBe(0);
   });
 
-  it('RETRYABLE re-enqueue rebuilds a TEXT payload from the message row', async () => {
+  it('RETRYABLE re-enqueue rebuilds a reply TEXT payload and its part from the message row', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const chatId = await getChatIdByGuid(db, 'c1');
@@ -1083,6 +1083,9 @@ describe('applyServerSendError', () => {
       chatGuid: 'c1',
       text: 'resend me',
       now: 1000,
+      selectedMessageGuid: 'original-guid',
+      partIndex: 2,
+      threadOriginatorGuid: 'original-guid',
       subject: 'Subj',
       effectId: 'com.apple.MobileSMS.expressivesend.impact',
     });
@@ -1096,6 +1099,8 @@ describe('applyServerSendError', () => {
     expect(row.kind).toBe('text');
     expect(JSON.parse(row.payload)).toMatchObject({
       message: 'resend me',
+      selectedMessageGuid: 'original-guid',
+      partIndex: 2,
       subject: 'Subj',
       effectId: 'com.apple.MobileSMS.expressivesend.impact',
     });

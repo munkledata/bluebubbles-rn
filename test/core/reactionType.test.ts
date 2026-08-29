@@ -1,5 +1,6 @@
 import {
   PICKER_ORDER,
+  partIndexFromAssociatedGuid,
   parseReactionType,
   reactionMeta,
   removalType,
@@ -37,6 +38,10 @@ describe('reactionType', () => {
     });
     it('strips the bp:0/ attachment-part prefix', () => {
       expect(stripAssociatedGuidPrefix('bp:0/ABC-123')).toBe('ABC-123');
+    });
+    it('strips the helper legacy bp: attachment wrapper without inventing a part', () => {
+      expect(stripAssociatedGuidPrefix('bp:ABC-123')).toBe('ABC-123');
+      expect(partIndexFromAssociatedGuid('bp:ABC-123')).toBeNull();
     });
     it('leaves a bare guid (no prefix) untouched', () => {
       expect(stripAssociatedGuidPrefix('ABC-123')).toBe('ABC-123');

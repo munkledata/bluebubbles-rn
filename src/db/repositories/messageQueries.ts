@@ -10,6 +10,31 @@ import { chatVisible } from './chatVisibility';
 
 /** Read-only message queries kept separate from mutation and transaction ownership. */
 
+export interface MessageActionPartLayoutRow {
+  text: string | null;
+  attributedBody: string | null;
+  partCount: number | null;
+  visibleAttachmentCount: number;
+}
+
+/** Minimal aggregate layout needed by a headless notification reaction action. */
+export async function getMessageActionPartLayoutByGuid(
+  db: AppDatabase,
+  guid: string,
+): Promise<MessageActionPartLayoutRow | null> {
+  const rows = await db.all<MessageActionPartLayoutRow>(sql`
+    SELECT m.text, m.attributed_body AS attributedBody, m.part_count AS partCount,
+           CASE WHEN m.balloon_bundle_id IS NULL THEN
+             (SELECT COUNT(*) FROM attachments a
+               WHERE a.message_id = m.id AND COALESCE(a.hide_attachment, 0) = 0)
+           ELSE 0 END AS visibleAttachmentCount
+      FROM messages m
+     WHERE m.guid = ${guid} AND m.date_deleted IS NULL
+     LIMIT 1
+  `);
+  return rows[0] ?? null;
+}
+
 /** Messages for a chat, newest first. */
 export function listMessages(db: AppDatabase, chatId: number, limit = 100) {
   return db
@@ -335,6 +360,8 @@ export interface MessageRow {
   payloadData?: string | null;
   /** Apple Messages extension identifier, used only to select a safe local fallback label. */
   balloonBundleId?: string | null;
+  /** Server aggregate part count, used only by the strict action-target resolver. */
+  partCount?: number | null;
   /** 1 when at least one non-hidden attachment can actually render in the message UI. */
   hasVisibleAttachments?: number;
   error: number;
@@ -382,6 +409,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.message_summary_info AS messageSummaryInfo,
     m.payload_data AS payloadData,
     m.balloon_bundle_id AS balloonBundleId,
+    m.part_count AS partCount,
     m.has_attachments AS hasAttachments, m.error, m.error_message AS errorMessage,
     m.send_state AS sendState,
     m.was_delivered_quietly AS wasDeliveredQuietly,
@@ -602,6 +630,10 @@ export interface MessagePreview {
   attachmentDescription?: string | null;
   /** Apple Messages extension identifier, never shown verbatim. */
   balloonBundleId?: string | null;
+  /** Server aggregate part count for preserving a selected reply target. */
+  partCount?: number | null;
+  /** Resolved target carried only while this preview is the active reply selection. */
+  targetPartIndex?: number;
   /** 1 when at least one non-hidden attachment can render. */
   hasVisibleAttachments?: number;
 }
@@ -615,6 +647,7 @@ export async function getMessagePreviewByGuid(
     SELECT m.guid, m.text, m.subject, m.is_from_me AS isFromMe,
            m.has_attachments AS hasAttachments,
            m.balloon_bundle_id AS balloonBundleId,
+           m.part_count AS partCount,
            COALESCE(h.display_name, h.address) AS senderName,
            (SELECT a.emoji_image_short_description FROM attachments a
               WHERE a.message_id = m.id

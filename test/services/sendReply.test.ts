@@ -44,10 +44,10 @@ describe('reply send (sendTextMessage with a reply target)', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-reply', dateCreated: 200, dateDelivered: 201 };
       }),
-      { chatGuid: 'c1', text: 'Yes!', selectedMessageGuid: 'orig' },
+      { chatGuid: 'c1', text: 'Yes!', selectedMessageGuid: 'orig', partIndex: 2 },
     );
 
-    expect(body).toMatchObject({ selectedMessageGuid: 'orig', text: 'Yes!' });
+    expect(body).toMatchObject({ selectedMessageGuid: 'orig', text: 'Yes!', partIndex: 2 });
     const row = raw
       .prepare("SELECT thread_originator_guid t FROM messages WHERE guid='real-reply'")
       .get() as {
@@ -59,11 +59,16 @@ describe('reply send (sendTextMessage with a reply target)', () => {
   it('a plain (non-reply) send leaves thread_originator_guid null', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
+    let body: Record<string, unknown> | undefined;
     await sendTextMessage(
       db,
-      fakeHttp(async () => ({ guid: 'real-plain', dateCreated: 200, dateDelivered: 201 })),
-      { chatGuid: 'c1', text: 'hello' },
+      fakeHttp(async (json) => {
+        body = json as Record<string, unknown>;
+        return { guid: 'real-plain', dateCreated: 200, dateDelivered: 201 };
+      }),
+      { chatGuid: 'c1', text: 'hello', partIndex: 9 },
     );
+    expect(body).not.toHaveProperty('partIndex');
     const row = raw
       .prepare("SELECT thread_originator_guid t FROM messages WHERE guid='real-plain'")
       .get() as {

@@ -1,5 +1,9 @@
 import { z } from 'zod/v4';
-import { stripAssociatedGuidPrefix } from '../reactions/reactionType';
+import {
+  MAX_MESSAGE_PART_INDEX,
+  partIndexFromAssociatedGuid,
+  stripAssociatedGuidPrefix,
+} from '../reactions/reactionType';
 import { epochMillis } from './common';
 import { Handle } from './handle';
 import { Attachment } from './attachment';
@@ -86,12 +90,22 @@ const BalloonBundleId = z.preprocess((value) => {
     : UNKNOWN_BALLOON_BUNDLE_ID;
 }, z.string().max(255).nullish());
 
+// Part metadata is server-controlled and lands in SQLite. Invalid/oversized values degrade to
+// absent so one malformed message cannot reject a whole sync page or manufacture an action target.
+const MessagePartIndex = z
+  .number()
+  .int()
+  .min(0)
+  .max(MAX_MESSAGE_PART_INDEX)
+  .nullish()
+  .catch(undefined);
+
 /**
  * A single message (Flutter: Message). Reactions are modelled server-side as
  * "associated messages" carrying an `associatedMessageType` (e.g. "love",
  * "like", "emphasize"); threading uses `threadOriginatorGuid`.
  */
-export const Message = z.object({
+const MessageWire = z.object({
   originalROWID: z.number().nullish(),
   guid: z.string(),
   text: z.string().nullish(),
@@ -151,6 +165,9 @@ export const Message = z.object({
    */
   balloonBundleId: BalloonBundleId,
 
+  /** Number of Apple message parts currently reported for this aggregate message row. */
+  partCount: MessagePartIndex,
+
   hasAttachments: z.boolean().nullish(),
   attachments: z.array(Attachment).nullish(),
 
@@ -190,11 +207,15 @@ export const Message = z.object({
    * here at the schema boundary so EVERY ingestion path (live socket/FCM event + sync/query) is
    * covered at once. See {@link stripAssociatedGuidPrefix}.
    */
-  associatedMessageGuid: z.string().transform(stripAssociatedGuidPrefix).nullish(),
+  associatedMessageGuid: z.string().nullish(),
+  /** Exact target-part id for an associated message; normally derived from the raw guid prefix. */
+  associatedMessagePart: MessagePartIndex,
   associatedMessageType: z.string().nullish(),
   /** Glyph of an arbitrary-emoji tapback (associatedMessageType 'emoji'/'-emoji'). */
   associatedMessageEmoji: z.string().nullish(),
   threadOriginatorGuid: z.string().nullish(),
+  /** Reply target part when a future/additive server payload exposes it. */
+  threadOriginatorPart: MessagePartIndex,
 
   /** iMessage expressive send effect id (effectMap in constants.dart). */
   expressiveSendStyleId: z.string().nullish(),
@@ -211,6 +232,19 @@ export const Message = z.object({
   otherHandle: z.number().nullish(),
 
   error: z.number().nullish(),
+});
+
+export const Message = MessageWire.transform((message) => {
+  // Capture the part BEFORE normalizing `p:<n>/<guid>` to the bare target guid. Future servers may
+  // send an explicit numeric field; a valid explicit value is authoritative when present.
+  const rawAssociatedGuid = message.associatedMessageGuid;
+  return {
+    ...message,
+    associatedMessageGuid:
+      rawAssociatedGuid == null ? rawAssociatedGuid : stripAssociatedGuidPrefix(rawAssociatedGuid),
+    associatedMessagePart:
+      message.associatedMessagePart ?? partIndexFromAssociatedGuid(rawAssociatedGuid),
+  };
 });
 export type Message = z.infer<typeof Message>;
 

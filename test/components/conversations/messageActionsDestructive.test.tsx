@@ -147,6 +147,7 @@ describe('useMessageActions — DEV reaction account scope', () => {
       'message-a',
       'love',
       undefined,
+      0,
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
 
@@ -163,6 +164,7 @@ describe('useMessageActions — DEV reaction account scope', () => {
         targetGuid: 'message-a',
         reaction: 'like',
         emoji: undefined,
+        partIndex: 0,
         selectedMessageText: 'hi',
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
@@ -178,6 +180,7 @@ describe('useMessageActions — DEV reaction account scope', () => {
       hasAttachments: 0,
       hasVisibleAttachments: 0,
       attachmentDescription: undefined,
+      targetPartIndex: 0,
     };
     expect(setReplyTo).toHaveBeenNthCalledWith(1, expectedReply);
     expect(setReplyTo).toHaveBeenNthCalledWith(2, expectedReply);

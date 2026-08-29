@@ -364,7 +364,11 @@ function ChatScreenInner({
     [guid, isGroup],
   );
   const [replyTo, setReplyTo] = useState<MessagePreview | null>(null);
-  const [editing, setEditing] = useState<{ guid: string; text: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    guid: string;
+    text: string;
+    partIndex: number;
+  } | null>(null);
   const [recording, setRecording] = useState(false);
 
   // Dormant future bounded-share handoff. IPC-01 currently exposes no inbound Android share target,
@@ -404,6 +408,7 @@ function ChatScreenInner({
           text,
           scheduledFor,
           selectedMessageGuid: replyTo?.guid,
+          selectedMessagePartIndex: replyTo?.targetPartIndex,
           recurrence,
         },
         accountLease,
@@ -428,16 +433,26 @@ function ChatScreenInner({
       // optimistic → sent flow is visible without a real Gator server.
       if (editing) {
         const g = editing.guid;
+        const partIndex = editing.partIndex;
         setEditing(null);
-        if (isDev()) void devEditFake(g, text, accountLease);
-        else void editText({ messageGuid: g, newText: text, chatGuid: guid }, accountLease);
+        if (isDev()) void devEditFake(g, text, partIndex, accountLease);
+        else
+          void editText({ messageGuid: g, newText: text, chatGuid: guid, partIndex }, accountLease);
         return;
       }
       if (replyTo) {
-        if (isDev()) void devSendFakeReply(guid, text, replyTo.guid, effectId, accountLease);
+        const partIndex = replyTo.targetPartIndex ?? 0;
+        if (isDev())
+          void devSendFakeReply(guid, text, replyTo.guid, partIndex, effectId, accountLease);
         else
           void reply(
-            { chatGuid: guid, text, replyToGuid: replyTo.guid, effectId },
+            {
+              chatGuid: guid,
+              text,
+              replyToGuid: replyTo.guid,
+              replyToPartIndex: partIndex,
+              effectId,
+            },
             accountLease,
             presentSendIssue,
           );

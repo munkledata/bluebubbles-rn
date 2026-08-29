@@ -67,6 +67,8 @@ export interface SendTextParams {
   subject?: string;
   /** Reply target. */
   selectedMessageGuid?: string;
+  /** Reply target part. Meaningful only when `selectedMessageGuid` is present. */
+  partIndex?: number;
   effectId?: string;
   /** @mention spans — the server assembles the Private-API multipart `parts` from these. */
   mentions?: MessageMention[];
@@ -93,6 +95,11 @@ export function sendText(http: HttpClient, params: SendTextParams): Promise<Send
       text: params.message,
       subject: params.subject,
       selectedMessageGuid: params.selectedMessageGuid,
+      // Plain sends have no target part. Keep the key absent unless this is a reply so the
+      // ordinary send-message wire shape remains unchanged.
+      ...(params.selectedMessageGuid && params.partIndex !== undefined
+        ? { partIndex: params.partIndex }
+        : {}),
       effectId: params.effectId,
       // Only sent when non-empty so the server keeps the plain send-message path otherwise.
       mentions: params.mentions?.length ? params.mentions : undefined,

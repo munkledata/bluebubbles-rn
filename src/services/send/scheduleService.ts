@@ -25,6 +25,8 @@ export interface ScheduleArgs {
   text: string;
   scheduledFor: number;
   selectedMessageGuid?: string;
+  /** Reply target part. Ignored when there is no selected message. */
+  selectedMessagePartIndex?: number;
   /** null/undefined = one-shot; a recurring message is LOCAL-ONLY (the server can't repeat). */
   recurrence?: Recurrence | null;
 }
@@ -215,6 +217,7 @@ type Sender = (
   text: string,
   selectedMessageGuid: string | undefined,
   onQueued: () => Promise<void>,
+  selectedMessagePartIndex?: number,
 ) => Promise<void>;
 
 /**
@@ -327,12 +330,17 @@ export async function runDueScheduled(
     try {
       assertScheduledScope(accountScope);
       if (sender) {
-        await sender(m.chatGuid, m.text, m.selectedMessageGuid, settle);
+        await sender(m.chatGuid, m.text, m.selectedMessageGuid, settle, m.selectedMessagePartIndex);
       } else {
         await sendTextMessage(
           db,
           http,
-          { chatGuid: m.chatGuid, text: m.text, selectedMessageGuid: m.selectedMessageGuid },
+          {
+            chatGuid: m.chatGuid,
+            text: m.text,
+            selectedMessageGuid: m.selectedMessageGuid,
+            partIndex: m.selectedMessageGuid ? m.selectedMessagePartIndex : undefined,
+          },
           Date.now(),
           recordAtomicHandover,
           { scheduledId: m.id, transition, commitGuard },

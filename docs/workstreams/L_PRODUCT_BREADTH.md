@@ -58,8 +58,20 @@ Deliver this as three independent slices:
    previews. Text, subjects, ordinary attachments, and actually rendered URL cards take precedence.
    Raw bundle identifiers are never displayed or opened, and extension payload attachments remain
    hidden even when a lean notification omitted their hidden flag.
-2. `FEAT-03B` preserves and resolves message-part identity for replies, reactions, edits, unsend,
-   live ingestion, sync, and retry reconciliation.
+2. `FEAT-03B` preserves bounded `partCount` and associated-message part identity through live
+   ingestion, sync, persistence, and retry. Parse exactly one outer `p:<n>/` or `bp:<n>/` prefix;
+   strip the helper's legacy `bp:<guid>` attachment wrapper while keeping its part unknown; unknown
+   identity stays distinct from the real part zero. For an aggregate bubble, resolve the
+   common attachment-caption text part from the visible attachment count only when `partCount`
+   proves that index exists; otherwise retain the legacy part-zero fallback. Replies, reactions,
+   edits, unsend, local scheduling, and retry payloads carry that resolved part. Reaction removal
+   prefers the part stored on the user's active reaction, and aggregate display keeps the newest
+   same-sender/kind reaction without discarding its removal target. Until the server exposes stable
+   normalized per-part topology and incoming reply-part identity, this remains a compatibility path
+   rather than proof of every Apple multipart layout. Unsend requests target the resolved part, but
+   local presentation intentionally keeps the existing aggregate tombstone: partial visual
+   preservation also affects inbox eligibility, search, notifications, and attachment-cache
+   ownership, so it needs one later shared classifier backed by live topology evidence.
 3. `FEAT-03C` adds text-plus-attachment sending only behind an explicit negotiated capability with
    one logical optimistic/retry identity and truthful disablement on older servers.
 

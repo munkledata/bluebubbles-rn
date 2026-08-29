@@ -396,8 +396,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'pass',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -426,8 +426,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'fail',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -512,8 +512,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       expect(mockFiles.get(RESUMING)).toBe(0);
       return {
         status: 'pass',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: resumeChecks,
       };
     });
@@ -539,8 +539,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-relaunch',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -603,8 +603,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         expect(mockFiles.get(ACTIVE_MIGRATION_DEATH_RESUMING)).toBe(0);
         return {
           status: 'pass',
-          migrationCount: 41,
-          migrationHead: '0041_message_balloon_bundle_id',
+          migrationCount: 42,
+          migrationHead: '0042_message_part_identity',
           checks: activeMigrationDeathResumeChecks,
         };
       },
@@ -633,8 +633,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-active-migration-death',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -774,8 +774,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'fail',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: { ...resumeChecks, databaseCleanup: false },
         failureCode: 'database-cleanup',
       };
@@ -808,8 +808,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'pass',
-        migrationCount: 41,
-        migrationHead: '0041_message_balloon_bundle_id',
+        migrationCount: 42,
+        migrationHead: '0042_message_part_identity',
         checks: resumeChecks,
       };
     });

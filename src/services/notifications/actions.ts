@@ -1,8 +1,11 @@
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
 import { isFaceTimeLink } from '@core/facetime';
+import { resolveTargetPartIndex } from '@core/messages/partIndex';
+import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
 import { logger } from '@core/secure';
-import { deleteReminderByNotificationId } from '@db/repositories';
+import { deleteReminderByNotificationId, getMessageActionPartLayoutByGuid } from '@db/repositories';
+import { withDbWriteLock } from '@db/transaction';
 import { isDevServer } from '@utils/isDev';
 import { http } from '../clients';
 import { markRead } from '../chatActions';
@@ -342,18 +345,38 @@ async function loveMessage(
 ): Promise<void> {
   const turn = await logicalSendQueue.acquire(accountLease);
   try {
+    // A notification carries aggregate identity only. Resolve the same conservative text/caption
+    // target as the mounted bubble from the current encrypted row before either dev or real send.
+    assertCurrentAccount(accountLease);
+    const db = await ensureDatabase();
+    assertCurrentAccount(accountLease);
+    // One shared SQLite connection means even a read can otherwise see a neighbouring owner's
+    // uncommitted rows. Take the global coordinator slot, but do not open a transaction: this is
+    // one bounded DB-only snapshot and all parsing/network work stays after the slot is released.
+    const layout = await withDbWriteLock(async () => {
+      assertCurrentAccount(accountLease);
+      return getMessageActionPartLayoutByGuid(db, messageGuid);
+    });
+    assertCurrentAccount(accountLease);
+    const bodyText = layout
+      ? bodyTextFromRuns(parseAttributedRuns(layout.attributedBody, layout.text))
+      : '';
+    const partIndex = layout
+      ? resolveTargetPartIndex({
+          attachmentCount: layout.visibleAttachmentCount,
+          hasText: bodyText.trim().length > 0,
+          partCount: layout.partCount,
+        })
+      : 0;
+
     // DEV: simulate the reaction round-trip locally without a server.
     if (isDevServer()) {
       const { devSendFakeReaction } = await import('@features/conversations/devSeed');
       assertCurrentAccount(accountLease);
-      await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, accountLease);
+      await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, partIndex, accountLease);
       assertCurrentAccount(accountLease);
       return;
     }
-    // ensureDatabase: a killed-app action runs headless with no prior DB open.
-    assertCurrentAccount(accountLease);
-    const db = await ensureDatabase();
-    assertCurrentAccount(accountLease);
     await sendReactionMessage(
       db,
       http,
@@ -361,6 +384,7 @@ async function loveMessage(
         chatGuid,
         targetGuid: messageGuid,
         reaction: 'love',
+        partIndex,
       },
       Date.now(),
       () => accountLease.isCurrent(),

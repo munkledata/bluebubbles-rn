@@ -116,6 +116,42 @@ describe('listReactionsByMessageGuids', () => {
     expect(byGuid.get('mt') ?? []).toHaveLength(0);
   });
 
+  it('keeps exact part state distinct and retains the newest visible removal target', async () => {
+    const { db } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    await react(db, chatId, hm, {
+      guid: 'unknown-add',
+      type: 'love',
+      from: 'a@x.com',
+      date: 110,
+    });
+    await react(db, chatId, hm, {
+      guid: 'part-zero-add',
+      type: 'love',
+      from: 'a@x.com',
+      date: 120,
+      target: 'p:0/mt',
+    });
+    await react(db, chatId, hm, {
+      guid: 'part-zero-remove',
+      type: '-love',
+      from: 'a@x.com',
+      date: 130,
+      target: 'p:0/mt',
+    });
+    await react(db, chatId, hm, {
+      guid: 'part-two-add',
+      type: 'love',
+      from: 'a@x.com',
+      date: 140,
+      target: 'p:2/mt',
+    });
+
+    const list = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ baseType: 'love', targetPart: 2 });
+  });
+
   it('keeps only the latest type per sender', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);

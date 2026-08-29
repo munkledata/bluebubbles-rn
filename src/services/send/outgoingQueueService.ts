@@ -29,6 +29,7 @@ import type { AttachmentUploader } from './sendAttachmentService';
 interface TextPayload {
   message: string;
   selectedMessageGuid?: string;
+  partIndex?: number;
   effectId?: string;
   subject?: string;
   mentions?: MessageMention[];
@@ -37,6 +38,7 @@ interface ReactionPayload {
   selectedMessageGuid: string;
   reaction: string;
   emoji?: string;
+  partIndex?: number;
   selectedMessageText?: string;
 }
 interface AttachmentPayload {
@@ -196,6 +198,7 @@ export async function resendOutgoingRow(
         tempGuid: row.tempGuid,
         message: p.message,
         selectedMessageGuid: p.selectedMessageGuid,
+        partIndex: p.selectedMessageGuid ? p.partIndex : undefined,
         effectId: p.effectId,
         subject: p.subject,
         mentions: p.mentions,
@@ -208,6 +211,7 @@ export async function resendOutgoingRow(
         selectedMessageGuid: p.selectedMessageGuid,
         reaction: p.reaction,
         emoji: p.emoji,
+        partIndex: p.partIndex,
       });
     } else if (row.kind === 'contact') {
       const p = JSON.parse(row.payload) as ContactPayload;

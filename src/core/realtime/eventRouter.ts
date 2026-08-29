@@ -158,10 +158,17 @@ export class EventRouter {
     // A guid-only key drops the removal. Include the delta state in this legacy direct-path key;
     // durable intake uses the stronger canonical digest identity instead.
     if (event.message.associatedMessageType != null) {
+      // Unknown part identity is deliberately distinct from the real part zero. Treating both as
+      // `0` would swallow one of two otherwise-identical reaction deltas aimed at different parts.
+      const partKey =
+        event.message.associatedMessagePart == null
+          ? 'part:unknown'
+          : `part:${event.message.associatedMessagePart}`;
       return [
         event.type,
         guid,
         event.message.dateCreated ?? '',
+        partKey,
         event.message.associatedMessageType,
         event.message.associatedMessageEmoji ?? '',
       ].join(':');

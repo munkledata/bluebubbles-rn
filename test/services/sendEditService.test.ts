@@ -137,11 +137,11 @@ describe('sendEdit / sendUnsend', () => {
     const { db } = await createTestDb();
     await seed(db); // m1 lives in chat c1
     const cap = capturingHttp(async () => ({ guid: 'm1' }));
-    await sendEdit(db, cap.http, { messageGuid: 'm1', newText: 'edited!' }, 5000);
+    await sendEdit(db, cap.http, { messageGuid: 'm1', newText: 'edited!', partIndex: 2 }, 5000);
     expect(cap.body()).toMatchObject({
       chatGuid: 'c1', // resolved from the message's DB row
       editedText: 'edited!',
-      partIndex: 0,
+      partIndex: 2,
     });
     expect((cap.body() as Record<string, unknown>).backwardsCompatText).toContain('edited!');
   });
@@ -349,8 +349,8 @@ describe('sendEdit / sendUnsend', () => {
     const { db } = await createTestDb();
     await seed(db);
     const cap = capturingHttp(async () => ({ unsent: true }));
-    await sendUnsend(db, cap.http, { messageGuid: 'm1' }, 7000);
-    expect(cap.body()).toMatchObject({ chatGuid: 'c1', partIndex: 0 });
+    await sendUnsend(db, cap.http, { messageGuid: 'm1', partIndex: 3 }, 7000);
+    expect(cap.body()).toMatchObject({ chatGuid: 'c1', partIndex: 3 });
   });
 
   it('unsend: resolves committed row identity inside its owner and never posts a missing row', async () => {

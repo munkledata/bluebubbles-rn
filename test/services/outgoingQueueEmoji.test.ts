@@ -58,7 +58,7 @@ async function seed(db: AppDatabase): Promise<number> {
 async function seedFailedReaction(
   db: AppDatabase,
   raw: Database.Database,
-  args: { chatId: number; tempGuid: string; reaction: string; emoji?: string },
+  args: { chatId: number; tempGuid: string; reaction: string; emoji?: string; partIndex?: number },
 ): Promise<void> {
   await insertOutgoingReaction(db, {
     tempGuid: args.tempGuid,
@@ -67,6 +67,7 @@ async function seedFailedReaction(
     targetGuid: 'mt',
     reaction: args.reaction,
     emoji: args.emoji,
+    partIndex: args.partIndex,
     selectedMessageText: 'hi',
     now: 1000,
   });
@@ -90,6 +91,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       tempGuid: 'temp-emo',
       reaction: 'emoji',
       emoji: '🔥',
+      partIndex: 2,
     });
 
     let body: Record<string, unknown> | undefined;
@@ -105,16 +107,22 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
 
     expect(res).toEqual({ eligible: 1, sent: 1 });
     // The retry re-POST carries the emoji reactionType AND the glyph (not a classic tapback).
-    expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'emoji', reactionEmoji: '🔥' });
+    expect(body).toMatchObject({
+      messageGuid: 'mt',
+      reactionType: 'emoji',
+      reactionEmoji: '🔥',
+      partIndex: 2,
+    });
     // Reconciled to the real guid, glyph preserved, queue row cleared.
     expect(queueCount(raw)).toBe(0);
     const row = raw
       .prepare(
-        "SELECT send_state s, associated_message_emoji e FROM messages WHERE guid = 'real-emo'",
+        "SELECT send_state s, associated_message_emoji e, associated_message_part p FROM messages WHERE guid = 'real-emo'",
       )
-      .get() as { s: string; e: string };
+      .get() as { s: string; e: string; p: number };
     expect(row.s).toBe('sent');
     expect(row.e).toBe('🔥');
+    expect(row.p).toBe(2);
   });
 
   it("re-POSTs an emoji REMOVAL with reactionType '-emoji' + the glyph", async () => {

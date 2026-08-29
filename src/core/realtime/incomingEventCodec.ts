@@ -543,6 +543,7 @@ function updateRevisionProjection(message: Message): unknown {
     isSent: message.isSent,
     isScheduled: message.isScheduled,
     hasAttachments: message.hasAttachments,
+    partCount: message.partCount,
     // Both serializers carry these stable attachment identity fields. Rich-only transfer flags,
     // metadata and dimensions must not manufacture a second update occurrence.
     attachments: message.attachments?.map((attachment) => ({
@@ -554,9 +555,11 @@ function updateRevisionProjection(message: Message): unknown {
       totalBytes: attachment.totalBytes,
     })),
     associatedMessageGuid: message.associatedMessageGuid,
+    associatedMessagePart: message.associatedMessagePart,
     associatedMessageType: message.associatedMessageType,
     associatedMessageEmoji: message.associatedMessageEmoji,
     threadOriginatorGuid: message.threadOriginatorGuid,
+    threadOriginatorPart: message.threadOriginatorPart,
     expressiveSendStyleId: message.expressiveSendStyleId,
     itemType: message.itemType,
     groupActionType: message.groupActionType,
@@ -568,7 +571,9 @@ function updateRevisionProjection(message: Message): unknown {
 function reactionRevisionProjection(message: Message): unknown {
   return {
     dateCreated: message.dateCreated,
+    partCount: message.partCount,
     associatedMessageGuid: message.associatedMessageGuid,
+    associatedMessagePart: message.associatedMessagePart,
     associatedMessageType: message.associatedMessageType,
     associatedMessageEmoji: message.associatedMessageEmoji,
     handleId: message.handleId,

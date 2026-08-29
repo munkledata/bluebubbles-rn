@@ -17,6 +17,7 @@ export interface ScheduledRow {
   chatGuid: string;
   text: string;
   selectedMessageGuid?: string;
+  selectedMessagePartIndex?: number;
   scheduledFor: number;
   status: string; // 'pending' | 'sending' | 'sent' | 'error' | 'uncertain'
   /** null/undefined = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send. */
@@ -26,6 +27,7 @@ export interface ScheduledRow {
 interface ScheduledPayload {
   text: string;
   selectedMessageGuid?: string;
+  selectedMessagePartIndex?: number;
 }
 
 export interface InsertScheduledArgs {
@@ -33,6 +35,7 @@ export interface InsertScheduledArgs {
   text: string;
   scheduledFor: number;
   selectedMessageGuid?: string;
+  selectedMessagePartIndex?: number;
   /** Set when the server is also tracking this row (server fires it; the local ticker skips it). */
   serverId?: string | null;
   /** null/undefined = one-shot; 'daily' | 'weekly' | 'monthly' = re-armed after each send. */
@@ -89,6 +92,7 @@ function mapScheduled(r: {
     chatGuid: r.chatGuid,
     text: p.text,
     selectedMessageGuid: p.selectedMessageGuid,
+    selectedMessagePartIndex: p.selectedMessageGuid ? p.selectedMessagePartIndex : undefined,
     scheduledFor: r.scheduledFor,
     status: r.status,
     recurrence: r.recurrence,
@@ -104,6 +108,9 @@ export function insertScheduledWithinTransaction(
     const payload: ScheduledPayload = {
       text: args.text,
       selectedMessageGuid: args.selectedMessageGuid,
+      selectedMessagePartIndex: args.selectedMessageGuid
+        ? args.selectedMessagePartIndex
+        : undefined,
     };
     const rows = await db
       .insert(scheduledMessages)
@@ -247,7 +254,7 @@ export async function reconcileServerScheduled(
  * Edit a still-pending scheduled message's text and/or fire time (and, when a server-backed
  * row is re-created against Gator's no-PUT API, its new `serverId`). The `status='pending'`
  * guard is the correctness lock — a row already claimed/sent can't be edited (mirrors
- * `claimScheduled`). The reply target (selectedMessageGuid) is preserved through the JSON.
+ * `claimScheduled`). The reply target and its part are preserved through the JSON.
  *
  * The transaction-only form lets an authenticated caller include account ownership in the commit.
  */

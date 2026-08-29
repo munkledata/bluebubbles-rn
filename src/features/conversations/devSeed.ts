@@ -520,6 +520,7 @@ export async function devSendFakeReaction(
   targetGuid: string,
   reaction: string,
   emoji: string | undefined,
+  partIndex: number | undefined,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   await runDevAccountWrite(accountLease, async () => {
@@ -535,6 +536,7 @@ export async function devSendFakeReaction(
       targetGuid,
       reaction,
       emoji,
+      partIndex,
       now,
     });
     queueDevSendReconcile(db, tempGuid, now, {
@@ -549,6 +551,7 @@ export async function devSendFakeReaction(
 export async function devEditFake(
   messageGuid: string,
   newText: string,
+  _partIndex: number | undefined,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   await runDevAccountWrite(accountLease, async () => {
@@ -560,6 +563,7 @@ export async function devEditFake(
 /** DEV: locally retract a message (no server) so the bubble becomes the tombstone. */
 export async function devUnsendFake(
   messageGuid: string,
+  _partIndex: number | undefined,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   await runDevAccountWrite(accountLease, async () => {
@@ -573,6 +577,7 @@ export async function devSendFakeReply(
   chatGuid: string,
   text: string,
   replyToGuid: string,
+  partIndex: number | undefined,
   effectId: string | undefined,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
@@ -589,6 +594,7 @@ export async function devSendFakeReply(
       text,
       now,
       selectedMessageGuid: replyToGuid,
+      partIndex,
       threadOriginatorGuid: replyToGuid,
       effectId,
     });

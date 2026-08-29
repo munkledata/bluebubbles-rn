@@ -212,12 +212,13 @@ describe('Home route — boot-completion side-effects', () => {
           text: string,
           selectedMessageGuid: string | undefined,
           onQueued: () => Promise<void>,
+          selectedMessagePartIndex?: number,
         ) => Promise<void>,
         accountLease: { isCurrent(): boolean },
       ) => {
         expect(accountLease.isCurrent()).toBe(true);
         await sender('plain-chat', 'plain', undefined, async () => undefined);
-        await sender('reply-chat', 'reply', 'reply-target', async () => undefined);
+        await sender('reply-chat', 'reply', 'reply-target', async () => undefined, 2);
         return 2;
       },
     );
@@ -231,6 +232,7 @@ describe('Home route — boot-completion side-effects', () => {
       'reply-chat',
       'reply',
       'reply-target',
+      2,
       undefined,
       accountLease,
     );

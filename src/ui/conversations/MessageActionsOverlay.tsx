@@ -25,6 +25,8 @@ import { useTheme } from '../theme';
 export interface SelectedMessage {
   guid: string;
   text: string | null;
+  /** Renderable body with attributed attachment placeholders removed. */
+  bodyText?: string;
   /** Optional subject/extension metadata retained for the reply preview. */
   subject?: string | null;
   balloonBundleId?: string | null;
@@ -37,6 +39,10 @@ export interface SelectedMessage {
   mine: ReactionBaseType[];
   /** Arbitrary-emoji tapback glyphs the current user has already applied. */
   myEmojis?: string[];
+  /** Exact stored target part for each own reaction, keyed by reactionKindKey. */
+  myReactionParts?: Readonly<Record<string, number>>;
+  /** Best available Apple part represented by this aggregate bubble. */
+  targetPartIndex?: number;
   dateCreated: number | null; // for the "recent" edit/unsend gate
   /** Delivery/read/edit timestamps + per-message service — surfaced by the "Details" sheet.
    *  Optional so existing SelectedMessage literals (tests) stay valid. */
@@ -229,7 +235,8 @@ export function MessageActionsOverlay({
     return stopAndSnap;
   }, [anim, hasAnchor, reduceMotion, selectedGuid]);
 
-  const hasText = !!selected?.text && selected.text.trim().length > 0;
+  const selectedBodyText = selected?.bodyText ?? selected?.text ?? '';
+  const hasText = selectedBodyText.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
   const canTargetServerMessage = !!selected && !selected.isTemp;
 
@@ -348,8 +355,7 @@ export function MessageActionsOverlay({
   if (onDetails) actions.push({ key: 'details', label: 'Details', onPress: onDetails });
   if (onSelect) actions.push({ key: 'select', label: 'Select', onPress: onSelect });
   actions.push({ key: 'remind', label: 'Remind Me Later', onPress: onRemindLater });
-  if (canEditUnsend && selected?.text)
-    actions.push({ key: 'edit', label: 'Edit', onPress: onEdit });
+  if (canEditUnsend && hasText) actions.push({ key: 'edit', label: 'Edit', onPress: onEdit });
   if (canEditUnsend)
     actions.push({ key: 'unsend', label: 'Unsend', onPress: onUnsend, destructive: true });
   if (canCancel)

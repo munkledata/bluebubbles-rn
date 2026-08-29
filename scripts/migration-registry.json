@@ -120,6 +120,16 @@
       "upgradeTest": "test/db/migrations/0041_message_balloon_bundle_id.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 42,
+      "name": "0042_message_part_identity",
+      "task": "FEAT-03B",
+      "branchPr": "release/store-01-0.1.41",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0042_message_part_identity.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

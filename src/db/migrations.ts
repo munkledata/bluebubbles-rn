@@ -757,4 +757,35 @@ export const MIGRATIONS: Migration[] = [
         )`,
     ],
   },
+  {
+    // Preserve enough Apple message-part identity to stop hardcoding every reply/reaction/edit/
+    // unsend to part zero. Existing rows intentionally start NULL: part_count refills on sync,
+    // while old associated prefixes were already normalized and cannot be reconstructed locally.
+    name: '0042_message_part_identity',
+    statements: [
+      `ALTER TABLE messages ADD COLUMN part_count INTEGER
+        CONSTRAINT messages_part_count_bounded
+        CHECK (
+          part_count IS NULL OR (
+            typeof(part_count) = 'integer' AND part_count BETWEEN 0 AND 10000
+          )
+        )`,
+      `ALTER TABLE messages ADD COLUMN associated_message_part INTEGER
+        CONSTRAINT messages_associated_message_part_bounded
+        CHECK (
+          associated_message_part IS NULL OR (
+            typeof(associated_message_part) = 'integer'
+            AND associated_message_part BETWEEN 0 AND 10000
+          )
+        )`,
+      `ALTER TABLE messages ADD COLUMN thread_originator_part INTEGER
+        CONSTRAINT messages_thread_originator_part_bounded
+        CHECK (
+          thread_originator_part IS NULL OR (
+            typeof(thread_originator_part) = 'integer'
+            AND thread_originator_part BETWEEN 0 AND 10000
+          )
+        )`,
+    ],
+  },
 ];

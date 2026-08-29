@@ -2384,6 +2384,101 @@ describe('reconcileEchoByContent — guard clauses', () => {
     expect(queueCount(raw, 'temp-nw')).toBe(0);
   });
 
+  it('keeps identical plain and reply echoes scoped to their exact reply target', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-plain-same',
+      chatId,
+      chatGuid: 'c1',
+      text: 'same',
+      now: 100,
+    });
+    for (const [suffix, target, partIndex] of [
+      ['reply-a', 'target-a', 1],
+      ['reply-b', 'target-b', 2],
+    ] as const) {
+      await insertOutgoingText(db, {
+        tempGuid: `temp-${suffix}`,
+        chatId,
+        chatGuid: 'c1',
+        text: 'same',
+        now: 100,
+        selectedMessageGuid: target,
+        threadOriginatorGuid: target,
+        partIndex,
+      });
+    }
+
+    await withDbTransaction(db, (context) =>
+      reconcileEchoByContent(
+        context,
+        {
+          guid: 'real-reply-b',
+          isFromMe: true,
+          text: 'same',
+          dateCreated: 100,
+          threadOriginatorGuid: 'target-b',
+        },
+        chatId,
+      ),
+    );
+    expect(
+      raw
+        .prepare(
+          "SELECT thread_originator_guid target, thread_originator_part part FROM messages WHERE guid = 'real-reply-b'",
+        )
+        .get(),
+    ).toEqual({ target: 'target-b', part: 2 });
+    expect(msgState(raw, 'temp-reply-a')).toBeDefined();
+    expect(msgState(raw, 'temp-plain-same')).toBeDefined();
+
+    await withDbTransaction(db, (context) =>
+      reconcileEchoByContent(
+        context,
+        { guid: 'real-plain-same', isFromMe: true, text: 'same', dateCreated: 100 },
+        chatId,
+      ),
+    );
+    expect(msgState(raw, 'real-plain-same')).toBeDefined();
+    expect(msgState(raw, 'temp-reply-a')).toBeDefined();
+  });
+
+  it('does not guess between same-target reply parts when the live echo omits its part', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    for (const partIndex of [0, 2]) {
+      await insertOutgoingText(db, {
+        tempGuid: `temp-reply-part-${partIndex}`,
+        chatId,
+        chatGuid: 'c1',
+        text: 'same reply',
+        now: 200,
+        selectedMessageGuid: 'same-target',
+        threadOriginatorGuid: 'same-target',
+        partIndex,
+      });
+    }
+
+    await withDbTransaction(db, (context) =>
+      reconcileEchoByContent(
+        context,
+        {
+          guid: 'real-ambiguous-reply',
+          isFromMe: true,
+          text: 'same reply',
+          dateCreated: 200,
+          threadOriginatorGuid: 'same-target',
+        },
+        chatId,
+      ),
+    );
+    expect(
+      raw.prepare("SELECT COUNT(*) count FROM messages WHERE guid LIKE 'temp-reply-part-%'").get(),
+    ).toEqual({ count: 2 });
+    expect(msgState(raw, 'real-ambiguous-reply')).toBeUndefined();
+  });
+
   it('moves a cancelled-send ledger marker through live-echo promotion and later purge', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');

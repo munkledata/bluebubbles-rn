@@ -15,6 +15,8 @@ export interface SendEditArgs {
   newText: string;
   /** Chat the message lives in (server-required). Resolved from the DB row when omitted. */
   chatGuid?: string;
+  /** Message part to edit; defaults to part 0 when omitted. */
+  partIndex?: number;
 }
 
 /**
@@ -139,7 +141,7 @@ async function sendEditOnce(
       messageGuid: args.messageGuid,
       editedMessage: args.newText,
       backwardsCompatibilityMessage: `Edited to: “${args.newText}”`,
-      partIndex: 0,
+      partIndex: args.partIndex ?? 0,
     });
     accepted = Boolean(ack.guid);
   } catch {
@@ -184,6 +186,8 @@ export interface SendUnsendArgs {
   messageGuid: string;
   /** Chat the message lives in (server-required). Resolved from the DB row when omitted. */
   chatGuid?: string;
+  /** Message part to retract; defaults to part 0 when omitted. */
+  partIndex?: number;
 }
 
 /** One short guarded owner for every compare-and-set unsend rollback. */
@@ -236,7 +240,7 @@ async function sendUnsendOnce(
     const ack = await unsendMessage(http, {
       chatGuid,
       messageGuid: args.messageGuid,
-      partIndex: 0,
+      partIndex: args.partIndex ?? 0,
     });
     accepted = ack.unsent === true;
   } catch {

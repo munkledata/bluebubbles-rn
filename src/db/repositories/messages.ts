@@ -104,10 +104,13 @@ export function upsertMessagesWithinTransaction(
             // The server omits `hasAttachments`; infer it from the hydrated attachments array so the
             // flag stays accurate for reply-quote previews (the image read path no longer relies on it).
             hasAttachments: m.hasAttachments ?? (m.attachments?.length ?? 0) > 0,
+            partCount: m.partCount ?? null,
             associatedMessageGuid: m.associatedMessageGuid ?? null,
+            associatedMessagePart: m.associatedMessagePart ?? null,
             associatedMessageType: m.associatedMessageType ?? null,
             associatedMessageEmoji: m.associatedMessageEmoji ?? null,
             threadOriginatorGuid: m.threadOriginatorGuid ?? null,
+            threadOriginatorPart: m.threadOriginatorPart ?? null,
             expressiveSendStyleId: m.expressiveSendStyleId ?? null,
             // Group/chat-event metadata (see utils/groupEvent.ts). NULL when the event omits them
             // so the COALESCE-preserve on conflict can't wipe a previously-stored value.
@@ -222,6 +225,14 @@ export function upsertMessagesWithinTransaction(
           // A later hydrated re-sync can flip a stale 0 → 1; never downgrade 1 → 0 when a fetch
           // omits attachments (excluded = 0), so MAX with the already-stored value.
           hasAttachments: sql`MAX(excluded.has_attachments, ${messages.hasAttachments})`,
+          // Part/link identity is presence-driven. A lean receipt must not erase identity learned
+          // from a hydrated live/sync payload, while a present newer value can fill or refresh it.
+          partCount: sql`COALESCE(excluded.part_count, ${messages.partCount})`,
+          associatedMessageGuid: sql`COALESCE(excluded.associated_message_guid, ${messages.associatedMessageGuid})`,
+          associatedMessagePart: sql`COALESCE(excluded.associated_message_part, ${messages.associatedMessagePart})`,
+          associatedMessageType: sql`COALESCE(excluded.associated_message_type, ${messages.associatedMessageType})`,
+          threadOriginatorGuid: sql`COALESCE(excluded.thread_originator_guid, ${messages.threadOriginatorGuid})`,
+          threadOriginatorPart: sql`COALESCE(excluded.thread_originator_part, ${messages.threadOriginatorPart})`,
           // COALESCE-preserve the emoji-tapback glyph: a later event that omits it (delivery
           // receipt re-upsert) must not blank a stored glyph.
           associatedMessageEmoji: sql`COALESCE(excluded.associated_message_emoji, ${messages.associatedMessageEmoji})`,
