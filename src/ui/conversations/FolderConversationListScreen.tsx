@@ -86,21 +86,20 @@ function FolderConversationListAttempt({
   const kbVisible = useKeyboardVisible();
   const openChatNav = useChatNavigator();
   const [searchText, setSearchText] = useState('');
-  const onSearchTextChange = useCallback((value: string): void => {
-    setSearchText(boundFolderSearchInput(value));
-  }, []);
   const normalizedSearch = normalizeFolderSearchInput(searchText);
   const searchMode = normalizedSearch.length > 0;
   const searchEligible = Array.from(normalizedSearch).length >= 2;
   const [settledSearch, setSettledSearch] = useState(() =>
     searchEligible ? normalizedSearch : '',
   );
+  const onSearchTextChange = useCallback((value: string): void => {
+    const bounded = boundFolderSearchInput(value);
+    setSearchText(bounded);
+    if (Array.from(normalizeFolderSearchInput(bounded)).length < 2) setSettledSearch('');
+  }, []);
 
   useEffect(() => {
-    if (!searchEligible) {
-      setSettledSearch('');
-      return;
-    }
+    if (!searchEligible) return;
     const timer = setTimeout(() => setSettledSearch(normalizedSearch), 250);
     return () => clearTimeout(timer);
   }, [normalizedSearch, searchEligible]);

@@ -212,14 +212,18 @@ function ChatScreenInner({
   // A short debounce keeps typing responsive without querying FTS for every keypress.
   useEffect(() => {
     const trimmed = searchText.trim();
-    if (!searchOpen || trimmed.length < 3) {
-      setSearchQuery('');
-      return;
-    }
+    if (!searchOpen || trimmed.length < 3) return;
     const timer = setTimeout(() => setSearchQuery(trimmed), 250);
     return () => clearTimeout(timer);
   }, [searchOpen, searchText]);
   const chatSearch = useChatSearch(guid, searchQuery, accountLease);
+  const {
+    fetchNextPage: fetchNextSearchPage,
+    hasNextPage: hasNextSearchPage,
+    isPending: searchPending,
+    results: searchResults,
+    totalCount: searchTotalCount,
+  } = chatSearch;
   // The message window grows as the user scrolls back through history (see onLoadOlder). Starts at
   // one screen-worth+ and pages by PAGE_SIZE. In search-anchor mode the window is centered on the
   // hit instead (limit is ignored), so pagination is disabled there.
@@ -279,6 +283,7 @@ function ChatScreenInner({
     searchNavigationTokenRef.current += 1;
     appliedSearchKeyRef.current = '';
     setSearchText(value);
+    if (value.trim().length < 3) setSearchQuery('');
     setSearchIndex(0);
     setSearchNavigating(false);
     // Do not leave a stale prior-query result highlighted while the next query is debouncing.
@@ -290,33 +295,26 @@ function ChatScreenInner({
   useEffect(() => {
     if (!searchOpen || searchQuery.length < 3) return;
     const key = `${accountLease.generation}\u0000${guid}\u0000${searchQuery}`;
-    if (chatSearch.isPending || appliedSearchKeyRef.current === key) return;
+    if (searchPending || appliedSearchKeyRef.current === key) return;
     appliedSearchKeyRef.current = key;
     searchNavigationTokenRef.current += 1;
     setSearchIndex(0);
     setSearchNavigating(false);
-    const first = chatSearch.results[0];
+    const first = searchResults[0];
     setJump(first ? { id: first.id, guid: first.guid } : null);
-  }, [
-    accountLease.generation,
-    chatSearch.isPending,
-    chatSearch.results,
-    guid,
-    searchOpen,
-    searchQuery,
-  ]);
+  }, [accountLease.generation, searchPending, searchResults, guid, searchOpen, searchQuery]);
 
   const moveToSearchResult = useCallback(
     async (targetIndex: number): Promise<void> => {
-      if (targetIndex < 0 || targetIndex >= chatSearch.totalCount || searchNavigating) return;
+      if (targetIndex < 0 || targetIndex >= searchTotalCount || searchNavigating) return;
       const key = searchQuery;
       const token = searchNavigationTokenRef.current + 1;
       searchNavigationTokenRef.current = token;
       setSearchNavigating(true);
-      let available = chatSearch.results;
+      let available = searchResults;
       try {
-        if (!available[targetIndex] && chatSearch.hasNextPage) {
-          const next = await chatSearch.fetchNextPage();
+        if (!available[targetIndex] && hasNextSearchPage) {
+          const next = await fetchNextSearchPage();
           available = next.data?.pages.flatMap((page) => page.results) ?? available;
         }
         if (
@@ -341,10 +339,10 @@ function ChatScreenInner({
     },
     [
       accountLease,
-      chatSearch.fetchNextPage,
-      chatSearch.hasNextPage,
-      chatSearch.results,
-      chatSearch.totalCount,
+      fetchNextSearchPage,
+      hasNextSearchPage,
+      searchResults,
+      searchTotalCount,
       searchNavigating,
       searchQuery,
     ],

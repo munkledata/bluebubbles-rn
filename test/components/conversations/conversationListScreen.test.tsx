@@ -904,10 +904,10 @@ describe('ConversationListScreen search field sizing', () => {
 describe('ConversationListScreen search bar bottom inset', () => {
   const NAV_BAR = 48;
 
-  /** The search bar is the input's grandparent — walk up rather than add a testID for one test. */
+  /** The search bar is the input's great-grandparent — walk up rather than add a testID. */
   function searchBarPaddingBottom(): number {
     const input = screen.getByPlaceholderText('Search messages & chats');
-    const bar = input.parent?.parent;
+    const bar = input.parent?.parent?.parent;
     const flat = Object.assign({}, ...[bar?.props.style].flat(Infinity).filter(Boolean));
     return flat.paddingBottom;
   }

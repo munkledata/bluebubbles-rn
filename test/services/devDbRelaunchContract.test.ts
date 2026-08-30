@@ -396,8 +396,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'pass',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -426,8 +426,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'fail',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -512,8 +512,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       expect(mockFiles.get(RESUMING)).toBe(0);
       return {
         status: 'pass',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: resumeChecks,
       };
     });
@@ -539,8 +539,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-relaunch',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -603,8 +603,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         expect(mockFiles.get(ACTIVE_MIGRATION_DEATH_RESUMING)).toBe(0);
         return {
           status: 'pass',
-          migrationCount: 43,
-          migrationHead: '0043_custom_folders',
+          migrationCount: 44,
+          migrationHead: '0044_custom_folder_unread_badge',
           checks: activeMigrationDeathResumeChecks,
         };
       },
@@ -633,8 +633,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-active-migration-death',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -774,8 +774,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'fail',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: { ...resumeChecks, databaseCleanup: false },
         failureCode: 'database-cleanup',
       };
@@ -808,8 +808,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'pass',
-        migrationCount: 43,
-        migrationHead: '0043_custom_folders',
+        migrationCount: 44,
+        migrationHead: '0044_custom_folder_unread_badge',
         checks: resumeChecks,
       };
     });

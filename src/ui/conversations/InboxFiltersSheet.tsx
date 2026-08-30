@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   DEFAULT_INBOX_FILTERS,
@@ -44,7 +44,6 @@ const SERVICE_CHOICES: readonly Choice<InboxServiceFilter>[] = [
 ];
 
 interface InboxFiltersSheetProps {
-  visible: boolean;
   filters: InboxFilters;
   senderLocked: boolean;
   onApply: (filters: InboxFilters) => void;
@@ -53,7 +52,6 @@ interface InboxFiltersSheetProps {
 
 /** Draft-first filter editor: Cancel writes nothing; Apply persists all five axes once. */
 export function InboxFiltersSheet({
-  visible,
   filters,
   senderLocked,
   onApply,
@@ -63,17 +61,13 @@ export function InboxFiltersSheet({
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<InboxFilters>(() => ({ ...filters }));
 
-  useEffect(() => {
-    if (visible) setDraft({ ...filters });
-  }, [filters, visible]);
-
   const setAxis = <K extends keyof InboxFilters>(key: K, value: InboxFilters[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }));
   };
   const displayedSender = senderLocked ? 'known' : draft.sender;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop} accessibilityViewIsModal>
         <Pressable
           style={StyleSheet.absoluteFill}

@@ -470,7 +470,7 @@ beforeEach(() => {
 
 describe('DB-03B1 fixed process-relaunch database contract', () => {
   it('pins the exact production migration boundary used across process death', () => {
-    expect(migrationNames).toHaveLength(43);
+    expect(migrationNames).toHaveLength(44);
     expect(migrationNames[28]).toBe('0029_chats_deleted_at');
     expect(migrationNames[29]).toBe('0030_attachment_cache_entries');
     expect(migrationNames[37]).toBe('0038_scrub_reaction_selected_message_text');
@@ -479,6 +479,7 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
     expect(migrationNames[40]).toBe('0041_message_balloon_bundle_id');
     expect(migrationNames[41]).toBe('0042_message_part_identity');
     expect(migrationNames[42]).toBe('0043_custom_folders');
+    expect(migrationNames[43]).toBe('0044_custom_folder_unread_badge');
   });
 
   it('prepares exact 0001-0029 state and keeps the encrypted handle open while READY waits', async () => {
@@ -574,8 +575,8 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
 
     await expect(resumeDbProcessRelaunchSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 43,
-      migrationHead: '0043_custom_folders',
+      migrationCount: 44,
+      migrationHead: '0044_custom_folder_unread_badge',
       checks: {
         readOnlyContinuityOpen: true,
         sameFileState: true,
@@ -937,7 +938,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
   it('pins the exact single-statement 0038 production migration boundary', () => {
     const migrations = (jest.requireActual('@db/migrations') as typeof import('@db/migrations'))
       .MIGRATIONS;
-    expect(migrations).toHaveLength(43);
+    expect(migrations).toHaveLength(44);
     expect(migrations[36]?.name).toBe('0037_purge_legacy_redacted_mode_setting');
     expect(migrations[37]).toEqual({
       name: '0038_scrub_reaction_selected_message_text',
@@ -957,6 +958,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
     expect(migrations[40]?.name).toBe('0041_message_balloon_bundle_id');
     expect(migrations[41]?.name).toBe('0042_message_part_identity');
     expect(migrations[42]?.name).toBe('0043_custom_folders');
+    expect(migrations[43]?.name).toBe('0044_custom_folder_unread_badge');
   });
 
   it('runs the real migration boundary, enters READY before ledger COMMIT, then rolls back on callback rejection', async () => {
@@ -1076,8 +1078,8 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
 
     await expect(resumeDbActiveMigrationDeathSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 43,
-      migrationHead: '0043_custom_folders',
+      migrationCount: 44,
+      migrationHead: '0044_custom_folder_unread_badge',
       checks: {
         readOnlyRecoveryOpen: true,
         walMode: true,

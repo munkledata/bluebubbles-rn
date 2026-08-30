@@ -534,13 +534,14 @@ export function ConversationListScreen(): React.JSX.Element {
         {searchBar}
       </KeyboardAvoidingView>
       <ChatActionsSheet target={actionTarget} onClose={() => setActionTarget(null)} />
-      <InboxFiltersSheet
-        visible={filtersVisible}
-        filters={inboxFilters}
-        senderLocked={filterUnknown}
-        onApply={applyInboxFilters}
-        onClose={() => setFiltersVisible(false)}
-      />
+      {filtersVisible ? (
+        <InboxFiltersSheet
+          filters={inboxFilters}
+          senderLocked={filterUnknown}
+          onApply={applyInboxFilters}
+          onClose={() => setFiltersVisible(false)}
+        />
+      ) : null}
     </Screen>
   );
 }

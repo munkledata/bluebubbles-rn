@@ -675,8 +675,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 43,
-      migrationHead: '0043_custom_folders',
+      migrationCount: 44,
+      migrationHead: '0044_custom_folder_unread_badge',
       checks: passingChecks,
     });
 
@@ -946,8 +946,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 43,
-      migrationHead: '0043_custom_folders',
+      migrationCount: 44,
+      migrationHead: '0044_custom_folder_unread_badge',
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

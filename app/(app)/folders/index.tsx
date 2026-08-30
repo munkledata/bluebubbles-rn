@@ -1,10 +1,10 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import type { CustomFolderSummaryRow } from '@db/repositories';
 import { useCustomFolderSummaries } from '@features/conversations/useCustomFolderSummaries';
-import { loadCustomFolderSummaries, reorderCustomFolders } from '@/services/customFolderCommands';
+import { reorderCustomFolders } from '@/services/customFolderCommands';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
@@ -17,10 +17,11 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
   const router = useRouter();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
-  const [rows, setRows] = useState<CustomFolderSummaryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [busyFolderId, setBusyFolderId] = useState<number | null>(null);
+  const [optimisticReorder, setOptimisticReorder] = useState<{
+    baseRows: CustomFolderSummaryRow[] | null;
+    rows: CustomFolderSummaryRow[];
+  } | null>(null);
   const [focused, setFocused] = useState(false);
   const focusedRef = useRef(false);
   const reorderInFlightRef = useRef(false);
@@ -29,55 +30,27 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
     () =>
       subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
         setAccountRetired(true);
-        setRows([]);
         setBusyFolderId(null);
+        setOptimisticReorder(null);
       }),
     [accountLease],
   );
 
   const accountCurrent = !accountRetired && accountLease.isCurrent();
-  const folders = useCustomFolderSummaries(accountLease, accountCurrent && focused);
-
-  useEffect(() => {
-    if (!focused || !focusedRef.current || reorderInFlightRef.current) return;
-    if (folders.error) {
-      setLoadFailed(true);
-      setLoading(false);
-      return;
-    }
-    if (folders.data == null) return;
-    setRows(folders.data);
-    setLoadFailed(false);
-    setLoading(false);
-  }, [folders.data, folders.error, focused]);
-
-  const refresh = useCallback(
-    async (showLoading: boolean): Promise<boolean> => {
-      if (!accountLease.isCurrent()) return false;
-      if (showLoading && focusedRef.current) setLoading(true);
-      try {
-        const result = await loadCustomFolderSummaries(accountLease);
-        if (!focusedRef.current || result.status === 'stale' || !accountLease.isCurrent()) {
-          return false;
-        }
-        setRows(result.value);
-        setLoadFailed(false);
-        return true;
-      } catch {
-        if (focusedRef.current && accountLease.isCurrent()) setLoadFailed(true);
-        return false;
-      } finally {
-        if (focusedRef.current && accountLease.isCurrent()) setLoading(false);
-      }
-    },
-    [accountLease],
-  );
+  const {
+    data: folderRows,
+    error: folderLoadError,
+    isLoading: foldersLoading,
+    retry: retryFolders,
+  } = useCustomFolderSummaries(accountLease, accountCurrent && focused);
+  const rows =
+    optimisticReorder?.baseRows === folderRows ? optimisticReorder.rows : (folderRows ?? []);
+  const loadFailed = folderLoadError != null;
 
   useFocusEffect(
     useCallback(() => {
       focusedRef.current = true;
       setFocused(true);
-      setLoading(true);
       if (!reorderInFlightRef.current) setBusyFolderId(null);
       return () => {
         focusedRef.current = false;
@@ -88,9 +61,8 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
 
   const retryFolderSummaries = useCallback((): void => {
     if (!accountLease.isCurrent() || !focusedRef.current) return;
-    setLoading(true);
-    folders.retry();
-  }, [accountLease, folders.retry]);
+    retryFolders();
+  }, [accountLease, retryFolders]);
 
   const moveFolder = async (index: number, offset: -1 | 1): Promise<void> => {
     if (
@@ -113,7 +85,6 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
     next[destination] = row;
     reorderInFlightRef.current = true;
     setBusyFolderId(row.id);
-    let refreshAfterCommit = false;
     try {
       const result = await reorderCustomFolders(
         next.map((folder) => folder.id),
@@ -121,35 +92,31 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
       );
       if (result.status === 'stale' || !accountLease.isCurrent() || !focusedRef.current) return;
       if (!result.value) {
-        const recovered = await refresh(false);
+        retryFolders();
         if (accountLease.isCurrent() && focusedRef.current) {
           showDialog(
             'Conversation Folders',
-            recovered
-              ? 'The folder list changed. Please try moving it again.'
-              : 'The folder list changed, but it could not be reloaded. Use Try Again before making more changes.',
+            'The folder list changed. It is being reloaded; please try moving it again.',
           );
         }
         return;
       }
-      setRows(next.map((folder, sortOrder) => ({ ...folder, sortOrder })));
-      refreshAfterCommit = true;
+      setOptimisticReorder({
+        baseRows: folderRows,
+        rows: next.map((folder, sortOrder) => ({ ...folder, sortOrder })),
+      });
+      retryFolders();
     } catch {
-      const recovered = await refresh(false);
+      retryFolders();
       if (accountLease.isCurrent() && focusedRef.current) {
         showDialog(
           'Conversation Folders',
-          recovered
-            ? 'Couldn’t change the folder order.'
-            : 'Couldn’t change or reload the folder order. Use Try Again before making more changes.',
+          'Couldn’t change the folder order. The folder list is being reloaded.',
         );
       }
     } finally {
       reorderInFlightRef.current = false;
       if (accountLease.isCurrent() && focusedRef.current) setBusyFolderId(null);
-      if (refreshAfterCommit && accountLease.isCurrent() && focusedRef.current) {
-        void refresh(false);
-      }
     }
   };
 
@@ -196,9 +163,9 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
             </Text>
             <Pressable
               onPress={retryFolderSummaries}
-              disabled={loading}
+              disabled={foldersLoading}
               accessibilityRole="button"
-              accessibilityState={{ disabled: loading }}
+              accessibilityState={{ disabled: foldersLoading }}
               style={styles.retry}
             >
               <Text style={[styles.retryText, { color: theme.color.tint }]}>Try Again</Text>
@@ -206,7 +173,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
           </View>
         ) : null}
 
-        {loading && rows.length === 0 ? (
+        {foldersLoading && rows.length === 0 ? (
           <ActivityIndicator style={styles.loading} color={theme.color.tint} />
         ) : loadFailed && rows.length === 0 ? (
           <View style={styles.messageBlock}>

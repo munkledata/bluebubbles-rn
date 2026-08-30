@@ -37,7 +37,12 @@ const validSource = `
         await sendTextMessage(
           db,
           http,
-          { chatGuid: m.chatGuid, text: m.text, selectedMessageGuid: m.selectedMessageGuid },
+          {
+            chatGuid: m.chatGuid,
+            text: m.text,
+            selectedMessageGuid: m.selectedMessageGuid,
+            partIndex: m.selectedMessageGuid ? m.selectedMessagePartIndex : undefined,
+          },
           Date.now(),
           recordAtomicHandover,
           { scheduledId: m.id, transition, commitGuard },
@@ -276,14 +281,35 @@ test('rejects omitted or misbound authoritative-claim inputs', () => {
 });
 
 test('rejects stale, indirect, or incorrectly mapped production send payloads', () => {
-  const exactPayload =
-    '{ chatGuid: m.chatGuid, text: m.text, selectedMessageGuid: m.selectedMessageGuid }';
-  const stalePayload =
-    '{ chatGuid: candidate.chatGuid, text: candidate.text, selectedMessageGuid: candidate.selectedMessageGuid }';
+  const exactPayload = `{
+            chatGuid: m.chatGuid,
+            text: m.text,
+            selectedMessageGuid: m.selectedMessageGuid,
+            partIndex: m.selectedMessageGuid ? m.selectedMessagePartIndex : undefined,
+          }`;
+  const stalePayload = `{
+            chatGuid: candidate.chatGuid,
+            text: candidate.text,
+            selectedMessageGuid: candidate.selectedMessageGuid,
+            partIndex: candidate.selectedMessageGuid
+              ? candidate.selectedMessagePartIndex
+              : undefined,
+          }`;
   for (const regression of [
     stalePayload,
     'payload',
-    '{ chatGuid: m.chatGuid, text: m.chatGuid, selectedMessageGuid: m.selectedMessageGuid }',
+    `{
+            chatGuid: m.chatGuid,
+            text: m.chatGuid,
+            selectedMessageGuid: m.selectedMessageGuid,
+            partIndex: m.selectedMessageGuid ? m.selectedMessagePartIndex : undefined,
+          }`,
+    `{
+            chatGuid: m.chatGuid,
+            text: m.text,
+            selectedMessageGuid: m.selectedMessageGuid,
+            partIndex: m.selectedMessagePartIndex,
+          }`,
   ]) {
     assert.match(
       scheduledRecoverySourceErrors(validSource.replace(exactPayload, regression)).join('\n'),

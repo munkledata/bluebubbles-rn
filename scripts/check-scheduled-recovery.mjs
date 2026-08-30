@@ -19,9 +19,9 @@ const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoin
 const TRANSACTION_TEXT_INSERT_TARGET =
   'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
 const REVIEWED_RUN_DUE_BODY_HASH =
-  '0102dd9c1bff60acd05562d68299fd5f3245f0775b0f909e0edf9031e0c352c0';
+  'e6259e87f1baef91ca5f55f92ada0b28604bfe628aa338b0e2c56bdcf1704d11';
 const REVIEWED_SEND_TEXT_BODY_HASH =
-  '73ad82acc8339bcf6c3322b9b47d90f50475b7833539b91daa141c329c430807';
+  'dd6359aeef52eef3a725a11ced96aad328317417d940e1b774d5e9c9ffc95d62';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
@@ -50,15 +50,15 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${CHAT_CATCHUP_PATH}#useChatScheduledCatchup`,
-    'c590aa8b46cf6a080e2c13304164c1a6cbdef75d6d4d2c8b7e471edf0fb19f12',
+    '57f75b6dde11ec6d426c255edbb1a1b6b0f5a1528745b881fd38c9e762cc666a',
   ],
   [
     `${CHAT_ROUTE_PATH}#ChatScreen`,
-    'a220c5979079ea5c0f8f8891cb04daba435d838c505898021f8f212705875dd1',
+    '06013bdb323211573156b5fadcd7c84f8b41f1fd393d9d0a8102071bf57f6d25',
   ],
   [
     `${HOME_PATH}#Home.scheduledEffect`,
-    '29770290812e8da2647f3194ff6c39d467a97d3de2fbbd6619e8fd193aa7013f',
+    '2fb810524311c376ae5cdca62563f51f4fb6961e4f38107a8baa52d3edf6ea6e',
   ],
 ]);
 const EXPECTED_SCHEDULED_CALLERS = new Map([
@@ -453,17 +453,44 @@ function atomicSendErrors(declaration) {
   }
 
   const payload = sendCall.arguments[2];
+  const partIndexProperty =
+    payload && ts.isObjectLiteralExpression(payload) ? payload.properties[3] : undefined;
+  const partIndexInitializer =
+    partIndexProperty && ts.isPropertyAssignment(partIndexProperty)
+      ? partIndexProperty.initializer
+      : undefined;
   if (
     !claimedRowIdentifier ||
     !payload ||
     !ts.isObjectLiteralExpression(payload) ||
-    payload.properties.length !== 3 ||
+    payload.properties.length !== 4 ||
     !isDirectPropertyAssignment(payload.properties[0], 'chatGuid', claimedRowIdentifier) ||
     !isDirectPropertyAssignment(payload.properties[1], 'text', claimedRowIdentifier) ||
-    !isDirectPropertyAssignment(payload.properties[2], 'selectedMessageGuid', claimedRowIdentifier)
+    !isDirectPropertyAssignment(
+      payload.properties[2],
+      'selectedMessageGuid',
+      claimedRowIdentifier,
+    ) ||
+    !partIndexProperty ||
+    !ts.isPropertyAssignment(partIndexProperty) ||
+    propertyNameText(partIndexProperty) !== 'partIndex' ||
+    !partIndexInitializer ||
+    !ts.isConditionalExpression(partIndexInitializer) ||
+    !isDirectPropertyAccess(
+      partIndexInitializer.condition,
+      claimedRowIdentifier,
+      'selectedMessageGuid',
+    ) ||
+    !isDirectPropertyAccess(
+      partIndexInitializer.whenTrue,
+      claimedRowIdentifier,
+      'selectedMessagePartIndex',
+    ) ||
+    !ts.isIdentifier(partIndexInitializer.whenFalse) ||
+    partIndexInitializer.whenFalse.text !== 'undefined'
   ) {
     errors.push(
-      'production send payload must be exactly { chatGuid: <claimed>.chatGuid, text: <claimed>.text, selectedMessageGuid: <claimed>.selectedMessageGuid }',
+      'production send payload must be exactly the claimed chat, text, selected message, and conditional selected-message part index',
     );
   }
 
