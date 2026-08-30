@@ -96,6 +96,18 @@ jest.mock('@ui/LoadErrorBoundary', () => ({
 jest.mock('@features/conversations/useMessages', () => ({ useMessages: jest.fn() }));
 jest.mock('@features/conversations/useChatHeader', () => ({ useChatHeader: jest.fn() }));
 jest.mock('@features/conversations/useNewScreenEffect', () => ({ useNewScreenEffect: jest.fn() }));
+jest.mock('@features/conversations/useChatSearch', () => ({
+  useChatSearch: () => ({
+    data: undefined,
+    fetchNextPage: jest.fn(),
+    hasNextPage: false,
+    isError: false,
+    isFetchingNextPage: false,
+    isPending: true,
+    results: [],
+    totalCount: 0,
+  }),
+}));
 jest.mock('@features/conversations/devSeed', () => ({
   devEditFake: jest.fn(),
   devInjectEffect: jest.fn(),
@@ -134,7 +146,9 @@ jest.mock('@/services/contacts/contactsService', () => ({
   getContactsPermissionState: jest.fn(),
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
-jest.mock('@/services/notifications/remindersService', () => ({ scheduleReminder: jest.fn() }));
+jest.mock('@/services/notifications/remindersService', () => ({
+  scheduleMessageReminder: jest.fn(),
+}));
 jest.mock('@/services/media', () => ({
   shareAttachment: jest.fn(),
   saveAttachmentsToPhotos: jest.fn(),
