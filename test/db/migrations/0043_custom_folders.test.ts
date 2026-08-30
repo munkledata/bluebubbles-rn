@@ -41,7 +41,10 @@ describe('migration 0043_custom_folders', () => {
       raw.prepare("INSERT INTO chats (guid) VALUES ('chat-before-0043')").run();
 
       stopBefore0043.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0044_custom_folder_unread_badge',
+      ]);
       raw.prepare("INSERT INTO custom_folders (name, sort_order) VALUES ('Work', 0)").run();
       const folderId = (
         raw.prepare("SELECT id FROM custom_folders WHERE name = 'Work'").get() as { id: number }
@@ -80,8 +83,8 @@ describe('migration 0043_custom_folders', () => {
     await expect(reorderCustomFolders(db, [family.id])).resolves.toBe(false);
     await expect(reorderCustomFolders(db, [family.id, work.id])).resolves.toBe(true);
     expect(await listCustomFolders(db)).toEqual([
-      { ...family, name: 'People', sortOrder: 0 },
-      { ...work, sortOrder: 1 },
+      { ...family, name: 'People', sortOrder: 0, showUnreadBadge: 1 },
+      { ...work, sortOrder: 1, showUnreadBadge: 1 },
     ]);
 
     await expect(replaceCustomFolderMembership(db, work.id, ['chat-a', 'chat-b'])).resolves.toBe(

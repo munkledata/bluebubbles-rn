@@ -313,39 +313,6 @@ describe('incoming event envelope codec', () => {
         payloadData: null,
       },
     ],
-    [
-      'reaction delta',
-      'new-message' as const,
-      {
-        guid: 'serializer-reaction',
-        originalROWID: 103,
-        dateCreated: 1_700_000_000_030,
-        associatedMessageGuid: 'p:0/serializer-target',
-        associatedMessageType: 'love',
-        handleId: 7,
-        handle: {
-          originalROWID: 7,
-          address: '+15551234567',
-          service: 'iMessage',
-          country: 'US',
-          uncanonicalizedId: '(555) 123-4567',
-        },
-        attributedBody: [{ string: '', runs: [] }],
-        wasDeliveredQuietly: false,
-        chats: [{ guid: 'serializer-chat', chatIdentifier: '+15551234567', style: 45 }],
-      },
-      {
-        guid: 'serializer-reaction',
-        originalROWID: 103,
-        dateCreated: 1_700_000_000_030,
-        associatedMessageGuid: 'serializer-target',
-        associatedMessageType: 'love',
-        handleId: 7,
-        handle: { originalROWID: 7, address: '+15551234567', service: 'iMessage' },
-        attributedBody: null,
-        chats: [{ guid: 'serializer-chat', chatIdentifier: '+15551234567', style: 45 }],
-      },
-    ],
   ])(
     'deduplicates the real rich-socket and lean-FCM %s serializers semantically',
     async (_label, eventName, richRaw, leanRaw) => {
@@ -365,6 +332,54 @@ describe('incoming event envelope codec', () => {
       expect(fcm.envelope.orderingKey).toBe(socket.envelope.orderingKey);
     },
   );
+
+  it('keeps a rich part-zero reaction distinct from a lean reaction with unknown part identity', async () => {
+    const socketEvent = normalized('new-message', {
+      guid: 'serializer-reaction',
+      originalROWID: 103,
+      dateCreated: 1_700_000_000_030,
+      associatedMessageGuid: 'p:0/serializer-target',
+      associatedMessageType: 'love',
+      handleId: 7,
+      handle: {
+        originalROWID: 7,
+        address: '+15551234567',
+        service: 'iMessage',
+        country: 'US',
+        uncanonicalizedId: '(555) 123-4567',
+      },
+      attributedBody: [{ string: '', runs: [] }],
+      wasDeliveredQuietly: false,
+      chats: [{ guid: 'serializer-chat', chatIdentifier: '+15551234567', style: 45 }],
+    });
+    const fcmEvent = normalized('new-message', {
+      guid: 'serializer-reaction',
+      originalROWID: 103,
+      dateCreated: 1_700_000_000_030,
+      associatedMessageGuid: 'serializer-target',
+      associatedMessageType: 'love',
+      handleId: 7,
+      handle: { originalROWID: 7, address: '+15551234567', service: 'iMessage' },
+      attributedBody: null,
+      chats: [{ guid: 'serializer-chat', chatIdentifier: '+15551234567', style: 45 }],
+    });
+    if (socketEvent.type !== 'new-message' || fcmEvent.type !== 'new-message') {
+      throw new Error('unexpected event type');
+    }
+    expect(socketEvent.message.associatedMessagePart).toBe(0);
+    expect(fcmEvent.message.associatedMessagePart).toBeNull();
+
+    const socket = await encodeIncomingEvent(
+      socketEvent,
+      metadata('socket', 'socket-serializer-copy'),
+      digest,
+    );
+    const fcm = await encodeIncomingEvent(fcmEvent, metadata('fcm', 'fcm-serializer-copy'), digest);
+
+    expect(fcm.envelope.payloadDigest).not.toBe(socket.envelope.payloadDigest);
+    expect(fcm.envelope.eventKey).not.toBe(socket.envelope.eventKey);
+    expect(fcm.envelope.orderingKey).toBe(socket.envelope.orderingKey);
+  });
 
   it('keeps message revisions distinct while serializing them behind one ordering key', async () => {
     const delivered = normalized('updated-message', {

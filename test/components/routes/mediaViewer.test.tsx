@@ -31,10 +31,9 @@ import { useDialogStore } from '@ui/dialog/dialogStore';
 import { useToastStore } from '@ui/toast/toastStore';
 
 const mockBack = jest.fn();
-const mockLoggerWarn = jest.fn();
 let mockRouteGuid = 'att-1';
 
-jest.mock('@core/secure', () => ({ logger: { warn: mockLoggerWarn } }));
+jest.mock('@core/secure', () => ({ logger: { warn: jest.fn() } }));
 
 jest.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ guid: mockRouteGuid }),
@@ -144,7 +143,7 @@ const ROUTE_B_TARGET = {
 };
 
 jest.mock('@db/repositories', () => ({
-  getAttachmentByGuid: jest.fn(),
+  getVisibleAttachmentByGuid: jest.fn(),
   listChatImageAttachmentsByAttachmentGuid: jest.fn(),
 }));
 
@@ -154,7 +153,10 @@ jest.mock('@/services/media', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { getAttachmentByGuid, listChatImageAttachmentsByAttachmentGuid } from '@db/repositories';
+import {
+  getVisibleAttachmentByGuid,
+  listChatImageAttachmentsByAttachmentGuid,
+} from '@db/repositories';
 // eslint-disable-next-line import/first
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 // eslint-disable-next-line import/first
@@ -165,12 +167,14 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 
-const getAtt = getAttachmentByGuid as jest.Mock;
+const getAtt = getVisibleAttachmentByGuid as jest.Mock;
 const listGallery = listChatImageAttachmentsByAttachmentGuid as jest.Mock;
 const share = shareAttachment as jest.Mock;
 const save = saveAttachmentsToPhotos as jest.Mock;
 const mockUseVideoPlayer = (jest.requireMock('expo-video') as { useVideoPlayer: jest.Mock })
   .useVideoPlayer;
+const mockLoggerWarn = (jest.requireMock('@core/secure') as { logger: { warn: jest.Mock } }).logger
+  .warn;
 const mockZoomableImage = (
   jest.requireMock('@ui/attachments/ZoomableImage') as { ZoomableImage: jest.Mock }
 ).ZoomableImage;

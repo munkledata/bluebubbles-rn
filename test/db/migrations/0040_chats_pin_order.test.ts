@@ -39,7 +39,13 @@ describe('migration 0040_chats_pin_order', () => {
         .run('ordinary-chat', 0, 1_000);
 
       stopBefore0040.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual(['0040_chats_pin_order']);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        '0040_chats_pin_order',
+        '0041_message_balloon_bundle_id',
+        '0042_message_part_identity',
+        '0043_custom_folders',
+        '0044_custom_folder_unread_badge',
+      ]);
       expect(
         raw.prepare('SELECT guid, pin_order AS pinOrder FROM chats ORDER BY guid').all(),
       ).toEqual([

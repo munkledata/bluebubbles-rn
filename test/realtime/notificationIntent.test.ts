@@ -206,6 +206,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
         dateCreated: 1700000000002,
         handle: { address: 'bob@x.com', displayName: 'Bob' },
         chats: [{ guid: 'cAtt', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+        attachments: [{ guid: 'att1-image', mimeType: 'image/jpeg' }],
       },
       'socket',
     );

@@ -73,10 +73,15 @@ describe('StoragePrivacyScreen', () => {
     expect(
       screen.getByText(/does not delete copies exported to Photos or the Gator album/),
     ).toBeTruthy();
-    expect(screen.getByText(/encrypts it before writing a temporary share file/)).toBeTruthy();
     expect(
-      screen.getByText(/not messages, drafts, diagnostic consent, or credentials/),
+      screen.getByText(/encrypts a new backup before writing a temporary share file/),
     ).toBeTruthy();
-    expect(screen.getByText(/attempts to delete that file/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /does not contain messages, drafts, unread state, diagnostic consent, files, or credentials/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/attempts to delete the temporary file/)).toBeTruthy();
+    expect(screen.getByText(/no longer has a plaintext export path/)).toBeTruthy();
   });
 });

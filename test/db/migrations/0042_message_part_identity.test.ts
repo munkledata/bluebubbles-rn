@@ -38,7 +38,11 @@ describe('migration 0042_message_part_identity', () => {
         .run(chatId);
 
       stopBefore0042.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0043_custom_folders',
+        '0044_custom_folder_unread_badge',
+      ]);
       expect(
         raw
           .prepare(

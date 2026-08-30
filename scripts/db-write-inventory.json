@@ -108,7 +108,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:4a38f10af7>:mutator-call:52515790b4b9",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1050,
+      "line": 1048,
       "symbol": "ChatScreenInner.<callback:4a38f10af7>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",

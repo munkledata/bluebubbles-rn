@@ -102,9 +102,11 @@ describe('createShareCapture', () => {
     expect(h.toast).toHaveBeenCalledTimes(1);
     expect(h.clearNativeIntent).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('[share] copy produced no file (application/pdf) — dropping');
-    expect(errorLog).toHaveBeenCalledWith('[share] all shared files were unreadable', {
-      affectedCount: 1,
-    });
+    expect(errorLog).toHaveBeenCalledWith(
+      '[share] all shared files were unreadable',
+      expect.any(String),
+      { affectedCount: 1 },
+    );
   });
 
   it('stages the survivors and warns when only some files fail', async () => {
@@ -162,6 +164,7 @@ describe('createShareCapture', () => {
     expect(h.toast).toHaveBeenCalledTimes(1);
     expect(errorLog).toHaveBeenCalledWith(
       '[share] no cache directory available — cannot accept shared files',
+      expect.any(String),
     );
   });
 
@@ -175,7 +178,7 @@ describe('createShareCapture', () => {
     await expect(h.capture(pdfEvent)).resolves.toBeUndefined();
     // The native intent is still dropped so the app can't get stuck re-firing it.
     expect(h.clearNativeIntent).toHaveBeenCalled();
-    expect(errorLog).toHaveBeenCalledWith('[share] capture failed', error);
+    expect(errorLog).toHaveBeenCalledWith('[share] capture failed', expect.any(String), error);
   });
 
   it('prunes old cache batches after a successful capture', async () => {

@@ -1,12 +1,10 @@
 /**
  * backupService (src/services/backup/backupService.ts) — the export/import orchestration
  * over expo-file-system + expo-sharing. Pins the AGENTS.md security contract:
- *   1. the plaintext/encrypted export file written to the cache dir is DELETED in a
- *      finally after the share sheet — even when sharing throws — so it never lingers;
- *   2. sharing-unavailable also deletes the file before throwing;
- *   3. the written plaintext export contains NO secret-looking kv values (buildBackup's
- *      filter, asserted end-to-end here on the actual written bytes);
- *   4. the encrypted export writes the sealed envelope (never the plaintext), and the
+ *   1. the encrypted export file written to the cache dir is DELETED in a finally after
+ *      the share sheet — even when sharing throws — so it never lingers;
+ *   2. sharing-unavailable does not create an export file;
+ *   3. the encrypted export writes the sealed envelope (never the plaintext), and the
  *      full seal→share→import round-trip restores settings under the right passphrase.
  *
  * expo-file-system / expo-sharing / expo-constants are mocked in-file; the DB is a real
@@ -82,7 +80,6 @@ import * as Sharing from 'expo-sharing';
 import {
   BackupAccountChangedError,
   BackupPassphraseRejectedError,
-  exportBackup,
   exportEncryptedBackup,
   importBackupAuto,
   readPickedBackupCopy,
@@ -119,7 +116,8 @@ function deferred<T>(): Deferred<T> {
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
-  for (let i = 0; i < 30; i += 1) {
+  // Backup v3 finishes its sequential base and custom-folder reads before reaching native seams.
+  for (let i = 0; i < 100; i += 1) {
     if (predicate()) return;
     await Promise.resolve();
   }
@@ -162,46 +160,9 @@ const theFile = (): MockFile => {
   return MockFile.instances[0]!;
 };
 
-// ---- plaintext export ------------------------------------------------------
+// ---- account ownership + picked-file cleanup -------------------------------
 
-describe('exportBackup', () => {
-  it('writes the backup, shares it, and deletes the cache file afterwards', async () => {
-    await seedDb();
-    await exportBackup(1_000);
-
-    const f = theFile();
-    expect(mockShare).toHaveBeenCalledWith(
-      f.uri,
-      expect.objectContaining({ mimeType: 'application/json' }),
-    );
-    expect(f.exists).toBe(false); // the finally-delete ran
-    expect(f.deletes).toBeGreaterThanOrEqual(1);
-    // The written export carries settings but NO secret kv values (filter pin).
-    expect(f.content).toContain('nord');
-    expect(f.content).not.toContain('hunter2');
-    expect(f.content).not.toContain('server.password');
-    // …nor unsent message text, the address it was aimed at, or device-local sync state.
-    expect(f.content).not.toContain(DRAFT_TEXT);
-    expect(f.content).not.toContain('+15555550123');
-    expect(f.content).not.toContain('sync.deletionsSyncedAt');
-  });
-
-  it('deletes the cache file even when the share sheet throws (the security pin)', async () => {
-    await seedDb();
-    mockShare.mockRejectedValueOnce(new Error('share cancelled by OS'));
-    await expect(exportBackup(1_000)).rejects.toThrow('share cancelled by OS');
-    expect(theFile().exists).toBe(false);
-  });
-
-  it('deletes the cache file and throws when sharing is unavailable', async () => {
-    await seedDb();
-    mockAvailable.mockResolvedValueOnce(false);
-    await expect(exportBackup(1_000)).rejects.toThrow('sharing-unavailable');
-    // Availability is checked before writing, so there is no generated file to clean up.
-    expect(MockFile.instances).toHaveLength(0);
-    expect(mockShare).not.toHaveBeenCalled();
-  });
-
+describe('backup account ownership / picked-file cleanup', () => {
   it('does not let a delayed A build open an export after Disconnect', async () => {
     const realDb = await seedDb();
     const readStarted = deferred<void>();
@@ -352,6 +313,17 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
     expect(theFile().exists).toBe(false);
   });
 
+  it('does not create an encrypted cache file when sharing is unavailable', async () => {
+    await seedDb();
+    mockAvailable.mockResolvedValueOnce(false);
+
+    await expect(exportEncryptedBackup('river-lantern-orbit-92', 2_000)).rejects.toThrow(
+      'sharing-unavailable',
+    );
+    expect(MockFile.instances).toHaveLength(0);
+    expect(mockShare).not.toHaveBeenCalled();
+  });
+
   it('normalizes a native-share failure that arrives after account retirement', async () => {
     await seedDb();
     mockGetSecretBox.mockResolvedValueOnce({
@@ -449,9 +421,13 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
   });
 
   it('auto-detect routes legacy plaintext JSON without needing the passphrase', async () => {
-    await seedDb();
-    await exportBackup(1_000);
-    const json = theFile().content!;
+    const json = JSON.stringify({
+      version: 1,
+      exportedAt: 1_000,
+      kv: [{ key: 'theme.preset', value: 'nord' }],
+      themes: [],
+      chatCustomizations: [],
+    });
 
     const fresh = await createTestDb();
     mockGetDatabase.mockReturnValue(fresh.db);
@@ -481,6 +457,10 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
       themes: 0,
       chatCustomizations: 0,
       chatCustomizationsSkipped: 0,
+      customFolders: 0,
+      customFoldersSkipped: 0,
+      customFolderMemberships: 0,
+      customFolderMembershipsSkipped: 0,
     });
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
   });

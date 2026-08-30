@@ -51,7 +51,12 @@ describe('migration 0041_message_balloon_bundle_id', () => {
         .run(chatId);
 
       stopBefore0041.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0042_message_part_identity',
+        '0043_custom_folders',
+        '0044_custom_folder_unread_badge',
+      ]);
       expect(hasBalloonColumn(raw)).toBe(true);
       expect(
         raw

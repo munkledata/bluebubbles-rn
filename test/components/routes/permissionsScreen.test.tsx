@@ -2,7 +2,6 @@ import React from 'react';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 
 const mockReplace = jest.fn();
-const mockDb = { account: 'permission-onboarding-account' };
 
 jest.mock('@ui', () => ({
   ...jest.requireActual('@ui/theme'),
@@ -12,9 +11,8 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ replace: mockReplace }) })
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
-jest.mock('@state/featureSettingsStore', () => ({
-  completePermissionOnboarding: jest.fn(),
+jest.mock('@/services/featureSettingsCommands', () => ({
+  finishPermissionOnboarding: jest.fn(),
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => ({ generation: 1, isCurrent: () => true }),
@@ -38,9 +36,9 @@ jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
 // eslint-disable-next-line import/first
 import PermissionsScreen from '../../../app/(setup)/permissions';
 // eslint-disable-next-line import/first
-import { getDatabase } from '@db/database';
-// eslint-disable-next-line import/first
 import { getContactsPermissionState, syncContacts } from '@/services/contacts/contactsService';
+// eslint-disable-next-line import/first
+import { finishPermissionOnboarding } from '@/services/featureSettingsCommands';
 // eslint-disable-next-line import/first
 import {
   getNotificationPermissionState,
@@ -49,21 +47,17 @@ import {
 } from '@/services/notifications/notifeeService';
 // eslint-disable-next-line import/first
 import { openContactsPermissionSettings } from '@ui/permissions/contactsPermission';
-// eslint-disable-next-line import/first
-import { completePermissionOnboarding } from '@state/featureSettingsStore';
 
 const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
-const mockGetDatabase = getDatabase as jest.Mock;
 const mockSyncContacts = syncContacts as jest.Mock;
+const mockFinishPermissionOnboarding = finishPermissionOnboarding as jest.Mock;
 const mockGetNotificationPermissionState = getNotificationPermissionState as jest.Mock;
 const mockOpenNotificationPermissionSettings = openNotificationPermissionSettings as jest.Mock;
 const mockRequestNotificationPermission = requestNotificationPermission as jest.Mock;
 const mockOpenContactsPermissionSettings = openContactsPermissionSettings as jest.Mock;
-const mockCompletePermissionOnboarding = completePermissionOnboarding as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockGetDatabase.mockReturnValue(mockDb);
   mockGetNotificationPermissionState.mockResolvedValue('not-determined');
   mockGetContactsPermissionState.mockResolvedValue({
     status: 'undetermined',
@@ -73,7 +67,7 @@ beforeEach(() => {
   mockOpenNotificationPermissionSettings.mockResolvedValue(undefined);
   mockSyncContacts.mockResolvedValue({ contacts: 3, matched: 2 });
   mockOpenContactsPermissionSettings.mockResolvedValue(undefined);
-  mockCompletePermissionOnboarding.mockResolvedValue(true);
+  mockFinishPermissionOnboarding.mockResolvedValue(true);
 });
 
 describe('PermissionsScreen', () => {
@@ -96,11 +90,13 @@ describe('PermissionsScreen', () => {
       fireEvent.press(screen.getByText('Continue to Messages'));
       await Promise.resolve();
     });
-    expect(mockCompletePermissionOnboarding).toHaveBeenCalledWith({
-      db: mockDb,
-      shouldCommit: expect.any(Function),
-    });
-    expect(mockReplace).toHaveBeenCalledWith('/home');
+    await waitFor(() =>
+      expect(mockFinishPermissionOnboarding).toHaveBeenCalledWith(
+        expect.objectContaining({ generation: 1 }),
+        expect.any(Function),
+      ),
+    );
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/home'));
   });
 
   it('rechecks an unavailable status without launching the native notification prompt', async () => {

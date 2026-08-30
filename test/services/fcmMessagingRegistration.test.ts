@@ -98,6 +98,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { registerFcmToken, startFcm } from '@/services/notifications/fcmMessaging';
+import '@/services/notifications/registerFcmBackgroundHandler';
 
 function setConnectedSession(origin: string, password: string, epoch: number): void {
   useSessionStore.setState({
