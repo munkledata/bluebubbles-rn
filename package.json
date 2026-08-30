@@ -31,6 +31,7 @@
     "check:error-diagnostics": "node --test scripts/check-error-diagnostics.test.mjs && node scripts/check-error-diagnostics.mjs",
     "check:migrations": "node scripts/check-migrations.mjs && node --test scripts/check-migrations.test.mjs",
     "check:android-build": "node --test scripts/check-android-build.test.mjs && node scripts/check-android-build.mjs",
+    "check:docs": "node --test scripts/check-docs.test.mjs && node scripts/check-docs.mjs",
     "doctor": "expo-doctor",
     "release:android": "node scripts/release-android.mjs help",
     "release:android:preflight": "node scripts/release-android.mjs preflight",
