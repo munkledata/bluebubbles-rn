@@ -651,7 +651,9 @@ or a setting that cannot be restored safely.
       library prompt is allowed.
 - [ ] **`EXACT PLAY CANDIDATE`:** Tapping the composer **Camera** requests camera only. Denial shows
       inline Settings guidance; allowance opens the camera and may cancel or stage one neutral
-      photo without a microphone prompt. Camera-video capture is not a current requirement.
+      photo without a microphone prompt. The action remains deliberately photo-only: no fresh-video
+      capture control is expected. Selecting and sending an existing synthetic gallery video remains
+      covered by the attachment and upload checks below.
 - [ ] **`EXACT PLAY CANDIDATE`:** Tapping voice record requests microphone access. Denial or a native
       request failure closes the recorder and shows the fixed recovery guidance; allowance records
       only silence or a neutral tone and can cancel without sending private speech.

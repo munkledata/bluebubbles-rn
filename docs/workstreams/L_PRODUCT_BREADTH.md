@@ -87,9 +87,11 @@ observable empty intermediate state.
 
 ## `FEAT-05` — isolated messaging additions
 
-Treat send-location, camera video, notification grouping beyond owned history, and server-assisted
-search as separate child tasks. Each selected slice needs its own capability gate, optimistic/error
-path, disablement boundary, and device sign-off; never bundle them into one release.
+Treat send-location, notification grouping beyond owned history, and server-assisted search as
+separate child tasks. Each selected slice needs its own capability gate, optimistic/error path,
+disablement boundary, and device sign-off; never bundle them into one release. Fresh camera-video
+capture is deliberately out of scope by owner decision: keep the existing Camera action photo-only
+without changing gallery-video selection, sending, receiving, or playback.
 
 <a id="feat-06"></a>
 
