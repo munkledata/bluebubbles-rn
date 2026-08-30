@@ -138,12 +138,20 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
 
         <SettingsSection label="BACKUPS" style={styles.gap}>
           <Text style={textStyle}>
-            A backup contains your theme, selected app settings, and per-chat customizations—not
-            custom folders, messages, drafts, diagnostic consent, or credentials. The current export
-            flow encrypts it before writing a temporary share file and attempts to delete that file
-            after the share sheet closes. A copy you save to Files, Drive, or another app remains
-            there until you delete it. Gator can still import older plaintext backup files but does
-            not offer plaintext export in the app.
+            A backup contains your theme, selected app settings, per-chat customizations, and custom
+            folder names, order, unread-badge choices, and portable conversation identities. Those
+            identities can include participant phone numbers or email addresses. It does not contain
+            messages, drafts, unread state, diagnostic consent, files, or credentials. Unavailable
+            or ambiguous folder members are skipped and reported rather than guessed. Same-name
+            folders merge without removing local members; only newly created folders use the saved
+            order.
+          </Text>
+          <Text style={textStyle}>
+            Gator encrypts a new backup before writing a temporary share file or sending ciphertext
+            to a server backup slot. It attempts to delete the temporary file after the share sheet
+            closes. Copies saved to Files, Drive, other apps, or server slots remain until you
+            delete them; disconnecting does not remove those copies. Gator can still import older
+            plaintext backup files but no longer has a plaintext export path.
           </Text>
         </SettingsSection>
       </ScrollView>

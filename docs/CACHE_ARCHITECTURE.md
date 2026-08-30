@@ -210,18 +210,21 @@ value TEXT)`.
 - **Encrypted FCM payloads (AES-GCM)** — supported `AEAD_GCM_V1` frames are decrypted on-device and
   enter `EventRouter` when the App Lock policy allows DB work. Unsupported/bad frames and locked
   delivery catch up on the next sync; locked delivery posts only a generic notice.
-- **Backups** — the UI exports settings only (kv minus secret-looking keys + user themes + per-chat
-  customizations), encrypted under a user passphrase before its temporary file is written. Message
-  history, handles, attachments, and the DB key are never exported; restoring on a fresh device
-  requires a full re-sync. Legacy plaintext backups can be imported but are not exported by the UI.
+- **Backups** — new encrypted v3 backups carry allow-listed settings, user themes, per-chat
+  customizations, and custom-folder name/order/badge/membership data. Folder membership uses the
+  same portable service/kind/stable-identifier/participant evidence as chat-customization restore;
+  it can therefore contain participant phone numbers or email addresses, but never message text,
+  drafts, attachments, contact display data, credentials, or the DB key. Temporarily absent,
+  ambiguous, and unsafe folder members are counted and visibly skipped instead of restoring an
+  opaque server-specific GUID. V1/v2 imports leave existing folders untouched. Folder restore
+  preserves local-only folders/members, merges exact normalized names, appends new names in backup
+  order, and applies all settings/theme/chat/folder writes in one guarded transaction. The UI and
+  server-slot paths expose only encrypted output; legacy plaintext backups remain importable.
   Import stats a picked file before reading it (6 MiB cap), bounds encoded text before base64 decode
-  (6 MiB), bounds decrypted/legacy plaintext before JSON parsing (4 MiB), and applies per-collection
-  and per-string schema limits. Argon2 cost is a fixed application setting, not attacker-controlled
-  envelope data. New exports require a 12-character, non-common passphrase; old encrypted backups
-  keep their original passphrase compatibility. The complete document is validated before writes,
-  but restore intentionally uses short writes/transactions because the app has one shared DB write
-  lock; an unexpected storage failure can therefore still leave a partially applied restore rather
-  than holding one unbounded transaction across thousands of chat customizations.
+  (6 MiB), bounds decrypted/legacy plaintext before JSON parsing (4 MiB), and applies per-collection,
+  aggregate-membership, and per-string schema limits. Argon2 cost is application-owned. New exports
+  require a 15-character, non-common passphrase; old encrypted backups retain their original
+  passphrase compatibility.
 
 ---
 

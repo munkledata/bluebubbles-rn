@@ -7,9 +7,15 @@ import {
   withDbTransaction,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import {
+  MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
+  MAX_CUSTOM_FOLDER_MEMBERS,
+  MAX_CUSTOM_FOLDERS,
+  normalizeCustomFolderName,
+} from './customFolders';
 import { kvSetWithinTransaction, THEME_CUSTOM_KEY } from './kv';
 
-// ---- Backup / restore reads + writes (settings, themes, chat customizations) ----
+// ---- Backup / restore reads + writes (settings, themes, chat customizations, custom folders) ----
 
 export interface KvPair {
   key: string;
@@ -35,14 +41,15 @@ export interface PortableChatParticipant {
   service: string;
   address: string;
 }
+export interface PortableChatIdentityRow {
+  version: 1;
+  service: string;
+  kind: 'direct' | 'group' | 'unknown';
+  serverChatIdentifier: string | null;
+  participants: PortableChatParticipant[];
+}
 export interface PortableChatCustomizationRow {
-  identity: {
-    version: 1;
-    service: string;
-    kind: 'direct' | 'group' | 'unknown';
-    serverChatIdentifier: string | null;
-    participants: PortableChatParticipant[];
-  };
+  identity: PortableChatIdentityRow;
   customName: string | null;
   customColor: string | null;
   muteType: string | null;
@@ -58,6 +65,33 @@ interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> 
   style: number | null;
   participantAddress: string | null;
   participantService: string | null;
+}
+
+const MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES = 10_000;
+const MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS = 25_000;
+const MAX_BACKUP_CHAT_PARTICIPANTS = 512;
+
+interface CustomFolderBackupExportRow {
+  folderId: number;
+  name: string;
+  showUnreadBadge: number;
+  chatGuid: string | null;
+  loadedGuid: string | null;
+  chatIdentifier: string | null;
+  style: number | null;
+  participantsJson: string | null;
+}
+
+export interface CustomFolderBackupRow {
+  name: string;
+  showUnreadBadge: 0 | 1;
+  sourceMemberCount: number;
+  memberIndexes: number[];
+}
+
+export interface CustomFolderBackupData {
+  customFolderChatIdentities: PortableChatIdentityRow[];
+  customFolders: CustomFolderBackupRow[];
 }
 
 /** SQL fragments are composed into the single restore statement below. */
@@ -121,6 +155,31 @@ function portableChatService(
   return 'iMessage';
 }
 
+function buildPortableChatIdentity(
+  guid: string,
+  chatIdentifier: string | null,
+  style: number | null,
+  participants: PortableChatParticipant[],
+): PortableChatIdentityRow {
+  return {
+    version: 1,
+    service: portableChatService(
+      guid,
+      participants.map((participant) => participant.service),
+    ),
+    kind: portableChatKind(style, guid, participants.length),
+    serverChatIdentifier: chatIdentifier?.trim() || null,
+    participants,
+  };
+}
+
+function hasPortableRestoreEvidence(identity: PortableChatIdentityRow): boolean {
+  return (
+    identity.kind !== 'unknown' &&
+    (identity.serverChatIdentifier !== null || identity.participants.length > 0)
+  );
+}
+
 /**
  * Validated backup rows serialized before the caller takes the process-wide DB lock.
  *
@@ -131,6 +190,14 @@ export interface PreparedBackupRestore {
   kvJson: string;
   themesJson: string;
   chatCustomizationsJson: string;
+  customFolderChatIdentitiesJson: string;
+  customFoldersJson: string;
+}
+
+export interface PreparedBackupRestoreResult {
+  chatCustomizations: number;
+  customFolders: number;
+  customFolderMemberships: number;
 }
 
 /**
@@ -233,13 +300,205 @@ export async function getChatCustomizations(
   }
   return [...grouped.values()].map(({ customization, guid, style }) => {
     const participants = customization.identity.participants;
-    customization.identity.service = portableChatService(
-      guid,
-      participants.map((participant) => participant.service),
-    );
-    customization.identity.kind = portableChatKind(style, guid, participants.length);
-    return customization;
+    return {
+      ...customization,
+      identity: buildPortableChatIdentity(
+        guid,
+        customization.identity.serverChatIdentifier,
+        style,
+        participants,
+      ),
+    };
   });
+}
+
+function readCustomFolderBackupRowsWithinTransaction(
+  context: DbTransactionContext,
+): Promise<CustomFolderBackupExportRow[]> {
+  return runInTransactionContext(context, async (db) =>
+    db.all<CustomFolderBackupExportRow>(sql`
+      WITH folder_probe AS MATERIALIZED (
+        SELECT id, name, sort_order, show_unread_badge
+          FROM custom_folders
+         ORDER BY sort_order ASC, id ASC
+         LIMIT ${MAX_CUSTOM_FOLDERS + 1}
+      ),
+      member_probe AS MATERIALIZED (
+        SELECT member.folder_id, member.chat_guid
+          FROM custom_folder_members AS member
+          JOIN folder_probe AS folder ON folder.id = member.folder_id
+         ORDER BY folder.sort_order ASC, folder.id ASC, member.chat_guid ASC
+         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+      ),
+      member_identity AS MATERIALIZED (
+        SELECT member.chat_guid,
+               chat.guid AS loaded_guid,
+               chat.chat_identifier,
+               chat.style,
+               COALESCE(
+                 (
+                   SELECT json_group_array(
+                     json_object(
+                       'service', participant.service,
+                       'address', participant.address
+                     )
+                   )
+                     FROM (
+                       SELECT COALESCE(handle.service, '') AS service,
+                              handle.address AS address
+                         FROM chat_handles AS chat_handle
+                         JOIN handles AS handle ON handle.id = chat_handle.handle_id
+                        WHERE chat_handle.chat_id = chat.id
+                          AND handle.address IS NOT NULL
+                          AND handle.address <> ''
+                        GROUP BY COALESCE(handle.service, ''), handle.address
+                        ORDER BY MIN(handle.id) ASC
+                        LIMIT ${MAX_BACKUP_CHAT_PARTICIPANTS + 1}
+                     ) AS participant
+                 ),
+                 '[]'
+               ) AS participants_json
+          FROM (SELECT DISTINCT chat_guid FROM member_probe) AS member
+          LEFT JOIN chats AS chat ON chat.guid = member.chat_guid
+      )
+      SELECT folder.id AS folderId,
+             folder.name,
+             folder.show_unread_badge AS showUnreadBadge,
+             member.chat_guid AS chatGuid,
+             identity.loaded_guid AS loadedGuid,
+             identity.chat_identifier AS chatIdentifier,
+             identity.style,
+             identity.participants_json AS participantsJson
+        FROM folder_probe AS folder
+        LEFT JOIN member_probe AS member ON member.folder_id = folder.id
+        LEFT JOIN member_identity AS identity ON identity.chat_guid = member.chat_guid
+       ORDER BY folder.sort_order ASC, folder.id ASC, member.chat_guid ASC
+    `),
+  );
+}
+
+function parseBackupParticipants(value: string | null): PortableChatParticipant[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value ?? '[]');
+  } catch {
+    throw new Error('Custom folder chat participants are invalid.');
+  }
+  if (!Array.isArray(parsed) || parsed.length > MAX_BACKUP_CHAT_PARTICIPANTS) {
+    throw new Error('Custom folder chat participants exceed their safety bound.');
+  }
+  return parsed.map((participant) => {
+    if (
+      typeof participant !== 'object' ||
+      participant === null ||
+      !('service' in participant) ||
+      !('address' in participant) ||
+      typeof participant.service !== 'string' ||
+      typeof participant.address !== 'string' ||
+      participant.address.length === 0
+    ) {
+      throw new Error('Custom folder chat participant is invalid.');
+    }
+    return { service: participant.service, address: participant.address };
+  });
+}
+
+/**
+ * Snapshot ordered folder metadata, complete durable membership counts, and portable identity
+ * evidence behind the shared DB coordinator. Temporarily absent members are counted but omitted
+ * from the identity registry because an opaque GUID is not portable across rebuilt Macs.
+ */
+export async function getCustomFolderBackupData(
+  db: AppDatabase,
+  commitGuard?: DbCommitGuard,
+): Promise<CustomFolderBackupData> {
+  const rows = await withDbTransaction(
+    db,
+    (context) => readCustomFolderBackupRowsWithinTransaction(context),
+    commitGuard,
+  );
+
+  const folderIds = new Set<number>();
+  const memberCounts = new Map<number, number>();
+  let associationCount = 0;
+  for (const row of rows) {
+    if (!Number.isSafeInteger(row.folderId) || row.folderId <= 0) {
+      throw new Error('Custom folder backup row has an invalid folder id.');
+    }
+    folderIds.add(row.folderId);
+    if (row.chatGuid !== null) {
+      associationCount += 1;
+      memberCounts.set(row.folderId, (memberCounts.get(row.folderId) ?? 0) + 1);
+    }
+  }
+  if (folderIds.size > MAX_CUSTOM_FOLDERS) {
+    throw new Error('Custom folder count exceeds its backup safety bound.');
+  }
+  if (associationCount > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
+    throw new Error('Custom folder memberships exceed their aggregate backup safety bound.');
+  }
+  if ([...memberCounts.values()].some((count) => count > MAX_CUSTOM_FOLDER_MEMBERS)) {
+    throw new Error('Custom folder membership exceeds its backup safety bound.');
+  }
+
+  const customFolderChatIdentities: PortableChatIdentityRow[] = [];
+  const identityIndexes = new Map<string, number>();
+  const customFolders: CustomFolderBackupRow[] = [];
+  const folderIndexes = new Map<number, number>();
+
+  for (const row of rows) {
+    const normalizedName = normalizeCustomFolderName(row.name);
+    if (normalizedName !== row.name || (row.showUnreadBadge !== 0 && row.showUnreadBadge !== 1)) {
+      throw new Error('Custom folder backup metadata is invalid.');
+    }
+
+    let folderIndex = folderIndexes.get(row.folderId);
+    if (folderIndex === undefined) {
+      folderIndex = customFolders.length;
+      folderIndexes.set(row.folderId, folderIndex);
+      customFolders.push({
+        name: row.name,
+        showUnreadBadge: row.showUnreadBadge,
+        sourceMemberCount: memberCounts.get(row.folderId) ?? 0,
+        memberIndexes: [],
+      });
+    }
+    if (row.chatGuid === null) continue;
+    if (
+      row.chatGuid.length === 0 ||
+      Array.from(row.chatGuid).length > MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS ||
+      row.chatGuid.includes('\u0000')
+    ) {
+      throw new Error('Custom folder membership contains an invalid chat GUID.');
+    }
+
+    // No chat row means there is no stable participant/server evidence to carry. The source count
+    // still lets restore report that omission instead of pretending the folder was complete.
+    if (row.loadedGuid === null) continue;
+    if (row.loadedGuid !== row.chatGuid) {
+      throw new Error('Custom folder membership identity is inconsistent.');
+    }
+
+    let identityIndex = identityIndexes.get(row.loadedGuid);
+    if (identityIndex === undefined) {
+      const identity = buildPortableChatIdentity(
+        row.loadedGuid,
+        row.chatIdentifier,
+        row.style,
+        parseBackupParticipants(row.participantsJson),
+      );
+      if (!hasPortableRestoreEvidence(identity)) continue;
+      if (customFolderChatIdentities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
+        throw new Error('Custom folder chat identities exceed their backup safety bound.');
+      }
+      identityIndex = customFolderChatIdentities.length;
+      identityIndexes.set(row.loadedGuid, identityIndex);
+      customFolderChatIdentities.push(identity);
+    }
+    customFolders[folderIndex]!.memberIndexes.push(identityIndex);
+  }
+
+  return { customFolderChatIdentities, customFolders };
 }
 
 export async function restoreKv(
@@ -422,7 +681,7 @@ export async function restoreChatCustomizationWithinTransaction(
 export function restorePreparedBackupWithinTransaction(
   context: DbTransactionContext,
   input: PreparedBackupRestore,
-): Promise<number> {
+): Promise<PreparedBackupRestoreResult> {
   return runInTransactionContext(context, async (db) => {
     await db.run(sql`
       INSERT INTO kv (key, value)
@@ -508,34 +767,54 @@ export function restorePreparedBackupWithinTransaction(
        ORDER BY source.source_index
     `);
 
-    const appliedRows = await db.all<{ id: number }>(sql`
-      WITH source_rows_raw AS (
-        SELECT CAST(entry.key AS INTEGER) AS source_index,
-               entry.value AS source_json,
-               json_extract(entry.value, '$.identity.version') AS identity_version,
-               json_extract(entry.value, '$.guid') AS guid,
+    await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folder_members`);
+    await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folders`);
+    await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_resolved_chats`);
+    try {
+      await db.run(sql`
+        CREATE TEMP TABLE gator_backup_resolved_chats AS
+        WITH source_input AS (
+          SELECT 'customization' AS restore_scope,
+                 CAST(entry.key AS INTEGER) AS restore_index,
+                 CAST(entry.key AS INTEGER) * 2 AS source_index,
+                 entry.value AS source_json
+            FROM json_each(${input.chatCustomizationsJson}) AS entry
+          UNION ALL
+          SELECT 'folder' AS restore_scope,
+                 CAST(entry.key AS INTEGER) AS restore_index,
+                 CAST(entry.key AS INTEGER) * 2 + 1 AS source_index,
+                 entry.value AS source_json
+            FROM json_each(${input.customFolderChatIdentitiesJson}) AS entry
+        ),
+        source_rows_raw AS (
+          SELECT restore_scope,
+                 restore_index,
+                 source_index,
+                 source_json,
+               json_extract(source_json, '$.identity.version') AS identity_version,
+               json_extract(source_json, '$.guid') AS guid,
                CASE
-                 WHEN INSTR(COALESCE(json_extract(entry.value, '$.guid'), ''), ';') > 0
+                 WHEN INSTR(COALESCE(json_extract(source_json, '$.guid'), ''), ';') > 0
                    THEN SUBSTR(
-                     json_extract(entry.value, '$.guid'),
-                     INSTR(json_extract(entry.value, '$.guid'), ';') + 1
+                     json_extract(source_json, '$.guid'),
+                     INSTR(json_extract(source_json, '$.guid'), ';') + 1
                    )
                  ELSE ''
                END AS legacy_remainder,
-               LOWER(TRIM(COALESCE(json_extract(entry.value, '$.identity.service'), '')))
+               LOWER(TRIM(COALESCE(json_extract(source_json, '$.identity.service'), '')))
                  AS portable_service,
-               json_extract(entry.value, '$.identity.kind') AS portable_kind,
+               json_extract(source_json, '$.identity.kind') AS portable_kind,
                NULLIF(
-                 TRIM(json_extract(entry.value, '$.identity.serverChatIdentifier')),
+                 TRIM(json_extract(source_json, '$.identity.serverChatIdentifier')),
                  ''
                ) AS server_chat_identifier,
-               json_extract(entry.value, '$.customName') AS custom_name,
-               json_extract(entry.value, '$.customColor') AS custom_color,
-               json_extract(entry.value, '$.muteType') AS mute_type,
-               json_extract(entry.value, '$.isPinned') AS is_pinned,
-               json_extract(entry.value, '$.pinOrder') AS pin_order,
-               json_extract(entry.value, '$.isArchived') AS is_archived
-          FROM json_each(${input.chatCustomizationsJson}) AS entry
+               json_extract(source_json, '$.customName') AS custom_name,
+               json_extract(source_json, '$.customColor') AS custom_color,
+               json_extract(source_json, '$.muteType') AS mute_type,
+               json_extract(source_json, '$.isPinned') AS is_pinned,
+               json_extract(source_json, '$.pinOrder') AS pin_order,
+               json_extract(source_json, '$.isArchived') AS is_archived
+            FROM source_input
       ),
       source_rows AS (
         SELECT source_rows_raw.*,
@@ -901,20 +1180,30 @@ export function restorePreparedBackupWithinTransaction(
         SELECT source_index, chat_id FROM portable_resolved
       ),
       resolved_ranked AS (
-        SELECT source_index, chat_id,
-               COUNT(*) OVER (PARTITION BY chat_id) AS source_count
+        SELECT resolved_candidates.source_index, resolved_candidates.chat_id,
+               source_rows.restore_scope,
+               COUNT(*) OVER (
+                 PARTITION BY source_rows.restore_scope, resolved_candidates.chat_id
+               ) AS source_count
           FROM resolved_candidates
+          JOIN source_rows ON source_rows.source_index = resolved_candidates.source_index
       ),
       resolved AS (
         SELECT source_index, chat_id
           FROM resolved_ranked
          WHERE source_count = 1
-      ),
-      source AS (
-        SELECT source_rows.*, resolved.chat_id
+      )
+      SELECT source_rows.*, resolved.chat_id
           FROM source_rows
           JOIN resolved ON resolved.source_index = source_rows.source_index
-      ),
+      `);
+
+      const appliedRows = await db.all<{ id: number }>(sql`
+        WITH source AS (
+          SELECT *
+            FROM temp.gator_backup_resolved_chats
+           WHERE restore_scope = 'customization'
+        ),
       source_pin_ranked AS (
         SELECT source_index, chat_id,
                ROW_NUMBER() OVER (
@@ -950,13 +1239,187 @@ export function restorePreparedBackupWithinTransaction(
              is_archived = (SELECT source.is_archived FROM source WHERE source.chat_id = chats.id)
        WHERE id IN (SELECT chat_id FROM source)
       RETURNING id
-    `);
+      `);
 
-    const applied = appliedRows.length;
-    if (!Number.isSafeInteger(applied) || applied < 0) {
-      throw new Error('Backup restore returned an invalid chat count.');
+      const applied = appliedRows.length;
+      if (!Number.isSafeInteger(applied) || applied < 0) {
+        throw new Error('Backup restore returned an invalid chat count.');
+      }
+
+      // Existing local folders win capacity and retain their current position. New names append in
+      // backup order; exact-name matches merge idempotently instead of creating duplicate folders.
+      await db.run(sql`
+        WITH source AS (
+          SELECT CAST(entry.key AS INTEGER) AS source_index,
+                 json_extract(entry.value, '$.name') AS name,
+                 json_extract(entry.value, '$.showUnreadBadge') AS show_unread_badge
+            FROM json_each(${input.customFoldersJson}) AS entry
+        ),
+        existing_summary AS (
+          SELECT COUNT(*) AS folder_count,
+                 COALESCE(MAX(sort_order), -1) AS max_sort_order
+            FROM custom_folders
+        ),
+        new_source AS (
+          SELECT source.*,
+                 ROW_NUMBER() OVER (ORDER BY source.source_index) AS new_rank
+            FROM source
+           WHERE NOT EXISTS (
+             SELECT 1 FROM custom_folders WHERE custom_folders.name = source.name
+           )
+        )
+        INSERT INTO custom_folders (name, sort_order, show_unread_badge)
+        SELECT new_source.name,
+               existing_summary.max_sort_order + new_source.new_rank,
+               new_source.show_unread_badge
+          FROM new_source
+          CROSS JOIN existing_summary
+         WHERE new_source.new_rank <=
+               MAX(0, ${MAX_CUSTOM_FOLDERS} - existing_summary.folder_count)
+         ORDER BY new_source.source_index
+      `);
+
+      await db.run(sql`
+        CREATE TEMP TABLE gator_backup_restored_folders AS
+        WITH source AS (
+          SELECT CAST(entry.key AS INTEGER) AS source_index,
+                 json_extract(entry.value, '$.name') AS name,
+                 json_extract(entry.value, '$.showUnreadBadge') AS show_unread_badge,
+                 json_extract(entry.value, '$.sourceMemberCount') AS source_member_count
+            FROM json_each(${input.customFoldersJson}) AS entry
+        )
+        SELECT source.source_index,
+               folder.id AS folder_id,
+               source.show_unread_badge,
+               source.source_member_count
+          FROM source
+          JOIN custom_folders AS folder ON folder.name = source.name
+      `);
+
+      await db.run(sql`
+        UPDATE custom_folders
+           SET show_unread_badge = (
+             SELECT restored.show_unread_badge
+               FROM temp.gator_backup_restored_folders AS restored
+              WHERE restored.folder_id = custom_folders.id
+           )
+         WHERE id IN (SELECT folder_id FROM temp.gator_backup_restored_folders)
+      `);
+
+      // Merge resolved portable members without pruning local-only or currently unresolvable rows.
+      // Existing memberships consume capacity first; deterministic file order selects any remaining
+      // additions up to the same 5,000-member bound used by the folder editor.
+      await db.run(sql`
+        CREATE TEMP TABLE gator_backup_restored_folder_members AS
+        WITH source_members AS (
+          SELECT CAST(folder_entry.key AS INTEGER) AS folder_source_index,
+                 CAST(member_entry.key AS INTEGER) AS member_order,
+                 CAST(member_entry.value AS INTEGER) AS identity_index
+            FROM json_each(${input.customFoldersJson}) AS folder_entry
+            JOIN json_each(folder_entry.value, '$.memberIndexes') AS member_entry ON TRUE
+        ),
+        resolved_source AS (
+          SELECT restored.folder_id,
+                 source_members.member_order,
+                 chat.guid AS chat_guid
+            FROM source_members
+            JOIN temp.gator_backup_restored_folders AS restored
+              ON restored.source_index = source_members.folder_source_index
+            JOIN temp.gator_backup_resolved_chats AS resolved
+              ON resolved.restore_scope = 'folder'
+             AND resolved.restore_index = source_members.identity_index
+            JOIN chats AS chat ON chat.id = resolved.chat_id
+           WHERE length(chat.guid) BETWEEN 1 AND ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS}
+             AND length(CAST(chat.guid AS BLOB)) <=
+                 ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS * 4}
+             AND instr(chat.guid, char(0)) = 0
+        ),
+        deduplicated AS (
+          SELECT folder_id, chat_guid, MIN(member_order) AS member_order
+            FROM resolved_source
+           GROUP BY folder_id, chat_guid
+        ),
+        existing_counts AS (
+          SELECT restored.folder_id, COUNT(member.chat_guid) AS member_count
+            FROM temp.gator_backup_restored_folders AS restored
+            LEFT JOIN custom_folder_members AS member ON member.folder_id = restored.folder_id
+           GROUP BY restored.folder_id
+        ),
+        existing_matches AS (
+          SELECT deduplicated.folder_id, deduplicated.chat_guid
+            FROM deduplicated
+            JOIN custom_folder_members AS member
+              ON member.folder_id = deduplicated.folder_id
+             AND member.chat_guid = deduplicated.chat_guid
+        ),
+        new_candidates AS (
+          SELECT deduplicated.folder_id,
+                 deduplicated.chat_guid,
+                 deduplicated.member_order
+            FROM deduplicated
+            LEFT JOIN custom_folder_members AS member
+              ON member.folder_id = deduplicated.folder_id
+             AND member.chat_guid = deduplicated.chat_guid
+           WHERE member.chat_guid IS NULL
+        ),
+        new_ranked AS (
+          SELECT new_candidates.*,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY new_candidates.folder_id
+                   ORDER BY new_candidates.member_order ASC, new_candidates.chat_guid ASC
+                 ) AS new_rank
+            FROM new_candidates
+        ),
+        eligible_new AS (
+          SELECT new_ranked.folder_id, new_ranked.chat_guid
+            FROM new_ranked
+            JOIN existing_counts ON existing_counts.folder_id = new_ranked.folder_id
+           WHERE new_ranked.new_rank <=
+                 MAX(0, ${MAX_CUSTOM_FOLDER_MEMBERS} - existing_counts.member_count)
+        )
+        SELECT folder_id, chat_guid FROM existing_matches
+        UNION ALL
+        SELECT folder_id, chat_guid FROM eligible_new
+      `);
+
+      await db.run(sql`
+        INSERT OR IGNORE INTO custom_folder_members (folder_id, chat_guid)
+        SELECT folder_id, chat_guid
+          FROM temp.gator_backup_restored_folder_members
+         ORDER BY folder_id ASC, chat_guid ASC
+      `);
+
+      const resultRows = await db.all<{
+        customFolders: number;
+        customFolderMemberships: number;
+      }>(sql`
+        SELECT (
+                 SELECT COUNT(*) FROM temp.gator_backup_restored_folders
+               ) AS customFolders,
+               (
+                 SELECT COUNT(*) FROM temp.gator_backup_restored_folder_members
+               ) AS customFolderMemberships
+      `);
+      const customFolders = resultRows[0]?.customFolders ?? 0;
+      const customFolderMemberships = resultRows[0]?.customFolderMemberships ?? 0;
+      if (
+        !Number.isSafeInteger(customFolders) ||
+        customFolders < 0 ||
+        !Number.isSafeInteger(customFolderMemberships) ||
+        customFolderMemberships < 0
+      ) {
+        throw new Error('Backup restore returned invalid custom folder counts.');
+      }
+      return {
+        chatCustomizations: applied,
+        customFolders,
+        customFolderMemberships,
+      };
+    } finally {
+      await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folder_members`);
+      await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folders`);
+      await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_resolved_chats`);
     }
-    return applied;
   });
 }
 

@@ -25,6 +25,11 @@ export const BACKUP_LIMITS = {
   chatIdentifierCharacters: 4_096,
   chatParticipantAddressCharacters: 4_096,
   chatParticipants: 512,
+  customFolders: 100,
+  customFolderNameCharacters: 64,
+  customFolderChatIdentities: 10_000,
+  customFolderMembers: 5_000,
+  customFolderMemberships: 25_000,
   chatNameCharacters: 1_024,
   chatColorCharacters: 128,
   muteTypeCharacters: 64,
@@ -122,7 +127,7 @@ const LegacyChatCustomizationSchema = z.object({
  * a future normalizer can coexist with files produced today. Addresses remain lossless in the
  * file; restore normalizes both the backed-up and local values with the same version-1 rules.
  */
-const PortableChatIdentitySchema = z.object({
+export const PortableChatIdentitySchema = z.object({
   version: z.literal(1),
   service: z.string().max(BACKUP_LIMITS.chatServiceCharacters),
   kind: z.enum(['direct', 'group', 'unknown']),
@@ -140,6 +145,33 @@ const PortableChatIdentitySchema = z.object({
 const PortableChatCustomizationSchema = z.object({
   identity: PortableChatIdentitySchema,
   ...ChatCustomizationShape,
+});
+
+const CUSTOM_FOLDER_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+
+const CustomFolderNameSchema = z.string().superRefine((value, context) => {
+  const normalized = value.normalize('NFC').trim();
+  if (
+    value !== normalized ||
+    normalized.length === 0 ||
+    Array.from(normalized).length > BACKUP_LIMITS.customFolderNameCharacters ||
+    CUSTOM_FOLDER_CONTROL_CHARACTER.test(normalized)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Custom folder names must be normalized, trimmed, non-empty, and within limits.',
+    });
+  }
+});
+
+const CustomFolderBackupSchema = z.object({
+  name: CustomFolderNameSchema,
+  showUnreadBadge: z.number().int().min(0).max(1),
+  /** Includes temporarily absent members omitted from `memberIndexes`. */
+  sourceMemberCount: z.number().int().min(0).max(BACKUP_LIMITS.customFolderMembers),
+  memberIndexes: z
+    .array(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER))
+    .max(BACKUP_LIMITS.customFolderMembers),
 });
 
 const BackupCommonShape = {
@@ -163,12 +195,86 @@ export const BackupV2Schema = z.object({
     .max(BACKUP_LIMITS.chatCustomizations),
 });
 
-/** New exports are v2; v1 remains accepted for GUID-only backward compatibility. */
-export const BackupSchema = z.discriminatedUnion('version', [BackupV1Schema, BackupV2Schema]);
+/**
+ * Version 3 adds custom folders without changing v2 semantics. Keeping a distinct outer version
+ * prevents an older client from silently discarding a folder payload while reporting success.
+ * Folder member indexes point into one deduplicated portable-identity registry, so overlapping
+ * folders do not repeat phone/email identity evidence throughout the encrypted document.
+ */
+export const BackupV3Schema = z
+  .object({
+    version: z.literal(3),
+    ...BackupCommonShape,
+    chatCustomizations: z
+      .array(PortableChatCustomizationSchema)
+      .max(BACKUP_LIMITS.chatCustomizations),
+    customFolderChatIdentities: z
+      .array(PortableChatIdentitySchema)
+      .max(BACKUP_LIMITS.customFolderChatIdentities),
+    customFolders: z.array(CustomFolderBackupSchema).max(BACKUP_LIMITS.customFolders),
+  })
+  .superRefine((backup, context) => {
+    const names = new Set<string>();
+    let membershipCount = 0;
+    for (const [folderIndex, folder] of backup.customFolders.entries()) {
+      if (names.has(folder.name)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['customFolders', folderIndex, 'name'],
+          message: 'Custom folder names must be unique.',
+        });
+      }
+      names.add(folder.name);
+
+      if (folder.sourceMemberCount < folder.memberIndexes.length) {
+        context.addIssue({
+          code: 'custom',
+          path: ['customFolders', folderIndex, 'sourceMemberCount'],
+          message: 'Custom folder source member count is smaller than its portable member list.',
+        });
+      }
+
+      const indexes = new Set<number>();
+      for (const [memberIndex, identityIndex] of folder.memberIndexes.entries()) {
+        if (identityIndex >= backup.customFolderChatIdentities.length) {
+          context.addIssue({
+            code: 'custom',
+            path: ['customFolders', folderIndex, 'memberIndexes', memberIndex],
+            message: 'Custom folder member index is out of range.',
+          });
+        }
+        if (indexes.has(identityIndex)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['customFolders', folderIndex, 'memberIndexes', memberIndex],
+            message: 'Custom folder member indexes must be unique within a folder.',
+          });
+        }
+        indexes.add(identityIndex);
+      }
+      membershipCount += folder.sourceMemberCount;
+    }
+    if (membershipCount > BACKUP_LIMITS.customFolderMemberships) {
+      context.addIssue({
+        code: 'custom',
+        path: ['customFolders'],
+        message: 'Custom folder memberships exceed the aggregate backup limit.',
+      });
+    }
+  });
+
+/** New encrypted exports are v3; v1/v2 remain accepted unchanged. */
+export const BackupSchema = z.discriminatedUnion('version', [
+  BackupV1Schema,
+  BackupV2Schema,
+  BackupV3Schema,
+]);
 
 export type Backup = z.infer<typeof BackupSchema>;
 export type BackupV1 = z.infer<typeof BackupV1Schema>;
 export type BackupV2 = z.infer<typeof BackupV2Schema>;
+export type BackupV3 = z.infer<typeof BackupV3Schema>;
+export type PortableChatIdentity = z.infer<typeof PortableChatIdentitySchema>;
 
 /**
  * A kv key that might hold a secret. Backups must NEVER export these — secrets

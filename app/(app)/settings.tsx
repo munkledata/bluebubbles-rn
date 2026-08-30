@@ -195,12 +195,12 @@ export default function SettingsScreen(): React.JSX.Element {
       // This is the ONLY consent gate on the wipe (home.tsx's Disconnect is inside the __DEV__
       // bar), so it has to name the UNRECOVERABLE half explicitly. Plenty of people tap Disconnect
       // just to re-enter a changed password or a rotated tunnel URL; conversations do come back on
-      // reconnect, but nothing on the server holds their pins, custom names, wallpapers, reminders
-      // or unsent messages, and `clearLocalCache` deletes all of it (deliberately — a chat guid is
-      // identical across servers, so keeping it would hand it to the next account).
+      // reconnect, but the messaging server itself does not hold their local choices. An exported
+      // encrypted backup or Gator backup slot can retain supported settings/folders; wallpapers,
+      // reminders, and unsent work remain local. `clearLocalCache` removes account A's device copy.
       'Forget this server and clear stored credentials?\n\n' +
         'Conversations, messages and downloaded attachments are deleted from this device and re-sync when you reconnect.\n\n' +
-        'Pins, mutes, custom chat names, chat themes and wallpapers, custom folders, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently.',
+        'Pins, mutes, custom chat names, chat themes and custom folders are removed from this device; a compatible encrypted backup made first can restore them. Wallpapers, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently. Exported files and server backup slots are not deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

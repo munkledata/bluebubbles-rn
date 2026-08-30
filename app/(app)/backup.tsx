@@ -61,7 +61,7 @@ function passphraseIssueMessage(issue: NewBackupPassphraseIssue): string {
     : 'Choose a less common passphrase.';
 }
 
-/** Settings/theme/chat-customization backup: encrypted export (share file) + restore (paste). */
+/** Settings/theme/chat/folder backup: encrypted export (share file) + restore (paste or picker). */
 export default function BackupScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
@@ -177,7 +177,7 @@ export default function BackupScreen(): React.JSX.Element {
       setRestorePass('');
       showDialog(
         'Restored',
-        `Settings: ${r.kv}, themes: ${r.themes}, chats restored: ${r.chatCustomizations}, chats skipped: ${r.chatCustomizationsSkipped}.`,
+        `Settings: ${r.kv}, themes: ${r.themes}, chats restored: ${r.chatCustomizations}, chats skipped: ${r.chatCustomizationsSkipped}, folders matched/restored: ${r.customFolders}, folders skipped: ${r.customFoldersSkipped}, folder members matched: ${r.customFolderMemberships}, folder members skipped: ${r.customFolderMembershipsSkipped}.`,
       );
     } catch (e) {
       if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;
@@ -198,8 +198,12 @@ export default function BackupScreen(): React.JSX.Element {
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
-          Backs up your theme, settings, and per-chat customizations — not messages or credentials.
-          The file is encrypted with a passphrase you choose; keep it safe, it can’t be recovered.
+          Backs up your theme, selected settings, per-chat customizations, and custom folders — not
+          messages or credentials. Folder membership identifiers can include participant phone
+          numbers or email addresses, so the file is always encrypted with your passphrase. Finish
+          syncing first for the most complete folder backup; unmatched members are reported on
+          restore. Same-name folders merge without removing local members, and only new folders use
+          the saved order. Keep the passphrase safe, it can’t be recovered.
         </Text>
 
         <SettingsSection>

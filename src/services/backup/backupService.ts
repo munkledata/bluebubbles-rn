@@ -11,12 +11,11 @@ import {
 import {
   assertBackupFileSize,
   assertBackupSourceTextWithinLimit,
-  buildBackup,
+  buildBackupWithCustomFolders,
   openBackup,
   parseBackup,
   restoreBackup,
   sealBackup,
-  serializeBackup,
   type RestoreResult,
 } from './backup';
 import {
@@ -74,10 +73,14 @@ async function buildCurrentBackup(now: number, lease: RealtimeDeliveryLease): Pr
     assertCurrent(activeLease);
     const candidate = await awaitCurrent(
       activeLease,
-      buildBackup(db, {
-        exportedAt: now,
-        appVersion: Constants.expoConfig?.version,
-      }),
+      buildBackupWithCustomFolders(
+        db,
+        {
+          exportedAt: now,
+          appVersion: Constants.expoConfig?.version,
+        },
+        () => activeLease.isCurrent(),
+      ),
     );
     built.value = candidate;
   });
@@ -88,7 +91,7 @@ async function buildCurrentBackup(now: number, lease: RealtimeDeliveryLease): Pr
 
 /**
  * Apply the complete mutation in one teardown-visible slot. The low-level restore uses the same
- * immutable lease as a last-moment commit guard for account-owned chat customizations.
+ * immutable lease as a last-moment commit guard for every account-owned restored row.
  */
 async function restoreCurrentBackup(
   backup: Backup,
@@ -172,40 +175,6 @@ async function shareGeneratedFile(
   });
   if (outcome === 'paused' || sharePromise === undefined) throw new BackupAccountChangedError();
   await awaitCurrent(lease, sharePromise);
-}
-
-/**
- * Build the backup, write it to a cache file, and open the share sheet so the
- * user can save it to Drive/Files/etc. The file holds only non-secret settings.
- */
-export async function exportBackup(
-  now: number,
-  lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<void> {
-  const backup = await buildCurrentBackup(now, lease);
-  const json = serializeBackup(backup, 2);
-  const sharingAvailable = await awaitCurrent(lease, Sharing.isAvailableAsync());
-  if (!sharingAvailable) throw new Error('sharing-unavailable');
-
-  const file = new File(Paths.cache, nextBackupFileName(now, lease, 'json'));
-  try {
-    assertCurrent(lease);
-    if (file.exists) file.delete();
-    file.create();
-    file.write(json);
-    assertCurrent(lease);
-    await shareGeneratedFile(
-      file,
-      {
-        mimeType: 'application/json',
-        dialogTitle: 'Export Gator backup',
-      },
-      lease,
-    );
-  } finally {
-    // Don't leave the plaintext export lingering in the cache directory.
-    deleteGeneratedFile(file);
-  }
 }
 
 /** Validate + apply a backup pasted/loaded as raw JSON text. */

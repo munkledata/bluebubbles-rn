@@ -343,8 +343,9 @@ export default function ConversationFolderEditScreen(): React.JSX.Element {
                 editable={!saving}
               />
               <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
-                Folder names and membership stay on this device and are removed when you disconnect.
-                They are not included in backups yet.
+                Folders are removed from this device when you disconnect. Encrypted backups include
+                their names, order, unread-badge choice, and portable membership evidence; a member
+                that is unavailable or ambiguous during export or restore may be skipped.
               </Text>
               {error ? (
                 <Text

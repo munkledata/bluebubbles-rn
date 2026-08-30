@@ -205,7 +205,7 @@ export function ServerBackupSlotsSection({
         setConfirmPassphrase('');
         showDialog(
           'Restored',
-          `Settings: ${result.kv}, themes: ${result.themes}, chats restored: ${result.chatCustomizations}, chats skipped: ${result.chatCustomizationsSkipped}.`,
+          `Settings: ${result.kv}, themes: ${result.themes}, chats restored: ${result.chatCustomizations}, chats skipped: ${result.chatCustomizationsSkipped}, folders matched/restored: ${result.customFolders}, folders skipped: ${result.customFoldersSkipped}, folder members matched: ${result.customFolderMemberships}, folder members skipped: ${result.customFolderMembershipsSkipped}.`,
         );
       } catch (error) {
         if (!canPublish() || isBackupAccountChangedError(error)) return;
@@ -308,8 +308,10 @@ export function ServerBackupSlotsSection({
   return (
     <View style={styles.section}>
       <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
-        Server slots sync encrypted settings across your devices. The passphrase stays on this
-        device; the server receives only ciphertext. Enter the original passphrase before Restore.
+        Server slots hold the same encrypted themes, selected settings, chat customizations, and
+        custom folders as a local backup. Folder identifiers can include phone numbers or email
+        addresses, but the passphrase stays on this device and the server receives only ciphertext.
+        Enter the original passphrase before Restore.
       </Text>
 
       <SettingsSection label="SAVE TO SERVER">
