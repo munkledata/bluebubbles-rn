@@ -4058,6 +4058,19 @@
       "evidence": "test/db/migrations/0043_custom_folders.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
+      "id": "src/db/migrations.ts#migration:0044_custom_folder_unread_badge:sql-schema:1f1714472c66",
+      "path": "src/db/migrations.ts",
+      "line": 833,
+      "symbol": "migration:0044_custom_folder_unread_badge",
+      "operation": "sql-schema",
+      "target": "custom_folders",
+      "detectedContext": "startup-migration",
+      "owner": "migration:0044_custom_folder_unread_badge",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "src/db/migrate.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; FEAT-04E independent DB review 2026-08-29 (focused 0044 upgrade test deferred)"
+    },
+    {
       "id": "src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation:sql-insert:23906c8fe812",
       "path": "src/db/repositories/attachmentCache.ts",
       "line": 105,
@@ -6023,7 +6036,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#listCustomFolders:mutator-call:a3e569250b89",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 106,
+      "line": 128,
       "symbol": "listCustomFolders",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6034,9 +6047,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
+      "id": "src/db/repositories/customFolders.ts#listCustomFolderSummaries:mutator-call:7b69f5e9c124",
+      "path": "src/db/repositories/customFolders.ts",
+      "line": 186,
+      "symbol": "listCustomFolderSummaries",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "listCustomFolderSummaries",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
       "id": "src/db/repositories/customFolders.ts#listCustomFolderChatGuids:mutator-call:ff177314922e",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 140,
+      "line": 220,
       "symbol": "listCustomFolderChatGuids",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6049,7 +6075,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#createCustomFolderWithinTransaction:drizzle-insert:d0b1c490787a",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 171,
+      "line": 251,
       "symbol": "createCustomFolderWithinTransaction",
       "operation": "drizzle-insert",
       "target": "customFolders",
@@ -6062,7 +6088,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#createCustomFolder:mutator-call:5335a2a7ab18",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 184,
+      "line": 264,
       "symbol": "createCustomFolder",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#createCustomFolder.<callback:6212f70e9f>",
@@ -6075,7 +6101,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#createCustomFolder:mutator-call:5fe4f11c99ef",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 184,
+      "line": 264,
       "symbol": "createCustomFolder",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6088,7 +6114,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#createCustomFolder.<callback:6212f70e9f>:mutator-call:44c7140cda27",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 186,
+      "line": 266,
       "symbol": "createCustomFolder.<callback:6212f70e9f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#createCustomFolderWithinTransaction",
@@ -6101,7 +6127,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#renameCustomFolderWithinTransaction:drizzle-update:ac430022e93b",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 203,
+      "line": 283,
       "symbol": "renameCustomFolderWithinTransaction",
       "operation": "drizzle-update",
       "target": "customFolders",
@@ -6114,7 +6140,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#renameCustomFolder:mutator-call:f1b7f3fe4323",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 218,
+      "line": 298,
       "symbol": "renameCustomFolder",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#renameCustomFolder.<callback:7ebe4a9c12>",
@@ -6127,7 +6153,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#renameCustomFolder:mutator-call:f4df6d65ac4f",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 218,
+      "line": 298,
       "symbol": "renameCustomFolder",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6140,7 +6166,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#renameCustomFolder.<callback:7ebe4a9c12>:mutator-call:ae90898fb282",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 220,
+      "line": 300,
       "symbol": "renameCustomFolder.<callback:7ebe4a9c12>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#renameCustomFolderWithinTransaction",
@@ -6151,9 +6177,61 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
+      "id": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadgeWithinTransaction:drizzle-update:32e4a41f51b4",
+      "path": "src/db/repositories/customFolders.ts",
+      "line": 316,
+      "symbol": "setCustomFolderShowUnreadBadgeWithinTransaction",
+      "operation": "drizzle-update",
+      "target": "customFolders",
+      "detectedContext": "withDbTransaction",
+      "owner": "setCustomFolderShowUnreadBadgeWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
+      "id": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadge:mutator-call:c6d4bbd5cada",
+      "path": "src/db/repositories/customFolders.ts",
+      "line": 331,
+      "symbol": "setCustomFolderShowUnreadBadge",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadge.<callback:7e483b89d0>",
+      "detectedContext": "withDbTransaction",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
+      "id": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadge:mutator-call:cc9f6115d132",
+      "path": "src/db/repositories/customFolders.ts",
+      "line": 331,
+      "symbol": "setCustomFolderShowUnreadBadge",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
+      "id": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadge.<callback:7e483b89d0>:mutator-call:92fd7fe64407",
+      "path": "src/db/repositories/customFolders.ts",
+      "line": 334,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:7e483b89d0>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadgeWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
       "id": "src/db/repositories/customFolders.ts#deleteCustomFolderWithinTransaction:drizzle-delete:d16e410f29b6",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 231,
+      "line": 345,
       "symbol": "deleteCustomFolderWithinTransaction",
       "operation": "drizzle-delete",
       "target": "customFolders",
@@ -6166,7 +6244,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#deleteCustomFolder:mutator-call:4351bf56478b",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 244,
+      "line": 358,
       "symbol": "deleteCustomFolder",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#deleteCustomFolder.<callback:50069adf02>",
@@ -6179,7 +6257,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#deleteCustomFolder:mutator-call:dd729c14e1f4",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 244,
+      "line": 358,
       "symbol": "deleteCustomFolder",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6192,7 +6270,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#deleteCustomFolder.<callback:50069adf02>:mutator-call:27c45b4ecf95",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 246,
+      "line": 360,
       "symbol": "deleteCustomFolder.<callback:50069adf02>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#deleteCustomFolderWithinTransaction",
@@ -6205,7 +6283,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#reorderCustomFoldersWithinTransaction:drizzle-update:4ca727efa740",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 269,
+      "line": 383,
       "symbol": "reorderCustomFoldersWithinTransaction",
       "operation": "drizzle-update",
       "target": "customFolders",
@@ -6218,7 +6296,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#reorderCustomFolders:mutator-call:c62564b133cb",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 280,
+      "line": 394,
       "symbol": "reorderCustomFolders",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#reorderCustomFolders.<callback:9dce5ecb93>",
@@ -6231,7 +6309,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#reorderCustomFolders:mutator-call:c7f110dc8e73",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 280,
+      "line": 394,
       "symbol": "reorderCustomFolders",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6244,7 +6322,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#reorderCustomFolders.<callback:9dce5ecb93>:mutator-call:4b5f201e9b51",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 282,
+      "line": 396,
       "symbol": "reorderCustomFolders.<callback:9dce5ecb93>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#reorderCustomFoldersWithinTransaction",
@@ -6257,7 +6335,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#replaceCustomFolderMembershipWithinTransaction:drizzle-insert:9bfc76cca5d8",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 317,
+      "line": 431,
       "symbol": "replaceCustomFolderMembershipWithinTransaction",
       "operation": "drizzle-insert",
       "target": "customFolderMembers",
@@ -6270,7 +6348,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#replaceCustomFolderMembershipWithinTransaction:drizzle-delete:80d7f2140e80",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 327,
+      "line": 441,
       "symbol": "replaceCustomFolderMembershipWithinTransaction",
       "operation": "drizzle-delete",
       "target": "customFolderMembers",
@@ -6283,7 +6361,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#replaceCustomFolderMembership:mutator-call:01b995162afb",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 346,
+      "line": 460,
       "symbol": "replaceCustomFolderMembership",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#replaceCustomFolderMembership.<callback:ebad94d95e>",
@@ -6296,7 +6374,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#replaceCustomFolderMembership:mutator-call:8bc7d6749ee6",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 346,
+      "line": 460,
       "symbol": "replaceCustomFolderMembership",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6309,7 +6387,7 @@
     {
       "id": "src/db/repositories/customFolders.ts#replaceCustomFolderMembership.<callback:ebad94d95e>:mutator-call:9668219b748f",
       "path": "src/db/repositories/customFolders.ts",
-      "line": 348,
+      "line": 462,
       "symbol": "replaceCustomFolderMembership.<callback:ebad94d95e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#replaceCustomFolderMembershipWithinTransaction",
@@ -14356,7 +14434,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:b0bc4a10d9>:mutator-call:a49303054cc9",
       "path": "src/services/customFolderCommands.ts",
-      "line": 58,
+      "line": 62,
       "symbol": "loadCustomFolders.<callback:b0bc4a10d9>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14369,7 +14447,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:b0bc4a10d9>:mutator-call:0d0b094be880",
       "path": "src/services/customFolderCommands.ts",
-      "line": 60,
+      "line": 64,
       "symbol": "loadCustomFolders.<callback:b0bc4a10d9>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14380,9 +14458,35 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:9f7370a04d>:mutator-call:ee341cd98ef7",
+      "path": "src/services/customFolderCommands.ts",
+      "line": 77,
+      "symbol": "loadCustomFolderSummaries.<callback:9f7370a04d>",
+      "operation": "mutator-call",
+      "target": "src/services/databaseControl.ts#ensureDatabase",
+      "detectedContext": "startup-single-flight-delegation",
+      "owner": "loadCustomFolderSummaries",
+      "transactionContext": "startup-single-flight-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:9f7370a04d>:mutator-call:e718952cdb34",
+      "path": "src/services/customFolderCommands.ts",
+      "line": 79,
+      "symbol": "loadCustomFolderSummaries.<callback:9f7370a04d>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "loadCustomFolderSummaries",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:439f5be933>:mutator-call:5a90f1c22363",
       "path": "src/services/customFolderCommands.ts",
-      "line": 74,
+      "line": 93,
       "symbol": "loadCustomFolderMembership.<callback:439f5be933>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14395,7 +14499,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:439f5be933>:mutator-call:06f27f108537",
       "path": "src/services/customFolderCommands.ts",
-      "line": 76,
+      "line": 95,
       "symbol": "loadCustomFolderMembership.<callback:439f5be933>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14408,7 +14512,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:c993864b73>:mutator-call:86fa5de96fcb",
       "path": "src/services/customFolderCommands.ts",
-      "line": 95,
+      "line": 114,
       "symbol": "loadCustomFolderInboxPage.<callback:c993864b73>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14421,7 +14525,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:c993864b73>:mutator-call:daa4729ea646",
       "path": "src/services/customFolderCommands.ts",
-      "line": 97,
+      "line": 116,
       "symbol": "loadCustomFolderInboxPage.<callback:c993864b73>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14434,7 +14538,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>:mutator-call:ea556374e3a9",
       "path": "src/services/customFolderCommands.ts",
-      "line": 110,
+      "line": 129,
       "symbol": "createCustomFolder.<callback:ce918d173c>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14447,7 +14551,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>:mutator-call:09161b686eed",
       "path": "src/services/customFolderCommands.ts",
-      "line": 112,
+      "line": 131,
       "symbol": "createCustomFolder.<callback:ce918d173c>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>.<callback:6212f70e9f>",
@@ -14460,7 +14564,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>:mutator-call:e41d3692764b",
       "path": "src/services/customFolderCommands.ts",
-      "line": 112,
+      "line": 131,
       "symbol": "createCustomFolder.<callback:ce918d173c>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14473,7 +14577,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>.<callback:6212f70e9f>:mutator-call:64bd99c9fee6",
       "path": "src/services/customFolderCommands.ts",
-      "line": 114,
+      "line": 133,
       "symbol": "createCustomFolder.<callback:ce918d173c>.<callback:6212f70e9f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#createCustomFolderWithinTransaction",
@@ -14486,7 +14590,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>:mutator-call:6753ba49a065",
       "path": "src/services/customFolderCommands.ts",
-      "line": 126,
+      "line": 145,
       "symbol": "renameCustomFolder.<callback:0bf41e242b>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14499,7 +14603,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>:mutator-call:b561a7b35bb8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 128,
+      "line": 147,
       "symbol": "renameCustomFolder.<callback:0bf41e242b>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14512,7 +14616,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>:mutator-call:fc51ac741c5b",
       "path": "src/services/customFolderCommands.ts",
-      "line": 128,
+      "line": 147,
       "symbol": "renameCustomFolder.<callback:0bf41e242b>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>.<callback:7ebe4a9c12>",
@@ -14525,7 +14629,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>.<callback:7ebe4a9c12>:mutator-call:328e648c1c22",
       "path": "src/services/customFolderCommands.ts",
-      "line": 130,
+      "line": 149,
       "symbol": "renameCustomFolder.<callback:0bf41e242b>.<callback:7ebe4a9c12>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#renameCustomFolderWithinTransaction",
@@ -14536,9 +14640,61 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>:mutator-call:63b01c7984a3",
+      "path": "src/services/customFolderCommands.ts",
+      "line": 162,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>",
+      "operation": "mutator-call",
+      "target": "src/services/databaseControl.ts#ensureDatabase",
+      "detectedContext": "startup-single-flight-delegation",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "startup-single-flight-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>:mutator-call:4a70a0c375cc",
+      "path": "src/services/customFolderCommands.ts",
+      "line": 164,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>",
+      "operation": "mutator-call",
+      "target": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>.<callback:7e483b89d0>",
+      "detectedContext": "withDbTransaction",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>:mutator-call:900f7b3eb437",
+      "path": "src/services/customFolderCommands.ts",
+      "line": 164,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>.<callback:7e483b89d0>:mutator-call:3d0feca66751",
+      "path": "src/services/customFolderCommands.ts",
+      "line": 167,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>.<callback:7e483b89d0>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadgeWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "setCustomFolderShowUnreadBadge",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
+    },
+    {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>:mutator-call:adf05b87bf46",
       "path": "src/services/customFolderCommands.ts",
-      "line": 141,
+      "line": 178,
       "symbol": "deleteCustomFolder.<callback:46a72ca223>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14551,7 +14707,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>:mutator-call:57068a885c03",
       "path": "src/services/customFolderCommands.ts",
-      "line": 143,
+      "line": 180,
       "symbol": "deleteCustomFolder.<callback:46a72ca223>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14564,7 +14720,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>:mutator-call:c2ae8ef50428",
       "path": "src/services/customFolderCommands.ts",
-      "line": 143,
+      "line": 180,
       "symbol": "deleteCustomFolder.<callback:46a72ca223>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>.<callback:50069adf02>",
@@ -14577,7 +14733,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>.<callback:50069adf02>:mutator-call:bcfb02dc1ee9",
       "path": "src/services/customFolderCommands.ts",
-      "line": 145,
+      "line": 182,
       "symbol": "deleteCustomFolder.<callback:46a72ca223>.<callback:50069adf02>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#deleteCustomFolderWithinTransaction",
@@ -14590,7 +14746,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>:mutator-call:74c5db14c92a",
       "path": "src/services/customFolderCommands.ts",
-      "line": 157,
+      "line": 194,
       "symbol": "reorderCustomFolders.<callback:74fe5a6a76>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14603,7 +14759,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>:mutator-call:3363c8754043",
       "path": "src/services/customFolderCommands.ts",
-      "line": 159,
+      "line": 196,
       "symbol": "reorderCustomFolders.<callback:74fe5a6a76>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14616,7 +14772,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>:mutator-call:f498f7fd5113",
       "path": "src/services/customFolderCommands.ts",
-      "line": 159,
+      "line": 196,
       "symbol": "reorderCustomFolders.<callback:74fe5a6a76>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>.<callback:fd5da13add>",
@@ -14629,7 +14785,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>.<callback:fd5da13add>:mutator-call:cd125c1eee31",
       "path": "src/services/customFolderCommands.ts",
-      "line": 161,
+      "line": 198,
       "symbol": "reorderCustomFolders.<callback:74fe5a6a76>.<callback:fd5da13add>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#reorderCustomFoldersWithinTransaction",
@@ -14642,7 +14798,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:97462ac4aa>:mutator-call:e38357ee6052",
       "path": "src/services/customFolderCommands.ts",
-      "line": 174,
+      "line": 211,
       "symbol": "replaceCustomFolderMembership.<callback:97462ac4aa>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -14655,7 +14811,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:97462ac4aa>:mutator-call:501e6403d452",
       "path": "src/services/customFolderCommands.ts",
-      "line": 176,
+      "line": 213,
       "symbol": "replaceCustomFolderMembership.<callback:97462ac4aa>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:97462ac4aa>.<callback:3c0c382302>",
@@ -14668,7 +14824,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:97462ac4aa>:mutator-call:d1a1db918d40",
       "path": "src/services/customFolderCommands.ts",
-      "line": 176,
+      "line": 213,
       "symbol": "replaceCustomFolderMembership.<callback:97462ac4aa>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14681,7 +14837,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:97462ac4aa>.<callback:3c0c382302>:mutator-call:1497447a82df",
       "path": "src/services/customFolderCommands.ts",
-      "line": 178,
+      "line": 215,
       "symbol": "replaceCustomFolderMembership.<callback:97462ac4aa>.<callback:3c0c382302>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#replaceCustomFolderMembershipWithinTransaction",

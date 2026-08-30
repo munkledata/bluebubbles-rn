@@ -140,6 +140,16 @@
       "upgradeTest": "test/db/migrations/0043_custom_folders.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 44,
+      "name": "0044_custom_folder_unread_badge",
+      "task": "FEAT-04E",
+      "branchPr": "release/store-01-0.1.41",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0044_custom_folder_unread_badge.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

@@ -7,6 +7,7 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import { chatHasUnreadSql } from './chatVisibility';
 
 export const MAX_CUSTOM_FOLDERS = 100;
 export const MAX_CUSTOM_FOLDER_NAME_CODE_POINTS = 64;
@@ -22,6 +23,16 @@ export interface CustomFolderRow {
   readonly name: string;
   readonly sortOrder: number;
   readonly chatCount: number;
+}
+
+export interface CustomFolderListRow extends CustomFolderRow {
+  /** Raw SQLite boolean; presentation-only and never part of read-state ownership. */
+  readonly showUnreadBadge: 0 | 1;
+}
+
+export interface CustomFolderSummaryRow extends CustomFolderListRow {
+  /** Available folder conversations with at least one qualifying unread message. */
+  readonly unreadChatCount: number;
 }
 
 function requireFolderId(id: number): void {
@@ -81,18 +92,29 @@ function normalizeFolderOrder(input: readonly number[]): number[] {
 /** Ordered folders plus the durable membership count, including temporarily absent chats. */
 export function listCustomFoldersWithinTransaction(
   context: DbTransactionContext,
-): Promise<CustomFolderRow[]> {
+): Promise<CustomFolderListRow[]> {
   return runInTransactionContext(context, async (db) => {
-    const rows = await db.all<CustomFolderRow>(sql`
-      SELECT f.id, f.name, f.sort_order AS sortOrder, COUNT(m.chat_guid) AS chatCount
+    const rows = await db.all<CustomFolderListRow>(sql`
+      SELECT f.id, f.name, f.sort_order AS sortOrder, COUNT(m.chat_guid) AS chatCount,
+             f.show_unread_badge AS showUnreadBadge
         FROM custom_folders AS f
         LEFT JOIN custom_folder_members AS m ON m.folder_id = f.id
-       GROUP BY f.id, f.name, f.sort_order
+       GROUP BY f.id, f.name, f.sort_order, f.show_unread_badge
        ORDER BY f.sort_order ASC, f.id ASC
        LIMIT ${MAX_CUSTOM_FOLDERS + 1}
     `);
     if (rows.length > MAX_CUSTOM_FOLDERS) {
       throw new Error('Custom folder count exceeds its safety bound.');
+    }
+    for (const row of rows) {
+      if (
+        !Number.isSafeInteger(row.chatCount) ||
+        row.chatCount < 0 ||
+        row.chatCount > MAX_CUSTOM_FOLDER_MEMBERS ||
+        (row.showUnreadBadge !== 0 && row.showUnreadBadge !== 1)
+      ) {
+        throw new Error('Custom folder list row is invalid.');
+      }
     }
     return rows;
   });
@@ -102,10 +124,68 @@ export function listCustomFoldersWithinTransaction(
 export function listCustomFolders(
   db: AppDatabase,
   commitGuard?: DbCommitGuard,
-): Promise<CustomFolderRow[]> {
+): Promise<CustomFolderListRow[]> {
   return withDbTransaction(
     db,
     (context) => listCustomFoldersWithinTransaction(context),
+    commitGuard,
+  );
+}
+
+/**
+ * Live manager-only summaries. The materialized CTE calculates unread state once per unique saved
+ * chat, then overlapping folders reuse that result instead of repeating the message lookup.
+ */
+export function listCustomFolderSummariesWithinTransaction(
+  context: DbTransactionContext,
+): Promise<CustomFolderSummaryRow[]> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<CustomFolderSummaryRow>(sql`
+      WITH member_chat_unread AS MATERIALIZED (
+        SELECT c.guid AS chatGuid,
+               CASE WHEN ${chatHasUnreadSql('c')} THEN 1 ELSE 0 END AS isUnread
+          FROM chats AS c
+          JOIN (SELECT DISTINCT chat_guid FROM custom_folder_members) AS member
+            ON member.chat_guid = c.guid
+      )
+      SELECT f.id, f.name, f.sort_order AS sortOrder, COUNT(m.chat_guid) AS chatCount,
+             f.show_unread_badge AS showUnreadBadge,
+             COALESCE(SUM(COALESCE(u.isUnread, 0)), 0) AS unreadChatCount
+        FROM custom_folders AS f
+        LEFT JOIN custom_folder_members AS m ON m.folder_id = f.id
+        LEFT JOIN member_chat_unread AS u ON u.chatGuid = m.chat_guid
+       GROUP BY f.id, f.name, f.sort_order, f.show_unread_badge
+       ORDER BY f.sort_order ASC, f.id ASC
+       LIMIT ${MAX_CUSTOM_FOLDERS + 1}
+    `);
+    if (rows.length > MAX_CUSTOM_FOLDERS) {
+      throw new Error('Custom folder count exceeds its safety bound.');
+    }
+    for (const row of rows) {
+      if (
+        !Number.isSafeInteger(row.chatCount) ||
+        row.chatCount < 0 ||
+        row.chatCount > MAX_CUSTOM_FOLDER_MEMBERS ||
+        (row.showUnreadBadge !== 0 && row.showUnreadBadge !== 1) ||
+        !Number.isSafeInteger(row.unreadChatCount) ||
+        row.unreadChatCount < 0 ||
+        row.unreadChatCount > row.chatCount
+      ) {
+        throw new Error('Custom folder summary is invalid.');
+      }
+    }
+    return rows;
+  });
+}
+
+/** Consistency-sensitive aggregate read for the focused folder manager only. */
+export function listCustomFolderSummaries(
+  db: AppDatabase,
+  commitGuard?: DbCommitGuard,
+): Promise<CustomFolderSummaryRow[]> {
+  return withDbTransaction(
+    db,
+    (context) => listCustomFolderSummariesWithinTransaction(context),
     commitGuard,
   );
 }
@@ -218,6 +298,40 @@ export function renameCustomFolder(
   return withDbTransaction(
     db,
     (context) => renameCustomFolderWithinTransaction(context, folderId, name),
+    commitGuard,
+  );
+}
+
+/** Toggle only the aggregate folder badge; message read markers remain untouched. */
+export function setCustomFolderShowUnreadBadgeWithinTransaction(
+  context: DbTransactionContext,
+  folderId: number,
+  showUnreadBadge: boolean,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    requireFolderId(folderId);
+    if (typeof showUnreadBadge !== 'boolean') {
+      throw new TypeError('Folder unread badge preference must be a boolean.');
+    }
+    const updated = await db
+      .update(customFolders)
+      .set({ showUnreadBadge })
+      .where(eq(customFolders.id, folderId))
+      .returning({ id: customFolders.id });
+    return updated.length > 0;
+  });
+}
+
+export function setCustomFolderShowUnreadBadge(
+  db: AppDatabase,
+  folderId: number,
+  showUnreadBadge: boolean,
+  commitGuard?: DbCommitGuard,
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    (context) =>
+      setCustomFolderShowUnreadBadgeWithinTransaction(context, folderId, showUnreadBadge),
     commitGuard,
   );
 }

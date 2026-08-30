@@ -1,14 +1,15 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
-import type { CustomFolderRow } from '@db/repositories';
-import { loadCustomFolders, reorderCustomFolders } from '@/services/customFolderCommands';
+import type { CustomFolderSummaryRow } from '@db/repositories';
+import { useCustomFolderSummaries } from '@features/conversations/useCustomFolderSummaries';
+import { loadCustomFolderSummaries, reorderCustomFolders } from '@/services/customFolderCommands';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
-import { Screen, ScreenHeader, useTheme } from '@ui';
+import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 
 /** Manage the small, explicitly bounded ordered set of device-local conversation folders. */
 export default function ConversationFoldersScreen(): React.JSX.Element {
@@ -16,10 +17,11 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
   const router = useRouter();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
-  const [rows, setRows] = useState<CustomFolderRow[]>([]);
+  const [rows, setRows] = useState<CustomFolderSummaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [busyFolderId, setBusyFolderId] = useState<number | null>(null);
+  const [focused, setFocused] = useState(false);
   const focusedRef = useRef(false);
   const reorderInFlightRef = useRef(false);
 
@@ -34,12 +36,27 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
   );
 
   const accountCurrent = !accountRetired && accountLease.isCurrent();
+  const folders = useCustomFolderSummaries(accountLease, accountCurrent && focused);
+
+  useEffect(() => {
+    if (!focused || !focusedRef.current || reorderInFlightRef.current) return;
+    if (folders.error) {
+      setLoadFailed(true);
+      setLoading(false);
+      return;
+    }
+    if (folders.data == null) return;
+    setRows(folders.data);
+    setLoadFailed(false);
+    setLoading(false);
+  }, [folders.data, folders.error, focused]);
+
   const refresh = useCallback(
     async (showLoading: boolean): Promise<boolean> => {
       if (!accountLease.isCurrent()) return false;
       if (showLoading && focusedRef.current) setLoading(true);
       try {
-        const result = await loadCustomFolders(accountLease);
+        const result = await loadCustomFolderSummaries(accountLease);
         if (!focusedRef.current || result.status === 'stale' || !accountLease.isCurrent()) {
           return false;
         }
@@ -59,13 +76,21 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       focusedRef.current = true;
+      setFocused(true);
+      setLoading(true);
       if (!reorderInFlightRef.current) setBusyFolderId(null);
-      void refresh(true);
       return () => {
         focusedRef.current = false;
+        setFocused(false);
       };
-    }, [refresh]),
+    }, []),
   );
+
+  const retryFolderSummaries = useCallback((): void => {
+    if (!accountLease.isCurrent() || !focusedRef.current) return;
+    setLoading(true);
+    folders.retry();
+  }, [accountLease, folders.retry]);
 
   const moveFolder = async (index: number, offset: -1 | 1): Promise<void> => {
     if (
@@ -88,6 +113,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
     next[destination] = row;
     reorderInFlightRef.current = true;
     setBusyFolderId(row.id);
+    let refreshAfterCommit = false;
     try {
       const result = await reorderCustomFolders(
         next.map((folder) => folder.id),
@@ -107,6 +133,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
         return;
       }
       setRows(next.map((folder, sortOrder) => ({ ...folder, sortOrder })));
+      refreshAfterCommit = true;
     } catch {
       const recovered = await refresh(false);
       if (accountLease.isCurrent() && focusedRef.current) {
@@ -120,6 +147,9 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
     } finally {
       reorderInFlightRef.current = false;
       if (accountLease.isCurrent() && focusedRef.current) setBusyFolderId(null);
+      if (refreshAfterCommit && accountLease.isCurrent() && focusedRef.current) {
+        void refresh(false);
+      }
     }
   };
 
@@ -149,8 +179,9 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
         <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
           Folders are private to this device and do not change your Mac or server. Tap a folder to
           browse it, or Manage its membership. Open a folder and use Edit to rename or delete it.
-          Folder search matches conversation names and participants. Message-text search and
-          folder-wide unread totals are not available yet.
+          Unread badges count currently available conversations, including archived or muted ones;
+          Manage can hide a folder’s badge. Folder search matches names and participants, but not
+          message text.
         </Text>
 
         {loadFailed && rows.length > 0 ? (
@@ -164,7 +195,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
               Folder changes are paused because the latest list could not be loaded.
             </Text>
             <Pressable
-              onPress={() => void refresh(true)}
+              onPress={retryFolderSummaries}
               disabled={loading}
               accessibilityRole="button"
               accessibilityState={{ disabled: loading }}
@@ -183,7 +214,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
               Couldn’t load conversation folders.
             </Text>
             <Pressable
-              onPress={() => void refresh(true)}
+              onPress={retryFolderSummaries}
               accessibilityRole="button"
               style={styles.retry}
             >
@@ -199,6 +230,8 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
             {rows.map((row, index) => {
               const busy = busyFolderId === row.id;
               const controlsDisabled = controlsBlocked;
+              const showUnreadBadge = row.showUnreadBadge === 1 && row.unreadChatCount > 0;
+              const unreadLabel = `${row.unreadChatCount.toLocaleString()} unread ${row.unreadChatCount === 1 ? 'conversation' : 'conversations'}`;
               return (
                 <View key={row.id}>
                   {index > 0 ? (
@@ -210,13 +243,27 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
                       onPress={() => router.push(`/folders/${row.id}/browse`)}
                       disabled={controlsDisabled}
                       accessibilityRole="button"
-                      accessibilityLabel={`${row.name}, ${row.chatCount} saved ${row.chatCount === 1 ? 'conversation' : 'conversations'}`}
+                      accessibilityLabel={`${row.name}, ${row.chatCount} saved ${row.chatCount === 1 ? 'conversation' : 'conversations'}${showUnreadBadge ? `, ${unreadLabel}` : ''}`}
                       accessibilityHint="Opens conversations currently available in this folder"
                       accessibilityState={{ disabled: controlsDisabled }}
                     >
-                      <Text numberOfLines={1} style={[styles.name, { color: theme.color.label }]}>
-                        {row.name}
-                      </Text>
+                      <View style={styles.titleRow}>
+                        <Text numberOfLines={1} style={[styles.name, { color: theme.color.label }]}>
+                          {row.name}
+                        </Text>
+                        {showUnreadBadge ? (
+                          <View style={[styles.badge, { backgroundColor: theme.color.tint }]}>
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                { color: readableTextOn(theme.color.tint) },
+                              ]}
+                            >
+                              {row.unreadChatCount > 99 ? '99+' : row.unreadChatCount}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                       <Text style={[styles.count, { color: theme.color.secondaryLabel }]}>
                         {row.chatCount.toLocaleString()}{' '}
                         {row.chatCount === 1 ? 'saved conversation' : 'saved conversations'} · Tap
@@ -274,7 +321,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
                       disabled={controlsDisabled}
                       hitSlop={6}
                       accessibilityRole="button"
-                      accessibilityLabel={`Manage membership for ${row.name}`}
+                      accessibilityLabel={`Manage membership and unread badge for ${row.name}`}
                       accessibilityState={{ disabled: controlsDisabled, busy }}
                       style={styles.edit}
                     >
@@ -311,8 +358,22 @@ const styles = StyleSheet.create({
   row: { minHeight: 68, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14 },
   dimmed: { opacity: 0.5 },
   rowMain: { flex: 1, alignSelf: 'stretch', justifyContent: 'center', paddingVertical: 10 },
-  name: { fontSize: 16, fontWeight: '500' },
-  count: { fontSize: 13, paddingTop: 3 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name: { flex: 1, fontSize: 16, fontWeight: '500' },
+  badge: {
+    minWidth: 24,
+    minHeight: 20,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    justifyContent: 'center',
+  },
+  badgeText: {
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  count: { fontSize: 13, paddingTop: 3, fontVariant: ['tabular-nums'] },
   control: { minWidth: 34, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   arrow: { fontSize: 21, fontWeight: '600' },
   edit: { minWidth: 66, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' },

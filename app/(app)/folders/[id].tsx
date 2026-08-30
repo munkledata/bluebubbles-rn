@@ -2,19 +2,32 @@ import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { MAX_CUSTOM_FOLDER_MEMBERS, type CustomFolderRow, type InboxRow } from '@db/repositories';
+import {
+  MAX_CUSTOM_FOLDER_MEMBERS,
+  type CustomFolderListRow,
+  type InboxRow,
+} from '@db/repositories';
 import { useChats } from '@features/conversations/useChats';
 import {
   loadCustomFolderMembership,
   loadCustomFolders,
   replaceCustomFolderMembership,
+  setCustomFolderShowUnreadBadge,
 } from '@/services/customFolderCommands';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
-import { Avatar, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
+import {
+  Avatar,
+  readableTextOn,
+  Screen,
+  ScreenHeader,
+  SettingsSection,
+  SwitchRow,
+  useTheme,
+} from '@ui';
 import { InboxSeparator } from '@ui/conversations/FilteredChatListScreen';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 
@@ -33,6 +46,11 @@ type PendingMembershipOutcome =
   | { readonly type: 'missing' }
   | { readonly type: 'error'; readonly message: string };
 
+type PendingBadgeOutcome =
+  | { readonly type: 'committed'; readonly value: 0 | 1 }
+  | { readonly type: 'missing'; readonly previous: 0 | 1 }
+  | { readonly type: 'error'; readonly previous: 0 | 1; readonly message: string };
+
 interface MembershipSelection {
   readonly members: Set<string>;
   readonly validationError: string | null;
@@ -46,7 +64,7 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
   const folderId = parseFolderId(params.id);
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
-  const [folder, setFolder] = useState<CustomFolderRow | null>(null);
+  const [folder, setFolder] = useState<CustomFolderListRow | null>(null);
   const [baseline, setBaseline] = useState<Set<string>>(() => new Set());
   const [selection, setSelection] = useState<MembershipSelection>(() => ({
     members: new Set(),
@@ -56,12 +74,15 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
   const [loadFailed, setLoadFailed] = useState(false);
   const [folderMissing, setFolderMissing] = useState(folderId == null);
   const [saving, setSaving] = useState(false);
+  const [badgeSaving, setBadgeSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const focusedRef = useRef(false);
   const abandonedRef = useRef(false);
   const mutationInFlightRef = useRef(false);
+  const badgeMutationInFlightRef = useRef(false);
   const pendingOutcomeRef = useRef<PendingMembershipOutcome | null>(null);
+  const pendingBadgeOutcomeRef = useRef<PendingBadgeOutcome | null>(null);
 
   const ownsRoute = useCallback(
     (): boolean =>
@@ -78,7 +99,10 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
         setBaseline(new Set());
         setSelection({ members: new Set(), validationError: null });
         setSaving(false);
+        setBadgeSaving(false);
         setSaveError(null);
+        badgeMutationInFlightRef.current = false;
+        pendingBadgeOutcomeRef.current = null;
       }),
     [accountLease],
   );
@@ -166,18 +190,43 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
     }
   }, [navigateWithoutPrompt, ownsRoute, router]);
 
+  const applyPendingBadgeOutcome = useCallback((): void => {
+    if (!ownsRoute()) return;
+    const outcome = pendingBadgeOutcomeRef.current;
+    if (!outcome) return;
+    pendingBadgeOutcomeRef.current = null;
+    setBadgeSaving(false);
+    if (outcome.type === 'committed') {
+      setFolder((current) =>
+        current == null ? null : { ...current, showUnreadBadge: outcome.value },
+      );
+    } else if (outcome.type === 'missing') {
+      setFolder((current) =>
+        current == null ? null : { ...current, showUnreadBadge: outcome.previous },
+      );
+      setFolderMissing(true);
+      setSaveError('This folder no longer exists.');
+    } else {
+      setFolder((current) =>
+        current == null ? null : { ...current, showUnreadBadge: outcome.previous },
+      );
+      setSaveError(outcome.message);
+    }
+  }, [ownsRoute]);
+
   useFocusEffect(
     useCallback(() => {
       focusedRef.current = true;
       queueMicrotask(() => {
         if (!ownsRoute()) return;
+        if (pendingBadgeOutcomeRef.current) applyPendingBadgeOutcome();
         if (pendingOutcomeRef.current) applyPendingOutcome();
         else if (!mutationInFlightRef.current) setSaving(false);
       });
       return () => {
         focusedRef.current = false;
       };
-    }, [applyPendingOutcome, ownsRoute]),
+    }, [applyPendingBadgeOutcome, applyPendingOutcome, ownsRoute]),
   );
 
   const toggle = useCallback(
@@ -201,7 +250,14 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
   );
 
   const save = async (): Promise<void> => {
-    if (!dirty || saving || folderId == null || mutationInFlightRef.current || !ownsRoute()) {
+    if (
+      !dirty ||
+      saving ||
+      badgeMutationInFlightRef.current ||
+      folderId == null ||
+      mutationInFlightRef.current ||
+      !ownsRoute()
+    ) {
       return;
     }
     mutationInFlightRef.current = true;
@@ -232,6 +288,45 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
     } finally {
       mutationInFlightRef.current = false;
       if (ownsRoute() && pendingOutcomeRef.current == null) setSaving(false);
+    }
+  };
+
+  const updateUnreadBadge = async (show: boolean): Promise<void> => {
+    if (
+      folderId == null ||
+      folder == null ||
+      saving ||
+      badgeMutationInFlightRef.current ||
+      mutationInFlightRef.current ||
+      !ownsRoute()
+    ) {
+      return;
+    }
+    const previous = folder.showUnreadBadge;
+    const value = show ? 1 : 0;
+    if (value === previous) return;
+
+    badgeMutationInFlightRef.current = true;
+    setBadgeSaving(true);
+    setSaveError(null);
+    setFolder({ ...folder, showUnreadBadge: value });
+    try {
+      const result = await setCustomFolderShowUnreadBadge(folderId, show, accountLease);
+      if (result.status === 'stale' || !accountLease.isCurrent()) return;
+      pendingBadgeOutcomeRef.current = result.value
+        ? { type: 'committed', value }
+        : { type: 'missing', previous };
+    } catch {
+      if (accountLease.isCurrent()) {
+        pendingBadgeOutcomeRef.current = {
+          type: 'error',
+          previous,
+          message: 'Couldn’t change this folder’s unread badge.',
+        };
+      }
+    } finally {
+      badgeMutationInFlightRef.current = false;
+      if (ownsRoute()) applyPendingBadgeOutcome();
     }
   };
 
@@ -287,7 +382,7 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
 
   if (!accountCurrent) return <Screen />;
 
-  const saveEnabled = dirty && !saving && !folderMissing && !loadFailed;
+  const saveEnabled = dirty && !saving && !badgeSaving && !folderMissing && !loadFailed;
   return (
     <Screen>
       <ScreenHeader
@@ -331,12 +426,22 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
       ) : (
         <>
           <View style={[styles.summary, { borderBottomColor: theme.color.separator }]}>
+            <SettingsSection label="FOLDER DISPLAY" style={styles.displaySetting}>
+              <SwitchRow
+                label="Show unread badge"
+                value={folder?.showUnreadBadge === 1}
+                onValueChange={(value) => void updateUnreadBadge(value)}
+                disabled={saving || badgeSaving || folder == null}
+                accessibilityLabel="Show unread badge for this folder"
+              />
+            </SettingsSection>
             <Text style={[styles.summaryCount, { color: theme.color.label }]}>
               {selected.size.toLocaleString()} selected
             </Text>
             <Text style={[styles.summaryNote, { color: theme.color.secondaryLabel }]}>
               Archived and temporarily unavailable conversations stay selected. Scroll to load more
-              available conversations.
+              available conversations. The unread badge setting changes only the folder list; it
+              does not mark messages read.
             </Text>
             {visibleError ? (
               <Text
@@ -390,6 +495,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  displaySetting: { paddingBottom: 12 },
   summaryCount: { fontSize: 15, fontWeight: '600' },
   summaryNote: { fontSize: 12, lineHeight: 17, paddingTop: 3 },
   saveError: { fontSize: 13, lineHeight: 18, paddingTop: 8 },

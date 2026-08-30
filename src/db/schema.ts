@@ -104,6 +104,8 @@ export const customFolders = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     name: text('name').notNull(),
     sortOrder: integer('sort_order').notNull(),
+    /** Presentation-only folder badge preference; never changes message read state. */
+    showUnreadBadge: integer('show_unread_badge', { mode: 'boolean' }).notNull().default(true),
   },
   (t) => ({
     nameIdx: uniqueIndex('custom_folders_name_idx').on(t.name),
@@ -118,6 +120,10 @@ export const customFolders = sqliteTable(
     sortOrderNonnegative: check(
       'custom_folders_sort_order_nonnegative',
       sql`typeof(${t.sortOrder}) = 'integer' AND ${t.sortOrder} >= 0`,
+    ),
+    showUnreadBadgeBoolean: check(
+      'custom_folders_show_unread_badge_boolean',
+      sql`typeof(${t.showUnreadBadge}) = 'integer' AND ${t.showUnreadBadge} IN (0, 1)`,
     ),
   }),
 );

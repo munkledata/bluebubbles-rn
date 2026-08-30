@@ -3,12 +3,16 @@ import {
   deleteCustomFolderWithinTransaction,
   listCustomFolderChatGuidsWithinTransaction,
   listCustomFolderInboxPageWithinTransaction,
+  listCustomFolderSummariesWithinTransaction,
   listCustomFoldersWithinTransaction,
   renameCustomFolderWithinTransaction,
   reorderCustomFoldersWithinTransaction,
   replaceCustomFolderMembershipWithinTransaction,
+  setCustomFolderShowUnreadBadgeWithinTransaction,
   type CustomFolderInboxPage,
+  type CustomFolderListRow,
   type CustomFolderRow,
+  type CustomFolderSummaryRow,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { ensureDatabase } from './databaseControl';
@@ -53,13 +57,28 @@ async function runCustomFolderCommand<T>(
 /** Read all ordered folders for the mounted account. */
 export function loadCustomFolders(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<CustomFolderCommandResult<CustomFolderRow[]>> {
+): Promise<CustomFolderCommandResult<CustomFolderListRow[]>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
     assertCustomFolderCommandLease(activeLease);
     return withDbTransaction(
       db,
       (context) => listCustomFoldersWithinTransaction(context),
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Read live manager-only unread summaries for the mounted account. */
+export function loadCustomFolderSummaries(
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<CustomFolderCommandResult<CustomFolderSummaryRow[]>> {
+  return runCustomFolderCommand(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertCustomFolderCommandLease(activeLease);
+    return withDbTransaction(
+      db,
+      (context) => listCustomFolderSummariesWithinTransaction(context),
       () => activeLease.isCurrent(),
     );
   });
@@ -128,6 +147,24 @@ export function renameCustomFolder(
     return withDbTransaction(
       db,
       (context) => renameCustomFolderWithinTransaction(context, folderId, name),
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Persist one folder's presentation-only unread badge preference. */
+export function setCustomFolderShowUnreadBadge(
+  folderId: number,
+  showUnreadBadge: boolean,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<CustomFolderCommandResult<boolean>> {
+  return runCustomFolderCommand(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertCustomFolderCommandLease(activeLease);
+    return withDbTransaction(
+      db,
+      (context) =>
+        setCustomFolderShowUnreadBadgeWithinTransaction(context, folderId, showUnreadBadge),
       () => activeLease.isCurrent(),
     );
   });

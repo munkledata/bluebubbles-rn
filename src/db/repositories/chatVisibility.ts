@@ -6,6 +6,44 @@ import { normalizeInboxFilters, type InboxFilters, type InboxSenderFilter } from
 export type InboxArchiveFilter = 'active' | 'archived' | 'all';
 export type { InboxSenderFilter } from '@core/models';
 
+/**
+ * One load-bearing definition of a qualifying unread message.
+ *
+ * The local-deletion floor prevents re-synced pre-delete history from becoming unread when its
+ * original read marker no longer resolves. It remains necessary even though ordinary ingress
+ * retires superseded tombstones: optimistic outgoing sends do not take that ingress path, so a
+ * temporarily un-hidden chat can still retain `deleted_at`. `marked_unread_at` is deliberately not
+ * another cutoff; Mark as Unread clears `last_read_message_guid`, which makes the existing stored
+ * incoming messages count again.
+ */
+function chatUnreadMessagePredicateSql(chatAlias: string, messageAlias: string) {
+  const c = sql.raw(chatAlias);
+  const m = sql.raw(messageAlias);
+  return sql`${m}.chat_id = ${c}.id AND ${m}.is_from_me = 0
+    AND ${m}.associated_message_type IS NULL
+    AND ${m}.date_retracted IS NULL
+    AND ${m}.date_deleted IS NULL
+    AND ${m}.date_created > COALESCE(
+      (SELECT lm.date_created FROM messages lm WHERE lm.guid = ${c}.last_read_message_guid),
+      0
+    )
+    AND (${c}.deleted_at IS NULL OR ${m}.date_created > ${c}.deleted_at)`;
+}
+
+/** One shared answer for unread-chat filters and folder badges. */
+export function chatHasUnreadSql(alias: string) {
+  return sql`EXISTS(
+    SELECT 1 FROM messages um WHERE ${chatUnreadMessagePredicateSql(alias, 'um')}
+  )`;
+}
+
+/** Exact qualifying message count for the existing per-conversation badge. */
+export function chatUnreadCountSql(alias: string) {
+  return sql`(
+    SELECT COUNT(*) FROM messages um WHERE ${chatUnreadMessagePredicateSql(alias, 'um')}
+  )`;
+}
+
 /** Shared inbox filter fragments used by both paging queries and pinned-order commands. */
 export function inboxFilterSql(options: {
   archive: InboxArchiveFilter;
@@ -33,24 +71,8 @@ export function inboxFilterSql(options: {
         ? sql`AND NOT ${known}`
         : sql``;
 
-  // Keep this byte-for-byte aligned with queryChatsForInbox's unreadCount projection. Filtering
-  // the decorated alias after LIMIT would make sparse unread pages incomplete.
-  const unread =
-    filters.read === 'unread'
-      ? sql`AND EXISTS(
-          SELECT 1 FROM messages um
-           WHERE um.chat_id = c.id AND um.is_from_me = 0
-             AND um.associated_message_type IS NULL
-             AND um.date_retracted IS NULL
-             AND um.date_deleted IS NULL
-             AND um.date_created > COALESCE(
-               (SELECT lm.date_created FROM messages lm
-                 WHERE lm.guid = c.last_read_message_guid),
-               0
-             )
-             AND (c.deleted_at IS NULL OR um.date_created > c.deleted_at)
-        )`
-      : sql``;
+  // Filtering the decorated alias after LIMIT would make sparse unread pages incomplete.
+  const unread = filters.read === 'unread' ? sql`AND ${chatHasUnreadSql('c')}` : sql``;
 
   // Mirror isGroupRow: a present chat.style is authoritative (43 = group); only an unknown style
   // falls back to participant count.

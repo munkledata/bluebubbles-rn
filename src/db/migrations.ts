@@ -825,4 +825,15 @@ export const MIGRATIONS: Migration[] = [
         ON custom_folder_members (chat_guid, folder_id)`,
     ],
   },
+  {
+    // Match the original per-folder presentation preference without coupling it to message read
+    // state. Existing folders opt in so adding the column does not silently remove their badge.
+    name: '0044_custom_folder_unread_badge',
+    statements: [
+      `ALTER TABLE custom_folders
+         ADD COLUMN show_unread_badge INTEGER NOT NULL DEFAULT 1
+         CONSTRAINT custom_folders_show_unread_badge_boolean
+         CHECK (typeof(show_unread_badge) = 'integer' AND show_unread_badge IN (0, 1))`,
+    ],
+  },
 ];

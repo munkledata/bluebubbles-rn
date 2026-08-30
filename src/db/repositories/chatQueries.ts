@@ -5,6 +5,7 @@ import { chats } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 import {
+  chatUnreadCountSql,
   chatVisible,
   inboxFilterSql,
   type InboxArchiveFilter,
@@ -229,23 +230,9 @@ async function queryChatsForInbox(
       (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS handleServices,
-      (SELECT COUNT(*) FROM messages um
-         WHERE um.chat_id = c.id AND um.is_from_me = 0 AND um.associated_message_type IS NULL
-           AND um.date_retracted IS NULL
-           AND um.date_deleted IS NULL
-           AND um.date_created > COALESCE(
-             (SELECT lm.date_created FROM messages lm WHERE lm.guid = c.last_read_message_guid), 0)
-           -- A chat the user deleted and that later came back counts only what arrived AFTER the
-           -- deletion. Its marker points at a message that went with the delete, so it resolves to
-           -- 0 and the whole re-synced history would otherwise land as one enormous unread badge.
-           -- STILL LOAD-BEARING even though clearSupersededTombstonesWithinTransaction now hands the floor to the
-           -- read marker: that handover only runs from message/chat INGESTION, and the optimistic
-           -- send path (insertOutgoingText/Attachment) routes through neither. Sending into a
-           -- hidden thread therefore makes it visible with its stamp still set — the one state
-           -- where this clause is the only thing between the user and a badge carrying their whole
-           -- re-synced history.
-           AND (c.deleted_at IS NULL OR um.date_created > c.deleted_at)
-      ) AS unreadCount,
+      -- The shared helper retains the last-read + local-deletion floor used by inbox filtering and
+      -- folder unread badges. A re-synced pre-delete history must never become unread again.
+      ${chatUnreadCountSql('c')} AS unreadCount,
       EXISTS(SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
               WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL) AS hasKnownSender
     FROM page p
