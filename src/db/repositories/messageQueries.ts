@@ -3,6 +3,7 @@ import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/re
 import { messages } from '../schema';
 import type { AppDatabase } from '../types';
 import { toFtsQuery } from './_shared';
+import { MAX_CUSTOM_FOLDER_MEMBERS } from './customFolders';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
 // message queries, so this dependency stays acyclic.
@@ -591,17 +592,24 @@ export async function listMessagesAround(
  * top-bar so it filters chats by message CONTENT (incl. decoded edited/SMS text), keeping it
  * consistent with the dedicated search page instead of matching only chat names + the latest preview.
  *
- * Locally-deleted chats are excluded here too. The caller intersects this with the (already
- * filtered) chat list, so today it changes nothing — but a guid list that includes hidden chats is
- * a trap for the next caller that trusts it, and the rule is one line.
+ * Locally-deleted chats are excluded here too. The custom-folder wrapper below reuses this exact
+ * query owner with a membership restriction, so its narrower scope cannot drift from these rules.
  */
-export async function searchChatGuidsByMessage(
+async function queryChatGuidsByMessage(
   db: AppDatabase,
   queryText: string,
-  limit = 300,
+  limit: number,
+  customFolderId?: number,
 ): Promise<string[]> {
   const match = toFtsQuery(queryText);
   if (!match) return [];
+  const folderRestriction =
+    customFolderId == null
+      ? sql``
+      : sql`AND EXISTS (
+          SELECT 1 FROM custom_folder_members cfm
+           WHERE cfm.folder_id = ${customFolderId} AND cfm.chat_guid = c.guid
+        )`;
   const rows = await db.all<{ guid: string }>(sql`
     SELECT DISTINCT c.guid AS guid
     FROM messages_fts f
@@ -612,9 +620,42 @@ export async function searchChatGuidsByMessage(
       AND m.date_retracted IS NULL
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
+      ${folderRestriction}
     LIMIT ${limit}
   `);
   return rows.map((r: { guid: string }) => r.guid);
+}
+
+export function searchChatGuidsByMessage(
+  db: AppDatabase,
+  queryText: string,
+  limit = 300,
+): Promise<string[]> {
+  return queryChatGuidsByMessage(db, queryText, limit);
+}
+
+/**
+ * Conversation-level message matches for one custom folder. Membership is applied in SQL before
+ * DISTINCT/LIMIT, and the extra row detects a corrupted result above the durable folder bound.
+ */
+export async function searchCustomFolderChatGuidsByMessage(
+  db: AppDatabase,
+  folderId: number,
+  queryText: string,
+): Promise<string[]> {
+  if (!Number.isSafeInteger(folderId) || folderId <= 0) {
+    throw new RangeError('Folder id must be a positive safe integer.');
+  }
+  const rows = await queryChatGuidsByMessage(
+    db,
+    queryText,
+    MAX_CUSTOM_FOLDER_MEMBERS + 1,
+    folderId,
+  );
+  if (rows.length > MAX_CUSTOM_FOLDER_MEMBERS) {
+    throw new Error('Custom folder message matches exceed their safety bound.');
+  }
+  return rows;
 }
 
 export interface MessagePreview {

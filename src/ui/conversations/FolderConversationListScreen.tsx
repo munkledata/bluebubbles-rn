@@ -160,13 +160,13 @@ function FolderConversationListAttempt({
             value={searchText}
             onChangeText={onSearchTextChange}
             maxLength={MAX_FOLDER_SEARCH_CODE_POINTS}
-            placeholder="Search names & participants"
+            placeholder="Search this folder"
             placeholderTextColor={theme.color.tertiaryLabel}
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
             accessibilityLabel={`Search conversations in ${folder?.name ?? 'this folder'}`}
-            accessibilityHint="Searches names and participants in currently available conversations"
+            accessibilityHint="Searches names, participants, and locally synced message text in currently available conversations"
             style={[styles.searchInput, { color: theme.color.label }]}
           />
           {searchText.length > 0 ? (
@@ -182,7 +182,8 @@ function FolderConversationListAttempt({
           ) : null}
         </View>
         <Text style={[styles.searchHelp, { color: theme.color.secondaryLabel }]}>
-          Conversation names and participants only; message text isn’t included.
+          Searches names, participants, and locally synced message text. It doesn’t search the
+          server.
         </Text>
       </View>
     );

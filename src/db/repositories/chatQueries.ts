@@ -12,6 +12,7 @@ import {
   type InboxSenderFilter,
 } from './chatVisibility';
 import { MAX_CUSTOM_FOLDER_MEMBERS, type CustomFolderRow } from './customFolders';
+import { searchCustomFolderChatGuidsByMessage } from './messageQueries';
 
 export type { InboxArchiveFilter, InboxSenderFilter } from './chatVisibility';
 
@@ -353,12 +354,16 @@ export function listCustomFolderInboxPageWithinTransaction(
         throw new Error('Custom folder search candidates do not match availability.');
       }
       const foldedQuery = searchQuery.toLowerCase();
+      const messageMatchGuids = new Set(
+        await searchCustomFolderChatGuidsByMessage(db, folderId, searchQuery),
+      );
       matchingChatGuids = candidates
-        .filter((candidate: CustomFolderSearchCandidate) =>
-          `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`
-            .normalize('NFC')
-            .toLowerCase()
-            .includes(foldedQuery),
+        .filter(
+          (candidate: CustomFolderSearchCandidate) =>
+            `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`
+              .normalize('NFC')
+              .toLowerCase()
+              .includes(foldedQuery) || messageMatchGuids.has(candidate.guid),
         )
         .map((candidate: CustomFolderSearchCandidate) => candidate.guid);
     }

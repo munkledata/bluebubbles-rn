@@ -180,8 +180,8 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
           Folders are private to this device and do not change your Mac or server. Tap a folder to
           browse it, or Manage its membership. Open a folder and use Edit to rename or delete it.
           Unread badges count currently available conversations, including archived or muted ones;
-          Manage can hide a folder’s badge. Folder search matches names and participants, but not
-          message text.
+          Manage can hide a folder’s badge. Folder search matches names, participants, and locally
+          synced message text; it does not search the server.
         </Text>
 
         {loadFailed && rows.length > 0 ? (
