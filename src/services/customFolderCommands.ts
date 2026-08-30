@@ -88,6 +88,7 @@ export function loadCustomFolderMembership(
 export function loadCustomFolderInboxPage(
   folderId: number,
   limit: number,
+  searchText = '',
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<CustomFolderCommandResult<CustomFolderInboxPage | null>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
@@ -95,7 +96,7 @@ export function loadCustomFolderInboxPage(
     assertCustomFolderCommandLease(activeLease);
     return withDbTransaction(
       db,
-      (context) => listCustomFolderInboxPageWithinTransaction(context, folderId, limit),
+      (context) => listCustomFolderInboxPageWithinTransaction(context, folderId, limit, searchText),
       () => activeLease.isCurrent(),
     );
   });

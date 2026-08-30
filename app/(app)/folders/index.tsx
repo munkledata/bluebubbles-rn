@@ -149,7 +149,8 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
         <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
           Folders are private to this device and do not change your Mac or server. Tap a folder to
           browse it, or Manage its membership. Open a folder and use Edit to rename or delete it.
-          Folder search and folder-wide unread totals are not available yet.
+          Folder search matches conversation names and participants. Message-text search and
+          folder-wide unread totals are not available yet.
         </Text>
 
         {loadFailed && rows.length > 0 ? (

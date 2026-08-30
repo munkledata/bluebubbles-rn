@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters } from '@core/models';
+import { resolveTitle } from '@utils/chat';
 import { chats } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
@@ -99,6 +100,20 @@ export interface CustomFolderInboxPage extends InboxPage {
   folder: CustomFolderRow;
   /** Visible chat rows in the complete folder, not only the currently loaded prefix. */
   availableCount: number;
+  /** Available chats matching the settled folder search, or availableCount when browsing. */
+  matchingCount: number;
+}
+
+const MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS = 128;
+
+interface CustomFolderSearchCandidate {
+  guid: string;
+  chatIdentifier: string | null;
+  displayName: string | null;
+  customName: string | null;
+  style: number | null;
+  participantCount: number;
+  participantNames: string | null;
 }
 
 function requireCustomFolderId(folderId: number): void {
@@ -116,6 +131,23 @@ function customFolderMembershipSql(folderId: number | undefined) {
   )`;
 }
 
+function normalizeCustomFolderSearch(input: string | undefined): string {
+  if (input == null) return '';
+  if (typeof input !== 'string') throw new TypeError('Folder search must be text.');
+  const normalized = Array.from(input.normalize('NFC').trim())
+    .slice(0, MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS)
+    .join('');
+  return Array.from(normalized).length >= 2 ? normalized : '';
+}
+
+function inboxChatGuidRestrictionSql(chatGuids: readonly string[] | undefined) {
+  if (chatGuids == null) return sql``;
+  if (chatGuids.length === 0) return sql`AND 0`;
+  return sql`AND c.guid IN (
+    SELECT CAST(value AS TEXT) FROM json_each(${JSON.stringify(chatGuids)})
+  )`;
+}
+
 async function queryChatsForInbox(
   db: AppDatabase,
   options: {
@@ -124,10 +156,12 @@ async function queryChatsForInbox(
     filters?: InboxFilters;
     limit?: number;
     folderId?: number;
+    chatGuids?: readonly string[];
   },
 ): Promise<InboxRow[]> {
   const filters = inboxFilterSql(options);
   const folderMembership = customFolderMembershipSql(options.folderId);
+  const chatGuidRestriction = inboxChatGuidRestrictionSql(options.chatGuids);
   const limit = options.limit == null ? sql`` : sql`LIMIT ${options.limit}`;
   return db.all<InboxRow>(sql`
     -- Bound the chat identities FIRST. Pinned rows use their device-local manual rank; unpinned
@@ -140,6 +174,7 @@ async function queryChatsForInbox(
        FROM chats c
        WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
          ${folderMembership}
+         ${chatGuidRestriction}
          AND c.is_pinned = 1
        ORDER BY pin_sort ASC, c.id DESC
        ${limit}
@@ -149,6 +184,7 @@ async function queryChatsForInbox(
        FROM chats c
        WHERE ${chatVisible('c')} ${filters.archive} ${filters.sender} ${filters.criteria}
          ${folderMembership}
+         ${chatGuidRestriction}
          AND c.is_pinned = 0
        ORDER BY c.latest_message_date DESC, c.id DESC
        ${limit}
@@ -266,6 +302,7 @@ export function listCustomFolderInboxPageWithinTransaction(
   context: DbTransactionContext,
   folderId: number,
   requestedLimit = 50,
+  searchText = '',
 ): Promise<CustomFolderInboxPage | null> {
   return runInTransactionContext(context, async (db) => {
     requireCustomFolderId(folderId);
@@ -306,17 +343,64 @@ export function listCustomFolderInboxPageWithinTransaction(
       throw new Error('Custom folder availability count is invalid.');
     }
 
-    const rows = await queryChatsForInbox(db, {
-      archive: 'all',
-      sender: 'any',
-      folderId,
-      limit: limit + 1,
-    });
+    const searchQuery = normalizeCustomFolderSearch(searchText);
+    let matchingChatGuids: string[] | undefined;
+    if (searchQuery) {
+      const candidates = await db.all<CustomFolderSearchCandidate>(sql`
+        SELECT c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
+               c.custom_name AS customName, c.style,
+               (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
+               (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
+                  FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                 WHERE ch.chat_id = c.id) AS participantNames
+          FROM chats c
+         WHERE ${chatVisible('c')} ${membership}
+         ORDER BY c.is_pinned DESC,
+                  CASE WHEN c.is_pinned = 1
+                    THEN COALESCE(c.pin_order, 9223372036854775807) END ASC,
+                  CASE WHEN c.is_pinned = 0 THEN c.latest_message_date END DESC,
+                  c.id DESC
+         LIMIT ${MAX_CUSTOM_FOLDER_MEMBERS + 1}
+      `);
+      if (candidates.length !== availableCount) {
+        throw new Error('Custom folder search candidates do not match availability.');
+      }
+      const foldedQuery = searchQuery.toLowerCase();
+      matchingChatGuids = candidates
+        .filter((candidate: CustomFolderSearchCandidate) =>
+          `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`
+            .normalize('NFC')
+            .toLowerCase()
+            .includes(foldedQuery),
+        )
+        .map((candidate: CustomFolderSearchCandidate) => candidate.guid);
+    }
+    const matchingCount = matchingChatGuids?.length ?? availableCount;
+    if (
+      !Number.isSafeInteger(matchingCount) ||
+      matchingCount < 0 ||
+      matchingCount > availableCount
+    ) {
+      throw new Error('Custom folder search count is invalid.');
+    }
+
+    const pageChatGuids = matchingChatGuids?.slice(0, limit + 1);
+    const rows =
+      pageChatGuids?.length === 0
+        ? []
+        : await queryChatsForInbox(db, {
+            archive: 'all',
+            sender: 'any',
+            folderId,
+            chatGuids: pageChatGuids,
+            limit: limit + 1,
+          });
     return {
       folder,
       availableCount,
+      matchingCount,
       rows: rows.slice(0, limit),
-      hasMore: rows.length > limit,
+      hasMore: matchingCount > limit,
     };
   });
 }
