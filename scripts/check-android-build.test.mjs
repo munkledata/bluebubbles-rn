@@ -10,6 +10,7 @@ import {
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
+  validateHeadlessEntry,
   validatePackagedAndroidBundle,
 } from './check-android-build.mjs';
 
@@ -166,6 +167,17 @@ function validate(overrides = {}) {
 test('accepts the expected manifest and headless entry order', () => {
   assert.deepEqual(REQUIRED_PERMISSIONS, intendedPermissions);
   assert.deepEqual(validate(), []);
+});
+
+test('validates the headless entry order without generated Android artifacts', () => {
+  assert.deepEqual(validateHeadlessEntry({ packageJson: { main: 'index.js' }, entrySource }), []);
+  assert.match(
+    validateHeadlessEntry({
+      packageJson: { main: 'index.js' },
+      entrySource: `import 'expo-router/entry';\nimport './src/services/notifications/registerFcmBackgroundHandler';`,
+    }).join('\n'),
+    /expo-router\/entry must be the final side-effect import/,
+  );
 });
 
 test('requires every intended sensitive and product permission', () => {

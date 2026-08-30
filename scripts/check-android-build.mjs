@@ -492,12 +492,30 @@ function validateManifestElements(elements, { debug = false } = {}) {
 }
 
 export function validateAndroidBuild({ manifest, packageJson, entrySource, debug = false }) {
-  const errors = validateManifestElements(parseElements(manifest), { debug });
+  return [
+    ...validateManifestElements(parseElements(manifest), { debug }),
+    ...validateHeadlessEntry({ packageJson, entrySource }),
+  ];
+}
 
-  if (packageJson.main !== 'index.js') errors.push('package.json main must remain index.js');
-  const entryImports = [...entrySource.matchAll(/^\s*import\s+['"]([^'"]+)['"];?\s*$/gm)].map(
+function entrySideEffectImports(entrySource) {
+  return [...entrySource.matchAll(/^\s*import\s+['"]([^'"]+)['"];?\s*$/gm)].map(
     (match) => match[1],
   );
+}
+
+/**
+ * Validate the JavaScript bundle entry without requiring generated Android artifacts.
+ *
+ * The full Android guard reuses this exact function for manifest/AAB validation, while the ordinary
+ * architecture gate can call it directly so a missing, late, or bypassed headless registration
+ * fails during repository-local checks too.
+ */
+export function validateHeadlessEntry({ packageJson, entrySource }) {
+  const errors = [];
+
+  if (packageJson.main !== 'index.js') errors.push('package.json main must remain index.js');
+  const entryImports = entrySideEffectImports(entrySource);
   const routerIndex = entryImports.indexOf('expo-router/entry');
   if (entryImports[0] !== './src/services/errors/registerReactNativeExceptionPrivacy') {
     errors.push(
@@ -523,6 +541,14 @@ export function validateAndroidBuild({ manifest, packageJson, entrySource, debug
   }
 
   return errors;
+}
+
+export function runHeadlessEntryCheck({ root = process.cwd() } = {}) {
+  const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+  const entrySource = readFileSync(resolve(root, 'index.js'), 'utf8');
+  const errors = validateHeadlessEntry({ packageJson, entrySource });
+  if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
+  return { imports: entrySideEffectImports(entrySource).length };
 }
 
 export function runAndroidBuildCheck({
