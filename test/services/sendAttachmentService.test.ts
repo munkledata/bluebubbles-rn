@@ -28,9 +28,23 @@ import {
   resumeRealtimeDeliveries,
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
-import { createTestDb } from '../support/testDb';
+import { createTestDb as createBaseTestDb } from '../support/testDb';
 
 const dummyHttp = {} as unknown as HttpClient;
+const openedDatabases: Database.Database[] = [];
+
+async function createTestDb() {
+  const testDb = await createBaseTestDb();
+  openedDatabases.push(testDb.raw);
+  return testDb;
+}
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  for (const raw of openedDatabases.splice(0)) {
+    if (raw.open) raw.close();
+  }
+});
 
 /**
  * Stub uploader: production streams the file via a native upload (`expo-file-system`), which isn't
@@ -214,7 +228,7 @@ describe('sendImageMessage', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
-  it('rolls an adopted paste promotion back to reserved when outgoing insertion fails', async () => {
+  it('rolls an adopted paste promotion back to reserved when the outgoing transaction fails', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const durableUri = 'file:///documents/attachments/media-temp/generation-7/media-photo.jpg';
@@ -223,8 +237,7 @@ describe('sendImageMessage', () => {
         "INSERT INTO attachment_cache_entries(path, bytes, last_used_at, state, attempts, next_retry_at) VALUES (?, 1000, 1, 'reserved', 0, 0)",
       )
       .run(durableUri);
-    raw.exec(`CREATE TRIGGER fail_adopted_paste_attachment
-      BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'forced attachment failure'); END`);
+    let conflictingAttachmentGuid: string | undefined;
     const rollbackProtectionHandoff = jest.fn(() => true);
     const release = jest.fn(async () => undefined);
     const reservation: AttachmentCacheReservation = {
@@ -235,10 +248,14 @@ describe('sendImageMessage', () => {
       rollbackProtectionHandoff,
       release,
     };
-    const prepare: AttachmentOwnershipPreparer = async ({ image }) => ({
-      image: { ...image, uri: durableUri },
-      cacheReservation: reservation,
-    });
+    const prepare: AttachmentOwnershipPreparer = async ({ image, attachmentGuid }) => {
+      conflictingAttachmentGuid = attachmentGuid;
+      raw.prepare('INSERT INTO attachments(guid) VALUES (?)').run(attachmentGuid);
+      return {
+        image: { ...image, uri: durableUri },
+        cacheReservation: reservation,
+      };
+    };
     const up = fakeUploader(async () => ({ guid: 'must-not-upload', viaPrivateApi: true }));
 
     await expect(
@@ -252,14 +269,15 @@ describe('sendImageMessage', () => {
         undefined,
         prepare,
       ),
-    ).rejects.toThrow('forced attachment failure');
+    ).rejects.toThrow('UNIQUE constraint failed: attachments.guid');
 
     expect(rollbackProtectionHandoff).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
     expect(up.captured).toBeUndefined();
     expect(one(raw, 'SELECT state FROM attachment_cache_entries')).toEqual({ state: 'reserved' });
     expect((one(raw, 'SELECT COUNT(*) AS count FROM messages') as { count: number }).count).toBe(0);
-    raw.exec('DROP TRIGGER fail_adopted_paste_attachment');
+    expect(conflictingAttachmentGuid).toBeDefined();
+    expect(one(raw, 'SELECT guid FROM attachments')).toEqual({ guid: conflictingAttachmentGuid });
   });
 
   it('rolls back a retired attachment insert before upload and lets a fresh lease send', async () => {

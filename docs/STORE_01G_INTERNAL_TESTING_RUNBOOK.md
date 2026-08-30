@@ -1,8 +1,9 @@
 # STORE-01G — Internal Testing readiness runbook
 
-> **Status (2026-08-27): DRAFT / NO CURRENT CANDIDATE / OWNER INPUT REQUIRED.** This runbook prepares
-> a future private Google Play Internal Testing round. It does not authorize or prove a build, upload,
-> submission, tester invitation, server deployment, Play acceptance, install, or device result.
+> **Status (2026-08-30): DRAFT / NO CURRENT CANDIDATE / OWNER INPUT REQUIRED.** This runbook prepares
+> a future private Google Play Internal Testing round and records the scoped build authorization below.
+> It does not prove a build, upload, submission, tester invitation, server deployment, Play acceptance,
+> install, or device result.
 
 This is the secret-free operational companion to `STORE-01`. Keep individual tester identities,
 private endpoints, credentials, QR payloads, and the Play opt-in link outside Git. Record only the
@@ -12,18 +13,18 @@ non-secret labels, owners, counts, dates, and evidence references needed to repr
 
 No conforming current candidate exists. A replacement must be frozen before any tester or Play work:
 
-| Field                      | Required replacement value                                                   |
-| -------------------------- | ---------------------------------------------------------------------------- |
+| Field                      | Required replacement value                                                    |
+| -------------------------- | ----------------------------------------------------------------------------- |
 | App/package                | Gator / `com.bluegreengatorapps.messages`                                     |
-| App version                | `[OPEN — do not guess]`                                                      |
-| Android version code       | `[OPEN — obtain from the approved build receipt]`                            |
-| Candidate source commit    | `[OPEN — exact freeze containing post-v57 commit 9046e27]`                   |
-| Local AAB                  | `[OPEN — ignored, never commit it]`                                          |
-| Size                       | `[OPEN]`                                                                     |
-| SHA-256                    | `[OPEN]`                                                                     |
-| Upload certificate SHA-256 | `[OPEN — record from the exact replacement]`                                 |
-| Packaged boundary          | `[OPEN — inspect the exact replacement]`                                     |
-| Build boundary             | Local-only EAS build; separate explicit approval required                    |
+| App version                | `[OPEN — do not guess]`                                                       |
+| Android version code       | `[OPEN — obtain from the approved build receipt]`                             |
+| Candidate source commit    | `[OPEN — exact freeze containing post-v57 commit 9046e27]`                    |
+| Local AAB                  | `[OPEN — ignored, never commit it]`                                           |
+| Size                       | `[OPEN]`                                                                      |
+| SHA-256                    | `[OPEN]`                                                                      |
+| Upload certificate SHA-256 | `[OPEN — record from the exact replacement]`                                  |
+| Packaged boundary          | `[OPEN — inspect the exact replacement]`                                      |
+| Build boundary             | Owner-approved local-only EAS build; no hosted build                          |
 | Distribution boundary      | Private Google Play Internal Testing only; no upload or submission authorized |
 
 ### Frozen nonconforming v57 — static proof only
@@ -45,19 +46,22 @@ The former candidate remains preserved as `0.1.40` / version code `56`, source c
 historical; no Play, tester, install/update, device, notification, or cleanup result transfers to a
 replacement candidate.
 
-No replacement build is approved in this runbook. A future approved local build creates a different
-artifact that needs a new identity and verification record; do not assume its version code. Any
-future submission must name that exact replacement file and verify its digest immediately beforehand;
-never select an ambiguous “latest” build.
+The owner approved freezing and pushing the current source and running one local EAS-backed `0.1.42`
+candidate build through validation and local promotion. The build may retrieve frozen EAS credentials
+and consume the remote Android version increment. It creates a different artifact that needs a new
+identity and verification record; do not assume its version code. Any future submission must name that
+exact replacement file and verify its digest immediately beforehand; never select an ambiguous “latest”
+build.
 
 ### Current execution mode
 
-The owner approved the post-v57 `PLAY-02` removal but has not approved a replacement build. Follow the
-authoritative `STORE-01` execution mode in `WORK_PLAN_2026-08-03.md`: do not rebuild, upload, submit,
-create more host-proof children, or rerun broad host gates. Use this runbook as the current handoff;
-future sessions should read only the Work Plan register and `STORE-01` section,
-`RELEASE_CHECKLIST.md` section 0, and this file unless a specific contradiction requires history.
-Put progress in the evidence ledger below and consolidate the parent update at closure.
+The owner approved the post-v57 `PLAY-02` removal plus the source freeze/push, local EAS credential
+retrieval and remote version increment, candidate build, validation, and local promotion. Follow the
+authoritative `STORE-01` execution mode in `WORK_PLAN_2026-08-03.md`. No Play upload or submission,
+server action, or device action is approved. Use this runbook as the current handoff; future sessions
+should read only the Work Plan register and `STORE-01` section, `RELEASE_CHECKLIST.md` section 0, and
+this file unless a specific contradiction requires history. Put progress in the evidence ledger below
+and consolidate the parent update at closure.
 
 ## 2. Current proven state
 
