@@ -9,16 +9,18 @@ history and is not executable evidence for a replacement candidate. Do not copy 
 build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
 broader Closed/Open/Production release gate.
 
-No conforming current candidate is frozen. Record the replacement before testing:
+Current locally promoted candidate — static artifact proof only; no Play, server, or device result:
 
-- Version/build number: `__________`
-- Git commit containing `9046e27`: `__________`
-- Local AAB: `__________` — ignored; never commit it
-- AAB SHA-256: `__________`
-- Upload certificate SHA-256: `__________`
-- EAS build URL or local build log: `__________`
-- Tester/device/Android versions: `__________`
-- Test date: `__________`
+- Version/build number: `0.1.42 (versionCode 58)`
+- Source commit containing `9046e27`: `fd02247578e928d909f0ce73c083c3cbcedffb4c`
+- Release commit/branch: `7942ed5bfbdce28ecadfefc54e7bd7cdde2e57d8` / `release/android-0.1.42` (local only)
+- Release run: `android-0.1.42-fd02247-20260830231420`
+- Local AAB: `gator-release-0.1.42-v58-7942ed5.aab` — ignored; never commit it
+- AAB size/SHA-256: `55,969,473` bytes / `ad7538bc3436eea017690801efdaa307a22a0565229c94006f7aacc278270298`
+- Upload certificate SHA-256: `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
+- Build provenance: local EAS production build on 2026-08-30; Gradle `BUILD SUCCESSFUL` (1,264 tasks in 9m42s); validation and local promotion passed; no hosted build or submission
+- Tester/device/Android versions: `[OPEN]`
+- Test date: `[OPEN]`
 
 Frozen nonconforming candidate — static proof only; do not upload, submit, or use it as current
 runtime evidence because it predates the approved `PLAY-02` removal in `9046e27`:
@@ -44,12 +46,12 @@ Play Internal Testing. `STORE-01A-UGC-SAFETY`, production listing assets, and la
 completion do not block this internal test; they are not waived and become gates before any Closed,
 Open, or Production promotion, or earlier if Play flags the internal app.
 
-- [ ] `eas.json` still declares `track: "internal"` as the only explicit submission track. The local
+- [x] `eas.json` still declares `track: "internal"` as the only explicit submission track. The local
       build phase cannot submit; the separate submit phase previews by default and requires `--execute`,
-      an interactive candidate-specific phrase, and reviewed operator approval. Play Console confirms
-      no Closed, Open, or Production release is active before submission.
-- [ ] Version/build, commit, AAB SHA-256, build provenance, tester devices, and test date are recorded
-      above.
+      an interactive candidate-specific phrase, and reviewed operator approval.
+- [ ] Play Console confirms no Closed, Open, or Production release is active before submission.
+- [x] Version/build, source and release commits, AAB SHA-256, and build provenance are recorded above.
+- [ ] Tester devices, Android versions, and test date are recorded above.
 - [ ] The intended tester list, opt-in link, feedback destination, and named response owner work.
 - [ ] Testers use a stable non-production server/setup path and no production-user data or credentials.
 - [ ] The exact AAB installs/updates and completes the staged connect, sync, send, receive, notification,
@@ -98,30 +100,33 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
   ./node_modules/.bin/expo export --platform android --output-dir dist-ci
 ```
 
-- [ ] The workflow supply-chain, architecture-boundary, and secret-hygiene guards pass their tests
+- [x] The workflow supply-chain, architecture-boundary, and secret-hygiene guards pass their tests
       and live scans.
-- [ ] Both complete Jest runs pass; neither has order-dependent failures or unexpected console noise.
-- [ ] Expo dependency validation and the pinned Doctor pass without ignored findings.
-- [ ] Full and production dependency audits have no unreviewed high/critical advisory.
-- [ ] The production Android Expo export completes with `__DEV__` false.
-- [ ] The lockfile is unchanged after the clean install.
+- [x] Both complete Jest runs pass; neither has order-dependent failures or unexpected console noise.
+- [x] Expo dependency validation and the local pinned Doctor pass 20/20. The isolated EAS worker's
+      19/20 local-module-directory advisory is retained; Gradle and AAB inspection prove all four
+      owned modules compiled and were packaged.
+- [x] Full and production dependency audits have no unreviewed high/critical advisory.
+- [x] The production Android Expo export completes with `__DEV__` false.
+- [x] The lockfile is unchanged after the clean install.
 
 ## 3. Environment and credentials
 
-- [ ] `GOOGLE_SERVICES_JSON` is configured as an EAS **file** variable in the `development`,
+- [x] `GOOGLE_SERVICES_JSON` is configured as an EAS **file** variable in the `development`,
       `preview`, and `production` environments and matches the Android application id.
 - [ ] A non-secret smoke variable proves that each named EAS environment selects the intended values.
-- [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
+- [x] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
       artifact is present in the uploaded source bundle.
-- [ ] Android signing and Play submission credentials are available to the release owner and are not
-      stored in Git.
+- [x] The managed Android upload-signing credential produced the exact candidate and is not stored in
+      Git.
+- [ ] Play submission credentials and live Console access are available to the release owner.
 - [ ] Production error reporting is either deliberately disabled or uses a reviewed redacting sink;
       there is no hidden telemetry or placeholder credential.
 
 ## 4. Clean native candidate
 
-For a future candidate only—not to rebuild the frozen candidate recorded above—run each phase
-separately and review its receipt before continuing:
+Do not rebuild or silently rerun the frozen candidate recorded above. For a later replacement, run
+each phase separately and review its receipt before continuing:
 
 ```sh
 npm run release:android:preflight -- --version <x.y.z> --source <full-sha>
@@ -161,20 +166,20 @@ cd ..
 npm run check:android-build
 ```
 
-- [ ] All four local Expo modules are discovered by autolinking and compile through Expo's aggregate
+- [x] All four local Expo modules are discovered by autolinking and compile through Expo's aggregate
       Android module during the app builds.
-- [ ] The candidate is a new signed native build; this project does not currently ship
+- [x] The candidate is a new signed native build; this project does not currently ship
       `expo-updates` or EAS update channels.
-- [ ] The release bundle/export completes with production behavior (`__DEV__` false).
-- [ ] The generated entry still registers FCM, notification, and background tasks before
+- [x] The release bundle/export completes with production behavior (`__DEV__` false).
+- [x] The generated entry still registers FCM, notification, and background tasks before
       `expo-router/entry`.
-- [ ] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
+- [x] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
       guard.
-- [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
+- [x] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [ ] The AAB hash at the top of this file is computed after all checks and is the artifact uploaded
-      to Play.
+- [x] The AAB hash at the top of this file was computed after validation and local promotion.
+- [ ] The byte-identical hashed AAB is the artifact uploaded to Play after separate approval.
 
 ## 5. Network and security smoke tests
 
@@ -188,9 +193,8 @@ npm run check:android-build
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. The host flow is included in source commit `8564b34`; an eligible replacement
-      must include that work plus post-v57 removal commit `9046e27`. Exact Android network and
-      SecureStore behavior remains unproven.
+      credentials. The current candidate contains the host flow from `8564b34` plus post-v57 removal
+      commit `9046e27`; exact Android network and SecureStore behavior remains unproven.
 - [ ] URL previews make no automatic third-party request. Exercise the enabled preview fallback and
       record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
@@ -202,7 +206,8 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Before device work begins, `DEVICE-01` must create a candidate-specific matrix for the exact replacement AAB.
+Before device work begins, `DEVICE-01` must create a candidate-specific matrix for the exact
+`gator-release-0.1.42-v58-7942ed5.aab` candidate.
 At minimum:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
@@ -253,7 +258,7 @@ These four DEV results stop at the then-current migration head `0038`; they do n
   the exact original head-`0037` state read-only, then retries exact `[0038]`, verifies persistence,
   and cleans all eight fixed paths. This is not statement-in-flight evidence.
 
-### Future replacement native/device proof
+### Current v58 candidate native/device proof
 
 - [ ] The exact release candidate and a supported physical device repeat the native contract and
       pass the crypto self-test, fresh install plus an actual signed prior-build install-over,

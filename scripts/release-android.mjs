@@ -123,6 +123,18 @@ function runCapture(command, args, { cwd = ROOT, env = process.env, allowFailure
   };
 }
 
+export function findLocalBranchObjectId(branch, { cwd = ROOT } = {}) {
+  const result = runCapture('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+    cwd,
+    allowFailure: true,
+  });
+  if (result.status === 1 && result.stdout === '' && result.stderr === '') return null;
+  if (result.status !== 0 || !FULL_COMMIT_PATTERN.test(result.stdout)) {
+    throw new Error('could not determine whether the release branch exists');
+  }
+  return result.stdout;
+}
+
 function processGroupIsRunning(processGroupId) {
   if (process.platform === 'win32' || !Number.isSafeInteger(processGroupId) || processGroupId < 1) {
     return false;
@@ -649,14 +661,9 @@ async function preflight(options) {
     const project = readProjectVersionState();
     assertVersionAdvances(project.version, version);
     const releaseBranch = `release/android-${version}`;
-    const branchExists = runCapture(
-      'git',
-      ['show-ref', '--verify', '--quiet', `refs/heads/${releaseBranch}`],
-      { allowFailure: true },
-    ).status;
-    if (branchExists === 0) throw new Error(`release branch already exists: ${releaseBranch}`);
-    if (branchExists !== 1)
-      throw new Error('could not determine whether the release branch exists');
+    if (findLocalBranchObjectId(releaseBranch) !== null) {
+      throw new Error(`release branch already exists: ${releaseBranch}`);
+    }
     resolveCredentialPath('GOOGLE_SERVICES_JSON', 'google-services.json');
     const toolchain = runToolchainCheck({ root: ROOT });
     const runId = createRunId(version, sourceCommit);
@@ -1176,20 +1183,16 @@ async function promote(options) {
       }
       if (existsSync(partialPath)) unlinkSync(partialPath);
 
-      const existingBranch = runCapture(
-        'git',
-        ['show-ref', '--hash', '--verify', releaseBranchRef],
-        { allowFailure: true },
-      );
-      if (existingBranch.status === 0) {
-        if (existingBranch.stdout !== promotion.commit) {
-          throw new Error(`release branch points at another commit: ${promotion.branch}`);
-        }
-      } else if (existingBranch.status === 1) {
-        git(['update-ref', releaseBranchRef, promotion.commit, ZERO_OBJECT_ID]);
-      } else {
-        throw new Error('could not determine whether the release branch exists');
+      const existingBranchObjectId = findLocalBranchObjectId(promotion.branch);
+      if (existingBranchObjectId !== null && existingBranchObjectId !== promotion.commit) {
+        throw new Error(`release branch points at another commit: ${promotion.branch}`);
       }
+      git([
+        'update-ref',
+        releaseBranchRef,
+        promotion.commit,
+        existingBranchObjectId ?? ZERO_OBJECT_ID,
+      ]);
 
       const completedAt = nowIso();
       const receipt = {

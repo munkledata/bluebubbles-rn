@@ -5,11 +5,11 @@
 > contains no Play or device result. Do not execute its rows, fill its result fields, or transfer any checkmark or
 > evidence to version code `57` or a future replacement.
 >
-> The later frozen `0.1.41` / version-code-`57` AAB is also nonconforming because it predates `9046e27`; no current
-> candidate exists. Use [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0 and
-> [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) for identity and readiness.
-> `DEVICE-01` in [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until this matrix is replaced
-> row-by-row for the exact replacement AAB and its source applicability.
+> The later frozen `0.1.41` / version-code-`57` AAB is also nonconforming because it predates `9046e27`. The current
+> local `0.1.42` / version-code-`58` candidate is recorded in [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0 and
+> [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md). `DEVICE-01` in
+> [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until this historical matrix is replaced
+> row-by-row for that exact AAB, source/release commit, device, and Android version.
 
 This was prepared as the evidence record for the retired Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native

@@ -22,7 +22,7 @@
     "coverage:ui": "jest --coverage --collectCoverageFrom='src/ui/**/*.{ts,tsx}' --collectCoverageFrom='!src/ui/**/index.ts' --coverageReporters=text --coverageReporters=json-summary",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src app",
-    "check:toolchain": "node --test scripts/check-toolchain.test.mjs && node scripts/check-toolchain.mjs",
+    "check:toolchain": "node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs && node scripts/check-toolchain.mjs",
     "check:architecture": "node --test scripts/check-core-boundaries.test.mjs scripts/check-scheduled-recovery.test.mjs && node scripts/check-core-boundaries.mjs && node scripts/check-scheduled-recovery.mjs",
     "check:db-writes:fast": "node --test scripts/check-db-writes.test.mjs",
     "check:db-writes:full": "DB_WRITE_SCANNER_FULL=1 node --test scripts/check-db-writes.test.mjs",

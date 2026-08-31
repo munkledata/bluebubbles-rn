@@ -19,11 +19,15 @@ standard policy/security review and are Data Safety-exempt while exclusively int
 UGC-policy exemption is claimed. Confirm in Play Console that no other track is active before relying
 on this boundary.
 
-No conforming current candidate is frozen. The preserved v57 AAB predates the owner-approved
-`PLAY-02` removal in `9046e27` and must not be uploaded or submitted; every candidate-dependent row
-below now refers to a future replacement containing that commit.
+The conforming current local candidate is `0.1.42` / version code `58`, source
+`fd02247578e928d909f0ce73c083c3cbcedffb4c`, release commit
+`7942ed5bfbdce28ecadfefc54e7bd7cdde2e57d8`, and SHA-256
+`ad7538bc3436eea017690801efdaa307a22a0565229c94006f7aacc278270298`. Its local build, validation,
+and promotion passed, but it has not been uploaded, submitted, installed, or exercised on a device.
+Candidate-dependent rows below refer to that exact artifact. The preserved v57 AAB remains
+nonconforming historical evidence and must not be uploaded or submitted.
 
-Recheck these requirements when the candidate is frozen:
+Recheck these requirements before upload/testing and again for any later replacement:
 
 - [Google Play Internal Testing guidance](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en)
 - [Google Play preview-asset requirements](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en)
@@ -132,7 +136,7 @@ closed, open, or production tracks.
 | User-generated content     | **Deferred for the current exclusive Internal Testing scope:** direct messages are UGC; no terms acceptance, in-app blocking/reporting, or moderation workflow was found                                                            | Complete `STORE-01A-UGC-SAFETY` before Closed/Open/Production promotion, or earlier if Play flags the internal app; retain policy/behavior evidence                |
 | Target audience/content    | **Pending; do not guess**                                                                                                                                                                                                           | Owner selects intended audience, answers the content-rating questionnaire, and reconciles UGC/minor safeguards                                                     |
 | Account deletion/retention | **Pending:** Disconnect wipes local app state, but does not prove deletion of server-side accounts or retained server data                                                                                                          | Decide whether Play's account-deletion rule applies and document the companion server's deletion/retention route                                                   |
-| Full-screen intent         | **Removal selected and implemented post-v57:** source config blocks `USE_FULL_SCREEN_INTENT`, the artifact guard forbids it, and call notifications omit automatic full-screen launch; frozen v57 is nonconforming                  | Prove the permission absent and body-tap/Answer/Decline behavior intact on an exact replacement candidate                                                           |
+| Full-screen intent         | **Removal selected and present in v58:** source config blocks `USE_FULL_SCREEN_INTENT`, the exact AAB omits it, and call notifications omit automatic full-screen launch                                                            | Prove body-tap/Answer/Decline behavior intact on the exact candidate's Android 14/15/16 device matrix                                                              |
 | Foreground service         | **Blocked:** the generated release manifest declares media-playback foreground-service access                                                                                                                                       | Complete the prompted declaration and demonstration evidence against the exact candidate                                                                           |
 | Photo/video access         | **Blocked:** the generated release manifest includes broad `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` access for gallery browsing                                                                                                       | Prove the core-use justification and declaration, or narrow the candidate to a policy-supported picker                                                             |
 | Contacts                   | **Pending:** the candidate can request `READ_CONTACTS` for explicit contact features                                                                                                                                                | Recheck current target-level policy, declaration prompts, Data safety, and the manual no-contacts journey                                                          |
