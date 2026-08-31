@@ -269,7 +269,11 @@ describe('sendImageMessage', () => {
         undefined,
         prepare,
       ),
-    ).rejects.toThrow('UNIQUE constraint failed: attachments.guid');
+    ).rejects.toMatchObject({
+      name: 'SqliteError',
+      code: 'SQLITE_CONSTRAINT_UNIQUE',
+      message: 'UNIQUE constraint failed: attachments.guid',
+    });
 
     expect(rollbackProtectionHandoff).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
