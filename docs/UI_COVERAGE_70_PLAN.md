@@ -1,10 +1,11 @@
 # UI Coverage → 70% Plan
 
-> **STATUS (2026-08-27): COMPLETED HISTORICAL ROLLOUT PLAN — NOT A CURRENT WORK ORDER.** The
-> 70% floor and `coverage:ui` command produced by this plan are already part of the repository.
-> Preserve the batches and measurements below as implementation history; do not rerun them as open
-> remediation. Current coverage-hardening scope is owned only by `TEST-01` in
-> `WORK_PLAN_2026-08-03.md`, and current test rules live in `AGENTS.md`.
+> **STATUS (2026-08-30): COMPLETED HISTORICAL ROLLOUT PLAN — NOT A CURRENT WORK ORDER.** The
+> original 70% rollout and `coverage:ui` command produced by this plan are implementation history.
+> The current, higher aggregate and critical-file floors are enforced by
+> `jest.ui-coverage.config.js` and CI under `TEST-01`; do not use this old 70% target as current
+> remediation. Current task status lives in `WORK_PLAN_2026-08-03.md`, and current test rules live
+> in `AGENTS.md`.
 
 **Historical goal:** raise statement coverage of `src/ui/**` from the measured baseline **23.3%
 (547/2347)** to **≥ 70%**, using the existing two-project jest setup (node + jest-expo

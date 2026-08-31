@@ -163,6 +163,42 @@ function requireDatabaseWriteApprovalGuard(checkJob, installIndex, errors) {
   }
 }
 
+function requireUiCoverageGate(checkJob, installIndex, errors) {
+  const name = 'Unit tests and UI coverage gate';
+  const command = 'npm run coverage:ui -- --ci --runInBand';
+  const nameLine = `      - name: ${name}`;
+  const commandLine = `        run: ${command}`;
+  const matchingNames = linesOf(checkJob).filter((line) => line === nameLine).length;
+  const step = extractNamedStep(checkJob, name);
+  if (!step) {
+    errors.push(`CI check job is missing the "${name}" step.`);
+    return;
+  }
+  if (matchingNames !== 1) {
+    errors.push(`The CI check job must declare "${name}" exactly once.`);
+  }
+
+  const reviewedLines = new Set([nameLine, commandLine]);
+  const liveLines = linesOf(step).filter(
+    (line) => line.trim() && !line.trimStart().startsWith('#'),
+  );
+  if (liveLines.some((line) => !reviewedLines.has(line))) {
+    errors.push(`"${name}" may contain only its reviewed name and exact run command.`);
+  }
+  if (liveLines.filter((line) => line === commandLine).length !== 1) {
+    errors.push(`"${name}" must run exactly: ${command}`);
+  }
+  if (installIndex < 0 || checkJob.indexOf(nameLine) < installIndex) {
+    errors.push(`"${name}" must run after npm ci installs the test dependencies.`);
+  }
+  if (/^\s*if\s*:/m.test(step)) {
+    errors.push(`"${name}" must run unconditionally.`);
+  }
+  if (/^\s*continue-on-error\s*:/m.test(step) || /\|\|\s*true/.test(step)) {
+    errors.push(`"${name}" must fail the CI job when tests or coverage fall below the floor.`);
+  }
+}
+
 function validateCheckJob(workflow, errors) {
   const check = extractJob(workflow, 'check');
   if (!check) {
@@ -212,6 +248,7 @@ function validateCheckJob(workflow, errors) {
 
   const installIndex = check.source.indexOf('run: npm ci');
   requireDatabaseWriteApprovalGuard(check.source, installIndex, errors);
+  requireUiCoverageGate(check.source, installIndex, errors);
   const fullAuditIndex = check.source.indexOf('run: npm audit --audit-level=high');
   const productionAuditIndex = check.source.indexOf('run: npm audit --omit=dev --audit-level=high');
   if (installIndex < 0 || fullAuditIndex < installIndex || productionAuditIndex < installIndex) {
@@ -383,7 +420,7 @@ if (invokedDirectly) {
   try {
     const result = runWorkflowSecurityCheck();
     console.log(
-      `Workflow security guard passed: ${result.actionCount} action uses are immutable; database-write approval, audits, dependency review, and Android release verification are enforced.`,
+      `Workflow security guard passed: ${result.actionCount} action uses are immutable; database-write approval, UI coverage, audits, dependency review, and Android release verification are enforced.`,
     );
   } catch (error) {
     console.error(

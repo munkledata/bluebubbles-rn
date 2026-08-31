@@ -148,6 +148,76 @@ test('requires the fail-closed database write approval guard after dependency in
   assert.ok(errorsFor(duplicateSteps).some((error) => error.includes('"steps" exactly once')));
 });
 
+test('requires the exact fail-closed UI coverage gate after dependency install', () => {
+  const step = [
+    '      - name: Unit tests and UI coverage gate',
+    '        run: npm run coverage:ui -- --ci --runInBand',
+  ].join('\n');
+
+  const wrongCommand = workflow.replace(
+    'npm run coverage:ui -- --ci --runInBand',
+    'npm test -- --ci',
+  );
+  assert.notEqual(wrongCommand, workflow, 'the command mutation must change the fixture');
+  assert.ok(errorsFor(wrongCommand).some((error) => error.includes('must run exactly')));
+
+  const silentCommand = workflow.replace(
+    'npm run coverage:ui -- --ci --runInBand',
+    'npm run coverage:ui -- --ci --runInBand --silent',
+  );
+  assert.notEqual(silentCommand, workflow, 'the silent-command mutation must change the fixture');
+  assert.ok(errorsFor(silentCommand).some((error) => error.includes('must run exactly')));
+
+  const renamed = workflow.replace('Unit tests and UI coverage gate', 'Unit tests');
+  assert.notEqual(renamed, workflow, 'the name mutation must change the fixture');
+  assert.ok(errorsFor(renamed).some((error) => error.includes('missing')));
+
+  const missing = workflow.replace(`${step}\n`, '');
+  assert.notEqual(missing, workflow, 'the missing-step mutation must change the fixture');
+  assert.ok(errorsFor(missing).some((error) => error.includes('missing')));
+
+  const duplicate = workflow.replace(step, `${step}\n\n${step}`);
+  assert.notEqual(duplicate, workflow, 'the duplicate-step mutation must change the fixture');
+  assert.ok(errorsFor(duplicate).some((error) => error.includes('exactly once')));
+
+  const movedBeforeInstall = workflow
+    .replace(`${step}\n`, '')
+    .replace('      - name: Install dependencies', `${step}\n\n      - name: Install dependencies`);
+  assert.notEqual(movedBeforeInstall, workflow, 'the ordering mutation must change the fixture');
+  assert.ok(errorsFor(movedBeforeInstall).some((error) => error.includes('after npm ci')));
+
+  for (const extraStepControl of [
+    'if: false',
+    'continue-on-error: true',
+    'shell: bash',
+    'run: npm --version',
+  ]) {
+    const controlledStep = workflow.replace(
+      step,
+      `${step.split('\n')[0]}\n        ${extraStepControl}\n${step.split('\n')[1]}`,
+    );
+    assert.notEqual(controlledStep, workflow, `${extraStepControl} must change the fixture`);
+    assert.ok(
+      errorsFor(controlledStep).some((error) => error.includes('only its reviewed name')),
+      `the UI coverage gate must reject ${extraStepControl}`,
+    );
+  }
+
+  const ignoredFailure = workflow.replace(
+    'npm run coverage:ui -- --ci --runInBand',
+    'npm run coverage:ui -- --ci --runInBand || true',
+  );
+  assert.notEqual(ignoredFailure, workflow, 'the ignored-failure mutation must change the fixture');
+  assert.ok(errorsFor(ignoredFailure).some((error) => error.includes('must fail the CI job')));
+
+  const extraCommand = workflow.replace(
+    'npm run coverage:ui -- --ci --runInBand',
+    'npm run coverage:ui -- --ci --runInBand && npm --version',
+  );
+  assert.notEqual(extraCommand, workflow, 'the extra-command mutation must change the fixture');
+  assert.ok(errorsFor(extraCommand).some((error) => error.includes('must run exactly')));
+});
+
 test('requires the Android build job', () => {
   const mutated = workflow.replace('\n  android:\n', '\n  android-disabled:\n');
   assert.notEqual(mutated, workflow, 'the Android job mutation must change the fixture');

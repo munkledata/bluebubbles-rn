@@ -102,8 +102,8 @@ jobs:
             exit 1
           fi
 
-      - name: Unit tests
-        run: npm test -- --ci
+      - name: Unit tests and UI coverage gate
+        run: npm run coverage:ui -- --ci --runInBand
 
   android:
     name: Clean Android prebuild · native modules · APK + AAB

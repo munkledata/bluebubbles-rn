@@ -19,7 +19,7 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
-    "coverage:ui": "jest --coverage --collectCoverageFrom='src/ui/**/*.{ts,tsx}' --collectCoverageFrom='!src/ui/**/index.ts' --coverageReporters=text --coverageReporters=json-summary",
+    "coverage:ui": "jest --config jest.ui-coverage.config.js --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src app",
     "check:toolchain": "node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs && node scripts/check-toolchain.mjs",
