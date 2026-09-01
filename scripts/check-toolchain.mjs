@@ -10,6 +10,11 @@ export const REQUIRED_NODE_VERSION = '24.19.0';
 export const REQUIRED_NODE_ENGINE = '>=24.19.0 <25';
 export const REQUIRED_NPM_VERSION = '11.17.0';
 export const REQUIRED_EAS_CLI_VERSION = '21.5.0';
+export const REQUIRED_ANDROID_ARCHITECTURES = Object.freeze({
+  development: 'arm64-v8a,x86_64',
+  preview: 'arm64-v8a,x86_64',
+  production: 'arm64-v8a',
+});
 export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@op-engineering/op-sqlite': '17.1.2',
   '@react-native-firebase/app': '25.1.0',
@@ -26,6 +31,7 @@ const ALTERNATE_DEPENDENCY_SECTIONS = Object.freeze([
   'peerDependencies',
 ]);
 const DEPENDENCY_SECTIONS = Object.freeze(['dependencies', ...ALTERNATE_DEPENDENCY_SECTIONS]);
+const REQUIRED_EAS_BUILD_PROFILES = Object.freeze(['base', 'development', 'preview', 'production']);
 const EAS_NPX_ENV_UNSET =
   'unset npm_config_ignore_scripts npm_config_call npm_config_package npm_config_yes; ';
 export const REQUIRED_ANDROID_RELEASE_POLICY = Object.freeze({
@@ -61,6 +67,16 @@ const PROTECTED_NATIVE_BOUNDARY_PACKAGES = new Set([
 const REVIEWED_RELEASE_SCRIPT_NAMES = new Set(Object.keys(REQUIRED_RELEASE_SCRIPTS));
 const EAS_BUILD_OR_SUBMIT_PATTERN =
   /(?:(?:\beas\b|\beas-cli(?:@[^\s'\"]+)?\b)[^\n]*(?:\bbuild\b|\bsubmit\b)|--auto-submit\b)/;
+const ENVIRONMENT_SMOKE_FLAG = '--environment-smoke';
+const ENVIRONMENT_SMOKE_STEP_NAME = 'Smoke controlled environment config resolution';
+const ENVIRONMENT_SMOKE_COMMAND = `node scripts/check-toolchain.mjs ${ENVIRONMENT_SMOKE_FLAG}`;
+const ENVIRONMENT_PROBE_FILE = '__gator_environment_probe_file__';
+const LOCAL_GOOGLE_SERVICES_FILE = './google-services.json';
+const REQUIRED_EXPO_IDENTITY = Object.freeze({
+  name: 'Gator',
+  slug: 'bluegreengatorappsmessages',
+  androidPackage: 'com.bluegreengatorapps.messages',
+});
 export function npmVersionFromUserAgent(userAgent) {
   return userAgent?.match(/(?:^|\s)npm\/([^ ]+)/)?.[1];
 }
@@ -327,6 +343,16 @@ export function validateToolchain({
       `EAS base profile uses ${String(eas?.build?.base?.node)}, but Node ${REQUIRED_NODE_VERSION} is required`,
     );
   }
+  if (eas?.build?.base?.environment !== 'production') {
+    errors.push('EAS base profile must select the production environment');
+  }
+  if (eas?.build?.base?.env != null) {
+    errors.push('EAS base profile must not declare inherited env values');
+  }
+  const buildProfiles = Object.keys(eas?.build ?? {}).sort();
+  if (!isDeepStrictEqual(buildProfiles, [...REQUIRED_EAS_BUILD_PROFILES].sort())) {
+    errors.push(`EAS build profiles must be exactly ${REQUIRED_EAS_BUILD_PROFILES.join(', ')}`);
+  }
 
   for (const profile of ['development', 'preview', 'production']) {
     const config = eas?.build?.[profile];
@@ -334,8 +360,13 @@ export function validateToolchain({
     if (config?.environment !== profile) {
       errors.push(`EAS ${profile} profile must select the ${profile} environment`);
     }
-    if (config?.env?.NODE_ENV != null) {
-      errors.push(`EAS ${profile} profile must not overload NODE_ENV`);
+    const expectedEnvironment = {
+      GATOR_ANDROID_ARCHITECTURES: REQUIRED_ANDROID_ARCHITECTURES[profile],
+    };
+    if (!isDeepStrictEqual(config?.env, expectedEnvironment)) {
+      errors.push(
+        `EAS ${profile} profile env must contain only GATOR_ANDROID_ARCHITECTURES=${REQUIRED_ANDROID_ARCHITECTURES[profile]}`,
+      );
     }
   }
 
@@ -346,6 +377,190 @@ export function validateToolchain({
   }
 
   return errors;
+}
+
+export function environmentProbeLanes(eas) {
+  return [
+    {
+      lane: 'local',
+      environment: 'local',
+      architectures: REQUIRED_ANDROID_ARCHITECTURES.development,
+      firebaseConfig: 'local-fallback',
+      googleServicesFile: LOCAL_GOOGLE_SERVICES_FILE,
+    },
+    ...['development', 'preview', 'production'].map((profile) => ({
+      lane: profile === 'development' ? 'ci' : profile,
+      environment: eas?.build?.[profile]?.environment,
+      architectures: eas?.build?.[profile]?.env?.GATOR_ANDROID_ARCHITECTURES,
+      firebaseConfig: 'sentinel-file-path',
+      googleServicesFile: ENVIRONMENT_PROBE_FILE,
+    })),
+  ];
+}
+
+export function validateResolvedEnvironmentConfig(config, lane) {
+  const errors = [];
+  if (config?.name !== REQUIRED_EXPO_IDENTITY.name) {
+    errors.push(`${lane.lane} Expo name must remain ${REQUIRED_EXPO_IDENTITY.name}`);
+  }
+  if (config?.slug !== REQUIRED_EXPO_IDENTITY.slug) {
+    errors.push(`${lane.lane} Expo slug must remain ${REQUIRED_EXPO_IDENTITY.slug}`);
+  }
+  if (config?.android?.package !== REQUIRED_EXPO_IDENTITY.androidPackage) {
+    errors.push(
+      `${lane.lane} Android package must remain ${REQUIRED_EXPO_IDENTITY.androidPackage}`,
+    );
+  }
+  if (config?.android?.googleServicesFile !== lane.googleServicesFile) {
+    errors.push(`${lane.lane} Firebase config did not resolve from ${lane.firebaseConfig}`);
+  }
+
+  const architecturePlugins = Array.isArray(config?.plugins)
+    ? config.plugins.filter(
+        (plugin) => Array.isArray(plugin) && plugin[0] === './plugins/withArm64Only',
+      )
+    : [];
+  if (architecturePlugins.length !== 1) {
+    errors.push(`${lane.lane} must resolve exactly one Android architecture plugin`);
+  } else if (architecturePlugins[0]?.[1]?.architectures !== lane.architectures) {
+    errors.push(`${lane.lane} Android architectures did not resolve to ${lane.architectures}`);
+  }
+
+  return errors;
+}
+
+export function validateEnvironmentSmokeWorkflowSource(source) {
+  if (typeof source !== 'string') return ['CI workflow source is unavailable'];
+  const checkStart = source.indexOf('\n  check:\n');
+  const checkEnd = source.indexOf('\n  android:\n', checkStart + 1);
+  if (checkStart < 0 || checkEnd < 0) {
+    return ['CI workflow must retain the check job before the Android job'];
+  }
+
+  const checkJob = source.slice(checkStart, checkEnd);
+  const checkoutPattern =
+    /^      - uses: actions\/checkout@[a-f0-9]{40} # v\d+\.\d+\.\d+\n        with:\n(?:          #.*\n)*          fetch-depth: 0\n          persist-credentials: false$/gm;
+  const nameLine = `      - name: ${ENVIRONMENT_SMOKE_STEP_NAME}`;
+  const commandLine = `        run: ${ENVIRONMENT_SMOKE_COMMAND}`;
+  const nameCount = checkJob.split(nameLine).length - 1;
+  const commandCount = checkJob.split(commandLine).length - 1;
+  const stepStart = checkJob.indexOf(nameLine);
+  const nextStep = checkJob.indexOf('\n      - ', stepStart + nameLine.length);
+  const step =
+    stepStart < 0
+      ? ''
+      : checkJob.slice(stepStart, nextStep < 0 ? checkJob.length : nextStep).trimEnd();
+  const expectedStep = `${nameLine}\n${commandLine}`;
+  const installIndex = checkJob.indexOf('        run: npm ci');
+  const expectedSequence = [
+    '      - name: Install dependencies',
+    '        run: npm ci',
+    '',
+    expectedStep,
+  ].join('\n');
+  const errors = [];
+
+  if ([...checkJob.matchAll(checkoutPattern)].length !== 1) {
+    errors.push(
+      'CI check job checkout must disable persisted credentials before evaluating Expo config.',
+    );
+  }
+
+  if (nameCount !== 1 || commandCount !== 1 || step !== expectedStep) {
+    errors.push(
+      `CI check job must run exactly one blocking "${ENVIRONMENT_SMOKE_STEP_NAME}" step: ${ENVIRONMENT_SMOKE_COMMAND}`,
+    );
+  }
+  if (
+    installIndex < 0 ||
+    stepStart < installIndex ||
+    checkJob.split(expectedSequence).length !== 2
+  ) {
+    errors.push('CI environment smoke must run immediately after npm ci installs Expo.');
+  }
+  return errors;
+}
+
+export function environmentProbeProcessEnv(lane, ambientEnvironment = process.env) {
+  const environment = {
+    EXPO_NO_CLIENT_ENV_VARS: '1',
+    EXPO_NO_DOTENV: '1',
+    EXPO_NO_TELEMETRY: '1',
+  };
+  for (const name of [
+    'ComSpec',
+    'HOME',
+    'PATH',
+    'PATHEXT',
+    'SystemRoot',
+    'TEMP',
+    'TMP',
+    'TMPDIR',
+  ]) {
+    if (ambientEnvironment[name] != null) environment[name] = ambientEnvironment[name];
+  }
+  if (lane.lane !== 'local') {
+    environment.CI = '1';
+    environment.GATOR_ANDROID_ARCHITECTURES = lane.architectures;
+    environment.GOOGLE_SERVICES_JSON = lane.googleServicesFile;
+  }
+  return environment;
+}
+
+function resolvePublicExpoConfig(root, lane) {
+  const expoCli = resolve(root, 'node_modules/expo/bin/cli');
+  if (!existsSync(expoCli)) {
+    throw new Error(
+      'Environment smoke requires installed dependencies; run npm ci before this command.',
+    );
+  }
+
+  try {
+    return JSON.parse(
+      execFileSync(process.execPath, [expoCli, 'config', '--type', 'public', '--json'], {
+        cwd: root,
+        encoding: 'utf8',
+        env: environmentProbeProcessEnv(lane),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 30_000,
+      }),
+    );
+  } catch {
+    throw new Error(`Expo config resolution failed for the ${lane.lane} environment.`);
+  }
+}
+
+export function runEnvironmentSmoke({
+  root = process.cwd(),
+  resolveConfig = resolvePublicExpoConfig,
+  toolchain,
+} = {}) {
+  const eas = JSON.parse(readFileSync(resolve(root, 'eas.json'), 'utf8'));
+  const resolvedToolchain = toolchain ?? runToolchainCheck({ root });
+  const results = [];
+
+  for (const lane of environmentProbeLanes(eas)) {
+    const config = resolveConfig(root, lane);
+    const errors = validateResolvedEnvironmentConfig(config, lane);
+    if (errors.length > 0) {
+      throw new Error(`Environment model drift:\n- ${errors.join('\n- ')}`);
+    }
+    results.push({
+      lane: lane.lane,
+      environment: lane.environment,
+      node: resolvedToolchain.node,
+      npm: resolvedToolchain.npm,
+      easCli: resolvedToolchain.easCli,
+      androidArchitectures: lane.architectures,
+      firebaseConfig: lane.firebaseConfig,
+    });
+  }
+
+  return results;
+}
+
+export function formatEnvironmentProbe(result) {
+  return `Environment smoke passed: lane=${result.lane}; environment=${result.environment}; Node ${result.node}; npm ${result.npm}; EAS CLI ${result.easCli}; Android architectures=${result.androidArchitectures}; Firebase config=${result.firebaseConfig}.`;
 }
 
 function readNpmVersion() {
@@ -364,6 +579,7 @@ export function runToolchainCheck({ root = process.cwd() } = {}) {
   const packageLock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
   const eas = JSON.parse(readFileSync(resolve(root, 'eas.json'), 'utf8'));
   const releaseRunnerSource = readFileSync(resolve(root, 'scripts/release-android.mjs'), 'utf8');
+  const workflowSource = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
   const nvmNode = readFileSync(resolve(root, '.nvmrc'), 'utf8').trim();
   const actualNode = process.versions.node;
   const childNpm = readNpmVersion();
@@ -380,6 +596,7 @@ export function runToolchainCheck({ root = process.cwd() } = {}) {
       packageJson,
     }),
     ...validateReleaseRunnerSource(releaseRunnerSource),
+    ...validateEnvironmentSmokeWorkflowSource(workflowSource),
   ];
 
   if (errors.length > 0) throw new Error(`Toolchain drift:\n- ${errors.join('\n- ')}`);
@@ -395,10 +612,19 @@ const invokedDirectly =
   process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (invokedDirectly) {
   try {
+    const args = process.argv.slice(2);
+    if (args.some((arg) => arg !== ENVIRONMENT_SMOKE_FLAG) || args.length > 1) {
+      throw new Error(`Usage: node scripts/check-toolchain.mjs [${ENVIRONMENT_SMOKE_FLAG}]`);
+    }
     const result = runToolchainCheck();
     console.log(
       `Toolchain guard passed: Node ${result.node}; npm ${result.npm}; EAS CLI ${result.easCli} pinned in config and release commands; Android submission pinned to ${result.androidSubmitTrack}.`,
     );
+    if (args[0] === ENVIRONMENT_SMOKE_FLAG) {
+      for (const environmentResult of runEnvironmentSmoke({ toolchain: result })) {
+        console.log(formatEnvironmentProbe(environmentResult));
+      }
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

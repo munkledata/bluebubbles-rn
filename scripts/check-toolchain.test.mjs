@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 import {
   FORBIDDEN_NATIVE_BOUNDARY_PACKAGES,
+  REQUIRED_ANDROID_ARCHITECTURES,
   REQUIRED_EAS_CLI_VERSION,
   REQUIRED_EAS_SUBMIT_CONFIG,
   REQUIRED_NATIVE_BOUNDARY_PINS,
@@ -10,7 +13,13 @@ import {
   REQUIRED_NODE_VERSION,
   REQUIRED_NPM_VERSION,
   REQUIRED_RELEASE_SCRIPTS,
+  environmentProbeLanes,
+  environmentProbeProcessEnv,
+  formatEnvironmentProbe,
   npmVersionFromUserAgent,
+  runEnvironmentSmoke,
+  validateEnvironmentSmokeWorkflowSource,
+  validateResolvedEnvironmentConfig,
   validateToolchain,
 } from './check-toolchain.mjs';
 
@@ -24,6 +33,8 @@ const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
   'react-native-webview': '13.16.1',
 });
 const EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze(['expo-share-intent']);
+const root = resolve(import.meta.dirname, '..');
+const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 
 function validInput() {
   return {
@@ -53,10 +64,14 @@ function validInput() {
     eas: {
       cli: { version: REQUIRED_EAS_CLI_VERSION },
       build: Object.fromEntries([
-        ['base', { node: REQUIRED_NODE_VERSION }],
+        ['base', { environment: 'production', node: REQUIRED_NODE_VERSION }],
         ...['development', 'preview', 'production'].map((profile) => [
           profile,
-          { extends: 'base', environment: profile },
+          {
+            extends: 'base',
+            environment: profile,
+            env: { GATOR_ANDROID_ARCHITECTURES: REQUIRED_ANDROID_ARCHITECTURES[profile] },
+          },
         ]),
       ]),
       submit: structuredClone(REQUIRED_EAS_SUBMIT_CONFIG),
@@ -78,6 +93,246 @@ test('accepts the reviewed toolchain, environments, and Internal Testing submiss
 
 test('accepts direct node invocation when npm on PATH is still pinned', () => {
   assert.deepEqual(validateToolchain({ ...validInput(), invokingNpm: undefined }), []);
+});
+
+test('rejects Android architecture drift in every EAS environment', () => {
+  for (const profile of ['development', 'preview', 'production']) {
+    for (const replacement of [undefined, 'x86_64', 'arm64-v8a,x86_64,armeabi-v7a']) {
+      const input = validInput();
+      input.eas.build[profile].env.GATOR_ANDROID_ARCHITECTURES = replacement;
+      expectToolchainError(
+        input,
+        `EAS ${profile} profile env`,
+        `${profile}: ${String(replacement)}`,
+      );
+    }
+  }
+});
+
+test('rejects inherited env drift and unreviewed EAS build profiles', () => {
+  for (const [label, mutate, marker] of [
+    [
+      'base environment',
+      (input) => (input.eas.build.base.environment = 'development'),
+      'base profile must select the production environment',
+    ],
+    [
+      'base NODE_ENV',
+      (input) => (input.eas.build.base.env = { NODE_ENV: 'production' }),
+      'base profile must not declare inherited env values',
+    ],
+    [
+      'child canary',
+      (input) => (input.eas.build.preview.env.UNREVIEWED_CANARY = 'secret-ish'),
+      'preview profile env',
+    ],
+    [
+      'extra profile',
+      (input) => (input.eas.build.unreviewed = { extends: 'base' }),
+      'build profiles must be exactly',
+    ],
+    [
+      'missing profile',
+      (input) => delete input.eas.build.development,
+      'build profiles must be exactly',
+    ],
+  ]) {
+    const input = validInput();
+    mutate(input);
+    expectToolchainError(input, marker, label);
+  }
+});
+
+function resolvedConfigFor(lane) {
+  return {
+    name: 'Gator',
+    slug: 'bluegreengatorappsmessages',
+    android: {
+      package: 'com.bluegreengatorapps.messages',
+      googleServicesFile: lane.googleServicesFile,
+    },
+    plugins: [['./plugins/withArm64Only', { architectures: lane.architectures }]],
+  };
+}
+
+test('defines local, CI, preview, and production probes from the reviewed model', () => {
+  assert.deepEqual(
+    environmentProbeLanes(validInput().eas).map(
+      ({ lane, environment, architectures, firebaseConfig }) => ({
+        lane,
+        environment,
+        architectures,
+        firebaseConfig,
+      }),
+    ),
+    [
+      {
+        lane: 'local',
+        environment: 'local',
+        architectures: 'arm64-v8a,x86_64',
+        firebaseConfig: 'local-fallback',
+      },
+      {
+        lane: 'ci',
+        environment: 'development',
+        architectures: 'arm64-v8a,x86_64',
+        firebaseConfig: 'sentinel-file-path',
+      },
+      {
+        lane: 'preview',
+        environment: 'preview',
+        architectures: 'arm64-v8a,x86_64',
+        firebaseConfig: 'sentinel-file-path',
+      },
+      {
+        lane: 'production',
+        environment: 'production',
+        architectures: 'arm64-v8a',
+        firebaseConfig: 'sentinel-file-path',
+      },
+    ],
+  );
+});
+
+test('requires one blocking environment smoke after dependency installation in CI', () => {
+  assert.deepEqual(validateEnvironmentSmokeWorkflowSource(workflow), []);
+
+  for (const [label, mutated] of [
+    [
+      'persisted checkout credentials',
+      workflow.replace('          persist-credentials: false\n', ''),
+    ],
+    [
+      'missing flag',
+      workflow.replace(
+        'node scripts/check-toolchain.mjs --environment-smoke',
+        'node scripts/check-toolchain.mjs',
+      ),
+    ],
+    [
+      'non-blocking step',
+      workflow.replace(
+        '        run: node scripts/check-toolchain.mjs --environment-smoke',
+        '        continue-on-error: true\n        run: node scripts/check-toolchain.mjs --environment-smoke',
+      ),
+    ],
+    [
+      'before install',
+      workflow.replace(
+        [
+          '      - name: Install dependencies',
+          '        run: npm ci',
+          '',
+          '      - name: Smoke controlled environment config resolution',
+          '        run: node scripts/check-toolchain.mjs --environment-smoke',
+        ].join('\n'),
+        [
+          '      - name: Smoke controlled environment config resolution',
+          '        run: node scripts/check-toolchain.mjs --environment-smoke',
+          '',
+          '      - name: Install dependencies',
+          '        run: npm ci',
+        ].join('\n'),
+      ),
+    ],
+    [
+      'interposed step',
+      workflow.replace(
+        '        run: npm ci\n\n      - name: Smoke controlled environment config resolution',
+        [
+          '        run: npm ci',
+          '',
+          '      - name: Mutate configuration',
+          '        run: node scripts/unreviewed.mjs',
+          '',
+          '      - name: Smoke controlled environment config resolution',
+        ].join('\n'),
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, workflow, `${label} mutation must change the workflow`);
+    assert.ok(validateEnvironmentSmokeWorkflowSource(mutated).length > 0, label);
+  }
+});
+
+test('passes only runtime necessities and reviewed probe values to Expo config', () => {
+  const lanes = environmentProbeLanes(validInput().eas);
+  const ambient = {
+    HOME: '/private/home',
+    PATH: '/reviewed/bin',
+    TMPDIR: '/private/tmp',
+    NODE_ENV: 'production',
+    GOOGLE_SERVICES_JSON: '/private/real-google-services.json',
+    GATOR_ANDROID_ARCHITECTURES: 'unreviewed-abi',
+    SECRET_CANARY: 'must-not-reach-app-config',
+  };
+
+  const localEnvironment = environmentProbeProcessEnv(lanes[0], ambient);
+  assert.deepEqual(localEnvironment, {
+    EXPO_NO_CLIENT_ENV_VARS: '1',
+    EXPO_NO_DOTENV: '1',
+    EXPO_NO_TELEMETRY: '1',
+    HOME: '/private/home',
+    PATH: '/reviewed/bin',
+    TMPDIR: '/private/tmp',
+  });
+
+  const productionEnvironment = environmentProbeProcessEnv(lanes[3], ambient);
+  assert.equal(productionEnvironment.CI, '1');
+  assert.equal(productionEnvironment.GATOR_ANDROID_ARCHITECTURES, 'arm64-v8a');
+  assert.equal(productionEnvironment.GOOGLE_SERVICES_JSON, lanes[3].googleServicesFile);
+  assert.equal(productionEnvironment.NODE_ENV, undefined);
+  assert.equal(productionEnvironment.SECRET_CANARY, undefined);
+});
+
+test('rejects resolved Expo identity, Firebase-source, and architecture drift', () => {
+  const lane = environmentProbeLanes(validInput().eas)[2];
+  assert.ok(lane);
+  assert.deepEqual(validateResolvedEnvironmentConfig(resolvedConfigFor(lane), lane), []);
+
+  for (const [label, mutate] of [
+    ['name', (config) => (config.name = 'Other')],
+    ['slug', (config) => (config.slug = 'other')],
+    ['package', (config) => (config.android.package = 'com.example.other')],
+    ['Firebase source', (config) => (config.android.googleServicesFile = './secret.json')],
+    ['missing architecture plugin', (config) => (config.plugins = [])],
+    ['duplicate architecture plugin', (config) => config.plugins.push(config.plugins[0])],
+    ['architecture value', (config) => (config.plugins[0][1].architectures = 'x86_64')],
+  ]) {
+    const config = resolvedConfigFor(lane);
+    mutate(config);
+    assert.ok(validateResolvedEnvironmentConfig(config, lane).length > 0, label);
+  }
+});
+
+test('emits an allowlisted environment report without file values or paths', () => {
+  const results = runEnvironmentSmoke({
+    root,
+    resolveConfig: (_root, lane) => resolvedConfigFor(lane),
+    toolchain: {
+      node: REQUIRED_NODE_VERSION,
+      npm: REQUIRED_NPM_VERSION,
+      easCli: REQUIRED_EAS_CLI_VERSION,
+    },
+  });
+  assert.deepEqual(
+    results.map((result) => Object.keys(result)),
+    Array.from({ length: 4 }, () => [
+      'lane',
+      'environment',
+      'node',
+      'npm',
+      'easCli',
+      'androidArchitectures',
+      'firebaseConfig',
+    ]),
+  );
+  const output = results.map(formatEnvironmentProbe).join('\n');
+  assert.doesNotMatch(output, /google-services|gator_environment_probe|\.json|\//i);
+  assert.match(output, /lane=local; environment=local/);
+  assert.match(output, /lane=ci; environment=development/);
+  assert.match(output, /lane=preview; environment=preview/);
+  assert.match(output, /lane=production; environment=production/);
 });
 
 test('owns the exact reviewed native boundary and forbidden-package sets', () => {
@@ -303,7 +558,7 @@ test('rejects drift in every executable and declarative toolchain boundary', () 
     'EAS base',
     'preview profile must extend base',
     'preview profile must select the preview environment',
-    'must not overload NODE_ENV',
+    'preview profile env',
     'EAS submit configuration',
   ]) {
     assert.ok(
