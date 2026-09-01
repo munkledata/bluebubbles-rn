@@ -44,7 +44,7 @@ const SCHEDULED_DB_RUNNER_LINES = [
   '}',
   'trap cleanup EXIT',
   'adb -s "$ANDROID_SERIAL" install -r "$APK_PATH"',
-  'CI=1 npm start -- --dev-client --localhost >"$METRO_LOG" 2>&1 &',
+  'CI=1 EXPO_UNSTABLE_HEADLESS=1 NODE_OPTIONS=--dns-result-order=ipv4first npm start -- --dev-client --localhost >"$METRO_LOG" 2>&1 &',
   'metro_pid=$!',
   'metro_ready=0',
   'for _attempt in {1..90}; do',
@@ -108,7 +108,7 @@ function hasStandaloneLine(block, value) {
 
 function liveTrimmedLines(source) {
   return linesOf(source ?? '')
-    .map((line) => line.trim())
+    .map((line) => line.replace(/^[ \t]+|[ \t]+$/g, ''))
     .filter((line) => line && !line.startsWith('#'));
 }
 

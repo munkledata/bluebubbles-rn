@@ -155,6 +155,12 @@ test('pins the Android DB runner lifecycle and exact four-lane sequence', () => 
   for (const [label, target, replacement] of [
     ['fail-fast shell', 'set -euo pipefail', 'set +e'],
     ['cleanup trap', 'trap cleanup EXIT', 'trap - EXIT'],
+    ['headless Expo', 'EXPO_UNSTABLE_HEADLESS=1', 'EXPO_UNSTABLE_HEADLESS=0'],
+    [
+      'IPv4 localhost resolution',
+      'NODE_OPTIONS=--dns-result-order=ipv4first',
+      'NODE_OPTIONS=--dns-result-order=verbatim',
+    ],
     ['contract lane', 'npm run test:android:db\n', 'npm --version\n'],
     ['relaunch lane', 'npm run test:android:db:relaunch\n', 'npm --version\n'],
     ['WAL lane', 'npm run test:android:db:wal-write-death\n', 'npm --version\n'],
@@ -179,6 +185,30 @@ test('pins the Android DB runner lifecycle and exact four-lane sequence', () => 
       error.includes('scheduled Android DB runner'),
     ),
   );
+
+  const withBrokenEnvironmentContinuation = androidDbRunner.replace(
+    'NODE_OPTIONS=--dns-result-order=ipv4first npm start',
+    'NODE_OPTIONS=--dns-result-order=ipv4first \\\n# break the exported environment\nnpm start',
+  );
+  assert.notEqual(withBrokenEnvironmentContinuation, androidDbRunner);
+  assert.ok(
+    errorsFor(workflow, dependabot, withBrokenEnvironmentContinuation).some((error) =>
+      error.includes('scheduled Android DB runner'),
+    ),
+  );
+
+  for (const mutated of [
+    androidDbRunner.replace('trap cleanup EXIT', 'trap cleanup EXIT\n\u00a0#not-a-bash-comment'),
+    androidDbRunner.replace('CI=1 EXPO_UNSTABLE_HEADLESS=1', '\u00a0CI=1 EXPO_UNSTABLE_HEADLESS=1'),
+  ]) {
+    assert.notEqual(mutated, androidDbRunner, 'Unicode mutation must change the fixture');
+    assert.ok(
+      errorsFor(workflow, dependabot, mutated).some((error) =>
+        error.includes('scheduled Android DB runner'),
+      ),
+      'Unicode shell whitespace must fail closed',
+    );
+  }
 });
 
 test('rejects unreviewed steps that can mutate scheduled Android DB evidence', () => {
