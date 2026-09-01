@@ -4,13 +4,18 @@ on:
   push:
     branches: [master, main, development]
   pull_request:
+  schedule:
+    # Weekly Tuesday 07:17 UTC (01:17 America/Denver while daylight saving is active).
+    # Use a non-zero minute to reduce GitHub scheduler congestion.
+    - cron: '17 7 * * 2'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # Cancel superseded runs on the same ref.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -176,3 +181,79 @@ jobs:
 
       - name: Verify debug/release manifests, release AAB, and headless entry
         run: npm run check:android-build
+
+      - name: Retain debug APK for scheduled database checks
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scheduled-android-db-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  android-db:
+    name: Scheduled Android DB · API 36 x86_64
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify toolchain pins
+        run: node scripts/check-toolchain.mjs
+
+      - name: Set up Java
+        uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4.9.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download reviewed debug APK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scheduled-android-db-debug-apk
+          path: android/app/build/outputs/apk/debug
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run real Android database lanes
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          ANDROID_SERIAL: emulator-5554
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          emulator-port: 5554
+          disable-animations: true
+          script: bash scripts/run-android-db-ci.sh
+
+      - name: Retain privacy-safe Android database reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scheduled-android-db-reports
+          path: |
+            android/app/build/reports/db-contract/android-db-contract-*.json
+            android/app/build/reports/db-relaunch/android-db-relaunch-*.json
+            android/app/build/reports/db-wal-write-death/android-db-wal-write-death-*.json
+            android/app/build/reports/db-active-migration-death/android-db-active-migration-death-*.json
+          if-no-files-found: error
+          retention-days: 14

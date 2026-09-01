@@ -8,6 +8,7 @@ import { validateWorkflowSecurity } from './check-workflow-security.mjs';
 const root = resolve(import.meta.dirname, '..');
 const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 const dependabot = readFileSync(resolve(root, '.github/dependabot.yml'), 'utf8');
+const androidDbRunner = readFileSync(resolve(root, 'scripts/run-android-db-ci.sh'), 'utf8');
 const toolchainPolicyTestStep = [
   '      - name: Test toolchain policy',
   '        run: node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs',
@@ -18,10 +19,15 @@ const toolchainGuardStep = [
 ].join('\n');
 const installStep = ['      - name: Install dependencies', '        run: npm ci'].join('\n');
 
-function errorsFor(workflowMutation = workflow, dependabotMutation = dependabot) {
+function errorsFor(
+  workflowMutation = workflow,
+  dependabotMutation = dependabot,
+  androidDbRunnerMutation = androidDbRunner,
+) {
   return validateWorkflowSecurity({
     workflow: workflowMutation,
     dependabot: dependabotMutation,
+    androidDbRunner: androidDbRunnerMutation,
   });
 }
 
@@ -40,13 +46,163 @@ test('accepts the repository workflow and Dependabot policy', () => {
   assert.deepEqual(errorsFor(), []);
 });
 
-test('requires one exact direct toolchain guard before npm ci in both CI jobs', () => {
-  assert.equal(workflow.split(toolchainGuardStep).length - 1, 2);
-  assert.equal(workflow.split(installStep).length - 1, 2);
+test('requires the reviewed weekly schedule, manual trigger, and event-isolated concurrency', () => {
+  for (const [label, target, replacement, expectedError] of [
+    ['schedule', '  schedule:\n', '  schedule-disabled:\n', 'workflow triggers'],
+    ['cron', "- cron: '17 7 * * 2'", "- cron: '0 7 * * 2'", 'weekly Android DB schedule'],
+    [
+      'manual trigger',
+      '  workflow_dispatch:\n',
+      '  workflow_dispatch_disabled:\n',
+      'workflow triggers',
+    ],
+    [
+      'concurrency',
+      'group: ci-${{ github.event_name }}-${{ github.ref }}',
+      'group: ci-${{ github.ref }}',
+      'concurrency',
+    ],
+  ]) {
+    const mutated = workflow.replace(target, replacement);
+    assert.notEqual(mutated, workflow, `${label} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) => error.includes(expectedError)),
+      `${label} must fail closed`,
+    );
+  }
+});
+
+test('requires the reviewed debug APK handoff after Android artifact verification', () => {
+  for (const [label, target, replacement] of [
+    [
+      'event condition',
+      "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+      'if: always()',
+    ],
+    ['artifact name', 'name: scheduled-android-db-debug-apk', 'name: unreviewed-apk'],
+    ['missing-file policy', 'if-no-files-found: error', 'if-no-files-found: warn'],
+  ]) {
+    const mutated = workflow.replace(target, replacement);
+    assert.notEqual(mutated, workflow, `${label} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) =>
+        error.includes('Retain debug APK for scheduled database checks'),
+      ),
+      `${label} must fail closed`,
+    );
+  }
+
+  const stepStart = '      - name: Retain debug APK for scheduled database checks';
+  const stepEnd = '\n\n  android-db:';
+  const start = workflow.indexOf(stepStart);
+  const end = workflow.indexOf(stepEnd, start);
+  assert.ok(start >= 0 && end > start, 'the APK handoff step must exist in the fixture');
+  const step = workflow.slice(start, end);
+  const withoutStep = `${workflow.slice(0, start)}${workflow.slice(end)}`;
+  const moved = withoutStep.replace(
+    '      - name: Verify debug/release manifests, release AAB, and headless entry',
+    `${step}\n\n      - name: Verify debug/release manifests, release AAB, and headless entry`,
+  );
+  assert.ok(
+    errorsFor(moved).some((error) => error.includes('immediately follow the packaged Android')),
+  );
+
+  const mutatingStep = [
+    '      - name: Mutate APK after verification',
+    '        run: touch android/app/build/outputs/apk/debug/app-debug.apk',
+    '',
+  ].join('\n');
+  const mutatedAfterVerification = workflow.replace(stepStart, `${mutatingStep}${stepStart}`);
+  assert.notEqual(mutatedAfterVerification, workflow);
+  assert.ok(
+    errorsFor(mutatedAfterVerification).some((error) =>
+      error.includes('immediately follow the packaged Android'),
+    ),
+  );
+});
+
+test('pins the scheduled Android DB emulator command and finite report upload', () => {
+  for (const [label, target, replacement] of [
+    ['job dependency', '    needs: android', '    needs: check'],
+    ['Android API', '          api-level: 36', '          api-level: 35'],
+    ['emulator ABI', '          arch: x86_64', '          arch: arm64-v8a'],
+    [
+      'runner command',
+      '          script: bash scripts/run-android-db-ci.sh',
+      '          script: bash scripts/unreviewed.sh',
+    ],
+    [
+      'report terminal condition',
+      '      - name: Retain privacy-safe Android database reports\n        if: always()',
+      '      - name: Retain privacy-safe Android database reports\n        if: success()',
+    ],
+    [
+      'report scope',
+      '            android/app/build/reports/db-contract/android-db-contract-*.json',
+      '            android/app/build/reports/**',
+    ],
+  ]) {
+    const mutated = workflow.replace(target, replacement);
+    assert.notEqual(mutated, workflow, `${label} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) => error.includes('scheduled Android DB job')),
+      `${label} must fail closed`,
+    );
+  }
+});
+
+test('pins the Android DB runner lifecycle and exact four-lane sequence', () => {
+  for (const [label, target, replacement] of [
+    ['fail-fast shell', 'set -euo pipefail', 'set +e'],
+    ['cleanup trap', 'trap cleanup EXIT', 'trap - EXIT'],
+    ['contract lane', 'npm run test:android:db\n', 'npm --version\n'],
+    ['relaunch lane', 'npm run test:android:db:relaunch\n', 'npm --version\n'],
+    ['WAL lane', 'npm run test:android:db:wal-write-death\n', 'npm --version\n'],
+    ['migration lane', 'npm run test:android:db:active-migration-death\n', 'npm --version\n'],
+  ]) {
+    const mutated = androidDbRunner.replace(target, replacement);
+    assert.notEqual(mutated, androidDbRunner, `${label} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(workflow, dependabot, mutated).some((error) =>
+        error.includes('scheduled Android DB runner'),
+      ),
+      `${label} must fail closed`,
+    );
+  }
+
+  const withUnrelatedLane = androidDbRunner.replace(
+    'npm run test:android:db:active-migration-death',
+    'npm run test:android:db:active-migration-death\nnpm run test:android:db:runtime-concurrency',
+  );
+  assert.ok(
+    errorsFor(workflow, dependabot, withUnrelatedLane).some((error) =>
+      error.includes('scheduled Android DB runner'),
+    ),
+  );
+});
+
+test('rejects unreviewed steps that can mutate scheduled Android DB evidence', () => {
+  const extraStep = [
+    '      - name: Mutate downloaded evidence input',
+    '        run: touch android/app/build/outputs/apk/debug/app-debug.apk',
+    '',
+  ].join('\n');
+  const mutated = workflow.replace(
+    '      - name: Enable KVM',
+    `${extraStep}      - name: Enable KVM`,
+  );
+  assert.notEqual(mutated, workflow);
+  assert.ok(errorsFor(mutated).some((error) => error.includes('exact reviewed step order')));
+});
+
+test('requires one exact direct toolchain guard before npm ci in all installing CI jobs', () => {
+  assert.equal(workflow.split(toolchainGuardStep).length - 1, 3);
+  assert.equal(workflow.split(installStep).length - 1, 3);
 
   for (const [jobLabel, occurrence] of [
     ['CI check job', 0],
     ['Android CI job', 1],
+    ['Scheduled Android DB job', 2],
   ]) {
     const missing = replaceOccurrence(
       workflow,
@@ -552,6 +708,35 @@ test('requires debug and release packaging to use separate Gradle invocations', 
 
   const missingDebug = workflow.replace(':app:assembleDebug', ':app:tasks');
   assert.ok(errorsFor(missingDebug).some((error) => error.includes('debug APK in its own')));
+
+  const overwriteAfterAssemble = workflow.replace(
+    '        run: ./gradlew :app:assembleDebug --no-daemon',
+    [
+      '        run: |',
+      '          ./gradlew :app:assembleDebug --no-daemon',
+      "          printf 'unreviewed' > app/build/outputs/apk/debug/app-debug.apk",
+    ].join('\n'),
+  );
+  assert.notEqual(overwriteAfterAssemble, workflow);
+  assert.ok(
+    errorsFor(overwriteAfterAssemble).some((error) =>
+      error.includes('exact reviewed "Assemble debug APK" step'),
+    ),
+  );
+
+  const extraTailStep = workflow.replace(
+    '      - name: Bundle release AAB',
+    [
+      '      - name: Mutate built APK',
+      "        run: printf 'unreviewed' > android/app/build/outputs/apk/debug/app-debug.apk",
+      '',
+      '      - name: Bundle release AAB',
+    ].join('\n'),
+  );
+  assert.notEqual(extraTailStep, workflow);
+  assert.ok(
+    errorsFor(extraTailStep).some((error) => error.includes('exact reviewed build, verification')),
+  );
 });
 
 test('requires the packaged Android artifact guard', () => {
