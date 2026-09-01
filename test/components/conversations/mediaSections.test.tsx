@@ -134,6 +134,23 @@ describe('MediaSections', () => {
     expect(safeOpenUrl).toHaveBeenCalledWith('https://example.com/a');
   });
 
+  it('opens the dedicated document explorer from its bounded count summary', async () => {
+    const onOpenDocuments = jest.fn();
+    await renderWithTheme(
+      <MediaSections
+        media={media()}
+        documentSummary={{ loadedCount: 50, hasMore: true }}
+        onOpenMedia={() => {}}
+        onOpenDocuments={onOpenDocuments}
+      />,
+    );
+
+    const row = screen.getByRole('button', { name: 'Shared documents, 50+' });
+    expect(screen.getByText('50+')).toBeTruthy();
+    await fireEvent.press(row);
+    expect(onOpenDocuments).toHaveBeenCalledTimes(1);
+  });
+
   it('delegates a tapped link to an explicit owner instead of the default native opener', async () => {
     const onOpenLink = jest.fn();
     await renderWithTheme(

@@ -2809,6 +2809,10 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4783aae969eb',
       'src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:fcf22eadb47f',
       'src/ui/attachments/FileChip.tsx#FileChip:mutator-reference:8833b8ec6280',
+      'src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>:mutator-call:309818d28369',
+      'src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:3ed9d17a6f21',
+      'src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:fb357510cd01',
+      'src/ui/attachments/FileChip.tsx#SharedDocumentRow:mutator-reference:70e78024ad82',
       'src/ui/attachments/ImageAttachment.tsx#ImageAttachment.<callback:3ce78bcbe6>:mutator-call:d25f31bcd5a6',
       'src/ui/attachments/ImageAttachment.tsx#ImageAttachment.onPress:mutator-call:75c9a2b2048c',
       'src/ui/attachments/ImageAttachment.tsx#ImageAttachment:mutator-reference:82a46914061d',
@@ -2820,7 +2824,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c',
     ].sort(),
   );
-  assert.equal(delegated.length, 26);
+  assert.equal(delegated.length, 30);
   assert.equal(
     findings.some((finding) => finding.symbol.includes('runTrackedDownloadTransaction')),
     false,

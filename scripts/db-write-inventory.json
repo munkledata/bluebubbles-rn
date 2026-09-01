@@ -4255,7 +4255,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-delete:899e9481fcb6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 51,
+      "line": 52,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-delete",
       "target": "attachments",
@@ -4268,7 +4268,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-update:08e96c608c66",
       "path": "src/db/repositories/attachments.ts",
-      "line": 53,
+      "line": 54,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-update",
       "target": "attachments",
@@ -4281,7 +4281,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-insert:60b5aec7b47b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 60,
+      "line": 61,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -4294,7 +4294,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachments:mutator-call:109ca20347f4",
       "path": "src/db/repositories/attachments.ts",
-      "line": 115,
+      "line": 116,
       "symbol": "upsertAttachments",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4307,7 +4307,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachments:mutator-call:e0117d873e1a",
       "path": "src/db/repositories/attachments.ts",
-      "line": 115,
+      "line": 116,
       "symbol": "upsertAttachments",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#upsertAttachments.<callback:5ac179fc7b>",
@@ -4320,7 +4320,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachments.<callback:5ac179fc7b>:mutator-call:10ee6fb7163d",
       "path": "src/db/repositories/attachments.ts",
-      "line": 117,
+      "line": 118,
       "symbol": "upsertAttachments.<callback:5ac179fc7b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction",
@@ -4333,7 +4333,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:fc8d72883c5b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 513,
+      "line": 585,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "messages",
@@ -4346,7 +4346,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:eca25accb829",
       "path": "src/db/repositories/attachments.ts",
-      "line": 527,
+      "line": 599,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -4359,7 +4359,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358",
       "path": "src/db/repositories/attachments.ts",
-      "line": 537,
+      "line": 609,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "outgoingQueue",
@@ -4372,7 +4372,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-update:1de3c8263d4f",
       "path": "src/db/repositories/attachments.ts",
-      "line": 543,
+      "line": 615,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -4385,7 +4385,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:060b68f9fb33",
       "path": "src/db/repositories/attachments.ts",
-      "line": 557,
+      "line": 629,
       "symbol": "insertOutgoingAttachment",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>",
@@ -4398,7 +4398,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:2109f62f577e",
       "path": "src/db/repositories/attachments.ts",
-      "line": 557,
+      "line": 629,
       "symbol": "insertOutgoingAttachment",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4411,7 +4411,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>:mutator-call:3069c9e0883c",
       "path": "src/db/repositories/attachments.ts",
-      "line": 558,
+      "line": 630,
       "symbol": "insertOutgoingAttachment.<callback:a5e1fc3fd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction",
@@ -4424,7 +4424,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction:sql-update:cdd120954cda",
       "path": "src/db/repositories/attachments.ts",
-      "line": 573,
+      "line": 645,
       "symbol": "updateAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -4437,7 +4437,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:420a1a02f6e6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 606,
+      "line": 678,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4450,7 +4450,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:814cc10efe69",
       "path": "src/db/repositories/attachments.ts",
-      "line": 606,
+      "line": 678,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>",
@@ -4463,7 +4463,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>:mutator-call:8bfa38b73ef8",
       "path": "src/db/repositories/attachments.ts",
-      "line": 607,
+      "line": 679,
       "symbol": "updateAttachmentLocalPath.<callback:64ad543547>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",
@@ -21714,7 +21714,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:fcf22eadb47f",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 52,
+      "line": 54,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -21727,7 +21727,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4783aae969eb",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 57,
+      "line": 59,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>",
@@ -21740,7 +21740,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>:mutator-call:b00e65e1611c",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 67,
+      "line": 69,
       "symbol": "FileChip.onPress.<callback:08fd24739a>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -21753,7 +21753,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip:mutator-reference:8833b8ec6280",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 79,
+      "line": 81,
       "symbol": "FileChip",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress",
@@ -21762,6 +21762,58 @@
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
+    },
+    {
+      "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:3ed9d17a6f21",
+      "path": "src/ui/attachments/FileChip.tsx",
+      "line": 213,
+      "symbol": "SharedDocumentRow.onPress",
+      "operation": "mutator-call",
+      "target": "src/services/download/index.ts#download",
+      "detectedContext": "coordinated-delegation",
+      "owner": "SharedDocumentRow.onPress",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/components/conversations/sharedDocumentsScreen.test.tsx"
+    },
+    {
+      "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:fb357510cd01",
+      "path": "src/ui/attachments/FileChip.tsx",
+      "line": 221,
+      "symbol": "SharedDocumentRow.onPress",
+      "operation": "mutator-call",
+      "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>",
+      "detectedContext": "coordinated-delegation",
+      "owner": "SharedDocumentRow.onPress",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/components/conversations/sharedDocumentsScreen.test.tsx"
+    },
+    {
+      "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>:mutator-call:309818d28369",
+      "path": "src/ui/attachments/FileChip.tsx",
+      "line": 228,
+      "symbol": "SharedDocumentRow.onPress.<callback:f4a342b533>",
+      "operation": "mutator-call",
+      "target": "src/services/download/index.ts#download",
+      "detectedContext": "coordinated-delegation",
+      "owner": "SharedDocumentRow.onPress",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/components/conversations/sharedDocumentsScreen.test.tsx"
+    },
+    {
+      "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow:mutator-reference:70e78024ad82",
+      "path": "src/ui/attachments/FileChip.tsx",
+      "line": 243,
+      "symbol": "SharedDocumentRow",
+      "operation": "mutator-reference",
+      "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress",
+      "detectedContext": "coordinated-delegation",
+      "owner": "SharedDocumentRow",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/components/conversations/sharedDocumentsScreen.test.tsx"
     },
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.<callback:3ce78bcbe6>:mutator-call:d25f31bcd5a6",

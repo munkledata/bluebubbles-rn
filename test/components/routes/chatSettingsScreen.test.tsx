@@ -342,6 +342,43 @@ jest.mock('@features/conversations/useChatHeader', () => ({
   },
 }));
 
+jest.mock('@features/conversations/useSharedDocuments', () => ({
+  useSharedDocuments: (guid: string) => {
+    const source = mockSourceFor(guid);
+    return {
+      data: {
+        items: [
+          {
+            id: 2,
+            guid: `${source.mediaGuid}-document`,
+            messageId: 92,
+            mimeType: 'application/pdf',
+            transferName: 'shared-document.pdf',
+            totalBytes: 2000,
+            height: null,
+            width: null,
+            blurhash: null,
+            hasLivePhoto: 0,
+            isSticker: 0,
+            hideAttachment: 0,
+            localPath: null,
+            service: null,
+            dateCreated: 2,
+          },
+        ],
+        hasMore: false,
+      },
+      isLoading: false,
+      error: null,
+      hasMore: false,
+      loadingMore: false,
+      loadMoreError: null,
+      loadMore: jest.fn(),
+      retry: jest.fn(),
+    };
+  },
+}));
+
 jest.mock('@utils', () => ({
   isGroupRow: (row: { style?: number }) => row.style === 43,
   resolveTitle: (row: { customName?: string | null; displayName?: string | null }) =>
@@ -751,6 +788,8 @@ describe('ChatSettingsScreen source and account ownership', () => {
 
     await fireEvent.press(screen.getByRole('image'));
     expect(mockPush).toHaveBeenCalledWith(`/media/${encodeURIComponent(source.mediaGuid)}`);
+    await fireEvent.press(screen.getByRole('button', { name: 'Shared documents, 1' }));
+    expect(mockPush).toHaveBeenCalledWith(`/documents/${encodeURIComponent(guid)}`);
     await fireEvent.press(screen.getByText(source.link));
     expect(mockSafeOpenUrl).toHaveBeenCalledWith(source.link);
     await fireEvent.press(screen.getByRole('button', { name: 'Back' }));
@@ -760,6 +799,9 @@ describe('ChatSettingsScreen source and account ownership', () => {
   it('key-remounts pending B without retained A data and revokes A callbacks across A to B to A', async () => {
     const view = await renderWithTheme(<ChatSettingsScreen />);
     const oldMedia = retainConfiguredPress(screen.getByRole('image'));
+    const oldDocuments = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Shared documents, 1' }),
+    );
     const oldLink = retainConfiguredPress(screen.getByText(PRIVATE_LINK).parent!);
     const oldOpenStudio = retainConfiguredPress(screen.getByText('Chat Theme…').parent!);
     await fireEvent.press(
@@ -828,13 +870,16 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(JSON.stringify(view.toJSON())).toContain(PRIVATE_MEDIA_URI);
 
     oldMedia();
+    oldDocuments();
     oldLink();
     expect(mockPush).not.toHaveBeenCalled();
     expect(mockSafeOpenUrl).not.toHaveBeenCalled();
 
     await fireEvent.press(screen.getByRole('image'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Shared documents, 1' }));
     await fireEvent.press(screen.getByText(PRIVATE_LINK));
     expect(mockPush).toHaveBeenCalledWith(`/media/${encodeURIComponent(MEDIA_GUID)}`);
+    expect(mockPush).toHaveBeenCalledWith(`/documents/${encodeURIComponent(CHAT_GUID)}`);
     expect(mockSafeOpenUrl).toHaveBeenCalledWith(PRIVATE_LINK);
   });
 

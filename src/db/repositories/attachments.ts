@@ -11,6 +11,7 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
+import { chatVisible } from './chatVisibility';
 import { requireChatIdByGuidWithinTransaction } from './chats';
 
 /**
@@ -392,6 +393,77 @@ export interface ChatMediaByKind {
   videos: AttachmentRow[];
   documents: AttachmentRow[];
   links: ChatLink[];
+}
+
+/** Number of additional shared documents requested by each explorer pagination step. */
+export const CHAT_DOCUMENT_PAGE_SIZE = 50;
+
+/** A visible non-photo/video attachment plus its stable conversation ordering key. */
+export interface ChatDocumentRow extends AttachmentRow {
+  dateCreated: number | null;
+}
+
+/** A bounded newest-first prefix for the Shared Documents explorer. */
+export interface ChatDocumentPage {
+  items: ChatDocumentRow[];
+  hasMore: boolean;
+}
+
+/**
+ * Visible documents for one chat, newest-first.
+ *
+ * The explorer grows this bounded prefix by exactly {@link CHAT_DOCUMENT_PAGE_SIZE} rows. Fetching
+ * one extra row proves whether more remain without running an unbounded COUNT. This is deliberately
+ * separate from `listChatAttachmentsByKind`: that lightweight mixed-media strip scans only a
+ * recent window and can miss an old document behind a photo-heavy conversation.
+ */
+export async function listChatDocumentAttachmentsPage(
+  db: AppDatabase,
+  chatGuid: string,
+  limit = CHAT_DOCUMENT_PAGE_SIZE,
+): Promise<ChatDocumentPage> {
+  if (
+    chatGuid.length === 0 ||
+    chatGuid.length > 4096 ||
+    !Number.isSafeInteger(limit) ||
+    limit <= 0 ||
+    limit % CHAT_DOCUMENT_PAGE_SIZE !== 0 ||
+    limit >= Number.MAX_SAFE_INTEGER
+  ) {
+    return { items: [], hasMore: false };
+  }
+
+  const rows = await db.all<ChatDocumentRow>(sql`
+    SELECT
+      a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
+      a.transfer_name AS transferName, a.total_bytes AS totalBytes,
+      a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
+      a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment,
+      a.emoji_image_content_identifier AS emojiImageContentIdentifier,
+      a.emoji_image_short_description AS emojiImageShortDescription,
+      a.local_path AS localPath, ${RCS_SERVICE_CASE} AS service,
+      m.date_created AS dateCreated
+    FROM attachments a
+    JOIN messages m ON m.id = a.message_id
+    JOIN chats c ON c.id = m.chat_id
+    WHERE c.guid = ${chatGuid}
+      AND ${chatVisible('c')}
+      AND a.is_sticker = 0
+      AND a.hide_attachment = 0
+      AND m.balloon_bundle_id IS NULL
+      AND m.date_retracted IS NULL
+      AND m.date_deleted IS NULL
+      AND (
+        c.deleted_at IS NULL
+        OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
+      )
+      AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'image/*'
+      AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'video/*'
+    ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, a.id DESC
+    LIMIT ${limit + 1}
+  `);
+
+  return { items: rows.slice(0, limit), hasMore: rows.length > limit };
 }
 
 /**

@@ -1,7 +1,9 @@
 import { Attachment, Chat, Message } from '@core/models';
 import {
   listChatAttachmentsByKind,
+  listChatDocumentAttachmentsPage,
   listChatImageAttachmentsByAttachmentGuid,
+  updateAttachmentLocalPath,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -144,6 +146,206 @@ describe('listChatAttachmentsByKind (2.1)', () => {
     const media = await listChatAttachmentsByKind(db, 'empty');
 
     expect(media).toEqual({ photos: [], videos: [], documents: [], links: [] });
+  });
+});
+
+describe('listChatDocumentAttachmentsPage (FEAT-07A)', () => {
+  it('grows a stable 50-row prefix, orders null dates last, and refreshes local paths', async () => {
+    const { db } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'docs@x.com' }]);
+    const chats = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'docs-chat', participants: [{ address: 'docs@x.com' }] })],
+      handles,
+    );
+    const chatId = chats.get('docs-chat')!;
+    const documentMessages = Array.from({ length: 52 }, (_, index) =>
+      Message.parse({
+        guid: `doc-message-${index}`,
+        dateCreated: index === 0 ? null : index >= 50 ? 5_000 : index * 100,
+        hasAttachments: true,
+        handle: { address: 'docs@x.com' },
+        attachments: [
+          Attachment.parse({
+            guid: `doc-attachment-${index}`,
+            mimeType: 'application/pdf',
+            transferName: `document-${index}.pdf`,
+            totalBytes: index + 100,
+          }),
+        ],
+      }),
+    );
+    await upsertMessages(db, documentMessages, () => chatId, handles);
+
+    const first = await listChatDocumentAttachmentsPage(db, 'docs-chat');
+    const second = await listChatDocumentAttachmentsPage(db, 'docs-chat', 100);
+
+    expect(first.items).toHaveLength(50);
+    expect(first.hasMore).toBe(true);
+    expect(second.items).toHaveLength(52);
+    expect(second.hasMore).toBe(false);
+    expect(second.items.slice(0, 50).map((row) => row.guid)).toEqual(
+      first.items.map((row) => row.guid),
+    );
+    expect(second.items.slice(0, 2).map((row) => row.guid)).toEqual([
+      'doc-attachment-51',
+      'doc-attachment-50',
+    ]);
+    expect(second.items.at(-1)?.guid).toBe('doc-attachment-0');
+
+    await updateAttachmentLocalPath(db, 'doc-attachment-25', 'file:///documents/25.pdf');
+    const refreshed = await listChatDocumentAttachmentsPage(db, 'docs-chat', 100);
+    expect(refreshed.items.find((row) => row.guid === 'doc-attachment-25')?.localPath).toBe(
+      'file:///documents/25.pdf',
+    );
+    await expect(listChatDocumentAttachmentsPage(db, 'docs-chat', 51)).resolves.toEqual({
+      items: [],
+      hasMore: false,
+    });
+  });
+
+  it('finds an old document behind a photo-heavy strip and excludes private or deleted rows', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'mixed@x.com' }]);
+    const chats = await upsertChats(
+      db,
+      [
+        Chat.parse({ guid: 'mixed-chat', participants: [{ address: 'mixed@x.com' }] }),
+        Chat.parse({ guid: 'hidden-chat', participants: [{ address: 'mixed@x.com' }] }),
+      ],
+      handles,
+    );
+    const mixedChatId = chats.get('mixed-chat')!;
+    const hiddenChatId = chats.get('hidden-chat')!;
+    const photos = Array.from({ length: 241 }, (_, index) =>
+      Message.parse({
+        guid: `recent-photo-message-${index}`,
+        dateCreated: index + 100,
+        hasAttachments: true,
+        handle: { address: 'mixed@x.com' },
+        attachments: [
+          Attachment.parse({
+            guid: `recent-photo-${index}`,
+            mimeType: 'image/jpeg',
+            transferName: `photo-${index}.jpg`,
+          }),
+        ],
+      }),
+    );
+    const documents = [
+      ['visible', null, false, false],
+      ['sticker', 'application/pdf', true, false],
+      ['hidden', 'application/pdf', false, true],
+      ['plugin', 'application/pdf', false, false],
+      ['deleted', 'application/pdf', false, false],
+      ['retracted', 'application/pdf', false, false],
+      ['video', 'video/mp4', false, false],
+      ['uppercase-image', 'IMAGE/JPEG', false, false],
+    ] as const;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'old-document-message',
+          dateCreated: 1,
+          hasAttachments: true,
+          handle: { address: 'mixed@x.com' },
+          attachments: [
+            Attachment.parse({
+              guid: 'old-document',
+              mimeType: 'application/pdf',
+              transferName: 'old.pdf',
+            }),
+          ],
+        }),
+        ...photos,
+        ...documents.map(([name, mimeType, isSticker, hideAttachment], index) =>
+          Message.parse({
+            guid: `${name}-document-message`,
+            dateCreated: 1_000 + index,
+            hasAttachments: true,
+            handle: { address: 'mixed@x.com' },
+            attachments: [
+              Attachment.parse({
+                guid: `${name}-document`,
+                mimeType,
+                transferName: `${name}.bin`,
+                isSticker,
+                hideAttachment,
+              }),
+            ],
+          }),
+        ),
+      ],
+      () => mixedChatId,
+      handles,
+    );
+    raw
+      .prepare("UPDATE messages SET balloon_bundle_id = 'private.plugin' WHERE guid = ?")
+      .run('plugin-document-message');
+    raw
+      .prepare('UPDATE messages SET date_deleted = 2000 WHERE guid = ?')
+      .run('deleted-document-message');
+    raw
+      .prepare('UPDATE messages SET date_retracted = 2000 WHERE guid = ?')
+      .run('retracted-document-message');
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'hidden-chat-document-message',
+          dateCreated: 10,
+          hasAttachments: true,
+          handle: { address: 'mixed@x.com' },
+          attachments: [
+            Attachment.parse({ guid: 'hidden-chat-document', mimeType: 'application/pdf' }),
+          ],
+        }),
+        Message.parse({
+          guid: 'hidden-chat-null-date-document-message',
+          dateCreated: null,
+          hasAttachments: true,
+          handle: { address: 'mixed@x.com' },
+          attachments: [
+            Attachment.parse({
+              guid: 'hidden-chat-null-date-document',
+              mimeType: 'application/pdf',
+            }),
+          ],
+        }),
+        Message.parse({
+          guid: 'visible-after-chat-delete-document-message',
+          dateCreated: 30,
+          hasAttachments: true,
+          handle: { address: 'mixed@x.com' },
+          attachments: [
+            Attachment.parse({
+              guid: 'visible-after-chat-delete-document',
+              mimeType: 'application/pdf',
+            }),
+          ],
+        }),
+      ],
+      () => hiddenChatId,
+      handles,
+    );
+    raw.prepare('UPDATE chats SET deleted_at = 20 WHERE guid = ?').run('hidden-chat');
+
+    const strip = await listChatAttachmentsByKind(db, 'mixed-chat');
+    const page = await listChatDocumentAttachmentsPage(db, 'mixed-chat');
+
+    // The legacy mixed strip classifies MIME values case-sensitively; the dedicated explorer owns
+    // the stricter normalized exclusion so an uppercase image never appears as a document there.
+    expect(strip.documents.map((row) => row.guid)).toEqual([
+      'uppercase-image-document',
+      'visible-document',
+    ]);
+    expect(page.items.map((row) => row.guid)).toEqual(['visible-document', 'old-document']);
+    const revivedChatPage = await listChatDocumentAttachmentsPage(db, 'hidden-chat');
+    expect(revivedChatPage.items.map((row) => row.guid)).toEqual([
+      'visible-after-chat-delete-document',
+    ]);
+    expect(revivedChatPage.hasMore).toBe(false);
   });
 });
 

@@ -45,6 +45,7 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { useChatHeader } from '@features/conversations/useChatHeader';
+import { useSharedDocuments } from '@features/conversations/useSharedDocuments';
 import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
 import {
   NavRow,
@@ -325,6 +326,7 @@ function ChatSettingsScreen({
     ['messages', 'attachments'],
     [guid],
   );
+  const { data: documentPage } = useSharedDocuments(guid, accountLease);
 
   // The studio opens with a stored dark theme. A legacy light theme stays in the DB but
   // starts from the active dark colors if the user chooses to convert it by applying edits.
@@ -692,6 +694,10 @@ function ChatSettingsScreen({
     if (!grantIsCurrent(renderGrant)) return;
     router.push(`/media/${encodeURIComponent(messageGuid)}`);
   };
+  const openDocuments = (): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    router.push(`/documents/${encodeURIComponent(guid)}`);
+  };
   const openLink = (url: string): void => {
     if (!grantIsCurrent(renderGrant)) return;
     void safeOpenUrl(url);
@@ -797,7 +803,17 @@ function ChatSettingsScreen({
           ) : null}
         </SettingsSection>
 
-        <MediaSections media={mediaData} onOpenMedia={openMedia} onOpenLink={openLink} />
+        <MediaSections
+          media={mediaData}
+          documentSummary={
+            documentPage
+              ? { loadedCount: documentPage.items.length, hasMore: documentPage.hasMore }
+              : null
+          }
+          onOpenMedia={openMedia}
+          onOpenDocuments={openDocuments}
+          onOpenLink={openLink}
+        />
 
         <SettingsSection label="NOTIFICATIONS" style={styles.gap}>
           <SwitchRow

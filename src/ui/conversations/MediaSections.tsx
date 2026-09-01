@@ -83,18 +83,27 @@ export function MediaSections({
   media,
   onOpenMedia,
   onOpenLink = safeOpenUrl,
+  documentSummary,
+  onOpenDocuments,
 }: {
   media: ChatMediaByKind | null | undefined;
   onOpenMedia: (attachmentGuid: string) => void;
   onOpenLink?: (url: string) => unknown;
+  documentSummary?: { loadedCount: number; hasMore: boolean } | null;
+  onOpenDocuments?: () => void;
 }): React.JSX.Element | null {
   const theme = useTheme();
-  if (!media) return null;
-  const { photos, videos, documents, links } = media;
-  if (!photos.length && !videos.length && !documents.length && !links.length) return null;
+  const photos = media?.photos ?? [];
+  const videos = media?.videos ?? [];
+  const documents = media?.documents ?? [];
+  const links = media?.links ?? [];
+  const documentCount = documentSummary?.loadedCount ?? documents.length;
+  if (!photos.length && !videos.length && documentCount === 0 && !links.length) return null;
 
   const labelStyle = [styles.sectionLabel, { color: theme.color.secondaryLabel, marginTop: 24 }];
   const rowValueStyle = [styles.rowValue, { color: theme.color.tertiaryLabel }];
+  const documentCountLabel = `${documentCount}${documentSummary?.hasMore ? '+' : ''}`;
+  const documentAccessibilityLabel = `Shared documents, ${documentCountLabel}`;
 
   return (
     <>
@@ -135,20 +144,34 @@ export function MediaSections({
           </ScrollView>
         </>
       ) : null}
-      {documents.length > 0 || links.length > 0 ? (
+      {documentCount > 0 || links.length > 0 ? (
         <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
-          {documents.length > 0 ? (
-            <View style={styles.row}>
-              <Text style={[styles.rowLabel, { color: theme.color.label }]}>Documents</Text>
-              <Text style={rowValueStyle}>{documents.length}</Text>
-            </View>
+          {documentCount > 0 ? (
+            onOpenDocuments ? (
+              <Pressable
+                onPress={onOpenDocuments}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={documentAccessibilityLabel}
+                accessibilityHint="Opens all shared documents in this conversation"
+                style={styles.row}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Documents</Text>
+                <Text style={rowValueStyle}>{documentCountLabel}</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.row}>
+                <Text style={[styles.rowLabel, { color: theme.color.label }]}>Documents</Text>
+                <Text style={rowValueStyle}>{documentCountLabel}</Text>
+              </View>
+            )
           ) : null}
           {links.length > 0 ? (
             <View>
               <View
                 style={[
                   styles.row,
-                  documents.length > 0 && {
+                  documentCount > 0 && {
                     borderTopColor: theme.color.separator,
                     borderTopWidth: StyleSheet.hairlineWidth,
                   },
