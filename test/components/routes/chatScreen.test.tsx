@@ -27,6 +27,7 @@
 import React from 'react';
 import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import { logger } from '@core/secure';
 
 const GUID = 'iMessage;-;+15551234567';
 const PRIVATE_WALLPAPER_URI = 'file:///private/chat-wallpaper-r-canary-9f31d7.jpg';
@@ -989,26 +990,33 @@ describe('ChatScreen — stable list callbacks (row memoization contract)', () =
 
 describe('ChatScreen — stable composer callbacks (Composer memo contract)', () => {
   it('surfaces a current-account attachment admission failure', async () => {
+    const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const failure = new Error('paste ownership unavailable');
-    (sendImages as jest.Mock).mockRejectedValueOnce(failure);
-    await renderWithTheme(<ChatScreen />);
+    try {
+      (sendImages as jest.Mock).mockRejectedValueOnce(failure);
+      await renderWithTheme(<ChatScreen />);
 
-    await act(async () => {
-      mockCaptured.composer!.onSendAttachments([
-        {
-          uri: 'file:///cache/pasted-in/1000-1/photo.jpg',
-          name: 'photo.jpg',
-          mimeType: 'image/jpeg',
-          size: 10,
-          origin: 'paste',
-        },
-      ]);
-      await Promise.resolve();
-    });
+      await act(async () => {
+        mockCaptured.composer!.onSendAttachments([
+          {
+            uri: 'file:///cache/pasted-in/1000-1/photo.jpg',
+            name: 'photo.jpg',
+            mimeType: 'image/jpeg',
+            size: 10,
+            origin: 'paste',
+          },
+        ]);
+        await Promise.resolve();
+      });
 
-    expect(showToast).toHaveBeenCalledWith(
-      'Couldn’t send one or more attachments—add the missing file again',
-    );
+      expect(showToast).toHaveBeenCalledWith(
+        'Couldn’t send one or more attachments—add the missing file again',
+      );
+      expect(loggerWarn).toHaveBeenCalledTimes(1);
+      expect(loggerWarn).toHaveBeenCalledWith('[chat] attachment send rejected', failure);
+    } finally {
+      loggerWarn.mockRestore();
+    }
   });
 
   it('keeps every composer callback identity across an unrelated screen re-render', async () => {
