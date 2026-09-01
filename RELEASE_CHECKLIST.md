@@ -265,7 +265,7 @@ These four DEV results stop at the then-current migration head `0038`; they do n
       spontaneous process death, active-migration crash, power-loss/torn-write recovery, and
       production-file continuity checks. The local DEV logical fixtures and controlled active-WAL and
       active-migration crashes do not establish Play/store artifact provenance and do not satisfy
-      this final release item, scheduled-CI evidence, or physical-device proof.
+      this final release item, scheduled-CI evidence, or exact-candidate physical-device proof.
 
 ## 7. Store, policy, and rollout
 
