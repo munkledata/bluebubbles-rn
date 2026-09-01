@@ -8,6 +8,13 @@ const DEFAULT_WORKFLOW = '.github/workflows/ci.yml';
 const DEFAULT_DEPENDABOT = '.github/dependabot.yml';
 const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/i;
 const READABLE_VERSION = /^v\d+\.\d+\.\d+(?:\s|$)/;
+const TOOLCHAIN_POLICY_TEST_NAME = 'Test toolchain policy';
+const TOOLCHAIN_POLICY_TEST_COMMAND =
+  'node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs';
+const TOOLCHAIN_GUARD_NAME = 'Verify toolchain pins';
+const TOOLCHAIN_GUARD_COMMAND = 'node scripts/check-toolchain.mjs';
+const INSTALL_NAME = 'Install dependencies';
+const INSTALL_COMMAND = 'npm ci';
 
 function linesOf(source) {
   return source.replace(/\r\n/g, '\n').split('\n');
@@ -54,6 +61,124 @@ function requireBlockingUnconditionalStep(step, name, errors) {
   }
   if (/^\s*continue-on-error\s*:/m.test(step ?? '')) {
     errors.push(`"${name}" must fail the Android job when the diagnostic scan fails.`);
+  }
+}
+
+function requireExactBlockingStep(job, jobLabel, name, command, errors) {
+  const nameLine = `      - name: ${name}`;
+  const commandLine = `        run: ${command}`;
+  const nameCount = linesOf(job).filter((line) => line === nameLine).length;
+  const commandCount = linesOf(job).filter((line) => line === commandLine).length;
+  const step = extractNamedStep(job, name);
+
+  if (nameCount !== 1 || !step) {
+    errors.push(`${jobLabel} must declare "${name}" exactly once.`);
+  }
+  if (commandCount !== 1) {
+    errors.push(`${jobLabel} "${name}" must run exactly once: ${command}`);
+  }
+
+  const reviewedLines = new Set([nameLine, commandLine]);
+  const liveLines = linesOf(step ?? '').filter(
+    (line) => line.trim() && !line.trimStart().startsWith('#'),
+  );
+  if (liveLines.length !== 2 || liveLines.some((line) => !reviewedLines.has(line))) {
+    errors.push(`${jobLabel} "${name}" may contain only its reviewed name and exact run command.`);
+  }
+
+  return job.indexOf(nameLine);
+}
+
+function requireToolchainGuardBeforeInstall(job, jobLabel, errors, { requireTests = false } = {}) {
+  const guardIndex = requireExactBlockingStep(
+    job,
+    jobLabel,
+    TOOLCHAIN_GUARD_NAME,
+    TOOLCHAIN_GUARD_COMMAND,
+    errors,
+  );
+  const installIndex = requireExactBlockingStep(
+    job,
+    jobLabel,
+    INSTALL_NAME,
+    INSTALL_COMMAND,
+    errors,
+  );
+
+  if (guardIndex < 0 || installIndex < 0 || guardIndex >= installIndex) {
+    errors.push(`${jobLabel} must run the direct toolchain guard before npm ci.`);
+  }
+
+  if (!requireTests) return;
+  const testIndex = requireExactBlockingStep(
+    job,
+    jobLabel,
+    TOOLCHAIN_POLICY_TEST_NAME,
+    TOOLCHAIN_POLICY_TEST_COMMAND,
+    errors,
+  );
+  if (testIndex < 0 || guardIndex < 0 || testIndex >= guardIndex) {
+    errors.push(`${jobLabel} must run the toolchain policy tests before the direct guard.`);
+  }
+}
+
+function validateExactDeclarations(source, indent, owner, reviewedDeclarations, errors) {
+  const keyCounts = new Map();
+  const declarationKind = owner.endsWith('job') ? 'job-level declaration' : 'declaration';
+  for (const line of linesOf(source)) {
+    if (!line.trim() || line.trimStart().startsWith('#') || indentation(line) !== indent) continue;
+    const key = reviewedDeclarations.get(line);
+    if (!key) {
+      errors.push(`The ${owner} has an unreviewed ${declarationKind}: ${line.trim()}`);
+      continue;
+    }
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+  for (const key of reviewedDeclarations.values()) {
+    if (keyCounts.get(key) !== 1) {
+      errors.push(`The ${owner} must declare "${key}" exactly once.`);
+    }
+  }
+}
+
+function validateWorkflowRootDeclarations(workflow, errors) {
+  validateExactDeclarations(
+    workflow,
+    0,
+    'CI workflow root',
+    new Map([
+      ['name: CI', 'name'],
+      ['on:', 'on'],
+      ['permissions:', 'permissions'],
+      ['concurrency:', 'concurrency'],
+      ['jobs:', 'jobs'],
+    ]),
+    errors,
+  );
+}
+
+function requireWorkflowSecurityGuard(checkJob, errors) {
+  const name = 'Workflow supply-chain guard';
+  const nameLine = `      - name: ${name}`;
+  const step = extractNamedStep(checkJob, name);
+  const reviewedLines = new Set([
+    nameLine,
+    '        shell: bash',
+    '        run: |',
+    '          node --test scripts/check-workflow-security.test.mjs',
+    '          node scripts/check-workflow-security.mjs',
+  ]);
+  const liveLines = linesOf(step ?? '').filter(
+    (line) => line.trim() && !line.trimStart().startsWith('#'),
+  );
+  if (
+    linesOf(checkJob).filter((line) => line === nameLine).length !== 1 ||
+    liveLines.length !== reviewedLines.size ||
+    liveLines.some((line) => !reviewedLines.has(line))
+  ) {
+    errors.push(
+      'The workflow supply-chain guard must run its exact mutation test and validator once under an explicit bash shell.',
+    );
   }
 }
 
@@ -209,26 +334,17 @@ function validateCheckJob(workflow, errors) {
   // Keep this release-blocking job structurally fail-closed. Any new job-level control must be
   // reviewed here first; otherwise `if`, `needs`, or `continue-on-error` could skip or neutralize
   // every guard inside it while the individual step still looked correct.
-  const reviewedDeclarations = new Map([
-    ['    name: Typecheck · Format · Test', 'name'],
-    ['    runs-on: ubuntu-latest', 'runs-on'],
-    ['    steps:', 'steps'],
-  ]);
-  const keyCounts = new Map();
-  for (const line of linesOf(check.source)) {
-    if (!line.trim() || line.trimStart().startsWith('#') || indentation(line) !== 4) continue;
-    const key = reviewedDeclarations.get(line);
-    if (!key) {
-      errors.push(`The CI check job has an unreviewed job-level declaration: ${line.trim()}`);
-      continue;
-    }
-    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
-  }
-  for (const key of reviewedDeclarations.values()) {
-    if (keyCounts.get(key) !== 1) {
-      errors.push(`The CI check job must declare "${key}" exactly once.`);
-    }
-  }
+  validateExactDeclarations(
+    check.source,
+    4,
+    'CI check job',
+    new Map([
+      ['    name: Typecheck · Format · Test', 'name'],
+      ['    runs-on: ubuntu-latest', 'runs-on'],
+      ['    steps:', 'steps'],
+    ]),
+    errors,
+  );
 
   const checkout = extractIndentedBlock(
     check.source,
@@ -238,13 +354,11 @@ function validateCheckJob(workflow, errors) {
     errors.push('The check job checkout must use fetch-depth: 0 so history scanning is complete.');
   }
 
-  const guard = extractNamedStep(check.source, 'Workflow supply-chain guard');
-  if (
-    !guard?.includes('node --test scripts/check-workflow-security.test.mjs') ||
-    !guard.includes('node scripts/check-workflow-security.mjs')
-  ) {
-    errors.push('The dependency-free workflow guard and its mutation tests must run in CI.');
-  }
+  requireWorkflowSecurityGuard(check.source, errors);
+
+  requireToolchainGuardBeforeInstall(check.source, 'CI check job', errors, {
+    requireTests: true,
+  });
 
   const installIndex = check.source.indexOf('run: npm ci');
   requireDatabaseWriteApprovalGuard(check.source, installIndex, errors);
@@ -275,6 +389,21 @@ function validateAndroidJob(workflow, errors) {
     errors.push('CI is missing the Android build job.');
     return;
   }
+
+  validateExactDeclarations(
+    android.source,
+    4,
+    'Android CI job',
+    new Map([
+      ['    name: Clean Android prebuild · native modules · APK + AAB', 'name'],
+      ['    runs-on: ubuntu-latest', 'runs-on'],
+      ['    timeout-minutes: 45', 'timeout-minutes'],
+      ['    steps:', 'steps'],
+    ]),
+    errors,
+  );
+
+  requireToolchainGuardBeforeInstall(android.source, 'Android CI job', errors);
 
   const prebuild = extractNamedStep(android.source, 'Clean Expo prebuild');
   const prebuildCommand =
@@ -395,6 +524,7 @@ function validateDependabot(dependabot, errors) {
 
 export function validateWorkflowSecurity({ workflow, dependabot }) {
   const errors = [];
+  validateWorkflowRootDeclarations(workflow, errors);
   validateActionPins(workflow, errors);
   validatePermissions(workflow, errors);
   validateCheckJob(workflow, errors);

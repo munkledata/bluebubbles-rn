@@ -68,8 +68,8 @@ The reviewed toolchain is exact:
 ```sh
 nvm install
 nvm use
+node scripts/check-toolchain.mjs
 npm ci
-npm run check:toolchain
 ```
 
 For an Android build, provide a Firebase config whose package is

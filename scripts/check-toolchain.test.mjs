@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  FORBIDDEN_NATIVE_BOUNDARY_PACKAGES,
   REQUIRED_EAS_CLI_VERSION,
   REQUIRED_EAS_SUBMIT_CONFIG,
+  REQUIRED_NATIVE_BOUNDARY_PINS,
   REQUIRED_NODE_ENGINE,
   REQUIRED_NODE_VERSION,
   REQUIRED_NPM_VERSION,
@@ -12,16 +14,41 @@ import {
   validateToolchain,
 } from './check-toolchain.mjs';
 
+const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
+  '@op-engineering/op-sqlite': '17.1.2',
+  '@react-native-firebase/app': '25.1.0',
+  '@react-native-firebase/messaging': '25.1.0',
+  '@shopify/flash-list': '2.0.2',
+  'drizzle-orm': '0.45.2',
+  'react-native-notify-kit': '10.4.8',
+  'react-native-webview': '13.16.1',
+});
+const EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze(['expo-share-intent']);
+
 function validInput() {
   return {
     actualNode: REQUIRED_NODE_VERSION,
     childNpm: REQUIRED_NPM_VERSION,
+    hasNpmShrinkwrap: false,
     invokingNpm: REQUIRED_NPM_VERSION,
     nvmNode: REQUIRED_NODE_VERSION,
     packageJson: {
       packageManager: `npm@${REQUIRED_NPM_VERSION}`,
       engines: { node: REQUIRED_NODE_ENGINE },
+      dependencies: { ...EXPECTED_NATIVE_BOUNDARY_PINS },
       scripts: { ...REQUIRED_RELEASE_SCRIPTS },
+    },
+    packageLock: {
+      lockfileVersion: 3,
+      packages: {
+        '': { dependencies: { ...EXPECTED_NATIVE_BOUNDARY_PINS } },
+        ...Object.fromEntries(
+          Object.entries(EXPECTED_NATIVE_BOUNDARY_PINS).map(([packageName, version]) => [
+            `node_modules/${packageName}`,
+            { version },
+          ]),
+        ),
+      },
     },
     eas: {
       cli: { version: REQUIRED_EAS_CLI_VERSION },
@@ -37,12 +64,188 @@ function validInput() {
   };
 }
 
+function expectToolchainError(input, marker, label) {
+  const errors = validateToolchain(input);
+  assert.ok(
+    errors.some((error) => error.includes(marker)),
+    `${label}: ${errors.join('; ')}`,
+  );
+}
+
 test('accepts the reviewed toolchain, environments, and Internal Testing submission', () => {
   assert.deepEqual(validateToolchain(validInput()), []);
 });
 
 test('accepts direct node invocation when npm on PATH is still pinned', () => {
   assert.deepEqual(validateToolchain({ ...validInput(), invokingNpm: undefined }), []);
+});
+
+test('owns the exact reviewed native boundary and forbidden-package sets', () => {
+  assert.deepEqual(REQUIRED_NATIVE_BOUNDARY_PINS, EXPECTED_NATIVE_BOUNDARY_PINS);
+  assert.deepEqual(FORBIDDEN_NATIVE_BOUNDARY_PACKAGES, EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES);
+});
+
+test('rejects drift in every reviewed native boundary pin', () => {
+  for (const [packageName, expected] of Object.entries(EXPECTED_NATIVE_BOUNDARY_PINS)) {
+    for (const [label, replacement] of [
+      ['missing', undefined],
+      ['caret range', `^${expected}`],
+      ['tilde range', `~${expected}`],
+      ['tag', 'latest'],
+      ['alias', `npm:${packageName}@${expected}`],
+      ['wrong exact version', '0.0.0'],
+    ]) {
+      const input = validInput();
+      if (replacement == null) delete input.packageJson.dependencies[packageName];
+      else input.packageJson.dependencies[packageName] = replacement;
+      expectToolchainError(input, `dependencies.${packageName}`, `${packageName}: ${label}`);
+    }
+
+    for (const owner of ['manifest', 'lock root', 'lock package name']) {
+      const input = validInput();
+      const aliasName = 'reviewed-boundary-alias';
+      if (owner === 'manifest') {
+        input.packageJson.dependencies[aliasName] = `npm:${packageName}@0.0.0`;
+      } else if (owner === 'lock root') {
+        input.packageLock.packages[''].dependencies = {
+          [aliasName]: `npm:${packageName}@0.0.0`,
+        };
+      } else {
+        input.packageLock.packages[`node_modules/${aliasName}`] = {
+          name: packageName,
+          version: '0.0.0',
+        };
+      }
+      expectToolchainError(input, 'alias protected package', `${packageName}: ${owner} alias`);
+    }
+
+    for (const [label, overrides] of [
+      ['direct override', { [packageName]: expected }],
+      ['root override alias', { replacement: `npm:${packageName}@0.0.0` }],
+      ['nested override alias', { parent: { child: `npm:${packageName}@0.0.0` } }],
+    ]) {
+      const input = validInput();
+      input.packageJson.overrides = overrides;
+      expectToolchainError(input, `protected package ${packageName}`, `${packageName}: ${label}`);
+    }
+
+    for (const [label, mutate] of [
+      [
+        'wrong lock-root pin',
+        (input) => (input.packageLock.packages[''].dependencies[packageName] = '0.0.0'),
+      ],
+      [
+        'wrong top-level lock version',
+        (input) => (input.packageLock.packages[`node_modules/${packageName}`].version = '0.0.0'),
+      ],
+      [
+        'nested second lock copy',
+        (input) =>
+          (input.packageLock.packages[`node_modules/example/node_modules/${packageName}`] = {
+            version: '0.0.0',
+          }),
+      ],
+    ]) {
+      const input = validInput();
+      mutate(input);
+      expectToolchainError(input, 'package-lock.json', `${packageName}: ${label}`);
+    }
+
+    for (const section of ['devDependencies', 'peerDependencies']) {
+      const input = validInput();
+      input.packageJson[section] = { [packageName]: expected };
+      expectToolchainError(
+        input,
+        `${section}.${packageName}`,
+        `${packageName}: duplicated in ${section}`,
+      );
+    }
+
+    for (const [label, replacement] of [
+      ['exact duplicate', expected],
+      ['ranged override', `^${expected}`],
+    ]) {
+      const input = validInput();
+      input.packageJson.optionalDependencies = { [packageName]: replacement };
+      expectToolchainError(
+        input,
+        `optionalDependencies.${packageName}`,
+        `${packageName}: ${label} in optionalDependencies`,
+      );
+    }
+
+    const movedToOptional = validInput();
+    delete movedToOptional.packageJson.dependencies[packageName];
+    movedToOptional.packageJson.optionalDependencies = { [packageName]: expected };
+    expectToolchainError(
+      movedToOptional,
+      `dependencies.${packageName}`,
+      `${packageName}: missing from production dependencies after optional move`,
+    );
+    expectToolchainError(
+      movedToOptional,
+      `optionalDependencies.${packageName}`,
+      `${packageName}: moved to optionalDependencies`,
+    );
+  }
+});
+
+test('keeps the retired share-intent package out of every install declaration', () => {
+  const packageName = EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES[0];
+  assert.ok(packageName);
+
+  for (const section of [
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+  ]) {
+    const input = validInput();
+    input.packageJson[section] = { ...input.packageJson[section], [packageName]: '1.0.0' };
+    expectToolchainError(input, `${section}.${packageName}`, section);
+  }
+
+  for (const packagePath of [
+    `node_modules/${packageName}`,
+    `node_modules/example/node_modules/${packageName}`,
+  ]) {
+    const input = validInput();
+    input.packageLock.packages[packagePath] = { version: '1.0.0' };
+    expectToolchainError(input, `package-lock.json must not contain ${packageName}`, packagePath);
+  }
+
+  const rootLockDeclaration = validInput();
+  rootLockDeclaration.packageLock.packages[''].dependencies[packageName] = '1.0.0';
+  expectToolchainError(
+    rootLockDeclaration,
+    `package-lock.json must not contain ${packageName}`,
+    'root lock declaration',
+  );
+
+  for (const [label, mutate] of [
+    ['legacy version', (input) => (input.packageLock.lockfileVersion = 1)],
+    ['missing packages', (input) => delete input.packageLock.packages],
+    ['array packages', (input) => (input.packageLock.packages = [])],
+    ['missing root package', (input) => delete input.packageLock.packages['']],
+  ]) {
+    const input = validInput();
+    mutate(input);
+    expectToolchainError(input, 'lockfileVersion 3 packages shape', label);
+  }
+
+  for (const overrides of [
+    { [packageName]: '8.0.1' },
+    { replacement: `npm:${packageName}@8.0.1` },
+    { parent: { child: `npm:${packageName}@8.0.1` } },
+  ]) {
+    const input = validInput();
+    input.packageJson.overrides = overrides;
+    expectToolchainError(input, `protected package ${packageName}`, 'share-intent override');
+  }
+
+  const shrinkwrap = validInput();
+  shrinkwrap.hasNpmShrinkwrap = true;
+  expectToolchainError(shrinkwrap, 'npm-shrinkwrap.json', 'preferred unchecked shrinkwrap');
 });
 
 test('rejects drift in every executable and declarative toolchain boundary', () => {
@@ -56,6 +259,7 @@ test('rejects drift in every executable and declarative toolchain boundary', () 
     packageJson: {
       packageManager: 'npm@11',
       engines: { node: '>=24' },
+      dependencies: { ...EXPECTED_NATIVE_BOUNDARY_PINS },
       scripts: {
         'release:prepare:patch': 'npm version minor --no-git-tag-version',
         'release:android': 'npm version patch --no-git-tag-version && eas build --auto-submit',

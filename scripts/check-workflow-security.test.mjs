@@ -8,6 +8,15 @@ import { validateWorkflowSecurity } from './check-workflow-security.mjs';
 const root = resolve(import.meta.dirname, '..');
 const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 const dependabot = readFileSync(resolve(root, '.github/dependabot.yml'), 'utf8');
+const toolchainPolicyTestStep = [
+  '      - name: Test toolchain policy',
+  '        run: node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs',
+].join('\n');
+const toolchainGuardStep = [
+  '      - name: Verify toolchain pins',
+  '        run: node scripts/check-toolchain.mjs',
+].join('\n');
+const installStep = ['      - name: Install dependencies', '        run: npm ci'].join('\n');
 
 function errorsFor(workflowMutation = workflow, dependabotMutation = dependabot) {
   return validateWorkflowSecurity({
@@ -16,8 +25,201 @@ function errorsFor(workflowMutation = workflow, dependabotMutation = dependabot)
   });
 }
 
+function replaceOccurrence(source, target, replacement, occurrence, description) {
+  let index = -1;
+  let offset = 0;
+  for (let current = 0; current <= occurrence; current += 1) {
+    index = source.indexOf(target, offset);
+    assert.notEqual(index, -1, `${description} must find occurrence ${occurrence + 1}`);
+    offset = index + target.length;
+  }
+  return `${source.slice(0, index)}${replacement}${source.slice(index + target.length)}`;
+}
+
 test('accepts the repository workflow and Dependabot policy', () => {
   assert.deepEqual(errorsFor(), []);
+});
+
+test('requires one exact direct toolchain guard before npm ci in both CI jobs', () => {
+  assert.equal(workflow.split(toolchainGuardStep).length - 1, 2);
+  assert.equal(workflow.split(installStep).length - 1, 2);
+
+  for (const [jobLabel, occurrence] of [
+    ['CI check job', 0],
+    ['Android CI job', 1],
+  ]) {
+    const missing = replaceOccurrence(
+      workflow,
+      `${toolchainGuardStep}\n\n`,
+      '',
+      occurrence,
+      `${jobLabel} missing guard mutation`,
+    );
+    assert.ok(errorsFor(missing).some((error) => error.includes(jobLabel)));
+
+    for (const [label, replacement] of [
+      ['npm-script alias', 'npm run check:toolchain'],
+      ['ignored failure', 'node scripts/check-toolchain.mjs || true'],
+      ['extra argument', 'node scripts/check-toolchain.mjs --skip-native-pins'],
+    ]) {
+      const wrongCommand = replaceOccurrence(
+        workflow,
+        toolchainGuardStep,
+        toolchainGuardStep.replace('node scripts/check-toolchain.mjs', replacement),
+        occurrence,
+        `${jobLabel} ${label} mutation`,
+      );
+      assert.ok(
+        errorsFor(wrongCommand).some(
+          (error) => error.includes(jobLabel) && error.includes('must run exactly once'),
+        ),
+        `${jobLabel}: ${label}`,
+      );
+    }
+
+    for (const control of [
+      'if: false',
+      "'if': false",
+      'continue-on-error: true',
+      '<<: { if: false }',
+      'shell: bash',
+      'run: node --version',
+    ]) {
+      const controlled = replaceOccurrence(
+        workflow,
+        toolchainGuardStep,
+        toolchainGuardStep.replace('\n        run:', `\n        ${control}\n        run:`),
+        occurrence,
+        `${jobLabel} ${control} mutation`,
+      );
+      assert.ok(
+        errorsFor(controlled).some(
+          (error) => error.includes(jobLabel) && error.includes('only its reviewed name'),
+        ),
+        `${jobLabel}: ${control}`,
+      );
+    }
+
+    const withoutGuard = replaceOccurrence(
+      workflow,
+      `${toolchainGuardStep}\n\n`,
+      '',
+      occurrence,
+      `${jobLabel} ordering removal`,
+    );
+    const movedAfterInstall = replaceOccurrence(
+      withoutGuard,
+      installStep,
+      `${installStep}\n\n${toolchainGuardStep}`,
+      occurrence,
+      `${jobLabel} ordering insertion`,
+    );
+    assert.ok(
+      errorsFor(movedAfterInstall).some(
+        (error) => error.includes(jobLabel) && error.includes('before npm ci'),
+      ),
+    );
+
+    const duplicateGuard = replaceOccurrence(
+      workflow,
+      toolchainGuardStep,
+      `${toolchainGuardStep}\n\n${toolchainGuardStep}`,
+      occurrence,
+      `${jobLabel} duplicate guard mutation`,
+    );
+    assert.ok(
+      errorsFor(duplicateGuard).some(
+        (error) => error.includes(jobLabel) && error.includes('exactly once'),
+      ),
+    );
+
+    const duplicateInstall = replaceOccurrence(
+      workflow,
+      installStep,
+      `${installStep}\n\n${installStep}`,
+      occurrence,
+      `${jobLabel} duplicate install mutation`,
+    );
+    assert.ok(
+      errorsFor(duplicateInstall).some(
+        (error) => error.includes(jobLabel) && error.includes('exactly once'),
+      ),
+    );
+  }
+});
+
+test('requires the exact toolchain policy tests before the check-job guard', () => {
+  const missing = workflow.replace(`${toolchainPolicyTestStep}\n\n`, '');
+  assert.notEqual(missing, workflow);
+  assert.ok(errorsFor(missing).some((error) => error.includes('Test toolchain policy')));
+
+  const npmAlias = workflow.replace(
+    toolchainPolicyTestStep,
+    toolchainPolicyTestStep.replace(
+      'node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs',
+      'npm run check:toolchain',
+    ),
+  );
+  assert.notEqual(npmAlias, workflow);
+  assert.ok(errorsFor(npmAlias).some((error) => error.includes('Test toolchain policy')));
+
+  const conditional = workflow.replace(
+    toolchainPolicyTestStep,
+    toolchainPolicyTestStep.replace('\n        run:', '\n        if: false\n        run:'),
+  );
+  assert.notEqual(conditional, workflow);
+  assert.ok(
+    errorsFor(conditional).some(
+      (error) =>
+        error.includes('Test toolchain policy') && error.includes('only its reviewed name'),
+    ),
+  );
+
+  const movedAfterGuard = workflow.replace(
+    `${toolchainPolicyTestStep}\n\n${toolchainGuardStep}`,
+    `${toolchainGuardStep}\n\n${toolchainPolicyTestStep}`,
+  );
+  assert.notEqual(movedAfterGuard, workflow);
+  assert.ok(errorsFor(movedAfterGuard).some((error) => error.includes('policy tests before')));
+});
+
+test('rejects workflow and Android controls that can neutralize pre-install guards', () => {
+  for (const shellLine of ['', '        shell: bash {0} || true\n']) {
+    const mutated = workflow.replace(
+      '        shell: bash\n        run: |',
+      `${shellLine}        run: |`,
+    );
+    assert.notEqual(mutated, workflow);
+    assert.ok(errorsFor(mutated).some((error) => error.includes('explicit bash shell')));
+  }
+
+  const workflowDefault = workflow.replace(
+    '\njobs:\n',
+    '\ndefaults:\n  run:\n    shell: bash {0} || true\n\njobs:\n',
+  );
+  assert.notEqual(workflowDefault, workflow);
+  assert.ok(errorsFor(workflowDefault).some((error) => error.includes('CI workflow root')));
+
+  for (const control of [
+    'if: false',
+    "'if': false",
+    'continue-on-error: true',
+    'defaults: { run: { shell: "bash {0} || true" } }',
+    '<<: { if: false }',
+  ]) {
+    const mutated = workflow.replace(
+      '  android:\n    name:',
+      `  android:\n    ${control}\n    name:`,
+    );
+    assert.notEqual(mutated, workflow, control);
+    assert.ok(
+      errorsFor(mutated).some(
+        (error) =>
+          error.includes('Android CI job') && error.includes('unreviewed job-level declaration'),
+      ),
+      control,
+    );
+  }
 });
 
 test('rejects a mutable action tag', () => {
