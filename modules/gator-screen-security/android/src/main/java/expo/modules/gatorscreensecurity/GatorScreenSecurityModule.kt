@@ -160,7 +160,10 @@ class GatorScreenSecurityModule : Module() {
       }
       registeredReactContext = reactContext
       reactContext.addExtraWindowEventListener(extraWindowListener)
-      appContext.currentActivity?.let(ScreenSecurityController::refresh)
+      // Expo module OnCreate is not guaranteed to run on Android's main thread.
+      runOnMainThread {
+        appContext.currentActivity?.let(ScreenSecurityController::refresh)
+      }
     }
     OnDestroy {
       registeredReactContext?.removeExtraWindowEventListener(extraWindowListener)
