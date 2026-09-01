@@ -70,8 +70,11 @@ the current handoff; future sessions should read only the Work Plan register and
   evidence only today.
 - The release build phase is local-only and cannot submit. A separate submit phase previews by default and requires
   `--execute` plus an interactive candidate-specific phrase; no upload or submission was run for v58. The existing
-  GitHub Actions native lane can compile disposable fixture/debug-signed APK/AAB verification artifacts; those are
-  not release candidates and do not use EAS Build or submit to Play.
+  GitHub Actions native lane compiles disposable fixture/debug-signed APK/AAB verification artifacts. Manual run
+  [`33476443641`](https://github.com/munkledata/bluebubbles-rn/actions/runs/33476443641) also completed the four
+  disposable database lanes on an API-36 x86_64 emulator; the workflow's first configured schedule occurrence was
+  unobserved, so genuine schedule proof remains open. These supporting artifacts are not release candidates and do not
+  use EAS Build or submit to Play.
 - The approved local production build incremented the EAS remote Android counter from `57` to `58`,
   fetched the existing managed keystore, completed all 1,264 Gradle tasks, and stopped after local
   validation and promotion. It did not create a hosted build or submission.

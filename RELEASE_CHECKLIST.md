@@ -258,14 +258,26 @@ These four DEV results stop at the then-current migration head `0038`; they do n
   the exact original head-`0037` state read-only, then retries exact `[0038]`, verifies persistence,
   and cleans all eight fixed paths. This is not statement-in-flight evidence.
 
+### Current post-v57 hosted DEV supporting evidence
+
+- Manual GitHub Actions
+  [`workflow_dispatch` run 33476443641](https://github.com/munkledata/bluebubbles-rn/actions/runs/33476443641)
+  built and ran exact source `80a44d309030c80410e110ab2f5b5b7c119146a9` on an API-36 x86_64 emulator. The
+  current 44-migration registry ended at `0044_custom_folder_unread_badge`; the disposable contract passed **28/28**,
+  relaunch passed **7/7 READY / 12/12 final / 3/3 host**, active-WAL death passed **9/9 / 12/12 / 5/5**, and
+  active-migration death passed **11/11 / 15/15 / 6/6**. All **108/108** retained report booleans were true. The
+  configured 2026-09-01 07:17 UTC schedule occurrence remained unobserved through 08:17:09 UTC, so child
+  `DB-03C1-SCHEDULED-ANDROID-CI` remains open until one genuine `event=schedule` run passes and its reports are
+  validated.
+
 ### Current v58 candidate native/device proof
 
 - [ ] The exact release candidate and a supported physical device repeat the native contract and
       pass the crypto self-test, fresh install plus an actual signed prior-build install-over,
       spontaneous process death, active-migration crash, power-loss/torn-write recovery, and
-      production-file continuity checks. The local DEV logical fixtures and controlled active-WAL and
-      active-migration crashes do not establish Play/store artifact provenance and do not satisfy
-      this final release item, scheduled-CI evidence, or exact-candidate physical-device proof.
+      production-file continuity checks. The local and manually dispatched hosted DEV fixtures and controlled
+      active-WAL and active-migration crashes do not establish Play/store artifact provenance and do not satisfy this
+      final release item, the still-unproved genuine schedule event, or exact-candidate physical-device proof.
 
 ## 7. Store, policy, and rollout
 
