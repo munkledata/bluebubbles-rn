@@ -19,6 +19,7 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
+    "benchmark:inbox": "GATOR_INBOX_BENCHMARK=1 node --expose-gc node_modules/jest/bin/jest.js --selectProjects node --runInBand --no-cache --runTestsByPath test/performance/inboxBenchmark.test.ts",
     "coverage:ui": "jest --config jest.ui-coverage.config.js --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src app",
