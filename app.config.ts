@@ -85,6 +85,7 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     'expo-secure-store',
+    'expo-image',
     // Cold-start splash: black background (matches the default oled-dark theme + the welcome
     // screen) with the gator icon, so launching a closed app no longer flashes white. Same
     // color in OS light + dark. The config plugin is the SDK 57 way (legacy `splash` keys are
