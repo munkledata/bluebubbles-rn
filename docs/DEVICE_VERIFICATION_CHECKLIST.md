@@ -868,14 +868,14 @@ do not infer them visually or manufacture a native failure.
 
 ### 7. Claims and cleanup boundaries
 
-| Claim or boundary                                             | Required evidence / current disposition                                                                                                                        |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native permission dialogs, limited media, IME/insets, intents | Exact Play-candidate observation on each applicable Android/API/navigation branch; host mocks cannot prove them                                                |
+| Claim or boundary                                             | Required evidence / current disposition                                                                                                                           |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native permission dialogs, limited media, IME/insets, intents | Exact Play-candidate observation on each applicable Android/API/navigation branch; host mocks cannot prove them                                                   |
 | Theme readability and accessibility                           | Exact-device screenshots/Scanner/TalkBack plus completed `THEME-02` host contrast/semantic evidence; remaining `A11Y-01..03` device gaps prevent a universal pass |
-| Embedded WebView/network absence                              | Static source plus controlled target/network observation; visual placeholder/browser handoff alone cannot prove traffic or hostile-navigation behavior         |
-| Account work cancellation and local wipe internals            | Host/native DB, file, notification, log, FCM, query, and lifecycle proof; visible B isolation cannot identify every deleted row/file or recalled native intent |
-| State that deliberately survives Disconnect                   | Device-wide themes/settings/contacts/App Lock/OS grants and user-created external copies; remove synthetic contacts/copies separately in their owning systems  |
-| Browser/Maps/share/native work already admitted               | Cannot be recalled after external handoff; close it before Disconnect and verify only the observable cleanup boundary                                          |
+| Embedded WebView/network absence                              | Static source plus controlled target/network observation; visual placeholder/browser handoff alone cannot prove traffic or hostile-navigation behavior            |
+| Account work cancellation and local wipe internals            | Host/native DB, file, notification, log, FCM, query, and lifecycle proof; visible B isolation cannot identify every deleted row/file or recalled native intent    |
+| State that deliberately survives Disconnect                   | Device-wide themes/settings/contacts/App Lock/OS grants and user-created external copies; remove synthetic contacts/copies separately in their owning systems     |
+| Browser/Maps/share/native work already admitted               | Cannot be recalled after external handoff; close it before Disconnect and verify only the observable cleanup boundary                                             |
 
 At cleanup, close browser/Maps/settings/share/native surfaces; settle or cancel fixture work;
 restore only OS appearance, navigation, font/display/TalkBack, permission, theme, and feature
@@ -1020,7 +1020,8 @@ zero-byte DEV request before ordinary boot, requires one READY marker from proce
 marker from a different process B, and retains the same finite metadata under the ignored
 `android/app/build/reports/db-relaunch/` directory. The active-WAL mode uses distinct scenario
 markers and the finite `GATOR_DB_WAL_WRITE_DEATH_V1` schema, requires physical WAL growth before
-exact `adb shell am crash <PID A>`, and retains only allowlisted target/check metadata under the
+exact same-UID `adb shell run-as com.bluegreengatorapps.messages kill -9 <PID A>`, and retains only
+allowlisted target/check metadata under the
 ignored `android/app/build/reports/db-wal-write-death/` directory. The active-migration mode uses a
 third distinct marker family and finite `GATOR_DB_ACTIVE_MIGRATION_DEATH_V1` schema, requires WAL
 beyond its header both before and after crashing exact A, and retains only allowlisted target/check
@@ -1105,7 +1106,7 @@ The active-WAL lane uses its own fixed `driver-wal-write-death-selftest.db`, nev
 scenario-specific zero-byte phase files in the same exclusive DEV dispatcher. A commits the exact
 baseline, requires WAL plus a successful truncate checkpoint, begins `BEGIN IMMEDIATE`, writes a
 bounded multi-page uncommitted canary, and stays open at READY. The host requires the WAL file to
-exceed its header before exact `am crash`; B's first encrypted open is read-only and requires the
+exceed its header before exact same-UID `SIGKILL`; B's first encrypted open is read-only and requires the
 exact baseline-only row set, after which read-write integrity/foreign-key checks, recovery commit,
 read-only reopen, WAL retirement, and the unchanged pre-fallback eight-path absence gate all pass.
 This is controlled ordinary active-WAL write-death evidence only—not active-migration crash,
@@ -1119,7 +1120,7 @@ bounded spill targets and five controls, checkpoints WAL, then enters the exact 
 transaction. Its private wrapper awaits the real `0038` `UPDATE`, proves the exact migrated
 in-transaction rows while the ledger is still exactly at `0037`, and enters a non-settling READY
 callback before returning, so the ledger insert and commit cannot start. The host requires WAL beyond
-its header both before and after exact `am crash`; B's first encrypted open is read-only and proves the
+its header both before and after exact same-UID `SIGKILL`; B's first encrypted open is read-only and proves the
 exact head-`0037` original fixture, after which read-write integrity/foreign-key checks, exact `[0038]`
 retry, head-`0038` ledger/data, idempotency, read-only persistence, WAL retirement, and the unchanged
 pre-fallback eight-path absence gate all pass. This is controlled post-statement/pre-ledger-and-commit

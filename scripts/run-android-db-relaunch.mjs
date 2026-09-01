@@ -1462,13 +1462,13 @@ export async function executeRelaunchSequence(operations, timing = {}) {
 }
 
 export function createCrashAppAdbArgs(pid) {
-  if (!/^\d+$/.test(String(pid))) {
+  if (!/^[1-9]\d*$/.test(String(pid))) {
     throw new HarnessError(
       'invalid-process-identity',
-      'The crash target must be one exact numeric app-process ID.',
+      'The crash target must be one exact positive numeric app-process ID.',
     );
   }
-  return ['shell', 'am', 'crash', String(pid)];
+  return ['shell', 'run-as', APP_PACKAGE, 'kill', '-9', String(pid)];
 }
 
 export function walFileGrewBeyondHeader(sizeText) {
@@ -2179,7 +2179,7 @@ function stopApp(serial) {
 function crashApp(serial, pid) {
   runAdb(serial, createCrashAppAdbArgs(pid), {
     code: 'app-crash-failed',
-    label: 'Exact Gator process crash',
+    label: 'Exact Gator process SIGKILL',
   });
 }
 

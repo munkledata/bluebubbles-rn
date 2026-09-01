@@ -405,7 +405,14 @@ test('pins exact WAL stat, process crash, and private-file absence argv', () => 
     '%s',
     'databases/driver-active-migration-death-selftest.db-wal',
   ]);
-  assert.deepEqual(createCrashAppAdbArgs('101'), ['shell', 'am', 'crash', '101']);
+  assert.deepEqual(createCrashAppAdbArgs('101'), [
+    'shell',
+    'run-as',
+    APP_PACKAGE,
+    'kill',
+    '-9',
+    '101',
+  ]);
   assert.deepEqual(
     createPrivateFileAbsenceAdbArgs('databases/driver-wal-write-death-selftest.db-shm'),
     [
@@ -442,7 +449,8 @@ test('pins exact WAL stat, process crash, and private-file absence argv', () => 
       'databases/driver-runtime-concurrency-selftest.db-shm',
     ],
   );
-  assert.throws(() => createCrashAppAdbArgs('101 202'), /one exact numeric/);
+  assert.throws(() => createCrashAppAdbArgs('101 202'), /one exact positive numeric/);
+  assert.throws(() => createCrashAppAdbArgs('0'), /one exact positive numeric/);
   assert.throws(() => createPrivateFileAbsenceAdbArgs('databases/gator.db'), /allowlist/);
   assert.equal(walFileGrewBeyondHeader('33\n'), true);
   assert.equal(walFileGrewBeyondHeader('32'), false);
