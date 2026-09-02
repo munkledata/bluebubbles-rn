@@ -35,6 +35,8 @@ function fixture(name: string): unknown {
 
 const DELETED_MESSAGES_CONTINUED_FIXTURE_SHA256 =
   '15fa0d3eaa7a8c9fa5394cc50878e89b1be33398b73ca2a7828ec948c0254c62';
+const DELETED_MESSAGES_LEDGER_FIXTURE_SHA256 =
+  '571976a9840ac317cd6bd28b15b605fe62fc099c846dd582389cb7b203b01312';
 
 function pinnedFixture(name: string, expectedSha256: string): unknown {
   const bytes = readFileSync(join(__dirname, '..', 'fixtures', 'contract', 'v1', name));
@@ -144,21 +146,28 @@ describe('endpoint shapes: list wrappers', () => {
     expect(MessageList.safeParse({ messages: null }).success).toBe(true);
   });
 
-  it('consumes the digest-locked continuation fixture while retaining the old-server fallback', async () => {
-    const continuedFixture = DeletedMessageList.parse(
+  it('consumes both digest-locked cursor fixtures while retaining the old-server fallback', async () => {
+    const continuedV1Fixture = DeletedMessageList.parse(
       pinnedFixture(
         'deletedMessages.continued.gator.json',
         DELETED_MESSAGES_CONTINUED_FIXTURE_SHA256,
       ),
     );
+    const ledgerFixture = DeletedMessageList.parse(
+      pinnedFixture('deletedMessages.ledger.gator.json', DELETED_MESSAGES_LEDGER_FIXTURE_SHA256),
+    );
     if (
-      typeof continuedFixture.cursor !== 'string' ||
-      typeof continuedFixture.hasMore !== 'boolean'
+      typeof continuedV1Fixture.cursor !== 'string' ||
+      typeof continuedV1Fixture.hasMore !== 'boolean' ||
+      typeof ledgerFixture.cursor !== 'string' ||
+      typeof ledgerFixture.hasMore !== 'boolean'
     ) {
-      throw new Error('continued-deletion fixture must contain cursor metadata');
+      throw new Error('deletion cursor fixtures must contain cursor metadata');
     }
+    expect(continuedV1Fixture.cursor).toMatch(/^v1\./);
+    expect(ledgerFixture.cursor).toMatch(/^v2\./);
     const responses: unknown[] = [
-      continuedFixture,
+      ledgerFixture,
       { deleted: [{ guid: 'legacy-deleted', chatGuid: null, dateDeleted: 1234 }] },
     ];
     const requests: { path: string; query: unknown }[] = [];
@@ -176,14 +185,14 @@ describe('endpoint shapes: list wrappers', () => {
     const first = await deletedMessages(http, { afterMs: 1000, cursor: null });
     const second = await deletedMessages(http, {
       afterMs: 1234,
-      cursor: continuedFixture.cursor,
+      cursor: continuedV1Fixture.cursor,
     });
 
     expect(first).toEqual({
       protocol: 'continuation',
-      deleted: continuedFixture.deleted,
-      cursor: continuedFixture.cursor,
-      hasMore: continuedFixture.hasMore,
+      deleted: ledgerFixture.deleted,
+      cursor: ledgerFixture.cursor,
+      hasMore: ledgerFixture.hasMore,
     });
     expect(second).toEqual({
       protocol: 'legacy',
@@ -192,14 +201,15 @@ describe('endpoint shapes: list wrappers', () => {
     expect(requests).toEqual([
       {
         path: '/message/deleted',
-        query: { after: 1000, continuation: 1, cursor: undefined },
+        query: { after: 1000, continuation: 1, cursor: undefined, ledger: 1 },
       },
       {
         path: '/message/deleted',
         query: {
           after: 1234,
           continuation: undefined,
-          cursor: continuedFixture.cursor,
+          cursor: continuedV1Fixture.cursor,
+          ledger: 1,
         },
       },
     ]);

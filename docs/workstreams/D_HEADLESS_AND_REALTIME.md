@@ -125,25 +125,36 @@ retry.
 
 ## `DELETE-SYNC-01` — lossless missed-deletion catch-up
 
-Replace a timestamp-only deletion watermark with an opaque continuation token or a composite
-`(dateDeleted, stableId)` cursor. The initial deletion cursor must describe the same consistent
-snapshot as history sync, or history must explicitly exclude or mark deletions within that snapshot.
+Retain the frozen timestamp and v1 keyset protocols for compatibility, and negotiate the v2 durable
+observation protocol with additive `ledger=1`. Old servers ignore the field. New servers rescan the
+recoverable deletion source before every page, append newly observed exact identities to an
+owner-only monotonic ledger, and page by observation sequence under a database epoch. A deletion
+revealed later with an older timestamp or lower source row ID must receive a new sequence rather than
+fall behind an already-issued cursor. The background database watcher writes the same exact
+full-source snapshot before realtime fanout or deletion-cursor advance so an event observed while
+clients are offline survives removal from Apple's temporary source.
 
 Apply each deletion page and its next cursor in one account-guarded transaction. Retrying a page must
 remain idempotent, and account revocation must prevent an old cursor commit. Until an unambiguous
 continuation contract is available, a full page that cannot advance the timestamp watermark stops
 fail-closed instead of silently skipping tied rows.
 
-As of 2026-09-01, the server and app implement the composite opaque continuation, `hasMore`,
-zero-origin initialization, legacy fallback, and atomic page/state commit. The remaining protocol
-gap is snapshot consistency across requests: the current keyset cursor cannot discover a deletion
-that becomes visible later with a key at or behind an already-issued cursor. History must exclude or
-mark deleted rows consistently, or the server must expose a snapshot/high-water plus a monotonic
-deletion-observation sequence. The response contract is host-green: the server owns one canonical
-continued-response fixture, and the app contract test consumes a byte-identical copy pinned to the
-same SHA-256. Exact-device killed-process verification remains open. For older timestamp-only
-servers, an over-500 soft-boundary tie remains intentionally fail-closed; the cursor-capable
-protocol is the tie-safe path.
+As of 2026-09-02, the server and app implement the frozen composite v1 continuation plus the additive
+v2 durable observation ledger, `hasMore`, zero-origin initialization, legacy fallback, and atomic
+page/state commit. Host tests prove late older-timestamp/lower-row observations, restart and epoch
+recovery (including startup rotation before background refill can reuse restored sequences),
+request-local rejection of forged-ahead cursors, background persistence before fanout, v1-to-v2
+transition, v2-to-old-server downgrade recovery, pagination, rollback, and old-server fallback. The
+response contract is host-green: the server owns canonical v1 and v2 continued-response fixtures,
+and app contract tests consume byte-identical copies pinned to matching SHA-256 digests. Exact-device
+killed-process verification remains open under the
+[`DELETE-SYNC-01` device runbook](../DELETE_SYNC_DEVICE_RUNBOOK.md). Each daemon start deliberately
+rotates the process epoch and therefore causes a conservative retained-history replay on the next
+sync. The append-only ledger retains GUID/timestamp metadata, but no message body or attachment
+content, in owner-only `config.db` without a TTL; safe pruning would require durable per-client
+acknowledgements. For older timestamp-only servers, an
+over-500 soft-boundary tie remains intentionally fail-closed; v1 is tie-safe for a stable result set,
+while v2 also closes late-behind-cursor discovery for observed rows.
 
 <a id="sched-01"></a>
 

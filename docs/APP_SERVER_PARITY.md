@@ -179,28 +179,45 @@ videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL bal
 
 <a id="missed-deletion-catch-up-sync-r1"></a>
 
-## ⚠️ Partial (updated 2026-09-01) — missed-deletion catch-up sync (R1)
+## ⚠️ Partial (updated 2026-09-02) — missed-deletion catch-up sync (R1)
 
-**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md). Composite continuation,
-atomic app adoption, and a digest-locked cross-repository response fixture are implemented.
-Cross-request snapshot consistency and exact-device proof keep the parent task open.
+**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md). Frozen legacy/v1
+continuation, additive v2 durable-ledger continuation, atomic app adoption, and two digest-locked
+cross-repository response fixtures are implemented. Exact-device proof keeps the parent task open.
 
 A `message-deleted` event arriving while the app was dead or app-locked used to be lost because the
 locked FCM path never touches the database. Boot/reconnect catch-up now closes that ordinary
 transport gap:
 
 - **Server** (`bluebubbles-server`): legacy `GET /api/v1/message/deleted?after=<unixMs>` retains
-  `{ deleted }`. Cursor-aware callers start with `after=<unixMs>&continuation=1` and resume with
-  `after=<fallback>&cursor=<opaque>`. The continued response is
-  `{ deleted: MessageDeletedV1[], cursor, hasMore }`, hard-capped at 500, and orders equal deletion
-  timestamps by stable message/chat identifiers so more than 500 ties cannot starve later rows.
+  `{ deleted }`, and existing `continuation=1`/`v1.*` callers keep the frozen v1 keyset behavior.
+  New callers add `ledger=1`; old servers ignore that unknown query field, while new servers return a
+  `v2.*` continuation backed by an append-only observation ledger in owner-only `config.db`. Before
+  realtime fanout/cursor advance, background database reconciliation writes one exact full-source
+  snapshot to that shared ledger. Each v2 request repeats the exact rescan as recovery, records new
+  identities with a monotonic sequence, and then pages by sequence. A deletion seen while every app
+  is offline, or exposed late with an older timestamp/lower source row ID, therefore receives a new
+  durable sequence instead of falling behind the client cursor. Every new/reset v2 stream replays
+  retained history from sequence zero because the server has no trusted per-client delivery record.
+  The v2 token also carries a process epoch. The server rotates it synchronously once at daemon
+  startup, before routes or background observation can run, so a cursor from an earlier process
+  cannot validate against sequence numbers refilled after a database restore. A same-process cursor
+  ahead of the durable head resets only that requesting stream and never rotates shared state. The
+  continued response remains
+  `{ deleted: MessageDeletedV1[], cursor, hasMore }`, is hard-capped at 500, and a failed exact scan
+  returns an error without advancing a checkpoint.
 - **App** (`bluebubbles-rn`): `syncDeletedMessages` in `src/services/sync/deletionSync.ts` runs after
-  chat/message history on every supported boot/reconnect sync. It stores versioned JSON in the
-  existing account-scoped `sync.deletionsSyncedAt` key: opaque cursor plus numeric old-server
-  fallback, or legacy fallback alone. Missing, malformed, and old bare-timestamp state starts from
-  zero instead of device `Date.now()`. A legacy state that first encounters the cursor protocol
-  discards that non-zero probe and restarts once from zero so timestamp ties cannot be stranded.
-  Older servers ignore the continuation query and keep using timestamp paging.
+  chat/message history on every supported boot/reconnect sync and now sends the additive `ledger=1`
+  negotiation field. It stores versioned JSON in the existing account-scoped
+  `sync.deletionsSyncedAt` key: opaque cursor plus numeric old-server fallback, or legacy fallback
+  alone. Missing, malformed, and old bare-timestamp state starts from zero instead of device
+  `Date.now()`. A legacy state that first encounters a cursor protocol discards that non-zero probe
+  and restarts once from zero so timestamp ties cannot be stranded. Returned `v2.*` pages use ledger
+  sequence as their progress order, so older or decreasing deletion timestamps are accepted without
+  lowering the numeric fallback. Legacy and v1 pages retain their strict timestamp/key ordering.
+  Older servers ignore `ledger=1` and keep using the frozen v1 or timestamp behavior. If a server is
+  downgraded after the app stored a `v2.*` cursor, one narrowly gated HTTP-400 recovery retries once
+  from zero; the old cursor remains durable until replay and replacement state commit atomically.
 
 The app validates the complete response before writing. Each page's durable deletion-ledger markers,
 message tombstones, chat-sort repair, and next versioned state commit in one account-guarded
@@ -213,22 +230,30 @@ backfill. Focused Node tests cover the strict legacy/continued wire shapes, zero
 upgrade, cursor ties/pages, legacy-to-cursor upgrade, rollback/retry, ownership revocation, malformed
 pages, and idempotency.
 
-Contract drift is now guarded by one canonical continued-response fixture owned by the server and a
-byte-identical app copy pinned to the same SHA-256. Both runtime contract tests consume those frozen
-bytes. Because the repositories clone and test independently, this is a digest-locked synchronized
-copy rather than one physical shared file; updates require coordinated commits.
+Contract drift is guarded by canonical v1 and v2 continued-response fixtures owned by the server and
+byte-identical app copies pinned to their respective SHA-256 digests. Both runtime contract tests
+consume those frozen bytes. Because the repositories clone and test independently, these are
+digest-locked synchronized copies rather than physical shared files; updates require coordinated
+commits.
 
 What remains:
 
-- The opaque cursor is a keyset position, not one SQLite snapshot spanning history and every
-  deletion request. If the server exposes a deletion late with a complete key at or behind an
-  already-issued cursor, the client cannot discover it. History must consistently exclude/mark
-  deleted rows, or the server needs a snapshot/high-water plus a monotonic deletion-observation
-  sequence.
 - Exact-device op-sqlite/SQLCipher killed-process and reconnect catch-up still needs to be run on the
-  current app/server build. Older timestamp-only servers retain their inherent tie limitation: a
-  soft boundary tie can exceed 500 rows, which the app rejects at parsing rather than advancing from
-  ambiguous state. The new cursor protocol is the tie-safe path for a stable server result set.
+  current app/server build using the
+  [`DELETE-SYNC-01` device runbook](./DELETE_SYNC_DEVICE_RUNBOOK.md).
+- Every daemon restart deliberately gives v2 a new process epoch, so the next sync conservatively
+  replays retained ledger history. App-side deletion markers are idempotent, but this trades restart
+  efficiency for a simple restore-safe guarantee until a future cursor can prove ledger-prefix
+  identity.
+- Lossless indefinite-offline catch-up requires retaining observation metadata without time-based
+  pruning. The ledger stores message GUID, nullable chat GUID, exact deletion time, observation time,
+  and canonical identity in the existing owner-only `config.db`; it stores no message body or
+  attachment content. This metadata remains until that database is explicitly reset/uninstalled.
+  Safe pruning would require durable per-client acknowledgements and is not part of v2.
+- Older timestamp-only servers retain their inherent tie limitation: a soft boundary tie can exceed
+  500 rows, which the app rejects at parsing rather than advancing from ambiguous state. The v1 path
+  is tie-safe for a stable result set, while v2 also closes late-behind-cursor discovery for rows the
+  server observes.
 
 ## 📱 RCS bridge (Google Messages)
 
@@ -276,7 +301,7 @@ The historical directional tables remain protocol evidence and do not override t
 
 | Open record/capability | Approved disposition | Reason / authoritative owner |
 | --- | --- | --- |
-| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns the snapshot-consistency contract and exact-device proof. |
+| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns the durable observation contract and exact-device proof. |
 | `imessage-aliases-removed` | DEFER | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source. |
 | Stubbed `GET /server/update/check` | DROP | The app fails closed without issuing the nonexistent request; release/update truth is owned by the release workflow. |
 | Admin `set-config` | DROP | Full server configuration writes require local admin authentication and belong in the trusted server console. |

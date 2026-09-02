@@ -19985,7 +19985,7 @@
     {
       "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:8b1496e402d5",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 203,
+      "line": 217,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19998,7 +19998,7 @@
     {
       "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:0fd8c6a986c4",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 274,
+      "line": 309,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:ee8cdd1e4e>",
@@ -20011,7 +20011,7 @@
     {
       "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:1a3b040948dc",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 274,
+      "line": 309,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20024,7 +20024,7 @@
     {
       "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:ee8cdd1e4e>:mutator-call:5e9c3cddb800",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 278,
+      "line": 313,
       "symbol": "syncDeletedMessages.<callback:ee8cdd1e4e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
@@ -20037,7 +20037,7 @@
     {
       "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:ee8cdd1e4e>:mutator-call:e54cface450b",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 280,
+      "line": 315,
       "symbol": "syncDeletedMessages.<callback:ee8cdd1e4e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",

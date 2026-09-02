@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { Message } from '@core/models';
+import { ApiError } from '@core/api/errors';
 import {
   DELETED_MESSAGE_PAGE_LIMIT,
   DeletedMessageList,
@@ -243,6 +244,212 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     await expect(syncDeletedMessages(db, cursorApi(resume), { supported: true })).resolves.toBe(0);
     expect(resume).toHaveBeenCalledWith(10.5, 'terminal', undefined);
     expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(10.5, 'terminal'));
+  });
+
+  it('adopts a returned v2 cursor from persisted v1 state and accepts ledger-ordered dates', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db, 'c1', ['ledger-old', 'ledger-high', 'ledger-descending']);
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, cursorState(2500, 'v1.start'));
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async () => ({
+        protocol: 'continuation',
+        deleted: [
+          { guid: 'ledger-old', chatGuid: 'c1', dateDeleted: 1000 },
+          { guid: 'ledger-high', chatGuid: 'c1', dateDeleted: 4000 },
+          { guid: 'ledger-descending', chatGuid: 'c1', dateDeleted: 2000 },
+        ],
+        cursor: 'v2.next',
+        hasMore: false,
+      }),
+    );
+
+    await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).resolves.toBe(3);
+
+    expect(fetch).toHaveBeenCalledWith(2500, 'v1.start', undefined);
+    expect([
+      tombstones(raw).get('ledger-old'),
+      tombstones(raw).get('ledger-high'),
+      tombstones(raw).get('ledger-descending'),
+    ]).toEqual([1000, 4000, 2000]);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(4000, 'v2.next'));
+  });
+
+  it.each(['legacy', 'v1'] as const)(
+    'replays from zero after an old server rejects a persisted v2 cursor, then adopts %s state atomically',
+    async (recoveredProtocol) => {
+      const { db, raw } = await createTestDb();
+      await seed(db, 'c1', ['downgrade-replay']);
+      const originalState = cursorState(3000, 'v2.persisted');
+      await kvSet(db, DELETIONS_SYNCED_AT_KEY, originalState);
+      let call = 0;
+      const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+        async () => {
+          call++;
+          if (call === 1) {
+            throw new ApiError('bad_request', 'GET /message/deleted failed', 400);
+          }
+
+          // The failed probe never persists a naked reset. Until this page commits, the previous
+          // account-scoped cursor remains the durable retry point.
+          expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(originalState);
+          if (recoveredProtocol === 'legacy') {
+            return {
+              protocol: 'legacy',
+              deleted: [{ guid: 'downgrade-replay', chatGuid: 'c1', dateDeleted: 1000 }],
+            };
+          }
+          return {
+            protocol: 'continuation',
+            deleted: [{ guid: 'downgrade-replay', chatGuid: 'c1', dateDeleted: 1000 }],
+            cursor: 'v1.recovered',
+            hasMore: false,
+          };
+        },
+      );
+
+      await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).resolves.toBe(1);
+
+      expect(fetch.mock.calls).toEqual([
+        [3000, 'v2.persisted', undefined],
+        [0, null, undefined],
+      ]);
+      expect(tombstones(raw).get('downgrade-replay')).toBe(1000);
+      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(
+        recoveredProtocol === 'legacy' ? legacyState(1000) : cursorState(1000, 'v1.recovered'),
+      );
+    },
+  );
+
+  it('retries a rejected persisted v2 cursor only once', async () => {
+    const { db } = await createTestDb();
+    const originalState = cursorState(3000, 'v2.persisted');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, originalState);
+    const rejection = new ApiError('bad_request', 'GET /message/deleted failed', 400);
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async () => {
+        throw rejection;
+      },
+    );
+
+    await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).rejects.toBe(
+      rejection,
+    );
+
+    expect(fetch.mock.calls).toEqual([
+      [3000, 'v2.persisted', undefined],
+      [0, null, undefined],
+    ]);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(originalState);
+  });
+
+  it('does not reinterpret a rejected v1 cursor as an old-server downgrade', async () => {
+    const { db } = await createTestDb();
+    const originalState = cursorState(3000, 'v1.persisted');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, originalState);
+    const rejection = new ApiError('bad_request', 'GET /message/deleted failed', 400);
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async () => {
+        throw rejection;
+      },
+    );
+
+    await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).rejects.toBe(
+      rejection,
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(3000, 'v1.persisted', undefined);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(originalState);
+  });
+
+  it.each([
+    ['network', new ApiError('no_connection', 'offline')],
+    ['server', new ApiError('server_error', 'unavailable', 503)],
+  ] as const)(
+    'does not reset a persisted v2 cursor after an arbitrary %s failure',
+    async (_name, error) => {
+      const { db } = await createTestDb();
+      const originalState = cursorState(3000, 'v2.persisted');
+      await kvSet(db, DELETIONS_SYNCED_AT_KEY, originalState);
+      const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+        async () => {
+          throw error;
+        },
+      );
+
+      await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).rejects.toBe(
+        error,
+      );
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledWith(3000, 'v2.persisted', undefined);
+      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(originalState);
+    },
+  );
+
+  it('does not begin v2 downgrade recovery after account ownership is revoked', async () => {
+    const { db } = await createTestDb();
+    const originalState = cursorState(3000, 'v2.persisted');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, originalState);
+    let aborted = false;
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async () => {
+        aborted = true;
+        throw new ApiError('bad_request', 'GET /message/deleted failed', 400);
+      },
+    );
+
+    await expect(
+      syncDeletedMessages(db, cursorApi(fetch), {
+        supported: true,
+        shouldAbort: () => aborted,
+      }),
+    ).resolves.toBe(0);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(3000, 'v2.persisted', undefined);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(originalState);
+  });
+
+  it.each([
+    {
+      name: 'a timestamp older than the requested watermark',
+      code: 'timestamp-before-watermark' as const,
+      rows: [
+        { guid: 'v1-before-first', chatGuid: 'c1', dateDeleted: 2000 },
+        { guid: 'v1-before-second', chatGuid: 'c1', dateDeleted: 999 },
+      ] satisfies DeletedMessage[],
+    },
+    {
+      name: 'decreasing timestamps',
+      code: 'timestamp-out-of-order' as const,
+      rows: [
+        { guid: 'v1-order-first', chatGuid: 'c1', dateDeleted: 3000 },
+        { guid: 'v1-order-second', chatGuid: 'c1', dateDeleted: 2000 },
+      ] satisfies DeletedMessage[],
+    },
+  ])('retains strict validation for v1 continuation pages with $name', async ({ code, rows }) => {
+    const { db, raw } = await createTestDb();
+    const guids = rows.map((row) => row.guid);
+    await seed(db, 'c1', guids);
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, cursorState(1000, 'v1.start'));
+
+    await expectProtocolError(
+      syncDeletedMessages(
+        db,
+        cursorApi(async () => ({
+          protocol: 'continuation',
+          deleted: rows,
+          cursor: 'v1.next',
+          hasMore: false,
+        })),
+        { supported: true },
+      ),
+      code,
+    );
+
+    expect(guids.map((guid) => tombstones(raw).get(guid))).toEqual(guids.map(() => null));
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(1000, 'v1.start'));
   });
 
   it('restarts once from zero when a legacy state first encounters a cursor-capable server', async () => {
@@ -766,7 +973,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         { guid: '', chatGuid: 'c1', dateDeleted: 3000 },
       ] satisfies DeletedMessage[],
     },
-  ])('rejects $name before any page write', async ({ code, rows }) => {
+  ])('legacy pages reject $name before any page write', async ({ code, rows }) => {
     const { db, raw } = await createTestDb();
     const seededGuids = rows.map((row) => row.guid).filter((guid) => guid.length > 0);
     await seed(db, 'c1', seededGuids);

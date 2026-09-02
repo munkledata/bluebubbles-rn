@@ -257,7 +257,8 @@ export interface DeletedMessageRequest {
 /**
  * GET /api/v1/message/deleted. New servers return an opaque continuation cursor and `hasMore`;
  * older servers ignore the extra query field and return only `{ deleted }`. `after` is always
- * included as the old-server fallback. Gate calls on `supports_message_deleted`.
+ * included as the old-server fallback. `ledger=1` advertises support for ledger-ordered v2 cursors
+ * and is ignored by older servers. Gate calls on `supports_message_deleted`.
  */
 export async function deletedMessages(
   http: HttpClient,
@@ -270,6 +271,7 @@ export async function deletedMessages(
       after: request.afterMs,
       continuation: request.cursor == null ? 1 : undefined,
       cursor: request.cursor ?? undefined,
+      ledger: 1,
     },
   });
   if ('cursor' in res && typeof res.cursor === 'string') {

@@ -1,0 +1,16 @@
+{
+  "deleted": [
+    {
+      "guid": "m1",
+      "chatGuid": "iMessage;-;+15551234567",
+      "dateDeleted": 980007200000
+    },
+    {
+      "guid": "m2",
+      "chatGuid": "iMessage;-;+15551234567",
+      "dateDeleted": 980007200500
+    }
+  ],
+  "cursor": "v2.WzIsIjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsbnVsbCwiMiIsIjIiXQ",
+  "hasMore": false
+}

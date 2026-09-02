@@ -3,6 +3,7 @@ import {
   type DeletedMessage,
   type DeletedMessagePage,
 } from '@core/api/endpoints/messages';
+import { ApiError } from '@core/api/errors';
 import {
   kvGetWithinTransaction,
   kvSetWithinTransaction,
@@ -100,6 +101,7 @@ function validateDeletionPage(
   rows: readonly DeletedMessage[],
   requestedWatermark: number,
   pageSize: number,
+  ledgerOrdered: boolean,
 ): ValidatedDeletionPage {
   if (rows.length > pageSize) throw new DeletionSyncProtocolError('page-over-cap');
 
@@ -117,14 +119,16 @@ function validateDeletionPage(
     if (!Number.isFinite(row.dateDeleted)) {
       throw new DeletionSyncProtocolError('invalid-timestamp');
     }
-    if (row.dateDeleted < requestedWatermark) {
-      throw new DeletionSyncProtocolError('timestamp-before-watermark');
+    if (!ledgerOrdered) {
+      if (row.dateDeleted < requestedWatermark) {
+        throw new DeletionSyncProtocolError('timestamp-before-watermark');
+      }
+      if (row.dateDeleted < previousTimestamp) {
+        throw new DeletionSyncProtocolError('timestamp-out-of-order');
+      }
+      previousTimestamp = row.dateDeleted;
     }
-    if (row.dateDeleted < previousTimestamp) {
-      throw new DeletionSyncProtocolError('timestamp-out-of-order');
-    }
-    previousTimestamp = row.dateDeleted;
-    maxTimestamp = row.dateDeleted;
+    maxTimestamp = Math.max(maxTimestamp, row.dateDeleted);
   }
   return { hasNullTimestamp, maxTimestamp };
 }
@@ -160,6 +164,15 @@ async function fetchDeletionPage(
   };
 }
 
+function isOldServerV2CursorRejection(error: unknown, cursor: string | null): boolean {
+  return (
+    cursor?.startsWith('v2.') === true &&
+    error instanceof ApiError &&
+    error.kind === 'bad_request' &&
+    error.status === 400
+  );
+}
+
 /**
  * Catch up `message-deleted` events missed while the app was stopped or locked.
  *
@@ -172,8 +185,9 @@ async function fetchDeletionPage(
  * Every complete response is validated before writing. Its tombstones and next state then commit
  * in one account-guarded transaction, so a crash, row failure, or ownership change cannot advance
  * the cursor separately from the page it represents. Network work always stays outside that
- * transaction. The server cursor is still keyset continuation rather than a cross-request SQLite
- * snapshot; a late server row inserted behind an already-issued cursor remains a server-side gap.
+ * transaction. V1 continuation remains timestamp/keyset ordered. A returned v2 cursor instead
+ * identifies ledger-observation order, so its rows may carry older or decreasing deletion dates;
+ * the opaque cursor, not those dates, owns continuation progress.
  */
 export async function syncDeletedMessages(
   db: AppDatabase,
@@ -212,11 +226,31 @@ export async function syncDeletedMessages(
   let applied = 0;
   let committedPages = 0;
   let restartedCursorFromZero = false;
+  let restartedRejectedV2CursorFromZero = false;
   while (committedPages < maxPages) {
     if (!shouldContinue()) break;
     const requestedAfterMs = state?.afterMs ?? 0;
     const requestedCursor = state?.mode === 'cursor' ? state.cursor : null;
-    const response = await fetchDeletionPage(api, requestedAfterMs, requestedCursor, opts.signal);
+    let response: DeletedMessagePage;
+    try {
+      response = await fetchDeletionPage(api, requestedAfterMs, requestedCursor, opts.signal);
+    } catch (error) {
+      // A pre-v2 server rejects an otherwise opaque persisted v2 cursor at input validation. Retry
+      // that one endpoint-specific 400 once from zero; all other failures, and a second rejection,
+      // escape unchanged. Do not write the reset itself: the recovered page and replacement state
+      // must still commit atomically under the account guard.
+      if (
+        !restartedRejectedV2CursorFromZero &&
+        isOldServerV2CursorRejection(error, requestedCursor)
+      ) {
+        if (!shouldContinue()) break;
+        restartedRejectedV2CursorFromZero = true;
+        state = null;
+        seenCursors.clear();
+        continue;
+      }
+      throw error;
+    }
 
     // HttpClient keeps an immutable request snapshot through retries. Reject an old-account result
     // before it can enter a transaction after Disconnect changed ownership.
@@ -236,7 +270,8 @@ export async function syncDeletedMessages(
     }
 
     const rows = response.deleted;
-    const validated = validateDeletionPage(rows, requestedAfterMs, pageSize);
+    const ledgerOrdered = response.protocol === 'continuation' && response.cursor.startsWith('v2.');
+    const validated = validateDeletionPage(rows, requestedAfterMs, pageSize, ledgerOrdered);
     const preparedRows = rows.map((row) => ({
       guid: row.guid,
       dateDeleted: row.dateDeleted ?? now(),
