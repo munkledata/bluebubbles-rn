@@ -7,6 +7,11 @@ import {
 import { deleteOwnedFile, downloadBoundedNativeFile } from './boundedNativeDownload';
 import { encodedMediaPathSegment, mediaGenerationPathSegment } from './pathSafety';
 
+// The bounded downloader deliberately rejects redirects. Keep this synthetic DEV fixture on the
+// direct Picsum CDN object instead of the public seed endpoint, which responds with HTTP 302.
+const DEV_PROGRESS_IMAGE_URL =
+  'https://fastly.picsum.photos/id/1078/1200/800.jpg?hmac=AaoeVGhypi-ZEGH8YpfSBDKaT3Lya5Hr4ETQOkVoqiI';
+
 function developmentDestination(
   guid: string,
   transferName: string,
@@ -49,10 +54,9 @@ export const devProgressFetcher: AttachmentFetcher = {
   ) {
     const { dir, file: dest } = developmentDestination(guid, transferName, generation);
     dir.create({ intermediates: true, idempotent: true });
-    const url = `https://picsum.photos/seed/${encodeURIComponent(guid)}/1200/800`;
     const maxBytes = limits?.maxBytes ?? MANUAL_ATTACHMENT_MAX_BYTES;
     const result = await downloadBoundedNativeFile({
-      url,
+      url: DEV_PROGRESS_IMAGE_URL,
       destination: dest,
       signal: limits?.signal,
       maxBytes,

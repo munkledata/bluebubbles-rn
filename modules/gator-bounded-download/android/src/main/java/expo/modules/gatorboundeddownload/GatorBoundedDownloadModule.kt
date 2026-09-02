@@ -495,8 +495,9 @@ class GatorBoundedDownloadModule : Module() {
         uri.fragment == null,
     ) { "Invalid synced-background retirement URI" }
     val rawPath = uri.path ?: throw IllegalArgumentException("Missing synced-background path")
-    val target = requireOwnedSyncedBackgroundRetirementPath(root, File(rawPath))
-    require(Uri.fromFile(target).toString() == rawUri) {
+    val rawTarget = File(rawPath).absoluteFile
+    val target = requireOwnedSyncedBackgroundRetirementPath(root, rawTarget)
+    require(Uri.fromFile(rawTarget).toString() == rawUri) {
       "Synced-background retirement URI is not canonical"
     }
     return target

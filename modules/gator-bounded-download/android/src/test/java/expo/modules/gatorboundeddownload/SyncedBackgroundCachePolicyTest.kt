@@ -102,6 +102,63 @@ class SyncedBackgroundCachePolicyTest {
   }
 
   @Test
+  fun `prunes through a trusted ancestor alias while retaining the exact keep file`() {
+    val realBase = temporary.newFolder("real-background-base").canonicalFile
+    val aliasBase = File(temporary.root.canonicalFile, "android-background-base-alias")
+    Files.createSymbolicLink(aliasBase.toPath(), realBase.toPath())
+    val realRoot = File(realBase, SYNCED_BACKGROUND_CACHE_DIRECTORY).apply { mkdirs() }
+    val aliasRoot = File(aliasBase, SYNCED_BACKGROUND_CACHE_DIRECTORY)
+    val keep = media(realRoot, 1, "keep", 4, 9_000L)
+    val stale = media(realRoot, 2, "stale", 4, 1_000L)
+    val aliasKeep = File(aliasRoot, "generation-1/media-keep.jpg")
+    val validatedKeep = requireOwnedSyncedBackgroundEntry(aliasRoot, aliasKeep)
+
+    val result = pruneSyncedBackgroundCache(
+      root = aliasRoot,
+      keepFile = validatedKeep,
+      nowMs = 10_000L,
+      maxBytes = 4L,
+      maxFiles = 1,
+      recentGraceMs = 0L,
+    )
+
+    assertTrue(result.withinQuota)
+    assertEquals(aliasKeep.absoluteFile, validatedKeep)
+    assertTrue(keep.exists())
+    assertFalse(stale.exists())
+    assertEquals(
+      keep.canonicalFile,
+      requireOwnedSyncedBackgroundRetirementPath(aliasRoot, aliasKeep),
+    )
+    assertTrue(
+      runCatching {
+        requireOwnedSyncedBackgroundRetirementPath(aliasRoot, keep)
+      }.isFailure,
+    )
+  }
+
+  @Test
+  fun `a symlink at the fixed root is rejected before pruning`() {
+    val realRoot = temporary.newFolder("real-background-root").canonicalFile
+    val owned = media(realRoot, 1, "owned", 4, 100L)
+    val linkedRoot = File(temporary.root.canonicalFile, "linked-background-root")
+    Files.createSymbolicLink(linkedRoot.toPath(), realRoot.toPath())
+
+    assertTrue(
+      runCatching {
+        pruneSyncedBackgroundCache(
+          root = linkedRoot,
+          nowMs = 10_000L,
+          maxBytes = 1L,
+          maxFiles = 1,
+          recentGraceMs = 0L,
+        )
+      }.isFailure,
+    )
+    assertTrue(owned.exists())
+  }
+
+  @Test
   fun `deletes only exact canonical two-level media entries`() {
     val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
     val owned = media(root, 1, "owned", 4, 100L)

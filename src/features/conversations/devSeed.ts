@@ -300,7 +300,7 @@ export async function seedFixtures(): Promise<number> {
       hm,
     );
 
-    // Attachment fixtures: a rendered image, a blurhash-only image, a PDF chip.
+    // Attachment fixtures: a downloadable image, a blurhash-only image, a PDF chip.
     await upsertMessages(
       db,
       [
@@ -402,9 +402,8 @@ export async function seedFixtures(): Promise<number> {
       () => craigId,
       hm,
     );
-    // DEV: render the first image from a real remote URL (localPath is normally a
-    // downloaded file://; for the demo this avoids needing a server).
-    await updateAttachmentLocalPath(db, 'cr-img-att', 'https://picsum.photos/seed/bb/1200/800');
+    // Leave the first image's localPath untouched. A fresh fixture starts undownloaded, while a
+    // repeat seed preserves a recovered app-owned file and can exercise restart/cache reuse.
     // DEV: the sticker image, so the overlay draws something on the 'cr-1' bubble.
     await updateAttachmentLocalPath(
       db,

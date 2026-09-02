@@ -522,6 +522,15 @@ or retry-safety evidence. Keyboard, wallpaper, and TalkBack presentation of the 
       occurs naturally or on a separately approved controlled device. Require Gator's dialog/toast
       rather than silence; do not infer the native failure from a button tap alone.
 
+**Supporting observation — 2026-09-02; `LOCAL-DEV SUPPORTING ONLY`, no checkbox or candidate
+credit:** A rebuilt `0.1.41` debug client on a physical Samsung device recovered and immediately
+rendered the existing 186,575-byte synthetic image after an in-place reinstall and fresh DEV-session
+seed. The current item reported `1 of 3`; Share foregrounded Android's chooser, and Save created an
+exact 186,575-byte `DCIM/media-keynote.jpg` MediaStore row without a permission prompt. Only that
+new synthetic external row was deleted after verification; the app-private source remains. No share
+suggestions or unrelated MediaStore rows were inspected. Video, TalkBack, staged-server, and exact
+Play-candidate results remain open.
+
 ### 6. Inbound-share containment and outbound preservation
 
 - [ ] **`STATIC/HOST`:** Retain exact source/packaged-boundary proof that Gator has no inbound

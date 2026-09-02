@@ -1,7 +1,13 @@
 import { useSessionStore } from '@state/sessionStore';
 import { DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD } from '@utils/isDev';
 import { ensureDatabase } from '@/services/databaseControl';
-import { resumeRealtimeDeliveries } from '@/services/realtime/deliveryCoordinator';
+import { getDatabase } from '@db/database';
+import { recoverAttachmentCache } from '@/services/download/attachmentCacheRecovery';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 import { seedFixtures } from './devSeed';
 
 let devFixtureSessionInFlight: Promise<void> | null = null;
@@ -16,13 +22,23 @@ export function startDevFixtureSession(): Promise<void> {
   const attempt = (async (): Promise<void> => {
     await ensureDatabase();
     await seedFixtures();
-    useSessionStore
-      .getState()
-      .connected(DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD, { server_version: '1.9.0' });
     // Normal connected boot reopens this gate after durable-session validation. This DEV-only
-    // shortcut deliberately bypasses that boot path, so reopen it only after fixtures and the
-    // in-memory session have both been published successfully.
+    // shortcut deliberately bypasses that boot path, so mirror its cache-recovery gate before
+    // publishing an inbox that offers persistent attachment downloads.
     resumeRealtimeDeliveries();
+    const cacheLease = captureRealtimeDeliveryLease();
+    try {
+      const recovery = await recoverAttachmentCache(getDatabase(), cacheLease);
+      if (recovery.status !== 'ready' || !cacheLease.isCurrent()) {
+        throw new Error('Development attachment cache recovery became stale.');
+      }
+      useSessionStore
+        .getState()
+        .connected(DEV_SERVER_ORIGIN, DEV_SERVER_PASSWORD, { server_version: '1.9.0' });
+    } catch (error) {
+      await pauseRealtimeDeliveries();
+      throw error;
+    }
   })();
 
   devFixtureSessionInFlight = attempt;

@@ -86,6 +86,26 @@ class AttachmentCacheScannerTest {
   }
 
   @Test
+  fun `streams through a trusted ancestor alias without changing manifest path identity`() {
+    val realBase = temporary.newFolder("real-scan-base").canonicalFile
+    val aliasBase = File(temporary.root.canonicalFile, "android-scan-base-alias")
+    Files.createSymbolicLink(aliasBase.toPath(), realBase.toPath())
+    val realRoot = File(realBase, ATTACHMENT_CACHE_DIRECTORY).apply { mkdirs() }
+    val realGeneration = File(realRoot, "media-guid/generation-3").apply { mkdirs() }
+    cacheFile(realGeneration, "media-photo.jpg", 3)
+    val aliasRoot = File(aliasBase, ATTACHMENT_CACHE_DIRECTORY)
+
+    val entries = collectAll(manager(aliasRoot))
+
+    assertEquals(1, entries.size)
+    assertEquals(
+      File(aliasRoot, "media-guid/generation-3/media-photo.jpg").absolutePath,
+      entries.single().file.absolutePath,
+    )
+    assertEquals(3L, entries.single().bytes)
+  }
+
+  @Test
   fun `a page stops after its native node budget even before finding a file`() {
     val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
     val generation = File(root, "media-chat/generation-unscoped").apply { mkdirs() }

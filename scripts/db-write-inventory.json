@@ -11546,43 +11546,43 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession:mutator-call:82b309039516",
+      "id": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession:mutator-call:952c7fc86f4b",
       "path": "src/features/conversations/devFixtureSession.ts",
-      "line": 16,
+      "line": 22,
       "symbol": "startDevFixtureSession",
       "operation": "mutator-call",
-      "target": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:a9dbc72121>",
+      "target": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:da7ab6f8ed>",
       "detectedContext": "coordinated-delegation",
       "owner": "startDevFixtureSession",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devFixtureSession.test.ts"
     },
     {
-      "id": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:a9dbc72121>:mutator-call:2c5e25d89e0a",
+      "id": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:da7ab6f8ed>:mutator-call:fe5a0a939144",
       "path": "src/features/conversations/devFixtureSession.ts",
-      "line": 17,
-      "symbol": "startDevFixtureSession.<callback:a9dbc72121>",
+      "line": 23,
+      "symbol": "startDevFixtureSession.<callback:da7ab6f8ed>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
       "owner": "startDevFixtureSession",
       "transactionContext": "startup-single-flight-delegation",
       "disposition": "proven-temporal-exclusion",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; test/features/conversations/devFixtureSession.test.ts"
     },
     {
-      "id": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:a9dbc72121>:mutator-call:b9b130735b2c",
+      "id": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:da7ab6f8ed>:mutator-call:05b010927a61",
       "path": "src/features/conversations/devFixtureSession.ts",
-      "line": 18,
-      "symbol": "startDevFixtureSession.<callback:a9dbc72121>",
+      "line": 24,
+      "symbol": "startDevFixtureSession.<callback:da7ab6f8ed>",
       "operation": "mutator-call",
       "target": "src/features/conversations/devSeed.ts#seedFixtures",
       "detectedContext": "coordinated-delegation",
       "owner": "startDevFixtureSession",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devFixtureSession.test.ts"
     },
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:9baf717e8519",
@@ -11689,22 +11689,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
     },
     {
-      "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:701132d9a72e",
-      "path": "src/features/conversations/devSeed.ts",
-      "line": 407,
-      "symbol": "seedFixtures",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath",
-      "detectedContext": "coordinated-delegation",
-      "owner": "seedFixtures",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
-    },
-    {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 409,
+      "line": 408,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath",
@@ -11717,7 +11704,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 415,
+      "line": 414,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath",
@@ -11730,7 +11717,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 447,
+      "line": 446,
       "symbol": "queueDevSendReconcile.<callback:a529712610>.reconcile",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess",
@@ -11743,7 +11730,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>:mutator-reference:7993eb4dd862",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 452,
+      "line": 451,
       "symbol": "queueDevSendReconcile.<callback:a529712610>",
       "operation": "mutator-reference",
       "target": "src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile",
@@ -11756,7 +11743,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 470,
+      "line": 469,
       "symbol": "devSendFakeImage.<callback:daefab75bd>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment",
@@ -11769,7 +11756,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devSendFake.<callback:3603f2d977>:mutator-call:5f9f1755f5ee",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 508,
+      "line": 507,
       "symbol": "devSendFake.<callback:3603f2d977>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingText",
@@ -11782,7 +11769,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 532,
+      "line": 531,
       "symbol": "devSendFakeReaction.<callback:6d65226469>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingReaction",
@@ -11795,7 +11782,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 559,
+      "line": 558,
       "symbol": "devEditFake.<callback:5de2143777>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#applyLocalEdit",
@@ -11808,7 +11795,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devUnsendFake.<callback:0403b8ef33>:mutator-call:1c3853448684",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 571,
+      "line": 570,
       "symbol": "devUnsendFake.<callback:0403b8ef33>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#applyLocalUnsend",
@@ -11821,7 +11808,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devSendFakeReply.<callback:2fcb797864>:mutator-call:9ad22db2d4df",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 590,
+      "line": 589,
       "symbol": "devSendFakeReply.<callback:2fcb797864>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingText",
@@ -11834,7 +11821,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devQueueIncomingMessageWithoutDrain.<callback:54ecf68772>:mutator-call:36d6d37aad05",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 631,
+      "line": 630,
       "symbol": "devQueueIncomingMessageWithoutDrain.<callback:54ecf68772>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#devPersistRealtimeEventWithoutDrain",
@@ -11847,7 +11834,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devResumeQueuedIncomingMessages.<callback:7d48074c07>:mutator-call:184b77fd26ef",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 671,
+      "line": 670,
       "symbol": "devResumeQueuedIncomingMessages.<callback:7d48074c07>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#devResumePersistedRealtimeEvents",
@@ -11860,7 +11847,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#injectMessage.<callback:73729e174f>:mutator-call:c8a56ff545c6",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 694,
+      "line": 693,
       "symbol": "injectMessage.<callback:73729e174f>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#inject",
@@ -11873,7 +11860,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devInjectIncomingFaceTime.<callback:3ab87b330d>:mutator-call:7b232ce77ff7",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 731,
+      "line": 730,
       "symbol": "devInjectIncomingFaceTime.<callback:3ab87b330d>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#inject",
@@ -11886,7 +11873,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devInjectEffect.<callback:8cbe838310>:mutator-call:586201c30c9c",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 778,
+      "line": 777,
       "symbol": "devInjectEffect.<callback:8cbe838310>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#inject",

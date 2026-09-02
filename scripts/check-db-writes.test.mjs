@@ -2338,7 +2338,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
     (finding) => !devFixtures.includes(finding) && !scheduledStateMachine.includes(finding),
   );
 
-  assert.equal(devFixtures.length, 18);
+  assert.equal(devFixtures.length, 17);
   assert.equal(intentionalBoundaries.length, 25);
   assert.equal(scheduledStateMachine.length, 9);
   assert.deepEqual(
@@ -2360,7 +2360,6 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:4663da7605da',
-      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:701132d9a72e',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:71542bb99e88',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:737bc3296081',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:98585f0a84d3',
@@ -2562,7 +2561,6 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:4663da7605da',
-      'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:701132d9a72e',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:71542bb99e88',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:737bc3296081',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:98585f0a84d3',
@@ -2949,8 +2947,8 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3',
       'app/(setup)/welcome.tsx#Welcome.<callback:b1fa990a01>:mutator-call:7469e4d131fc',
       'app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d',
-      'src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:a9dbc72121>:mutator-call:b9b130735b2c',
-      'src/features/conversations/devFixtureSession.ts#startDevFixtureSession:mutator-call:82b309039516',
+      'src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:da7ab6f8ed>:mutator-call:05b010927a61',
+      'src/features/conversations/devFixtureSession.ts#startDevFixtureSession:mutator-call:952c7fc86f4b',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ace67f713c95',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ca17968027de',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:fcf356fa69c2',

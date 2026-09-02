@@ -373,17 +373,14 @@ private class AttachmentCacheScanSession(
     // confirms an entry exists; on macOS/JVM tests a missing child under `/var` canonicalizes via
     // `/private/var`, even though there is no node (and therefore no symlink) to reject.
     val node = inspect(root) ?: return null
-    val canonicalRoot = try {
-      root.canonicalFile
+    try {
+      canonicalOwnedRoot(root, "Attachment cache root")
     } catch (problem: Exception) {
       throw AttachmentCacheScanException(
         AttachmentCacheScanFailure.CORRUPT,
         "the cache root cannot be resolved",
         problem,
       )
-    }
-    if (canonicalRoot.path != absoluteRoot.path) {
-      fail(AttachmentCacheScanFailure.CORRUPT, "the cache root is a symlink or alias")
     }
     if (node.kind != AttachmentCacheNodeKind.DIRECTORY) {
       fail(AttachmentCacheScanFailure.CORRUPT, "the cache root is not a plain directory")
@@ -467,17 +464,15 @@ private class AttachmentCacheScanSession(
   ) {
     if (!validName) fail(AttachmentCacheScanFailure.CORRUPT, "$label name is invalid")
     requireDirectChild(parent, directory, label)
-    val canonical = try {
-      directory.canonicalFile
+    try {
+      val canonicalRoot = canonicalOwnedRoot(root, "Attachment cache root")
+      canonicalOwnedDescendant(root, canonicalRoot, directory, label)
     } catch (problem: Exception) {
       throw AttachmentCacheScanException(
         AttachmentCacheScanFailure.CORRUPT,
         "$label cannot be resolved",
         problem,
       )
-    }
-    if (canonical.path != directory.absoluteFile.path) {
-      fail(AttachmentCacheScanFailure.CORRUPT, "$label is a symlink or alias")
     }
     val node = inspect(directory)
       ?: fail(AttachmentCacheScanFailure.CORRUPT, "$label disappeared during the scan")

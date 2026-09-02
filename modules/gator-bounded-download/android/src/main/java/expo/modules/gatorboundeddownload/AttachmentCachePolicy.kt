@@ -21,6 +21,54 @@ private val GENERATION_SEGMENT = Regex("^generation-(?:0|[1-9][0-9]*|unscoped)$"
 private val COMMITTED_PASTE_BATCH = Regex("^(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*))?$")
 
 /**
+ * Canonicalize only ancestors of a native-fixed root, never the root entry itself.
+ *
+ * Android can expose the same app sandbox through two OS-owned path spellings. Requiring the raw
+ * `filesDir` spelling to equal `canonicalFile` therefore rejects valid files on some devices. The
+ * root's parent is trusted native input, so its alias may resolve; rebuilding the final component
+ * below that canonical parent still rejects a symlink or alias at the cache root itself.
+ */
+internal fun canonicalOwnedRoot(root: File, label: String): File {
+  val absoluteRoot = root.absoluteFile
+  val absoluteParent = absoluteRoot.parentFile
+    ?: throw IllegalArgumentException("$label has no parent directory")
+  val canonicalParent = absoluteParent.canonicalFile
+  val expectedCanonicalRoot = File(canonicalParent, absoluteRoot.name).absoluteFile
+  val canonicalRoot = root.canonicalFile
+  require(canonicalRoot.path == expectedCanonicalRoot.path) {
+    "$label entry is a symlink or alias"
+  }
+  return canonicalRoot
+}
+
+/**
+ * Resolve one descendant while permitting only the trusted root's inherited ancestor alias.
+ *
+ * The raw relative spelling is transplanted beneath the already-validated canonical root. Any
+ * `..`, intermediate symlink, or final symlink makes the actual canonical path differ from that
+ * expected spelling and is rejected.
+ */
+internal fun canonicalOwnedDescendant(
+  root: File,
+  canonicalRoot: File,
+  candidate: File,
+  label: String,
+): File {
+  val absoluteRoot = root.absoluteFile
+  val absoluteCandidate = candidate.absoluteFile
+  val prefix = absoluteRoot.path + File.separator
+  require(absoluteCandidate.path.startsWith(prefix)) { "$label is outside the owned root" }
+  val relativePath = absoluteCandidate.path.substring(prefix.length)
+  require(relativePath.isNotEmpty()) { "$label is the owned root" }
+  val expectedCanonical = File(canonicalRoot, relativePath).absoluteFile
+  val canonicalCandidate = candidate.canonicalFile
+  require(canonicalCandidate.path == expectedCanonical.path) {
+    "$label is not canonical beneath the owned root"
+  }
+  return canonicalCandidate
+}
+
+/**
  * Validate one exact ordinary-attachment cache file without requiring it to still exist.
  *
  * The fixed root comes from `appContext.persistentFilesDirectory`; JavaScript cannot choose it.
@@ -37,10 +85,7 @@ private val COMMITTED_PASTE_BATCH = Regex("^(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]
  */
 internal fun requireOwnedAttachmentCachePath(root: File, candidate: File): File {
   val absoluteRoot = root.absoluteFile
-  val canonicalRoot = root.canonicalFile
-  require(canonicalRoot.path == absoluteRoot.path) {
-    "Attachment cache root is not canonical"
-  }
+  val canonicalRoot = canonicalOwnedRoot(root, "Attachment cache root")
   require(!canonicalRoot.exists() || canonicalRoot.isDirectory) {
     "Attachment cache root is not a directory"
   }
@@ -49,9 +94,14 @@ internal fun requireOwnedAttachmentCachePath(root: File, candidate: File): File 
   require(absoluteCandidate.path.length <= MAX_ATTACHMENT_CACHE_PATH_CHARS) {
     "Attachment cache path is too long"
   }
-  val canonicalCandidate = candidate.canonicalFile
-  require(canonicalCandidate.path == absoluteCandidate.path) {
-    "Attachment cache path is not canonical"
+  val canonicalCandidate = canonicalOwnedDescendant(
+    root,
+    canonicalRoot,
+    candidate,
+    "Attachment cache path",
+  )
+  require(canonicalCandidate.path.length <= MAX_ATTACHMENT_CACHE_PATH_CHARS) {
+    "Canonical attachment cache path is too long"
   }
   val parentDirectory = canonicalCandidate.parentFile
     ?: throw IllegalArgumentException("Attachment cache path has no parent directory")
@@ -63,7 +113,7 @@ internal fun requireOwnedAttachmentCachePath(root: File, candidate: File): File 
     require(isLegacyAttachmentCacheSegment(canonicalCandidate.name)) {
       "Legacy attachment cache filename is invalid"
     }
-    return canonicalCandidate
+    return absoluteCandidate
   }
 
   val mediaDirectory = parentDirectory.parentFile
@@ -80,7 +130,7 @@ internal fun requireOwnedAttachmentCachePath(root: File, candidate: File): File 
   require(isEncodedMediaSegment(canonicalCandidate.name)) {
     "Attachment cache filename is invalid"
   }
-  return canonicalCandidate
+  return absoluteCandidate
 }
 
 /** Accept only the current generation-scoped layout used for newly adopted outgoing files. */
@@ -90,7 +140,7 @@ internal fun requireOwnedCurrentAttachmentCachePath(root: File, candidate: File)
     ?: throw IllegalArgumentException("Attachment cache path has no generation directory")
   val mediaDirectory = generationDirectory.parentFile
     ?: throw IllegalArgumentException("Attachment cache path has no media directory")
-  require(mediaDirectory.parentFile?.path == root.canonicalFile.path) {
+  require(mediaDirectory.parentFile?.path == root.absoluteFile.path) {
     "Outgoing attachment destination must use the current cache namespace"
   }
   require(isEncodedMediaSegment(mediaDirectory.name)) {
@@ -112,46 +162,54 @@ internal fun requireOwnedCurrentAttachmentCachePath(root: File, candidate: File)
  * from turning a later empty-directory cleanup into a traversal primitive.
  */
 internal fun requireOwnedPastedAttachment(root: File, candidate: File): File {
-  val absoluteRoot = root.absoluteFile
-  val canonicalRoot = root.canonicalFile
-  require(canonicalRoot.path == absoluteRoot.path) { "Paste cache root is not canonical" }
+  val canonicalRoot = canonicalOwnedRoot(root, "Paste cache root")
   require(canonicalRoot.isDirectory) { "Paste cache root is unavailable" }
 
   val absoluteCandidate = candidate.absoluteFile
   require(absoluteCandidate.path.length <= MAX_ATTACHMENT_CACHE_PATH_CHARS) {
     "Pasted attachment path is too long"
   }
-  val target = candidate.canonicalFile
-  require(target.path == absoluteCandidate.path) { "Pasted attachment path is not canonical" }
-  val batch = target.parentFile ?: throw IllegalArgumentException("Pasted attachment has no batch")
-  require(batch.parentFile?.path == canonicalRoot.path && COMMITTED_PASTE_BATCH.matches(batch.name)) {
+  val canonicalTarget = canonicalOwnedDescendant(
+    root,
+    canonicalRoot,
+    candidate,
+    "Pasted attachment path",
+  )
+  val canonicalBatch = canonicalTarget.parentFile
+    ?: throw IllegalArgumentException("Pasted attachment has no batch")
+  require(
+    canonicalBatch.parentFile?.path == canonicalRoot.path &&
+      COMMITTED_PASTE_BATCH.matches(canonicalBatch.name),
+  ) {
     "Pasted attachment is outside a committed batch"
   }
-  require(batch.isDirectory && target.isFile) { "Pasted attachment is not a regular file" }
+  require(canonicalBatch.isDirectory && canonicalTarget.isFile) {
+    "Pasted attachment is not a regular file"
+  }
 
-  val siblings = batch.listFiles() ?: throw IllegalArgumentException("Paste batch is unreadable")
+  val rawBatch = absoluteCandidate.parentFile
+    ?: throw IllegalArgumentException("Pasted attachment has no raw batch")
+  val siblings = rawBatch.listFiles() ?: throw IllegalArgumentException("Paste batch is unreadable")
   require(siblings.isNotEmpty() && siblings.size <= MAX_PASTED_BATCH_FILES) {
     "Paste batch has an invalid file count"
   }
   siblings.forEach { raw ->
-    val sibling = raw.canonicalFile
+    val sibling = canonicalOwnedDescendant(root, canonicalRoot, raw, "Pasted attachment sibling")
     require(
-      sibling.path == raw.absoluteFile.path &&
-        sibling.parentFile?.path == batch.path &&
+      sibling.parentFile?.path == canonicalBatch.path &&
         sibling.isFile,
     ) { "Paste batch contains an invalid file" }
   }
-  require(siblings.any { it.absoluteFile.path == target.path }) {
+  require(siblings.any { it.absoluteFile.path == absoluteCandidate.path }) {
     "Pasted attachment is not in its batch"
   }
-  return target
+  return absoluteCandidate
 }
 
 /** Remove only the two exact empty current-layout parents created for one reserved file. */
 internal fun pruneEmptyAttachmentCacheParents(root: File, target: File) {
-  val canonicalRoot = root.canonicalFile
-  val canonicalTarget = requireOwnedCurrentAttachmentCachePath(canonicalRoot, target)
-  val generation = canonicalTarget.parentFile ?: return
+  val ownedTarget = requireOwnedCurrentAttachmentCachePath(root, target)
+  val generation = ownedTarget.parentFile ?: return
   val media = generation.parentFile ?: return
   if (generation.listFiles()?.isEmpty() == true) generation.delete()
   if (media.listFiles()?.isEmpty() == true) media.delete()

@@ -69,7 +69,13 @@ internal fun pruneSyncedBackgroundCache(
   require(canonicalRoot.isDirectory) { "Synced-background cache root is not a directory" }
 
   val keep = keepFile?.let { candidate ->
-    requireOwnedEntry(canonicalRoot, candidate)
+    val canonicalCandidate = canonicalOwnedDescendant(
+      root,
+      canonicalRoot,
+      candidate,
+      "Synced-background keep file",
+    )
+    requireOwnedEntry(canonicalRoot, canonicalCandidate)
   }
   val keepPath = keep?.path
   val keepBytes = keep?.length()?.coerceAtLeast(0L) ?: 0L
@@ -132,10 +138,17 @@ internal fun pruneSyncedBackgroundCache(
   )
 }
 
-/** Return the canonical entry only when every path component has the exact owned shape. */
+/** Return the raw absolute entry after proving its canonical path has the exact owned shape. */
 internal fun requireOwnedSyncedBackgroundEntry(root: File, candidate: File): File {
   val canonicalRoot = canonicalPlainRoot(root)
-  return requireOwnedEntry(canonicalRoot, candidate)
+  val canonicalCandidate = canonicalOwnedDescendant(
+    root,
+    canonicalRoot,
+    candidate,
+    "Synced-background file",
+  )
+  requireOwnedEntry(canonicalRoot, canonicalCandidate)
+  return candidate.absoluteFile
 }
 
 /**
@@ -147,8 +160,12 @@ internal fun requireOwnedSyncedBackgroundEntry(root: File, candidate: File): Fil
  */
 internal fun requireOwnedSyncedBackgroundRetirementPath(root: File, candidate: File): File {
   val canonicalRoot = canonicalPlainRoot(root)
-  val canonicalCandidate = canonicalPlain(candidate)
-    ?: throw IllegalArgumentException("Synced-background retirement path is not canonical")
+  val canonicalCandidate = canonicalOwnedDescendant(
+    root,
+    canonicalRoot,
+    candidate,
+    "Synced-background retirement path",
+  )
   val parent = canonicalCandidate.parentFile
     ?: throw IllegalArgumentException("Synced-background retirement path has no parent")
 
@@ -254,11 +271,7 @@ private fun requireOwnedEntry(root: File, candidate: File): File {
 }
 
 private fun canonicalPlainRoot(root: File): File {
-  val canonical = root.canonicalFile
-  require(canonical.path == root.absoluteFile.path) {
-    "Synced-background cache root is not canonical"
-  }
-  return canonical
+  return canonicalOwnedRoot(root, "Synced-background cache root")
 }
 
 /** Reject symlinks and path aliases rather than following them during cache deletion. */

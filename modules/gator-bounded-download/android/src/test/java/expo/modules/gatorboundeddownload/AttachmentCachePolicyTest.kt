@@ -30,6 +30,44 @@ class AttachmentCachePolicyTest {
   }
 
   @Test
+  fun `accepts only the trusted ancestor alias while preserving the raw cache identity`() {
+    val realBase = temporary.newFolder("real-app-base").canonicalFile
+    val aliasBase = File(temporary.root.canonicalFile, "android-app-base-alias")
+    Files.createSymbolicLink(aliasBase.toPath(), realBase.toPath())
+    val realRoot = File(realBase, ATTACHMENT_CACHE_DIRECTORY).apply { mkdirs() }
+    val aliasRoot = File(aliasBase, ATTACHMENT_CACHE_DIRECTORY)
+    val realCurrent = File(realRoot, "media-guid/generation-7/media-photo.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(1))
+    }
+    val realLegacy = File(realRoot, "legacy-guid/legacy photo.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(2))
+    }
+    val aliasCurrent = File(aliasRoot, "media-guid/generation-7/media-photo.jpg")
+    val aliasLegacy = File(aliasRoot, "legacy-guid/legacy photo.jpg")
+    val aliasMissing = File(aliasRoot, "media-guid/generation-7/media-later.jpg")
+
+    assertEquals(
+      aliasCurrent.absoluteFile,
+      requireOwnedAttachmentCachePath(aliasRoot, aliasCurrent),
+    )
+    assertEquals(
+      aliasLegacy.absoluteFile,
+      requireOwnedAttachmentCachePath(aliasRoot, aliasLegacy),
+    )
+    assertEquals(
+      aliasMissing.absoluteFile,
+      requireOwnedAttachmentCachePath(aliasRoot, aliasMissing),
+    )
+    assertTrue(
+      runCatching { requireOwnedAttachmentCachePath(aliasRoot, realCurrent) }.isFailure,
+    )
+    assertTrue(realCurrent.exists())
+    assertTrue(realLegacy.exists())
+  }
+
+  @Test
   fun `accepts broad bounded legacy names and a mixed legacy-current directory`() {
     val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
     val legacyDirectory = File(root, "old chat +1555 % raw").apply { mkdirs() }
@@ -204,6 +242,30 @@ class AttachmentCachePolicyTest {
     assertTrue(runCatching { requireOwnedPastedAttachment(root, outside) }.isFailure)
     assertTrue(runCatching { requireOwnedPastedAttachment(root, linked) }.isFailure)
     assertTrue(outside.exists())
+  }
+
+  @Test
+  fun `validates a completed paste through only the trusted ancestor alias`() {
+    val realBase = temporary.newFolder("real-paste-base").canonicalFile
+    val aliasBase = File(temporary.root.canonicalFile, "android-paste-base-alias")
+    Files.createSymbolicLink(aliasBase.toPath(), realBase.toPath())
+    val realRoot = File(realBase, PASTED_INPUT_CACHE_DIRECTORY).apply { mkdirs() }
+    val aliasRoot = File(aliasBase, PASTED_INPUT_CACHE_DIRECTORY)
+    File(realRoot, "1000-1/photo.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(1, 2))
+    }
+    val aliasFile = File(aliasRoot, "1000-1/photo.jpg")
+
+    assertEquals(
+      aliasFile.absoluteFile,
+      requireOwnedPastedAttachment(aliasRoot, aliasFile),
+    )
+    assertTrue(
+      runCatching {
+        requireOwnedPastedAttachment(aliasRoot, File(realRoot, "1000-1/photo.jpg"))
+      }.isFailure,
+    )
   }
 
   @Test
