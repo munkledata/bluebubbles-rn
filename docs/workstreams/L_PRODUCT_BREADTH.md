@@ -111,10 +111,39 @@ Implement as three independent slices:
 1. `FEAT-07A` provides a bounded, privacy-safe shared-documents explorer with explicit download/open
    state.
 2. `FEAT-07B` adds fullscreen media secondary actions after a visible on-demand download.
-3. `FEAT-07C` makes a separate in-app PDF-viewer decision based on privacy, offline behavior, package
-   surface, malformed/large files, and accessibility.
+3. `FEAT-07C` is **DONE as a product/architecture decision**: Gator will not add an embedded PDF
+   renderer, WebView/PDF.js bridge, or remote conversion service. An explicit tap keeps using the
+   existing bounded local download and Android external-viewer boundary; a fast no-viewer rejection
+   falls back to the system share sheet, followed by visible no-handler feedback when neither path
+   is available.
 
 Reuse the existing safe URI, transfer, and external-open boundaries.
+
+The accepted `FEAT-07C` boundary is:
+
+- **Privacy and trust:** Gator does not parse attacker-controlled PDF bytes. It grants a selected or
+  default viewer temporary read-only access to one exact FileProvider URI; on fallback, the chosen
+  share target receives equivalent read access. Either third-party app can then read, copy, cache,
+  or upload the plaintext document; Gator's App Lock, Secure Screen, and Recents policy no longer
+  control presentation in that app.
+- **Offline behavior:** Once the file is downloaded, Gator needs no network service to hand it off,
+  but offline viewing works only when an installed viewer itself works offline. The share sheet is
+  not an offline-viewing guarantee.
+- **Large files:** The existing manual download streams to app-private storage with the current
+  512 MiB and 15-minute hard limits. New manual downloads exceeding either bound are rejected; the
+  external viewer owns rendering memory and performance for files that reach handoff.
+- **Malformed or encrypted files:** Gator makes no validity or password-support claim and cannot
+  reliably observe a parse failure after another app accepts the intent. The selected viewer owns
+  rejection, password UI, and any document-specific recovery.
+- **Accessibility and package surface:** Gator adds no parser dependency, native configuration,
+  license surface, or renderer-specific UI. Gator remains responsible for its download/open action
+  and system handoff; document-reading semantics, zoom, reflow, and TalkBack quality depend on the
+  installed viewer.
+
+This decision closes no Android release checkbox. Exact-candidate FileProvider/ACTION_VIEW behavior,
+offline opening, cache-loss re-download, natural no-viewer fallback, large/encrypted/malformed files,
+URI-grant behavior, dynamic font, and TalkBack focus/announcement remain device evidence under the
+parent `FEAT-07` task.
 
 <a id="alias-send-01"></a>
 
