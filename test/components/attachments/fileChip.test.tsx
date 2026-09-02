@@ -41,7 +41,10 @@ jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),
 }));
 jest.mock('@ui/primitives', () => {
+  // Jest evaluates this factory before module imports, so these must stay runtime requires.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const r = require('react');
   return {
     Icon: ({ name }: { name: string }) => r.createElement(RN.Text, null, 'ICON:' + name),
@@ -142,6 +145,28 @@ describe('FileChip — name + subtitle rendering', () => {
 });
 
 describe('FileChip — download-state affordances', () => {
+  it.each([
+    ['Download report.pdf', {}, null, false],
+    ['Retry report.pdf', {}, 'error', false],
+    ['Retry report.pdf', { localPath: 'file:///data/report.pdf' }, 'error', false],
+    ['Downloading report.pdf', {}, 'downloading', true],
+    ['Open report.pdf', { localPath: 'file:///data/report.pdf' }, null, false],
+  ] as const)(
+    'exposes the %s action and transfer state to accessibility',
+    async (name, attachment, downloadStatus, busy) => {
+      if (downloadStatus) {
+        useDownloadStore.setState({ status: { 'att-1': downloadStatus }, progress: {} });
+      }
+      await renderWithTheme(<FileChip att={makeAtt(attachment)} isFromMe={false} />);
+
+      const action = screen.getByRole('button', { name });
+      expect(action.props.accessibilityHint).toBe(
+        'Downloads the document or opens it in another app',
+      );
+      expect(action.props.accessibilityState).toEqual({ busy });
+    },
+  );
+
   it('shows "Downloading…" while the store status is downloading', async () => {
     useDownloadStore.setState({ status: { 'att-1': 'downloading' }, progress: {} });
     await renderWithTheme(<FileChip att={makeAtt()} isFromMe={false} />);
@@ -179,6 +204,9 @@ describe('FileChip — upload progress', () => {
     // friendlySize(512*1024) = '512 KB'; friendlySize(2_621_440) = '2.5 MB'; 512K/2.5M ≈ 20%.
     expect(screen.getByText('512 KB of 2.5 MB • 20%')).toBeTruthy();
     expect(screen.queryByText('PDF • 2.5 MB')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Uploading report.pdf' }).props.accessibilityState,
+    ).toEqual({ busy: true });
   });
 
   it('omits the percentage until the total is known, keeping the size readout', async () => {
@@ -222,7 +250,7 @@ describe('FileChip — press dispatch', () => {
     expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     await view.rerender(<FileChip att={{ ...att }} isFromMe={false} />);
     expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
-    fireEvent.press(screen.getByText('report.pdf'));
+    fireEvent.press(screen.getByRole('button', { name: 'Download report.pdf' }));
     expect(mockDownload).toHaveBeenCalledWith(att, 'manual', mockAccountLease);
     expect(mockCaptureAccountLease).toHaveBeenCalledTimes(1);
     expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
@@ -234,7 +262,7 @@ describe('FileChip — press dispatch', () => {
     await renderWithTheme(
       <FileChip att={makeAtt({ localPath: 'file:///data/report.pdf' })} isFromMe={false} />,
     );
-    fireEvent.press(screen.getByText('report.pdf'));
+    fireEvent.press(screen.getByRole('button', { name: 'Open report.pdf' }));
     expect(mockOpenAttachmentFile).toHaveBeenCalledWith(
       'file:///data/report.pdf',
       'application/pdf',

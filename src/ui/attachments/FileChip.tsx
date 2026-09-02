@@ -43,6 +43,17 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   const sub =
     uploadSub ??
     (status === 'downloading' ? 'Downloading…' : status === 'error' ? 'Tap to retry' : baseSub);
+  const fileName = att.transferName ?? 'file';
+  const transferBusy = Boolean(upload) || status === 'downloading';
+  const accessibilityAction = upload
+    ? 'Uploading'
+    : status === 'downloading'
+      ? 'Downloading'
+      : status === 'error'
+        ? 'Retry'
+        : att.localPath
+          ? 'Open'
+          : 'Download';
 
   // In-flight guard: opening is async and a double-tap would fire two intents.
   const opening = React.useRef(false);
@@ -79,6 +90,11 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   return (
     <Pressable
       onPress={onPress}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={`${accessibilityAction} ${fileName}`}
+      accessibilityHint="Downloads the document or opens it in another app"
+      accessibilityState={{ busy: transferBusy }}
       style={[
         styles.chip,
         {

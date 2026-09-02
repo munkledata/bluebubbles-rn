@@ -21779,7 +21779,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:fcf22eadb47f",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 54,
+      "line": 65,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -21792,7 +21792,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4783aae969eb",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 59,
+      "line": 70,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>",
@@ -21805,7 +21805,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>:mutator-call:b00e65e1611c",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 69,
+      "line": 80,
       "symbol": "FileChip.onPress.<callback:08fd24739a>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -21818,7 +21818,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip:mutator-reference:8833b8ec6280",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 81,
+      "line": 92,
       "symbol": "FileChip",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress",
@@ -21831,7 +21831,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:3ed9d17a6f21",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 213,
+      "line": 229,
       "symbol": "SharedDocumentRow.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -21844,7 +21844,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:fb357510cd01",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 221,
+      "line": 237,
       "symbol": "SharedDocumentRow.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>",
@@ -21857,7 +21857,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>:mutator-call:309818d28369",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 228,
+      "line": 244,
       "symbol": "SharedDocumentRow.onPress.<callback:f4a342b533>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -21870,7 +21870,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow:mutator-reference:70e78024ad82",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 243,
+      "line": 259,
       "symbol": "SharedDocumentRow",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress",
