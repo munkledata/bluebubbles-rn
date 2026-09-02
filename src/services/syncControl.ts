@@ -650,9 +650,9 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     // `supports_message_deleted` capability (older servers would 404); best-effort — a failure
     // must never flip the sync status, which `sync.done` already reported above.
     //
-    // Skipped outright once the session has ended: its FIRST run seeds the kv watermark with NO
-    // network call at all, so it is another write the credential clear cannot stop — it would
-    // re-seed the key `clearLocalCache` had just removed, with the old server's clock.
+    // Skipped once the session has ended. The initial state read and every page/state transaction
+    // are account-guarded, so an old run cannot recreate continuation state after
+    // `clearLocalCache`.
     if (!shouldAbort()) {
       const deletionCatchup = syncDeletedMessages(db, api, {
         supported: sessionAccessors.messageDeletedSupported(),

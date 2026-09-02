@@ -1,6 +1,10 @@
-import { DELETED_MESSAGE_PAGE_LIMIT, type DeletedMessage } from '@core/api/endpoints/messages';
 import {
-  kvGet,
+  DELETED_MESSAGE_PAGE_LIMIT,
+  type DeletedMessage,
+  type DeletedMessagePage,
+} from '@core/api/endpoints/messages';
+import {
+  kvGetWithinTransaction,
   kvSetWithinTransaction,
   markMessageDeletedWithinTransaction,
 } from '@db/repositories';
@@ -10,23 +14,32 @@ import type { SyncApi } from './types';
 
 /** Deleted-message catch-up is isolated from full, targeted, and incremental sync flows. */
 
-/** kv key holding the deletion-catch-up watermark: the max `dateDeleted` (Unix ms) already applied. */
+/** Account-scoped deletion continuation state. Account cleanup deletes this key. */
 export const DELETIONS_SYNCED_AT_KEY = 'sync.deletionsSyncedAt';
-/** Server page cap for GET /message/deleted — a FULL page means more rows may remain. */
+/** Server page cap for GET /message/deleted. */
 export const DELETION_SYNC_PAGE_SIZE = DELETED_MESSAGE_PAGE_LIMIT;
-/** Bounded catch-up: at most this many pages per sync (any remainder catches up next sync). */
+/** Bounded catch-up: at most this many committed pages per sync. */
 export const DELETION_SYNC_MAX_PAGES = 5;
+
+const DELETION_SYNC_STATE_VERSION = 1;
+const MAX_DELETION_CURSOR_LENGTH = 512;
+
+type DeletionSyncState =
+  | { v: 1; mode: 'legacy'; afterMs: number }
+  | { v: 1; mode: 'cursor'; afterMs: number; cursor: string };
 
 export type DeletionSyncProtocolErrorCode =
   | 'page-over-cap'
   | 'invalid-guid'
   | 'invalid-timestamp'
   | 'timestamp-before-watermark'
-  | 'timestamp-out-of-order';
+  | 'timestamp-out-of-order'
+  | 'cursor-not-advanced'
+  | 'cursor-restart-loop';
 
 /**
  * A server response violated the deletion cursor contract. The message and code deliberately name
- * only the rule: never include a message guid, timestamp, or other response payload in logs.
+ * only the rule: never include a message guid, timestamp, or cursor payload in logs.
  */
 export class DeletionSyncProtocolError extends Error {
   constructor(readonly code: DeletionSyncProtocolErrorCode) {
@@ -40,7 +53,49 @@ interface ValidatedDeletionPage {
   maxTimestamp: number;
 }
 
-/** Validate the COMPLETE response before its first tombstone or watermark write. */
+function parseState(raw: string | null): DeletionSyncState | null {
+  if (raw == null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== 'object' || value == null) return null;
+    const candidate = value as Record<string, unknown>;
+    if (
+      candidate.v !== DELETION_SYNC_STATE_VERSION ||
+      typeof candidate.afterMs !== 'number' ||
+      !Number.isFinite(candidate.afterMs) ||
+      (candidate.afterMs as number) < 0
+    ) {
+      return null;
+    }
+    if (candidate.mode === 'legacy') {
+      return { v: 1, mode: 'legacy', afterMs: candidate.afterMs as number };
+    }
+    if (
+      candidate.mode === 'cursor' &&
+      typeof candidate.cursor === 'string' &&
+      candidate.cursor.length > 0 &&
+      candidate.cursor.length <= MAX_DELETION_CURSOR_LENGTH
+    ) {
+      return {
+        v: 1,
+        mode: 'cursor',
+        afterMs: candidate.afterMs as number,
+        cursor: candidate.cursor,
+      };
+    }
+  } catch {
+    // Old values were bare numeric timestamps. Treat those, and malformed JSON, as uninitialized
+    // so this release performs one conservative zero-origin sweep instead of trusting a value that
+    // may have been seeded from a clock-ahead device.
+  }
+  return null;
+}
+
+function serializeState(state: DeletionSyncState): string {
+  return JSON.stringify(state);
+}
+
+/** Validate the COMPLETE response before its first tombstone or continuation-state write. */
 function validateDeletionPage(
   rows: readonly DeletedMessage[],
   requestedWatermark: number,
@@ -75,13 +130,13 @@ function validateDeletionPage(
 }
 
 export interface DeletionSyncOptions {
-  /** The server's `supports_message_deleted` capability (sessionAccessors.messageDeletedSupported()). */
+  /** The server's `supports_message_deleted` capability. */
   supported: boolean;
-  /** Injectable clock (tests). */
+  /** Injectable clock used only when a deletion has no server timestamp. */
   now?: () => number;
   /** Page cap per sync (default {@link DELETION_SYNC_MAX_PAGES}). */
   maxPages?: number;
-  /** Full-page threshold (default {@link DELETION_SYNC_PAGE_SIZE}; overridable so tests can page small). */
+  /** Full-page threshold (default {@link DELETION_SYNC_PAGE_SIZE}; tests may lower it). */
   pageSize?: number;
   /** Stop before the next request/write when this account no longer owns the run. */
   shouldAbort?: () => boolean;
@@ -89,24 +144,36 @@ export interface DeletionSyncOptions {
   signal?: AbortSignal;
 }
 
+async function fetchDeletionPage(
+  api: SyncApi,
+  afterMs: number,
+  cursor: string | null,
+  signal?: AbortSignal,
+): Promise<DeletedMessagePage> {
+  if (api.fetchDeletedPage) return api.fetchDeletedPage(afterMs, cursor, signal);
+  if (!api.fetchDeletedAfter) {
+    throw new Error('Deletion sync API has no deletion page reader');
+  }
+  return {
+    protocol: 'legacy',
+    deleted: await api.fetchDeletedAfter(afterMs, signal),
+  };
+}
+
 /**
- * R1 deletion catch-up sync: apply `message-deleted` events the app MISSED while dead or
- * app-locked (the locked FCM path never touches the DB, so a live-only deletion is lost and the
- * deleted message lingers forever). Pages `GET /message/deleted?after=<watermark>` and re-applies
- * each row through the SAME transaction-only tombstone helper the live event uses (idempotent —
- * rows sharing the watermark's exact ms may legitimately re-emit).
+ * Catch up `message-deleted` events missed while the app was stopped or locked.
  *
- * Watermark (`sync.deletionsSyncedAt`, kv): the max `dateDeleted` already applied. FIRST RUN seeds
- * it to now() WITHOUT fetching to avoid replaying unbounded deletion history for rows this install
- * never stored. That containment is not a consistent snapshot: normal history sync runs first and
- * can ingest a row the server already considers deleted, and device clock skew can move the seed.
- * A server-issued snapshot cursor (or deleted-row metadata/exclusion in the history response) is
- * still required. Every response is validated in full before its first write: over-cap,
- * pre-watermark, or decreasing timestamps fail closed. Equal timestamps are valid. A row with a
- * null `dateDeleted` is still tombstoned (now() fallback, same as the live sink), but a FULL page
- * containing one cannot advance safely and stops without moving the watermark.
+ * State in `sync.deletionsSyncedAt` is versioned JSON. Cursor-capable servers supply the opaque
+ * continuation and `hasMore`; the numeric `afterMs` travels beside it only as an older-server
+ * fallback. Missing, malformed, and old bare-timestamp state starts at zero. This is deliberately
+ * more conservative than the former `Date.now()` seed: deletion history runs after message history,
+ * and the durable deletion ledger safely hides both current rows and future backfills.
  *
- * Returns the number of deletion rows applied. Callers gate on `supported` (older servers 404).
+ * Every complete response is validated before writing. Its tombstones and next state then commit
+ * in one account-guarded transaction, so a crash, row failure, or ownership change cannot advance
+ * the cursor separately from the page it represents. Network work always stays outside that
+ * transaction. The server cursor is still keyset continuation rather than a cross-request SQLite
+ * snapshot; a late server row inserted behind an already-issued cursor remains a server-side gap.
  */
 export async function syncDeletedMessages(
   db: AppDatabase,
@@ -129,72 +196,102 @@ export async function syncDeletedMessages(
         : 0;
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
   const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
-  if (!shouldContinue()) return 0;
+  if (!shouldContinue() || maxPages === 0 || pageSize === 0) return 0;
 
-  // Read and conditionally seed under one short lock. A bare read on the shared connection can see
-  // a neighbouring transaction's uncommitted watermark; seeding from that phantom state can skip
-  // this account's deletion window. No network work runs in this callback.
-  const initial = await withDbTransaction(
+  // The read takes the same global owner as writes. It cannot observe a neighbouring transaction's
+  // uncommitted state, and the commit guard rejects a queued old-account read after revocation.
+  const rawState = await withDbTransaction(
     db,
-    async (transactionContext) => {
-      const raw = await kvGet(db, DELETIONS_SYNCED_AT_KEY);
-      const parsed = raw == null ? Number.NaN : Number(raw);
-      if (Number.isFinite(parsed)) return { seeded: false, watermark: parsed };
-      const watermark = now();
-      await kvSetWithinTransaction(transactionContext, DELETIONS_SYNCED_AT_KEY, String(watermark));
-      return { seeded: true, watermark };
-    },
+    (transactionContext) => kvGetWithinTransaction(transactionContext, DELETIONS_SYNCED_AT_KEY),
     commitGuard,
   );
-  if (initial.seeded || maxPages === 0 || pageSize === 0) return 0;
-  let watermark = initial.watermark;
+  let state = parseState(rawState);
+  const seenCursors = new Set<string>();
+  if (state?.mode === 'cursor') seenCursors.add(state.cursor);
 
   let applied = 0;
-  for (let page = 0; page < maxPages; page++) {
+  let committedPages = 0;
+  let restartedCursorFromZero = false;
+  while (committedPages < maxPages) {
     if (!shouldContinue()) break;
-    const rows = await api.fetchDeletedAfter(watermark, opts.signal);
-    // HttpClient keeps an immutable request snapshot through retries. A Disconnect cannot cancel
-    // that already-running request, so reject its old-account result before any DB transaction.
-    if (!shouldContinue()) break;
-    if (rows.length === 0) break;
-    const validated = validateDeletionPage(rows, watermark, pageSize);
+    const requestedAfterMs = state?.afterMs ?? 0;
+    const requestedCursor = state?.mode === 'cursor' ? state.cursor : null;
+    const response = await fetchDeletionPage(api, requestedAfterMs, requestedCursor, opts.signal);
 
-    for (const row of rows) {
-      if (!shouldContinue()) return applied;
-      // Unknown / hard-gone rows still leave a durable ledger marker so later backfill is born
-      // hidden. Keep that marker, the message tombstone, and chat sort-key recompute together.
-      const dateDeleted = row.dateDeleted ?? now();
-      await withDbTransaction(
-        db,
-        (transactionContext) =>
-          markMessageDeletedWithinTransaction(transactionContext, row.guid, dateDeleted),
-        commitGuard,
-      );
-      applied++;
+    // HttpClient keeps an immutable request snapshot through retries. Reject an old-account result
+    // before it can enter a transaction after Disconnect changed ownership.
+    if (!shouldContinue()) break;
+
+    // A timestamp-only run cannot be converted safely at a non-zero watermark: rows tied at that
+    // timestamp may sit on the other side of the new composite cursor. Discard the one probe and
+    // establish the new protocol from zero. Old servers keep returning the legacy shape and never
+    // take this branch.
+    if (response.protocol === 'continuation' && state?.mode === 'legacy' && state.afterMs > 0) {
+      if (restartedCursorFromZero) {
+        throw new DeletionSyncProtocolError('cursor-restart-loop');
+      }
+      restartedCursorFromZero = true;
+      state = null;
+      continue;
     }
 
-    const isFullPage = rows.length === pageSize;
-    const cursorIsSafe = !(isFullPage && validated.hasNullTimestamp);
-    const advanced = cursorIsSafe && validated.maxTimestamp > watermark;
-    if (advanced) {
-      if (!shouldContinue()) return applied;
-      await withDbTransaction(
-        db,
-        (transactionContext) =>
-          kvSetWithinTransaction(
-            transactionContext,
-            DELETIONS_SYNCED_AT_KEY,
-            String(validated.maxTimestamp),
-          ),
-        commitGuard,
-      );
-      // Only advertise the cursor in memory after the durable commit succeeds.
-      watermark = validated.maxTimestamp;
+    const rows = response.deleted;
+    const validated = validateDeletionPage(rows, requestedAfterMs, pageSize);
+    const preparedRows = rows.map((row) => ({
+      guid: row.guid,
+      dateDeleted: row.dateDeleted ?? now(),
+    }));
+    const nextAfterMs = Math.max(requestedAfterMs, validated.maxTimestamp);
+
+    let nextState: DeletionSyncState;
+    let shouldFetchAnotherPage: boolean;
+    if (response.protocol === 'continuation') {
+      if ((response.hasMore || rows.length > 0) && seenCursors.has(response.cursor)) {
+        throw new DeletionSyncProtocolError('cursor-not-advanced');
+      }
+      nextState = {
+        v: 1,
+        mode: 'cursor',
+        afterMs: nextAfterMs,
+        cursor: response.cursor,
+      };
+      shouldFetchAnotherPage = response.hasMore;
+    } else {
+      const isFullPage = rows.length === pageSize;
+      const advanced =
+        !(isFullPage && validated.hasNullTimestamp) && nextAfterMs > requestedAfterMs;
+      nextState = {
+        v: 1,
+        mode: 'legacy',
+        afterMs: advanced ? nextAfterMs : requestedAfterMs,
+      };
+      // A scalar cursor can continue only when a full page moved it. Equal-timestamp and null
+      // full pages stop safely rather than refetching forever.
+      shouldFetchAnotherPage = isFullPage && advanced;
     }
-    // Loop ONLY on a full page that moved the watermark; a stuck watermark would refetch the
-    // identical page forever. A full page containing a null timestamp is also cursor-ambiguous:
-    // apply its durable markers, but do not skip past it or request a continuation from bad state.
-    if (!isFullPage || !advanced) break;
+
+    const serializedNextState = serializeState(nextState);
+    await withDbTransaction(
+      db,
+      async (transactionContext) => {
+        for (const row of preparedRows) {
+          await markMessageDeletedWithinTransaction(transactionContext, row.guid, row.dateDeleted);
+        }
+        await kvSetWithinTransaction(
+          transactionContext,
+          DELETIONS_SYNCED_AT_KEY,
+          serializedNextState,
+        );
+      },
+      commitGuard,
+    );
+
+    // Advertise progress only after the page and its continuation committed together.
+    applied += rows.length;
+    committedPages++;
+    state = nextState;
+    if (response.protocol === 'continuation') seenCursors.add(response.cursor);
+    if (!shouldFetchAnotherPage) break;
   }
   return applied;
 }

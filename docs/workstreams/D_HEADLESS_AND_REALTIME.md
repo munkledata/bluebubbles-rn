@@ -134,6 +134,16 @@ remain idempotent, and account revocation must prevent an old cursor commit. Unt
 continuation contract is available, a full page that cannot advance the timestamp watermark stops
 fail-closed instead of silently skipping tied rows.
 
+As of 2026-09-01, the server and app implement the composite opaque continuation, `hasMore`,
+zero-origin initialization, legacy fallback, and atomic page/state commit. The remaining protocol
+gap is snapshot consistency across requests: the current keyset cursor cannot discover a deletion
+that becomes visible later with a key at or behind an already-issued cursor. History must exclude or
+mark deleted rows consistently, or the server must expose a snapshot/high-water plus a monotonic
+deletion-observation sequence. One frozen response fixture consumed by both the server and app
+contract tests, plus exact-device killed-process verification, also remain open. For older
+timestamp-only servers, an over-500 soft-boundary tie remains intentionally fail-closed; the
+cursor-capable protocol is the tie-safe path.
+
 <a id="sched-01"></a>
 
 ## `SCHED-01` — scheduled work outside mounted screens

@@ -1,4 +1,4 @@
-import type { DeletedMessage } from '@core/api/endpoints/messages';
+import type { DeletedMessage, DeletedMessagePage } from '@core/api/endpoints/messages';
 import type { Chat, Message } from '@core/models';
 import type { SyncCursor } from '@core/sync';
 
@@ -25,5 +25,12 @@ export interface SyncApi {
    * `message-deleted` events missed while the app was dead/locked). Only called when the server
    * advertises `supports_message_deleted`; older servers would 404.
    */
-  fetchDeletedAfter(afterMs: number, signal?: AbortSignal): Promise<DeletedMessage[]>;
+  /** Legacy timestamp-only deletion reader. Optional for older test/embedding adapters. */
+  fetchDeletedAfter?(afterMs: number, signal?: AbortSignal): Promise<DeletedMessage[]>;
+  /** Cursor-aware deletion page used by production. */
+  fetchDeletedPage?(
+    afterMs: number,
+    cursor: string | null,
+    signal?: AbortSignal,
+  ): Promise<DeletedMessagePage>;
 }

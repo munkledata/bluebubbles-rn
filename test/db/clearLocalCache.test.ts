@@ -273,7 +273,7 @@ describe('clearLocalCache', () => {
     expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 7, lastSyncedTimestamp: 8 });
   });
 
-  it('drops the deletion watermark + per-chat drafts but keeps settings, themes and device contacts', async () => {
+  it('drops deletion continuation state + per-chat drafts but keeps settings, themes and device contacts', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
 
@@ -740,7 +740,7 @@ describe('clearLocalCache', () => {
         `INSERT INTO kv (key, value) VALUES ('${DRAFT_KV_PREFIX}isolated', 'private draft')`,
       ],
       [
-        'deletion watermark',
+        'deletion continuation state',
         `INSERT INTO kv (key, value) VALUES ('${DELETIONS_WATERMARK_KV_KEY}', '1234')`,
       ],
       [
@@ -758,7 +758,7 @@ describe('clearLocalCache', () => {
     });
   });
 
-  it('targets the same kv key the deletion sync writes', () => {
+  it('targets the same continuation-state key the deletion sync writes', () => {
     // db/ cannot import services/, so the key is duplicated — this is the guard that they agree.
     expect(DELETIONS_WATERMARK_KV_KEY).toBe(DELETIONS_SYNCED_AT_KEY);
   });

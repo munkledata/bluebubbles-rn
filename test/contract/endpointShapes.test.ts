@@ -3,9 +3,11 @@ import { join } from 'path';
 import { z } from 'zod/v4';
 import type { HttpClient } from '@core/api/http';
 import {
+  DeletedMessageList,
   MessageList,
   SendAck,
   UnsendAck,
+  deletedMessages,
   queryMessages,
   sendText,
   unsendMessage,
@@ -130,6 +132,48 @@ describe('endpoint shapes: list wrappers', () => {
   it('list wrappers tolerate an absent/null key (empty list)', () => {
     expect(ChatList.safeParse({}).success).toBe(true);
     expect(MessageList.safeParse({ messages: null }).success).toBe(true);
+  });
+
+  it('requests cursor continuation while retaining the old-server timestamp fallback', async () => {
+    const responses: unknown[] = [
+      { deleted: [], cursor: 'opaque-page-1', hasMore: true },
+      { deleted: [{ guid: 'legacy-deleted', chatGuid: null, dateDeleted: 1234 }] },
+    ];
+    const requests: { path: string; query: unknown }[] = [];
+    const http = {
+      get: async (
+        path: string,
+        schema: typeof DeletedMessageList,
+        options?: { query?: unknown },
+      ) => {
+        requests.push({ path, query: options?.query });
+        return schema.parseAsync(responses.shift());
+      },
+    } as unknown as HttpClient;
+
+    const first = await deletedMessages(http, { afterMs: 1000, cursor: null });
+    const second = await deletedMessages(http, { afterMs: 1234, cursor: 'opaque-page-1' });
+
+    expect(first).toEqual({
+      protocol: 'continuation',
+      deleted: [],
+      cursor: 'opaque-page-1',
+      hasMore: true,
+    });
+    expect(second).toEqual({
+      protocol: 'legacy',
+      deleted: [{ guid: 'legacy-deleted', chatGuid: null, dateDeleted: 1234 }],
+    });
+    expect(requests).toEqual([
+      {
+        path: '/message/deleted',
+        query: { after: 1000, continuation: 1, cursor: undefined },
+      },
+      {
+        path: '/message/deleted',
+        query: { after: 1234, continuation: undefined, cursor: 'opaque-page-1' },
+      },
+    ]);
   });
 });
 

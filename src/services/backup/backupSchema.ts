@@ -298,9 +298,9 @@ export function isSecretKey(key: string): boolean {
  *   • `draft.<chat guid>` — the key embeds the counterparty's phone number or email and the value
  *     is UNSENT message text (the chat screen never deletes the row, it writes ''). That is
  *     message content and a handle in a file the user is told holds neither.
- *   • `sync.deletionsSyncedAt` — the deleted-message catch-up watermark. Restoring a backup taken
- *     on a more current device drags the target's watermark FORWARD, so the skipped window is
- *     never fetched and everything deleted on the Mac in it stays visible in the thread forever.
+ *   • `sync.deletionsSyncedAt` — versioned deleted-message continuation state. Restoring a backup
+ *     from another device would import its opaque cursor or timestamp fallback, skipping
+ *     account-relative deletion history on this device.
  *   • `maintenance.searchTextBackfill.v1` — a one-shot per-install migration flag.
  * A deny-list carries every FUTURE key by default, which is exactly how those three got in; an
  * allow-list fails closed, so a new device-local key is simply never exported. The cost is that a

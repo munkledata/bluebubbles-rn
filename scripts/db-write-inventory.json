@@ -19853,9 +19853,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; scripts/check-scheduled-recovery.test.mjs; test/services/sendService.test.ts; test/services/sendAccountScope.test.ts; test/services/notificationActions.test.ts; test/services/sendOutcome.test.ts"
     },
     {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:8b73d40e6202",
+      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:8b1496e402d5",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 137,
+      "line": 203,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19863,51 +19863,25 @@
       "owner": "syncDeletedMessages",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:9d287d50f08a",
+      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:0fd8c6a986c4",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 137,
+      "line": 274,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
-      "target": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:2aa49ef460>",
+      "target": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:ee8cdd1e4e>",
       "detectedContext": "withDbTransaction",
       "owner": "syncDeletedMessages",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:2aa49ef460>:mutator-call:f1b8f2ff46cf",
+      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:1a3b040948dc",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 144,
-      "symbol": "syncDeletedMessages.<callback:2aa49ef460>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
-      "detectedContext": "withDbTransaction",
-      "owner": "syncDeletedMessages",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:135cb4b0be14",
-      "path": "src/services/sync/deletionSync.ts",
-      "line": 167,
-      "symbol": "syncDeletedMessages",
-      "operation": "mutator-call",
-      "target": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:45ede47ded>",
-      "detectedContext": "withDbTransaction",
-      "owner": "syncDeletedMessages",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:b231d25152c9",
-      "path": "src/services/sync/deletionSync.ts",
-      "line": 167,
+      "line": 274,
       "symbol": "syncDeletedMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19915,59 +19889,33 @@
       "owner": "syncDeletedMessages",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:45ede47ded>:mutator-call:34dbbba2999b",
+      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:ee8cdd1e4e>:mutator-call:5e9c3cddb800",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 170,
-      "symbol": "syncDeletedMessages.<callback:45ede47ded>",
+      "line": 278,
+      "symbol": "syncDeletedMessages.<callback:ee8cdd1e4e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "syncDeletedMessages",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:0ad28907e493",
+      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:ee8cdd1e4e>:mutator-call:e54cface450b",
       "path": "src/services/sync/deletionSync.ts",
-      "line": 181,
-      "symbol": "syncDeletedMessages",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "syncDeletedMessages",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages:mutator-call:b31a0c0033f8",
-      "path": "src/services/sync/deletionSync.ts",
-      "line": 181,
-      "symbol": "syncDeletedMessages",
-      "operation": "mutator-call",
-      "target": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:cea645a778>",
-      "detectedContext": "withDbTransaction",
-      "owner": "syncDeletedMessages",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/sync/deletionSync.ts#syncDeletedMessages.<callback:cea645a778>:mutator-call:d31335b24a73",
-      "path": "src/services/sync/deletionSync.ts",
-      "line": 184,
-      "symbol": "syncDeletedMessages.<callback:cea645a778>",
+      "line": 280,
+      "symbol": "syncDeletedMessages.<callback:ee8cdd1e4e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
       "owner": "syncDeletedMessages",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/deletionSync.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
       "id": "src/services/sync/engine.ts#reapplyReadWatermarksWithinTransaction.<callback:c431528489>:mutator-call:1c5e8b6acab4",

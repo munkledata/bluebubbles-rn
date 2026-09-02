@@ -216,28 +216,71 @@ const DeletedMessageTimestamp = z
 export const DeletedMessageResponseRow = MessageDeletedPayload.extend({
   dateDeleted: DeletedMessageTimestamp,
 });
-export const DeletedMessageList = z.object({
-  deleted: z.array(DeletedMessageResponseRow).max(DELETED_MESSAGE_PAGE_LIMIT).nullish(),
-});
 export type DeletedMessage = z.infer<typeof DeletedMessageResponseRow>;
 
+const DeletedMessageRows = z.array(DeletedMessageResponseRow).max(DELETED_MESSAGE_PAGE_LIMIT);
+
+// Keep the two wire shapes disjoint. In particular, a response with only one of `cursor` or
+// `hasMore` must fail instead of having the cursor field silently stripped and being mistaken for
+// an older server response.
+const ContinuedDeletedMessageList = z
+  .object({
+    deleted: DeletedMessageRows,
+    cursor: z.string().min(1).max(512),
+    hasMore: z.boolean(),
+  })
+  .strict();
+const LegacyDeletedMessageList = z
+  .object({
+    deleted: DeletedMessageRows.nullish(),
+    cursor: z.undefined().optional(),
+    hasMore: z.undefined().optional(),
+  })
+  .strict();
+
+export const DeletedMessageList = z.union([ContinuedDeletedMessageList, LegacyDeletedMessageList]);
+
+export type DeletedMessagePage =
+  | { protocol: 'legacy'; deleted: DeletedMessage[] }
+  | {
+      protocol: 'continuation';
+      deleted: DeletedMessage[];
+      cursor: string;
+      hasMore: boolean;
+    };
+
+export interface DeletedMessageRequest {
+  afterMs: number;
+  cursor: string | null;
+}
+
 /**
- * GET /api/v1/message/deleted — deletions whose `dateDeleted` is STRICTLY after the Unix-ms
- * watermark, oldest-first, page capped server-side (500 rows — a full page means more remain;
- * loop with the page's max `dateDeleted` as the next watermark). Rows sharing the watermark's
- * exact ms may RE-EMIT (the server floors fractional ms), so applying a row must stay
- * idempotent — re-tombstoning already is. Gate calls on `supports_message_deleted`.
+ * GET /api/v1/message/deleted. New servers return an opaque continuation cursor and `hasMore`;
+ * older servers ignore the extra query field and return only `{ deleted }`. `after` is always
+ * included as the old-server fallback. Gate calls on `supports_message_deleted`.
  */
 export async function deletedMessages(
   http: HttpClient,
-  afterMs: number,
+  request: DeletedMessageRequest,
   signal?: AbortSignal,
-): Promise<DeletedMessage[]> {
+): Promise<DeletedMessagePage> {
   const res = await http.get('/message/deleted', DeletedMessageList, {
     signal,
-    query: { after: afterMs },
+    query: {
+      after: request.afterMs,
+      continuation: request.cursor == null ? 1 : undefined,
+      cursor: request.cursor ?? undefined,
+    },
   });
-  return res.deleted ?? [];
+  if ('cursor' in res && typeof res.cursor === 'string') {
+    return {
+      protocol: 'continuation',
+      deleted: res.deleted ?? [],
+      cursor: res.cursor,
+      hasMore: res.hasMore,
+    };
+  }
+  return { protocol: 'legacy', deleted: res.deleted ?? [] };
 }
 
 export interface SendReactionParams {

@@ -7,9 +7,9 @@ import { setSyncMarkerWithinTransaction } from './sync';
 // ---- Whole-cache maintenance ----------------------------------------------
 
 /**
- * kv key holding the deletion catch-up watermark. Duplicated from `DELETIONS_SYNCED_AT_KEY`
- * (`src/services/sync/deletionSync.ts`) rather than imported, because `src/db` must never import
- * `src/services` — the sync engine imports THIS layer, so the reverse edge would be a cycle.
+ * kv key holding versioned deletion continuation state. Duplicated from `DELETIONS_SYNCED_AT_KEY`
+ * (`src/services/sync/deletionSync.ts`) rather than imported: `src/db` must never import services,
+ * because the sync engine imports this layer and the reverse edge would create a cycle.
  * `test/db/clearLocalCache.test.ts` asserts the two strings still agree.
  */
 export const DELETIONS_WATERMARK_KV_KEY = 'sync.deletionsSyncedAt';
@@ -354,8 +354,8 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
     });
   }
 
-  // The deletion watermark is a server-relative timestamp. Removing the key makes the next run
-  // re-seed it to now() instead of replaying the new server's entire deletion history.
+  // The cursor and its old-server timestamp fallback are relative to one account. Removing the
+  // whole versioned state makes the next account establish its own continuation from zero.
   await withDbWriteLock(async () => db.delete(kv).where(eq(kv.key, DELETIONS_WATERMARK_KV_KEY)));
   // Composer drafts are the one CHAT-SCOPED thing in kv: unsent, user-authored text about a chat
   // whose row was deleted five statements ago, keyed by a guid that is identical across servers.

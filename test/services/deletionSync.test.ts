@@ -4,6 +4,7 @@ import {
   DELETED_MESSAGE_PAGE_LIMIT,
   DeletedMessageList,
   type DeletedMessage,
+  type DeletedMessagePage,
 } from '@core/api/endpoints/messages';
 import {
   kvGet,
@@ -30,7 +31,7 @@ import { createTestDb } from '../support/testDb';
  * pages GET /message/deleted after the persisted watermark and re-applies the tombstones.
  */
 
-function api(fetchDeletedAfter: SyncApi['fetchDeletedAfter']): SyncApi {
+function api(fetchDeletedAfter: NonNullable<SyncApi['fetchDeletedAfter']>): SyncApi {
   return {
     serverVersion: async () => '1.9.0',
     fetchChats: async () => [],
@@ -38,6 +39,21 @@ function api(fetchDeletedAfter: SyncApi['fetchDeletedAfter']): SyncApi {
     fetchMessagesAfter: async () => [],
     fetchDeletedAfter,
   };
+}
+
+function cursorApi(
+  fetchDeletedPage: NonNullable<SyncApi['fetchDeletedPage']>,
+  fetchDeletedAfter: NonNullable<SyncApi['fetchDeletedAfter']> = async () => [],
+): SyncApi {
+  return { ...api(fetchDeletedAfter), fetchDeletedPage };
+}
+
+function legacyState(afterMs: number): string {
+  return JSON.stringify({ v: 1, mode: 'legacy', afterMs });
+}
+
+function cursorState(afterMs: number, cursor: string): string {
+  return JSON.stringify({ v: 1, mode: 'cursor', afterMs, cursor });
 }
 
 /** Seed a chat + messages through the same upsert path the sync engine uses. */
@@ -61,10 +77,10 @@ async function seed(db: AppDatabase, chatGuid: string, guids: string[]): Promise
 
 /** guid → date_deleted for every stored message (null = not tombstoned). */
 function tombstones(raw: Database.Database): Map<string, number | null> {
-  const rows = raw.prepare('SELECT guid, date_deleted AS d FROM messages').all() as Array<{
+  const rows = raw.prepare('SELECT guid, date_deleted AS d FROM messages').all() as {
     guid: string;
     d: number | null;
-  }>;
+  }[];
   return new Map(rows.map((r) => [r.guid, r.d]));
 }
 
@@ -116,9 +132,23 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         deleted: [{ guid: 'numeric-string', chatGuid: null, dateDeleted: '1234' }],
       }).deleted?.[0]?.dateDeleted,
     ).toBe(1234);
+    expect(
+      DeletedMessageList.safeParse({ deleted: [], cursor: 'cursor-without-has-more' }).success,
+    ).toBe(false);
+    expect(DeletedMessageList.safeParse({ deleted: [], hasMore: false }).success).toBe(false);
+    expect(
+      DeletedMessageList.safeParse({ deleted: [], cursor: 'x'.repeat(513), hasMore: false })
+        .success,
+    ).toBe(false);
+    expect(DeletedMessageList.safeParse({ cursor: 'missing-rows', hasMore: true }).success).toBe(
+      false,
+    );
+    expect(
+      DeletedMessageList.safeParse({ deleted: null, cursor: 'null-rows', hasMore: true }).success,
+    ).toBe(false);
   });
 
-  it('does NOTHING when the capability is unsupported: no fetch, no watermark seed', async () => {
+  it('does NOTHING when the capability is unsupported: no fetch and no state', async () => {
     const { db } = await createTestDb();
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async () => [
       { guid: 'never-applied', chatGuid: null, dateDeleted: 123 },
@@ -128,32 +158,165 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
 
     expect(applied).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
-    // No seed either — the first SUPPORTED run owns the seeding.
+    // No state either — the first supported run owns initialization.
     expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBeNull();
   });
 
-  it('FIRST run seeds the watermark to now() and does NOT replay server deletion history', async () => {
+  it('starts a first run from zero and replays recoverable deletion history without using the device clock', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['m1']);
-    // The server would happily return its whole pre-existing deletion history for after=0 —
-    // the seed must prevent that fetch entirely (mirrors the server's own seeding argument).
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async () => [
       { guid: 'm1', chatGuid: 'c1', dateDeleted: 111 },
     ]);
+    const clock = jest.fn(() => 1700000123456);
 
     const applied = await syncDeletedMessages(db, api(fetch), {
       supported: true,
-      now: () => 1700000123456,
+      now: clock,
     });
 
-    expect(applied).toBe(0);
-    expect(fetch).not.toHaveBeenCalled();
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1700000123456');
-    // History NOT replayed: the pre-existing local row is untouched.
-    expect(tombstones(raw).get('m1')).toBeNull();
+    expect(applied).toBe(1);
+    expect(fetch).toHaveBeenCalledWith(0, undefined);
+    expect(clock).not.toHaveBeenCalled();
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(111));
+    expect(tombstones(raw).get('m1')).toBe(111);
   });
 
-  it('reads committed watermark state after a rolling-back neighbour, then seeds safely', async () => {
+  it('replaces an old clock-derived timestamp with cursor pages from zero and persists the terminal cursor', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db, 'c1', ['cursor-1', 'cursor-2', 'cursor-3']);
+    // This is the old format and is years ahead of the deletion rows. Trusting it would skip all
+    // three; cursor-aware state deliberately treats it as uninitialized.
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '4102444800000');
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async (_after, cursor) => {
+        if (cursor == null) {
+          return {
+            protocol: 'continuation',
+            deleted: [
+              { guid: 'cursor-1', chatGuid: 'c1', dateDeleted: 10.5 },
+              { guid: 'cursor-2', chatGuid: 'c1', dateDeleted: 10.5 },
+            ],
+            cursor: 'page-1',
+            hasMore: true,
+          };
+        }
+        if (cursor === 'page-1') {
+          return {
+            protocol: 'continuation',
+            deleted: [{ guid: 'cursor-3', chatGuid: 'c1', dateDeleted: 10.5 }],
+            cursor: 'page-2',
+            hasMore: true,
+          };
+        }
+        return {
+          protocol: 'continuation',
+          deleted: [],
+          cursor: 'terminal',
+          hasMore: false,
+        };
+      },
+    );
+
+    await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).resolves.toBe(3);
+
+    expect(fetch.mock.calls).toEqual([
+      [0, null, undefined],
+      [10.5, 'page-1', undefined],
+      [10.5, 'page-2', undefined],
+    ]);
+    expect([
+      tombstones(raw).get('cursor-1'),
+      tombstones(raw).get('cursor-2'),
+      tombstones(raw).get('cursor-3'),
+    ]).toEqual([10.5, 10.5, 10.5]);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(10.5, 'terminal'));
+
+    const resume = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async () => ({
+        protocol: 'continuation',
+        deleted: [],
+        cursor: 'terminal',
+        hasMore: false,
+      }),
+    );
+    await expect(syncDeletedMessages(db, cursorApi(resume), { supported: true })).resolves.toBe(0);
+    expect(resume).toHaveBeenCalledWith(10.5, 'terminal', undefined);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(10.5, 'terminal'));
+  });
+
+  it('restarts once from zero when a legacy state first encounters a cursor-capable server', async () => {
+    const { db, raw } = await createTestDb();
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async (after) =>
+        after === 1000
+          ? {
+              protocol: 'continuation',
+              deleted: [{ guid: 'discarded-upgrade-probe', chatGuid: null, dateDeleted: 1500 }],
+              cursor: 'unsafe-conversion',
+              hasMore: false,
+            }
+          : {
+              protocol: 'continuation',
+              deleted: [{ guid: 'zero-origin-row', chatGuid: null, dateDeleted: 100 }],
+              cursor: 'zero-terminal',
+              hasMore: false,
+            },
+    );
+
+    await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).resolves.toBe(1);
+
+    expect(fetch.mock.calls).toEqual([
+      [1000, null, undefined],
+      [0, null, undefined],
+    ]);
+    expect(
+      raw
+        .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
+        .pluck()
+        .get('discarded-upgrade-probe'),
+    ).toBeUndefined();
+    expect(
+      raw
+        .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
+        .pluck()
+        .get('zero-origin-row'),
+    ).toBe(100);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(100, 'zero-terminal'));
+  });
+
+  it.each([true, false])(
+    'rejects a non-advancing continuation with rows before writing its page (hasMore=$hasMore)',
+    async (hasMore) => {
+      const { db, raw } = await createTestDb();
+      await kvSet(db, DELETIONS_SYNCED_AT_KEY, cursorState(100, 'stuck'));
+
+      await expectProtocolError(
+        syncDeletedMessages(
+          db,
+          cursorApi(async () => ({
+            protocol: 'continuation',
+            deleted: [{ guid: 'must-not-commit', chatGuid: null, dateDeleted: 200 }],
+            cursor: 'stuck',
+            hasMore,
+          })),
+          { supported: true },
+        ),
+        'cursor-not-advanced',
+      );
+
+      expect(
+        raw
+          .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
+          .pluck()
+          .get('must-not-commit'),
+      ).toBeUndefined();
+      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(100, 'stuck'));
+    },
+  );
+
+  it('reads committed state after a rolling-back neighbour, then initializes from zero', async () => {
     const { db } = await createTestDb();
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async () => []);
     let neighbourStarted!: () => void;
@@ -186,11 +349,11 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     releaseNeighbour();
     await expect(neighbour).rejects.toThrow('neighbour rollback');
     await expect(sync).resolves.toBe(0);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1234');
-    expect(fetch).not.toHaveBeenCalled();
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(0));
+    expect(fetch).toHaveBeenCalledWith(0, undefined);
   });
 
-  it('rejects a queued first-run seed after account ownership is revoked', async () => {
+  it('rejects a queued first-run state read after account ownership is revoked', async () => {
     const { db } = await createTestDb();
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async () => []);
     let neighbourStarted!: () => void;
@@ -228,7 +391,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
   it('keeps network outside the mutex and rejects its queued tombstone after ownership changes', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['m1']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     let neighbourStarted!: () => void;
     let releaseNeighbour!: () => void;
@@ -265,105 +428,58 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     await expect(neighbour).rejects.toThrow('neighbour rollback');
     await rejected;
     expect(tombstones(raw).get('m1')).toBeNull();
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(1000));
   });
 
-  it.each([
-    { name: 'commits after the neighbour rolls back', revoke: false },
-    { name: 'rejects after account ownership is revoked', revoke: true },
-  ])('$name when the cursor advance is queued after its tombstone', async ({ revoke }) => {
+  it('rolls back the whole page when account ownership is revoked before commit', async () => {
     const { db, raw } = await createTestDb();
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
-    const guid = revoke ? 'cursor-revoked' : 'cursor-current';
-
-    let markNeighbourStarted!: () => void;
-    let releaseNeighbour!: () => void;
-    const neighbourStarted = new Promise<void>((resolve) => {
-      markNeighbourStarted = resolve;
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
+    let releaseStateWrite!: () => void;
+    let markStateWriteStarted!: () => void;
+    const stateWriteStarted = new Promise<void>((resolve) => {
+      markStateWriteStarted = resolve;
     });
-    const neighbourHeld = new Promise<void>((resolve) => {
-      releaseNeighbour = resolve;
+    const stateWriteHeld = new Promise<void>((resolve) => {
+      releaseStateWrite = resolve;
     });
-    const neighbourError = new Error('deletion cursor neighbour rollback');
-    let neighbourQueued = false;
-    let neighbour: Promise<unknown> | undefined;
-    let aborted = false;
-    const shouldAbort = (): boolean => {
-      const tombstoneExists = raw
-        .prepare('SELECT 1 FROM message_deletion_ledger WHERE guid = ?')
-        .get(guid);
-      if (!neighbourQueued && tombstoneExists) {
-        neighbourQueued = true;
-        neighbour = withDbTransaction(db, async (context) => {
-          await kvSetWithinTransaction(context, DELETIONS_SYNCED_AT_KEY, '9999');
-          markNeighbourStarted();
-          await neighbourHeld;
-          throw neighbourError;
-        }).then(
-          () => null,
-          (error: unknown) => error,
-        );
-      }
-      return aborted;
-    };
-
-    let syncSettled = false;
-    const syncOutcome = syncDeletedMessages(
-      db,
-      api(async () => [{ guid, chatGuid: null, dateDeleted: 2000 }]),
-      { supported: true, shouldAbort },
-    )
-      .then(
-        (value) => ({ kind: 'resolved' as const, value }),
-        (error: unknown) => ({ kind: 'rejected' as const, error }),
-      )
-      .finally(() => {
-        syncSettled = true;
+    const realKvSetWithinTransaction = kvRepository.kvSetWithinTransaction;
+    const stateWriteSpy = jest
+      .spyOn(kvRepository, 'kvSetWithinTransaction')
+      .mockImplementation(async (context, key, value) => {
+        if (key === DELETIONS_SYNCED_AT_KEY && value === legacyState(2000)) {
+          markStateWriteStarted();
+          await stateWriteHeld;
+        }
+        await realKvSetWithinTransaction(context, key, value);
       });
-
-    await neighbourStarted;
-    let observationError: unknown;
+    let aborted = false;
+    const sync = syncDeletedMessages(
+      db,
+      api(async () => [{ guid: 'cursor-revoked', chatGuid: null, dateDeleted: 2000 }]),
+      { supported: true, shouldAbort: () => aborted },
+    );
     try {
-      await nextEventLoopTurn();
-      expect(syncSettled).toBe(false);
-      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('9999');
-      expect(
-        raw
-          .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
-          .pluck()
-          .get(guid),
-      ).toBe(2000);
-      aborted = revoke;
-    } catch (error) {
-      observationError = error;
+      await stateWriteStarted;
+      aborted = true;
+      releaseStateWrite();
+      await expect(sync).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
     } finally {
-      releaseNeighbour();
+      releaseStateWrite();
+      await Promise.allSettled([sync]);
+      stateWriteSpy.mockRestore();
     }
-
-    const [rolledBack, outcome] = await Promise.all([neighbour, syncOutcome]);
-    if (observationError) throw observationError;
-    expect(rolledBack).toBe(neighbourError);
     expect(
       raw
         .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
         .pluck()
-        .get(guid),
-    ).toBe(2000);
-    if (revoke) {
-      expect(outcome.kind).toBe('rejected');
-      if (outcome.kind === 'rejected') {
-        expect(outcome.error).toBeInstanceOf(DbCommitGuardRejectedError);
-      }
-      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1000');
-    } else {
-      expect(outcome).toEqual({ kind: 'resolved', value: 1 });
-      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('2000');
-    }
+        .get('cursor-revoked'),
+    ).toBeUndefined();
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(1000));
   });
 
-  it('keeps committed tombstones but rolls back a failed cursor advance and releases retry', async () => {
+  it('rolls back tombstones with a failed state write and releases retry', async () => {
     const { db, raw } = await createTestDb();
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
     raw.exec(`
       CREATE TRIGGER reject_deletion_cursor
       BEFORE UPDATE OF value ON kv
@@ -384,8 +500,8 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
         .pluck()
         .get('cursor-failure'),
-    ).toBe(2000);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1000');
+    ).toBeUndefined();
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(1000));
 
     raw.exec('DROP TRIGGER reject_deletion_cursor');
     await expect(syncDeletedMessages(db, api(fetch), { supported: true })).resolves.toBe(1);
@@ -393,12 +509,12 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
       [1000, undefined],
       [1000, undefined],
     ]);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('2000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(2000));
   });
 
   it('awaits the asynchronous cursor body before committing its transaction owner', async () => {
     const { db, raw } = await createTestDb();
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     let releaseCursorWrite!: () => void;
     let markCursorWriteFinished!: () => void;
@@ -413,7 +529,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     const cursorWriteSpy = jest
       .spyOn(kvRepository, 'kvSetWithinTransaction')
       .mockImplementation(async (context, key, value) => {
-        if (key === DELETIONS_SYNCED_AT_KEY && value === '2000') {
+        if (key === DELETIONS_SYNCED_AT_KEY && value === legacyState(2000)) {
           cursorWriteDidStart = true;
           try {
             await cursorWriteHeld;
@@ -453,7 +569,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         await nextEventLoopTurn();
         expect(syncSettled).toBe(false);
         expect(raw.inTransaction).toBe(true);
-        expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1000');
+        expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(1000));
       } catch (error) {
         observationError = error;
       } finally {
@@ -464,7 +580,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
       if (observationError) throw observationError;
       expect(outcome).toEqual({ kind: 'resolved', value: 1 });
       expect(raw.inTransaction).toBe(false);
-      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('2000');
+      expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(2000));
     } finally {
       releaseCursorWrite();
       try {
@@ -480,7 +596,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
   it('applies deletions after the watermark, durably records unknown guids, and advances it', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['m1', 'm2']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async (after) =>
       after === 1000
@@ -506,13 +622,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         .pluck()
         .get('ghost-never-synced'),
     ).toBe(2500);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('3000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(3000));
   });
 
   it('is idempotent: rows re-emitted at the watermark re-apply as no-ops and the watermark stays put', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['m1', 'm2']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     // The server RE-EMITS rows sharing the watermark's exact ms (fractional-ms flooring), so a
     // rerun sees the same rows again — applying them must change nothing.
@@ -526,19 +642,19 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
 
     await syncDeletedMessages(db, api(fetch), { supported: true });
     const first = tombstones(raw);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('3000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(3000));
 
     // Second run: a row at the exact advanced watermark may re-emit; it changes nothing.
     await expect(syncDeletedMessages(db, api(fetch), { supported: true })).resolves.toBe(1);
     expect(fetch).toHaveBeenLastCalledWith(3000, undefined);
     expect(tombstones(raw)).toEqual(first);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('3000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(3000));
   });
 
   it('a null dateDeleted row is still tombstoned (now() fallback) but NEVER advances the watermark', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['m3']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '5000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(5000));
 
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async (after) =>
       after === 5000 ? [{ guid: 'm3', chatGuid: null, dateDeleted: null }] : [],
@@ -551,13 +667,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
 
     expect(applied).toBe(1);
     expect(tombstones(raw).get('m3')).toBe(999999); // tombstone applied with the clock fallback
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('5000'); // watermark NOT advanced on null
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(5000));
   });
 
   it('loops on a FULL page, advancing the watermark per page, and stops on the short page', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['d1', 'd2', 'd3']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '5');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(5));
 
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async (after) => {
       if (after === 5) {
@@ -576,13 +692,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     expect(fetch.mock.calls.map(([after]) => after)).toEqual([5, 20]);
     const t = tombstones(raw);
     expect([t.get('d1'), t.get('d2'), t.get('d3')]).toEqual([10, 20, 30]);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('30');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(30));
   });
 
   it('rejects an over-returned page before any tombstone, ledger, or watermark write', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['b1', 'b2', 'b3', 'b4', 'b5']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '0');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(0));
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async () => [
       { guid: 'b1', chatGuid: 'c1', dateDeleted: 10 },
       { guid: 'b2', chatGuid: 'c1', dateDeleted: 20 },
@@ -614,7 +730,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         .pluck()
         .get(),
     ).toBe(0);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('0');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(0));
   });
 
   it.each([
@@ -654,7 +770,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     const { db, raw } = await createTestDb();
     const seededGuids = rows.map((row) => row.guid).filter((guid) => guid.length > 0);
     await seed(db, 'c1', seededGuids);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     await expectProtocolError(
       syncDeletedMessages(
@@ -674,13 +790,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
         .pluck()
         .get(rows[0]!.guid, rows[1]!.guid),
     ).toBe(0);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(1000));
   });
 
   it('accepts equal timestamps and advances to their shared value', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['tie-1', 'tie-2']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     await expect(
       syncDeletedMessages(
@@ -694,13 +810,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     ).resolves.toBe(2);
 
     expect([tombstones(raw).get('tie-1'), tombstones(raw).get('tie-2')]).toEqual([2000, 2000]);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('2000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(2000));
   });
 
   it('ignores a null while checking order and advances a short page from its dated rows', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['mixed-short-null', 'mixed-short-dated']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
 
     await expect(
       syncDeletedMessages(
@@ -717,13 +833,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
       tombstones(raw).get('mixed-short-null'),
       tombstones(raw).get('mixed-short-dated'),
     ]).toEqual([1500, 2000]);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('2000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(2000));
   });
 
-  it('keeps committed earlier tombstones but not the watermark when a later row fails', async () => {
+  it('rolls back every tombstone and the state when a later row fails', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['f1', 'f2', 'f3']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '1000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(1000));
     const rows: DeletedMessage[] = [
       { guid: 'f1', chatGuid: 'c1', dateDeleted: 2000 },
       { guid: 'f2', chatGuid: 'c1', dateDeleted: 3000 },
@@ -771,8 +887,8 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
       tombstones(raw).get('f1'),
       tombstones(raw).get('f2'),
       tombstones(raw).get('f3'),
-    ]).toEqual([2000, null, null]);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('1000');
+    ]).toEqual([null, null, null]);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(1000));
 
     raw.exec(`
       DROP INDEX fail_second_deletion;
@@ -784,13 +900,13 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
       tombstones(raw).get('f2'),
       tombstones(raw).get('f3'),
     ]).toEqual([2000, 3000, 4000]);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('4000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(4000));
   });
 
   it('breaks (bounded) on a full page that cannot advance the watermark instead of spinning', async () => {
     const { db, raw } = await createTestDb();
     await seed(db, 'c1', ['n1', 'n2']);
-    await kvSet(db, DELETIONS_SYNCED_AT_KEY, '7000');
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, legacyState(7000));
 
     // A full page with even one null timestamp has no safe continuation cursor. The dated row
     // proves we do not advance merely because another row could move the watermark.
@@ -809,6 +925,6 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     expect(fetch).toHaveBeenCalledTimes(1); // no watermark advance → no refetch of the same page
     expect(tombstones(raw).get('n1')).toBe(424242);
     expect(tombstones(raw).get('n2')).toBe(8000);
-    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe('7000');
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(7000));
   });
 });

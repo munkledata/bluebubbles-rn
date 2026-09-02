@@ -177,63 +177,55 @@ videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL bal
   network/library bug for a whole evening; see the AGENTS.md UI gotcha). `UrlPreviewCard` now uses a
   fixed `width:'78%'`, verified rendering on-device. Preview cards are feature-complete end to end.
 
-## ⚠️ Partial (2026-08-06) — missed-deletion catch-up sync (R1)
+<a id="missed-deletion-catch-up-sync-r1"></a>
 
-**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md).
-The client containment below is implemented; the two final server-protocol bullets keep that task blocked.
+## ⚠️ Partial (updated 2026-09-01) — missed-deletion catch-up sync (R1)
 
-The one documented residual from the schema-gap wave: a `message-deleted` event arriving while the
-app was DEAD or APP-LOCKED was LOST (the locked FCM path never touches the DB), so the deleted
-message lingered locally forever — there was no sync-side signal to reconcile against. That
-dead/locked transport gap is closed on both sides:
+**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md). Composite continuation and
+atomic app adoption are implemented. Cross-request snapshot consistency, one shared frozen contract
+fixture, and exact-device proof keep the parent task open.
 
-- **Server** (`packages/bbd`, shipped 2026-07-23): `GET /api/v1/message/deleted?after=<unixMs>`
-  (auth, standard v1 envelope) returns `{ deleted: MessageDeletedV1[] }` — the SAME
-  `{ guid, chatGuid, dateDeleted }` DTO as the realtime `message-deleted` event — oldest-first,
-  page capped at 500 rows. `after` is a Unix-ms watermark (fractional ms floored server-side, so
-  rows sharing the watermark's exact ms may RE-EMIT — application must be idempotent). Advertised
-  via the existing `supports_message_deleted` capability.
-- **App** (`bluebubbles-rn`): `syncDeletedMessages` (`src/services/sync/engine.ts`) runs on every
-  boot/reconnect sync (`runSync` in `syncControl.ts`, after the chat/message sync), gated on
-  `sessionAccessors.messageDeletedSupported()`. It pages the endpoint from the persisted
-  `sync.deletionsSyncedAt` watermark (kv table — no new migration) and applies each row through the
-  public guarded `markMessageDeleted` transaction owner. It shares the live event's underlying
-  transaction-only tombstone primitive and is idempotent, so re-emitted rows are no-ops. FIRST
-  supported run seeds the watermark to `Date.now()` WITHOUT fetching to avoid an
-  unbounded replay of deletions for rows this install never stored. This is containment, not a
-  consistent snapshot: normal history sync runs first and can ingest a row the server already
-  considers deleted. Null `dateDeleted` rows are tombstoned (now() fallback) but never advance the
-  watermark; the page loop is bounded (max 5 pages per sync) and stops when a full page can't
-  advance the watermark. Engine-level tests in
-  `test/services/deletionSync.test.ts` (capability gate, first-run seed / no history replay,
-  watermark advance, idempotent re-run, null dateDeleted, strict response validation, paging +
-  bounded loop).
+A `message-deleted` event arriving while the app was dead or app-locked used to be lost because the
+locked FCM path never touches the database. Boot/reconnect catch-up now closes that ordinary
+transport gap:
 
-The app-side watermark seed/read, each tombstone, and each watermark advance now also own short
-account-guarded transactions, so a neighbouring rollback or Disconnect cannot create a false
-committed cursor. The app-side ordering and protocol defects are closed:
+- **Server** (`bluebubbles-server`): legacy `GET /api/v1/message/deleted?after=<unixMs>` retains
+  `{ deleted }`. Cursor-aware callers start with `after=<unixMs>&continuation=1` and resume with
+  `after=<fallback>&cursor=<opaque>`. The continued response is
+  `{ deleted: MessageDeletedV1[], cursor, hasMore }`, hard-capped at 500, and orders equal deletion
+  timestamps by stable message/chat identifiers so more than 500 ties cannot starve later rows.
+- **App** (`bluebubbles-rn`): `syncDeletedMessages` in `src/services/sync/deletionSync.ts` runs after
+  chat/message history on every supported boot/reconnect sync. It stores versioned JSON in the
+  existing account-scoped `sync.deletionsSyncedAt` key: opaque cursor plus numeric old-server
+  fallback, or legacy fallback alone. Missing, malformed, and old bare-timestamp state starts from
+  zero instead of device `Date.now()`. A legacy state that first encounters the cursor protocol
+  discards that non-zero probe and restarts once from zero so timestamp ties cannot be stranded.
+  Older servers ignore the continuation query and keep using timestamp paging.
 
-- Migration `0033_message_deletion_ledger` backfills existing tombstones and retains the greatest
-  deletion time per GUID without a message foreign key. `markMessageDeleted` records the marker even
-  when the row is absent; `upsertMessages` applies it in the initial INSERT. Durable realtime delivery
-  checkpoints that marker atomically instead of retrying/recovering an already-applied deletion.
-- The REST schema rejects malformed timestamps and more than 500 rows. Before any page write, the
-  engine rejects an invalid GUID/non-finite timestamp, a timestamp below the requested watermark, or
-  decreasing order; equal timestamps remain valid. It never sorts or slices a bad response. A full
-  page containing a null timestamp is applied but cannot move the cursor, and ingestion auto-download
-  excludes attachments whose owner is already tombstoned.
+The app validates the complete response before writing. Each page's durable deletion-ledger markers,
+message tombstones, chat-sort repair, and next versioned state commit in one account-guarded
+transaction. A row failure, state-write failure, process crash, or Disconnect therefore cannot split
+tombstones from the cursor; retry remains idempotent. Cursor paging follows `hasMore`, persists empty
+and terminal cursors, and rejects a repeated non-terminal cursor before any page write. The legacy
+fallback keeps its safe-stop behavior for an ambiguous full timestamp page. Migration
+`0033_message_deletion_ledger` continues to make unknown GUIDs authoritative for later history
+backfill. Focused Node tests cover the strict legacy/continued wire shapes, zero-origin clock-ahead
+upgrade, cursor ties/pages, legacy-to-cursor upgrade, rollback/retry, ownership revocation, malformed
+pages, and idempotency.
 
-Two server-protocol residuals keep this section partial rather than fully closed:
+What remains:
 
-- A timestamp-only cursor cannot losslessly continue when a full 500-row page can share/floor to one
-  cursor millisecond and those ties re-emit; exactly 500 tied rows can already starve newer rows. The
-  durable fix is a server continuation token or composite `(dateDeleted, stableId)` cursor; a full
-  ambiguous page currently stops safely rather than skipping rows.
-- First supported run still seeds from device `Date.now()`. A clock-ahead device, an existing
-  installation gaining the capability, or even a fresh install whose normal history sync just
-  ingested an already-deleted row can seed past relevant deletion knowledge. A server-issued initial
-  cursor must be tied to a consistent history snapshot (or history must exclude/mark deleted rows)
-  to remove that race.
+- The opaque cursor is a keyset position, not one SQLite snapshot spanning history and every
+  deletion request. If the server exposes a deletion late with a complete key at or behind an
+  already-issued cursor, the client cannot discover it. History must consistently exclude/mark
+  deleted rows, or the server needs a snapshot/high-water plus a monotonic deletion-observation
+  sequence.
+- Exact-device op-sqlite/SQLCipher killed-process and reconnect catch-up still needs to be run on the
+  current app/server build. Older timestamp-only servers retain their inherent tie limitation: a
+  soft boundary tie can exceed 500 rows, which the app rejects at parsing rather than advancing from
+  ambiguous state. The new cursor protocol is the tie-safe path for a stable server result set.
+- Server and app contract tests currently pin the same shape independently. The work plan's one
+  frozen response fixture consumed by both repositories remains open.
 
 ## 📱 RCS bridge (Google Messages)
 
@@ -281,7 +273,7 @@ The historical directional tables remain protocol evidence and do not override t
 
 | Open record/capability | Approved disposition | Reason / authoritative owner |
 | --- | --- | --- |
-| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns exact-device proof and server/helper investigation. |
+| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns the snapshot-consistency contract, shared fixture, and exact-device proof. |
 | `imessage-aliases-removed` | DEFER | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source. |
 | Stubbed `GET /server/update/check` | DROP | The app fails closed without issuing the nonexistent request; release/update truth is owned by the release workflow. |
 | Admin `set-config` | DROP | Full server configuration writes require local admin authentication and belong in the trusted server console. |

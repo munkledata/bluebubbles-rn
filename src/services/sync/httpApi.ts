@@ -24,6 +24,7 @@ export function httpSyncApi(http: HttpClient): SyncApi {
         },
         signal,
       ),
-    fetchDeletedAfter: (afterMs, signal) => messagesApi.deletedMessages(http, afterMs, signal),
+    fetchDeletedPage: (afterMs, cursor, signal) =>
+      messagesApi.deletedMessages(http, { afterMs, cursor }, signal),
   };
 }
