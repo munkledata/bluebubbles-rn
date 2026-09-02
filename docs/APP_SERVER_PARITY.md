@@ -181,9 +181,9 @@ videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL bal
 
 ## ⚠️ Partial (updated 2026-09-01) — missed-deletion catch-up sync (R1)
 
-**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md). Composite continuation and
-atomic app adoption are implemented. Cross-request snapshot consistency, one shared frozen contract
-fixture, and exact-device proof keep the parent task open.
+**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md). Composite continuation,
+atomic app adoption, and a digest-locked cross-repository response fixture are implemented.
+Cross-request snapshot consistency and exact-device proof keep the parent task open.
 
 A `message-deleted` event arriving while the app was dead or app-locked used to be lost because the
 locked FCM path never touches the database. Boot/reconnect catch-up now closes that ordinary
@@ -213,6 +213,11 @@ backfill. Focused Node tests cover the strict legacy/continued wire shapes, zero
 upgrade, cursor ties/pages, legacy-to-cursor upgrade, rollback/retry, ownership revocation, malformed
 pages, and idempotency.
 
+Contract drift is now guarded by one canonical continued-response fixture owned by the server and a
+byte-identical app copy pinned to the same SHA-256. Both runtime contract tests consume those frozen
+bytes. Because the repositories clone and test independently, this is a digest-locked synchronized
+copy rather than one physical shared file; updates require coordinated commits.
+
 What remains:
 
 - The opaque cursor is a keyset position, not one SQLite snapshot spanning history and every
@@ -224,8 +229,6 @@ What remains:
   current app/server build. Older timestamp-only servers retain their inherent tie limitation: a
   soft boundary tie can exceed 500 rows, which the app rejects at parsing rather than advancing from
   ambiguous state. The new cursor protocol is the tie-safe path for a stable server result set.
-- Server and app contract tests currently pin the same shape independently. The work plan's one
-  frozen response fixture consumed by both repositories remains open.
 
 ## 📱 RCS bridge (Google Messages)
 
@@ -273,7 +276,7 @@ The historical directional tables remain protocol evidence and do not override t
 
 | Open record/capability | Approved disposition | Reason / authoritative owner |
 | --- | --- | --- |
-| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns the snapshot-consistency contract, shared fixture, and exact-device proof. |
+| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns the snapshot-consistency contract and exact-device proof. |
 | `imessage-aliases-removed` | DEFER | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source. |
 | Stubbed `GET /server/update/check` | DROP | The app fails closed without issuing the nonexistent request; release/update truth is owned by the release workflow. |
 | Admin `set-config` | DROP | Full server configuration writes require local admin authentication and belong in the trusted server console. |

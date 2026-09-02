@@ -139,10 +139,11 @@ zero-origin initialization, legacy fallback, and atomic page/state commit. The r
 gap is snapshot consistency across requests: the current keyset cursor cannot discover a deletion
 that becomes visible later with a key at or behind an already-issued cursor. History must exclude or
 mark deleted rows consistently, or the server must expose a snapshot/high-water plus a monotonic
-deletion-observation sequence. One frozen response fixture consumed by both the server and app
-contract tests, plus exact-device killed-process verification, also remain open. For older
-timestamp-only servers, an over-500 soft-boundary tie remains intentionally fail-closed; the
-cursor-capable protocol is the tie-safe path.
+deletion-observation sequence. The response contract is host-green: the server owns one canonical
+continued-response fixture, and the app contract test consumes a byte-identical copy pinned to the
+same SHA-256. Exact-device killed-process verification remains open. For older timestamp-only
+servers, an over-500 soft-boundary tie remains intentionally fail-closed; the cursor-capable
+protocol is the tie-safe path.
 
 <a id="sched-01"></a>
 
