@@ -7,7 +7,11 @@ import {
 import { deleteOwnedFile, downloadBoundedNativeFile } from './boundedNativeDownload';
 import { encodedMediaPathSegment, mediaGenerationPathSegment } from './pathSafety';
 
-function developmentDestination(guid: string, generation?: number): { dir: Directory; file: File } {
+function developmentDestination(
+  guid: string,
+  transferName: string,
+  generation?: number,
+): { dir: Directory; file: File } {
   const safeGuid = encodedMediaPathSegment(guid);
   const dir = new Directory(
     Paths.document,
@@ -15,7 +19,7 @@ function developmentDestination(guid: string, generation?: number): { dir: Direc
     safeGuid,
     mediaGenerationPathSegment(generation),
   );
-  return { dir, file: new File(dir, `${safeGuid}.jpg`) };
+  return { dir, file: new File(dir, encodedMediaPathSegment(transferName)) };
 }
 
 /**
@@ -32,18 +36,18 @@ export const devProgressFetcher: AttachmentFetcher = {
       return false;
     }
   },
-  destinationUri(guid: string, _transferName: string, generation?: number): string {
-    return developmentDestination(guid, generation).file.uri;
+  destinationUri(guid: string, transferName: string, generation?: number): string {
+    return developmentDestination(guid, transferName, generation).file.uri;
   },
   async download(
     guid: string,
-    _transferName: string,
+    transferName: string,
     onProgress?: (loaded: number, total: number) => void,
     _service?: string | null,
     generation?: number,
     limits?,
   ) {
-    const { dir, file: dest } = developmentDestination(guid, generation);
+    const { dir, file: dest } = developmentDestination(guid, transferName, generation);
     dir.create({ intermediates: true, idempotent: true });
     const url = `https://picsum.photos/seed/${encodeURIComponent(guid)}/1200/800`;
     const maxBytes = limits?.maxBytes ?? MANUAL_ATTACHMENT_MAX_BYTES;

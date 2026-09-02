@@ -1,6 +1,8 @@
+import * as Crypto from 'expo-crypto';
 import { getDatabase } from '@db/database';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
+import { extensionForMime, isLocalFileUri } from '@utils';
 import { http } from '../clients';
 import {
   runTrackedRealtimeWork,
@@ -8,10 +10,12 @@ import {
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 import {
+  attachmentDownloadDestinationIdentity,
   attachmentMetadataAllowsDownload,
   ensureDownloadedOutcome,
   type AttachmentDownloadMode,
   type AttachmentDownloadOutcome,
+  type AttachmentDownloadReplacement,
   type AttachmentDownloadScope,
   type AttachmentFetcher,
 } from './downloadService';
@@ -47,13 +51,25 @@ const RCS_RETRY_BACKOFF_MS = [2500, 6000, 12000];
 
 interface RcsRetryState {
   readonly owner: symbol;
+  readonly destinationIdentity: string;
   retries: number;
   timer: ReturnType<typeof setTimeout> | null;
   unsubscribeInvalidation: () => void;
+  releaseProtection: (() => void) | null;
 }
 
 /** One retry chain per account generation + attachment. */
 const rcsRetryStates = new Map<string, RcsRetryState>();
+
+function replacementFileExtension(att: AttachmentRow): string {
+  const mimeExtension = extensionForMime(att.mimeType);
+  if (mimeExtension) return mimeExtension;
+  const transferName = att.transferName ?? '';
+  const dot = transferName.lastIndexOf('.');
+  if (dot <= 0 || dot === transferName.length - 1) return '';
+  const candidate = transferName.slice(dot);
+  return /^\.[a-z0-9]{1,16}$/i.test(candidate) ? candidate.toLowerCase() : '';
+}
 
 /**
  * Ensure an attachment is downloaded locally (UI-bound). Reports progress into
@@ -72,6 +88,11 @@ export function download(
 ): Promise<string | null> {
   const scope = downloadScope(deliveryLease, fetcher);
   const key = retryKey(att.guid, scope);
+  // A forced copy-on-write replacement owns both the damaged source pin and the terminal viewer
+  // transition. A stale ordinary request must not revoke it merely to discover that the flight
+  // layer considers the two destinations incompatible.
+  const destinationIdentity = attachmentDownloadDestinationIdentity();
+  if (hasIncompatibleRcsOwner(key, destinationIdentity)) return Promise.resolve(null);
   // A fresh UI or ingestion intent owns this guid now. Clear both the old count and its sleeping
   // timer; deleting only the count lets an older callback wake and start a second retry chain.
   cancelRcsRetry(key);
@@ -90,8 +111,94 @@ export function download(
     return Promise.resolve(null);
   }
   const retryOwner =
-    att.service === 'RCS' && mode === 'manual' ? beginRcsRetry(key, scope.generation) : undefined;
+    att.service === 'RCS' && mode === 'manual'
+      ? beginRcsRetry(key, scope.generation, destinationIdentity)
+      : undefined;
   return runDownload(att, scope, mode, onVerifiedBytes, maxBytesOverride, retryOwner);
+}
+
+/**
+ * Replace a damaged local image/video without unlinking bytes that mounted native readers still
+ * own. The new file is reserved and verified under a distinct UUID name, then the DB commit swaps
+ * only the exact captured old path. Ordinary cache retirement cleans the old path after every
+ * reader and outgoing fallback releases it.
+ */
+export function redownload(
+  att: AttachmentRow,
+  deliveryLease: RealtimeDeliveryLease,
+): Promise<string | null> {
+  const scope = downloadScope(deliveryLease, fetcher);
+  const key = retryKey(att.guid, scope);
+  const expectedLocalPath = att.localPath;
+  const destinationIdentity = attachmentDownloadDestinationIdentity({
+    expectedLocalPath: expectedLocalPath ?? '',
+  });
+  if (hasIncompatibleRcsOwner(key, destinationIdentity)) return Promise.resolve(null);
+  if (
+    !scope.isCurrent() ||
+    !isLocalFileUri(expectedLocalPath) ||
+    att.guid.startsWith('temp-') ||
+    !attachmentMetadataAllowsDownload(att.totalBytes, 'manual')
+  ) {
+    cancelRcsRetry(key);
+    if (scope.isCurrent()) useDownloadStore.getState().fail(att.guid);
+    return Promise.resolve(null);
+  }
+
+  let oldPathProtection: ReturnType<typeof attachmentCacheCoordinator.protect> = null;
+  try {
+    oldPathProtection = attachmentCacheCoordinator.protect(expectedLocalPath);
+  } catch {
+    // Persisted paths are untrusted. A malformed path is unavailable, never a deletion target.
+  }
+  if (!oldPathProtection) {
+    cancelRcsRetry(key);
+    useDownloadStore.getState().fail(att.guid);
+    return Promise.resolve(null);
+  }
+
+  let replacement: AttachmentDownloadReplacement;
+  try {
+    replacement = {
+      expectedLocalPath,
+      destinationName: `redownload-${Crypto.randomUUID()}${replacementFileExtension(att)}`,
+    };
+  } catch {
+    cancelRcsRetry(key);
+    oldPathProtection.release();
+    useDownloadStore.getState().fail(att.guid);
+    return Promise.resolve(null);
+  }
+
+  // Acquire the fresh owner's exact-path pin before retiring the previous RCS owner. Reversing
+  // this order creates a brief zero-owner window where cache retirement can claim the damaged
+  // source while the shared native replacement is still in flight.
+  cancelRcsRetry(key);
+  let retryOwner: symbol | undefined;
+  let task: Promise<string | null>;
+  try {
+    retryOwner =
+      att.service === 'RCS'
+        ? beginRcsRetry(key, scope.generation, destinationIdentity, oldPathProtection.release)
+        : undefined;
+    task = runDownload(att, scope, 'manual', undefined, undefined, retryOwner, replacement);
+  } catch (error) {
+    // `runDownload` reads the DB and starts Zustand presentation synchronously before returning its
+    // Promise. A startup/disconnect exception must not strand the old-file pin or RCS owner.
+    cancelRcsRetry(key, retryOwner);
+    oldPathProtection.release();
+    return Promise.reject(error);
+  }
+  if (retryOwner === undefined) return task.finally(oldPathProtection.release);
+  return task
+    .catch((error: unknown) => {
+      cancelRcsRetry(key, retryOwner);
+      throw error;
+    })
+    .finally(() => {
+      // A sleeping RCS chain keeps the pin. Every terminal cancel path releases it.
+      if (!ownsRcsRetry(key, retryOwner)) oldPathProtection.release();
+    });
 }
 
 function downloadScope(
@@ -150,13 +257,20 @@ async function runTrackedDownloadWork<T>(
 const retryKey = (guid: string, scope: AttachmentDownloadScope): string =>
   `${scope.generation}:${guid}`;
 
-function beginRcsRetry(key: string, generation: number): symbol {
+function beginRcsRetry(
+  key: string,
+  generation: number,
+  destinationIdentity: string,
+  releaseProtection?: () => void,
+): symbol {
   const owner = Symbol(key);
   const state: RcsRetryState = {
     owner,
+    destinationIdentity,
     retries: 0,
     timer: null,
     unsubscribeInvalidation: () => undefined,
+    releaseProtection: releaseProtection ?? null,
   };
   rcsRetryStates.set(key, state);
   state.unsubscribeInvalidation = subscribeRealtimeGenerationInvalidation(generation, () => {
@@ -165,11 +279,18 @@ function beginRcsRetry(key: string, generation: number): symbol {
   return owner;
 }
 
+function hasIncompatibleRcsOwner(key: string, destinationIdentity: string): boolean {
+  const current = rcsRetryStates.get(key);
+  return current !== undefined && current.destinationIdentity !== destinationIdentity;
+}
+
 function cancelRcsRetry(key: string, owner?: symbol): void {
   const state = rcsRetryStates.get(key);
   if (!state || (owner !== undefined && state.owner !== owner)) return;
   if (state.timer != null) clearTimeout(state.timer);
   state.unsubscribeInvalidation();
+  state.releaseProtection?.();
+  state.releaseProtection = null;
   rcsRetryStates.delete(key);
 }
 
@@ -184,6 +305,7 @@ function runDownload(
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
   retryOwner?: symbol,
+  replacement?: AttachmentDownloadReplacement,
 ): Promise<string | null> {
   const key = retryKey(att.guid, scope);
   if (!scope.isCurrent()) {
@@ -202,6 +324,7 @@ function runDownload(
     mode,
     onVerifiedBytes,
     maxBytesOverride,
+    replacement,
   ).then((outcome) => {
     // A fresh invocation may have superseded this chain while it shared an in-flight native
     // request. Only the current owner may schedule another timer or alter presentation state.
@@ -214,6 +337,14 @@ function runDownload(
       if (retryOwner !== undefined) cancelRcsRetry(key, retryOwner);
       finish(att.guid);
       return outcome.localPath;
+    }
+    if (replacement && outcome.status === 'source_changed') {
+      // Another owner already changed the authoritative DB row. This replacement lost safely;
+      // publish a terminal marker so mounted observers reread and adopt that newer source instead
+      // of retrying forever with the stale corrupt path.
+      if (retryOwner !== undefined) cancelRcsRetry(key, retryOwner);
+      finish(att.guid);
+      return null;
     }
     if (retryOwner !== undefined && isTransientRcsOutcome(outcome)) {
       const state = rcsRetryStates.get(key);
@@ -230,7 +361,15 @@ function runDownload(
             cancelRcsRetry(key, retryOwner);
             return;
           }
-          void runDownload(att, scope, mode, onVerifiedBytes, maxBytesOverride, retryOwner);
+          void runDownload(
+            att,
+            scope,
+            mode,
+            onVerifiedBytes,
+            maxBytesOverride,
+            retryOwner,
+            replacement,
+          );
         }, delay);
         return null;
       }

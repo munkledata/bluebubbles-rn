@@ -664,6 +664,43 @@ export function updateAttachmentLocalPathWithinTransaction(
 }
 
 /**
+ * Atomically replace one visible attachment's exact old file with a verified copy-on-write path.
+ *
+ * The old-path predicate is the compare-and-swap fence: a late corrupt-file recovery cannot
+ * overwrite a newer download, sync result, or row reuse that already changed this attachment.
+ */
+export function replaceVisibleAttachmentLocalPathWithinTransaction(
+  context: DbTransactionContext,
+  input: {
+    attachmentGuid: string;
+    expectedLocalPath: string;
+    replacementLocalPath: string;
+  },
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const updated = await db.all<{ id: number }>(sql`
+    UPDATE attachments
+       SET local_path = ${input.replacementLocalPath}
+     WHERE guid = ${input.attachmentGuid}
+       AND local_path = ${input.expectedLocalPath}
+       AND EXISTS (
+         SELECT 1 FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+          WHERE m.id = attachments.message_id
+            AND m.date_deleted IS NULL
+            AND m.date_retracted IS NULL
+            AND (
+              c.deleted_at IS NULL
+              OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
+            )
+       )
+    RETURNING id
+  `);
+    return updated.length === 1;
+  });
+}
+
+/**
  * Persist a downloaded file path (fires the reactive `attachments` watcher).
  *
  * Returns false when the attachment disappeared, or its owning message was locally deleted,

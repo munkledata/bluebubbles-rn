@@ -14,6 +14,7 @@ import {
   listAttachmentsByMessageIds,
   listChatAttachmentsByKind,
   listChatImageAttachmentsByAttachmentGuid,
+  replaceVisibleAttachmentLocalPathWithinTransaction,
   updateAttachmentLocalPath,
   upsertAttachments,
   upsertChats,
@@ -787,6 +788,41 @@ describe('Genmoji fields round-trip via the chat-scoped reads', () => {
 });
 
 describe('updateAttachmentLocalPath', () => {
+  it('copy-on-write replaces only the exact visible source path', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db);
+    const id = await putMsg(db, chatId, {
+      guid: 'msg-replace-local-path',
+      dateCreated: 1,
+      chats: [{ guid: 'c1' }],
+      attachments: [{ guid: 'att-replace-local-path', mimeType: 'image/jpeg' }],
+    });
+    await updateAttachmentLocalPath(db, 'att-replace-local-path', 'file:///documents/old.jpg');
+
+    await expect(
+      withDbTransaction(db, (context) =>
+        replaceVisibleAttachmentLocalPathWithinTransaction(context, {
+          attachmentGuid: 'att-replace-local-path',
+          expectedLocalPath: 'file:///documents/old.jpg',
+          replacementLocalPath: 'file:///documents/new.jpg',
+        }),
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      withDbTransaction(db, (context) =>
+        replaceVisibleAttachmentLocalPathWithinTransaction(context, {
+          attachmentGuid: 'att-replace-local-path',
+          expectedLocalPath: 'file:///documents/old.jpg',
+          replacementLocalPath: 'file:///documents/stale.jpg',
+        }),
+      ),
+    ).resolves.toBe(false);
+
+    expect((await listAttachmentsByMessageIds(db, [id])).get(id)![0]!.localPath).toBe(
+      'file:///documents/new.jpg',
+    );
+  });
+
   it('persists a downloaded file path onto the attachment', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db);

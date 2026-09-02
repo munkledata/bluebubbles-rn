@@ -1,5 +1,6 @@
 import {
   commitAttachmentCacheReservation,
+  replaceVisibleAttachmentLocalPathWithinTransaction,
   updateAttachmentLocalPathWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction, type DbTransactionContext } from '@db/transaction';
@@ -53,7 +54,7 @@ export class AttachmentFetchError extends Error {
 }
 
 export type AttachmentDownloadFailure =
-  AttachmentFetchFailure | 'busy' | 'deleted' | 'stale' | 'storage';
+  AttachmentFetchFailure | 'busy' | 'deleted' | 'source_changed' | 'stale' | 'storage';
 
 export type AttachmentDownloadOutcome =
   | { readonly status: 'success'; readonly localPath: string; readonly bytes: number | null }
@@ -109,6 +110,7 @@ interface DownloadFlightObserver {
 interface DownloadFlight {
   readonly guid: string;
   readonly generation: number | 'unscoped';
+  readonly destinationIdentity: string;
   readonly mode: AttachmentDownloadMode;
   readonly maxBytes: number;
   readonly timeoutMs: number;
@@ -122,6 +124,9 @@ interface DownloadFlight {
 const inFlight = new Map<string, Set<DownloadFlight>>();
 const ATTACHMENT_CACHE_RECORD_CONFLICT = Symbol('attachment-cache-record-conflict');
 const ATTACHMENT_CACHE_TARGET_MISSING = Symbol('attachment-cache-target-missing');
+const ATTACHMENT_CACHE_REPLACEMENT_SOURCE_CHANGED = Symbol(
+  'attachment-cache-replacement-source-changed',
+);
 
 export function downloadMaxBytes(mode: AttachmentDownloadMode): number {
   return mode === 'automatic' ? AUTO_IMAGE_MAX_BYTES : MANUAL_ATTACHMENT_MAX_BYTES;
@@ -187,6 +192,23 @@ export interface AttachmentDownloadTarget {
   readonly service?: string | null;
 }
 
+/** Copy-on-write destination for a user-confirmed corrupt local file. */
+export interface AttachmentDownloadReplacement {
+  /** Exact DB source captured before native work; the commit must still match it. */
+  readonly expectedLocalPath: string;
+  /** New canonical filename. It must resolve to a path distinct from the damaged source. */
+  readonly destinationName: string;
+}
+
+/** Stable identity shared by native-flight deduplication and public RCS retry ownership. */
+export function attachmentDownloadDestinationIdentity(
+  replacement?: Pick<AttachmentDownloadReplacement, 'expectedLocalPath'>,
+): string {
+  return JSON.stringify(
+    replacement ? ['replacement', replacement.expectedLocalPath] : ['ordinary'],
+  );
+}
+
 /**
  * Download an attachment to local storage, persist its `localPath`, and return a typed outcome.
  * Compatible concurrent callers share one transfer only when its byte and time limits are at
@@ -203,9 +225,19 @@ export async function ensureDownloadedOutcome(
   mode: AttachmentDownloadMode = 'manual',
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
+  replacement?: AttachmentDownloadReplacement,
 ): Promise<AttachmentDownloadOutcome> {
   if (scope && !scope.isCurrent()) return { status: 'stale' };
-  if (att.localPath) {
+  if (replacement) {
+    if (att.localPath !== replacement.expectedLocalPath) return { status: 'source_changed' };
+    if (
+      replacement.expectedLocalPath.length === 0 ||
+      replacement.destinationName.length === 0 ||
+      replacement.destinationName.length > 255
+    ) {
+      return { status: 'unavailable' };
+    }
+  } else if (att.localPath) {
     if (scope?.reuseCache) {
       let reuse: AttachmentCacheReuseResult;
       try {
@@ -235,23 +267,28 @@ export async function ensureDownloadedOutcome(
   }
   const maxBytes = Math.min(downloadMaxBytes(mode), maxBytesOverride ?? Number.MAX_SAFE_INTEGER);
   const timeoutMs = downloadTimeoutMs(mode);
-  const transferName = attachmentFileName(att.transferName, att.guid, att.mimeType);
+  const transferName =
+    replacement?.destinationName ?? attachmentFileName(att.transferName, att.guid, att.mimeType);
   const generation = scope?.generation ?? 'unscoped';
   const flightKey = JSON.stringify([generation, att.guid]);
+  const destinationIdentity = attachmentDownloadDestinationIdentity(replacement);
   const observer: DownloadFlightObserver = { onProgress, onVerifiedBytes };
   const flights = inFlight.get(flightKey);
   const existing = [...(flights ?? [])].find(
-    (flight) => flight.maxBytes <= maxBytes && flight.timeoutMs <= timeoutMs,
+    (flight) =>
+      flight.destinationIdentity === destinationIdentity &&
+      flight.maxBytes <= maxBytes &&
+      flight.timeoutMs <= timeoutMs,
   );
   if (existing?.task) return observeFlight(existing, existing.task, observer);
-  // The production fetcher writes every generation+guid to one final destination. Starting a
-  // second, stricter transfer beside a looser one would race that path; fail this attempt closed
-  // and let its caller retry after the existing flight settles.
+  // Incompatible limits or destination identities must neither join nor run concurrently. An
+  // ordinary stale caller and a forced replacement could otherwise race two local-path commits.
   if (flights && flights.size > 0) return { status: 'busy' };
 
   const flight: DownloadFlight = {
     guid: att.guid,
     generation,
+    destinationIdentity,
     mode,
     maxBytes,
     timeoutMs,
@@ -275,6 +312,7 @@ export async function ensureDownloadedOutcome(
     try {
       if (flight.cancelledAs) return { status: flight.cancelledAs };
       if (scope && !scope.isCurrent()) return { status: 'stale' };
+      if (replacement && !scope?.reserveCache) return { status: 'unavailable' };
 
       if (scope?.reserveCache) {
         if (!fetcher.destinationUri) return { status: 'unavailable' };
@@ -282,6 +320,9 @@ export async function ensureDownloadedOutcome(
         try {
           destination = fetcher.destinationUri(att.guid, transferName, scope.generation);
         } catch {
+          return { status: 'unavailable' };
+        }
+        if (replacement && destination === replacement.expectedLocalPath) {
           return { status: 'unavailable' };
         }
         const admission = await scope.reserveCache(destination, maxBytes);
@@ -425,22 +466,29 @@ export async function ensureDownloadedOutcome(
           }
           cacheProtectionHandoff = true;
         }
-        const updated = await updateAttachmentLocalPathWithinTransaction(
-          context,
-          att.guid,
-          verifiedPath,
-        );
+        const updated = replacement
+          ? await replaceVisibleAttachmentLocalPathWithinTransaction(context, {
+              attachmentGuid: att.guid,
+              expectedLocalPath: replacement.expectedLocalPath,
+              replacementLocalPath: verifiedPath,
+            })
+          : await updateAttachmentLocalPathWithinTransaction(context, att.guid, verifiedPath);
         // When a durable reservation was promoted above, returning false would COMMIT it as active
         // with no attachment reference. Throw so the outer transaction restores `reserved`; the
         // reservation release then owns exact cleanup through crash-safe recovery.
         if (!updated) {
-          if (cacheReservation) throw ATTACHMENT_CACHE_TARGET_MISSING;
+          if (cacheReservation) {
+            throw replacement
+              ? ATTACHMENT_CACHE_REPLACEMENT_SOURCE_CHANGED
+              : ATTACHMENT_CACHE_TARGET_MISSING;
+          }
           return false;
         }
         return true;
       };
       let cacheRecordConflict = false;
       let cacheTargetMissing = false;
+      let cacheReplacementSourceChanged = false;
       let persisted: boolean | null;
       try {
         persisted = scope
@@ -457,7 +505,9 @@ export async function ensureDownloadedOutcome(
       } catch (error) {
         if (error === ATTACHMENT_CACHE_RECORD_CONFLICT) cacheRecordConflict = true;
         else if (error === ATTACHMENT_CACHE_TARGET_MISSING) cacheTargetMissing = true;
-        else throw error;
+        else if (error === ATTACHMENT_CACHE_REPLACEMENT_SOURCE_CHANGED) {
+          cacheReplacementSourceChanged = true;
+        } else throw error;
         persisted = false;
       }
       if (persisted !== true) {
@@ -469,6 +519,7 @@ export async function ensureDownloadedOutcome(
         completedPath = null;
         if (cacheRecordConflict) return { status: 'busy' };
         if (cacheTargetMissing) return { status: 'deleted' };
+        if (cacheReplacementSourceChanged) return { status: 'source_changed' };
         return {
           status: persisted === null || (scope != null && !scope.isCurrent()) ? 'stale' : 'deleted',
         };

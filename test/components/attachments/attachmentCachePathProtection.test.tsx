@@ -15,8 +15,8 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
 // eslint-disable-next-line import/first
 import { useAttachmentCachePathProtection } from '@ui/attachments/useAttachmentCachePathProtection';
 
-function Harness({ path }: { path: string | null }): React.JSX.Element | null {
-  const protectedPath = useAttachmentCachePathProtection(path);
+function Harness({ path, refreshKey = 0 }: { path: string | null; refreshKey?: number }) {
+  const protectedPath = useAttachmentCachePathProtection(path, refreshKey);
   return <Text testID="protected-path">{protectedPath ?? 'none'}</Text>;
 }
 
@@ -60,6 +60,19 @@ it('fails closed when retirement already owns the local path', async () => {
   expect(view.getByTestId('protected-path').props.children).toBe('none');
   await view.unmount();
   expect(mockRelease).not.toHaveBeenCalled();
+});
+
+it('retries protection for the same path only after the caller changes its refresh key', async () => {
+  const path = 'file:///documents/attachments/recovered.jpg';
+  mockProtect.mockReturnValueOnce(null);
+  const view = await render(<Harness path={path} />);
+  expect(view.getByTestId('protected-path').props.children).toBe('none');
+
+  await view.rerender(<Harness path={path} refreshKey={1} />);
+  expect(mockProtect).toHaveBeenCalledTimes(2);
+  expect(view.getByTestId('protected-path').props.children).toBe(path);
+  await view.unmount();
+  expect(mockRelease).toHaveBeenCalledTimes(1);
 });
 
 it('passes a remote URL through without allocating a cache protection', async () => {

@@ -31,6 +31,7 @@ jest.mock('expo-image', () => {
         testID: 'expo-image',
         source: props.source,
         placeholder: props.placeholder,
+        onError: props.onError,
       }),
   };
 });
@@ -190,6 +191,13 @@ describe('ZoomableImage', () => {
     await mount();
     const img = screen.getByTestId('expo-image');
     expect(img.props.source).toEqual({ uri: 'file:///photo.jpg' });
+  });
+
+  it('forwards native image failures to the fullscreen recovery owner', async () => {
+    const onError = jest.fn();
+    await mount({ onError });
+    await act(async () => screen.getByTestId('expo-image').props.onError());
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 
   it('renders the blurhash placeholder + hint when not downloaded', async () => {

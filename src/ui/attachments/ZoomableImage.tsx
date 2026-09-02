@@ -21,6 +21,8 @@ interface ZoomableImageProps {
   active?: boolean;
   /** Reports whether the image is currently zoomed (>1x) so the pager can disable paging. */
   onZoomChange?: (zoomed: boolean) => void;
+  /** Local decode/read failure; fullscreen recovery decides whether to offer copy-on-write retry. */
+  onError?: () => void;
 }
 
 /** Distance between the first two active touches (for pinch). */
@@ -54,6 +56,7 @@ export function ZoomableImage({
   height,
   active = true,
   onZoomChange,
+  onError,
 }: ZoomableImageProps): React.JSX.Element {
   const scale = useRef(new Animated.Value(1)).current;
   const translateX = useRef(new Animated.Value(0)).current;
@@ -212,6 +215,7 @@ export function ZoomableImage({
             contentFit="contain"
             style={{ width, height }}
             accessibilityIgnoresInvertColors
+            onError={onError}
           />
         </Animated.View>
       ) : (

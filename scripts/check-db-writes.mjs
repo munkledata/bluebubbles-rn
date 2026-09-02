@@ -80,6 +80,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'app/(app)/chat/[guid].tsx',
   'app/(app)/chat-settings/[guid].tsx',
   'app/(app)/home.tsx',
+  'app/(app)/media/[guid].tsx',
   'app/(app)/new-chat.tsx',
   'app/(app)/scheduled.tsx',
   'app/(app)/settings.tsx',

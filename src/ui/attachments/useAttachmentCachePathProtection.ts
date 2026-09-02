@@ -11,10 +11,16 @@ import { isLocalFileUri } from '@utils';
  * image/video/file reader can race the unlink. Remote URLs are not owned by this cache and pass
  * through unchanged.
  *
+ * `refreshKey` lets a caller retry protection after an explicit recovery attempt returns the same
+ * path string (for example, a cache retirement temporarily refused the first pin).
+ *
  * Cleanup is identity-checked by the coordinator, so a recycled row can release its old path
  * without removing a newer component's protection for that same file.
  */
-export function useAttachmentCachePathProtection(path: string | null | undefined): string | null {
+export function useAttachmentCachePathProtection(
+  path: string | null | undefined,
+  refreshKey = 0,
+): string | null {
   const localPath = isLocalFileUri(path) ? path : null;
   const [protectedPath, setProtectedPath] = useState<string | null>(null);
 
@@ -37,7 +43,7 @@ export function useAttachmentCachePathProtection(path: string | null | undefined
     // Deliberately re-render before paint only after the external cache protection is established.
     setProtectedPath(protection ? localPath : null);
     return () => protection?.release();
-  }, [localPath]);
+  }, [localPath, refreshKey]);
 
   if (!path) return null;
   if (!localPath) return path;

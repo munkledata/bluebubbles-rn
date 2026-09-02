@@ -2774,6 +2774,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
 test('certifies exactly the reviewed attachment-download delegation boundary', () => {
   const findings = scanProjectDbWrites();
   const reviewedPaths = new Set([
+    'app/(app)/media/[guid].tsx',
     'src/services/download/downloadService.ts',
     'src/services/download/index.ts',
     'src/ui/attachments/AudioAttachment.tsx',
@@ -2792,13 +2793,21 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
+      'app/(app)/media/[guid].tsx#MediaViewer.<callback:8d26753ace>:mutator-call:a0bbdb31db62',
+      'app/(app)/media/[guid].tsx#MediaViewer.onSave:mutator-call:c81dabe3f471',
+      'app/(app)/media/[guid].tsx#MediaViewer.onShare:mutator-call:5677683b31c4',
+      'app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:3d37a02ebe19',
+      'app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:dded74882e63',
+      'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:d9da1c4d8c72',
+      'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea',
       'src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26',
-      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:4108587ea0f4',
+      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:b92371d908fb',
       'src/services/download/index.ts#download:mutator-call:73f4bd568161',
       'src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094',
       'src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4',
-      'src/services/download/index.ts#runDownload.<callback:6cd1952f6a>.<callback:5059ebce7a>:mutator-call:a91b975c46cc',
-      'src/services/download/index.ts#runDownload:mutator-call:3dd749a9ad12',
+      'src/services/download/index.ts#redownload:mutator-call:8835792ea98a',
+      'src/services/download/index.ts#runDownload.<callback:defde603c1>.<callback:fc40974d29>:mutator-call:512a87ba913a',
+      'src/services/download/index.ts#runDownload:mutator-call:38952dee5c58',
       'src/ui/attachments/AudioAttachment.tsx#AudioAttachment.onToggle:mutator-call:14fdf073006e',
       'src/ui/attachments/AudioAttachment.tsx#AudioAttachment:mutator-reference:6c803e2f12fc',
       'src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>:mutator-call:d7520b586d39',
@@ -2824,7 +2833,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c',
     ].sort(),
   );
-  assert.equal(delegated.length, 30);
+  assert.equal(delegated.length, 38);
   assert.equal(
     findings.some((finding) => finding.symbol.includes('runTrackedDownloadTransaction')),
     false,

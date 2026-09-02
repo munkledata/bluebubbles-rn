@@ -42,7 +42,16 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('expo-video', () => {
-  const useVideoPlayer = jest.fn(() => ({ loop: false, play: jest.fn(), pause: jest.fn() }));
+  const useVideoPlayer = jest.fn(() => {
+    const player = {
+      loop: false,
+      status: 'idle',
+      play: jest.fn(),
+      pause: jest.fn(),
+      addListener: jest.fn(() => ({ remove: jest.fn() })),
+    };
+    return player;
+  });
   return {
     useVideoPlayer,
     VideoView: () => {
@@ -71,6 +80,7 @@ jest.mock('@ui/attachments/ZoomableImage', () => {
       uri: string | null;
       blurhash: string | null;
       active: boolean;
+      onError: () => void;
       onZoomChange: (zoomed: boolean) => void;
     }) => (
       <View
@@ -152,6 +162,11 @@ jest.mock('@/services/media', () => ({
   saveAttachmentsToPhotos: jest.fn(),
 }));
 
+jest.mock('@/services/download', () => ({
+  download: jest.fn(),
+  redownload: jest.fn(),
+}));
+
 // eslint-disable-next-line import/first
 import {
   getVisibleAttachmentByGuid,
@@ -160,17 +175,23 @@ import {
 // eslint-disable-next-line import/first
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 // eslint-disable-next-line import/first
+import { download, redownload } from '@/services/download';
+// eslint-disable-next-line import/first
 import MediaViewer from '../../../app/(app)/media/[guid]';
 // eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+// eslint-disable-next-line import/first
+import { useDownloadStore } from '@state/downloadStore';
 
 const getAtt = getVisibleAttachmentByGuid as jest.Mock;
 const listGallery = listChatImageAttachmentsByAttachmentGuid as jest.Mock;
 const share = shareAttachment as jest.Mock;
 const save = saveAttachmentsToPhotos as jest.Mock;
+const downloadMedia = download as jest.Mock;
+const redownloadMedia = redownload as jest.Mock;
 const mockUseVideoPlayer = (jest.requireMock('expo-video') as { useVideoPlayer: jest.Mock })
   .useVideoPlayer;
 const mockLoggerWarn = (jest.requireMock('@core/secure') as { logger: { warn: jest.Mock } }).logger
@@ -228,11 +249,30 @@ function retainConfiguredPress(node: { props: Record<string, unknown> }): () => 
   return () => onPress({ nativeEvent: {} });
 }
 
+function latestImageError(uri: string): () => void {
+  const call = [...mockZoomableImage.mock.calls].reverse().find(([props]) => props.uri === uri);
+  const onError = call?.[0]?.onError as (() => void) | undefined;
+  if (!onError) throw new Error(`Expected an image error callback for ${uri}`);
+  return onError;
+}
+
+function renderedMediaLabels(): string[] {
+  return screen.queryAllByRole('image').map((node) => String(node.props.accessibilityLabel ?? ''));
+}
+
+function expectRenderedMediaToOmit(...privateValues: string[]): void {
+  const renderedLabels = renderedMediaLabels().join('\n');
+  for (const privateValue of privateValues) {
+    expect(renderedLabels).not.toContain(privateValue);
+  }
+}
+
 interface MediaListProbe {
   props: {
     data: unknown[];
     initialScrollIndex: number;
     scrollEnabled: boolean;
+    onScrollBeginDrag: () => void;
     onMomentumScrollEnd: (event: object) => void;
   };
 }
@@ -257,15 +297,36 @@ async function scrollToPage(view: RenderResult, rawIndex: number): Promise<void>
   });
 }
 
+async function beginPageDrag(view: RenderResult): Promise<void> {
+  await act(async () => mediaList(view).props.onScrollBeginDrag());
+}
+
+async function emitVideoError(): Promise<void> {
+  const player = mockUseVideoPlayer.mock.results.at(-1)?.value as
+    { addListener?: jest.Mock } | undefined;
+  const listener = player?.addListener?.mock.calls.find(
+    ([name]) => name === 'statusChange',
+  )?.[1] as ((event: { status: string }) => void) | undefined;
+  if (!listener) throw new Error('Expected an active video status listener');
+  await act(async () => listener({ status: 'error' }));
+}
+
 beforeEach(() => {
   resumeRealtimeDeliveries();
   mockRouteGuid = 'att-1';
   useToastStore.setState({ current: null, queue: [] });
   useDialogStore.setState({ current: null, queue: [] });
-  getAtt.mockReset().mockResolvedValue(ATT);
+  getAtt
+    .mockReset()
+    .mockImplementation((_db, guid) =>
+      Promise.resolve(guid === SECOND_ATT.guid ? SECOND_ATT : ATT),
+    );
   listGallery.mockReset().mockResolvedValue({ items: [ATT], index: 0 });
   share.mockReset();
   save.mockReset();
+  downloadMedia.mockReset().mockResolvedValue(null);
+  redownloadMedia.mockReset().mockResolvedValue(null);
+  useDownloadStore.getState().reset();
   mockReleaseProtection.mockClear();
   mockUseVideoPlayer.mockClear();
   mockZoomableImage.mockClear();
@@ -279,6 +340,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resumeRealtimeDeliveries();
+  useDownloadStore.getState().reset();
 });
 
 describe('MediaViewer account ownership', () => {
@@ -293,7 +355,7 @@ describe('MediaViewer account ownership', () => {
     });
 
     expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
-    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(view.toJSON())).not.toContain(PRIVATE_IMAGE_URI);
   });
 
@@ -394,9 +456,10 @@ describe('MediaViewer route, page, and mount ownership', () => {
     ).toBeTruthy();
     expect(
       screen.getByRole('image', {
-        name: `media ${PRIVATE_SECOND_IMAGE_URI} ${PRIVATE_SECOND_BLURHASH}`,
+        name: 'media none no-blurhash',
       }),
     ).toBeTruthy();
+    expectRenderedMediaToOmit(PRIVATE_SECOND_IMAGE_URI, PRIVATE_SECOND_BLURHASH);
     expect(screen.getByText('1 of 2')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Save media' })).toBeEnabled();
@@ -454,6 +517,59 @@ describe('MediaViewer route, page, and mount ownership', () => {
     );
   });
 
+  it('does not let a retained route-A drag cancel route-B Share continuation', async () => {
+    const routeARemote = { ...ATT, localPath: null };
+    const routeBRemote = { ...ROUTE_B_TARGET, localPath: null };
+    const routeBDownloaded = {
+      ...routeBRemote,
+      localPath: 'file:///docs/route-b-drag-finished.jpg',
+    };
+    let routeBFinished = false;
+    getAtt.mockImplementation((_db, attachmentGuid) => {
+      if (attachmentGuid !== ROUTE_B_GUID) return Promise.resolve(routeARemote);
+      return Promise.resolve(routeBFinished ? routeBDownloaded : routeBRemote);
+    });
+    listGallery.mockImplementation((_db, attachmentGuid) =>
+      Promise.resolve({
+        items: [attachmentGuid === ROUTE_B_GUID ? routeBRemote : routeARemote],
+        index: 0,
+      }),
+    );
+    downloadMedia.mockImplementation((att: typeof routeARemote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    share.mockResolvedValue({ ok: true });
+    const view = await renderWithTheme(<MediaViewer />);
+    await screen.findByRole('button', { name: 'Download media' });
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+    const retainedRouteADrag = mediaList(view).props.onScrollBeginDrag;
+
+    mockRouteGuid = ROUTE_B_GUID;
+    await view.rerender(<MediaViewer />);
+    await screen.findByRole('button', { name: 'Download media' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(2));
+    await act(async () => retainedRouteADrag());
+
+    routeBFinished = true;
+    await act(async () => {
+      useDownloadStore.getState().finish(ROUTE_B_GUID);
+      await flush();
+      await flush();
+    });
+
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(
+        routeBDownloaded.localPath,
+        routeBDownloaded.mimeType,
+        expect.any(Function),
+      ),
+    );
+  });
+
   it.each(['success', 'rejection'] as const)(
     'does not adopt a late route-A load %s after route B is current',
     async (outcome) => {
@@ -506,6 +622,7 @@ describe('MediaViewer route, page, and mount ownership', () => {
       expect(screen.getByText('2 of 2')).toBeTruthy();
       await scrollToPage(view, 0);
       expect(screen.getByText('1 of 2')).toBeTruthy();
+      await waitFor(() => expect(screen.getByRole('button', { name: button })).toBeEnabled());
       oldPress();
       const blockedCurrentPress = retainConfiguredPress(
         screen.getByRole('button', { name: button }),
@@ -559,6 +676,7 @@ describe('MediaViewer route, page, and mount ownership', () => {
     expect(screen.getByText('2 of 2')).toBeTruthy();
     await scrollToPage(view, 0);
     expect(screen.getByText('1 of 2')).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
     await act(async () => {
       oldZoom(true);
     });
@@ -578,6 +696,7 @@ describe('MediaViewer route, page, and mount ownership', () => {
 
     await scrollToPage(view, 99);
     expect(screen.getByText('2 of 2')).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
     await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
     await waitFor(() =>
       expect(share).toHaveBeenCalledWith(
@@ -608,7 +727,7 @@ describe('MediaViewer route, page, and mount ownership', () => {
       resumeRealtimeDeliveries();
     });
     await waitFor(() => expect(screen.queryByTestId('video-view')).toBeNull());
-    expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
+    expect(mockReleaseProtection).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
     expect(JSON.stringify(view.toJSON())).not.toContain(PRIVATE_VIDEO_URI);
   });
@@ -880,22 +999,591 @@ describe('MediaViewer double-tap', () => {
 });
 
 describe('MediaViewer gating', () => {
-  // The pills are disabled for an undownloaded photo, so no helper may be called at all. This is
-  // the branch that must NOT start reporting outcomes — there is nothing to act on.
-  it('does nothing when the photo has no local file', async () => {
+  it('preflights the initial page before publishing a path changed during route admission', async () => {
+    const admitted = { ...ATT, localPath: null };
+    const currentRow = { ...admitted, localPath: 'file:///docs/current-initial-att-1.jpg' };
+    const preflight = deferred<typeof currentRow>();
+    getAtt.mockReset().mockResolvedValueOnce(admitted).mockReturnValueOnce(preflight.promise);
+    listGallery.mockResolvedValue({ items: [admitted], index: 0 });
+    await renderWithTheme(<MediaViewer />);
+
+    expect(await screen.findByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expectRenderedMediaToOmit(PRIVATE_BLURHASH);
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
+    expect(downloadMedia).not.toHaveBeenCalled();
+
+    await act(async () => {
+      preflight.resolve(currentRow);
+      await preflight.promise;
+    });
+
+    expect(await screen.findByTestId(`img:${currentRow.localPath}`)).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: 'Download media' })).toBeNull();
+    expect(downloadMedia).not.toHaveBeenCalled();
+  });
+
+  it('withholds an initial local path until preflight confirms that it was not cleared', async () => {
+    const cleared = { ...ATT, localPath: null };
+    const preflight = deferred<typeof cleared>();
+    getAtt.mockReset().mockResolvedValueOnce(ATT).mockReturnValueOnce(preflight.promise);
+    listGallery.mockResolvedValue({ items: [ATT], index: 0 });
+    await renderWithTheme(<MediaViewer />);
+
+    expect(await screen.findByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
+    expectRenderedMediaToOmit(PRIVATE_BLURHASH);
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
+
+    await act(async () => {
+      preflight.resolve(cleared);
+      await preflight.promise;
+    });
+
+    expect(await screen.findByRole('button', { name: 'Download media' })).toBeTruthy();
+    expect(screen.getByTestId('img:none')).toBeTruthy();
+    expect(mockUseVideoPlayer).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('copy-on-write redownloads an image that native decoding rejects', async () => {
+    const replacement = { ...ATT, localPath: 'file:///docs/redownloaded-att-1.jpg' };
+    let authoritative: typeof ATT | typeof replacement = ATT;
+    getAtt.mockImplementation(() => Promise.resolve(authoritative));
+    redownloadMedia.mockImplementation((att: typeof ATT) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderViewer();
+    const staleImageError = latestImageError(PRIVATE_IMAGE_URI);
+
+    await act(async () => staleImageError());
+    expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
+    expectRenderedMediaToOmit(PRIVATE_BLURHASH);
+    expect(screen.getByRole('button', { name: 'Retry media download' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry media download' }));
+    expect(redownloadMedia).toHaveBeenCalledWith(ATT, expect.any(Object));
+    expect(downloadMedia).not.toHaveBeenCalled();
+    authoritative = replacement;
+    await act(async () => {
+      useDownloadStore.getState().finish(ATT.guid);
+      await flush();
+      await flush();
+    });
+
+    expect(await screen.findByTestId(`img:${replacement.localPath}`)).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
+    await act(async () => staleImageError());
+    expect(screen.getByTestId(`img:${replacement.localPath}`)).toBeTruthy();
+  });
+
+  it('adopts a cleared source after replacement loses and retries as an ordinary download', async () => {
+    const remote = { ...ATT, localPath: null };
+    let authoritative: typeof ATT | typeof remote = ATT;
+    getAtt.mockImplementation(() => Promise.resolve(authoritative));
+    redownloadMedia.mockImplementation((att: typeof ATT) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderViewer();
+    const staleImageError = latestImageError(PRIVATE_IMAGE_URI);
+
+    await act(async () => staleImageError());
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry media download' }));
+    authoritative = remote;
+    await act(async () => {
+      useDownloadStore.getState().finish(ATT.guid);
+      await flush();
+      await flush();
+    });
+
+    expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Retry media download' })).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry media download' }));
+    expect(downloadMedia).toHaveBeenCalledWith(remote, 'manual', expect.any(Object));
+    expect(redownloadMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps rejected bytes hidden when an intermediate terminal read still returns that path', async () => {
+    const replacement = { ...ATT, localPath: 'file:///docs/recovery-after-stale-terminal.jpg' };
+    let authoritative: typeof ATT | typeof replacement = ATT;
+    getAtt.mockImplementation(() => Promise.resolve(authoritative));
+    redownloadMedia.mockImplementation((att: typeof ATT) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderViewer();
+    const staleImageError = latestImageError(PRIVATE_IMAGE_URI);
+
+    await act(async () => staleImageError());
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry media download' }));
+    await act(async () => {
+      useDownloadStore.getState().finish(ATT.guid);
+      await flush();
+    });
+
+    expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
+    expectRenderedMediaToOmit(PRIVATE_IMAGE_URI, PRIVATE_BLURHASH);
+    expect(screen.getByRole('button', { name: 'Retry media download' })).toBeTruthy();
+
+    authoritative = replacement;
+    await act(async () => {
+      useDownloadStore.getState().finish(ATT.guid);
+      await flush();
+      await flush();
+    });
+    expect(await screen.findByTestId(`img:${replacement.localPath}`)).toBeTruthy();
+  });
+
+  it('turns an expo-video player error into the same forced-redownload affordance', async () => {
+    const video = { ...ATT, mimeType: 'video/mp4', localPath: PRIVATE_VIDEO_URI };
+    getAtt.mockResolvedValue(video);
+    redownloadMedia.mockImplementation((att: typeof video) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderWithTheme(<MediaViewer />);
+    expect(await screen.findByTestId('video-view')).toBeTruthy();
+
+    await emitVideoError();
+    expect(screen.queryByTestId('video-view')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry media download' })).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry media download' }));
+
+    expect(redownloadMedia).toHaveBeenCalledWith(video, expect.any(Object));
+    expect(downloadMedia).not.toHaveBeenCalled();
+  });
+
+  it('visibly downloads a remote photo, adopts its DB path, then continues Share', async () => {
+    const remote = { ...ATT, localPath: null };
+    const downloaded = { ...remote, localPath: 'file:///docs/downloaded-att-1.jpg' };
+    getAtt.mockResolvedValue(remote);
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    share.mockResolvedValue({ ok: true });
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderWithTheme(<MediaViewer />);
+    expect(await screen.findByRole('button', { name: 'Download media' })).toBeTruthy();
+    expect(screen.getAllByTestId('img:none').length).toBeGreaterThan(0);
+
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save media' })).toBeEnabled();
+    await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+    expect(downloadMedia).toHaveBeenCalledWith(remote, 'manual', expect.any(Object));
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    await act(async () => useDownloadStore.getState().setProgress(remote.guid, 25, 100));
+    expect(
+      screen.getByRole('progressbar', { name: 'Downloading media to share' }).props
+        .accessibilityValue,
+    ).toEqual({ min: 0, max: 100, now: 25 });
+
+    getAtt.mockResolvedValue(downloaded);
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      await flush();
+      await flush();
+    });
+
+    expect(screen.getByTestId(`img:${downloaded.localPath}`)).toBeTruthy();
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(
+        downloaded.localPath,
+        downloaded.mimeType,
+        expect.any(Function),
+      ),
+    );
+    expect(getAtt).toHaveBeenLastCalledWith(undefined, remote.guid);
+  });
+
+  it('shows indeterminate video progress, then renders and continues Save', async () => {
+    const remote = { ...ATT, mimeType: 'video/mp4', localPath: null };
+    const downloaded = { ...remote, localPath: PRIVATE_VIDEO_URI };
+    getAtt.mockResolvedValue(remote);
+    save.mockResolvedValue({ status: 'saved', saved: 1 });
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderWithTheme(<MediaViewer />);
+    expect(await screen.findByRole('button', { name: 'Download media' })).toBeTruthy();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Save media' }));
+    await act(async () => useDownloadStore.getState().setProgress(remote.guid, 20, -1));
+    expect(
+      screen.getByRole('progressbar', { name: 'Downloading media to save' }).props
+        .accessibilityValue,
+    ).toBeUndefined();
+
+    getAtt.mockResolvedValue(downloaded);
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      await flush();
+      await flush();
+    });
+
+    expect(screen.getByTestId('video-view')).toBeTruthy();
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith([PRIVATE_VIDEO_URI], expect.any(Function)),
+    );
+  });
+
+  it.each([
+    { intent: 'Share', button: 'Share media', nativeMock: share },
+    { intent: 'Save', button: 'Save media', nativeMock: save },
+  ])(
+    'cancels pending $intent continuation as soon as a page drag begins',
+    async ({ button, nativeMock }) => {
+      const remote = { ...ATT, localPath: null };
+      const downloaded = { ...remote, localPath: 'file:///docs/drag-finished-att-1.jpg' };
+      let authoritative: typeof remote | typeof downloaded = remote;
+      getAtt.mockImplementation(() => Promise.resolve(authoritative));
+      listGallery.mockResolvedValue({ items: [remote, SECOND_ATT], index: 0 });
+      downloadMedia.mockImplementation((att: typeof remote) => {
+        useDownloadStore.getState().start(att.guid);
+        return Promise.resolve(null);
+      });
+      const view = await renderWithTheme(<MediaViewer />);
+      await screen.findByRole('button', { name: 'Download media' });
+
+      await fireEvent.press(screen.getByRole('button', { name: button }));
+      await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+      await beginPageDrag(view);
+      expect(screen.getByRole('progressbar', { name: 'Downloading media' })).toBeTruthy();
+
+      authoritative = downloaded;
+      await act(async () => {
+        useDownloadStore.getState().finish(remote.guid);
+        await flush();
+        await flush();
+      });
+
+      expect(await screen.findByTestId(`img:${downloaded.localPath}`)).toBeTruthy();
+      expect(nativeMock).not.toHaveBeenCalled();
+      expect(downloadMedia).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('deduplicates Download taps and exposes an exact Retry after failure', async () => {
     const remote = { ...ATT, localPath: null };
     getAtt.mockResolvedValue(remote);
     listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
     await renderWithTheme(<MediaViewer />);
-    await waitFor(() => expect(screen.getByTestId('img:none')).toBeTruthy());
+    const button = await screen.findByRole('button', { name: 'Download media' });
+    const retainedDownload = retainConfiguredPress(button);
 
-    fireEvent.press(pills()[0]!);
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(button);
+    retainedDownload();
+    await flush();
+    expect(downloadMedia).toHaveBeenCalledTimes(1);
 
+    await act(async () => {
+      useDownloadStore.getState().fail(remote.guid);
+      await flush();
+    });
+    const retry = screen.getByRole('button', { name: 'Retry media download' });
+    const retainedRetry = retainConfiguredPress(retry);
+    await fireEvent.press(retry);
+    retainedRetry();
+    await flush();
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(2));
+  });
+
+  it('joins an externally started transfer before a retained Share callback can restart it', async () => {
+    const remote = { ...ATT, localPath: null };
+    const downloaded = { ...remote, localPath: 'file:///docs/external-flight-att-1.jpg' };
+    let authoritative: typeof remote | typeof downloaded = remote;
+    getAtt.mockImplementation(() => Promise.resolve(authoritative));
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    share.mockResolvedValue({ ok: true });
+    await renderWithTheme(<MediaViewer />);
+    const shareButton = await screen.findByRole('button', { name: 'Share media' });
+    await waitFor(() => expect(shareButton).toBeEnabled());
+    const sharePress = retainConfiguredPress(shareButton);
+
+    await act(async () => {
+      useDownloadStore.getState().start(remote.guid);
+      sharePress();
+    });
+
+    expect(downloadMedia).not.toHaveBeenCalled();
+    expect(screen.getByRole('progressbar', { name: 'Downloading media to share' })).toBeTruthy();
+    authoritative = downloaded;
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      await flush();
+      await flush();
+    });
+
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(
+        downloaded.localPath,
+        downloaded.mimeType,
+        expect.any(Function),
+      ),
+    );
+    expect(downloadMedia).not.toHaveBeenCalled();
+  });
+
+  it('authoritatively adopts an unobserved idle-success marker before starting a transfer', async () => {
+    const remote = { ...ATT, localPath: null };
+    const downloaded = { ...remote, localPath: 'file:///docs/unobserved-finish-att-1.jpg' };
+    let authoritative: typeof remote | typeof downloaded = remote;
+    getAtt.mockImplementation(() => Promise.resolve(authoritative));
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    share.mockResolvedValue({ ok: true });
+    await renderWithTheme(<MediaViewer />);
+    const shareButton = await screen.findByRole('button', { name: 'Share media' });
+    await waitFor(() => expect(shareButton).toBeEnabled());
+    const sharePress = retainConfiguredPress(shareButton);
+
+    authoritative = downloaded;
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      sharePress();
+      await flush();
+      await flush();
+    });
+
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(
+        downloaded.localPath,
+        downloaded.mimeType,
+        expect.any(Function),
+      ),
+    );
+    expect(downloadMedia).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a newer start-and-finish cycle when an older reread is stale', async () => {
+    const remote = { ...ATT, localPath: null };
+    const staleDownloaded = { ...remote, localPath: 'file:///docs/stale-external-att-1.jpg' };
+    const downloaded = { ...remote, localPath: 'file:///docs/newer-external-att-1.jpg' };
+    const staleRead = deferred<typeof staleDownloaded>();
+    let readMode: 'initial' | 'stale' | 'current' = 'initial';
+    getAtt.mockImplementation(() => {
+      if (readMode === 'stale') return staleRead.promise;
+      return Promise.resolve(readMode === 'current' ? downloaded : remote);
+    });
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    share.mockResolvedValue({ ok: true });
+    await renderWithTheme(<MediaViewer />);
+    const shareButton = await screen.findByRole('button', { name: 'Share media' });
+    await waitFor(() => expect(shareButton).toBeEnabled());
+    const sharePress = retainConfiguredPress(shareButton);
+
+    readMode = 'stale';
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      sharePress();
+    });
+    await waitFor(() => expect(getAtt).toHaveBeenCalledTimes(3));
+
+    readMode = 'current';
+    await act(async () => {
+      useDownloadStore.getState().start(remote.guid);
+      useDownloadStore.getState().finish(remote.guid);
+      staleRead.resolve(staleDownloaded);
+      await staleRead.promise;
+      await flush();
+      await flush();
+    });
+
+    expect(useDownloadStore.getState().status[remote.guid]).toBe('idle');
+    expect(useDownloadStore.getState().progress[remote.guid]).toBe(1);
+    await waitFor(() =>
+      expect(share).toHaveBeenCalledWith(
+        downloaded.localPath,
+        downloaded.mimeType,
+        expect.any(Function),
+      ),
+    );
+    expect(downloadMedia).not.toHaveBeenCalled();
+  });
+
+  it('still fails the target when only an unrelated download changes during its stale reread', async () => {
+    const remote = { ...ATT, localPath: null };
+    const staleRead = deferred<typeof remote>();
+    getAtt
+      .mockReset()
+      .mockResolvedValueOnce(remote)
+      .mockResolvedValueOnce(remote)
+      .mockReturnValueOnce(staleRead.promise);
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    await renderWithTheme(<MediaViewer />);
+    const shareButton = await screen.findByRole('button', { name: 'Share media' });
+    await act(async () => useDownloadStore.getState().finish(remote.guid));
+    await fireEvent.press(shareButton);
+    await waitFor(() => expect(getAtt).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      useDownloadStore.getState().start('unrelated-guid');
+      useDownloadStore.getState().finish('unrelated-guid');
+      staleRead.resolve(remote);
+      await staleRead.promise;
+      await flush();
+    });
+
+    expect(useDownloadStore.getState().status[remote.guid]).toBe('error');
+  });
+
+  it('adopts a download completed offscreen without redownloading or resuming canceled Share', async () => {
+    const remote = { ...ATT, localPath: null };
+    const downloaded = { ...remote, localPath: 'file:///docs/stale-page-att-1.jpg' };
+    const returnToA = deferred<typeof downloaded>();
+    let useReturnRead = false;
+    listGallery.mockResolvedValue({ items: [remote, SECOND_ATT], index: 0 });
+    getAtt.mockImplementation((_db, attachmentGuid) => {
+      if (attachmentGuid === SECOND_ATT.guid) return Promise.resolve(SECOND_ATT);
+      return useReturnRead ? returnToA.promise : Promise.resolve(remote);
+    });
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    const view = await renderWithTheme(<MediaViewer />);
+    await screen.findByRole('button', { name: 'Download media' });
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+    await scrollToPage(view, 1);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      await flush();
+    });
     expect(share).not.toHaveBeenCalled();
+
+    useReturnRead = true;
+    await scrollToPage(view, 0);
+    expect(screen.getByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
+    expect(downloadMedia).toHaveBeenCalledTimes(1);
+    expect(share).not.toHaveBeenCalled();
+
+    await act(async () => {
+      returnToA.resolve(downloaded);
+      await returnToA.promise;
+    });
+
+    expect(await screen.findByTestId(`img:${downloaded.localPath}`)).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: 'Download media' })).toBeNull();
+    expect(downloadMedia).toHaveBeenCalledTimes(1);
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it('adopts an offscreen local-path removal before rendering or acting on the stale file', async () => {
+    const cleared = { ...ATT, localPath: null };
+    const returnToA = deferred<typeof cleared>();
+    let useReturnRead = false;
+    listGallery.mockResolvedValue({ items: [ATT, SECOND_ATT], index: 0 });
+    getAtt.mockImplementation((_db, attachmentGuid) => {
+      if (attachmentGuid === SECOND_ATT.guid) return Promise.resolve(SECOND_ATT);
+      return useReturnRead ? returnToA.promise : Promise.resolve(ATT);
+    });
+    downloadMedia.mockImplementation((att: typeof cleared) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    const view = await renderViewer();
+
+    await scrollToPage(view, 1);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
+    useReturnRead = true;
+    await scrollToPage(view, 0);
+
+    expect(screen.getByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
+    await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+    expect(downloadMedia).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
+
+    await act(async () => {
+      returnToA.resolve(cleared);
+      await returnToA.promise;
+    });
+
+    expect(await screen.findByRole('button', { name: 'Download media' })).toBeTruthy();
+    expect(screen.getAllByTestId('img:none').length).toBeGreaterThan(0);
+    await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+    expect(downloadMedia).toHaveBeenCalledWith(cleared, 'manual', expect.any(Object));
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it('fails a page refresh closed and retries it with a fresh page lifetime', async () => {
+    const firstRead = deferred<typeof SECOND_ATT>();
+    let retrying = false;
+    listGallery.mockResolvedValue({ items: [ATT, SECOND_ATT], index: 0 });
+    getAtt.mockImplementation((_db, attachmentGuid) => {
+      if (attachmentGuid === ATT.guid) return Promise.resolve(ATT);
+      return retrying ? Promise.resolve(SECOND_ATT) : firstRead.promise;
+    });
+    const view = await renderViewer();
+
+    await scrollToPage(view, 1);
+    expect(screen.getByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expectRenderedMediaToOmit(PRIVATE_SECOND_IMAGE_URI, PRIVATE_SECOND_BLURHASH);
+    await act(async () => {
+      firstRead.reject(new Error('current-page-refresh-error-47cc'));
+      await firstRead.promise.catch(() => undefined);
+    });
+
+    expect(await screen.findByRole('button', { name: 'Retry media refresh' })).toBeTruthy();
+    expect(screen.queryByTestId(`img:${PRIVATE_SECOND_IMAGE_URI}`)).toBeNull();
+    expectRenderedMediaToOmit(PRIVATE_SECOND_BLURHASH);
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      '[media] could not refresh current attachment',
+      expect.any(Error),
+    );
+
+    retrying = true;
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry media refresh' }));
+    expect(await screen.findByTestId(`img:${PRIVATE_SECOND_IMAGE_URI}`)).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled());
+  });
+
+  it('does not continue a remote Save after Close revokes the viewer', async () => {
+    const remote = { ...ATT, localPath: null };
+    const downloaded = { ...remote, localPath: 'file:///docs/stale-closed-att-1.jpg' };
+    getAtt.mockResolvedValue(remote);
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await renderWithTheme(<MediaViewer />);
+    await screen.findByRole('button', { name: 'Download media' });
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Save media' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+    await fireEvent.press(screen.getByRole('button', { name: 'Close media viewer' }));
+    getAtt.mockResolvedValue(downloaded);
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      await flush();
+    });
+    await flush();
+
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(getAtt).toHaveBeenCalledTimes(2);
     expect(save).not.toHaveBeenCalled();
-    expect(useDialogStore.getState().current).toBeNull();
-    expect(useToastStore.getState().current).toBeNull();
   });
 });
 
@@ -913,7 +1601,7 @@ describe('MediaViewer cache-reader protection', () => {
       listGallery.mockResolvedValue({ items: [remote], index: 0 });
 
       await renderWithTheme(<MediaViewer />);
-      await waitFor(() => expect(getAtt).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(getAtt).toHaveBeenCalledTimes(2));
       expect(getAtt).toHaveBeenCalledWith(undefined, 'att-1');
       if (type === 'image') {
         expect(await screen.findByTestId('img:none')).toBeTruthy();
@@ -923,14 +1611,20 @@ describe('MediaViewer cache-reader protection', () => {
       }
       expect(mockProtectPath).not.toHaveBeenCalled();
       expect(mockUseVideoPlayer).not.toHaveBeenCalled();
-      expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Share media' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Save media' })).toBeEnabled();
+      await fireEvent.press(screen.getByRole('button', { name: 'Share media' }));
+      expect(downloadMedia).toHaveBeenCalledWith(
+        { ...remote, localPath: null },
+        'manual',
+        expect.any(Object),
+      );
       expect(share).not.toHaveBeenCalled();
       expect(save).not.toHaveBeenCalled();
     },
   );
 
-  it('pins each mounted carousel cell independently and withholds a refused adjacent path', async () => {
+  it('does not pin an adjacent carousel path until its exact page passes preflight', async () => {
     const second = {
       ...ATT,
       id: 2,
@@ -939,18 +1633,23 @@ describe('MediaViewer cache-reader protection', () => {
       localPath: 'file:///docs/b.jpg',
     };
     listGallery.mockResolvedValue({ items: [ATT, second], index: 0 });
+    getAtt.mockImplementation((_db, attachmentGuid) =>
+      Promise.resolve(attachmentGuid === second.guid ? second : ATT),
+    );
     mockProtectPath.mockImplementation((path) =>
       path.endsWith('/b.jpg') ? null : { path, release: mockReleaseProtection },
     );
 
-    await renderWithTheme(<MediaViewer />);
-    await waitFor(() => {
-      expect(mockProtectPath).toHaveBeenCalledWith(PRIVATE_IMAGE_URI);
-      expect(mockProtectPath).toHaveBeenCalledWith('file:///docs/b.jpg');
-    });
+    const view = await renderWithTheme(<MediaViewer />);
+    await waitFor(() => expect(mockProtectPath).toHaveBeenCalledWith(PRIVATE_IMAGE_URI));
+    expect(mockProtectPath).not.toHaveBeenCalledWith('file:///docs/b.jpg');
     expect(screen.getByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeTruthy();
+    expectRenderedMediaToOmit('file:///docs/b.jpg');
+
+    await scrollToPage(view, 1);
+    await waitFor(() => expect(mockProtectPath).toHaveBeenCalledWith('file:///docs/b.jpg'));
     expect(screen.queryByTestId('img:file:///docs/b.jpg')).toBeNull();
-    expect(screen.getByTestId('img:none')).toBeTruthy();
+    expect(screen.getAllByTestId('img:none').length).toBeGreaterThan(0);
   });
 
   it('does not construct a native video player when its path cannot be pinned', async () => {

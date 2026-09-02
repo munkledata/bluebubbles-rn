@@ -24,9 +24,13 @@ import {
   getNativeAttachmentCacheAvailableBytes,
   statNativeAttachmentCacheFile,
 } from '@native/boundedDownload';
-import { download, setAttachmentFetcher } from '@/services/download';
+import { download, redownload, setAttachmentFetcher } from '@/services/download';
+import { useDownloadStore } from '@state/downloadStore';
 import { createAttachmentCacheAccountScope } from '@/services/download/attachmentCacheAccountScope';
-import { AttachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import {
+  attachmentCacheCoordinator,
+  AttachmentCacheCoordinator,
+} from '@/services/download/attachmentCacheCoordinator';
 import { recoverAttachmentCache } from '@/services/download/attachmentCacheRecovery';
 import { ATTACHMENT_CACHE_MAX_BYTES } from '@/services/download/attachmentCacheQuotaPolicy';
 import { AttachmentFetchError } from '@/services/download/downloadService';
@@ -95,6 +99,7 @@ async function seedRcsAttachment(db: AppDatabase) {
 }
 
 afterEach(async () => {
+  useDownloadStore.getState().reset();
   jest.clearAllTimers();
   jest.useRealTimers();
   await pauseRealtimeDeliveries();
@@ -102,6 +107,428 @@ afterEach(async () => {
 });
 
 describe('account-scoped attachment retries', () => {
+  it('holds an exact old-path pin while copy-on-write redownload commits a new cache path', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
+    const seeded = await seedRcsAttachment(db);
+    const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/old.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
+    );
+    const attachment = {
+      ...(await getAttachmentByGuid(db, seeded.guid))!,
+      mimeType: 'image/avif',
+      transferName: 'camera.avif',
+      service: 'iMessage',
+    };
+    jest.mocked(getNativeAttachmentCacheAvailableBytes).mockResolvedValue(Number.MAX_SAFE_INTEGER);
+    let releaseNative!: (value: { localPath: string; bytes: number }) => void;
+    let markNativeStarted!: () => void;
+    let nativePath = '';
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeDownload = jest.fn((_guid, transferName: string) => {
+      nativePath = `file:///documents/attachments/scope-attachment/generation-0/${transferName}`;
+      markNativeStarted();
+      return new Promise<{ localPath: string; bytes: number }>((finish) => {
+        releaseNative = finish;
+      });
+    });
+    setAttachmentFetcher({
+      exists: () => true,
+      destinationUri: (_guid, transferName) =>
+        `file:///documents/attachments/scope-attachment/generation-0/${transferName}`,
+      download: nativeDownload,
+    });
+    const realProtect = attachmentCacheCoordinator.protect.bind(attachmentCacheCoordinator);
+    let servicePinReleased = false;
+    const protectSpy = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockImplementation((path) => {
+        const protection = realProtect(path);
+        if (!protection || path !== oldPath) return protection;
+        return {
+          path: protection.path,
+          release: () => {
+            servicePinReleased = true;
+            protection.release();
+          },
+        };
+      });
+
+    try {
+      const task = redownload(attachment, captureRealtimeDeliveryLease());
+      await nativeStarted;
+      const joinedTask = redownload(attachment, captureRealtimeDeliveryLease());
+      expect(servicePinReleased).toBe(false);
+      expect(nativePath).not.toBe(oldPath);
+      expect(nativePath).toMatch(/\.avif$/);
+      releaseNative({ localPath: nativePath, bytes: 1_000 });
+      await expect(Promise.all([task, joinedTask])).resolves.toEqual([nativePath, nativePath]);
+    } finally {
+      protectSpy.mockRestore();
+    }
+
+    expect(nativeDownload).toHaveBeenCalledTimes(1);
+    expect(servicePinReleased).toBe(true);
+    expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBe(nativePath);
+    expect(await getAttachmentCacheEntry(db, nativePath)).toMatchObject({ state: 'active' });
+    expect(await getAttachmentCacheEntry(db, oldPath)).toMatchObject({ state: 'active' });
+  });
+
+  it('hands a repeated RCS redownload to the fresh owner without dropping the old-path pin', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
+    const seeded = await seedRcsAttachment(db);
+    const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/rcs-old.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
+    );
+    const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
+    jest.mocked(getNativeAttachmentCacheAvailableBytes).mockResolvedValue(Number.MAX_SAFE_INTEGER);
+
+    let releaseNative!: (value: { localPath: string; bytes: number }) => void;
+    let markNativeStarted!: () => void;
+    let nativePath = '';
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeDownload = jest.fn((_guid, transferName: string) => {
+      nativePath = `file:///documents/attachments/scope-attachment/generation-0/${transferName}`;
+      markNativeStarted();
+      return new Promise<{ localPath: string; bytes: number }>((finish) => {
+        releaseNative = finish;
+      });
+    });
+    setAttachmentFetcher({
+      exists: () => true,
+      destinationUri: (_guid, transferName) =>
+        `file:///documents/attachments/scope-attachment/generation-0/${transferName}`,
+      download: nativeDownload,
+    });
+
+    const realProtect = attachmentCacheCoordinator.protect.bind(attachmentCacheCoordinator);
+    let activeOldPathPins = 0;
+    let mayReleaseOldPath = false;
+    let droppedOldPathPin = false;
+    const protectSpy = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockImplementation((path) => {
+        const protection = realProtect(path);
+        if (!protection || path !== oldPath) return protection;
+        activeOldPathPins += 1;
+        let released = false;
+        return {
+          path: protection.path,
+          release: () => {
+            if (released) return;
+            released = true;
+            activeOldPathPins -= 1;
+            if (!mayReleaseOldPath && activeOldPathPins === 0) droppedOldPathPin = true;
+            protection.release();
+          },
+        };
+      });
+
+    try {
+      const oldOwner = redownload(attachment, captureRealtimeDeliveryLease());
+      await nativeStarted;
+      const freshOwner = redownload(attachment, captureRealtimeDeliveryLease());
+
+      expect(nativeDownload).toHaveBeenCalledTimes(1);
+      expect(activeOldPathPins).toBeGreaterThan(0);
+      expect(droppedOldPathPin).toBe(false);
+
+      mayReleaseOldPath = true;
+      releaseNative({ localPath: nativePath, bytes: 1_000 });
+      await expect(oldOwner).resolves.toBeNull();
+      await expect(freshOwner).resolves.toBe(nativePath);
+    } finally {
+      protectSpy.mockRestore();
+    }
+
+    expect(nativeDownload).toHaveBeenCalledTimes(1);
+    expect(droppedOldPathPin).toBe(false);
+    expect(activeOldPathPins).toBe(0);
+    expect(useDownloadStore.getState().status[attachment.guid]).toBe('idle');
+    expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBe(nativePath);
+  });
+
+  it('keeps the original RCS redownload owner when a different source path arrives', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
+    const seeded = await seedRcsAttachment(db);
+    const oldPathA = 'file:///documents/attachments/scope-attachment/generation-0/source-a.jpg';
+    const oldPathB = 'file:///documents/attachments/scope-attachment/generation-0/source-b.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPathA);
+    await withDbTransaction(db, async (context) => {
+      await recordAttachmentCacheEntry(context, { path: oldPathA, bytes: 1_000, lastUsedAt: 1 });
+      await recordAttachmentCacheEntry(context, { path: oldPathB, bytes: 1_000, lastUsedAt: 1 });
+    });
+    const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
+    jest.mocked(getNativeAttachmentCacheAvailableBytes).mockResolvedValue(Number.MAX_SAFE_INTEGER);
+
+    let releaseNative!: (value: { localPath: string; bytes: number }) => void;
+    let markNativeStarted!: () => void;
+    let nativePath = '';
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeDownload = jest.fn((_guid, transferName: string) => {
+      nativePath = `file:///documents/attachments/scope-attachment/generation-0/${transferName}`;
+      markNativeStarted();
+      return new Promise<{ localPath: string; bytes: number }>((finish) => {
+        releaseNative = finish;
+      });
+    });
+    setAttachmentFetcher({
+      exists: () => false,
+      destinationUri: (_guid, transferName) =>
+        `file:///documents/attachments/scope-attachment/generation-0/${transferName}`,
+      download: nativeDownload,
+    });
+
+    const realProtect = attachmentCacheCoordinator.protect.bind(attachmentCacheCoordinator);
+    let activeSourceAPins = 0;
+    let mayReleaseSourceA = false;
+    let droppedSourceAPin = false;
+    const protectSpy = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockImplementation((path) => {
+        const protection = realProtect(path);
+        if (!protection || path !== oldPathA) return protection;
+        activeSourceAPins += 1;
+        let released = false;
+        return {
+          path: protection.path,
+          release: () => {
+            if (released) return;
+            released = true;
+            activeSourceAPins -= 1;
+            if (!mayReleaseSourceA && activeSourceAPins === 0) droppedSourceAPin = true;
+            protection.release();
+          },
+        };
+      });
+
+    try {
+      const sourceAOwner = redownload(attachment, captureRealtimeDeliveryLease());
+      await nativeStarted;
+      const sourceBOwner = redownload(
+        { ...attachment, localPath: oldPathB },
+        captureRealtimeDeliveryLease(),
+      );
+
+      await expect(sourceBOwner).resolves.toBeNull();
+      expect(nativeDownload).toHaveBeenCalledTimes(1);
+      expect(activeSourceAPins).toBeGreaterThan(0);
+      expect(droppedSourceAPin).toBe(false);
+
+      mayReleaseSourceA = true;
+      releaseNative({ localPath: nativePath, bytes: 1_000 });
+      await expect(sourceAOwner).resolves.toBe(nativePath);
+    } finally {
+      protectSpy.mockRestore();
+    }
+
+    expect(nativeDownload).toHaveBeenCalledTimes(1);
+    expect(droppedSourceAPin).toBe(false);
+    expect(activeSourceAPins).toBe(0);
+    expect(useDownloadStore.getState().status[attachment.guid]).toBe('idle');
+    expect(useDownloadStore.getState().progress[attachment.guid]).toBe(1);
+    expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBe(nativePath);
+  });
+
+  it('keeps an RCS redownload owner when an incompatible ordinary download arrives', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
+    const seeded = await seedRcsAttachment(db);
+    const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/rcs-corrupt.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
+    );
+    const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
+    jest.mocked(getNativeAttachmentCacheAvailableBytes).mockResolvedValue(Number.MAX_SAFE_INTEGER);
+
+    let releaseNative!: (value: { localPath: string; bytes: number }) => void;
+    let markNativeStarted!: () => void;
+    let nativePath = '';
+    const nativeStarted = new Promise<void>((resolve) => {
+      markNativeStarted = resolve;
+    });
+    const nativeDownload = jest.fn((_guid, transferName: string) => {
+      nativePath = `file:///documents/attachments/scope-attachment/generation-0/${transferName}`;
+      markNativeStarted();
+      return new Promise<{ localPath: string; bytes: number }>((finish) => {
+        releaseNative = finish;
+      });
+    });
+    setAttachmentFetcher({
+      exists: () => false,
+      destinationUri: (_guid, transferName) =>
+        `file:///documents/attachments/scope-attachment/generation-0/${transferName}`,
+      download: nativeDownload,
+    });
+
+    const realProtect = attachmentCacheCoordinator.protect.bind(attachmentCacheCoordinator);
+    let activeOldPathPins = 0;
+    let mayReleaseOldPath = false;
+    let droppedOldPathPin = false;
+    const protectSpy = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockImplementation((path) => {
+        const protection = realProtect(path);
+        if (!protection || path !== oldPath) return protection;
+        activeOldPathPins += 1;
+        let released = false;
+        return {
+          path: protection.path,
+          release: () => {
+            if (released) return;
+            released = true;
+            activeOldPathPins -= 1;
+            if (!mayReleaseOldPath && activeOldPathPins === 0) droppedOldPathPin = true;
+            protection.release();
+          },
+        };
+      });
+
+    try {
+      const replacementOwner = redownload(attachment, captureRealtimeDeliveryLease());
+      await nativeStarted;
+      const ordinaryOwner = download(
+        { ...attachment, localPath: null },
+        'manual',
+        captureRealtimeDeliveryLease(),
+      );
+
+      await expect(ordinaryOwner).resolves.toBeNull();
+      expect(nativeDownload).toHaveBeenCalledTimes(1);
+      expect(activeOldPathPins).toBeGreaterThan(0);
+      expect(droppedOldPathPin).toBe(false);
+
+      mayReleaseOldPath = true;
+      releaseNative({ localPath: nativePath, bytes: 1_000 });
+      await expect(replacementOwner).resolves.toBe(nativePath);
+    } finally {
+      protectSpy.mockRestore();
+    }
+
+    expect(nativeDownload).toHaveBeenCalledTimes(1);
+    expect(droppedOldPathPin).toBe(false);
+    expect(activeOldPathPins).toBe(0);
+    expect(useDownloadStore.getState().status[attachment.guid]).toBe('idle');
+    expect(useDownloadStore.getState().progress[attachment.guid]).toBe(1);
+    expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBe(nativePath);
+  });
+
+  it('signals terminal DB adoption when a newer path wins the copy-on-write race', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
+    const seeded = await seedRcsAttachment(db);
+    const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/race-old.jpg';
+    const newerPath = 'file:///documents/attachments/scope-attachment/generation-0/race-newer.jpg';
+    const replacementPath =
+      'file:///documents/attachments/scope-attachment/generation-0/race-replacement.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
+    );
+    const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
+    jest.mocked(getNativeAttachmentCacheAvailableBytes).mockResolvedValue(Number.MAX_SAFE_INTEGER);
+    const discard = jest.fn();
+    setAttachmentFetcher({
+      exists: () => true,
+      destinationUri: () => replacementPath,
+      download: jest.fn(async () => {
+        await updateAttachmentLocalPath(db, attachment.guid, newerPath);
+        return { localPath: replacementPath, bytes: 1_000 };
+      }),
+      discard,
+    });
+
+    await expect(redownload(attachment, captureRealtimeDeliveryLease())).resolves.toBeNull();
+
+    expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBe(newerPath);
+    expect(discard).toHaveBeenCalledWith(replacementPath);
+    expect(useDownloadStore.getState().status[attachment.guid]).toBe('idle');
+    expect(useDownloadStore.getState().progress[attachment.guid]).toBe(1);
+  });
+
+  it('refuses forced redownload when retirement already owns the old path', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
+    const seeded = await seedRcsAttachment(db);
+    const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/busy.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPath);
+    const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
+    const fetch = jest.fn();
+    setAttachmentFetcher({
+      exists: () => true,
+      destinationUri: () => 'file:///documents/attachments/replacement.jpg',
+      download: fetch,
+    });
+    const protectSpy = jest.spyOn(attachmentCacheCoordinator, 'protect').mockReturnValueOnce(null);
+
+    try {
+      await expect(redownload(attachment, captureRealtimeDeliveryLease())).resolves.toBeNull();
+    } finally {
+      protectSpy.mockRestore();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBe(oldPath);
+  });
+
+  it('releases the old-path pin when redownload throws before returning a Promise', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    const seeded = await seedRcsAttachment(db);
+    const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/sync-throw.jpg';
+    await updateAttachmentLocalPath(db, seeded.guid, oldPath);
+    const attachment = { ...(await getAttachmentByGuid(db, seeded.guid))!, service: 'iMessage' };
+    const realProtect = attachmentCacheCoordinator.protect.bind(attachmentCacheCoordinator);
+    const release = jest.fn();
+    const protectSpy = jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockImplementationOnce((path) => {
+        const protection = realProtect(path);
+        if (!protection) return null;
+        let released = false;
+        return {
+          path: protection.path,
+          release: () => {
+            if (released) return;
+            released = true;
+            release();
+            protection.release();
+          },
+        };
+      });
+    const startSpy = jest.spyOn(useDownloadStore.getState(), 'start').mockImplementationOnce(() => {
+      throw new Error('forced synchronous download start failure');
+    });
+
+    try {
+      await expect(redownload(attachment, captureRealtimeDeliveryLease())).rejects.toThrow(
+        'forced synchronous download start failure',
+      );
+    } finally {
+      startSpy.mockRestore();
+      protectSpy.mockRestore();
+    }
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it('commits the cache reservation after a rolling neighbour and before native download starts', async () => {
     const { db, raw } = await createTestDb();
     activeDb = db;

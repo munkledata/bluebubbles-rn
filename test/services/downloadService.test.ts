@@ -5,6 +5,7 @@ import {
   getAttachmentByGuid,
   getAttachmentCacheEntry,
   recordAttachmentCacheEntry,
+  updateAttachmentLocalPath,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -241,6 +242,59 @@ describe('ensureDownloaded', () => {
     expect(a).toBe('file:///docs/d2.jpg');
     expect(b).toBe('file:///docs/d2.jpg');
     expect(calls).toBe(1); // single fetch
+  });
+
+  it('does not join or run a forced replacement beside an ordinary flight', async () => {
+    const { db } = await createTestDb();
+    const guid = 'ordinary-replacement-flight';
+    const oldPath = 'file:///docs/ordinary-replacement-old.jpg';
+    await seedAttachment(db, guid);
+    await updateAttachmentLocalPath(db, guid, oldPath);
+    let finishOrdinary!: (result: ReturnType<typeof fetched>) => void;
+    const fetcher: AttachmentFetcher = {
+      exists: () => false,
+      download: jest.fn(
+        () =>
+          new Promise((resolve) => {
+            finishOrdinary = resolve;
+          }),
+      ),
+    };
+    const scope: AttachmentDownloadScope = {
+      generation: 29,
+      isCurrent: () => true,
+      runCommit: (task) => task(),
+    };
+
+    const ordinary = ensureDownloadedOutcome(
+      db,
+      fetcher,
+      { guid, transferName: 'ordinary.jpg', localPath: null },
+      undefined,
+      scope,
+    );
+    const replacement = ensureDownloadedOutcome(
+      db,
+      fetcher,
+      { guid, transferName: 'ordinary.jpg', localPath: oldPath },
+      undefined,
+      scope,
+      'manual',
+      undefined,
+      undefined,
+      { expectedLocalPath: oldPath, destinationName: 'redownload.jpg' },
+    );
+
+    await expect(replacement).resolves.toEqual({ status: 'busy' });
+    for (let i = 0; i < 10 && finishOrdinary == null; i += 1) await Promise.resolve();
+    expect(fetcher.download).toHaveBeenCalledTimes(1);
+
+    finishOrdinary(fetched('file:///docs/ordinary-finished.jpg', 10));
+    await expect(ordinary).resolves.toEqual({
+      status: 'success',
+      localPath: 'file:///docs/ordinary-finished.jpg',
+      bytes: 10,
+    });
   });
 
   it('fans progress and verified bytes out to every caller joining a compatible flight', async () => {
@@ -520,6 +574,151 @@ describe('ensureDownloaded', () => {
     });
     expect(beginProtectionHandoff).toHaveBeenCalledTimes(1);
     expect(rollbackProtectionHandoff).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('copy-on-write promotes a distinct replacement while leaving the protected old path active', async () => {
+    const { db } = await createTestDb();
+    const guid = 'quota-copy-on-write';
+    const oldPath = 'file:///documents/attachments/copy-on-write/old.jpg';
+    const replacementPath = 'file:///documents/attachments/copy-on-write/redownload-test.jpg';
+    await seedAttachment(db, guid);
+    await updateAttachmentLocalPath(db, guid, oldPath);
+    await withDbTransaction(db, (context) =>
+      recordAttachmentCacheEntry(context, { path: oldPath, bytes: 10, lastUsedAt: 1 }),
+    );
+    const release = jest.fn(async () => undefined);
+    const beginProtectionHandoff = jest.fn(() => true);
+    const rollbackProtectionHandoff = jest.fn(() => true);
+    const reserveCache = jest.fn(async (_path: string, maxBytes: number) => {
+      await withDbTransaction(db, (context) =>
+        createAttachmentCacheReservation(context, {
+          path: replacementPath,
+          maxBytes,
+          createdAt: 2,
+        }),
+      );
+      return {
+        status: 'reserved' as const,
+        reservation: {
+          path: replacementPath,
+          maxBytes,
+          generation: 17 as const,
+          beginProtectionHandoff,
+          rollbackProtectionHandoff,
+          release,
+        },
+      };
+    });
+    const fetcher: AttachmentFetcher = {
+      exists: jest.fn(() => true),
+      destinationUri: (_guid, transferName) => {
+        expect(transferName).toBe('redownload-test.jpg');
+        return replacementPath;
+      },
+      download: jest.fn(async () => fetched(replacementPath, 20)),
+    };
+    const scope: AttachmentDownloadScope = {
+      generation: 17,
+      isCurrent: () => true,
+      runCommit: (task) => task(),
+      reserveCache,
+      reuseCache: jest.fn(async () => ({ status: 'hit' as const })),
+    };
+
+    await expect(
+      ensureDownloadedOutcome(
+        db,
+        fetcher,
+        { guid, transferName: 'photo.jpg', localPath: oldPath, mimeType: 'image/jpeg' },
+        undefined,
+        scope,
+        'manual',
+        undefined,
+        undefined,
+        { expectedLocalPath: oldPath, destinationName: 'redownload-test.jpg' },
+      ),
+    ).resolves.toEqual({ status: 'success', localPath: replacementPath, bytes: 20 });
+
+    expect(scope.reuseCache).not.toHaveBeenCalled();
+    expect(fetcher.exists).not.toHaveBeenCalled();
+    expect((await getAttachmentByGuid(db, guid))?.localPath).toBe(replacementPath);
+    expect(await getAttachmentCacheEntry(db, replacementPath)).toMatchObject({
+      state: 'active',
+      bytes: 20,
+    });
+    expect(await getAttachmentCacheEntry(db, oldPath)).toMatchObject({ state: 'active' });
+    expect(beginProtectionHandoff).toHaveBeenCalledTimes(1);
+    expect(rollbackProtectionHandoff).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls replacement promotion back when the exact source path changes during download', async () => {
+    const { db } = await createTestDb();
+    const guid = 'quota-copy-source-race';
+    const oldPath = 'file:///documents/attachments/copy-source-race/old.jpg';
+    const newerPath = 'file:///documents/attachments/copy-source-race/newer.jpg';
+    const replacementPath = 'file:///documents/attachments/copy-source-race/redownload-stale.jpg';
+    await seedAttachment(db, guid);
+    await updateAttachmentLocalPath(db, guid, oldPath);
+    const release = jest.fn(async () => undefined);
+    const beginProtectionHandoff = jest.fn(() => true);
+    const rollbackProtectionHandoff = jest.fn(() => true);
+    const discard = jest.fn();
+    const fetcher: AttachmentFetcher = {
+      exists: () => true,
+      destinationUri: () => replacementPath,
+      download: jest.fn(async () => {
+        await updateAttachmentLocalPath(db, guid, newerPath);
+        return fetched(replacementPath, 20);
+      }),
+      discard,
+    };
+    const scope: AttachmentDownloadScope = {
+      generation: 18,
+      isCurrent: () => true,
+      runCommit: (task) => task(),
+      reserveCache: async (_path, maxBytes) => {
+        await withDbTransaction(db, (context) =>
+          createAttachmentCacheReservation(context, {
+            path: replacementPath,
+            maxBytes,
+            createdAt: 2,
+          }),
+        );
+        return {
+          status: 'reserved',
+          reservation: {
+            path: replacementPath,
+            maxBytes,
+            generation: 18,
+            beginProtectionHandoff,
+            rollbackProtectionHandoff,
+            release,
+          },
+        };
+      },
+    };
+
+    await expect(
+      ensureDownloadedOutcome(
+        db,
+        fetcher,
+        { guid, transferName: 'photo.jpg', localPath: oldPath, mimeType: 'image/jpeg' },
+        undefined,
+        scope,
+        'manual',
+        undefined,
+        undefined,
+        { expectedLocalPath: oldPath, destinationName: 'redownload-stale.jpg' },
+      ),
+    ).resolves.toEqual({ status: 'source_changed' });
+
+    expect((await getAttachmentByGuid(db, guid))?.localPath).toBe(newerPath);
+    expect(await getAttachmentCacheEntry(db, replacementPath)).toMatchObject({ state: 'reserved' });
+    expect(discard).toHaveBeenCalledWith(replacementPath);
+    expect(beginProtectionHandoff).toHaveBeenCalledTimes(1);
+    expect(rollbackProtectionHandoff).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
   });
 
