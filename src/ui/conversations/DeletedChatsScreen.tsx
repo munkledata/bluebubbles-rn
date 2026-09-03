@@ -13,10 +13,12 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import { Screen, ScreenHeader } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 
 const PAGE_SIZE = 50;
-const TABLES = ['chats', 'messages', 'chat_handles', 'handles'];
+const TABLES = ['chats', 'messages', 'chat_handles', 'handles', 'kv'];
+const ACCOUNT_CHANGED_COPY =
+  'Conversation account changed. Go back and reopen Deleted Conversations.';
 
 /** Soft-deleted conversations stay recoverable without making them visible in normal chat lists. */
 export function DeletedChatsScreen(): React.JSX.Element {
@@ -43,7 +45,9 @@ export function DeletedChatsScreen(): React.JSX.Element {
     [limit],
     { enabled: accountCurrent },
   );
-  const rows = useMemo(() => data?.rows ?? [], [data]);
+  // `useReactiveQuery` clears disabled data in an effect. Mask it at render time too so a retiring
+  // account cannot commit one frame of its deleted-conversation titles or restore actions.
+  const rows = useMemo(() => (accountCurrent ? (data?.rows ?? []) : []), [accountCurrent, data]);
 
   const confirmRestore = useCallback(
     (row: DeletedChatRow): void => {
@@ -90,6 +94,7 @@ export function DeletedChatsScreen(): React.JSX.Element {
     ({ item }: { item: DeletedChatRow }): React.JSX.Element => {
       const restoring = restoringGuid === item.guid;
       const disabled = restoringGuid != null || !accountCurrent;
+      const restoreForeground = readableTextOn(theme.color.tint);
       return (
         <View style={[styles.row, { borderBottomColor: theme.color.separator }]}>
           <View style={styles.details}>
@@ -109,9 +114,9 @@ export function DeletedChatsScreen(): React.JSX.Element {
             style={[styles.restoreButton, { backgroundColor: theme.color.tint }]}
           >
             {restoring ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={restoreForeground} />
             ) : (
-              <Text style={styles.restoreText}>Restore</Text>
+              <Text style={[styles.restoreText, { color: restoreForeground }]}>Restore</Text>
             )}
           </Pressable>
         </View>
@@ -123,26 +128,51 @@ export function DeletedChatsScreen(): React.JSX.Element {
   return (
     <Screen>
       <ScreenHeader title="Deleted Conversations" onBack={() => router.back()} />
-      <FlashList
-        data={rows}
-        keyExtractor={(row: DeletedChatRow) => row.guid}
-        renderItem={renderItem}
-        onEndReached={() => {
-          if (data?.hasMore) setLimit((current) => Math.min(current + PAGE_SIZE, 250));
-        }}
-        onEndReachedThreshold={0.5}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            {isLoading ? <ActivityIndicator color={theme.color.tint} /> : null}
-            {!isLoading ? (
-              <Text style={[styles.emptyText, { color: theme.color.secondaryLabel }]}>
-                {error ? 'Couldn’t load deleted conversations.' : 'No deleted conversations.'}
-              </Text>
-            ) : null}
-          </View>
-        }
-        contentContainerStyle={styles.content}
-      />
+      {!accountCurrent ? (
+        <View style={styles.empty}>
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+            style={[styles.emptyText, { color: theme.color.secondaryLabel }]}
+          >
+            {ACCOUNT_CHANGED_COPY}
+          </Text>
+        </View>
+      ) : (
+        <FlashList
+          data={rows}
+          keyExtractor={(row: DeletedChatRow) => row.guid}
+          renderItem={renderItem}
+          onEndReached={() => {
+            if (data?.hasMore) setLimit((current) => Math.min(current + PAGE_SIZE, 250));
+          }}
+          onEndReachedThreshold={0.5}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              {isLoading ? (
+                <>
+                  <ActivityIndicator color={theme.color.tint} />
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    style={[styles.emptyText, { color: theme.color.secondaryLabel }]}
+                  >
+                    Loading deleted conversations…
+                  </Text>
+                </>
+              ) : (
+                <Text
+                  accessibilityRole={error ? 'alert' : undefined}
+                  accessibilityLiveRegion={error ? 'assertive' : undefined}
+                  style={[styles.emptyText, { color: theme.color.secondaryLabel }]}
+                >
+                  {error ? 'Couldn’t load deleted conversations.' : 'No deleted conversations.'}
+                </Text>
+              )}
+            </View>
+          }
+          contentContainerStyle={styles.content}
+        />
+      )}
     </Screen>
   );
 }
@@ -163,13 +193,13 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13 },
   restoreButton: {
     minWidth: 82,
-    minHeight: 38,
+    minHeight: 44,
     paddingHorizontal: 14,
-    borderRadius: 19,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  restoreText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  restoreText: { fontSize: 14, fontWeight: '600' },
   empty: { paddingTop: 80, alignItems: 'center', gap: 12 },
   emptyText: { fontSize: 16, textAlign: 'center' },
 });
