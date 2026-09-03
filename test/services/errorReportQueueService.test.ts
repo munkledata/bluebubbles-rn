@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 // `flushErrorReports` (below) lives in services/errors/index, which pulls expo-constants,
 // react-native and the native DB handle. Stub ONLY those leaves — the queue service, the session
 // store and the feature-settings store under test stay real.
@@ -48,6 +52,17 @@ const { http: mockHttp } = jest.requireMock('@/services/clients') as { http: { p
 const { errorReportSink: mockSink } = jest.requireMock('@/services/errors/errorReportSink') as {
   errorReportSink: { flushToDb: jest.Mock; resetSession: jest.Mock };
 };
+
+const ERROR_REPORT_UPLOAD_FIXTURE_SHA256 =
+  'ee0505e0a7a810e88bb2e5ddc6b7ecdd51410b4405cda54954d9292284e2a359';
+
+function errorReportUploadFixture(): unknown {
+  const bytes = readFileSync(
+    join(__dirname, '..', 'fixtures', 'contract', 'v1', 'errorReports.upload.gator.json'),
+  );
+  expect(createHash('sha256').update(bytes).digest('hex')).toBe(ERROR_REPORT_UPLOAD_FIXTURE_SHA256);
+  return JSON.parse(bytes.toString('utf8'));
+}
 
 function fakeHttp(impl: (json: unknown, signal?: AbortSignal) => Promise<unknown>): HttpClient {
   return {
@@ -195,22 +210,11 @@ describe('runErrorReportQueue', () => {
       const res = await runErrorReportQueue(db, http, uploadNow, {
         appVersion: '1.2.3',
         platform: 'android',
+        osVersion: '34',
       });
       expect(res).toEqual({ eligible: 3, uploaded: 3 });
       expect(count(raw)).toBe(0);
-      const expectedReport = {
-        level: 'error',
-        message: 'media.share_failed',
-        stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.mediaShare}`,
-        tag: 'media',
-        meta: JSON.stringify({ schemaVersion: 1 }),
-        timestamp: Date.UTC(2026, 7, 6, 12, 34),
-      };
-      expect(sent).toEqual({
-        reports: [expectedReport, expectedReport, expectedReport],
-        appVersion: '1.2.3',
-        platform: 'android',
-      });
+      expect(sent).toEqual(errorReportUploadFixture());
     } finally {
       nowSpy.mockRestore();
     }
