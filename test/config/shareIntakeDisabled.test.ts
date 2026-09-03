@@ -96,8 +96,40 @@ describe('IPC-01 inbound-share containment', () => {
     expect(shortcutBridge).not.toMatch(/setShareShortcuts/);
     expect(nativeShortcutBridge).toMatch(/Function\("clearShareShortcuts"\)/);
     expect(nativeShortcutBridge).not.toMatch(/runCatching|getOrDefault\(emptyList\(\)\)/);
-    expect(nativeShortcutBridge.match(/ShortcutManagerCompat\.getShortcuts\(/g)).toHaveLength(2);
-    expect(nativeShortcutBridge).toMatch(/check\(remainingIds\.isEmpty\(\)\)/);
+    for (const marker of [
+      'ShortcutManagerCompat.FLAG_MATCH_DYNAMIC',
+      'ShortcutManagerCompat.FLAG_MATCH_CACHED',
+      'ShortcutManagerCompat.FLAG_MATCH_PINNED',
+      'com.bluegreengatorapps.messages.category.RETIRED_SHORTCUT',
+      'val before = store.list()',
+      'val unsafe = store.list().filter',
+      'check(unsafe.isEmpty())',
+      'categories == setOf(RETIRED_SHORTCUT_CATEGORY)',
+      'IconCompat.createWithResource(context, context.applicationInfo.icon)',
+      'val launchIntent = Intent(Intent.ACTION_VIEW)',
+      'setPackage(context.packageName)',
+      'ShortcutInfoCompat.Builder(context, replacement.id)',
+      '.setName(replacement.personName)',
+      '.setKey(replacement.personKey)',
+      '.setShortLabel(replacement.shortLabel)',
+      '.setLongLabel(replacement.longLabel)',
+      '.setDisabledMessage(replacement.disabledMessage)',
+      '.setIntent(Intent(launchIntent))',
+      '.setPerson(person)',
+      '.setCategories(setOf(RETIRED_SHORTCUT_CATEGORY))',
+      '.setLocusId(LocusIdCompat(replacement.locusId))',
+      '.setLongLived(false)',
+      '.setExtras(',
+      'putString(RETIRED_SHORTCUT_MARKER_KEY, RETIRED_SHORTCUT_MARKER_VALUE)',
+      'ShortcutManagerCompat.updateShortcuts(context, retired)',
+      'ShortcutManagerCompat.disableShortcuts',
+      'ShortcutManagerCompat.removeAllDynamicShortcuts',
+      'ShortcutManagerCompat.removeLongLivedShortcuts',
+      'clearLegacyShareShortcuts(AndroidLegacyShortcutStore(context))',
+    ]) {
+      expect(nativeShortcutBridge).toContain(marker);
+    }
+    expect(nativeShortcutBridge.match(/\.setIcon\(appIcon\)/g)).toHaveLength(2);
     expect(nativeShortcutBridge).not.toMatch(
       /setShareShortcuts|reportShortcutUsed|getLaunchShortcutId|OnNewIntent|ShareShortcutRecord/,
     );
