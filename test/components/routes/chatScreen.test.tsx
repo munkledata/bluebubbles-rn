@@ -27,15 +27,18 @@
 import React from 'react';
 import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
+import type { ChatSearchResultRow } from '@db/repositories';
 import { logger } from '@core/secure';
 
 const GUID = 'iMessage;-;+15551234567';
 const PRIVATE_WALLPAPER_URI = 'file:///private/chat-wallpaper-r-canary-9f31d7.jpg';
 const SECOND_WALLPAPER_URI = 'file:///private/chat-wallpaper-second-74c02a.jpg';
 const mockPush = jest.fn();
+const mockSetParams = jest.fn();
 const mockNavigationDispatch = jest.fn();
 const mockUsePreventRemove = jest.fn();
 const mockIsDevServer = jest.fn(() => false);
+const mockUseChatSearch = jest.fn();
 // Mutable so a test can hand the SAME mounted screen a new guid (reused-instance path).
 let mockGuid = GUID;
 
@@ -46,6 +49,7 @@ const mockCaptured: {
   overlay?: Record<string, any>;
   upload?: Record<string, any>;
   composer?: Record<string, any>;
+  search?: Record<string, any>;
 } = {};
 let mockVoiceRecorderProps: Record<string, any> | undefined;
 
@@ -70,7 +74,7 @@ jest.mock('expo-router', () => {
     useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
     useLocalSearchParams: () => ({ guid: mockGuid }),
     useNavigation: () => ({ dispatch: mockNavigationDispatch }),
-    useRouter: () => ({ push: mockPush }),
+    useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
   };
 });
 jest.mock('expo-router/react-navigation', () => ({
@@ -128,7 +132,7 @@ jest.mock('@ui', () => {
   const R = require('react');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View, Text } = require('react-native');
-  const capture = (key: 'header' | 'list' | 'overlay' | 'upload' | 'composer') =>
+  const capture = (key: 'header' | 'list' | 'overlay' | 'upload' | 'composer' | 'search') =>
     function CapturedProbe(props: any) {
       const instance = R.useRef(Symbol(key));
       mockCaptured[key] = { ...props, __instance: instance.current };
@@ -138,6 +142,7 @@ jest.mock('@ui', () => {
     useTheme: () => ({ color: { background: '#000000' } }),
     Screen: ({ children }: { children: React.ReactNode }) => R.createElement(View, null, children),
     ConversationHeader: capture('header'),
+    ChatSearchBar: capture('search'),
     EdgeFade: () => null,
     ScreenEffectOverlay: () => null,
     TypingBubble: () => R.createElement(Text, null, 'typing…'),
@@ -169,16 +174,7 @@ jest.mock('@features/conversations/useMessages', () => ({ useMessages: jest.fn()
 jest.mock('@features/conversations/useChatHeader', () => ({ useChatHeader: jest.fn() }));
 jest.mock('@features/conversations/useNewScreenEffect', () => ({ useNewScreenEffect: jest.fn() }));
 jest.mock('@features/conversations/useChatSearch', () => ({
-  useChatSearch: () => ({
-    data: undefined,
-    fetchNextPage: jest.fn(),
-    hasNextPage: false,
-    isError: false,
-    isFetchingNextPage: false,
-    isPending: true,
-    results: [],
-    totalCount: 0,
-  }),
+  useChatSearch: (...args: unknown[]) => mockUseChatSearch(...args),
 }));
 jest.mock('@features/conversations/devSeed', () => ({
   devEditFake: jest.fn(),
@@ -324,6 +320,19 @@ function makeMsg(overrides: Partial<EnrichedMessage> = {}): EnrichedMessage {
   } as unknown as EnrichedMessage;
 }
 
+function makeSearchHit(id: number, guid: string): ChatSearchResultRow {
+  return {
+    id,
+    guid,
+    dateCreated: id,
+    text: `search result ${id}`,
+    snippet: `search snippet ${id}`,
+    isFromMe: 0,
+    senderName: 'Search Sender',
+    senderAddress: 'search-sender@example.invalid',
+  };
+}
+
 /** A reaction row (only isFromMe/baseType/emoji are read by the selection mapper). */
 function reactionRow(over: Record<string, unknown>): any {
   return {
@@ -358,6 +367,17 @@ beforeEach(() => {
   });
   useNewScreenEffectMock.mockReturnValue({ effect: null, clear: jest.fn() });
   useChatBackgroundUriMock.mockReturnValue(null);
+  mockUseChatSearch.mockReset().mockReturnValue({
+    data: undefined,
+    fetchNextPage: jest.fn(),
+    hasNextPage: false,
+    isError: false,
+    isFetchingNextPage: false,
+    isPending: true,
+    results: [],
+    totalCount: 0,
+    query: '',
+  });
 });
 
 /** Invoke a captured screen callback inside act (it mutates screen state). */
@@ -715,7 +735,7 @@ describe('ChatScreen — send routing', () => {
     expect(pickAndSendContact).not.toHaveBeenCalled();
 
     const buttons = (showDialog as jest.Mock).mock.calls.at(-1)?.[2] as
-      Array<{ text: string; onPress?: () => void }> | undefined;
+      { text: string; onPress?: () => void }[] | undefined;
     await run(() => buttons?.find((button) => button.text === 'Continue')?.onPress?.());
     await waitFor(() => expect(pickAndSendContact).toHaveBeenCalledTimes(1));
   });
@@ -849,6 +869,226 @@ describe('ChatScreen — typing indicator', () => {
     await fireEvent.press(screen.getByText('⌨️'));
 
     expect(dispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatScreen — current-chat search orchestration', () => {
+  it('debounces a trimmed query, anchors its exact first hit, and preserves the ordinary-route composer', async () => {
+    jest.useFakeTimers();
+    const newest = makeSearchHit(901, 'search-newest-guid');
+    const middle = makeSearchHit(802, 'search-middle-guid');
+    const hits = [newest, middle];
+    let needleHits = hits;
+    mockUseChatSearch.mockImplementation(
+      (_chatGuid: string, query: string, _accountLease: unknown) => {
+        const ready = query === 'needle';
+        return {
+          data: ready ? { pages: [{ results: needleHits, totalCount: 3 }] } : undefined,
+          fetchNextPage: jest.fn(),
+          hasNextPage: ready,
+          isError: false,
+          isFetchingNextPage: false,
+          isPending: !ready,
+          results: ready ? needleHits : [],
+          totalCount: ready ? 3 : 0,
+          query,
+        };
+      },
+    );
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+
+    try {
+      view = await renderWithTheme(<ChatScreen />);
+      const composerInstance = mockCaptured.composer!.__instance;
+      expect(mockCaptured.header?.searchActive).toBe(false);
+      expect(mockCaptured.composer?.active).toBe(true);
+
+      await run(() => mockCaptured.header!.onSearchPress());
+      expect(mockCaptured.header?.searchActive).toBe(true);
+      expect(mockCaptured.search?.status).toBe('Type at least 3 characters');
+      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+      expect(mockCaptured.composer?.active).toBe(false);
+      expect(mockCaptured.list?.onLongPressMessage).toBeUndefined();
+      expect(mockCaptured.list?.onSwipeReply).toBeUndefined();
+      expect(mockCaptured.list?.onToggleSelect).toBeUndefined();
+
+      await run(() => mockCaptured.search!.onChangeText('  needle  '));
+      expect(mockCaptured.search?.value).toBe('  needle  ');
+      expect(mockCaptured.search?.status).toBe('Searching…');
+      expect(mockUseChatSearch.mock.calls.at(-1)?.[1]).toBe('');
+
+      await act(async () => {
+        jest.advanceTimersByTime(249);
+      });
+      expect(mockUseChatSearch.mock.calls.at(-1)?.[1]).toBe('');
+
+      await act(async () => {
+        jest.advanceTimersByTime(1);
+      });
+      expect(mockUseChatSearch).toHaveBeenLastCalledWith(
+        GUID,
+        'needle',
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      );
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: newest.id,
+        guid: newest.guid,
+      });
+      expect(mockCaptured.list?.focusMessageId).toBe(newest.id);
+      expect(mockCaptured.list?.focusGuid).toBe(newest.guid);
+      expect(mockCaptured.search?.status).toBe('Result 3 of 3');
+      expect(mockCaptured.search?.canGoOlder).toBe(true);
+      expect(mockCaptured.search?.canGoNewer).toBe(false);
+
+      // Whitespace is presentation-only after trimming. It must not clear the selected hit while
+      // React correctly treats the normalized query state update as a no-op.
+      await run(() => mockCaptured.search!.onChangeText(' needle '));
+      expect(mockCaptured.list?.focusMessageId).toBe(newest.id);
+      expect(mockCaptured.list?.focusGuid).toBe(newest.guid);
+      await act(async () => {
+        jest.advanceTimersByTime(250);
+      });
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: newest.id,
+        guid: newest.guid,
+      });
+
+      await run(() => mockCaptured.search!.onChangeText('different'));
+      expect(mockCaptured.list?.focusMessageId).toBeUndefined();
+      expect(mockCaptured.list?.focusGuid).toBeUndefined();
+      needleHits = [makeSearchHit(999, 'stale-refreshed-needle-guid'), ...hits];
+      await act(async () => view?.rerender(<ChatScreen />));
+      expect(mockCaptured.list?.focusMessageId).toBeUndefined();
+      expect(mockCaptured.list?.focusGuid).toBeUndefined();
+
+      await run(() => mockCaptured.header!.onSearchPress());
+      expect(mockCaptured.header?.searchActive).toBe(false);
+      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+      expect(mockCaptured.composer?.active).toBe(true);
+      expect(mockCaptured.list?.focusMessageId).toBeUndefined();
+      expect(mockCaptured.list?.focusGuid).toBeUndefined();
+      expect(mockCaptured.list?.onLongPressMessage).toEqual(expect.any(Function));
+      expect(mockCaptured.list?.onSwipeReply).toEqual(expect.any(Function));
+      expect(mockSetParams).toHaveBeenLastCalledWith({ focus: '', focusDate: '' });
+
+      await run(() => mockCaptured.header!.onSearchPress());
+      expect(mockCaptured.search?.value).toBe('');
+      expect(mockCaptured.search?.status).toBe('Type at least 3 characters');
+      expect(mockCaptured.search?.canGoOlder).toBe(false);
+      expect(mockCaptured.search?.canGoNewer).toBe(false);
+      expect(mockUseChatSearch.mock.calls.at(-1)?.[1]).toBe('');
+      expect(mockCaptured.list?.focusMessageId).toBeUndefined();
+      expect(mockCaptured.list?.focusGuid).toBeUndefined();
+      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+      await run(() => mockCaptured.header!.onSearchPress());
+    } finally {
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it('navigates loaded and paged exact hits and rejects a late retired-account page', async () => {
+    jest.useFakeTimers();
+    const newest = makeSearchHit(901, 'search-newest-guid');
+    const middle = makeSearchHit(802, 'search-middle-guid');
+    const oldest = makeSearchHit(703, 'search-oldest-guid');
+    const stalePage = deferred<{
+      data: { pages: { results: ChatSearchResultRow[] }[] };
+    }>();
+    const fetchedPages = {
+      data: {
+        pages: [{ results: [newest, middle] }, { results: [oldest] }],
+      },
+    };
+    const fetchNextPage = jest
+      .fn()
+      .mockResolvedValueOnce(fetchedPages)
+      .mockReturnValueOnce(stalePage.promise);
+    mockUseChatSearch.mockImplementation(
+      (_chatGuid: string, query: string, _accountLease: unknown) => {
+        const ready = query === 'needle';
+        return {
+          data: ready ? { pages: [{ results: [newest, middle], totalCount: 3 }] } : undefined,
+          fetchNextPage,
+          hasNextPage: ready,
+          isError: false,
+          isFetchingNextPage: false,
+          isPending: !ready,
+          results: ready ? [newest, middle] : [],
+          totalCount: ready ? 3 : 0,
+          query,
+        };
+      },
+    );
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+
+    try {
+      view = await renderWithTheme(<ChatScreen />);
+      await run(() => mockCaptured.header!.onSearchPress());
+      await run(() => mockCaptured.search!.onChangeText('needle'));
+      await act(async () => {
+        jest.advanceTimersByTime(250);
+      });
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: newest.id,
+        guid: newest.guid,
+      });
+      expect(mockCaptured.list?.focusMessageId).toBe(newest.id);
+      expect(mockCaptured.list?.focusGuid).toBe(newest.guid);
+
+      await run(() => mockCaptured.search!.onGoOlder());
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: middle.id,
+        guid: middle.guid,
+      });
+      expect(mockCaptured.list?.focusMessageId).toBe(middle.id);
+      expect(mockCaptured.list?.focusGuid).toBe(middle.guid);
+      expect(mockCaptured.search?.status).toBe('Result 2 of 3');
+      expect(mockCaptured.search?.canGoNewer).toBe(true);
+
+      await act(async () => {
+        mockCaptured.search!.onGoOlder();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(fetchNextPage).toHaveBeenCalledTimes(1);
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: oldest.id,
+        guid: oldest.guid,
+      });
+      expect(mockCaptured.list?.focusMessageId).toBe(oldest.id);
+      expect(mockCaptured.list?.focusGuid).toBe(oldest.guid);
+      expect(mockCaptured.search?.status).toBe('Result 1 of 3');
+      expect(mockCaptured.search?.canGoOlder).toBe(false);
+
+      await run(() => mockCaptured.search!.onGoNewer());
+      expect(mockCaptured.list?.focusMessageId).toBe(middle.id);
+      expect(mockCaptured.list?.focusGuid).toBe(middle.guid);
+
+      await run(() => mockCaptured.search!.onGoOlder());
+      expect(fetchNextPage).toHaveBeenCalledTimes(2);
+      expect(mockCaptured.search?.loading).toBe(true);
+      expect(mockCaptured.search?.canGoOlder).toBe(false);
+      expect(mockCaptured.search?.canGoNewer).toBe(false);
+
+      await pauseRealtimeDeliveries();
+      await act(async () => {
+        stalePage.resolve(fetchedPages);
+        await stalePage.promise;
+        await Promise.resolve();
+      });
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: middle.id,
+        guid: middle.guid,
+      });
+      expect(mockCaptured.list?.focusMessageId).toBe(middle.id);
+      expect(mockCaptured.list?.focusGuid).toBe(middle.guid);
+    } finally {
+      stalePage.resolve(fetchedPages);
+      resumeRealtimeDeliveries();
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -1050,7 +1290,7 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
   it('drops a native file-picker result after the screen account that opened it retires', async () => {
     let finishPicker!: (value: {
       canceled: false;
-      assets: Array<{ uri: string; name: string; mimeType: string; size: number }>;
+      assets: { uri: string; name: string; mimeType: string; size: number }[];
     }) => void;
     const getDocumentAsync = jest.fn().mockReturnValueOnce(
       new Promise((resolve) => {

@@ -280,10 +280,15 @@ function ChatScreenInner({
     else exitAnchor();
   }, [closeSearch, exitAnchor]);
   const onSearchTextChange = useCallback((value: string): void => {
+    const query = value.trim();
+    setSearchText(value);
+    // Leading/trailing whitespace does not change the normalized FTS query. Preserve the current
+    // exact hit and any in-flight page instead of clearing them for a state update React will
+    // correctly treat as a no-op.
+    if (query === searchQueryRef.current) return;
     searchNavigationTokenRef.current += 1;
     appliedSearchKeyRef.current = '';
-    setSearchText(value);
-    if (value.trim().length < 3) setSearchQuery('');
+    if (query.length < 3) setSearchQuery('');
     setSearchIndex(0);
     setSearchNavigating(false);
     // Do not leave a stale prior-query result highlighted while the next query is debouncing.
@@ -293,7 +298,14 @@ function ChatScreenInner({
   // Select the newest hit once for each completed query. Later page loads reuse the same key and
   // therefore cannot snap the reader back to result zero.
   useEffect(() => {
-    if (!searchOpen || searchQuery.length < 3) return;
+    if (
+      !searchOpen ||
+      searchQuery.length < 3 ||
+      searchText.trim() !== searchQuery ||
+      !accountLease.isCurrent()
+    ) {
+      return;
+    }
     const key = `${accountLease.generation}\u0000${guid}\u0000${searchQuery}`;
     if (searchPending || appliedSearchKeyRef.current === key) return;
     appliedSearchKeyRef.current = key;
@@ -302,7 +314,7 @@ function ChatScreenInner({
     setSearchNavigating(false);
     const first = searchResults[0];
     setJump(first ? { id: first.id, guid: first.guid } : null);
-  }, [accountLease.generation, searchPending, searchResults, guid, searchOpen, searchQuery]);
+  }, [accountLease, searchPending, searchResults, guid, searchOpen, searchQuery, searchText]);
 
   const moveToSearchResult = useCallback(
     async (targetIndex: number): Promise<void> => {
