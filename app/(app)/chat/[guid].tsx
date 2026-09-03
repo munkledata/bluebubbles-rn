@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
@@ -148,21 +148,23 @@ const VoiceRecorder = lazy(() =>
  */
 export default function ChatScreen(): React.JSX.Element {
   // `focus`/`focusDate` arrive when opened from a search hit — scroll to + highlight that message.
-  const { guid, focus, focusDate, share } = useLocalSearchParams<{
+  const { guid, focus, share } = useLocalSearchParams<{
     guid: string;
     focus?: string;
     focusDate?: string;
     share?: string;
   }>();
+  const route = useRoute();
   // Remount the whole per-chat subtree when the chat (or its open mode) changes. The screen
   // instance is REUSED on a `router.replace` thread switch (notification tap while a chat is open),
   // and `useReactiveQuery` keeps the PREVIOUS deps' data until the new query resolves — without the
   // key, `messagesLoading` never gates, so the list mounted with the previous chat's rows, did its
   // one-shot bottom landing against the wrong content, and stranded the new thread mid-history.
-  // The key also resets per-chat state that must not leak across a switch (pagination limit, jump
-  // anchor, reply/edit targets, selection) and re-runs the share-intent lazy initializers so a
-  // Direct Share into an already-open different chat still stages its files.
-  const screenKey = `${guid}|${focus ?? ''}|${focusDate ?? ''}|${share ?? ''}`;
+  // Route identity changes on replace/push, but remains stable when this screen clears its own
+  // focus params with setParams. That preserves the mounted Composer during local anchor exit while
+  // still resetting pagination, jumps, reply/edit targets, and selection for a genuine navigation.
+  // Keep guid/share as defensive reset boundaries for same-route mutations and future share intake.
+  const screenKey = `${route.key}|${guid}|${share ?? ''}`;
   return (
     <ChatThemeProvider key={screenKey} guid={guid}>
       <ChatScreenInner guid={guid} focusGuid={focus} fromShare={share === '1'} />
@@ -202,6 +204,7 @@ function ChatScreenInner({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
   const [searchNavigating, setSearchNavigating] = useState(false);
+  const [returningToNewest, setReturningToNewest] = useState(false);
   const searchOpenRef = useRef(searchOpen);
   searchOpenRef.current = searchOpen;
   const searchQueryRef = useRef(searchQuery);
@@ -228,7 +231,12 @@ function ChatScreenInner({
   // one screen-worth+ and pages by PAGE_SIZE. In search-anchor mode the window is centered on the
   // hit instead (limit is ignored), so pagination is disabled there.
   const [limit, setLimit] = useState(250);
-  const { data: messagesData, error: messagesError } = useMessages(guid, limit, anchor);
+  const {
+    data: messagesData,
+    error: messagesError,
+    isCurrentWindow,
+    refreshWindow,
+  } = useMessages(guid, limit, anchor);
   const messages = messagesData ?? [];
   // Hold the list back until the FIRST DB read resolves, so FlashList mounts WITH data. Its
   // `startRenderingFromBottom` only anchors the newest message on the INITIAL render (verified
@@ -250,22 +258,26 @@ function ChatScreenInner({
     setLimit((n) => n + 200);
   }, [anchor, messages.length, limit]);
   // The list's scroll-to-bottom button in an ANCHORED session (search hit / unread jump): exit the
-  // anchor and return to the live newest window. Clearing the route params changes `screenKey`
-  // (clean remount → normal bottom-anchored open); clearing only `jump` keeps the instance, and
-  // the anchored→normal data swap converges to the newest row via the list's pinned follow loop.
+  // anchor and return to the live newest window. Clearing route params keeps this route identity
+  // and Composer mounted; the anchored→normal data swap converges through the list's pinned follow
+  // loop. Search close separately keeps Composer hidden until that exact newest request settles.
   // '' (not undefined) is the strict-TS-safe way to drop a param — the existing focus-guid guard
   // treats it as absent (`findIndex('') === -1`). `focusDate` remains in old deep links only for
   // compatibility; exact message identity now owns the window lookup.
   const router = useRouter();
   const navigation = useNavigation();
   const exitAnchor = useCallback((): void => {
+    // Advance the proof generation even if a prior newest result is still retained. Otherwise a
+    // quick newest → pending anchor → newest bounce could mistake that older result for this exit.
+    refreshWindow();
     setJump(null);
     router.setParams({ focus: '', focusDate: '' });
-  }, [router]);
+  }, [refreshWindow, router]);
 
   const closeSearch = useCallback((): void => {
     searchNavigationTokenRef.current += 1;
     appliedSearchKeyRef.current = '';
+    setReturningToNewest(true);
     setSearchOpen(false);
     setSearchText('');
     setSearchQuery('');
@@ -275,6 +287,16 @@ function ChatScreenInner({
     // becomes usable again, or a send outside that old window can look as though it disappeared.
     exitAnchor();
   }, [exitAnchor]);
+  const hasMessageAnchor = anchor != null;
+  useEffect(() => {
+    if (!returningToNewest || hasMessageAnchor || !isCurrentWindow || !accountLease.isCurrent()) {
+      return;
+    }
+    // This acknowledges an async DB result for the requested newest window; it is not derived
+    // render state. The flag must reset so a later search close establishes a fresh barrier.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReturningToNewest(false);
+  }, [accountLease, hasMessageAnchor, isCurrentWindow, returningToNewest]);
   const exitSearchAnchor = useCallback((): void => {
     if (searchOpenRef.current) closeSearch();
     else exitAnchor();
@@ -866,7 +888,7 @@ function ChatScreenInner({
     </View>
   ) : null;
 
-  const composerHidden = selectedGuids != null || searchOpen;
+  const composerHidden = selectedGuids != null || searchOpen || returningToNewest;
   const composerStack = (
     <View
       style={composerHidden ? styles.hiddenComposer : null}

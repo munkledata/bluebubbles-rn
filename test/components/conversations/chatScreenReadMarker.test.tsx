@@ -41,6 +41,7 @@ jest.mock('expo-router', () => {
       R.useEffect(() => (mockRouteFocused ? callback() : undefined), [callback, mockRouteFocused]),
     useLocalSearchParams: () => ({ guid: mockGuid }),
     useNavigation: () => ({ dispatch: jest.fn() }),
+    useRoute: () => ({ key: 'chat-read-marker-route' }),
     useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
   };
 });
@@ -56,13 +57,17 @@ jest.mock('expo-media-library', () => ({
   saveToLibraryAsync: jest.fn(),
 }));
 jest.mock('expo-image', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   return { Image: (props: Record<string, unknown>) => R.createElement(View, props) };
 });
 
 jest.mock('@ui', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   return {
     useTheme: () => ({ color: { background: '#000000' } }),

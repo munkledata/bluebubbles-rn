@@ -2,19 +2,19 @@
  * useMessages (src/features/conversations/useMessages.ts) — the live, newest-first chat feed with
  * attachments, reactions, and reply-quote previews attached. Locked-in contract:
  *   - it subscribes to the ['messages','handles','attachments'] tables and passes
- *     [chatGuid, limit, anchorDate] as the reactive deps;
+ *     [chatGuid, limit, anchorGuid, anchorId, windowGeneration] as the reactive deps;
  *   - an unknown chat guid (getChatIdByGuid → null) yields [] and skips every downstream read;
  *   - enrichment wiring: each row gets its OWN attachments (by message id), reactions (by guid),
  *     and reply preview (by threadOriginatorGuid) — and only reply targets are fetched, deduped;
- *   - `anchorDate` loads the centered window (listMessagesAround) instead of the recent window
- *     (listMessagesWithSenders).
+ *   - an exact anchor loads the centered window (listMessagesAround) instead of the recent window
+ *     (listMessagesWithSenders), and the current-window proof distinguishes retained old rows.
  *
  * The reactive layer (@db/useReactiveQuery) is mocked with a tiny real hook that RUNS the passed
  * enrichment fn once (and re-runs on dep change) so the wiring is exercised; the repositories are
  * mocked in-file with controlled rows. `getDatabase` is the shared setup stub (its value is only
  * forwarded into the mocked repo fns).
  */
-import { renderHook, waitFor } from '../support/renderWithTheme';
+import { act, renderHook, waitFor } from '../support/renderWithTheme';
 import { useMessages, type EnrichedMessage } from '@features/conversations/useMessages';
 import {
   getChatIdByGuid,
@@ -25,6 +25,7 @@ import {
   listReactionsByMessageGuids,
   listStickersForTargets,
   type AttachmentRow,
+  type MessageWindowAnchor,
   type MessagePreview,
   type ReactionRow,
 } from '@db/repositories';
@@ -39,6 +40,7 @@ const mockReactiveArgs: {
 } = { tables: [], deps: [], run: null };
 
 jest.mock('@db/useReactiveQuery', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
   return {
     __esModule: true,
@@ -85,6 +87,19 @@ const mReactions = listReactionsByMessageGuids as jest.MockedFunction<
   typeof listReactionsByMessageGuids
 >;
 const mStickers = listStickersForTargets as jest.MockedFunction<typeof listStickersForTargets>;
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 function mkAttachment(over: Partial<AttachmentRow> = {}): AttachmentRow {
   return {
@@ -143,7 +158,7 @@ describe('useMessages', () => {
   it('subscribes to the right tables and passes exact anchor primitives as deps', async () => {
     await renderHook(() => useMessages('iMessage;-;c1', 100, { guid: 'anchor-guid', id: 12345 }));
     expect(mockReactiveArgs.tables).toEqual(['messages', 'handles', 'attachments']);
-    expect(mockReactiveArgs.deps).toEqual(['iMessage;-;c1', 100, 'anchor-guid', 12345]);
+    expect(mockReactiveArgs.deps).toEqual(['iMessage;-;c1', 100, 'anchor-guid', 12345, 0]);
   });
 
   it('returns [] and skips downstream reads for an unknown chat guid', async () => {
@@ -211,6 +226,99 @@ describe('useMessages', () => {
     expect(mRecent).not.toHaveBeenCalled();
   });
 
+  it('marks retained anchored rows stale until the newest window actually resolves', async () => {
+    const anchored = mkMessage({ id: 9, guid: 'anchored-msg' });
+    const newest = mkMessage({ id: 10, guid: 'newest-msg' });
+    const newestWindow = deferred<Awaited<ReturnType<typeof listMessagesWithSenders>>>();
+    const paginationWindow = deferred<Awaited<ReturnType<typeof listMessagesWithSenders>>>();
+    mAround.mockResolvedValue([anchored]);
+    mRecent.mockReturnValue(newestWindow.promise);
+    const initialAnchor: MessageWindowAnchor = { guid: anchored.guid, id: anchored.id };
+    const { result, rerender } = await renderHook(
+      ({ anchor, limit }: { anchor?: MessageWindowAnchor; limit: number }) =>
+        useMessages('iMessage;-;c1', limit, anchor),
+      { initialProps: { anchor: initialAnchor, limit: 100 } },
+    );
+    await waitFor(() => expect(result.current.data?.[0]?.guid).toBe(anchored.guid));
+    expect(result.current.isCurrentWindow).toBe(true);
+
+    await rerender({ anchor: undefined, limit: 100 });
+
+    expect(mRecent).toHaveBeenLastCalledWith(undefined, 10, 100);
+    expect(result.current.data?.[0]?.guid).toBe(anchored.guid);
+    expect(result.current.isCurrentWindow).toBe(false);
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.error).toBeNull();
+
+    newestWindow.resolve([newest]);
+    await waitFor(() => expect(result.current.data?.[0]?.guid).toBe(newest.guid));
+    expect(result.current.isCurrentWindow).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+
+    // Growing the same newest window is pagination, not a mode change. Retained newest rows remain
+    // current and the Composer must not be disabled merely because an older page is being fetched.
+    mRecent.mockReturnValue(paginationWindow.promise);
+    await rerender({ anchor: undefined, limit: 300 });
+    expect(mRecent).toHaveBeenLastCalledWith(undefined, 10, 300);
+    expect(result.current.data?.[0]?.guid).toBe(newest.guid);
+    expect(result.current.isCurrentWindow).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+    await act(async () => {
+      paginationWindow.resolve([newest]);
+      await paginationWindow.promise;
+    });
+  });
+
+  it('does not reuse an older newest proof after bouncing through a pending anchor', async () => {
+    const retainedNewest = mkMessage({ id: 10, guid: 'retained-newest' });
+    const refreshedNewest = mkMessage({ id: 11, guid: 'refreshed-newest' });
+    const pendingAnchor = mkMessage({ id: 9, guid: 'pending-anchor' });
+    const anchorWindow = deferred<Awaited<ReturnType<typeof listMessagesAround>>>();
+    const newestWindow = deferred<Awaited<ReturnType<typeof listMessagesWithSenders>>>();
+    mRecent.mockResolvedValueOnce([retainedNewest]).mockReturnValue(newestWindow.promise);
+    mAround.mockReturnValue(anchorWindow.promise);
+    const { result, rerender } = await renderHook(
+      ({ anchor }: { anchor?: MessageWindowAnchor }) => useMessages('iMessage;-;c1', 100, anchor),
+      { initialProps: { anchor: undefined } },
+    );
+    await waitFor(() => expect(result.current.data?.[0]?.guid).toBe(retainedNewest.guid));
+    expect(result.current.isCurrentWindow).toBe(true);
+    const refreshWindow = result.current.refreshWindow;
+
+    await rerender({ anchor: { guid: pendingAnchor.guid, id: pendingAnchor.id } });
+    expect(result.current.data?.[0]?.guid).toBe(retainedNewest.guid);
+    expect(result.current.isCurrentWindow).toBe(false);
+
+    await act(async () => refreshWindow());
+    await rerender({ anchor: undefined });
+
+    expect(result.current.refreshWindow).toBe(refreshWindow);
+    expect(result.current.data?.[0]?.guid).toBe(retainedNewest.guid);
+    expect(result.current.isCurrentWindow).toBe(false);
+    expect(result.current.isLoading).toBe(true);
+
+    await act(async () => {
+      anchorWindow.resolve([pendingAnchor]);
+      newestWindow.resolve([refreshedNewest]);
+      await Promise.all([anchorWindow.promise, newestWindow.promise]);
+    });
+    await waitFor(() => expect(result.current.data?.[0]?.guid).toBe(refreshedNewest.guid));
+    expect(result.current.isCurrentWindow).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('reports a failed requested window without treating it as current', async () => {
+    const failure = new Error('message window failed');
+    mRecent.mockRejectedValue(failure);
+
+    const { result } = await renderHook(() => useMessages('iMessage;-;c1'));
+
+    await waitFor(() => expect(result.current.error).toBe(failure));
+    expect(result.current.data).toBeNull();
+    expect(result.current.isCurrentWindow).toBe(false);
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('preserves row identity across re-queries when nothing changed', async () => {
     mRecent.mockResolvedValue([mkMessage({ id: 1, guid: 'msg-1', sendState: 'sending' })]);
     const { result } = await renderHook(() => useMessages('iMessage;-;c1'));
@@ -220,14 +328,14 @@ describe('useMessages', () => {
     // Simulate a reactive flush: re-run the captured query fn. The enrichment map builds a FRESH
     // object per pass; the identity cache must hand back the previous one when nothing changed,
     // or every flush defeats the memoized MessageRow/MessageBubble.
-    const second = (await mockReactiveArgs.run!()) as EnrichedMessage[];
-    expect(second[0]).toBe(first);
+    const second = (await mockReactiveArgs.run!()) as { messages: EnrichedMessage[] };
+    expect(second.messages[0]).toBe(first);
 
     // A mutable column changed (sendState) → a NEW object.
     mRecent.mockResolvedValue([mkMessage({ id: 1, guid: 'msg-1', sendState: 'sent' })]);
-    const third = (await mockReactiveArgs.run!()) as EnrichedMessage[];
-    expect(third[0]).not.toBe(first);
-    expect(third[0]!.sendState).toBe('sent');
+    const third = (await mockReactiveArgs.run!()) as { messages: EnrichedMessage[] };
+    expect(third.messages[0]).not.toBe(first);
+    expect(third.messages[0]!.sendState).toBe('sent');
   });
 
   it('a reactions change produces a new row object (nested content is fingerprinted)', async () => {
@@ -238,12 +346,12 @@ describe('useMessages', () => {
     expect(first.reactions).toEqual([]);
 
     mReactions.mockResolvedValue(new Map([['msg-1', [mkReaction({ targetGuid: 'msg-1' })]]]));
-    const second = (await mockReactiveArgs.run!()) as EnrichedMessage[];
-    expect(second[0]).not.toBe(first);
-    expect(second[0]!.reactions).toHaveLength(1);
+    const second = (await mockReactiveArgs.run!()) as { messages: EnrichedMessage[] };
+    expect(second.messages[0]).not.toBe(first);
+    expect(second.messages[0]!.reactions).toHaveLength(1);
   });
 
-  it('uses the recent window (listMessagesWithSenders) with no anchorDate', async () => {
+  it('uses the recent window (listMessagesWithSenders) with no anchor', async () => {
     mRecent.mockResolvedValue([mkMessage({ id: 5, guid: 'msg-5' })]);
     const { result } = await renderHook(() => useMessages('iMessage;-;c1', 30));
     await waitFor(() => expect(result.current.data).toHaveLength(1));

@@ -39,8 +39,12 @@ const mockNavigationDispatch = jest.fn();
 const mockUsePreventRemove = jest.fn();
 const mockIsDevServer = jest.fn(() => false);
 const mockUseChatSearch = jest.fn();
+const mockRefreshWindow = jest.fn();
 // Mutable so a test can hand the SAME mounted screen a new guid (reused-instance path).
 let mockGuid = GUID;
+let mockFocus: string | undefined;
+let mockFocusDate: string | undefined;
+let mockRouteKey = 'chat-route-1';
 
 /** Latest props each probe was rendered with — tests read/invoke these. */
 const mockCaptured: {
@@ -72,8 +76,13 @@ jest.mock('expo-router', () => {
   const R = require('react');
   return {
     useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
-    useLocalSearchParams: () => ({ guid: mockGuid }),
+    useLocalSearchParams: () => ({
+      guid: mockGuid,
+      focus: mockFocus,
+      focusDate: mockFocusDate,
+    }),
     useNavigation: () => ({ dispatch: mockNavigationDispatch }),
+    useRoute: () => ({ key: mockRouteKey }),
     useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
   };
 });
@@ -355,12 +364,21 @@ beforeEach(() => {
   mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
   (pickAndSendContact as jest.Mock).mockResolvedValue(null);
   mockGuid = GUID;
+  mockFocus = undefined;
+  mockFocusDate = undefined;
+  mockRouteKey = 'chat-route-1';
   mockInsetBottom = 0;
   mockKbVisible = false;
   mockVoiceRecorderProps = undefined;
   useSessionStore.setState({ serverInfo: null });
   useTypingStore.setState({ typing: {} });
-  useMessagesMock.mockReturnValue({ data: [], error: null });
+  useMessagesMock.mockReturnValue({
+    data: [],
+    error: null,
+    isCurrentWindow: true,
+    isLoading: false,
+    refreshWindow: mockRefreshWindow,
+  });
   useChatHeaderMock.mockReturnValue({
     data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: null },
     error: null,
@@ -457,6 +475,22 @@ function overlayStyleCounts(tree: unknown): { top: number; bottom: number } {
     if (style.bottom === 0) bottom += 1;
   });
   return { top, bottom };
+}
+
+function hiddenComposerGateCount(tree: unknown): number {
+  let count = 0;
+  visitHostTree(tree, (node) => {
+    const style = flattenTestStyle(node.props?.style);
+    if (
+      style.display === 'none' &&
+      node.props?.pointerEvents === 'none' &&
+      node.props?.accessibilityElementsHidden === true &&
+      node.props?.importantForAccessibility === 'no-hide-descendants'
+    ) {
+      count += 1;
+    }
+  });
+  return count;
 }
 
 function expectWallpaperPresentation(tree: unknown, uri: string | null): void {
@@ -981,6 +1015,172 @@ describe('ChatScreen — current-chat search orchestration', () => {
       expect(mockCaptured.list?.focusGuid).toBeUndefined();
       expect(mockCaptured.composer?.__instance).toBe(composerInstance);
       await run(() => mockCaptured.header!.onSearchPress());
+    } finally {
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps a focused-route composer mounted and hidden until the newest window is current', async () => {
+    mockFocus = 'route-focus-guid';
+    mockFocusDate = '123456';
+    let newestWindowCurrent = false;
+    const retainedRows = [makeMsg({ guid: 'route-focus-guid' })];
+    useMessagesMock.mockImplementation(
+      (_chatGuid: string, _limit: number, anchor?: { guid: string; id?: number }) => ({
+        data: retainedRows,
+        error: null,
+        isCurrentWindow: anchor != null || newestWindowCurrent,
+        isLoading: false,
+        refreshWindow: mockRefreshWindow,
+      }),
+    );
+    const view = await renderWithTheme(<ChatScreen />);
+    const composerInstance = mockCaptured.composer!.__instance;
+
+    expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+      guid: 'route-focus-guid',
+    });
+    await run(() => mockCaptured.header!.onSearchPress());
+    await run(() => mockCaptured.header!.onSearchPress());
+
+    expect(mockSetParams).toHaveBeenLastCalledWith({ focus: '', focusDate: '' });
+    expect(mockRefreshWindow).toHaveBeenCalledTimes(1);
+    expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+    expect(mockCaptured.composer?.active).toBe(false);
+    expect(hiddenComposerGateCount(view.toJSON())).toBe(1);
+
+    // `setParams` updates the same navigator route. Apply those changed params as Expo Router would;
+    // the old focus-keyed screen remounted here and silently discarded non-text Composer state.
+    mockFocus = '';
+    mockFocusDate = '';
+    await act(async () => view.rerender(<ChatScreen />));
+
+    expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, undefined);
+    expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+    expect(mockCaptured.composer?.active).toBe(false);
+    expect(hiddenComposerGateCount(view.toJSON())).toBe(1);
+
+    newestWindowCurrent = true;
+    await act(async () => view.rerender(<ChatScreen />));
+    await waitFor(() => expect(mockCaptured.composer?.active).toBe(true));
+    expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+    expect(hiddenComposerGateCount(view.toJSON())).toBe(0);
+  });
+
+  it('does not reuse an older newest proof after closing a still-loading search anchor', async () => {
+    jest.useFakeTimers();
+    const searchHit = makeSearchHit(901, 'pending-search-guid');
+    let newestWindowCurrent = true;
+    mockRefreshWindow.mockImplementation(() => {
+      newestWindowCurrent = false;
+    });
+    useMessagesMock.mockImplementation(
+      (_chatGuid: string, _limit: number, anchor?: { guid: string; id?: number }) => ({
+        data: [makeMsg({ guid: 'retained-newest-guid' })],
+        error: null,
+        isCurrentWindow: anchor == null && newestWindowCurrent,
+        isLoading: false,
+        refreshWindow: mockRefreshWindow,
+      }),
+    );
+    mockUseChatSearch.mockImplementation(
+      (_chatGuid: string, query: string, _accountLease: unknown) => {
+        const ready = query === 'needle';
+        return {
+          data: ready ? { pages: [{ results: [searchHit], totalCount: 1 }] } : undefined,
+          fetchNextPage: jest.fn(),
+          hasNextPage: false,
+          isError: false,
+          isFetchingNextPage: false,
+          isPending: !ready,
+          results: ready ? [searchHit] : [],
+          totalCount: ready ? 1 : 0,
+          query,
+        };
+      },
+    );
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+
+    try {
+      view = await renderWithTheme(<ChatScreen />);
+      const composerInstance = mockCaptured.composer!.__instance;
+      await run(() => mockCaptured.header!.onSearchPress());
+      await run(() => mockCaptured.search!.onChangeText('needle'));
+      await act(async () => {
+        jest.advanceTimersByTime(250);
+      });
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: searchHit.id,
+        guid: searchHit.guid,
+      });
+
+      // Close before the anchored message query settles. The older retained newest rows cannot
+      // prove that the fresh return-to-newest request triggered by this close has completed.
+      await run(() => mockCaptured.header!.onSearchPress());
+      expect(mockRefreshWindow).toHaveBeenCalledTimes(1);
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, undefined);
+      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+      expect(mockCaptured.composer?.active).toBe(false);
+      expect(hiddenComposerGateCount(view.toJSON())).toBe(1);
+
+      newestWindowCurrent = true;
+      await act(async () => view?.rerender(<ChatScreen />));
+      await waitFor(() => expect(mockCaptured.composer?.active).toBe(true));
+      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+      expect(hiddenComposerGateCount(view.toJSON())).toBe(0);
+    } finally {
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it('adopts a same-focus external route replacement instead of retaining a local search jump', async () => {
+    jest.useFakeTimers();
+    mockFocus = 'external-focus-guid';
+    mockFocusDate = '123456';
+    const searchHit = makeSearchHit(901, 'local-search-guid');
+    mockUseChatSearch.mockImplementation(
+      (_chatGuid: string, query: string, _accountLease: unknown) => {
+        const ready = query === 'needle';
+        return {
+          data: ready ? { pages: [{ results: [searchHit], totalCount: 1 }] } : undefined,
+          fetchNextPage: jest.fn(),
+          hasNextPage: false,
+          isError: false,
+          isFetchingNextPage: false,
+          isPending: !ready,
+          results: ready ? [searchHit] : [],
+          totalCount: ready ? 1 : 0,
+          query,
+        };
+      },
+    );
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+
+    try {
+      view = await renderWithTheme(<ChatScreen />);
+      const composerInstance = mockCaptured.composer!.__instance;
+      await run(() => mockCaptured.header!.onSearchPress());
+      await run(() => mockCaptured.search!.onChangeText('needle'));
+      await act(async () => {
+        jest.advanceTimersByTime(250);
+      });
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        id: searchHit.id,
+        guid: searchHit.guid,
+      });
+
+      // Current focused navigation uses router.replace. The focus value can repeat, but the new
+      // navigator route key must still reset local search/jump state and adopt its route anchor.
+      mockRouteKey = 'chat-route-2';
+      await act(async () => view?.rerender(<ChatScreen />));
+
+      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+        guid: 'external-focus-guid',
+      });
+      expect(mockCaptured.composer?.__instance).not.toBe(composerInstance);
+      expect(mockCaptured.header?.searchActive).toBe(false);
     } finally {
       if (view) await act(async () => view?.unmount());
       jest.useRealTimers();

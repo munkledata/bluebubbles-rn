@@ -54,7 +54,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${CHAT_ROUTE_PATH}#ChatScreen`,
-    '06013bdb323211573156b5fadcd7c84f8b41f1fd393d9d0a8102071bf57f6d25',
+    'dc96ee03b5ee747b737a9db1235e67e1c3b48899404f70b472248a496d17d978',
   ],
   [
     `${HOME_PATH}#Home.scheduledEffect`,

@@ -29,6 +29,7 @@ jest.mock('expo-router', () => {
     useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
     useLocalSearchParams: () => ({ guid: GUID }),
     useNavigation: () => ({ dispatch: jest.fn() }),
+    useRoute: () => ({ key: 'chat-deleted-backfill-route' }),
     useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
   };
 });
