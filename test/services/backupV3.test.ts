@@ -100,7 +100,17 @@ async function expectBoundedExportRejection(t: TestDb, message: string): Promise
   await expect(kvSet(t.db, 'theme.preset', 'writer-after-rejection')).resolves.toBeUndefined();
 }
 
-function captureAllSql(db: TestDb['db']): { db: TestDb['db']; statements: string[] } {
+interface CapturedSqlQuery {
+  sql: string;
+  params: unknown[];
+}
+
+function captureAllSql(db: TestDb['db']): {
+  db: TestDb['db'];
+  queries: CapturedSqlQuery[];
+  statements: string[];
+} {
+  const queries: CapturedSqlQuery[] = [];
   const statements: string[] = [];
   const instrumented = new Proxy(db, {
     get(target, property) {
@@ -109,17 +119,19 @@ function captureAllSql(db: TestDb['db']): { db: TestDb['db']; statements: string
         return (...args: unknown[]) => {
           const dialect = (
             target as unknown as {
-              dialect: { sqlToQuery(query: unknown): { sql: string } };
+              dialect: { sqlToQuery(query: unknown): CapturedSqlQuery };
             }
           ).dialect;
-          statements.push(dialect.sqlToQuery(args[0]).sql);
+          const query = dialect.sqlToQuery(args[0]);
+          queries.push(query);
+          statements.push(query.sql);
           return Reflect.apply(value, target, args);
         };
       }
       return typeof value === 'function' ? value.bind(target) : value;
     },
   }) as TestDb['db'];
-  return { db: instrumented, statements };
+  return { db: instrumented, queries, statements };
 }
 
 describe('backup v3 custom folders', () => {
@@ -418,7 +430,7 @@ describe('backup v3 custom folders', () => {
 
   it('rejects aggregate max-plus-one folder memberships before window or identity JSON work', async () => {
     const source = await createTestDb();
-    const folders: Array<Awaited<ReturnType<typeof createCustomFolder>>> = [];
+    const folders: Awaited<ReturnType<typeof createCustomFolder>>[] = [];
     for (let index = 0; index < 6; index += 1) {
       folders.push(await createCustomFolder(source.db, `Bounded folder ${index}`));
     }
@@ -443,6 +455,13 @@ describe('backup v3 custom folders', () => {
     expect(captured.statements.some((statement) => /row_number\s*\(/iu.test(statement))).toBe(
       false,
     );
+    const memberProbeStatements = captured.statements.filter((statement) =>
+      statement.includes('WITH member_ids AS MATERIALIZED'),
+    );
+    expect(memberProbeStatements).toHaveLength(1);
+    expect(memberProbeStatements[0]).toContain(
+      'custom_folder_members INDEXED BY custom_folder_members_chat_guid_idx',
+    );
     expect(
       captured.statements.some(
         (statement) =>
@@ -461,7 +480,7 @@ describe('backup v3 custom folders', () => {
          )
          SELECT COUNT(*) FROM member_ids`,
       )
-      .all() as Array<{ detail: string }>;
+      .all() as { detail: string }[];
     expect(plan.some((row) => row.detail.includes('custom_folder_members_chat_guid_idx'))).toBe(
       true,
     );
@@ -469,6 +488,109 @@ describe('backup v3 custom folders', () => {
     await expect(
       kvSet(source.db, 'theme.preset', 'writer-after-folder-cap'),
     ).resolves.toBeUndefined();
+  });
+
+  it('accepts 10,000 folder identities and bounds exact validation before rejecting more', async () => {
+    const source = await createTestDb();
+    const folders = await Promise.all([
+      createCustomFolder(source.db, 'Identity cap 1'),
+      createCustomFolder(source.db, 'Identity cap 2'),
+      createCustomFolder(source.db, 'Identity cap 3'),
+      createCustomFolder(source.db, 'Identity cap 4'),
+      createCustomFolder(source.db, 'Identity cap 5'),
+    ]);
+    const insertChat = source.raw.prepare(
+      'INSERT INTO chats (guid, chat_identifier, style) VALUES (?, ?, 45)',
+    );
+    const insertMember = source.raw.prepare(
+      'INSERT INTO custom_folder_members (folder_id, chat_guid) VALUES (?, ?)',
+    );
+    source.raw.transaction(() => {
+      for (let index = 0; index < BACKUP_LIMITS.customFolderChatIdentities; index += 1) {
+        const guid = `g${index}`;
+        insertChat.run(guid, 'x');
+        const folderIndex = Math.floor(index / MAX_CUSTOM_FOLDER_MEMBERS);
+        insertMember.run(folders[folderIndex]!.id, guid);
+      }
+    })();
+    const atLimit = await buildBackupWithCustomFolders(source.db, { exportedAt: 44 });
+    expect(atLimit.customFolderChatIdentities).toHaveLength(
+      BACKUP_LIMITS.customFolderChatIdentities,
+    );
+
+    source.raw.transaction(() => {
+      for (
+        let index = BACKUP_LIMITS.customFolderChatIdentities;
+        index < BACKUP_LIMITS.customFolderMemberships;
+        index += 1
+      ) {
+        const guid = `g${index}`;
+        insertChat.run(guid, 'x');
+        const folderIndex = Math.floor(index / MAX_CUSTOM_FOLDER_MEMBERS);
+        insertMember.run(folders[folderIndex]!.id, guid);
+      }
+    })();
+
+    const captured = captureAllSql(source.db);
+    await expect(buildBackupWithCustomFolders(captured.db, { exportedAt: 44 })).rejects.toThrow(
+      'Custom folder chat identities exceed their backup safety bound.',
+    );
+    const participantAggregationQueries = captured.queries.filter(
+      (query) =>
+        query.sql.includes('WITH requested_chat AS MATERIALIZED') &&
+        query.sql.includes('json_group_array'),
+    );
+    expect(participantAggregationQueries).toHaveLength(1);
+    const requestedIdsJson = participantAggregationQueries[0]!.params.find(
+      (value): value is string => typeof value === 'string' && value.startsWith('['),
+    );
+    expect(requestedIdsJson).toBeDefined();
+    expect(JSON.parse(requestedIdsJson!)).toHaveLength(
+      BACKUP_LIMITS.customFolderChatIdentities + 1,
+    );
+    await expect(
+      kvSet(source.db, 'theme.preset', 'writer-after-identity-cap'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('omits 10,001 SQL-bounded but non-portable identities instead of rejecting', async () => {
+    const source = await createTestDb();
+    const folders = await Promise.all([
+      createCustomFolder(source.db, 'Non-portable cap 1'),
+      createCustomFolder(source.db, 'Non-portable cap 2'),
+      createCustomFolder(source.db, 'Non-portable cap 3'),
+    ]);
+    const insertChat = source.raw.prepare(
+      'INSERT INTO chats (guid, chat_identifier, style) VALUES (?, ?, 45)',
+    );
+    const insertMember = source.raw.prepare(
+      'INSERT INTO custom_folder_members (folder_id, chat_guid) VALUES (?, ?)',
+    );
+    const handle = source.raw
+      .prepare('INSERT INTO handles (address, service) VALUES (?, ?)')
+      .run('x', `${'a'.repeat(BACKUP_LIMITS.chatServiceCharacters - 1)}😀`);
+    const insertChatHandle = source.raw.prepare(
+      'INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)',
+    );
+    source.raw.transaction(() => {
+      for (let index = 0; index <= BACKUP_LIMITS.customFolderChatIdentities; index += 1) {
+        const guid = `n${index}`;
+        const chat = insertChat.run(guid, null);
+        insertChatHandle.run(Number(chat.lastInsertRowid), Number(handle.lastInsertRowid));
+        const folderIndex = Math.floor(index / MAX_CUSTOM_FOLDER_MEMBERS);
+        insertMember.run(folders[folderIndex]!.id, guid);
+      }
+      insertChat.run('z-portable-tail', 'portable-tail');
+      insertMember.run(folders[2]!.id, 'z-portable-tail');
+    })();
+
+    const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 44 });
+    expect(backup.customFolderChatIdentities).toEqual([
+      expect.objectContaining({ serverChatIdentifier: 'portable-tail' }),
+    ]);
+    expect(
+      backup.customFolders.reduce((total, folder) => total + folder.sourceMemberCount, 0),
+    ).toBe(BACKUP_LIMITS.customFolderChatIdentities + 2);
   });
 
   it('charges escaped folder identity JSON to the shared base budget before aggregation', async () => {
@@ -563,6 +685,38 @@ describe('backup v3 custom folders', () => {
     expect(backup.customFolders).toEqual([
       expect.objectContaining({ sourceMemberCount: 1, memberIndexes: [0] }),
     ]);
+  });
+
+  it('validates one shared non-portable folder identity only once', async () => {
+    const source = await createTestDb();
+    const oversizedAddress = '😀'.repeat(2_049);
+    await seedChat(source, 'shared-non-portable-identity', {
+      chatIdentifier: null,
+      participants: [{ address: oversizedAddress, service: 'iMessage' }],
+      style: 45,
+    });
+    const firstFolder = await createCustomFolder(source.db, 'Shared invalid 1');
+    const secondFolder = await createCustomFolder(source.db, 'Shared invalid 2');
+    await replaceCustomFolderMembership(source.db, firstFolder.id, [
+      'shared-non-portable-identity',
+    ]);
+    await replaceCustomFolderMembership(source.db, secondFolder.id, [
+      'shared-non-portable-identity',
+    ]);
+    const participantJson = JSON.stringify([{ service: 'iMessage', address: oversizedAddress }]);
+    const parseSpy = jest.spyOn(JSON, 'parse');
+
+    try {
+      const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 44 });
+      expect(backup.customFolderChatIdentities).toEqual([]);
+      expect(backup.customFolders).toEqual([
+        expect.objectContaining({ sourceMemberCount: 1, memberIndexes: [] }),
+        expect.objectContaining({ sourceMemberCount: 1, memberIndexes: [] }),
+      ]);
+      expect(parseSpy.mock.calls.filter(([value]) => value === participantJson)).toHaveLength(1);
+    } finally {
+      parseSpy.mockRestore();
+    }
   });
 
   it('exports one encrypted portable registry and restores it into a fresh database', async () => {

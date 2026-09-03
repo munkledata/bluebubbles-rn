@@ -145,10 +145,15 @@ interface CustomFolderIdentityExportRow {
   participantsJson: string;
 }
 
+interface CustomFolderPortableIdentityRow {
+  chatId: number;
+  identity: PortableChatIdentityRow;
+}
+
 interface CustomFolderBackupExportRows {
   folders: CustomFolderHeaderExportRow[];
   members: Array<Pick<CustomFolderMemberProbeRow, 'folderId' | 'chatId'>>;
-  identities: CustomFolderIdentityExportRow[];
+  identities: CustomFolderPortableIdentityRow[];
 }
 
 export interface CustomFolderBackupRow {
@@ -1534,61 +1539,86 @@ function readCustomFolderBackupRowsWithinTransaction(
       );
     }
 
-    const identities = await db.all<CustomFolderIdentityExportRow>(sql`
-      WITH requested_chat AS MATERIALIZED (
-        SELECT CAST(entry.value AS INTEGER) AS chat_id,
-               CAST(entry.key AS INTEGER) AS occurrence
-          FROM json_each(${exportableChatIdsJson}) AS entry
-         ORDER BY CAST(entry.key AS INTEGER)
-         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
-      )
-      SELECT chat.id AS chatId,
-             chat.guid,
-             chat.chat_identifier AS chatIdentifier,
-             chat.style,
-             COALESCE(
-               (
-                 SELECT json_group_array(
-                   json_object('service', participant.service, 'address', participant.address)
-                 )
-                   FROM (
-                     SELECT COALESCE(handle.service, '') AS service,
-                            handle.address AS address
-                       FROM (
-                         SELECT handle_id
-                           FROM chat_handles
-                          WHERE chat_id = chat.id
-                          ORDER BY handle_id ASC
-                          LIMIT ${limits.chatParticipants + 1}
-                       ) AS raw_handle
-                       JOIN handles AS handle ON handle.id = raw_handle.handle_id
-                      WHERE handle.address IS NOT NULL
-                        AND handle.address <> ''
-                      GROUP BY COALESCE(handle.service, ''), handle.address
-                      ORDER BY MIN(handle.id) ASC
-                   ) AS participant
-               ),
-               '[]'
-             ) AS participantsJson
-        FROM requested_chat AS request
-        JOIN chats AS chat ON chat.id = request.chat_id
-       ORDER BY request.occurrence ASC
-    `);
-    if (identities.length !== exportableChatIds.length) {
-      throw new Error('Custom folder identity export is incomplete.');
-    }
-    const exportableIdSet = new Set(exportableChatIds);
+    // Exact JavaScript/Zod string rules can reject a SQL-bounded candidate (for example, one
+    // astral code point consumes two UTF-16 units). Aggregate at most max-plus-one candidates at
+    // a time, validate each batch exactly, and retain only portable identities. This preserves
+    // omission semantics without letting all 25,000 associations allocate participant arrays.
+    const identities: CustomFolderPortableIdentityRow[] = [];
     const returnedIdentityIds = new Set<number>();
-    for (const row of identities) {
-      if (
-        !Number.isSafeInteger(row.chatId) ||
-        row.chatId <= 0 ||
-        !exportableIdSet.has(row.chatId) ||
-        returnedIdentityIds.has(row.chatId)
-      ) {
-        throw new Error('Custom folder identity export is inconsistent.');
+    const identityBatchSize = MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES + 1;
+    for (let offset = 0; offset < exportableChatIds.length; offset += identityBatchSize) {
+      const batchChatIds = exportableChatIds.slice(offset, offset + identityBatchSize);
+      const batchChatIdsJson = JSON.stringify(batchChatIds);
+      const batchRows = await db.all<CustomFolderIdentityExportRow>(sql`
+        WITH requested_chat AS MATERIALIZED (
+          SELECT CAST(entry.value AS INTEGER) AS chat_id,
+                 CAST(entry.key AS INTEGER) AS occurrence
+            FROM json_each(${batchChatIdsJson}) AS entry
+           ORDER BY CAST(entry.key AS INTEGER)
+           LIMIT ${identityBatchSize}
+        )
+        SELECT chat.id AS chatId,
+               chat.guid,
+               chat.chat_identifier AS chatIdentifier,
+               chat.style,
+               COALESCE(
+                 (
+                   SELECT json_group_array(
+                     json_object('service', participant.service, 'address', participant.address)
+                   )
+                     FROM (
+                       SELECT COALESCE(handle.service, '') AS service,
+                              handle.address AS address
+                         FROM (
+                           SELECT handle_id
+                             FROM chat_handles
+                            WHERE chat_id = chat.id
+                            ORDER BY handle_id ASC
+                            LIMIT ${limits.chatParticipants + 1}
+                         ) AS raw_handle
+                         JOIN handles AS handle ON handle.id = raw_handle.handle_id
+                        WHERE handle.address IS NOT NULL
+                          AND handle.address <> ''
+                        GROUP BY COALESCE(handle.service, ''), handle.address
+                        ORDER BY MIN(handle.id) ASC
+                     ) AS participant
+                 ),
+                 '[]'
+               ) AS participantsJson
+          FROM requested_chat AS request
+          JOIN chats AS chat ON chat.id = request.chat_id
+         ORDER BY request.occurrence ASC
+      `);
+      if (batchRows.length !== batchChatIds.length) {
+        throw new Error('Custom folder identity export is incomplete.');
       }
-      returnedIdentityIds.add(row.chatId);
+      for (const [index, row] of batchRows.entries()) {
+        if (
+          !Number.isSafeInteger(row.chatId) ||
+          row.chatId <= 0 ||
+          row.chatId !== batchChatIds[index] ||
+          returnedIdentityIds.has(row.chatId)
+        ) {
+          throw new Error('Custom folder identity export is inconsistent.');
+        }
+        returnedIdentityIds.add(row.chatId);
+        const participants = parseBackupParticipants(row.participantsJson);
+        if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants)) continue;
+        const identity = buildPortableChatIdentity(
+          row.guid,
+          row.chatIdentifier,
+          row.style,
+          participants,
+        );
+        if (!hasPortableRestoreEvidence(identity)) continue;
+        if (identities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
+          throw new Error('Custom folder chat identities exceed their backup safety bound.');
+        }
+        identities.push({ chatId: row.chatId, identity });
+      }
+    }
+    if (returnedIdentityIds.size !== exportableChatIds.length) {
+      throw new Error('Custom folder identity export is incomplete.');
     }
     return { folders, members, identities };
   });
@@ -1676,16 +1706,12 @@ function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): Custom
 
   const customFolderChatIdentities: PortableChatIdentityRow[] = [];
   const identityIndexes = new Map<number, number>();
-  const identityRows = new Map<number, CustomFolderIdentityExportRow>();
-  for (const identity of rows.identities) {
-    if (
-      !Number.isSafeInteger(identity.chatId) ||
-      identity.chatId <= 0 ||
-      identityRows.has(identity.chatId)
-    ) {
+  const identityRows = new Map<number, PortableChatIdentityRow>();
+  for (const row of rows.identities) {
+    if (!Number.isSafeInteger(row.chatId) || row.chatId <= 0 || identityRows.has(row.chatId)) {
       throw new Error('Custom folder identity export is inconsistent.');
     }
-    identityRows.set(identity.chatId, identity);
+    identityRows.set(row.chatId, row.identity);
   }
   const customFolders: CustomFolderBackupRow[] = [];
 
@@ -1707,19 +1733,10 @@ function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): Custom
       // No chat row or no bounded portable evidence means there is nothing stable to carry. The
       // complete source count still lets restore report the omission.
       if (member.chatId === null) continue;
-      const row = identityRows.get(member.chatId);
-      if (!row) continue;
+      const identity = identityRows.get(member.chatId);
+      if (!identity) continue;
       let identityIndex = identityIndexes.get(member.chatId);
       if (identityIndex === undefined) {
-        const participants = parseBackupParticipants(row.participantsJson);
-        if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants)) continue;
-        const identity = buildPortableChatIdentity(
-          row.guid,
-          row.chatIdentifier,
-          row.style,
-          participants,
-        );
-        if (!hasPortableRestoreEvidence(identity)) continue;
         if (customFolderChatIdentities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
           throw new Error('Custom folder chat identities exceed their backup safety bound.');
         }
