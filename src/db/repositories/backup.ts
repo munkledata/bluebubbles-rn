@@ -10,6 +10,7 @@ import type { AppDatabase } from '../types';
 import {
   MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
   MAX_CUSTOM_FOLDER_MEMBERS,
+  MAX_CUSTOM_FOLDER_NAME_CODE_POINTS,
   MAX_CUSTOM_FOLDERS,
   normalizeCustomFolderName,
 } from './customFolders';
@@ -75,18 +76,79 @@ const MAX_BACKUP_CHAT_PARTICIPANTS = 512;
 const MAX_BACKUP_CHAT_SERVICE_CHARACTERS = 128;
 const MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS = 4_096;
 const MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS = 4_096;
-const MAX_UTF8_BYTES_PER_CHARACTER = 4;
+const DEFAULT_BACKUP_MAX_RAW_BYTES = 4 * 1024 * 1024;
+const ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER = 96;
+const ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER_ASSOCIATION = 12;
+const ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER_IDENTITY = 128;
 
-interface CustomFolderBackupExportRow {
+interface CustomFolderExportLimits {
+  maxRawBytes: number;
+  chatServiceCharacters: number;
+  chatIdentifierCharacters: number;
+  chatParticipantAddressCharacters: number;
+  chatParticipants: number;
+}
+
+const DEFAULT_CUSTOM_FOLDER_EXPORT_LIMITS: CustomFolderExportLimits = {
+  maxRawBytes: DEFAULT_BACKUP_MAX_RAW_BYTES,
+  chatServiceCharacters: MAX_BACKUP_CHAT_SERVICE_CHARACTERS,
+  chatIdentifierCharacters: MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS,
+  chatParticipantAddressCharacters: MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS,
+  chatParticipants: MAX_BACKUP_CHAT_PARTICIPANTS,
+};
+
+interface CustomFolderHeaderProbeRow {
+  folderId: number;
+  invalidTypeCount: number;
+  nameCharacters: number;
+  nameBytes: number;
+  nameJsonBytes: number;
+}
+
+interface CustomFolderHeaderExportRow {
   folderId: number;
   name: string;
   showUnreadBadge: number;
-  chatGuid: string | null;
-  loadedGuid: string | null;
-  identityEvidenceValid: number | null;
+}
+
+interface CustomFolderMemberCountProbeRow {
+  rowCount: number;
+}
+
+interface CustomFolderMemberProbeRow {
+  folderId: number;
+  chatId: number | null;
+  invalidTypeCount: number;
+  guidCharacters: number;
+  guidBytes: number;
+  hasNullCharacter: number;
+}
+
+interface CustomFolderIdentityProbeRow {
+  chatId: number;
+  invalidTypeCount: number;
+  guidCharacters: number;
+  guidBytes: number;
+  identifierCharacters: number;
+  identifierBytes: number;
+  identifierJsonBytes: number;
+  hasKnownKind: number;
+  identifierHasContent: number;
+  participantStatsJson: string;
+}
+
+interface CustomFolderIdentityExportRow {
+  chatId: number;
+  guid: string;
   chatIdentifier: string | null;
   style: number | null;
-  participantsJson: string | null;
+  participantsJson: string;
+}
+
+interface CustomFolderBackupExportRows {
+  folders: CustomFolderHeaderExportRow[];
+  members: Array<Pick<CustomFolderMemberProbeRow, 'folderId' | 'chatId'>>;
+  identities: CustomFolderIdentityExportRow[];
 }
 
 export interface CustomFolderBackupRow {
@@ -339,6 +401,7 @@ interface BackupBaseExportRows {
   kv: KvPair[];
   themes: ThemeRow[];
   chatCustomizations: BoundedChatCustomizationExportRow[];
+  estimatedBytes: number;
 }
 
 /**
@@ -482,6 +545,32 @@ function assertProbeStringBound(
   ) {
     throw new Error(`Backup export ${label} exceeds its safety bound.`);
   }
+}
+
+function hasProbeStringBound(
+  characters: unknown,
+  bytes: unknown,
+  maxCharacters: number,
+  label: string,
+): boolean {
+  const characterCount = requireProbeInteger(characters, `${label} character`);
+  const byteCount = requireProbeInteger(bytes, `${label} byte`);
+  return (
+    characterCount <= maxCharacters && byteCount <= maxCharacters * MAX_UTF8_BYTES_PER_SQL_CHARACTER
+  );
+}
+
+function addEstimatedBackupBytes(
+  current: number,
+  additional: number,
+  limit: number,
+  label: string,
+): number {
+  const next = current + requireProbeInteger(additional, `${label} raw-byte`);
+  if (!Number.isSafeInteger(next) || next > limit) {
+    throw new Error(`Backup export ${label} exceeds its aggregate safety bound.`);
+  }
+  return next;
 }
 
 function parseParticipantProbeStats(value: string): ParticipantProbeStats {
@@ -979,134 +1068,530 @@ function readBackupBaseRowsWithinTransaction(
         JOIN chats AS c ON c.id = probe.id
        ORDER BY c.id
     `);
-    return { kv, themes, chatCustomizations };
+    return { kv, themes, chatCustomizations, estimatedBytes };
   });
 }
 
 function readCustomFolderBackupRowsWithinTransaction(
   context: DbTransactionContext,
-): Promise<CustomFolderBackupExportRow[]> {
-  return runInTransactionContext(context, async (db) =>
-    db.all<CustomFolderBackupExportRow>(sql`
-      WITH folder_probe AS MATERIALIZED (
-        SELECT id, name, sort_order, show_unread_badge
-          FROM custom_folders
+  limits: CustomFolderExportLimits = DEFAULT_CUSTOM_FOLDER_EXPORT_LIMITS,
+  initialEstimatedBytes = 0,
+): Promise<CustomFolderBackupExportRows> {
+  return runInTransactionContext(context, async (db) => {
+    const numericLimits = [
+      limits.maxRawBytes,
+      limits.chatServiceCharacters,
+      limits.chatIdentifierCharacters,
+      limits.chatParticipantAddressCharacters,
+      limits.chatParticipants,
+    ];
+    if (
+      numericLimits.some((value) => !Number.isSafeInteger(value) || value <= 0) ||
+      !Number.isSafeInteger(initialEstimatedBytes) ||
+      initialEstimatedBytes < 0 ||
+      initialEstimatedBytes > limits.maxRawBytes
+    ) {
+      throw new Error('Custom folder backup export limits are invalid.');
+    }
+    let estimatedBytes = initialEstimatedBytes;
+
+    // Probe only small numeric facts first. A corrupt oversized name never crosses the native
+    // bridge, and 101 folders fail before any membership or identity work begins.
+    const folderProbe = await db.all<CustomFolderHeaderProbeRow>(sql`
+      WITH folder_ids AS MATERIALIZED (
+        SELECT id
+          FROM custom_folders INDEXED BY custom_folders_order_idx
          ORDER BY sort_order ASC, id ASC
          LIMIT ${MAX_CUSTOM_FOLDERS + 1}
-      ),
-      member_probe AS MATERIALIZED (
-        SELECT member.folder_id, member.chat_guid,
-               ROW_NUMBER() OVER (
-                 PARTITION BY member.chat_guid
-                 ORDER BY folder.sort_order ASC, folder.id ASC
-               ) AS identity_occurrence
-          FROM custom_folder_members AS member
-          JOIN folder_probe AS folder ON folder.id = member.folder_id
-         ORDER BY folder.sort_order ASC, folder.id ASC, member.chat_guid ASC
-         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
-      ),
-      member_identity_source AS MATERIALIZED (
-        SELECT member.chat_guid,
-               chat.id AS chat_id,
-               chat.guid AS loaded_guid,
-               CASE WHEN chat.chat_identifier IS NULL OR (
-                 length(chat.chat_identifier) <= ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS}
-                 AND length(CAST(chat.chat_identifier AS BLOB)) <=
-                     ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
-               ) THEN chat.chat_identifier ELSE NULL END AS chat_identifier,
-               chat.style,
-               CASE
-                 WHEN chat.id IS NULL THEN 0
-                 WHEN chat.chat_identifier IS NOT NULL AND (
-                   length(chat.chat_identifier) > ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS}
-                   OR length(CAST(chat.chat_identifier AS BLOB)) >
-                      ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
-                 ) THEN 0
-                 WHEN (
-                   SELECT COUNT(*)
-                     FROM (
-                       SELECT 1
-                         FROM chat_handles AS chat_handle
-                         JOIN handles AS handle ON handle.id = chat_handle.handle_id
-                        WHERE chat_handle.chat_id = chat.id
-                          AND handle.address IS NOT NULL
-                          AND handle.address <> ''
-                        LIMIT ${MAX_BACKUP_CHAT_PARTICIPANTS + 1}
-                     ) AS participant_probe
-                 ) > ${MAX_BACKUP_CHAT_PARTICIPANTS} THEN 0
-                 WHEN EXISTS (
-                   SELECT 1
-                     FROM chat_handles AS chat_handle
-                     JOIN handles AS handle ON handle.id = chat_handle.handle_id
-                    WHERE chat_handle.chat_id = chat.id
-                      AND handle.address IS NOT NULL
-                      AND handle.address <> ''
-                      AND (
-                        length(handle.address) >
-                          ${MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS}
-                        OR length(CAST(handle.address AS BLOB)) >
-                           ${MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
-                        OR length(COALESCE(handle.service, '')) >
-                           ${MAX_BACKUP_CHAT_SERVICE_CHARACTERS}
-                        OR length(CAST(COALESCE(handle.service, '') AS BLOB)) >
-                           ${MAX_BACKUP_CHAT_SERVICE_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
-                      )
-                 ) THEN 0
-                 ELSE 1
-               END AS identity_evidence_valid
-          FROM (SELECT DISTINCT chat_guid FROM member_probe) AS member
-          LEFT JOIN chats AS chat ON chat.guid = member.chat_guid
-      ),
-      member_identity AS MATERIALIZED (
-        SELECT source.chat_guid,
-               source.loaded_guid,
-               source.identity_evidence_valid,
-               CASE WHEN source.identity_evidence_valid = 1
-                 THEN source.chat_identifier ELSE NULL END AS chat_identifier,
-               source.style,
-               CASE WHEN source.identity_evidence_valid = 1 THEN
-               COALESCE(
-                 (
-                   SELECT json_group_array(
-                     json_object(
-                       'service', participant.service,
-                       'address', participant.address
-                     )
-                   )
-                     FROM (
-                       SELECT COALESCE(handle.service, '') AS service,
-                              handle.address AS address
-                         FROM chat_handles AS chat_handle
-                         JOIN handles AS handle ON handle.id = chat_handle.handle_id
-                        WHERE chat_handle.chat_id = source.chat_id
-                          AND handle.address IS NOT NULL
-                          AND handle.address <> ''
-                        GROUP BY COALESCE(handle.service, ''), handle.address
-                        ORDER BY MIN(handle.id) ASC
-                        LIMIT ${MAX_BACKUP_CHAT_PARTICIPANTS + 1}
-                     ) AS participant
-                 ),
-                 '[]'
-               ) ELSE NULL END AS participants_json
-          FROM member_identity_source AS source
       )
       SELECT folder.id AS folderId,
-             folder.name,
-             folder.show_unread_badge AS showUnreadBadge,
-             member.chat_guid AS chatGuid,
-             identity.loaded_guid AS loadedGuid,
-             identity.identity_evidence_valid AS identityEvidenceValid,
-             CASE WHEN member.identity_occurrence = 1
-               THEN identity.chat_identifier ELSE NULL END AS chatIdentifier,
-             identity.style,
-             CASE WHEN member.identity_occurrence = 1
-               THEN identity.participants_json ELSE NULL END AS participantsJson
-        FROM folder_probe AS folder
-        LEFT JOIN member_probe AS member ON member.folder_id = folder.id
-        LEFT JOIN member_identity AS identity ON identity.chat_guid = member.chat_guid
-       ORDER BY folder.sort_order ASC, folder.id ASC, member.chat_guid ASC
-    `),
-  );
+             CASE WHEN typeof(folder.id) <> 'integer'
+                    OR typeof(folder.name) <> 'text'
+                    OR typeof(folder.sort_order) <> 'integer'
+                    OR typeof(folder.show_unread_badge) <> 'integer'
+                    OR folder.show_unread_badge NOT IN (0, 1)
+               THEN 1 ELSE 0 END AS invalidTypeCount,
+             length(substr(
+               folder.name, 1, ${MAX_CUSTOM_FOLDER_NAME_CODE_POINTS + 1}
+             )) AS nameCharacters,
+             length(CAST(substr(
+               folder.name, 1, ${MAX_CUSTOM_FOLDER_NAME_CODE_POINTS + 1}
+             ) AS BLOB)) AS nameBytes,
+             length(CAST(json_quote(substr(
+               folder.name, 1, ${MAX_CUSTOM_FOLDER_NAME_CODE_POINTS + 1}
+             )) AS BLOB)) AS nameJsonBytes
+        FROM folder_ids AS probe
+        JOIN custom_folders AS folder ON folder.id = probe.id
+       ORDER BY folder.sort_order ASC, folder.id ASC
+    `);
+    if (folderProbe.length > MAX_CUSTOM_FOLDERS) {
+      throw new Error('Custom folder count exceeds its backup safety bound.');
+    }
+    const folderIds = new Set<number>();
+    for (const row of folderProbe) {
+      const folderId = requireProbeInteger(row.folderId, 'custom folder id');
+      if (folderId <= 0 || folderIds.has(folderId)) {
+        throw new Error('Custom folder backup row has an invalid folder id.');
+      }
+      folderIds.add(folderId);
+      if (requireProbeInteger(row.invalidTypeCount, 'custom folder type') > 0) {
+        throw new Error('Custom folder backup metadata is invalid.');
+      }
+      assertProbeStringBound(
+        row.nameCharacters,
+        row.nameBytes,
+        MAX_CUSTOM_FOLDER_NAME_CODE_POINTS,
+        'custom folder name',
+      );
+    }
+
+    const folders: CustomFolderHeaderExportRow[] = await db.all<CustomFolderHeaderExportRow>(sql`
+      SELECT id AS folderId, name, show_unread_badge AS showUnreadBadge
+        FROM custom_folders INDEXED BY custom_folders_order_idx
+       ORDER BY sort_order ASC, id ASC
+       LIMIT ${MAX_CUSTOM_FOLDERS + 1}
+    `);
+    if (
+      folders.length !== folderProbe.length ||
+      folders.some((folder, index) => folder.folderId !== folderProbe[index]?.folderId)
+    ) {
+      throw new Error('Custom folder backup metadata probe is incomplete.');
+    }
+    let folderBytes = 0;
+    for (const [index, folder] of folders.entries()) {
+      const normalizedName = normalizeCustomFolderName(folder.name);
+      if (
+        normalizedName !== folder.name ||
+        (folder.showUnreadBadge !== 0 && folder.showUnreadBadge !== 1)
+      ) {
+        throw new Error('Custom folder backup metadata is invalid.');
+      }
+      folderBytes +=
+        requireProbeInteger(folderProbe[index]?.nameJsonBytes, 'custom folder name JSON-byte') +
+        ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER;
+    }
+    estimatedBytes = addEstimatedBackupBytes(
+      estimatedBytes,
+      folderBytes,
+      limits.maxRawBytes,
+      'custom-folder data',
+    );
+
+    // The named reverse index makes the innermost max-plus-one selector stop before any join,
+    // window, grouping, or JSON work. The later reads are safe because this proves the entire
+    // membership table contains at most 25,000 rows for this committed snapshot.
+    const memberCountProbe = requireProbeRow<CustomFolderMemberCountProbeRow>(
+      await db.all<CustomFolderMemberCountProbeRow>(sql`
+        WITH member_ids AS MATERIALIZED (
+          SELECT rowid
+            FROM custom_folder_members INDEXED BY custom_folder_members_chat_guid_idx
+           ORDER BY chat_guid ASC, folder_id ASC
+           LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+        )
+        SELECT COUNT(*) AS rowCount FROM member_ids
+      `),
+      'custom folder membership count',
+    );
+    const memberCount = requireProbeInteger(
+      memberCountProbe.rowCount,
+      'custom folder membership count',
+    );
+    if (memberCount > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
+      throw new Error('Custom folder memberships exceed their aggregate backup safety bound.');
+    }
+
+    const memberProbe = await db.all<CustomFolderMemberProbeRow>(sql`
+      WITH member_ids AS MATERIALIZED (
+        SELECT rowid
+          FROM custom_folder_members INDEXED BY custom_folder_members_chat_guid_idx
+         ORDER BY chat_guid ASC, folder_id ASC
+         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+      )
+      SELECT member.folder_id AS folderId,
+             chat.id AS chatId,
+             CASE WHEN typeof(member.folder_id) <> 'integer'
+                    OR typeof(member.chat_guid) <> 'text'
+               THEN 1 ELSE 0 END AS invalidTypeCount,
+             length(substr(
+               member.chat_guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+             )) AS guidCharacters,
+             length(CAST(substr(
+               member.chat_guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+             ) AS BLOB)) AS guidBytes,
+             CASE WHEN instr(substr(
+               member.chat_guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+             ), char(0)) > 0 THEN 1 ELSE 0 END AS hasNullCharacter
+        FROM member_ids AS probe
+        JOIN custom_folder_members AS member ON member.rowid = probe.rowid
+        LEFT JOIN chats AS chat INDEXED BY chats_guid_idx ON chat.guid = member.chat_guid
+       ORDER BY member.chat_guid ASC, member.folder_id ASC
+    `);
+    if (memberProbe.length !== memberCount) {
+      throw new Error('Custom folder membership probe is incomplete.');
+    }
+    const memberCounts = new Map<number, number>();
+    const members: CustomFolderBackupExportRows['members'] = [];
+    for (const row of memberProbe) {
+      const folderId = requireProbeInteger(row.folderId, 'custom folder membership folder id');
+      if (folderId <= 0 || !folderIds.has(folderId)) {
+        throw new Error('Custom folder membership has an invalid folder id.');
+      }
+      if (requireProbeInteger(row.invalidTypeCount, 'custom folder membership type') > 0) {
+        throw new Error('Custom folder membership contains an invalid chat GUID.');
+      }
+      assertProbeStringBound(
+        row.guidCharacters,
+        row.guidBytes,
+        MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
+        'custom folder membership chat GUID',
+      );
+      if (requireProbeInteger(row.hasNullCharacter, 'custom folder membership NUL') !== 0) {
+        throw new Error('Custom folder membership contains an invalid chat GUID.');
+      }
+      if (row.chatId !== null && (!Number.isSafeInteger(row.chatId) || row.chatId <= 0)) {
+        throw new Error('Custom folder membership has an invalid chat id.');
+      }
+      memberCounts.set(folderId, (memberCounts.get(folderId) ?? 0) + 1);
+      members.push({ folderId, chatId: row.chatId });
+    }
+    if ([...memberCounts.values()].some((count) => count > MAX_CUSTOM_FOLDER_MEMBERS)) {
+      throw new Error('Custom folder membership exceeds its backup safety bound.');
+    }
+    estimatedBytes = addEstimatedBackupBytes(
+      estimatedBytes,
+      members.length * ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER_ASSOCIATION,
+      limits.maxRawBytes,
+      'custom-folder data',
+    );
+
+    const candidateChatIds = [
+      ...new Set(members.flatMap((member) => (member.chatId === null ? [] : [member.chatId]))),
+    ];
+    if (candidateChatIds.length === 0) return { folders, members, identities: [] };
+    const candidateChatIdsJson = JSON.stringify(candidateChatIds);
+    const identityProbe = await db.all<CustomFolderIdentityProbeRow>(sql`
+      WITH requested_chat AS MATERIALIZED (
+        SELECT CAST(entry.value AS INTEGER) AS chat_id,
+               CAST(entry.key AS INTEGER) AS occurrence
+          FROM json_each(${candidateChatIdsJson}) AS entry
+         ORDER BY CAST(entry.key AS INTEGER)
+         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+      )
+      SELECT chat.id AS chatId,
+             CASE WHEN typeof(chat.guid) <> 'text'
+                    OR (chat.chat_identifier IS NOT NULL
+                        AND typeof(chat.chat_identifier) <> 'text')
+                    OR (chat.style IS NOT NULL AND typeof(chat.style) <> 'integer')
+               THEN 1 ELSE 0 END AS invalidTypeCount,
+             length(substr(
+               chat.guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+             )) AS guidCharacters,
+             length(CAST(substr(
+               chat.guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+             ) AS BLOB)) AS guidBytes,
+             length(substr(
+               COALESCE(chat.chat_identifier, ''),
+               1,
+               ${limits.chatIdentifierCharacters + 1}
+             )) AS identifierCharacters,
+             length(CAST(substr(
+               COALESCE(chat.chat_identifier, ''),
+               1,
+               ${limits.chatIdentifierCharacters + 1}
+             ) AS BLOB)) AS identifierBytes,
+             length(CAST(json_quote(CASE WHEN chat.chat_identifier IS NULL THEN NULL ELSE
+               substr(chat.chat_identifier, 1, ${limits.chatIdentifierCharacters + 1})
+             END) AS BLOB)) AS identifierJsonBytes,
+             CASE WHEN chat.style IN (43, 45) OR (
+               instr(substr(
+                 chat.guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+               ), ';') > 0
+               AND substr(
+                 substr(chat.guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}),
+                 instr(substr(
+                   chat.guid, 1, ${MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS + 1}
+                 ), ';') + 1,
+                 2
+               ) IN ('+;', '-;')
+             ) THEN 1 ELSE 0 END AS hasKnownKind,
+             CASE WHEN chat.chat_identifier IS NOT NULL
+                        AND length(trim(substr(
+                          chat.chat_identifier,
+                          1,
+                          ${limits.chatIdentifierCharacters + 1}
+                        ))) > 0
+               THEN 1 ELSE 0 END AS identifierHasContent,
+             (
+               SELECT json_object(
+                 'linkCount', COUNT(raw_handle.handle_id),
+                 'count', COALESCE(SUM(CASE
+                   WHEN handle.id IS NOT NULL AND handle.address IS NOT NULL
+                     AND handle.address <> '' THEN 1 ELSE 0 END
+                 ), 0),
+                 'invalidTypeCount', COALESCE(SUM(CASE
+                   WHEN raw_handle.handle_id IS NOT NULL AND handle.id IS NULL THEN 1
+                   WHEN handle.address IS NOT NULL AND handle.address <> '' AND (
+                     typeof(handle.address) <> 'text'
+                     OR typeof(COALESCE(handle.service, '')) <> 'text'
+                   ) THEN 1 ELSE 0 END
+                 ), 0),
+                 'rawBytes', COALESCE(SUM(CASE
+                   WHEN handle.id IS NOT NULL AND handle.address IS NOT NULL
+                     AND handle.address <> '' THEN
+                       length(CAST(substr(
+                         COALESCE(handle.service, ''),
+                         1,
+                         ${limits.chatServiceCharacters + 1}
+                       ) AS BLOB)) +
+                       length(CAST(substr(
+                         handle.address,
+                         1,
+                         ${limits.chatParticipantAddressCharacters + 1}
+                       ) AS BLOB))
+                   ELSE 0 END
+                 ), 0),
+                 'maxServiceCharacters', COALESCE(MAX(CASE
+                   WHEN handle.id IS NOT NULL AND handle.address IS NOT NULL
+                     AND handle.address <> '' THEN length(substr(
+                       COALESCE(handle.service, ''),
+                       1,
+                       ${limits.chatServiceCharacters + 1}
+                     )) ELSE 0 END
+                 ), 0),
+                 'maxServiceBytes', COALESCE(MAX(CASE
+                   WHEN handle.id IS NOT NULL AND handle.address IS NOT NULL
+                     AND handle.address <> '' THEN length(CAST(substr(
+                       COALESCE(handle.service, ''),
+                       1,
+                       ${limits.chatServiceCharacters + 1}
+                     ) AS BLOB)) ELSE 0 END
+                 ), 0),
+                 'maxAddressCharacters', COALESCE(MAX(CASE
+                   WHEN handle.id IS NOT NULL AND handle.address IS NOT NULL
+                     AND handle.address <> '' THEN length(substr(
+                       handle.address,
+                       1,
+                       ${limits.chatParticipantAddressCharacters + 1}
+                     )) ELSE 0 END
+                 ), 0),
+                 'maxAddressBytes', COALESCE(MAX(CASE
+                   WHEN handle.id IS NOT NULL AND handle.address IS NOT NULL
+                     AND handle.address <> '' THEN length(CAST(substr(
+                       handle.address,
+                       1,
+                       ${limits.chatParticipantAddressCharacters + 1}
+                     ) AS BLOB)) ELSE 0 END
+                 ), 0)
+               )
+                 FROM (
+                   SELECT handle_id
+                     FROM chat_handles
+                    WHERE chat_id = chat.id
+                    ORDER BY handle_id ASC
+                    LIMIT ${limits.chatParticipants + 1}
+                 ) AS raw_handle
+                 LEFT JOIN handles AS handle ON handle.id = raw_handle.handle_id
+             ) AS participantStatsJson
+        FROM requested_chat AS request
+        JOIN chats AS chat ON chat.id = request.chat_id
+       ORDER BY request.occurrence ASC
+    `);
+    if (identityProbe.length !== candidateChatIds.length) {
+      throw new Error('Custom folder identity probe is incomplete.');
+    }
+
+    const candidateIdSet = new Set(candidateChatIds);
+    const identityProbeByChatId = new Map<number, CustomFolderIdentityProbeRow>();
+    const exportableChatIds: number[] = [];
+    for (const row of identityProbe) {
+      const chatId = requireProbeInteger(row.chatId, 'custom folder identity chat id');
+      if (chatId <= 0 || !candidateIdSet.has(chatId) || identityProbeByChatId.has(chatId)) {
+        throw new Error('Custom folder identity probe is inconsistent.');
+      }
+      identityProbeByChatId.set(chatId, row);
+      const participants = parseParticipantProbeStats(row.participantStatsJson);
+      const identityStringsAreCoarselyValid =
+        requireProbeInteger(row.invalidTypeCount, 'custom folder identity type') === 0 &&
+        hasProbeStringBound(
+          row.identifierCharacters,
+          row.identifierBytes,
+          limits.chatIdentifierCharacters,
+          'custom folder chat identifier',
+        ) &&
+        participants.invalidTypeCount === 0 &&
+        participants.linkCount <= limits.chatParticipants &&
+        participants.count <= limits.chatParticipants &&
+        hasProbeStringBound(
+          participants.maxServiceCharacters,
+          participants.maxServiceBytes,
+          limits.chatServiceCharacters,
+          'custom folder participant service',
+        ) &&
+        hasProbeStringBound(
+          participants.maxAddressCharacters,
+          participants.maxAddressBytes,
+          limits.chatParticipantAddressCharacters,
+          'custom folder participant address',
+        );
+      assertProbeStringBound(
+        row.guidCharacters,
+        row.guidBytes,
+        MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
+        'custom folder identity guid',
+      );
+      const hasKnownKind = requireProbeInteger(row.hasKnownKind, 'custom folder identity kind');
+      const identifierHasContent = requireProbeInteger(
+        row.identifierHasContent,
+        'custom folder identity evidence',
+      );
+      if (hasKnownKind > 1 || identifierHasContent > 1) {
+        throw new Error('Custom folder identity probe is invalid.');
+      }
+      if (
+        identityStringsAreCoarselyValid &&
+        (hasKnownKind === 1 || participants.count > 0) &&
+        (identifierHasContent === 1 || participants.count > 0)
+      ) {
+        exportableChatIds.push(chatId);
+      }
+    }
+    if (identityProbeByChatId.size !== candidateChatIds.length) {
+      throw new Error('Custom folder identity probe is incomplete.');
+    }
+    if (exportableChatIds.length === 0) return { folders, members, identities: [] };
+
+    // Measure escaped participant objects before json_group_array can allocate the arrays. The
+    // raw handle prefix is already capped, and the accepted total shares the base snapshot budget.
+    const exportableChatIdsJson = JSON.stringify(exportableChatIds);
+    const participantBudgetProbe = await db.all<ParticipantBudgetProbeRow>(sql`
+      WITH requested_chat AS MATERIALIZED (
+        SELECT CAST(entry.value AS INTEGER) AS chat_id,
+               CAST(entry.key AS INTEGER) AS occurrence
+          FROM json_each(${exportableChatIdsJson}) AS entry
+         ORDER BY CAST(entry.key AS INTEGER)
+         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+      )
+      SELECT chat.id AS chatId,
+             (
+               SELECT json_object(
+                 'count', COUNT(*),
+                 'jsonBytes', CASE WHEN COUNT(*) = 0 THEN 2 ELSE
+                   COALESCE(SUM(length(CAST(json_object(
+                     'service', participant.service,
+                     'address', participant.address
+                   ) AS BLOB))), 0) + COUNT(*) + 1
+                 END
+               )
+                 FROM (
+                   SELECT COALESCE(handle.service, '') AS service,
+                          handle.address AS address
+                     FROM (
+                       SELECT handle_id
+                         FROM chat_handles
+                        WHERE chat_id = chat.id
+                        ORDER BY handle_id ASC
+                        LIMIT ${limits.chatParticipants + 1}
+                     ) AS raw_handle
+                     JOIN handles AS handle ON handle.id = raw_handle.handle_id
+                    WHERE handle.address IS NOT NULL
+                      AND handle.address <> ''
+                    GROUP BY COALESCE(handle.service, ''), handle.address
+                    ORDER BY MIN(handle.id) ASC
+                 ) AS participant
+             ) AS participantStatsJson
+        FROM requested_chat AS request
+        JOIN chats AS chat ON chat.id = request.chat_id
+       ORDER BY request.occurrence ASC
+    `);
+    if (participantBudgetProbe.length !== exportableChatIds.length) {
+      throw new Error('Custom folder participant budget probe is incomplete.');
+    }
+    const budgetedIdentityIds = new Set<number>();
+    for (const row of participantBudgetProbe) {
+      const chatId = requireProbeInteger(row.chatId, 'custom folder participant budget chat id');
+      const identity = identityProbeByChatId.get(chatId);
+      if (!identity || budgetedIdentityIds.has(chatId)) {
+        throw new Error('Custom folder participant budget probe is inconsistent.');
+      }
+      budgetedIdentityIds.add(chatId);
+      const participants = parseParticipantBudgetStats(row.participantStatsJson);
+      if (participants.count > limits.chatParticipants) {
+        throw new Error('Custom folder participant budget exceeds its safety bound.');
+      }
+      const identityBytes =
+        requireProbeInteger(identity.guidBytes, 'custom folder identity guid byte') +
+        requireProbeInteger(
+          identity.identifierJsonBytes,
+          'custom folder identity identifier JSON-byte',
+        ) +
+        participants.jsonBytes +
+        ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER_IDENTITY;
+      estimatedBytes = addEstimatedBackupBytes(
+        estimatedBytes,
+        identityBytes,
+        limits.maxRawBytes,
+        'custom-folder data',
+      );
+    }
+
+    const identities = await db.all<CustomFolderIdentityExportRow>(sql`
+      WITH requested_chat AS MATERIALIZED (
+        SELECT CAST(entry.value AS INTEGER) AS chat_id,
+               CAST(entry.key AS INTEGER) AS occurrence
+          FROM json_each(${exportableChatIdsJson}) AS entry
+         ORDER BY CAST(entry.key AS INTEGER)
+         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+      )
+      SELECT chat.id AS chatId,
+             chat.guid,
+             chat.chat_identifier AS chatIdentifier,
+             chat.style,
+             COALESCE(
+               (
+                 SELECT json_group_array(
+                   json_object('service', participant.service, 'address', participant.address)
+                 )
+                   FROM (
+                     SELECT COALESCE(handle.service, '') AS service,
+                            handle.address AS address
+                       FROM (
+                         SELECT handle_id
+                           FROM chat_handles
+                          WHERE chat_id = chat.id
+                          ORDER BY handle_id ASC
+                          LIMIT ${limits.chatParticipants + 1}
+                       ) AS raw_handle
+                       JOIN handles AS handle ON handle.id = raw_handle.handle_id
+                      WHERE handle.address IS NOT NULL
+                        AND handle.address <> ''
+                      GROUP BY COALESCE(handle.service, ''), handle.address
+                      ORDER BY MIN(handle.id) ASC
+                   ) AS participant
+               ),
+               '[]'
+             ) AS participantsJson
+        FROM requested_chat AS request
+        JOIN chats AS chat ON chat.id = request.chat_id
+       ORDER BY request.occurrence ASC
+    `);
+    if (identities.length !== exportableChatIds.length) {
+      throw new Error('Custom folder identity export is incomplete.');
+    }
+    const exportableIdSet = new Set(exportableChatIds);
+    const returnedIdentityIds = new Set<number>();
+    for (const row of identities) {
+      if (
+        !Number.isSafeInteger(row.chatId) ||
+        row.chatId <= 0 ||
+        !exportableIdSet.has(row.chatId) ||
+        returnedIdentityIds.has(row.chatId)
+      ) {
+        throw new Error('Custom folder identity export is inconsistent.');
+      }
+      returnedIdentityIds.add(row.chatId);
+    }
+    return { folders, members, identities };
+  });
 }
 
 function parseBackupParticipants(value: string | null): PortableChatParticipant[] {
@@ -1150,26 +1635,39 @@ function hasBackupSchemaBoundedIdentityStrings(
   );
 }
 
-function buildCustomFolderBackupData(
-  rows: readonly CustomFolderBackupExportRow[],
-): CustomFolderBackupData {
+function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): CustomFolderBackupData {
   const folderIds = new Set<number>();
   const memberCounts = new Map<number, number>();
-  let associationCount = 0;
-  for (const row of rows) {
-    if (!Number.isSafeInteger(row.folderId) || row.folderId <= 0) {
+  const membersByFolder = new Map<
+    number,
+    Array<Pick<CustomFolderMemberProbeRow, 'folderId' | 'chatId'>>
+  >();
+  for (const folder of rows.folders) {
+    if (
+      !Number.isSafeInteger(folder.folderId) ||
+      folder.folderId <= 0 ||
+      folderIds.has(folder.folderId)
+    ) {
       throw new Error('Custom folder backup row has an invalid folder id.');
     }
-    folderIds.add(row.folderId);
-    if (row.chatGuid !== null) {
-      associationCount += 1;
-      memberCounts.set(row.folderId, (memberCounts.get(row.folderId) ?? 0) + 1);
+    folderIds.add(folder.folderId);
+  }
+  for (const member of rows.members) {
+    if (!folderIds.has(member.folderId)) {
+      throw new Error('Custom folder membership has an invalid folder id.');
     }
+    if (member.chatId !== null && (!Number.isSafeInteger(member.chatId) || member.chatId <= 0)) {
+      throw new Error('Custom folder membership has an invalid chat id.');
+    }
+    memberCounts.set(member.folderId, (memberCounts.get(member.folderId) ?? 0) + 1);
+    const folderMembers = membersByFolder.get(member.folderId) ?? [];
+    folderMembers.push(member);
+    membersByFolder.set(member.folderId, folderMembers);
   }
   if (folderIds.size > MAX_CUSTOM_FOLDERS) {
     throw new Error('Custom folder count exceeds its backup safety bound.');
   }
-  if (associationCount > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
+  if (rows.members.length > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
     throw new Error('Custom folder memberships exceed their aggregate backup safety bound.');
   }
   if ([...memberCounts.values()].some((count) => count > MAX_CUSTOM_FOLDER_MEMBERS)) {
@@ -1177,63 +1675,61 @@ function buildCustomFolderBackupData(
   }
 
   const customFolderChatIdentities: PortableChatIdentityRow[] = [];
-  const identityIndexes = new Map<string, number>();
+  const identityIndexes = new Map<number, number>();
+  const identityRows = new Map<number, CustomFolderIdentityExportRow>();
+  for (const identity of rows.identities) {
+    if (
+      !Number.isSafeInteger(identity.chatId) ||
+      identity.chatId <= 0 ||
+      identityRows.has(identity.chatId)
+    ) {
+      throw new Error('Custom folder identity export is inconsistent.');
+    }
+    identityRows.set(identity.chatId, identity);
+  }
   const customFolders: CustomFolderBackupRow[] = [];
-  const folderIndexes = new Map<number, number>();
 
-  for (const row of rows) {
-    const normalizedName = normalizeCustomFolderName(row.name);
-    if (normalizedName !== row.name || (row.showUnreadBadge !== 0 && row.showUnreadBadge !== 1)) {
+  for (const folder of rows.folders) {
+    const normalizedName = normalizeCustomFolderName(folder.name);
+    if (
+      normalizedName !== folder.name ||
+      (folder.showUnreadBadge !== 0 && folder.showUnreadBadge !== 1)
+    ) {
       throw new Error('Custom folder backup metadata is invalid.');
     }
-
-    let folderIndex = folderIndexes.get(row.folderId);
-    if (folderIndex === undefined) {
-      folderIndex = customFolders.length;
-      folderIndexes.set(row.folderId, folderIndex);
-      customFolders.push({
-        name: row.name,
-        showUnreadBadge: row.showUnreadBadge,
-        sourceMemberCount: memberCounts.get(row.folderId) ?? 0,
-        memberIndexes: [],
-      });
-    }
-    if (row.chatGuid === null) continue;
-    if (
-      row.chatGuid.length === 0 ||
-      Array.from(row.chatGuid).length > MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS ||
-      row.chatGuid.includes('\u0000')
-    ) {
-      throw new Error('Custom folder membership contains an invalid chat GUID.');
-    }
-
-    // No chat row means there is no stable participant/server evidence to carry. The source count
-    // still lets restore report that omission instead of pretending the folder was complete.
-    if (row.loadedGuid === null) continue;
-    if (row.loadedGuid !== row.chatGuid) {
-      throw new Error('Custom folder membership identity is inconsistent.');
-    }
-
-    let identityIndex = identityIndexes.get(row.loadedGuid);
-    if (identityIndex === undefined) {
-      if (row.identityEvidenceValid !== 1) continue;
-      const participants = parseBackupParticipants(row.participantsJson);
-      if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants)) continue;
-      const identity = buildPortableChatIdentity(
-        row.loadedGuid,
-        row.chatIdentifier,
-        row.style,
-        participants,
-      );
-      if (!hasPortableRestoreEvidence(identity)) continue;
-      if (customFolderChatIdentities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
-        throw new Error('Custom folder chat identities exceed their backup safety bound.');
+    const backupFolder: CustomFolderBackupRow = {
+      name: folder.name,
+      showUnreadBadge: folder.showUnreadBadge,
+      sourceMemberCount: memberCounts.get(folder.folderId) ?? 0,
+      memberIndexes: [],
+    };
+    for (const member of membersByFolder.get(folder.folderId) ?? []) {
+      // No chat row or no bounded portable evidence means there is nothing stable to carry. The
+      // complete source count still lets restore report the omission.
+      if (member.chatId === null) continue;
+      const row = identityRows.get(member.chatId);
+      if (!row) continue;
+      let identityIndex = identityIndexes.get(member.chatId);
+      if (identityIndex === undefined) {
+        const participants = parseBackupParticipants(row.participantsJson);
+        if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants)) continue;
+        const identity = buildPortableChatIdentity(
+          row.guid,
+          row.chatIdentifier,
+          row.style,
+          participants,
+        );
+        if (!hasPortableRestoreEvidence(identity)) continue;
+        if (customFolderChatIdentities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
+          throw new Error('Custom folder chat identities exceed their backup safety bound.');
+        }
+        identityIndex = customFolderChatIdentities.length;
+        identityIndexes.set(member.chatId, identityIndex);
+        customFolderChatIdentities.push(identity);
       }
-      identityIndex = customFolderChatIdentities.length;
-      identityIndexes.set(row.loadedGuid, identityIndex);
-      customFolderChatIdentities.push(identity);
+      backupFolder.memberIndexes.push(identityIndex);
     }
-    customFolders[folderIndex]!.memberIndexes.push(identityIndex);
+    customFolders.push(backupFolder);
   }
 
   return { customFolderChatIdentities, customFolders };
@@ -1267,7 +1763,11 @@ export async function getBackupV3ExportData(
     db,
     async (context) => {
       const base = await readBackupBaseRowsWithinTransaction(context, limits);
-      const customFolders = await readCustomFolderBackupRowsWithinTransaction(context);
+      const customFolders = await readCustomFolderBackupRowsWithinTransaction(
+        context,
+        limits,
+        base.estimatedBytes,
+      );
       return { base, customFolders };
     },
     commitGuard,

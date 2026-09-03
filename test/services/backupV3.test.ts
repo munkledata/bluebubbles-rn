@@ -100,6 +100,28 @@ async function expectBoundedExportRejection(t: TestDb, message: string): Promise
   await expect(kvSet(t.db, 'theme.preset', 'writer-after-rejection')).resolves.toBeUndefined();
 }
 
+function captureAllSql(db: TestDb['db']): { db: TestDb['db']; statements: string[] } {
+  const statements: string[] = [];
+  const instrumented = new Proxy(db, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property === 'all' && typeof value === 'function') {
+        return (...args: unknown[]) => {
+          const dialect = (
+            target as unknown as {
+              dialect: { sqlToQuery(query: unknown): { sql: string } };
+            }
+          ).dialect;
+          statements.push(dialect.sqlToQuery(args[0]).sql);
+          return Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as TestDb['db'];
+  return { db: instrumented, statements };
+}
+
 describe('backup v3 custom folders', () => {
   it('queues the complete export behind a rolling-back neighbour', async () => {
     const source = await createTestDb();
@@ -392,6 +414,155 @@ describe('backup v3 custom folders', () => {
       source,
       'Backup export base data exceeds its aggregate safety bound.',
     );
+  });
+
+  it('rejects aggregate max-plus-one folder memberships before window or identity JSON work', async () => {
+    const source = await createTestDb();
+    const folders: Array<Awaited<ReturnType<typeof createCustomFolder>>> = [];
+    for (let index = 0; index < 6; index += 1) {
+      folders.push(await createCustomFolder(source.db, `Bounded folder ${index}`));
+    }
+    const insertMember = source.raw.prepare(
+      'INSERT INTO custom_folder_members (folder_id, chat_guid) VALUES (?, ?)',
+    );
+    source.raw.transaction(() => {
+      let inserted = 0;
+      for (const folder of folders) {
+        const folderCount = Math.min(MAX_CUSTOM_FOLDER_MEMBERS, 25_001 - inserted);
+        for (let index = 0; index < folderCount; index += 1) {
+          insertMember.run(folder.id, `bounded-member-${inserted + index}`);
+        }
+        inserted += folderCount;
+      }
+    })();
+
+    const captured = captureAllSql(source.db);
+    await expect(buildBackupWithCustomFolders(captured.db, { exportedAt: 44 })).rejects.toThrow(
+      'Custom folder memberships exceed their aggregate backup safety bound.',
+    );
+    expect(captured.statements.some((statement) => /row_number\s*\(/iu.test(statement))).toBe(
+      false,
+    );
+    expect(
+      captured.statements.some(
+        (statement) =>
+          statement.includes('requested_chat') && statement.includes('json_group_array'),
+      ),
+    ).toBe(false);
+
+    const plan = source.raw
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         WITH member_ids AS MATERIALIZED (
+           SELECT rowid
+             FROM custom_folder_members INDEXED BY custom_folder_members_chat_guid_idx
+            ORDER BY chat_guid ASC, folder_id ASC
+            LIMIT 25001
+         )
+         SELECT COUNT(*) FROM member_ids`,
+      )
+      .all() as Array<{ detail: string }>;
+    expect(plan.some((row) => row.detail.includes('custom_folder_members_chat_guid_idx'))).toBe(
+      true,
+    );
+    expect(plan.some((row) => row.detail.includes('USE TEMP B-TREE'))).toBe(false);
+    await expect(
+      kvSet(source.db, 'theme.preset', 'writer-after-folder-cap'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('charges escaped folder identity JSON to the shared base budget before aggregation', async () => {
+    const source = await createTestDb();
+    const insertTheme = source.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)',
+    );
+    source.raw.transaction(() => {
+      for (let index = 0; index < 12; index += 1) {
+        insertTheme.run(
+          `Shared budget theme ${index}`,
+          'dark',
+          'x'.repeat(BACKUP_LIMITS.themeTokensCharacters),
+        );
+      }
+    })();
+    await seedChat(source, 'escaped-folder-budget', {
+      chatIdentifier: 'escaped-folder-budget',
+      style: 43,
+    });
+    const chat = source.raw
+      .prepare('SELECT id FROM chats WHERE guid = ?')
+      .get('escaped-folder-budget') as { id: number };
+    const insertHandle = source.raw.prepare('INSERT INTO handles (address, service) VALUES (?, ?)');
+    const insertLink = source.raw.prepare(
+      'INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)',
+    );
+    source.raw.transaction(() => {
+      for (let index = 0; index < 64; index += 1) {
+        const suffix = `-${index}@example.test`;
+        const address = `${'\u0001'.repeat(
+          BACKUP_LIMITS.chatParticipantAddressCharacters - suffix.length,
+        )}${suffix}`;
+        const result = insertHandle.run(address, 'iMessage');
+        insertLink.run(chat.id, Number(result.lastInsertRowid));
+      }
+    })();
+    const folder = await createCustomFolder(source.db, 'Escaped identity budget');
+    await replaceCustomFolderMembership(source.db, folder.id, ['escaped-folder-budget']);
+
+    const captured = captureAllSql(source.db);
+    await expect(buildBackupWithCustomFolders(captured.db, { exportedAt: 44 })).rejects.toThrow(
+      'Backup export custom-folder data exceeds its aggregate safety bound.',
+    );
+    expect(
+      captured.statements.some(
+        (statement) =>
+          statement.includes('requested_chat') && statement.includes('json_group_array'),
+      ),
+    ).toBe(false);
+    await expect(
+      kvSet(source.db, 'theme.preset', 'writer-after-folder-budget'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('preserves folder participant deduplication and first-seen order after staged reads', async () => {
+    const source = await createTestDb();
+    await seedChat(source, 'folder-participant-order', {
+      chatIdentifier: 'folder-participant-order',
+      style: 43,
+    });
+    const chat = source.raw
+      .prepare('SELECT id FROM chats WHERE guid = ?')
+      .get('folder-participant-order') as { id: number };
+    const insertHandle = source.raw.prepare('INSERT INTO handles (address, service) VALUES (?, ?)');
+    const insertNullService = source.raw.prepare(
+      'INSERT INTO handles (address, service) VALUES (?, NULL)',
+    );
+    const insertLink = source.raw.prepare(
+      'INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)',
+    );
+    const handleIds = [
+      insertNullService.run('same@example.test').lastInsertRowid,
+      insertHandle.run('same@example.test', '').lastInsertRowid,
+      insertHandle.run('z-first@example.test', 'iMessage').lastInsertRowid,
+      insertHandle.run('a-second@example.test', 'iMessage').lastInsertRowid,
+    ];
+    for (const handleId of handleIds) insertLink.run(chat.id, Number(handleId));
+    const folder = await createCustomFolder(source.db, 'Participant order');
+    await replaceCustomFolderMembership(source.db, folder.id, ['folder-participant-order']);
+
+    const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 44 });
+    expect(backup.customFolderChatIdentities).toEqual([
+      expect.objectContaining({
+        participants: [
+          { service: '', address: 'same@example.test' },
+          { service: 'iMessage', address: 'z-first@example.test' },
+          { service: 'iMessage', address: 'a-second@example.test' },
+        ],
+      }),
+    ]);
+    expect(backup.customFolders).toEqual([
+      expect.objectContaining({ sourceMemberCount: 1, memberIndexes: [0] }),
+    ]);
   });
 
   it('exports one encrypted portable registry and restores it into a fresh database', async () => {

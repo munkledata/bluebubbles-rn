@@ -216,9 +216,9 @@ describe('custom-folder backup v3', () => {
     ]);
   });
 
-  it('omits identity evidence with more than 512 participants', async () => {
+  it('omits identity evidence with more than 512 raw participant links', async () => {
     const source = await createTestDb();
-    const participants = Array.from({ length: 513 }, (_, index) => ({
+    const participants = Array.from({ length: 512 }, (_, index) => ({
       address: `participant-${index}@example.test`,
       service: 'iMessage',
     }));
@@ -236,6 +236,15 @@ describe('custom-folder backup v3', () => {
       ],
       handles,
     );
+    const chat = source.raw
+      .prepare('SELECT id FROM chats WHERE guid = ?')
+      .get('too-many-participants') as { id: number };
+    const emptyHandle = source.raw
+      .prepare('INSERT INTO handles (address, service) VALUES (?, ?)')
+      .run('', 'corrupt-empty-address');
+    source.raw
+      .prepare('INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)')
+      .run(chat.id, Number(emptyHandle.lastInsertRowid));
     const folder = await createCustomFolder(source.db, 'Participant bound');
     await replaceCustomFolderMembership(source.db, folder.id, ['too-many-participants']);
 
