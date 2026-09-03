@@ -4580,7 +4580,7 @@
     {
       "id": "src/db/repositories/backup.ts#getCustomFolderBackupData:mutator-call:256a49576437",
       "path": "src/db/repositories/backup.ts",
-      "line": 415,
+      "line": 498,
       "symbol": "getCustomFolderBackupData",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4593,7 +4593,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:3d0e0e711df1",
       "path": "src/db/repositories/backup.ts",
-      "line": 515,
+      "line": 601,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>",
@@ -4606,7 +4606,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:95a28f5a24c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 515,
+      "line": 601,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4619,7 +4619,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>:mutator-call:cbbc55ccf1c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 517,
+      "line": 603,
       "symbol": "restoreKv.<callback:5188e54620>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -4632,7 +4632,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:097cd820cdfa",
       "path": "src/db/repositories/backup.ts",
-      "line": 572,
+      "line": 658,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4645,7 +4645,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:08312684c164",
       "path": "src/db/repositories/backup.ts",
-      "line": 589,
+      "line": 675,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreThemes.<callback:4ed79282ca>",
@@ -4658,7 +4658,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:c87f5cedf55d",
       "path": "src/db/repositories/backup.ts",
-      "line": 589,
+      "line": 675,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4671,7 +4671,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-update:365048ad07a1",
       "path": "src/db/repositories/backup.ts",
-      "line": 607,
+      "line": 693,
       "symbol": "restoreThemes",
       "operation": "sql-update",
       "target": "themes",
@@ -4684,7 +4684,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-insert:22d3eacb4b53",
       "path": "src/db/repositories/backup.ts",
-      "line": 612,
+      "line": 698,
       "symbol": "restoreThemes",
       "operation": "sql-insert",
       "target": "themes",
@@ -4697,7 +4697,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction:drizzle-update:5be60b42a201",
       "path": "src/db/repositories/backup.ts",
-      "line": 651,
+      "line": 737,
       "symbol": "restoreChatCustomizationWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -4710,7 +4710,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e",
       "path": "src/db/repositories/backup.ts",
-      "line": 686,
+      "line": 772,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "kv",
@@ -4723,7 +4723,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977",
       "path": "src/db/repositories/backup.ts",
-      "line": 695,
+      "line": 781,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "themes",
@@ -4736,7 +4736,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0",
       "path": "src/db/repositories/backup.ts",
-      "line": 734,
+      "line": 820,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "themes",
@@ -4749,7 +4749,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff",
       "path": "src/db/repositories/backup.ts",
-      "line": 770,
+      "line": 856,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -4762,7 +4762,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6",
       "path": "src/db/repositories/backup.ts",
-      "line": 771,
+      "line": 857,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -4775,7 +4775,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a",
       "path": "src/db/repositories/backup.ts",
-      "line": 772,
+      "line": 858,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -4788,7 +4788,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:1cf95359657b",
       "path": "src/db/repositories/backup.ts",
-      "line": 774,
+      "line": 860,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4801,7 +4801,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:4a38fcfbd34e",
       "path": "src/db/repositories/backup.ts",
-      "line": 1201,
+      "line": 1287,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "chats",
@@ -4814,7 +4814,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:a9908ef95877",
       "path": "src/db/repositories/backup.ts",
-      "line": 1251,
+      "line": 1337,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folders",
@@ -4827,7 +4827,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:9a38cb1ceb72",
       "path": "src/db/repositories/backup.ts",
-      "line": 1282,
+      "line": 1368,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4840,7 +4840,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:ed07d6fd2e8d",
       "path": "src/db/repositories/backup.ts",
-      "line": 1299,
+      "line": 1385,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "custom_folders",
@@ -4853,7 +4853,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:0593854a2ac8",
       "path": "src/db/repositories/backup.ts",
-      "line": 1312,
+      "line": 1398,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4866,7 +4866,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:42d5bf1453d2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1385,
+      "line": 1471,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folder_members",
@@ -4879,7 +4879,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1419,
+      "line": 1505,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -4892,7 +4892,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1420,
+      "line": 1506,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -4905,7 +4905,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1421,
+      "line": 1507,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -4918,7 +4918,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:b8f4ecd73be2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1438,
+      "line": 1524,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4931,7 +4931,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:cfe21ece36c0",
       "path": "src/db/repositories/backup.ts",
-      "line": 1438,
+      "line": 1524,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>",
@@ -4944,7 +4944,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>:mutator-call:9ffade814657",
       "path": "src/db/repositories/backup.ts",
-      "line": 1440,
+      "line": 1526,
       "symbol": "restoreChatCustomizations.<callback:b943573fc5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction",

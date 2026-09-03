@@ -269,6 +269,12 @@ describe('backup account ownership / picked-file cleanup', () => {
 // ---- encrypted export + import round-trip ----------------------------------
 
 describe('exportEncryptedBackup / importBackupAuto', () => {
+  it('does not expose the retired plaintext export entry point', () => {
+    expect(jest.requireActual('@/services/backup/backupService')).not.toHaveProperty(
+      'exportBackup',
+    );
+  });
+
   it.each([
     ['short', 'only-short'],
     ['common', 'password1234'],
