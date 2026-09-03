@@ -294,7 +294,7 @@ function startTargetedChatRepair(
   });
   const predecessor = targetedRepairInFlight;
 
-  const result = settledAll([syncInFlight, trackedInFlight, predecessor]).then(async () => {
+  const operation = settledAll([syncInFlight, trackedInFlight, predecessor]).then(async () => {
     const stopped = (): boolean =>
       abortController.signal.aborted || sessionAccessors.getEpoch() !== epoch || !lease.isCurrent();
     if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
@@ -357,6 +357,11 @@ function startTargetedChatRepair(
   });
 
   let slot!: Promise<void>;
+  const result = operation.finally(() => {
+    // Clear only the matching run before callers observe settlement and can retry it.
+    const current = targetedRepairByKey.get(key);
+    if (current?.slot === slot) targetedRepairByKey.delete(key);
+  });
   slot = result
     .then(
       () => undefined,
@@ -364,8 +369,6 @@ function startTargetedChatRepair(
     )
     .finally(() => {
       releaseInvalidation();
-      const current = targetedRepairByKey.get(key);
-      if (current?.slot === slot) targetedRepairByKey.delete(key);
       if (targetedRepairInFlight === slot) targetedRepairInFlight = null;
     });
   const run: TargetedRepairRun = { epoch, key, result, slot };
@@ -390,13 +393,10 @@ export function restoreDeletedChat(
 /**
  * Resolve once no sync is in flight (immediately when none is).
  *
- * `forget()` awaits this before wiping the DB. A sync that is still paging when the wipe lands
- * re-inserts the OLD server's chats/handles/messages AFTER the deletes and then writes a NON-NULL
- * sync marker — precisely the two failures the wipe exists to prevent. There is no cancellation to
- * offer here (a run never abandons a page mid-flight), but once `forget()` has cleared the origin
- * every in-flight request fails fast, so the run unwinds in seconds — and the phases that would
- * write WITHOUT a request first ask `sessionEnded` and skip themselves (see `runSync`), because
- * this drain is bounded by the caller's deadline and a big account can outlive it.
+ * `forget()` awaits this before wiping the DB. Otherwise a still-paging sync can reinsert the old
+ * account's chats/handles/messages and non-null marker after deletion. Clearing the origin makes
+ * requests fail fast, while request-free phases check `sessionEnded`; the caller's bounded deadline
+ * can still expire before a large account fully unwinds.
  *
  * Covers the AWAITED body of `runSync` plus anything published via `runTrackedSync` (the
  * background catch-up) — BOTH slots, since a wipe cares about every writer, not about which
