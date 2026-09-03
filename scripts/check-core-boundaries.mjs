@@ -12,6 +12,8 @@ const CORE_DIRECTORY = 'src/core';
 const SERVICES_DIRECTORY = 'src/services';
 const UI_DB_OWNER_DIRECTORIES = ['app', 'src/ui'];
 const PRODUCTION_DIRECTORIES = ['app', 'src'];
+const PRODUCTION_ENTRY_FILES = ['index.js'];
+const EMBEDDED_WEBVIEW_MODULE = 'react-native-webview';
 const FORBIDDEN_SOURCE_DIRECTORIES = ['db', 'features', 'native', 'services', 'state', 'ui'];
 const FORBIDDEN_ALIASES = ['@db', '@features', '@native', '@services', '@state', '@ui'];
 const SOURCE_EXTENSIONS = ['.tsx', '.jsx', '.mts', '.cts', '.mjs', '.cjs', '.ts', '.js'];
@@ -179,6 +181,30 @@ export function validateServiceImports({ root, files }) {
         errors.push(`${relative(root, file)} uses a non-literal require/import.`);
       } else if (isUiAlias(specifier) || isUiRelativeImport({ root, file, specifier })) {
         errors.push(`${relative(root, file)} imports forbidden UI boundary "${specifier}".`);
+      }
+    }
+  }
+
+  return errors.sort();
+}
+
+export function validateEmbeddedWebViewImports({ root, files }) {
+  const errors = [];
+
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8');
+    for (const specifier of importSpecifiers(source, file)) {
+      if (specifier === '<non-literal>') {
+        errors.push(
+          `${relative(root, file)} uses a non-literal require/import, so the disabled embedded WebView boundary cannot be verified.`,
+        );
+      } else if (
+        specifier === EMBEDDED_WEBVIEW_MODULE ||
+        specifier.startsWith(`${EMBEDDED_WEBVIEW_MODULE}/`)
+      ) {
+        errors.push(
+          `${relative(root, file)} imports disabled embedded WebView boundary "${specifier}".`,
+        );
       }
     }
   }
@@ -809,12 +835,23 @@ export function runSynchronousRuntimeCycleCheck({ root = process.cwd() } = {}) {
   return { edges: result.edges, files: files.length };
 }
 
+export function runEmbeddedWebViewBoundaryCheck({ root = process.cwd() } = {}) {
+  const files = [
+    ...PRODUCTION_DIRECTORIES.flatMap((directory) => sourceFiles(resolve(root, directory))),
+    ...PRODUCTION_ENTRY_FILES.map((file) => resolve(root, file)).filter(existsSync),
+  ];
+  const errors = validateEmbeddedWebViewImports({ root, files });
+  if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
+  return { files: files.length };
+}
+
 export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
   return {
     core: runCoreBoundaryCheck({ root }),
     services: runServiceBoundaryCheck({ root }),
     uiDb: runUiDbCommandBoundaryCheck({ root }),
     cycles: runSynchronousRuntimeCycleCheck({ root }),
+    embeddedWebView: runEmbeddedWebViewBoundaryCheck({ root }),
     headlessEntry: runHeadlessEntryCheck({ root }),
   };
 }
@@ -825,7 +862,7 @@ if (invokedDirectly) {
   try {
     const result = runArchitectureBoundaryCheck();
     console.log(
-      `Architecture boundary guard passed: ${result.core.files} core files, ${result.services.files} UI-free service files, ${result.uiDb.files} UI/app files with read-only DB ownership, ${result.cycles.files} production files / ${result.cycles.edges} synchronous runtime edges without cycles, and ${result.headlessEntry.imports} ordered entry imports.`,
+      `Architecture boundary guard passed: ${result.core.files} core files, ${result.services.files} UI-free service files, ${result.uiDb.files} UI/app files with read-only DB ownership, ${result.cycles.files} production files / ${result.cycles.edges} synchronous runtime edges without cycles, ${result.embeddedWebView.files} production files without embedded WebView imports, and ${result.headlessEntry.imports} ordered entry imports.`,
     );
   } catch (error) {
     console.error(

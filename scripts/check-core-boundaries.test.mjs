@@ -8,8 +8,10 @@ import {
   importSpecifiers,
   runArchitectureBoundaryCheck,
   runCoreBoundaryCheck,
+  runEmbeddedWebViewBoundaryCheck,
   runServiceBoundaryCheck,
   validateCoreImports,
+  validateEmbeddedWebViewImports,
   validateServiceImports,
   validateSynchronousRuntimeCycles,
   validateUiDbCommands,
@@ -126,6 +128,34 @@ test('rejects every service-to-UI import form and non-literal loading', () => {
 test('the repository services currently satisfy the UI boundary', () => {
   const result = runServiceBoundaryCheck();
   assert.ok(result.files > 0);
+});
+
+test('rejects embedded WebView imports from production source', () => {
+  const root = fixture({
+    'index.js': `require('react-native-webview');`,
+    'app/direct.tsx': `import { WebView } from 'react-native-webview'; export { WebView };`,
+    'src/dynamic.ts': `export async function load() { return import('react-native-webview/lib/WebView'); }`,
+    'src/unknown.ts': `export async function load(name) { return import(name); }`,
+  });
+  const files = [
+    resolve(root, 'app/direct.tsx'),
+    resolve(root, 'src/dynamic.ts'),
+    resolve(root, 'src/unknown.ts'),
+  ];
+
+  try {
+    const errors = validateEmbeddedWebViewImports({ root, files });
+    assert.equal(errors.length, 3);
+    assert.ok(errors.some((error) => error.includes('app/direct.tsx')));
+    assert.ok(errors.some((error) => error.includes('src/dynamic.ts')));
+    assert.ok(errors.some((error) => error.includes('src/unknown.ts')));
+    assert.throws(
+      () => runEmbeddedWebViewBoundaryCheck({ root }),
+      /index\.js imports disabled embedded WebView boundary/,
+    );
+  } finally {
+    rmSync(root, { recursive: true });
+  }
 });
 
 test('allows reviewed UI DB reads, type-only imports, and a query-only local handle', () => {
@@ -399,5 +429,6 @@ test('the repository satisfies UI DB, cycle, and static headless entry architect
   assert.ok(result.uiDb.files > 0);
   assert.ok(result.cycles.files > 0);
   assert.ok(result.cycles.edges > 0);
+  assert.ok(result.embeddedWebView.files > 0);
   assert.ok(result.headlessEntry.imports > 0);
 });
