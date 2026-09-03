@@ -89,9 +89,13 @@ observable empty intermediate state.
 
 Implement these as three independent slices:
 
-1. `FEAT-05A` adds current-location sending through an explicit foreground permission and one
-   bounded, user-initiated location attachment. It needs truthful denial/cancellation/error states
-   and must not introduce background location collection.
+1. `FEAT-05A` is blocked until a negotiated server transport can actually send the location
+   attachment. The current server intentionally rejects iMessage attachment upload after retirement
+   of the Private API helper, and its supported AppleScript fallback sends text only. Until that
+   capability exists, expose no Location action and add no location permission or dependency. Once
+   available, current-location sending must use an explicit foreground permission and one bounded,
+   user-initiated location attachment, with truthful denial/cancellation/error states and no
+   background location collection.
 2. `FEAT-05B` groups only current, owned, ordinary Android message children under one fixed group.
    Two distinct valid chats first create one fixed, generic, non-alerting summary with the
    count-neutral body `New messages`; it alerts through its children only and opens the inbox without
