@@ -15,14 +15,15 @@
  * Reduce Motion keeps entrance content visible and static, cancels active entrances, and makes an
  * invisible-ink reveal instant without removing its conceal/reveal control. Preference events win
  * over stale initial queries, and a consumed entrance never replays merely because the setting is
- * later disabled.
+ * later disabled. While invisible ink is concealed, its private descendants are absent from the
+ * accessibility tree and one fixed Reveal button is exposed; revealing reverses that boundary.
  *
  * We assert start/stop contracts directly by spying on `Animated.parallel` and checking its returned
  * handle — the same cleanup-contract approach as typingBubble.test.tsx. (We do NOT assert
  * `getTimerCount() === 0`: the jest-expo Animated mock leaves residual frame timers regardless.)
  */
 import React from 'react';
-import { AccessibilityInfo, Animated, Text } from 'react-native';
+import { AccessibilityInfo, Animated, Pressable, Text } from 'react-native';
 import type { BubbleEffect } from '@core/effects';
 import { renderWithTheme, screen, fireEvent, act } from '../support/renderWithTheme';
 import { BubbleEffectView } from '@ui/conversations/effects/BubbleEffectView';
@@ -34,6 +35,7 @@ interface CompositeHandle {
 }
 
 type EntranceEffect = Exclude<BubbleEffect, 'invisibleInk'>;
+const HIDDEN = { includeHiddenElements: true } as const;
 
 const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jest.MockedFunction<
   typeof AccessibilityInfo.isReduceMotionEnabled
@@ -367,13 +369,13 @@ describe('BubbleEffectView motion preference and cleanup', () => {
         </BubbleEffectView>,
       );
       // Content sits behind the tap-to-reveal overlay; no animation runs until the user taps.
-      expect(screen.getByText('secret')).toBeTruthy();
-      expect(screen.getByText('✨ Tap to reveal')).toBeTruthy();
+      expect(screen.getByText('secret', HIDDEN)).toBeTruthy();
+      expect(screen.getByText('✨ Tap to reveal', HIDDEN)).toBeTruthy();
       expect(handles).toHaveLength(0);
 
       // Tap to reveal → starts the reveal animation.
       await act(async () => {
-        fireEvent.press(screen.getByText('secret'));
+        fireEvent.press(screen.getByRole('button', { name: 'Reveal invisible ink message' }));
       });
       expect(handles).toHaveLength(1);
       const [anim] = handles;
@@ -391,6 +393,49 @@ describe('BubbleEffectView motion preference and cleanup', () => {
     }
   });
 
+  it('invisibleInk: conceals private descendants from accessibility until explicit reveal', async () => {
+    const privateText = 'private-invisible-ink-x-7d91@example.test';
+    const privateAction = 'Open private invisible-ink message actions';
+    const onMessageAction = jest.fn();
+    await renderWithTheme(
+      <BubbleEffectView effect="invisibleInk">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={privateAction}
+          onPress={onMessageAction}
+        >
+          <Text>{privateText}</Text>
+        </Pressable>
+      </BubbleEffectView>,
+    );
+
+    expect(screen.queryByText(privateText)).toBeNull();
+    expect(screen.queryByRole('button', { name: privateAction })).toBeNull();
+    expect(screen.getByText(privateText, HIDDEN)).toBeTruthy();
+    const concealedAction = screen.getByRole('button', {
+      name: privateAction,
+      includeHiddenElements: true,
+    });
+    expect(concealedAction.parent?.props).toMatchObject({
+      accessibilityElementsHidden: true,
+      importantForAccessibility: 'no-hide-descendants',
+    });
+
+    const reveal = screen.getByRole('button', { name: 'Reveal invisible ink message' });
+    expect(reveal.props.accessible).toBe(true);
+    await fireEvent.press(reveal);
+
+    expect(screen.queryByRole('button', { name: 'Reveal invisible ink message' })).toBeNull();
+    expect(screen.getByText(privateText)).toBeTruthy();
+    const revealedAction = screen.getByRole('button', { name: privateAction });
+    expect(revealedAction.parent?.props).toMatchObject({
+      accessibilityElementsHidden: false,
+      importantForAccessibility: 'auto',
+    });
+    await fireEvent.press(revealedAction);
+    expect(onMessageAction).toHaveBeenCalledTimes(1);
+  });
+
   it('invisibleInk: an unresolved preference keeps concealment but reveals instantly', async () => {
     mockIsReduceMotionEnabled.mockReturnValue(new Promise<boolean>(() => undefined));
     const { handles, restore } = spyParallel();
@@ -401,10 +446,10 @@ describe('BubbleEffectView motion preference and cleanup', () => {
           <Text>secret</Text>
         </BubbleEffectView>,
       );
-      expect(screen.getByText('✨ Tap to reveal')).toBeTruthy();
+      expect(screen.getByText('✨ Tap to reveal', HIDDEN)).toBeTruthy();
 
       await act(async () => {
-        fireEvent.press(screen.getByText('secret'));
+        fireEvent.press(screen.getByRole('button', { name: 'Reveal invisible ink message' }));
       });
       expect(handles).toHaveLength(0);
       expect(screen.queryByText('✨ Tap to reveal')).toBeNull();
@@ -429,10 +474,10 @@ describe('BubbleEffectView motion preference and cleanup', () => {
           <Text>secret</Text>
         </BubbleEffectView>,
       );
-      expect(screen.getByText('✨ Tap to reveal')).toBeTruthy();
+      expect(screen.getByText('✨ Tap to reveal', HIDDEN)).toBeTruthy();
 
       await act(async () => {
-        fireEvent.press(screen.getByText('secret'));
+        fireEvent.press(screen.getByRole('button', { name: 'Reveal invisible ink message' }));
       });
       expect(handles).toHaveLength(0);
       expect(screen.queryByText('✨ Tap to reveal')).toBeNull();
@@ -451,7 +496,7 @@ describe('BubbleEffectView motion preference and cleanup', () => {
         </BubbleEffectView>,
       );
       await act(async () => {
-        fireEvent.press(screen.getByText('secret'));
+        fireEvent.press(screen.getByRole('button', { name: 'Reveal invisible ink message' }));
       });
       expect(handles).toHaveLength(1);
 

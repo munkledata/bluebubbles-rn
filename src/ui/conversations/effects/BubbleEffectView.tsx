@@ -168,11 +168,25 @@ function InvisibleInk({
   };
 
   return (
-    <Pressable onPress={revealed ? undefined : reveal}>
-      <Animated.View style={{ opacity: contentOpacity }}>{children}</Animated.View>
+    <Pressable
+      onPress={revealed ? undefined : reveal}
+      accessible={!revealed}
+      accessibilityRole={revealed ? undefined : 'button'}
+      accessibilityLabel={revealed ? undefined : 'Reveal invisible ink message'}
+    >
+      <Animated.View
+        style={{ opacity: contentOpacity }}
+        accessibilityElementsHidden={!revealed}
+        importantForAccessibility={revealed ? 'auto' : 'no-hide-descendants'}
+      >
+        {children}
+      </Animated.View>
       {!revealed ? (
         <Animated.View
           pointerEvents="none"
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
           style={[
             StyleSheet.absoluteFill,
             styles.overlay,
