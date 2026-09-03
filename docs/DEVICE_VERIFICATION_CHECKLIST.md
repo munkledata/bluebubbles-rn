@@ -537,6 +537,22 @@ Play-candidate results remain open.
       `SEND`/`SEND_MULTIPLE` filters, Direct Share target metadata/resource, `expo-share-intent`
       dependency/autolinking, or active intake mount. Cleanup-only legacy shortcut code is not an
       inbound capability.
+- [ ] **`EXACT PLAY CANDIDATE` + approved prior-build Play update:** Name the exact Play-delivered
+      shortcut-publishing baseline and its version code. Through that baseline's ordinary app/server
+      flow, use one distinct non-private synthetic chat/avatar and verify its shortcut label, avatar,
+      and legacy Direct Share category; never invoke inbound sharing or use `cmd shortcut` to create
+      or clear state. Pin that shortcut only through launcher UI when permitted. Update through Play
+      without uninstalling or clearing app data. Before the first candidate launch, run
+      `adb shell dumpsys shortcut com.bluegreengatorapps.messages` and verify that the same shortcut
+      ID and old pinned metadata survived the update; otherwise leave the pinned-survivor branch
+      open. Launch the candidate, then inspect that package-scoped dump and the launcher: old
+      dynamic/cached rows are gone, and the same retained pinned ID is disabled and generic, with no
+      old synthetic label, avatar, launch deep link, or Direct Share category. Launch again and
+      repeat the inspection to prove cleanup is safe to rerun. Retain only sanitized fields or a
+      private evidence reference—not the raw dump—and after review remove only the synthetic
+      home-screen pin through launcher UI. If publishing, pinning, or post-update survival cannot be
+      demonstrated, leave that branch `BLOCKED/OPEN`; do not substitute a clean install, sideloaded
+      build, DEV fixture, or command-created shortcut.
 - [ ] **`EXACT PLAY CANDIDATE`:** From another app's Android share sheet, try bounded synthetic text,
       one image, multiple images, and a PDF. Gator and Gator conversation chips must not appear as
       destinations. Use fixture labels and a private evidence reference; never capture another
@@ -1160,6 +1176,8 @@ production-file behavior, signed/store provenance, scheduled CI, or release/phys
 `expo-share-intent@8.0.1` reads provider metadata/media and can copy a stream without byte or time
 limits before JavaScript receives an event. The release candidate therefore must not accept text,
 files, `SEND_MULTIPLE`, or Direct Share targets until an owned bounded native intake replaces it.
+This historical checklist is non-executable; current matrix slice 2, section 6 is the authoritative
+candidate procedure, including the pinned-shortcut survivor and approved-baseline rules.
 
 - [ ] Inspect the exact candidate manifest: MainActivity has no `android.intent.action.SEND` or
       `android.intent.action.SEND_MULTIPLE` filter.

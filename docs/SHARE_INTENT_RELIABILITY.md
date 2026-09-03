@@ -1,13 +1,16 @@
 # Sharing INTO Gator — why a shared PDF vanished, and the fix
 
-> **Current release status (2026-08-04): disabled for IPC-01 containment.** The investigation below
+> **Current release status (2026-09-03): disabled for IPC-01 containment.** The investigation below
 > is retained as design evidence, but its earlier JS workaround is not safe enough to ship.
 > `expo-share-intent@8.0.1` can perform unbounded provider reads/copies inside `getFileInfo()` before
 > any raw event reaches JavaScript. Gator therefore installs no such native package, declares no
-> `SEND`/`SEND_MULTIPLE` or Direct Share target, and mounts no provider/capture. Re-enabling inbound
-> sharing requires an owned native intake with pre-copy count rejection, actual per-file and
-> aggregate byte caps, streaming cancellation/deadline enforcement, atomic completion, and
-> process-restart cleanup.
+> `SEND`/`SEND_MULTIPLE` or Direct Share target, and mounts no provider/capture. The app-root cleanup
+> bridge removes old dynamic/cached conversation shortcuts and disables and sanitizes any retained
+> pinned rows that Android will not let the publisher delete. Exact in-place device-upgrade proof
+> remains open.
+> Re-enabling inbound sharing requires an owned native intake with pre-copy count rejection, actual
+> per-file and aggregate byte caps, streaming cancellation/deadline enforcement, atomic completion,
+> and process-restart cleanup.
 
 _2026-07-24. Reported symptom: "I tried to share a PDF and Gator showed in the intent menu but
 failed after that" — and, when pressed for detail, **nothing happened at all**: no attachment, no
@@ -207,10 +210,11 @@ The pure suites remain useful evidence, but they do not authorize re-enabling na
 | `test/services/uploadErrors.test.ts`             | the exact expo-file-system wordings classify as local-file; network errors do not                                                                                                                                                                                                     |
 | `test/components/shareIntentHandler.test.tsx`    | dormant navigator behavior only; production layouts never mount it                                                                                                                                                                                                                    |
 | `test/services/shareShortcuts.test.ts`           | cleanup-only bridge; no publish/usage/launch API remains                                                                                                                                                                                                                              |
+| `LegacyShortcutCleanupTest.kt`                   | eight native tests cover dynamic/cached removal, pinned-row sanitization and disablement, unsafe-update failure, re-query failure, and idempotence                                                                                                                                    |
 | `test/services/sendOutcome.test.ts` _(extended)_ | a `local_file` error yields 10009, not 10004                                                                                                                                                                                                                                          |
 | `test/utils/messageStatus.test.ts` _(extended)_  | 10009 → "Attachment Unavailable"                                                                                                                                                                                                                                                      |
-| `test/config/shareIntakeDisabled.test.ts`        | dependency/lock/config/import/layout/publication absence plus root legacy cleanup                                                                                                                                                                                                     |
-| `scripts/check-android-build.test.mjs`           | allows harmless outbound `<queries>` ACTION_SEND but rejects Activity filters, shortcuts metadata/resource, and stale native DEX markers                                                                                                                                              |
+| `test/config/shareIntakeDisabled.test.ts`        | dependency/lock/config/import/layout/publication absence plus root legacy cleanup and retired-shortcut marker enforcement                                                                                                                                                             |
+| `scripts/check-android-build.test.mjs`           | allows harmless outbound `<queries>` ACTION_SEND, rejects inbound surfaces, and requires the cleanup/sanitization DEX markers while forbidding the old publisher markers                                                                                                              |
 
 ## Current IPC-01 verification
 
@@ -223,17 +227,38 @@ npm test -- --runInBand \
   test/components/shareIntentHandler.test.tsx
 npx expo-modules-autolinking search -p android # output must omit expo-share-intent
 
-# Cleanup-only local bridge:
-cd android && ./gradlew :gator-share-shortcuts:compileDebugKotlin --no-daemon
+# Cleanup-only local bridge and its native unit tests:
+cd android && ./gradlew \
+  :gator-share-shortcuts:compileDebugKotlin \
+  :gator-share-shortcuts:testDebugUnitTest \
+  --no-daemon
 ```
 
 `check:android-build` parses both merged manifests and the packaged protobuf manifest. It rejects
 `SEND`/`SEND_MULTIPLE` only when nested in an Activity/Activity-alias intent-filter; an ACTION_SEND
 inside manifest `<queries>` is expected package visibility for **outbound** `expo-sharing` and does
 not make Gator a receiver. The guard also rejects `android.app.shortcuts` metadata, any packaged
-`<share-target>`, and old `ExpoShareIntent` markers in DEX.
+`<share-target>`, and old `ExpoShareIntent` markers in DEX. Its packaged-Dex check requires all
+seven cleanup and pinned-row sanitization markers and forbids all four old first-party shortcut
+publisher markers.
 
-On a device, open another app's share sheet with text, one file, multiple files, and a PDF. Gator
-and conversation chips must not appear. Then run `adb shell dumpsys shortcut` and confirm the old
-Gator dynamic/cached conversation rows disappear after launching the upgraded app. Ordinary
-outbound backup/media sharing must continue to work through `expo-sharing`.
+The remaining device proof must start from the exact approved shortcut-publishing Play build. Use
+that baseline's ordinary app/server flow with one distinct, non-private synthetic chat and avatar;
+never invoke its unsafe inbound-share path or use `cmd shortcut` to manufacture or clear state.
+Verify that the baseline publishes the shortcut with its distinct synthetic label/avatar and legacy
+Direct Share category, then pin it only through the launcher UI when the launcher permits. Update to
+the exact candidate through Play **without uninstalling or clearing app data**. Before the first
+candidate launch, run
+`adb shell dumpsys shortcut com.bluegreengatorapps.messages` and verify that the same shortcut ID
+and old pinned metadata survived the update; otherwise the pinned-survivor branch remains open.
+After launching the candidate, inspect that package-scoped dump and the launcher again: old
+dynamic/cached conversation rows must be gone. Android may retain the launcher-owned pinned row, but
+the same ID must now be disabled and generic, with no old conversation/account label, contact photo,
+launch deep link, or Direct Share category. Launch again and repeat the inspection to prove cleanup
+is safe to rerun. Retain only sanitized fields or a private evidence reference—not the raw dump—and
+after review remove only the synthetic home-screen pin through the launcher UI. If the approved
+baseline cannot publish the shortcut, the launcher cannot pin it, or the row does not survive the
+update, leave the affected branch `BLOCKED/OPEN`; a clean install, sideload, DEV build, or
+command-created shortcut is not a substitute. Separately open another app's share sheet with bounded
+synthetic text, one file, multiple files, and a PDF: Gator and conversation chips must not appear.
+Ordinary outbound backup/media sharing must continue to work through `expo-sharing`.
