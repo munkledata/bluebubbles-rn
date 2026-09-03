@@ -8,7 +8,8 @@
  *   - the FIFO queue actually PLAYS BACK: a second toast enqueued behind the first is promoted by
  *     the auto-dismiss instead of being dropped;
  *   - a STALE toast (enqueued by a headless FCM wake in a previous, hostless life of the JS
- *     context) is dropped on sight instead of replaying as a ghost pill.
+ *     context) is dropped on sight instead of replaying as a ghost pill or accessibility alert;
+ *   - the current pill is one polite accessibility alert whose label follows FIFO promotion.
  * Insets are mocked (the pill offsets by insets.bottom). Renders async under RNTL 14 → await.
  */
 import React from 'react';
@@ -22,9 +23,11 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
+const realDismiss = useToastStore.getState().dismiss;
+
 describe('AppToast', () => {
   beforeEach(() => {
-    useToastStore.setState({ current: null, queue: [] });
+    useToastStore.setState({ current: null, queue: [], dismiss: realDismiss });
   });
 
   it('renders nothing when there is no toast', async () => {
@@ -38,6 +41,9 @@ describe('AppToast', () => {
       showToast('Downloaded 3 images to Gator album');
     });
     expect(await screen.findByText('Downloaded 3 images to Gator album')).toBeTruthy();
+    const alert = screen.getByRole('alert', { name: 'Downloaded 3 images to Gator album' });
+    expect(alert.props.accessible).toBe(true);
+    expect(alert.props.accessibilityLiveRegion).toBe('polite');
   });
 
   it('auto-dismisses after its duration', async () => {
@@ -80,12 +86,14 @@ describe('AppToast', () => {
 
     // Only one at a time: "second" is parked in the queue while "first" is on screen.
     expect(await screen.findByText('first')).toBeTruthy();
+    expect(screen.getByRole('alert').props.accessibilityLabel).toBe('first');
     expect(screen.queryByText('second')).toBeNull();
     expect(useToastStore.getState().queue).toHaveLength(1);
 
     // The first toast's own timer calls dismiss(), which promotes the queued one — this is the
     // whole point of the queue (a burst of toasts plays back instead of clobbering each other).
     expect(await screen.findByText('second', {}, { timeout: 1500 })).toBeTruthy();
+    expect(screen.getByRole('alert').props.accessibilityLabel).toBe('second');
     expect(screen.queryByText('first')).toBeNull();
     expect(useToastStore.getState().queue).toHaveLength(0);
   });
@@ -96,6 +104,29 @@ describe('AppToast', () => {
     const current = useToastStore.getState().current;
     expect(current?.createdAt).toBeGreaterThanOrEqual(before);
     expect(current?.createdAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('never exposes a stale current toast before its dismiss effect runs', async () => {
+    const dismiss = jest.fn();
+    useToastStore.setState({
+      current: {
+        id: 900,
+        message: 'private message from an old session',
+        durationMs: 2500,
+        createdAt: Date.now() - 60_000,
+      },
+      queue: [],
+      // Keep the stale entry in the store after the effect. If AppToast hid it only by dismissing
+      // after render, this test would still see the old text and alert in the committed tree.
+      dismiss,
+    });
+
+    await renderWithTheme(<AppToast />);
+
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(screen.toJSON()).toBeNull();
+    expect(screen.queryByText('private message from an old session')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('drops a stale toast instead of showing it, and drains a whole stale backlog', async () => {
@@ -115,6 +146,9 @@ describe('AppToast', () => {
     // Both stale pills are dropped without ever animating in; the fresh one behind them still
     // shows — this is why the fix is per-toast staleness and NOT a mount-time store reset.
     expect(await screen.findByText('live')).toBeTruthy();
+    expect(screen.getByRole('alert').props.accessibilityLabel).toBe('live');
+    expect(screen.queryByRole('alert', { name: 'ghost one' })).toBeNull();
+    expect(screen.queryByRole('alert', { name: 'ghost two' })).toBeNull();
     expect(screen.queryByText('ghost one')).toBeNull();
     expect(screen.queryByText('ghost two')).toBeNull();
     expect(useToastStore.getState().queue).toHaveLength(0);

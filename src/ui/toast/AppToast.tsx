@@ -28,13 +28,17 @@ export function AppToast(): React.JSX.Element | null {
   const current = useToastStore((s) => s.current);
   const dismiss = useToastStore((s) => s.dismiss);
   const opacity = useRef(new Animated.Value(0)).current;
+  // Reading the clock here is deliberate: effects run too late to keep a stale headless-session
+  // message out of the accessibility tree on its first frame.
+  // eslint-disable-next-line react-hooks/purity
+  const currentIsStale = current !== null && Date.now() - current.createdAt > MAX_TOAST_AGE_MS;
 
   useEffect(() => {
     if (!current) return;
     // Stale backlog → skip it and promote the next one (which gets the same test, so a whole
     // hostless burst drains at once). No animation was started, so `opacity` is still 0 and the
     // pill never becomes visible for the frame it takes to unmount.
-    if (Date.now() - current.createdAt > MAX_TOAST_AGE_MS) {
+    if (currentIsStale) {
       dismiss();
       return;
     }
@@ -46,13 +50,19 @@ export function AppToast(): React.JSX.Element | null {
       anim.stop();
       opacity.setValue(0);
     };
-  }, [current, dismiss, opacity]);
+  }, [current, currentIsStale, dismiss, opacity]);
 
-  if (!current) return null;
+  // Effects run after render. Suppress an old headless-session message here so it cannot enter the
+  // accessibility tree for one frame before the effect above drains it from the queue.
+  if (!current || currentIsStale) return null;
 
   return (
     <View style={styles.wrap} pointerEvents="none">
       <Animated.View
+        accessible
+        accessibilityRole="alert"
+        accessibilityLiveRegion="polite"
+        accessibilityLabel={current.message}
         style={[
           styles.pill,
           { backgroundColor: theme.color.secondaryBackground, bottom: insets.bottom + 24, opacity },
