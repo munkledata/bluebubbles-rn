@@ -70,6 +70,12 @@ interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> 
 const MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES = 10_000;
 const MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS = 25_000;
 const MAX_BACKUP_CHAT_PARTICIPANTS = 512;
+// Apply coarse SQL allocation caps before JSON aggregation. The JavaScript check below then
+// mirrors BackupV3Schema's exact UTF-16 string-length semantics without truncating evidence.
+const MAX_BACKUP_CHAT_SERVICE_CHARACTERS = 128;
+const MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS = 4_096;
+const MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS = 4_096;
+const MAX_UTF8_BYTES_PER_CHARACTER = 4;
 
 interface CustomFolderBackupExportRow {
   folderId: number;
@@ -77,6 +83,7 @@ interface CustomFolderBackupExportRow {
   showUnreadBadge: number;
   chatGuid: string | null;
   loadedGuid: string | null;
+  identityEvidenceValid: number | null;
   chatIdentifier: string | null;
   style: number | null;
   participantsJson: string | null;
@@ -324,17 +331,76 @@ function readCustomFolderBackupRowsWithinTransaction(
          LIMIT ${MAX_CUSTOM_FOLDERS + 1}
       ),
       member_probe AS MATERIALIZED (
-        SELECT member.folder_id, member.chat_guid
+        SELECT member.folder_id, member.chat_guid,
+               ROW_NUMBER() OVER (
+                 PARTITION BY member.chat_guid
+                 ORDER BY folder.sort_order ASC, folder.id ASC
+               ) AS identity_occurrence
           FROM custom_folder_members AS member
           JOIN folder_probe AS folder ON folder.id = member.folder_id
          ORDER BY folder.sort_order ASC, folder.id ASC, member.chat_guid ASC
          LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
       ),
-      member_identity AS MATERIALIZED (
+      member_identity_source AS MATERIALIZED (
         SELECT member.chat_guid,
+               chat.id AS chat_id,
                chat.guid AS loaded_guid,
-               chat.chat_identifier,
+               CASE WHEN chat.chat_identifier IS NULL OR (
+                 length(chat.chat_identifier) <= ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS}
+                 AND length(CAST(chat.chat_identifier AS BLOB)) <=
+                     ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
+               ) THEN chat.chat_identifier ELSE NULL END AS chat_identifier,
                chat.style,
+               CASE
+                 WHEN chat.id IS NULL THEN 0
+                 WHEN chat.chat_identifier IS NOT NULL AND (
+                   length(chat.chat_identifier) > ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS}
+                   OR length(CAST(chat.chat_identifier AS BLOB)) >
+                      ${MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
+                 ) THEN 0
+                 WHEN (
+                   SELECT COUNT(*)
+                     FROM (
+                       SELECT 1
+                         FROM chat_handles AS chat_handle
+                         JOIN handles AS handle ON handle.id = chat_handle.handle_id
+                        WHERE chat_handle.chat_id = chat.id
+                          AND handle.address IS NOT NULL
+                          AND handle.address <> ''
+                        LIMIT ${MAX_BACKUP_CHAT_PARTICIPANTS + 1}
+                     ) AS participant_probe
+                 ) > ${MAX_BACKUP_CHAT_PARTICIPANTS} THEN 0
+                 WHEN EXISTS (
+                   SELECT 1
+                     FROM chat_handles AS chat_handle
+                     JOIN handles AS handle ON handle.id = chat_handle.handle_id
+                    WHERE chat_handle.chat_id = chat.id
+                      AND handle.address IS NOT NULL
+                      AND handle.address <> ''
+                      AND (
+                        length(handle.address) >
+                          ${MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS}
+                        OR length(CAST(handle.address AS BLOB)) >
+                           ${MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
+                        OR length(COALESCE(handle.service, '')) >
+                           ${MAX_BACKUP_CHAT_SERVICE_CHARACTERS}
+                        OR length(CAST(COALESCE(handle.service, '') AS BLOB)) >
+                           ${MAX_BACKUP_CHAT_SERVICE_CHARACTERS * MAX_UTF8_BYTES_PER_CHARACTER}
+                      )
+                 ) THEN 0
+                 ELSE 1
+               END AS identity_evidence_valid
+          FROM (SELECT DISTINCT chat_guid FROM member_probe) AS member
+          LEFT JOIN chats AS chat ON chat.guid = member.chat_guid
+      ),
+      member_identity AS MATERIALIZED (
+        SELECT source.chat_guid,
+               source.loaded_guid,
+               source.identity_evidence_valid,
+               CASE WHEN source.identity_evidence_valid = 1
+                 THEN source.chat_identifier ELSE NULL END AS chat_identifier,
+               source.style,
+               CASE WHEN source.identity_evidence_valid = 1 THEN
                COALESCE(
                  (
                    SELECT json_group_array(
@@ -348,7 +414,7 @@ function readCustomFolderBackupRowsWithinTransaction(
                               handle.address AS address
                          FROM chat_handles AS chat_handle
                          JOIN handles AS handle ON handle.id = chat_handle.handle_id
-                        WHERE chat_handle.chat_id = chat.id
+                        WHERE chat_handle.chat_id = source.chat_id
                           AND handle.address IS NOT NULL
                           AND handle.address <> ''
                         GROUP BY COALESCE(handle.service, ''), handle.address
@@ -357,18 +423,20 @@ function readCustomFolderBackupRowsWithinTransaction(
                      ) AS participant
                  ),
                  '[]'
-               ) AS participants_json
-          FROM (SELECT DISTINCT chat_guid FROM member_probe) AS member
-          LEFT JOIN chats AS chat ON chat.guid = member.chat_guid
+               ) ELSE NULL END AS participants_json
+          FROM member_identity_source AS source
       )
       SELECT folder.id AS folderId,
              folder.name,
              folder.show_unread_badge AS showUnreadBadge,
              member.chat_guid AS chatGuid,
              identity.loaded_guid AS loadedGuid,
-             identity.chat_identifier AS chatIdentifier,
+             identity.identity_evidence_valid AS identityEvidenceValid,
+             CASE WHEN member.identity_occurrence = 1
+               THEN identity.chat_identifier ELSE NULL END AS chatIdentifier,
              identity.style,
-             identity.participants_json AS participantsJson
+             CASE WHEN member.identity_occurrence = 1
+               THEN identity.participants_json ELSE NULL END AS participantsJson
         FROM folder_probe AS folder
         LEFT JOIN member_probe AS member ON member.folder_id = folder.id
         LEFT JOIN member_identity AS identity ON identity.chat_guid = member.chat_guid
@@ -401,6 +469,21 @@ function parseBackupParticipants(value: string | null): PortableChatParticipant[
     }
     return { service: participant.service, address: participant.address };
   });
+}
+
+/** Match the final Zod string semantics after SQL has already capped allocation by bytes. */
+function hasBackupSchemaBoundedIdentityStrings(
+  chatIdentifier: string | null,
+  participants: readonly PortableChatParticipant[],
+): boolean {
+  return (
+    (chatIdentifier === null || chatIdentifier.length <= MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS) &&
+    participants.every(
+      (participant) =>
+        participant.service.length <= MAX_BACKUP_CHAT_SERVICE_CHARACTERS &&
+        participant.address.length <= MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS,
+    )
+  );
 }
 
 /**
@@ -481,11 +564,14 @@ export async function getCustomFolderBackupData(
 
     let identityIndex = identityIndexes.get(row.loadedGuid);
     if (identityIndex === undefined) {
+      if (row.identityEvidenceValid !== 1) continue;
+      const participants = parseBackupParticipants(row.participantsJson);
+      if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants)) continue;
       const identity = buildPortableChatIdentity(
         row.loadedGuid,
         row.chatIdentifier,
         row.style,
-        parseBackupParticipants(row.participantsJson),
+        participants,
       );
       if (!hasPortableRestoreEvidence(identity)) continue;
       if (customFolderChatIdentities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
