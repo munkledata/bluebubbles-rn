@@ -158,7 +158,8 @@ function FolderConversationListAttempt({
           <TextInput
             value={searchText}
             onChangeText={onSearchTextChange}
-            maxLength={MAX_FOLDER_SEARCH_CODE_POINTS}
+            // Android counts UTF-16 units here; reserve two for each JavaScript code point.
+            maxLength={MAX_FOLDER_SEARCH_CODE_POINTS * 2}
             placeholder="Search this folder"
             placeholderTextColor={theme.color.tertiaryLabel}
             autoCapitalize="none"
