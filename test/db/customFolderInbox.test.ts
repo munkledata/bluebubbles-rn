@@ -2,7 +2,9 @@ import { Chat, Message } from '@core/models';
 import {
   createCustomFolder,
   listCustomFolderInboxPageWithinTransaction,
+  MAX_CUSTOM_FOLDER_MEMBERS,
   replaceCustomFolderMembership,
+  searchChatGuidsByMessage,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -219,5 +221,85 @@ describe('listCustomFolderInboxPageWithinTransaction', () => {
 
     const oneCharacterFallsBackToBrowse = await loadFolderPage(t, folder.id, 2, ' c ');
     expect(oneCharacterFallsBackToBrowse).toMatchObject({ matchingCount: 6, hasMore: true });
+  });
+
+  it('normalizes Unicode and truncates search input at 128 code points', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'normalized-title', {
+      displayName: 'Cafe\u0301 room',
+      messages: [{ guid: 'normalized-message', text: 'ordinary', date: 200 }],
+    });
+    const boundedPrefix = '😀'.repeat(127);
+    const boundedTitleA = `${boundedPrefix}A`;
+    expect(Array.from(boundedTitleA)).toHaveLength(128);
+    await seedChat(t, 'bounded-title-a', {
+      displayName: boundedTitleA,
+      messages: [{ guid: 'bounded-message-a', text: 'ordinary', date: 100 }],
+    });
+    await seedChat(t, 'bounded-title-b', {
+      displayName: `${boundedPrefix}B`,
+      messages: [{ guid: 'bounded-message-b', text: 'ordinary', date: 50 }],
+    });
+    const folder = await createCustomFolder(t.db, 'Search bounds');
+    await replaceCustomFolderMembership(t.db, folder.id, [
+      'normalized-title',
+      'bounded-title-a',
+      'bounded-title-b',
+    ]);
+
+    await expect(loadFolderPage(t, folder.id, 10, 'CAFÉ')).resolves.toMatchObject({
+      matchingCount: 1,
+      rows: [{ guid: 'normalized-title' }],
+    });
+    await expect(loadFolderPage(t, folder.id, 10, 'CAFE\u0301')).resolves.toMatchObject({
+      matchingCount: 1,
+      rows: [{ guid: 'normalized-title' }],
+    });
+    await expect(loadFolderPage(t, folder.id, 10, boundedTitleA)).resolves.toMatchObject({
+      matchingCount: 1,
+      rows: [{ guid: 'bounded-title-a' }],
+    });
+    await expect(loadFolderPage(t, folder.id, 10, `${boundedTitleA}Z`)).resolves.toMatchObject({
+      matchingCount: 1,
+      rows: [{ guid: 'bounded-title-a' }],
+    });
+  });
+
+  it('applies folder membership before the full-text result cap', async () => {
+    const t = await createTestDb();
+    const insertChat = t.raw.prepare(
+      `INSERT INTO chats (guid, style, is_archived, is_pinned, latest_message_date)
+       VALUES (?, 45, 0, 0, ?)`,
+    );
+    const insertMessage = t.raw.prepare(
+      `INSERT INTO messages (guid, chat_id, text, date_created, is_from_me)
+       VALUES (?, ?, 'boundaryneedle', ?, 0)`,
+    );
+    t.raw.transaction(() => {
+      for (let index = 0; index < MAX_CUSTOM_FOLDER_MEMBERS + 1; index += 1) {
+        const chatId = Number(insertChat.run(`nonmember-${index}`, index).lastInsertRowid);
+        insertMessage.run(`nonmember-message-${index}`, chatId, index);
+      }
+    })();
+    await seedChat(t, 'folder-member-after-global-cap', {
+      displayName: 'Target conversation',
+      messages: [{ guid: 'folder-member-message', text: 'boundaryneedle', date: 10_000 }],
+    });
+    const folder = await createCustomFolder(t.db, 'Cap boundary');
+    await replaceCustomFolderMembership(t.db, folder.id, ['folder-member-after-global-cap']);
+
+    const globalMatches = await searchChatGuidsByMessage(
+      t.db,
+      'boundaryneedle',
+      MAX_CUSTOM_FOLDER_MEMBERS + 1,
+    );
+    expect(globalMatches).toHaveLength(MAX_CUSTOM_FOLDER_MEMBERS + 1);
+    expect(globalMatches).not.toContain('folder-member-after-global-cap');
+    await expect(loadFolderPage(t, folder.id, 10, 'boundaryneedle')).resolves.toMatchObject({
+      availableCount: 1,
+      matchingCount: 1,
+      hasMore: false,
+      rows: [{ guid: 'folder-member-after-global-cap' }],
+    });
   });
 });
