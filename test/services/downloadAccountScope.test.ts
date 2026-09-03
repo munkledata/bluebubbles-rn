@@ -1,11 +1,14 @@
 /* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
 let activeDb: unknown;
+let mockIsDevServer = true;
+const mockProductionDownload = jest.fn();
 
 jest.mock('@db/database', () => ({ getDatabase: () => activeDb }));
 jest.mock('@/services/clients', () => ({ http: {} }));
 jest.mock('@/services/download/expoFetcher', () => ({
-  expoFetcher: () => ({ exists: () => false, download: jest.fn() }),
+  expoFetcher: () => ({ exists: () => false, download: mockProductionDownload }),
 }));
+jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer }));
 
 import { Attachment, Chat, Message } from '@core/models';
 import {
@@ -99,6 +102,8 @@ async function seedRcsAttachment(db: AppDatabase) {
 }
 
 afterEach(async () => {
+  mockIsDevServer = true;
+  mockProductionDownload.mockReset();
   useDownloadStore.getState().reset();
   jest.clearAllTimers();
   jest.useRealTimers();
@@ -107,6 +112,38 @@ afterEach(async () => {
 });
 
 describe('account-scoped attachment retries', () => {
+  it('uses an installed fixture fetcher only while the DEV fixture session is active', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    const attachment = { ...(await seedRcsAttachment(db)), service: 'iMessage' };
+    const fixtureDownload = jest.fn().mockResolvedValue({
+      localPath: 'file:///attachments/scope-attachment/fixture.jpg',
+      bytes: 1_000,
+    });
+    mockProductionDownload.mockResolvedValue({
+      localPath: 'file:///attachments/scope-attachment/server.jpg',
+      bytes: 1_000,
+    });
+    setAttachmentFetcher({ exists: () => false, download: fixtureDownload });
+
+    mockIsDevServer = false;
+    await expect(download(attachment, 'manual', captureRealtimeDeliveryLease())).resolves.toBe(
+      'file:///attachments/scope-attachment/server.jpg',
+    );
+
+    mockIsDevServer = true;
+    await expect(download(attachment, 'manual', captureRealtimeDeliveryLease())).resolves.toBe(
+      'file:///attachments/scope-attachment/fixture.jpg',
+    );
+
+    mockIsDevServer = false;
+    await expect(download(attachment, 'manual', captureRealtimeDeliveryLease())).resolves.toBe(
+      'file:///attachments/scope-attachment/server.jpg',
+    );
+    expect(mockProductionDownload).toHaveBeenCalledTimes(2);
+    expect(fixtureDownload).toHaveBeenCalledTimes(1);
+  });
+
   it('holds an exact old-path pin while copy-on-write redownload commits a new cache path', async () => {
     const { db } = await createTestDb();
     activeDb = db;

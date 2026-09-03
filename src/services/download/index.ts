@@ -3,6 +3,7 @@ import { getDatabase } from '@db/database';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { extensionForMime, isLocalFileUri } from '@utils';
+import { isDevServer } from '@utils/isDev';
 import { http } from '../clients';
 import {
   runTrackedRealtimeWork,
@@ -29,15 +30,20 @@ import { expoFetcher } from './expoFetcher';
 export type { AttachmentFetcher } from './downloadService';
 export { ensureDownloaded } from './downloadService';
 
-let fetcher: AttachmentFetcher = expoFetcher(http);
+const productionFetcher: AttachmentFetcher = expoFetcher(http);
+let developmentFetcher: AttachmentFetcher | null = null;
 
-/** DEV/test hook to swap the fetcher (e.g. a real-URL progress stub). */
+/** Register the DEV fixture fetcher. Tests use the same hook while mocking an active DEV session. */
 export function setAttachmentFetcher(f: AttachmentFetcher): void {
   // Metro defines __DEV__ in every app bundle; plain Node/Jest intentionally does not.
   if (typeof __DEV__ !== 'undefined' && !__DEV__) {
     throw new Error('Attachment fetcher replacement is development-only.');
   }
-  fetcher = f;
+  developmentFetcher = f;
+}
+
+function attachmentFetcherForInvocation(): AttachmentFetcher {
+  return isDevServer() && developmentFetcher ? developmentFetcher : productionFetcher;
 }
 
 // RCS media often 404s only TRANSIENTLY: the picture frame can reach the server before its
@@ -86,7 +92,8 @@ export function download(
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
 ): Promise<string | null> {
-  const scope = downloadScope(deliveryLease, fetcher);
+  const ownerFetcher = attachmentFetcherForInvocation();
+  const scope = downloadScope(deliveryLease, ownerFetcher);
   const key = retryKey(att.guid, scope);
   // A forced copy-on-write replacement owns both the damaged source pin and the terminal viewer
   // transition. A stale ordinary request must not revoke it merely to discover that the flight
@@ -114,7 +121,7 @@ export function download(
     att.service === 'RCS' && mode === 'manual'
       ? beginRcsRetry(key, scope.generation, destinationIdentity)
       : undefined;
-  return runDownload(att, scope, mode, onVerifiedBytes, maxBytesOverride, retryOwner);
+  return runDownload(att, scope, ownerFetcher, mode, onVerifiedBytes, maxBytesOverride, retryOwner);
 }
 
 /**
@@ -127,7 +134,8 @@ export function redownload(
   att: AttachmentRow,
   deliveryLease: RealtimeDeliveryLease,
 ): Promise<string | null> {
-  const scope = downloadScope(deliveryLease, fetcher);
+  const ownerFetcher = attachmentFetcherForInvocation();
+  const scope = downloadScope(deliveryLease, ownerFetcher);
   const key = retryKey(att.guid, scope);
   const expectedLocalPath = att.localPath;
   const destinationIdentity = attachmentDownloadDestinationIdentity({
@@ -181,7 +189,16 @@ export function redownload(
       att.service === 'RCS'
         ? beginRcsRetry(key, scope.generation, destinationIdentity, oldPathProtection.release)
         : undefined;
-    task = runDownload(att, scope, 'manual', undefined, undefined, retryOwner, replacement);
+    task = runDownload(
+      att,
+      scope,
+      ownerFetcher,
+      'manual',
+      undefined,
+      undefined,
+      retryOwner,
+      replacement,
+    );
   } catch (error) {
     // `runDownload` reads the DB and starts Zustand presentation synchronously before returning its
     // Promise. A startup/disconnect exception must not strand the old-file pin or RCS owner.
@@ -301,6 +318,7 @@ function ownsRcsRetry(key: string, owner: symbol): boolean {
 function runDownload(
   att: AttachmentRow,
   scope: AttachmentDownloadScope,
+  ownerFetcher: AttachmentFetcher,
   mode: AttachmentDownloadMode,
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
@@ -317,7 +335,7 @@ function runDownload(
   start(att.guid);
   return ensureDownloadedOutcome(
     getDatabase(),
-    fetcher,
+    ownerFetcher,
     att,
     (loaded, total) => setProgress(att.guid, loaded, total),
     scope,
@@ -364,6 +382,7 @@ function runDownload(
           void runDownload(
             att,
             scope,
+            ownerFetcher,
             mode,
             onVerifiedBytes,
             maxBytesOverride,
