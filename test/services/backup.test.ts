@@ -172,6 +172,54 @@ describe('buildBackup', () => {
     const keys = (await buildBackup(t.db, { exportedAt: 1 })).kv.map((p) => p.key);
     expect(keys).toEqual(['theme.preset']);
   });
+
+  it('rejects max-plus-one themes and releases the database writer', async () => {
+    const t = await createTestDb();
+    const insertTheme = t.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)',
+    );
+    t.raw.transaction(() => {
+      for (let index = 0; index <= BACKUP_LIMITS.themes; index += 1) {
+        insertTheme.run(`Legacy v2 theme ${index}`, 'dark', '{}');
+      }
+    })();
+
+    await expect(buildBackup(t.db, { exportedAt: 1 })).rejects.toThrow(
+      'Backup export theme count exceeds its safety bound.',
+    );
+    await expect(kvSet(t.db, 'theme.preset', 'writer-after-v2-rejection')).resolves.toBeUndefined();
+  });
+
+  it('does not make a v2 export depend on custom-folder validity', async () => {
+    const t = await createTestDb();
+    const insertFolder = t.raw.prepare(
+      'INSERT INTO custom_folders (name, sort_order, show_unread_badge) VALUES (?, ?, 1)',
+    );
+    t.raw.transaction(() => {
+      for (let index = 0; index <= BACKUP_LIMITS.customFolders; index += 1) {
+        insertFolder.run(`Legacy v2 folder ${index}`, index);
+      }
+    })();
+
+    await expect(buildBackup(t.db, { exportedAt: 1 })).resolves.toEqual(
+      expect.objectContaining({ version: 2 }),
+    );
+  });
+
+  it('applies exact JavaScript string limits after the bounded SQL read', async () => {
+    const t = await createTestDb();
+    const sqlBoundedButJavaScriptOversized =
+      'a'.repeat(BACKUP_LIMITS.themeNameCharacters - 1) + '😀';
+    expect(Array.from(sqlBoundedButJavaScriptOversized)).toHaveLength(
+      BACKUP_LIMITS.themeNameCharacters,
+    );
+    expect(sqlBoundedButJavaScriptOversized).toHaveLength(BACKUP_LIMITS.themeNameCharacters + 1);
+    t.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
+      .run(sqlBoundedButJavaScriptOversized, 'dark', '{}');
+
+    await expect(buildBackup(t.db, { exportedAt: 1 })).rejects.toThrow();
+  });
 });
 
 describe('restoreBackup round-trip', () => {

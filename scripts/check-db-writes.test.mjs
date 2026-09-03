@@ -2339,7 +2339,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 17);
-  assert.equal(intentionalBoundaries.length, 25);
+  assert.equal(intentionalBoundaries.length, 26);
   assert.equal(scheduledStateMachine.length, 9);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2367,7 +2367,8 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c189a52293cc',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
-      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:506e065c203d',
+      'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
+      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
@@ -5807,7 +5808,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
       'src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95',
-      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:506e065c203d',
+      'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
+      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48',
       'src/services/chat/groupManagement.ts#renameGroupChat.<callback:c13ecdb63a>:mutator-call:2e89e3325c50',
@@ -5815,7 +5817,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 90);
+  assert.equal(selected.length, 91);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

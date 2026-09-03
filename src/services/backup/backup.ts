@@ -1,8 +1,6 @@
 import {
-  getAllKv,
-  getAllThemes,
+  getBackupBaseExportData,
   getBackupV3ExportData,
-  getChatCustomizations,
   restorePreparedBackupWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
@@ -16,6 +14,7 @@ import { utf8Encode } from '@utils/bytes';
 import {
   BACKUP_LIMITS,
   BackupSchema,
+  BackupV2Schema,
   BackupV3Schema,
   isBackupKey,
   listBackupKvKeys,
@@ -67,6 +66,27 @@ export function serializeBackup(backup: Backup, indent?: number): string {
   return serialized;
 }
 
+const BACKUP_EXPORT_LIMITS = {
+  kvKeys: listBackupKvKeys(),
+  maxRawBytes: BACKUP_LIMITS.plaintextBytes,
+  kvEntries: BACKUP_LIMITS.kvEntries,
+  themes: BACKUP_LIMITS.themes,
+  chatCustomizations: BACKUP_LIMITS.chatCustomizations,
+  keyCharacters: BACKUP_LIMITS.keyCharacters,
+  valueCharacters: BACKUP_LIMITS.valueCharacters,
+  themeNameCharacters: BACKUP_LIMITS.themeNameCharacters,
+  themeModeCharacters: BACKUP_LIMITS.themeModeCharacters,
+  themeTokensCharacters: BACKUP_LIMITS.themeTokensCharacters,
+  chatGuidCharacters: BACKUP_LIMITS.chatGuidCharacters,
+  chatServiceCharacters: BACKUP_LIMITS.chatServiceCharacters,
+  chatIdentifierCharacters: BACKUP_LIMITS.chatIdentifierCharacters,
+  chatParticipantAddressCharacters: BACKUP_LIMITS.chatParticipantAddressCharacters,
+  chatParticipants: BACKUP_LIMITS.chatParticipants,
+  chatNameCharacters: BACKUP_LIMITS.chatNameCharacters,
+  chatColorCharacters: BACKUP_LIMITS.chatColorCharacters,
+  muteTypeCharacters: BACKUP_LIMITS.muteTypeCharacters,
+};
+
 /**
  * Gather the v2-compatible portion of a backup: settings (kv), custom themes, and per-chat
  * customizations. `buildBackupWithCustomFolders` extends it for encrypted v3 export.
@@ -80,19 +100,14 @@ export async function buildBackup(
   db: AppDatabase,
   opts: { exportedAt: number; appVersion?: string },
 ): Promise<BackupV2> {
-  const [kv, themes, chatCustomizations] = await Promise.all([
-    getAllKv(db),
-    getAllThemes(db),
-    getChatCustomizations(db),
-  ]);
-  return {
+  const snapshot = await getBackupBaseExportData(db, BACKUP_EXPORT_LIMITS);
+  return BackupV2Schema.parse({
     version: 2,
     exportedAt: opts.exportedAt,
     appVersion: opts.appVersion,
-    kv: kv.filter((p) => isBackupKey(p.key)),
-    themes,
-    chatCustomizations,
-  };
+    ...snapshot,
+    kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
+  });
 }
 
 /** Build the complete encrypted-export payload from one coordinated database snapshot. */
@@ -101,30 +116,7 @@ export async function buildBackupWithCustomFolders(
   opts: { exportedAt: number; appVersion?: string },
   ownershipGuard?: DbCommitGuard,
 ): Promise<BackupV3> {
-  const snapshot = await getBackupV3ExportData(
-    db,
-    {
-      kvKeys: listBackupKvKeys(),
-      maxRawBytes: BACKUP_LIMITS.plaintextBytes,
-      kvEntries: BACKUP_LIMITS.kvEntries,
-      themes: BACKUP_LIMITS.themes,
-      chatCustomizations: BACKUP_LIMITS.chatCustomizations,
-      keyCharacters: BACKUP_LIMITS.keyCharacters,
-      valueCharacters: BACKUP_LIMITS.valueCharacters,
-      themeNameCharacters: BACKUP_LIMITS.themeNameCharacters,
-      themeModeCharacters: BACKUP_LIMITS.themeModeCharacters,
-      themeTokensCharacters: BACKUP_LIMITS.themeTokensCharacters,
-      chatGuidCharacters: BACKUP_LIMITS.chatGuidCharacters,
-      chatServiceCharacters: BACKUP_LIMITS.chatServiceCharacters,
-      chatIdentifierCharacters: BACKUP_LIMITS.chatIdentifierCharacters,
-      chatParticipantAddressCharacters: BACKUP_LIMITS.chatParticipantAddressCharacters,
-      chatParticipants: BACKUP_LIMITS.chatParticipants,
-      chatNameCharacters: BACKUP_LIMITS.chatNameCharacters,
-      chatColorCharacters: BACKUP_LIMITS.chatColorCharacters,
-      muteTypeCharacters: BACKUP_LIMITS.muteTypeCharacters,
-    },
-    ownershipGuard,
-  );
+  const snapshot = await getBackupV3ExportData(db, BACKUP_EXPORT_LIMITS, ownershipGuard);
   return BackupV3Schema.parse({
     version: 3,
     exportedAt: opts.exportedAt,

@@ -168,11 +168,13 @@ export interface CustomFolderBackupData {
   customFolders: CustomFolderBackupRow[];
 }
 
-export interface BackupV3ExportData extends CustomFolderBackupData {
+export interface BackupBaseExportData {
   kv: KvPair[];
   themes: ThemeRow[];
   chatCustomizations: PortableChatCustomizationRow[];
 }
+
+export interface BackupV3ExportData extends BackupBaseExportData, CustomFolderBackupData {}
 
 /** SQL fragments are composed into the single restore statement below. */
 const BACKUP_PHONE_COMPACT_SQL = sql`
@@ -282,9 +284,9 @@ export interface PreparedBackupRestoreResult {
 
 /**
  * Every kv pair, unfiltered. `kv` also holds per-chat composer drafts and device-local sync
- * bookkeeping, so the CALLER decides what may leave the device — `buildBackup` gates this through
- * the `isBackupKey` allow-list (`src/services/backup/backupSchema.ts`). Nothing here may import
- * that policy: `src/db` must not reach into `src/services`.
+ * bookkeeping, so a generic CALLER decides what may leave the device. Backup export uses the
+ * bounded allowlisted snapshot reader below; nothing here may import that service-owned policy
+ * because `src/db` must not reach into `src/services`.
  */
 export async function getAllKv(db: AppDatabase): Promise<KvPair[]> {
   return db.all<KvPair>(sql`SELECT key, value FROM kv ORDER BY key`);
@@ -414,7 +416,7 @@ interface BackupBaseExportRows {
  * here avoids an architecture-breaking db -> service import while preventing the two layers from
  * silently drifting apart.
  */
-export interface BackupV3ExportLimits {
+export interface BackupExportLimits {
   kvKeys: readonly string[];
   maxRawBytes: number;
   kvEntries: number;
@@ -507,7 +509,7 @@ const ESTIMATED_JSON_BYTES_PER_KV_ENTRY = 32;
 const ESTIMATED_JSON_BYTES_PER_THEME = 64;
 const ESTIMATED_JSON_BYTES_PER_CHAT_CUSTOMIZATION = 192;
 
-function assertBackupV3ExportLimits(limits: BackupV3ExportLimits): void {
+function assertBackupExportLimits(limits: BackupExportLimits): void {
   const numericLimits = Object.entries(limits).filter(([name]) => name !== 'kvKeys');
   if (
     numericLimits.some(
@@ -673,7 +675,7 @@ function buildBoundedPortableChatCustomizations(
 
 function readBackupBaseRowsWithinTransaction(
   context: DbTransactionContext,
-  limits: BackupV3ExportLimits,
+  limits: BackupExportLimits,
 ): Promise<BackupBaseExportRows> {
   return runInTransactionContext(context, async (db) => {
     const kvPredicate =
@@ -1769,13 +1771,42 @@ export async function getCustomFolderBackupData(
   return buildCustomFolderBackupData(rows);
 }
 
+function buildBackupBaseExportData(
+  rows: BackupBaseExportRows,
+  limits: BackupExportLimits,
+): BackupBaseExportData {
+  return {
+    kv: rows.kv,
+    themes: rows.themes,
+    chatCustomizations: buildBoundedPortableChatCustomizations(
+      rows.chatCustomizations,
+      limits.chatParticipants,
+    ),
+  };
+}
+
+/** Read the folder-independent v2 payload from one bounded, committed database snapshot. */
+export async function getBackupBaseExportData(
+  db: AppDatabase,
+  limits: BackupExportLimits,
+  commitGuard?: DbCommitGuard,
+): Promise<BackupBaseExportData> {
+  assertBackupExportLimits(limits);
+  const rows = await withDbTransaction(
+    db,
+    (context) => readBackupBaseRowsWithinTransaction(context, limits),
+    commitGuard,
+  );
+  return buildBackupBaseExportData(rows, limits);
+}
+
 /** Read every v3 backup domain from one committed point in time on the shared connection. */
 export async function getBackupV3ExportData(
   db: AppDatabase,
-  limits: BackupV3ExportLimits,
+  limits: BackupExportLimits,
   commitGuard?: DbCommitGuard,
 ): Promise<BackupV3ExportData> {
-  assertBackupV3ExportLimits(limits);
+  assertBackupExportLimits(limits);
   const rows = await withDbTransaction(
     db,
     async (context) => {
@@ -1790,12 +1821,7 @@ export async function getBackupV3ExportData(
     commitGuard,
   );
   return {
-    kv: rows.base.kv,
-    themes: rows.base.themes,
-    chatCustomizations: buildBoundedPortableChatCustomizations(
-      rows.base.chatCustomizations,
-      limits.chatParticipants,
-    ),
+    ...buildBackupBaseExportData(rows.base, limits),
     ...buildCustomFolderBackupData(rows.customFolders),
   };
 }

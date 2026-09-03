@@ -4606,7 +4606,7 @@
     {
       "id": "src/db/repositories/backup.ts#getCustomFolderBackupData:mutator-call:256a49576437",
       "path": "src/db/repositories/backup.ts",
-      "line": 1764,
+      "line": 1766,
       "symbol": "getCustomFolderBackupData",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4617,9 +4617,22 @@
       "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); independent SQL/contract/integration review"
     },
     {
+      "id": "src/db/repositories/backup.ts#getBackupBaseExportData:mutator-call:552b2b41d2e5",
+      "path": "src/db/repositories/backup.ts",
+      "line": 1795,
+      "symbol": "getBackupBaseExportData",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "getBackupBaseExportData",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "docs/WORK_PLAN_2026-08-03.md (BACKUP-02); test/services/backup.test.ts (bounded v2 snapshot, exact schema, and folder independence); scripts/check-db-writes.test.mjs"
+    },
+    {
       "id": "src/db/repositories/backup.ts#getBackupV3ExportData:mutator-call:eac48e20bed5",
       "path": "src/db/repositories/backup.ts",
-      "line": 1779,
+      "line": 1810,
       "symbol": "getBackupV3ExportData",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4632,7 +4645,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:3d0e0e711df1",
       "path": "src/db/repositories/backup.ts",
-      "line": 1814,
+      "line": 1840,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>",
@@ -4645,7 +4658,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:95a28f5a24c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 1814,
+      "line": 1840,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4658,7 +4671,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>:mutator-call:cbbc55ccf1c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 1816,
+      "line": 1842,
       "symbol": "restoreKv.<callback:5188e54620>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -4671,7 +4684,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:097cd820cdfa",
       "path": "src/db/repositories/backup.ts",
-      "line": 1871,
+      "line": 1897,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4684,7 +4697,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:08312684c164",
       "path": "src/db/repositories/backup.ts",
-      "line": 1888,
+      "line": 1914,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreThemes.<callback:4ed79282ca>",
@@ -4697,7 +4710,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:c87f5cedf55d",
       "path": "src/db/repositories/backup.ts",
-      "line": 1888,
+      "line": 1914,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4710,7 +4723,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-update:365048ad07a1",
       "path": "src/db/repositories/backup.ts",
-      "line": 1906,
+      "line": 1932,
       "symbol": "restoreThemes",
       "operation": "sql-update",
       "target": "themes",
@@ -4723,7 +4736,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-insert:22d3eacb4b53",
       "path": "src/db/repositories/backup.ts",
-      "line": 1911,
+      "line": 1937,
       "symbol": "restoreThemes",
       "operation": "sql-insert",
       "target": "themes",
@@ -4736,7 +4749,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction:drizzle-update:5be60b42a201",
       "path": "src/db/repositories/backup.ts",
-      "line": 1950,
+      "line": 1976,
       "symbol": "restoreChatCustomizationWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -4749,7 +4762,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e",
       "path": "src/db/repositories/backup.ts",
-      "line": 1985,
+      "line": 2011,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "kv",
@@ -4762,7 +4775,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977",
       "path": "src/db/repositories/backup.ts",
-      "line": 1994,
+      "line": 2020,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "themes",
@@ -4775,7 +4788,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0",
       "path": "src/db/repositories/backup.ts",
-      "line": 2033,
+      "line": 2059,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "themes",
@@ -4788,7 +4801,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff",
       "path": "src/db/repositories/backup.ts",
-      "line": 2069,
+      "line": 2095,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -4801,7 +4814,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6",
       "path": "src/db/repositories/backup.ts",
-      "line": 2070,
+      "line": 2096,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -4814,7 +4827,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a",
       "path": "src/db/repositories/backup.ts",
-      "line": 2071,
+      "line": 2097,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -4827,7 +4840,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:1cf95359657b",
       "path": "src/db/repositories/backup.ts",
-      "line": 2073,
+      "line": 2099,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4840,7 +4853,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:4a38fcfbd34e",
       "path": "src/db/repositories/backup.ts",
-      "line": 2500,
+      "line": 2526,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "chats",
@@ -4853,7 +4866,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:a9908ef95877",
       "path": "src/db/repositories/backup.ts",
-      "line": 2550,
+      "line": 2576,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folders",
@@ -4866,7 +4879,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:9a38cb1ceb72",
       "path": "src/db/repositories/backup.ts",
-      "line": 2581,
+      "line": 2607,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4879,7 +4892,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:ed07d6fd2e8d",
       "path": "src/db/repositories/backup.ts",
-      "line": 2598,
+      "line": 2624,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "custom_folders",
@@ -4892,7 +4905,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:0593854a2ac8",
       "path": "src/db/repositories/backup.ts",
-      "line": 2611,
+      "line": 2637,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4905,7 +4918,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:42d5bf1453d2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2684,
+      "line": 2710,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folder_members",
@@ -4918,7 +4931,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2718,
+      "line": 2744,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -4931,7 +4944,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2719,
+      "line": 2745,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -4944,7 +4957,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2720,
+      "line": 2746,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -4957,7 +4970,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:b8f4ecd73be2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2737,
+      "line": 2763,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4970,7 +4983,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:cfe21ece36c0",
       "path": "src/db/repositories/backup.ts",
-      "line": 2737,
+      "line": 2763,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>",
@@ -4983,7 +4996,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>:mutator-call:9ffade814657",
       "path": "src/db/repositories/backup.ts",
-      "line": 2739,
+      "line": 2765,
       "symbol": "restoreChatCustomizations.<callback:b943573fc5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction",
@@ -12170,9 +12183,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/syncedBackgroundAccountScope.test.ts; test/services/syncedBackgroundTransaction.test.ts; test/db/chatTheme.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:506e065c203d",
+      "id": "src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e",
       "path": "src/services/backup/backup.ts",
-      "line": 104,
+      "line": 103,
+      "symbol": "buildBackup",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/backup.ts#getBackupBaseExportData",
+      "detectedContext": "coordinated-delegation",
+      "owner": "buildBackup",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "docs/WORK_PLAN_2026-08-03.md (BACKUP-02); test/services/backup.test.ts (bounded v2 snapshot, exact schema, and folder independence); scripts/check-db-writes.test.mjs"
+    },
+    {
+      "id": "src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50",
+      "path": "src/services/backup/backup.ts",
+      "line": 119,
       "symbol": "buildBackupWithCustomFolders",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#getBackupV3ExportData",
@@ -12185,7 +12211,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc",
       "path": "src/services/backup/backup.ts",
-      "line": 213,
+      "line": 205,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -12198,7 +12224,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115",
       "path": "src/services/backup/backup.ts",
-      "line": 213,
+      "line": 205,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>",
@@ -12211,7 +12237,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875",
       "path": "src/services/backup/backup.ts",
-      "line": 215,
+      "line": 207,
       "symbol": "restoreBackup.<callback:0154bc3d51>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction",
