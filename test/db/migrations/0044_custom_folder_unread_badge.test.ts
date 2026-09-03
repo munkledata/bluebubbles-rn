@@ -31,7 +31,10 @@ describe('migration 0044_custom_folder_unread_badge', () => {
       raw.prepare("INSERT INTO custom_folders (name, sort_order) VALUES ('Existing', 0)").run();
 
       stopBefore0044.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0045_backup_export_indexes',
+      ]);
       expect(
         raw
           .prepare(

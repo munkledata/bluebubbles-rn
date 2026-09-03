@@ -4162,6 +4162,32 @@
       "evidence": "src/db/migrate.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; FEAT-04E independent DB review 2026-08-29 (focused 0044 upgrade test deferred)"
     },
     {
+      "id": "src/db/migrations.ts#migration:0045_backup_export_indexes:sql-schema:1dd080d9a772",
+      "path": "src/db/migrations.ts",
+      "line": 844,
+      "symbol": "migration:0045_backup_export_indexes",
+      "operation": "sql-schema",
+      "target": "themes_backup_export_idx",
+      "detectedContext": "startup-migration",
+      "owner": "migration:0045_backup_export_indexes",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "test/db/migrations/0045_backup_export_indexes.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/db/migrations.ts#migration:0045_backup_export_indexes:sql-schema:5c939652027a",
+      "path": "src/db/migrations.ts",
+      "line": 845,
+      "symbol": "migration:0045_backup_export_indexes",
+      "operation": "sql-schema",
+      "target": "chats_backup_export_idx",
+      "detectedContext": "startup-migration",
+      "owner": "migration:0045_backup_export_indexes",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "test/db/migrations/0045_backup_export_indexes.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
       "id": "src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation:sql-insert:23906c8fe812",
       "path": "src/db/repositories/attachmentCache.ts",
       "line": 105,
@@ -4580,7 +4606,7 @@
     {
       "id": "src/db/repositories/backup.ts#getCustomFolderBackupData:mutator-call:256a49576437",
       "path": "src/db/repositories/backup.ts",
-      "line": 620,
+      "line": 1251,
       "symbol": "getCustomFolderBackupData",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4591,9 +4617,9 @@
       "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); independent SQL/contract/integration review"
     },
     {
-      "id": "src/db/repositories/backup.ts#getBackupV3ExportData:mutator-call:7b331a482bbc",
+      "id": "src/db/repositories/backup.ts#getBackupV3ExportData:mutator-call:b083ac721484",
       "path": "src/db/repositories/backup.ts",
-      "line": 633,
+      "line": 1266,
       "symbol": "getBackupV3ExportData",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4601,12 +4627,12 @@
       "owner": "getBackupV3ExportData",
       "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
-      "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); test/services/backupV3.test.ts; independent high-risk review"
+      "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); test/services/backupV3.test.ts (atomic snapshot and bounded-probe regressions); independent high-risk review"
     },
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:3d0e0e711df1",
       "path": "src/db/repositories/backup.ts",
-      "line": 661,
+      "line": 1297,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>",
@@ -4619,7 +4645,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv:mutator-call:95a28f5a24c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 661,
+      "line": 1297,
       "symbol": "restoreKv",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4632,7 +4658,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreKv.<callback:5188e54620>:mutator-call:cbbc55ccf1c1",
       "path": "src/db/repositories/backup.ts",
-      "line": 663,
+      "line": 1299,
       "symbol": "restoreKv.<callback:5188e54620>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -4645,7 +4671,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:097cd820cdfa",
       "path": "src/db/repositories/backup.ts",
-      "line": 718,
+      "line": 1354,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4658,7 +4684,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:08312684c164",
       "path": "src/db/repositories/backup.ts",
-      "line": 735,
+      "line": 1371,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreThemes.<callback:4ed79282ca>",
@@ -4671,7 +4697,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:mutator-call:c87f5cedf55d",
       "path": "src/db/repositories/backup.ts",
-      "line": 735,
+      "line": 1371,
       "symbol": "restoreThemes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4684,7 +4710,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-update:365048ad07a1",
       "path": "src/db/repositories/backup.ts",
-      "line": 753,
+      "line": 1389,
       "symbol": "restoreThemes",
       "operation": "sql-update",
       "target": "themes",
@@ -4697,7 +4723,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreThemes:sql-insert:22d3eacb4b53",
       "path": "src/db/repositories/backup.ts",
-      "line": 758,
+      "line": 1394,
       "symbol": "restoreThemes",
       "operation": "sql-insert",
       "target": "themes",
@@ -4710,7 +4736,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction:drizzle-update:5be60b42a201",
       "path": "src/db/repositories/backup.ts",
-      "line": 797,
+      "line": 1433,
       "symbol": "restoreChatCustomizationWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -4723,7 +4749,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e",
       "path": "src/db/repositories/backup.ts",
-      "line": 832,
+      "line": 1468,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "kv",
@@ -4736,7 +4762,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977",
       "path": "src/db/repositories/backup.ts",
-      "line": 841,
+      "line": 1477,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "themes",
@@ -4749,7 +4775,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0",
       "path": "src/db/repositories/backup.ts",
-      "line": 880,
+      "line": 1516,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "themes",
@@ -4762,7 +4788,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff",
       "path": "src/db/repositories/backup.ts",
-      "line": 916,
+      "line": 1552,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -4775,7 +4801,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6",
       "path": "src/db/repositories/backup.ts",
-      "line": 917,
+      "line": 1553,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -4788,7 +4814,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a",
       "path": "src/db/repositories/backup.ts",
-      "line": 918,
+      "line": 1554,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -4801,7 +4827,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:1cf95359657b",
       "path": "src/db/repositories/backup.ts",
-      "line": 920,
+      "line": 1556,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4814,7 +4840,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:4a38fcfbd34e",
       "path": "src/db/repositories/backup.ts",
-      "line": 1347,
+      "line": 1983,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "chats",
@@ -4827,7 +4853,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:a9908ef95877",
       "path": "src/db/repositories/backup.ts",
-      "line": 1397,
+      "line": 2033,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folders",
@@ -4840,7 +4866,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:9a38cb1ceb72",
       "path": "src/db/repositories/backup.ts",
-      "line": 1428,
+      "line": 2064,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4853,7 +4879,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:ed07d6fd2e8d",
       "path": "src/db/repositories/backup.ts",
-      "line": 1445,
+      "line": 2081,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "custom_folders",
@@ -4866,7 +4892,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:0593854a2ac8",
       "path": "src/db/repositories/backup.ts",
-      "line": 1458,
+      "line": 2094,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -4879,7 +4905,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:42d5bf1453d2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1531,
+      "line": 2167,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folder_members",
@@ -4892,7 +4918,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1565,
+      "line": 2201,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -4905,7 +4931,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1566,
+      "line": 2202,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -4918,7 +4944,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1567,
+      "line": 2203,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -4931,7 +4957,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:b8f4ecd73be2",
       "path": "src/db/repositories/backup.ts",
-      "line": 1584,
+      "line": 2220,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -4944,7 +4970,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations:mutator-call:cfe21ece36c0",
       "path": "src/db/repositories/backup.ts",
-      "line": 1584,
+      "line": 2220,
       "symbol": "restoreChatCustomizations",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>",
@@ -4957,7 +4983,7 @@
     {
       "id": "src/db/repositories/backup.ts#restoreChatCustomizations.<callback:b943573fc5>:mutator-call:9ffade814657",
       "path": "src/db/repositories/backup.ts",
-      "line": 1586,
+      "line": 2222,
       "symbol": "restoreChatCustomizations.<callback:b943573fc5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restoreChatCustomizationWithinTransaction",
@@ -12144,9 +12170,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/syncedBackgroundAccountScope.test.ts; test/services/syncedBackgroundTransaction.test.ts; test/db/chatTheme.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:affe441fba9a",
+      "id": "src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:506e065c203d",
       "path": "src/services/backup/backup.ts",
-      "line": 103,
+      "line": 104,
       "symbol": "buildBackupWithCustomFolders",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#getBackupV3ExportData",
@@ -12154,12 +12180,12 @@
       "owner": "buildBackupWithCustomFolders",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
-      "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); test/services/backupV3.test.ts; independent high-risk review"
+      "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); test/services/backupV3.test.ts (atomic snapshot and bounded-probe regressions); independent high-risk review"
     },
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc",
       "path": "src/services/backup/backup.ts",
-      "line": 189,
+      "line": 213,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -12172,7 +12198,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115",
       "path": "src/services/backup/backup.ts",
-      "line": 189,
+      "line": 213,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>",
@@ -12185,7 +12211,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875",
       "path": "src/services/backup/backup.ts",
-      "line": 191,
+      "line": 215,
       "symbol": "restoreBackup.<callback:0154bc3d51>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction",
@@ -16382,9 +16408,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/index.ts#download:mutator-call:73f4bd568161",
+      "id": "src/services/download/index.ts#download:mutator-call:ff62716582b2",
       "path": "src/services/download/index.ts",
-      "line": 117,
+      "line": 124,
       "symbol": "download",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -16395,9 +16421,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/index.ts#redownload:mutator-call:8835792ea98a",
+      "id": "src/services/download/index.ts#redownload:mutator-call:e09cebc88e10",
       "path": "src/services/download/index.ts",
-      "line": 184,
+      "line": 192,
       "symbol": "redownload",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -16410,7 +16436,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094",
       "path": "src/services/download/index.ts",
-      "line": 227,
+      "line": 244,
       "symbol": "downloadScope.reserveCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve",
@@ -16423,7 +16449,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4",
       "path": "src/services/download/index.ts",
-      "line": 235,
+      "line": 252,
       "symbol": "downloadScope.reuseCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
@@ -16434,9 +16460,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/index.ts#runDownload:mutator-call:38952dee5c58",
+      "id": "src/services/download/index.ts#runDownload:mutator-call:ea7e1163b248",
       "path": "src/services/download/index.ts",
-      "line": 318,
+      "line": 336,
       "symbol": "runDownload",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome",
@@ -16447,10 +16473,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/index.ts#runDownload.<callback:defde603c1>.<callback:fc40974d29>:mutator-call:512a87ba913a",
+      "id": "src/services/download/index.ts#runDownload.<callback:f07558eb37>.<callback:795e53be0d>:mutator-call:cab0a3e0fcab",
       "path": "src/services/download/index.ts",
-      "line": 364,
-      "symbol": "runDownload.<callback:defde603c1>.<callback:fc40974d29>",
+      "line": 382,
+      "symbol": "runDownload.<callback:f07558eb37>.<callback:795e53be0d>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
       "detectedContext": "coordinated-delegation",

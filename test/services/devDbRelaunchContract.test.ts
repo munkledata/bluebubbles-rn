@@ -182,14 +182,14 @@ function loadContract(): typeof import('@/services/boot/devDbRelaunchContract') 
   return require('@/services/boot/devDbRelaunchContract') as typeof import('@/services/boot/devDbRelaunchContract');
 }
 
-function createExisting(...entries: Array<string | readonly [string, number]>): void {
+function createExisting(...entries: (string | readonly [string, number])[]): void {
   for (const entry of entries) {
     if (typeof entry === 'string') mockFiles.set(entry, 0);
     else mockFiles.set(entry[0], entry[1]);
   }
 }
 
-function parsedMarkers(): Array<Record<string, unknown>> {
+function parsedMarkers(): Record<string, unknown>[] {
   return mockLogger.info.mock.calls.map(([message]) => {
     expect(typeof message).toBe('string');
     expect(message).toMatch(/^GATOR_DB_RELAUNCH_V1 /);
@@ -197,7 +197,7 @@ function parsedMarkers(): Array<Record<string, unknown>> {
   });
 }
 
-function parsedWalWriteDeathMarkers(): Array<Record<string, unknown>> {
+function parsedWalWriteDeathMarkers(): Record<string, unknown>[] {
   return mockLogger.info.mock.calls.map(([message]) => {
     expect(typeof message).toBe('string');
     expect(message).toMatch(/^GATOR_DB_WAL_WRITE_DEATH_V1 /);
@@ -208,7 +208,7 @@ function parsedWalWriteDeathMarkers(): Array<Record<string, unknown>> {
   });
 }
 
-function parsedActiveMigrationDeathMarkers(): Array<Record<string, unknown>> {
+function parsedActiveMigrationDeathMarkers(): Record<string, unknown>[] {
   return mockLogger.info.mock.calls.map(([message]) => {
     expect(typeof message).toBe('string');
     expect(message).toMatch(/^GATOR_DB_ACTIVE_MIGRATION_DEATH_V1 /);
@@ -219,7 +219,7 @@ function parsedActiveMigrationDeathMarkers(): Array<Record<string, unknown>> {
   });
 }
 
-function parsedRuntimeConcurrencyMarkers(): Array<Record<string, unknown>> {
+function parsedRuntimeConcurrencyMarkers(): Record<string, unknown>[] {
   return mockLogger.info.mock.calls.map(([message]) => {
     expect(typeof message).toBe('string');
     expect(message).toMatch(/^GATOR_DB_RUNTIME_CONCURRENCY_V1 /);
@@ -396,8 +396,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'pass',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -426,8 +426,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'fail',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -512,8 +512,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       expect(mockFiles.get(RESUMING)).toBe(0);
       return {
         status: 'pass',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: resumeChecks,
       };
     });
@@ -539,8 +539,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-relaunch',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -603,8 +603,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         expect(mockFiles.get(ACTIVE_MIGRATION_DEATH_RESUMING)).toBe(0);
         return {
           status: 'pass',
-          migrationCount: 44,
-          migrationHead: '0044_custom_folder_unread_badge',
+          migrationCount: 45,
+          migrationHead: '0045_backup_export_indexes',
           checks: activeMigrationDeathResumeChecks,
         };
       },
@@ -633,8 +633,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-active-migration-death',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -774,8 +774,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'fail',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: { ...resumeChecks, databaseCleanup: false },
         failureCode: 'database-cleanup',
       };
@@ -808,8 +808,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'pass',
-        migrationCount: 44,
-        migrationHead: '0044_custom_folder_unread_badge',
+        migrationCount: 45,
+        migrationHead: '0045_backup_export_indexes',
         checks: resumeChecks,
       };
     });

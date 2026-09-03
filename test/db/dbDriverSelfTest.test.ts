@@ -62,7 +62,7 @@ function cleanupHandle(deleteFails = false) {
   };
 }
 
-function scheduledRows(complete: boolean): Array<Record<string, unknown>> {
+function scheduledRows(complete: boolean): Record<string, unknown>[] {
   return [
     {
       server_id: null,
@@ -85,7 +85,7 @@ function scheduledRows(complete: boolean): Array<Record<string, unknown>> {
   ];
 }
 
-function outgoingRows(complete: boolean): Array<Record<string, unknown>> {
+function outgoingRows(complete: boolean): Record<string, unknown>[] {
   return [
     {
       temp_guid: 'driver-contract-message-control',
@@ -613,7 +613,7 @@ function installDriverHarness(options: DriverHarnessOptions = {}) {
   return { finalCleanup, historical, initial, oldKey, preCleanup, reopened, rekeyed, wrongKey };
 }
 
-function openedOptions(): Array<{ name: string; encryptionKey?: string; readOnly?: boolean }> {
+function openedOptions(): { name: string; encryptionKey?: string; readOnly?: boolean }[] {
   return mockOpen.mock.calls.map(
     (call) => call[0] as { name: string; encryptionKey?: string; readOnly?: boolean },
   );
@@ -675,8 +675,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 44,
-      migrationHead: '0044_custom_folder_unread_badge',
+      migrationCount: 45,
+      migrationHead: '0045_backup_export_indexes',
       checks: passingChecks,
     });
 
@@ -946,8 +946,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 44,
-      migrationHead: '0044_custom_folder_unread_badge',
+      migrationCount: 45,
+      migrationHead: '0045_backup_export_indexes',
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

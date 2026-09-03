@@ -18,6 +18,7 @@ import {
   BackupSchema,
   BackupV3Schema,
   isBackupKey,
+  listBackupKvKeys,
   type Backup,
   type BackupV2,
   type BackupV3,
@@ -100,7 +101,30 @@ export async function buildBackupWithCustomFolders(
   opts: { exportedAt: number; appVersion?: string },
   ownershipGuard?: DbCommitGuard,
 ): Promise<BackupV3> {
-  const snapshot = await getBackupV3ExportData(db, ownershipGuard);
+  const snapshot = await getBackupV3ExportData(
+    db,
+    {
+      kvKeys: listBackupKvKeys(),
+      maxRawBytes: BACKUP_LIMITS.plaintextBytes,
+      kvEntries: BACKUP_LIMITS.kvEntries,
+      themes: BACKUP_LIMITS.themes,
+      chatCustomizations: BACKUP_LIMITS.chatCustomizations,
+      keyCharacters: BACKUP_LIMITS.keyCharacters,
+      valueCharacters: BACKUP_LIMITS.valueCharacters,
+      themeNameCharacters: BACKUP_LIMITS.themeNameCharacters,
+      themeModeCharacters: BACKUP_LIMITS.themeModeCharacters,
+      themeTokensCharacters: BACKUP_LIMITS.themeTokensCharacters,
+      chatGuidCharacters: BACKUP_LIMITS.chatGuidCharacters,
+      chatServiceCharacters: BACKUP_LIMITS.chatServiceCharacters,
+      chatIdentifierCharacters: BACKUP_LIMITS.chatIdentifierCharacters,
+      chatParticipantAddressCharacters: BACKUP_LIMITS.chatParticipantAddressCharacters,
+      chatParticipants: BACKUP_LIMITS.chatParticipants,
+      chatNameCharacters: BACKUP_LIMITS.chatNameCharacters,
+      chatColorCharacters: BACKUP_LIMITS.chatColorCharacters,
+      muteTypeCharacters: BACKUP_LIMITS.muteTypeCharacters,
+    },
+    ownershipGuard,
+  );
   return BackupV3Schema.parse({
     version: 3,
     exportedAt: opts.exportedAt,

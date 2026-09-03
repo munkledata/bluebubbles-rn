@@ -90,6 +90,12 @@ export const chats = sqliteTable(
     guidIdx: uniqueIndex('chats_guid_idx').on(t.guid),
     sortIdx: index('chats_sort_idx').on(t.isArchived, t.latestMessageDate),
     pinOrderIdx: index('chats_pin_order_idx').on(t.isPinned, t.pinOrder, t.id),
+    backupExportIdx: index('chats_backup_export_idx')
+      .on(t.id)
+      .where(
+        sql`${t.customName} IS NOT NULL OR ${t.customColor} IS NOT NULL OR ${t.muteType} IS NOT NULL
+            OR ${t.isPinned} = 1 OR ${t.isArchived} = 1`,
+      ),
     pinOrderNonnegative: check(
       'chats_pin_order_nonnegative',
       sql`${t.pinOrder} IS NULL OR (typeof(${t.pinOrder}) = 'integer' AND ${t.pinOrder} >= 0)`,
@@ -644,6 +650,8 @@ export const themes = sqliteTable(
     // Backup restore claims one original twin at a time by this exact equality-prefix + id range.
     // Without the index, each short global-lock transaction can scan the whole themes table.
     restoreLookupIdx: index('themes_restore_lookup_idx').on(t.isPreset, t.name, t.mode, t.id),
+    // Backup export walks only custom themes in stable id order and stops at its max+1 probe.
+    backupExportIdx: index('themes_backup_export_idx').on(t.isPreset, t.id),
   }),
 );
 

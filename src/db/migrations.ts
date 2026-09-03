@@ -836,4 +836,16 @@ export const MIGRATIONS: Migration[] = [
          CHECK (typeof(show_unread_badge) = 'integer' AND show_unread_badge IN (0, 1))`,
     ],
   },
+  {
+    // Backup-v3 limit probes run while holding the one global DB transaction. These indexes let
+    // both probes stop at their configured max+1 rows instead of walking unrelated table rows.
+    name: '0045_backup_export_indexes',
+    statements: [
+      `CREATE INDEX themes_backup_export_idx ON themes (is_preset, id)`,
+      `CREATE INDEX chats_backup_export_idx
+        ON chats (id)
+        WHERE custom_name IS NOT NULL OR custom_color IS NOT NULL OR mute_type IS NOT NULL
+           OR is_pinned = 1 OR is_archived = 1`,
+    ],
+  },
 ];

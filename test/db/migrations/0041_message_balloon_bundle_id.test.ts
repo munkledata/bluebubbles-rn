@@ -56,6 +56,7 @@ describe('migration 0041_message_balloon_bundle_id', () => {
         '0042_message_part_identity',
         '0043_custom_folders',
         '0044_custom_folder_unread_badge',
+        '0045_backup_export_indexes',
       ]);
       expect(hasBalloonColumn(raw)).toBe(true);
       expect(

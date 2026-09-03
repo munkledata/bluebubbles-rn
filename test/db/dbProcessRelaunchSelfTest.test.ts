@@ -29,7 +29,6 @@ const WAL_BASELINE = 'db-03b2b1-baseline-v1';
 const WAL_RECOVERY = 'db-03b2b1-recovery-v1';
 const MIGRATION_DEATH_DB_NAME = 'driver-active-migration-death-selftest.db';
 const MIGRATION_DEATH_FIXED_KEY = 'db-03b2b2-public-throwaway-key-v1';
-const ACTIVE_MIGRATION_TARGET = migrationNames[37] ?? '';
 const ACTIVE_MIGRATION_SQL = (
   jest.requireActual('@db/migrations') as typeof import('@db/migrations')
 ).MIGRATIONS[37]?.statements[0];
@@ -96,7 +95,7 @@ interface WalWriteDeathState {
   baseline: boolean;
   canaries: number;
   recovery: boolean;
-  extras?: Array<{ id: number; state: string }>;
+  extras?: { id: number; state: string }[];
 }
 
 function walWriteDeathHandle(
@@ -163,7 +162,7 @@ function walWriteDeathHandle(
       return { rows: [] };
     }
     if (normalized.startsWith('select id, state from driver_wal_write_death_contract')) {
-      const rows: Array<{ id: number; state: string }> = [];
+      const rows: { id: number; state: string }[] = [];
       if (state.baseline || pendingBaseline) rows.push({ id: 1, state: WAL_BASELINE });
       if (state.recovery || pendingRecovery) rows.push({ id: 2, state: WAL_RECOVERY });
       const visibleCanaries = state.canaries + pendingCanaries;
@@ -470,7 +469,7 @@ beforeEach(() => {
 
 describe('DB-03B1 fixed process-relaunch database contract', () => {
   it('pins the exact production migration boundary used across process death', () => {
-    expect(migrationNames).toHaveLength(44);
+    expect(migrationNames).toHaveLength(45);
     expect(migrationNames[28]).toBe('0029_chats_deleted_at');
     expect(migrationNames[29]).toBe('0030_attachment_cache_entries');
     expect(migrationNames[37]).toBe('0038_scrub_reaction_selected_message_text');
@@ -480,6 +479,7 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
     expect(migrationNames[41]).toBe('0042_message_part_identity');
     expect(migrationNames[42]).toBe('0043_custom_folders');
     expect(migrationNames[43]).toBe('0044_custom_folder_unread_badge');
+    expect(migrationNames[44]).toBe('0045_backup_export_indexes');
   });
 
   it('prepares exact 0001-0029 state and keeps the encrypted handle open while READY waits', async () => {
@@ -575,8 +575,8 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
 
     await expect(resumeDbProcessRelaunchSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 44,
-      migrationHead: '0044_custom_folder_unread_badge',
+      migrationCount: 45,
+      migrationHead: '0045_backup_export_indexes',
       checks: {
         readOnlyContinuityOpen: true,
         sameFileState: true,
@@ -938,7 +938,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
   it('pins the exact single-statement 0038 production migration boundary', () => {
     const migrations = (jest.requireActual('@db/migrations') as typeof import('@db/migrations'))
       .MIGRATIONS;
-    expect(migrations).toHaveLength(44);
+    expect(migrations).toHaveLength(45);
     expect(migrations[36]?.name).toBe('0037_purge_legacy_redacted_mode_setting');
     expect(migrations[37]).toEqual({
       name: '0038_scrub_reaction_selected_message_text',
@@ -959,6 +959,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
     expect(migrations[41]?.name).toBe('0042_message_part_identity');
     expect(migrations[42]?.name).toBe('0043_custom_folders');
     expect(migrations[43]?.name).toBe('0044_custom_folder_unread_badge');
+    expect(migrations[44]?.name).toBe('0045_backup_export_indexes');
   });
 
   it('runs the real migration boundary, enters READY before ledger COMMIT, then rolls back on callback rejection', async () => {
@@ -1078,8 +1079,8 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
 
     await expect(resumeDbActiveMigrationDeathSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 44,
-      migrationHead: '0044_custom_folder_unread_badge',
+      migrationCount: 45,
+      migrationHead: '0045_backup_export_indexes',
       checks: {
         readOnlyRecoveryOpen: true,
         walMode: true,

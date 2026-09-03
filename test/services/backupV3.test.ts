@@ -94,6 +94,12 @@ async function readFolderState(t: TestDb) {
   return rows;
 }
 
+async function expectBoundedExportRejection(t: TestDb, message: string): Promise<void> {
+  await expect(buildBackupWithCustomFolders(t.db, { exportedAt: 44 })).rejects.toThrow(message);
+  // A probe rejection rolls back and releases the one process-wide writer slot.
+  await expect(kvSet(t.db, 'theme.preset', 'writer-after-rejection')).resolves.toBeUndefined();
+}
+
 describe('backup v3 custom folders', () => {
   it('queues the complete export behind a rolling-back neighbour', async () => {
     const source = await createTestDb();
@@ -135,11 +141,15 @@ describe('backup v3 custom folders', () => {
     await neighbourStarted;
 
     const exporting = buildBackupWithCustomFolders(source.db, { exportedAt: 42 });
-    expect(source.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toEqual({
-      value: 'phantom-theme',
-    });
+    try {
+      expect(source.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toEqual({
+        value: 'phantom-theme',
+      });
+    } finally {
+      releaseNeighbour();
+      await Promise.allSettled([neighbour, exporting]);
+    }
 
-    releaseNeighbour();
     await expect(neighbour).rejects.toThrow('neighbour rollback');
     const backup = await exporting;
     expect(backup.kv).toContainEqual({ key: 'theme.preset', value: 'committed-theme' });
@@ -211,6 +221,177 @@ describe('backup v3 custom folders', () => {
       name: 'Folder new',
       show_unread_badge: 0,
     });
+  });
+
+  it('probes only allowlisted settings and rejects an oversized allowed value', async () => {
+    const source = await createTestDb();
+    await kvSet(source.db, 'theme.preset', 'allowed-value');
+    source.raw
+      .prepare('INSERT INTO kv (key, value) VALUES (?, ?)')
+      .run('draft.private-chat', 'x'.repeat(BACKUP_LIMITS.plaintextBytes + 1));
+
+    const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 44 });
+    expect(backup.kv).toEqual([{ key: 'theme.preset', value: 'allowed-value' }]);
+    expect(JSON.stringify(backup)).not.toContain('draft.private-chat');
+
+    source.raw
+      .prepare('UPDATE kv SET value = ? WHERE key = ?')
+      .run('x'.repeat(BACKUP_LIMITS.valueCharacters + 1), 'theme.preset');
+    await expectBoundedExportRejection(source, 'Backup export kv value exceeds its safety bound.');
+  });
+
+  it('rejects max-plus-one theme and customized-chat collections', async () => {
+    const themeSource = await createTestDb();
+    const insertTheme = themeSource.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)',
+    );
+    themeSource.raw.transaction(() => {
+      for (let index = 0; index <= BACKUP_LIMITS.themes; index += 1) {
+        insertTheme.run(`Theme ${index}`, 'dark', '{}');
+      }
+    })();
+    await expectBoundedExportRejection(
+      themeSource,
+      'Backup export theme count exceeds its safety bound.',
+    );
+
+    const chatSource = await createTestDb();
+    const insertChat = chatSource.raw.prepare(
+      'INSERT INTO chats (guid, custom_name) VALUES (?, ?)',
+    );
+    chatSource.raw.transaction(() => {
+      for (let index = 0; index <= BACKUP_LIMITS.chatCustomizations; index += 1) {
+        insertChat.run(`bounded-chat-${index}`, `Chat ${index}`);
+      }
+    })();
+    await expectBoundedExportRejection(
+      chatSource,
+      'Backup export chat customization count exceeds its safety bound.',
+    );
+  });
+
+  it('rejects max-plus-one participants and an over-budget bounded base payload', async () => {
+    const participantSource = await createTestDb();
+    await seedChat(participantSource, 'participant-bound-chat');
+    await setChatCustomization(participantSource.db, 'participant-bound-chat', {
+      customName: 'Participant bound',
+    });
+    const chat = participantSource.raw
+      .prepare('SELECT id FROM chats WHERE guid = ?')
+      .get('participant-bound-chat') as { id: number };
+    const insertHandle = participantSource.raw.prepare(
+      'INSERT INTO handles (address, service) VALUES (?, ?)',
+    );
+    const insertLink = participantSource.raw.prepare(
+      'INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)',
+    );
+    participantSource.raw.transaction(() => {
+      for (let index = 0; index <= BACKUP_LIMITS.chatParticipants; index += 1) {
+        const result = insertHandle.run(`bounded-${index}@example.test`, 'iMessage');
+        insertLink.run(chat.id, Number(result.lastInsertRowid));
+      }
+    })();
+    await expectBoundedExportRejection(
+      participantSource,
+      'Backup export chat participant count exceeds its safety bound.',
+    );
+
+    const aggregateSource = await createTestDb();
+    const maxTokens = 'x'.repeat(BACKUP_LIMITS.themeTokensCharacters);
+    const insertLargeTheme = aggregateSource.raw.prepare(
+      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)',
+    );
+    aggregateSource.raw.transaction(() => {
+      for (let index = 0; index < 17; index += 1) {
+        insertLargeTheme.run(`Large theme ${index}`, 'dark', maxTokens);
+      }
+    })();
+    await expectBoundedExportRejection(
+      aggregateSource,
+      'Backup export base data exceeds its aggregate safety bound.',
+    );
+  });
+
+  it('preserves first-seen participant order when null and empty services collapse', async () => {
+    const source = await createTestDb();
+    await seedChat(source, 'nullable-service-duplicates', { style: 43 });
+    await setChatCustomization(source.db, 'nullable-service-duplicates', {
+      customName: 'Deduplicated chat',
+    });
+    const chat = source.raw
+      .prepare('SELECT id FROM chats WHERE guid = ?')
+      .get('nullable-service-duplicates') as { id: number };
+    const first = source.raw
+      .prepare('INSERT INTO handles (address, service) VALUES (?, NULL)')
+      .run('same@example.test');
+    const second = source.raw
+      .prepare('INSERT INTO handles (address, service) VALUES (?, ?)')
+      .run('same@example.test', '');
+    const firstDistinct = source.raw
+      .prepare('INSERT INTO handles (address, service) VALUES (?, ?)')
+      .run('z-first@example.test', 'iMessage');
+    const secondDistinct = source.raw
+      .prepare('INSERT INTO handles (address, service) VALUES (?, ?)')
+      .run('a-second@example.test', 'iMessage');
+    source.raw
+      .prepare(
+        `INSERT INTO chat_handles (chat_id, handle_id)
+         VALUES (?, ?), (?, ?), (?, ?), (?, ?)`,
+      )
+      .run(
+        chat.id,
+        Number(first.lastInsertRowid),
+        chat.id,
+        Number(second.lastInsertRowid),
+        chat.id,
+        Number(firstDistinct.lastInsertRowid),
+        chat.id,
+        Number(secondDistinct.lastInsertRowid),
+      );
+
+    const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 44 });
+    expect(backup.chatCustomizations).toEqual([
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          kind: 'group',
+          participants: [
+            { service: '', address: 'same@example.test' },
+            { service: 'iMessage', address: 'z-first@example.test' },
+            { service: 'iMessage', address: 'a-second@example.test' },
+          ],
+        }),
+      }),
+    ]);
+  });
+
+  it('accounts for JSON escaping before materializing participant payloads', async () => {
+    const source = await createTestDb();
+    await seedChat(source, 'escaped-participant-budget');
+    await setChatCustomization(source.db, 'escaped-participant-budget', {
+      customName: 'Escaped participant budget',
+    });
+    const chat = source.raw
+      .prepare('SELECT id FROM chats WHERE guid = ?')
+      .get('escaped-participant-budget') as { id: number };
+    const insertHandle = source.raw.prepare('INSERT INTO handles (address, service) VALUES (?, ?)');
+    const insertLink = source.raw.prepare(
+      'INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)',
+    );
+    source.raw.transaction(() => {
+      for (let index = 0; index < BACKUP_LIMITS.chatParticipants; index += 1) {
+        const suffix = `${index}@example.test`;
+        const escapedAddress = '\u0001'.repeat(
+          BACKUP_LIMITS.chatParticipantAddressCharacters - suffix.length,
+        );
+        const result = insertHandle.run(`${escapedAddress}${suffix}`, 'iMessage');
+        insertLink.run(chat.id, Number(result.lastInsertRowid));
+      }
+    })();
+
+    await expectBoundedExportRejection(
+      source,
+      'Backup export base data exceeds its aggregate safety bound.',
+    );
   });
 
   it('exports one encrypted portable registry and restores it into a fresh database', async () => {

@@ -338,16 +338,647 @@ function buildPortableChatCustomizations(
 interface BackupBaseExportRows {
   kv: KvPair[];
   themes: ThemeRow[];
-  chatCustomizations: ChatCustomizationExportRow[];
+  chatCustomizations: BoundedChatCustomizationExportRow[];
+}
+
+/**
+ * Service-owned schema limits passed down to the snapshot reader. Keeping this structural contract
+ * here avoids an architecture-breaking db -> service import while preventing the two layers from
+ * silently drifting apart.
+ */
+export interface BackupV3ExportLimits {
+  kvKeys: readonly string[];
+  maxRawBytes: number;
+  kvEntries: number;
+  themes: number;
+  chatCustomizations: number;
+  keyCharacters: number;
+  valueCharacters: number;
+  themeNameCharacters: number;
+  themeModeCharacters: number;
+  themeTokensCharacters: number;
+  chatGuidCharacters: number;
+  chatServiceCharacters: number;
+  chatIdentifierCharacters: number;
+  chatParticipantAddressCharacters: number;
+  chatParticipants: number;
+  chatNameCharacters: number;
+  chatColorCharacters: number;
+  muteTypeCharacters: number;
+}
+
+interface KvExportProbeRow {
+  rowCount: number;
+  invalidTypeCount: number;
+  rawBytes: number;
+  maxKeyCharacters: number;
+  maxKeyBytes: number;
+  maxValueCharacters: number;
+  maxValueBytes: number;
+}
+
+interface ThemeExportProbeRow {
+  rowCount: number;
+  invalidTypeCount: number;
+  rawBytes: number;
+  maxNameCharacters: number;
+  maxNameBytes: number;
+  maxModeCharacters: number;
+  maxModeBytes: number;
+  maxTokensCharacters: number;
+  maxTokensBytes: number;
+}
+
+interface ChatCustomizationProbeRow {
+  chatId: number;
+  invalidTypeCount: number;
+  metadataRawBytes: number;
+  guidCharacters: number;
+  guidBytes: number;
+  identifierCharacters: number;
+  identifierBytes: number;
+  customNameCharacters: number;
+  customNameBytes: number;
+  customColorCharacters: number;
+  customColorBytes: number;
+  muteTypeCharacters: number;
+  muteTypeBytes: number;
+  participantStatsJson: string;
+}
+
+interface ParticipantProbeStats {
+  linkCount: number;
+  count: number;
+  invalidTypeCount: number;
+  rawBytes: number;
+  maxServiceCharacters: number;
+  maxServiceBytes: number;
+  maxAddressCharacters: number;
+  maxAddressBytes: number;
+}
+
+interface ParticipantBudgetProbeRow {
+  chatId: number;
+  participantStatsJson: string;
+}
+
+interface ParticipantBudgetStats {
+  count: number;
+  jsonBytes: number;
+}
+
+interface BoundedChatCustomizationExportRow extends Omit<
+  ChatCustomizationExportRow,
+  'participantAddress' | 'participantService'
+> {
+  participantsJson: string;
+}
+
+const MAX_UTF8_BYTES_PER_SQL_CHARACTER = 4;
+const ESTIMATED_JSON_BYTES_PER_KV_ENTRY = 32;
+const ESTIMATED_JSON_BYTES_PER_THEME = 64;
+const ESTIMATED_JSON_BYTES_PER_CHAT_CUSTOMIZATION = 192;
+
+function assertBackupV3ExportLimits(limits: BackupV3ExportLimits): void {
+  const numericLimits = Object.entries(limits).filter(([name]) => name !== 'kvKeys');
+  if (
+    numericLimits.some(
+      ([, value]) => typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0,
+    )
+  ) {
+    throw new Error('Backup export limits are invalid.');
+  }
+  if (
+    limits.kvKeys.length > limits.kvEntries ||
+    new Set(limits.kvKeys).size !== limits.kvKeys.length ||
+    limits.kvKeys.some((key) => key.length === 0 || key.length > limits.keyCharacters)
+  ) {
+    throw new Error('Backup export key allow-list is invalid.');
+  }
+}
+
+function requireProbeRow<T>(rows: readonly T[], label: string): T {
+  const row = rows[0];
+  if (!row) throw new Error(`Backup export ${label} probe returned no result.`);
+  return row;
+}
+
+function requireProbeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Backup export ${label} probe is invalid.`);
+  }
+  return value;
+}
+
+function assertProbeStringBound(
+  characters: unknown,
+  bytes: unknown,
+  maxCharacters: number,
+  label: string,
+): void {
+  if (
+    requireProbeInteger(characters, `${label} character`) > maxCharacters ||
+    requireProbeInteger(bytes, `${label} byte`) > maxCharacters * MAX_UTF8_BYTES_PER_SQL_CHARACTER
+  ) {
+    throw new Error(`Backup export ${label} exceeds its safety bound.`);
+  }
+}
+
+function parseParticipantProbeStats(value: string): ParticipantProbeStats {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Backup export participant probe is invalid.');
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('Backup export participant probe is invalid.');
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    linkCount: requireProbeInteger(record.linkCount, 'participant link count'),
+    count: requireProbeInteger(record.count, 'participant count'),
+    invalidTypeCount: requireProbeInteger(record.invalidTypeCount, 'participant type'),
+    rawBytes: requireProbeInteger(record.rawBytes, 'participant raw-byte'),
+    maxServiceCharacters: requireProbeInteger(
+      record.maxServiceCharacters,
+      'participant service character',
+    ),
+    maxServiceBytes: requireProbeInteger(record.maxServiceBytes, 'participant service byte'),
+    maxAddressCharacters: requireProbeInteger(
+      record.maxAddressCharacters,
+      'participant address character',
+    ),
+    maxAddressBytes: requireProbeInteger(record.maxAddressBytes, 'participant address byte'),
+  };
+}
+
+function parseParticipantBudgetStats(value: string): ParticipantBudgetStats {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Backup export participant budget probe is invalid.');
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('Backup export participant budget probe is invalid.');
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    count: requireProbeInteger(record.count, 'deduplicated participant count'),
+    jsonBytes: requireProbeInteger(record.jsonBytes, 'deduplicated participant JSON-byte'),
+  };
+}
+
+function parseBoundedChatParticipants(
+  value: string,
+  maxParticipants: number,
+): PortableChatParticipant[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Backup chat customization participants are invalid.');
+  }
+  if (!Array.isArray(parsed) || parsed.length > maxParticipants) {
+    throw new Error('Backup chat customization participants exceed their safety bound.');
+  }
+  return parsed.map((participant) => {
+    if (
+      typeof participant !== 'object' ||
+      participant === null ||
+      !('service' in participant) ||
+      !('address' in participant) ||
+      typeof participant.service !== 'string' ||
+      typeof participant.address !== 'string' ||
+      participant.address.length === 0
+    ) {
+      throw new Error('Backup chat customization participant is invalid.');
+    }
+    return { service: participant.service, address: participant.address };
+  });
+}
+
+function buildBoundedPortableChatCustomizations(
+  rows: readonly BoundedChatCustomizationExportRow[],
+  maxParticipants: number,
+): PortableChatCustomizationRow[] {
+  return rows.map((row) => {
+    const participants = parseBoundedChatParticipants(row.participantsJson, maxParticipants);
+    return {
+      identity: buildPortableChatIdentity(row.guid, row.chatIdentifier, row.style, participants),
+      customName: row.customName,
+      customColor: row.customColor,
+      muteType: row.muteType,
+      isPinned: row.isPinned,
+      pinOrder: row.pinOrder ?? null,
+      isArchived: row.isArchived,
+    };
+  });
 }
 
 function readBackupBaseRowsWithinTransaction(
   context: DbTransactionContext,
+  limits: BackupV3ExportLimits,
 ): Promise<BackupBaseExportRows> {
   return runInTransactionContext(context, async (db) => {
-    const kv = await getAllKv(db);
-    const themes = await getAllThemes(db);
-    const chatCustomizations = await readChatCustomizationExportRows(db);
+    const kvPredicate =
+      limits.kvKeys.length === 0
+        ? sql`0`
+        : sql`key IN (${sql.join(
+            limits.kvKeys.map((key) => sql`${key}`),
+            sql`, `,
+          )})`;
+    const kvProbe = requireProbeRow<KvExportProbeRow>(
+      await db.all<KvExportProbeRow>(sql`
+        WITH kv_probe AS MATERIALIZED (
+          SELECT key
+            FROM kv
+           WHERE ${kvPredicate}
+           ORDER BY key
+           LIMIT ${limits.kvEntries + 1}
+        )
+        SELECT COUNT(*) AS rowCount,
+               COALESCE(SUM(CASE
+                 WHEN typeof(selected.key) <> 'text'
+                   OR (selected.value IS NOT NULL AND typeof(selected.value) <> 'text')
+                 THEN 1 ELSE 0
+               END), 0) AS invalidTypeCount,
+               COALESCE(SUM(
+                 length(CAST(selected.key AS BLOB)) +
+                 length(CAST(COALESCE(selected.value, '') AS BLOB))
+               ), 0) AS rawBytes,
+               COALESCE(MAX(length(substr(
+                 selected.key, 1, ${limits.keyCharacters + 1}
+               ))), 0) AS maxKeyCharacters,
+               COALESCE(MAX(length(CAST(selected.key AS BLOB))), 0) AS maxKeyBytes,
+               COALESCE(MAX(length(substr(
+                 COALESCE(selected.value, ''), 1, ${limits.valueCharacters + 1}
+               ))), 0) AS maxValueCharacters,
+               COALESCE(MAX(length(CAST(COALESCE(selected.value, '') AS BLOB))), 0) AS maxValueBytes
+          FROM kv_probe AS probe
+          JOIN kv AS selected ON selected.key = probe.key
+      `),
+      'kv',
+    );
+    const themeProbe = requireProbeRow<ThemeExportProbeRow>(
+      await db.all<ThemeExportProbeRow>(sql`
+        WITH theme_probe AS MATERIALIZED (
+          SELECT id
+            FROM themes INDEXED BY themes_backup_export_idx
+           WHERE is_preset = 0
+           ORDER BY id
+           LIMIT ${limits.themes + 1}
+        )
+        SELECT COUNT(*) AS rowCount,
+               COALESCE(SUM(CASE
+                 WHEN typeof(selected.name) <> 'text' OR typeof(selected.mode) <> 'text'
+                   OR typeof(selected.tokens) <> 'text'
+                 THEN 1 ELSE 0
+               END), 0) AS invalidTypeCount,
+               COALESCE(SUM(
+                 length(CAST(selected.name AS BLOB)) +
+                 length(CAST(selected.mode AS BLOB)) +
+                 length(CAST(selected.tokens AS BLOB))
+               ), 0) AS rawBytes,
+               COALESCE(MAX(length(substr(
+                 selected.name, 1, ${limits.themeNameCharacters + 1}
+               ))), 0) AS maxNameCharacters,
+               COALESCE(MAX(length(CAST(selected.name AS BLOB))), 0) AS maxNameBytes,
+               COALESCE(MAX(length(substr(
+                 selected.mode, 1, ${limits.themeModeCharacters + 1}
+               ))), 0) AS maxModeCharacters,
+               COALESCE(MAX(length(CAST(selected.mode AS BLOB))), 0) AS maxModeBytes,
+               COALESCE(MAX(length(substr(
+                 selected.tokens, 1, ${limits.themeTokensCharacters + 1}
+               ))), 0) AS maxTokensCharacters,
+               COALESCE(MAX(length(CAST(selected.tokens AS BLOB))), 0) AS maxTokensBytes
+          FROM theme_probe AS probe
+          JOIN themes AS selected ON selected.id = probe.id
+      `),
+      'theme',
+    );
+    const chatProbe = await db.all<ChatCustomizationProbeRow>(sql`
+      WITH chat_probe AS MATERIALIZED (
+        SELECT id
+          FROM chats INDEXED BY chats_backup_export_idx
+         WHERE custom_name IS NOT NULL OR custom_color IS NOT NULL OR mute_type IS NOT NULL
+            OR is_pinned = 1 OR is_archived = 1
+         ORDER BY id
+         LIMIT ${limits.chatCustomizations + 1}
+      )
+      SELECT c.id AS chatId,
+             CASE
+               WHEN typeof(c.guid) <> 'text'
+                 OR (c.chat_identifier IS NOT NULL AND typeof(c.chat_identifier) <> 'text')
+                 OR (c.custom_name IS NOT NULL AND typeof(c.custom_name) <> 'text')
+                 OR (c.custom_color IS NOT NULL AND typeof(c.custom_color) <> 'text')
+                 OR (c.mute_type IS NOT NULL AND typeof(c.mute_type) <> 'text')
+               THEN 1 ELSE 0
+             END AS invalidTypeCount,
+             length(CAST(c.guid AS BLOB)) +
+               length(CAST(COALESCE(c.chat_identifier, '') AS BLOB)) +
+               length(CAST(COALESCE(c.custom_name, '') AS BLOB)) +
+               length(CAST(COALESCE(c.custom_color, '') AS BLOB)) +
+               length(CAST(COALESCE(c.mute_type, '') AS BLOB)) AS metadataRawBytes,
+             length(substr(c.guid, 1, ${limits.chatGuidCharacters + 1})) AS guidCharacters,
+             length(CAST(c.guid AS BLOB)) AS guidBytes,
+             length(substr(
+               COALESCE(c.chat_identifier, ''), 1, ${limits.chatIdentifierCharacters + 1}
+             )) AS identifierCharacters,
+             length(CAST(COALESCE(c.chat_identifier, '') AS BLOB)) AS identifierBytes,
+             length(substr(
+               COALESCE(c.custom_name, ''), 1, ${limits.chatNameCharacters + 1}
+             )) AS customNameCharacters,
+             length(CAST(COALESCE(c.custom_name, '') AS BLOB)) AS customNameBytes,
+             length(substr(
+               COALESCE(c.custom_color, ''), 1, ${limits.chatColorCharacters + 1}
+             )) AS customColorCharacters,
+             length(CAST(COALESCE(c.custom_color, '') AS BLOB)) AS customColorBytes,
+             length(substr(
+               COALESCE(c.mute_type, ''), 1, ${limits.muteTypeCharacters + 1}
+             )) AS muteTypeCharacters,
+             length(CAST(COALESCE(c.mute_type, '') AS BLOB)) AS muteTypeBytes,
+             (
+               SELECT json_object(
+                 'linkCount', (
+                   SELECT COUNT(*)
+                     FROM (
+                       SELECT 1
+                         FROM chat_handles AS raw_chat_handle
+                        WHERE raw_chat_handle.chat_id = c.id
+                        ORDER BY raw_chat_handle.handle_id
+                        LIMIT ${limits.chatParticipants + 1}
+                     ) AS raw_participant_link
+                 ),
+                 'count', COUNT(*),
+                 'invalidTypeCount', COALESCE(SUM(CASE
+                   WHEN typeof(COALESCE(handle.service, '')) <> 'text'
+                     OR typeof(handle.address) <> 'text'
+                   THEN 1 ELSE 0
+                 END), 0),
+                 'rawBytes', COALESCE(SUM(
+                   length(CAST(COALESCE(handle.service, '') AS BLOB)) +
+                   length(CAST(handle.address AS BLOB))
+                 ), 0),
+                 'maxServiceCharacters', COALESCE(MAX(length(substr(
+                   COALESCE(handle.service, ''), 1, ${limits.chatServiceCharacters + 1}
+                 ))), 0),
+                 'maxServiceBytes', COALESCE(MAX(
+                   length(CAST(COALESCE(handle.service, '') AS BLOB))
+                 ), 0),
+                 'maxAddressCharacters', COALESCE(MAX(length(substr(
+                   handle.address, 1, ${limits.chatParticipantAddressCharacters + 1}
+                 ))), 0),
+                 'maxAddressBytes', COALESCE(MAX(length(CAST(handle.address AS BLOB))), 0)
+               )
+                 FROM (
+                   SELECT handle_id
+                     FROM chat_handles
+                    WHERE chat_id = c.id
+                    ORDER BY handle_id
+                    LIMIT ${limits.chatParticipants + 1}
+                 ) AS chat_handle
+                 JOIN handles AS handle ON handle.id = chat_handle.handle_id
+                WHERE handle.address IS NOT NULL
+                  AND handle.address <> ''
+             ) AS participantStatsJson
+        FROM chat_probe AS probe
+        JOIN chats AS c ON c.id = probe.id
+       ORDER BY c.id
+    `);
+
+    const kvCount = requireProbeInteger(kvProbe.rowCount, 'kv count');
+    const themeCount = requireProbeInteger(themeProbe.rowCount, 'theme count');
+    if (requireProbeInteger(kvProbe.invalidTypeCount, 'kv type') > 0) {
+      throw new Error('Backup export kv data has an invalid type.');
+    }
+    if (requireProbeInteger(themeProbe.invalidTypeCount, 'theme type') > 0) {
+      throw new Error('Backup export theme data has an invalid type.');
+    }
+    if (kvCount > limits.kvEntries)
+      throw new Error('Backup export kv count exceeds its safety bound.');
+    if (themeCount > limits.themes) {
+      throw new Error('Backup export theme count exceeds its safety bound.');
+    }
+    if (chatProbe.length > limits.chatCustomizations) {
+      throw new Error('Backup export chat customization count exceeds its safety bound.');
+    }
+    assertProbeStringBound(
+      kvProbe.maxKeyCharacters,
+      kvProbe.maxKeyBytes,
+      limits.keyCharacters,
+      'kv key',
+    );
+    assertProbeStringBound(
+      kvProbe.maxValueCharacters,
+      kvProbe.maxValueBytes,
+      limits.valueCharacters,
+      'kv value',
+    );
+    assertProbeStringBound(
+      themeProbe.maxNameCharacters,
+      themeProbe.maxNameBytes,
+      limits.themeNameCharacters,
+      'theme name',
+    );
+    assertProbeStringBound(
+      themeProbe.maxModeCharacters,
+      themeProbe.maxModeBytes,
+      limits.themeModeCharacters,
+      'theme mode',
+    );
+    assertProbeStringBound(
+      themeProbe.maxTokensCharacters,
+      themeProbe.maxTokensBytes,
+      limits.themeTokensCharacters,
+      'theme tokens',
+    );
+
+    let estimatedBytes =
+      requireProbeInteger(kvProbe.rawBytes, 'kv raw-byte') +
+      requireProbeInteger(themeProbe.rawBytes, 'theme raw-byte') +
+      kvCount * ESTIMATED_JSON_BYTES_PER_KV_ENTRY +
+      themeCount * ESTIMATED_JSON_BYTES_PER_THEME;
+    for (const chat of chatProbe) {
+      requireProbeInteger(chat.chatId, 'chat id');
+      if (requireProbeInteger(chat.invalidTypeCount, 'chat type') > 0) {
+        throw new Error('Backup export chat customization data has an invalid type.');
+      }
+      assertProbeStringBound(
+        chat.guidCharacters,
+        chat.guidBytes,
+        limits.chatGuidCharacters,
+        'chat guid',
+      );
+      assertProbeStringBound(
+        chat.identifierCharacters,
+        chat.identifierBytes,
+        limits.chatIdentifierCharacters,
+        'chat identifier',
+      );
+      assertProbeStringBound(
+        chat.customNameCharacters,
+        chat.customNameBytes,
+        limits.chatNameCharacters,
+        'chat name',
+      );
+      assertProbeStringBound(
+        chat.customColorCharacters,
+        chat.customColorBytes,
+        limits.chatColorCharacters,
+        'chat color',
+      );
+      assertProbeStringBound(
+        chat.muteTypeCharacters,
+        chat.muteTypeBytes,
+        limits.muteTypeCharacters,
+        'chat mute type',
+      );
+      const participants = parseParticipantProbeStats(chat.participantStatsJson);
+      if (participants.invalidTypeCount > 0) {
+        throw new Error('Backup export chat participant data has an invalid type.');
+      }
+      if (
+        participants.linkCount > limits.chatParticipants ||
+        participants.count > limits.chatParticipants
+      ) {
+        throw new Error('Backup export chat participant count exceeds its safety bound.');
+      }
+      assertProbeStringBound(
+        participants.maxServiceCharacters,
+        participants.maxServiceBytes,
+        limits.chatServiceCharacters,
+        'chat participant service',
+      );
+      assertProbeStringBound(
+        participants.maxAddressCharacters,
+        participants.maxAddressBytes,
+        limits.chatParticipantAddressCharacters,
+        'chat participant address',
+      );
+      estimatedBytes +=
+        requireProbeInteger(chat.metadataRawBytes, 'chat metadata raw-byte') +
+        ESTIMATED_JSON_BYTES_PER_CHAT_CUSTOMIZATION;
+      if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes > limits.maxRawBytes) {
+        throw new Error('Backup export base data exceeds its aggregate safety bound.');
+      }
+    }
+
+    // Field sizes and raw link counts are now known safe. Only then group bounded handles to
+    // preserve the legacy first-seen `(service, address)` deduplication semantics.
+    const participantBudgetProbe = await db.all<ParticipantBudgetProbeRow>(sql`
+      WITH chat_probe AS MATERIALIZED (
+        SELECT id
+          FROM chats INDEXED BY chats_backup_export_idx
+         WHERE custom_name IS NOT NULL OR custom_color IS NOT NULL OR mute_type IS NOT NULL
+            OR is_pinned = 1 OR is_archived = 1
+         ORDER BY id
+         LIMIT ${limits.chatCustomizations + 1}
+      )
+      SELECT c.id AS chatId,
+             (
+               SELECT json_object(
+                 'count', COUNT(*),
+                 'jsonBytes', CASE WHEN COUNT(*) = 0 THEN 2 ELSE
+                   COALESCE(SUM(length(CAST(json_object(
+                     'service', participant.service,
+                     'address', participant.address
+                   ) AS BLOB))), 0) + COUNT(*) + 1
+                 END
+               )
+                 FROM (
+                   SELECT COALESCE(handle.service, '') AS service,
+                          handle.address AS address
+                     FROM (
+                       SELECT handle_id
+                         FROM chat_handles
+                        WHERE chat_id = c.id
+                        ORDER BY handle_id
+                        LIMIT ${limits.chatParticipants + 1}
+                     ) AS chat_handle
+                     JOIN handles AS handle ON handle.id = chat_handle.handle_id
+                    WHERE handle.address IS NOT NULL
+                      AND handle.address <> ''
+                    GROUP BY COALESCE(handle.service, ''), handle.address
+                    ORDER BY MIN(handle.id)
+                 ) AS participant
+             ) AS participantStatsJson
+        FROM chat_probe AS probe
+        JOIN chats AS c ON c.id = probe.id
+       ORDER BY c.id
+    `);
+    for (const row of participantBudgetProbe) {
+      requireProbeInteger(row.chatId, 'participant budget chat id');
+      const participants = parseParticipantBudgetStats(row.participantStatsJson);
+      estimatedBytes += participants.jsonBytes;
+      if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes > limits.maxRawBytes) {
+        throw new Error('Backup export base data exceeds its aggregate safety bound.');
+      }
+    }
+    if (participantBudgetProbe.length !== chatProbe.length) {
+      throw new Error('Backup export participant budget probe is incomplete.');
+    }
+    if (estimatedBytes > limits.maxRawBytes) {
+      throw new Error('Backup export base data exceeds its aggregate safety bound.');
+    }
+
+    const kv = await db.all<KvPair>(sql`
+      SELECT key, value
+        FROM kv
+       WHERE ${kvPredicate}
+       ORDER BY key
+       LIMIT ${limits.kvEntries + 1}
+    `);
+    const themes = await db.all<ThemeRow>(sql`
+      SELECT name, mode, tokens, is_preset AS isPreset
+        FROM themes INDEXED BY themes_backup_export_idx
+       WHERE is_preset = 0
+       ORDER BY id
+       LIMIT ${limits.themes + 1}
+    `);
+    const chatCustomizations = await db.all<BoundedChatCustomizationExportRow>(sql`
+      WITH chat_probe AS MATERIALIZED (
+        SELECT id
+          FROM chats INDEXED BY chats_backup_export_idx
+         WHERE custom_name IS NOT NULL OR custom_color IS NOT NULL OR mute_type IS NOT NULL
+            OR is_pinned = 1 OR is_archived = 1
+         ORDER BY id
+         LIMIT ${limits.chatCustomizations + 1}
+      )
+      SELECT c.id AS chatId, c.guid, c.chat_identifier AS chatIdentifier, c.style,
+             c.custom_name AS customName, c.custom_color AS customColor,
+             c.mute_type AS muteType, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
+             c.is_archived AS isArchived,
+             COALESCE(
+               (
+                 SELECT json_group_array(
+                   json_object('service', participant.service, 'address', participant.address)
+                 )
+                   FROM (
+                     SELECT COALESCE(handle.service, '') AS service,
+                            handle.address AS address
+                       FROM (
+                         SELECT handle_id
+                           FROM chat_handles
+                          WHERE chat_id = c.id
+                          ORDER BY handle_id
+                          LIMIT ${limits.chatParticipants + 1}
+                       ) AS chat_handle
+                      JOIN handles AS handle ON handle.id = chat_handle.handle_id
+                      WHERE handle.address IS NOT NULL
+                        AND handle.address <> ''
+                      GROUP BY COALESCE(handle.service, ''), handle.address
+                      ORDER BY MIN(handle.id)
+                      LIMIT ${limits.chatParticipants + 1}
+                   ) AS participant
+               ),
+               '[]'
+             ) AS participantsJson
+        FROM chat_probe AS probe
+        JOIN chats AS c ON c.id = probe.id
+       ORDER BY c.id
+    `);
     return { kv, themes, chatCustomizations };
   });
 }
@@ -628,12 +1259,14 @@ export async function getCustomFolderBackupData(
 /** Read every v3 backup domain from one committed point in time on the shared connection. */
 export async function getBackupV3ExportData(
   db: AppDatabase,
+  limits: BackupV3ExportLimits,
   commitGuard?: DbCommitGuard,
 ): Promise<BackupV3ExportData> {
+  assertBackupV3ExportLimits(limits);
   const rows = await withDbTransaction(
     db,
     async (context) => {
-      const base = await readBackupBaseRowsWithinTransaction(context);
+      const base = await readBackupBaseRowsWithinTransaction(context, limits);
       const customFolders = await readCustomFolderBackupRowsWithinTransaction(context);
       return { base, customFolders };
     },
@@ -642,7 +1275,10 @@ export async function getBackupV3ExportData(
   return {
     kv: rows.base.kv,
     themes: rows.base.themes,
-    chatCustomizations: buildPortableChatCustomizations(rows.base.chatCustomizations),
+    chatCustomizations: buildBoundedPortableChatCustomizations(
+      rows.base.chatCustomizations,
+      limits.chatParticipants,
+    ),
     ...buildCustomFolderBackupData(rows.customFolders),
   };
 }

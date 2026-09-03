@@ -42,6 +42,7 @@ describe('migration 0042_message_part_identity', () => {
         MIGRATION_NAME,
         '0043_custom_folders',
         '0044_custom_folder_unread_badge',
+        '0045_backup_export_indexes',
       ]);
       expect(
         raw

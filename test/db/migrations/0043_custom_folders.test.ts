@@ -44,6 +44,7 @@ describe('migration 0043_custom_folders', () => {
       await expect(runMigrations(runner)).resolves.toEqual([
         MIGRATION_NAME,
         '0044_custom_folder_unread_badge',
+        '0045_backup_export_indexes',
       ]);
       raw.prepare("INSERT INTO custom_folders (name, sort_order) VALUES ('Work', 0)").run();
       const folderId = (

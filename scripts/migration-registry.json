@@ -150,6 +150,16 @@
       "upgradeTest": "test/db/migrations/0044_custom_folder_unread_badge.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 45,
+      "name": "0045_backup_export_indexes",
+      "task": "FEAT-04F",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0045_backup_export_indexes.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "N/A: index only; no persistent rows"
     }
   ]
 }

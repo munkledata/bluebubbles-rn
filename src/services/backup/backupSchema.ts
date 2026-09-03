@@ -335,6 +335,11 @@ const BACKUP_KV_KEYS: ReadonlySet<string> = new Set([
   'attachments.autoDownloadDestination',
 ]);
 
+/** Return a copy so callers can build a bounded SQL allow-list without mutating the policy set. */
+export function listBackupKvKeys(): string[] {
+  return [...BACKUP_KV_KEYS].filter((key) => isBackupKey(key));
+}
+
 /**
  * Whether a kv pair may cross the device boundary — in EITHER direction. Applied on export and
  * again on import: a backup file is untrusted input, so the same gate stops a hand-edited or

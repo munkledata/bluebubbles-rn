@@ -45,6 +45,7 @@ describe('migration 0040_chats_pin_order', () => {
         '0042_message_part_identity',
         '0043_custom_folders',
         '0044_custom_folder_unread_badge',
+        '0045_backup_export_indexes',
       ]);
       expect(
         raw.prepare('SELECT guid, pin_order AS pinOrder FROM chats ORDER BY guid').all(),
