@@ -1,3 +1,5 @@
+/* eslint-disable import/first -- Jest mocks must be registered before importing application modules. */
+
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,10 +66,24 @@ function errorReportUploadFixture(): unknown {
   return JSON.parse(bytes.toString('utf8'));
 }
 
-function fakeHttp(impl: (json: unknown, signal?: AbortSignal) => Promise<unknown>): HttpClient {
+interface ObservedHttpRequest {
+  path: string;
+  retry: unknown;
+}
+
+function fakeHttp(
+  impl: (
+    json: unknown,
+    signal: AbortSignal | undefined,
+    request: ObservedHttpRequest,
+  ) => Promise<unknown>,
+): HttpClient {
   return {
-    post: (_p: string, _s: unknown, opts: { json?: unknown; signal?: AbortSignal }) =>
-      impl(opts?.json, opts?.signal),
+    post: (
+      path: string,
+      _schema: unknown,
+      opts: { json?: unknown; signal?: AbortSignal; retry?: unknown },
+    ) => impl(opts?.json, opts?.signal, { path, retry: opts?.retry }),
   } as unknown as HttpClient;
 }
 const count = (raw: Database.Database): number =>
@@ -202,9 +218,11 @@ describe('runErrorReportQueue', () => {
     try {
       await seed(db, 3, uploadNow);
       let sent: Record<string, unknown> | undefined;
-      const http = fakeHttp(async (json) => {
+      const requests: ObservedHttpRequest[] = [];
+      const http = fakeHttp(async (json, _signal, request) => {
         expect(raw.inTransaction).toBe(false);
         sent = json as Record<string, unknown>;
+        requests.push(request);
         return { ingested: 3 };
       });
       const res = await runErrorReportQueue(db, http, uploadNow, {
@@ -214,6 +232,7 @@ describe('runErrorReportQueue', () => {
       });
       expect(res).toEqual({ eligible: 3, uploaded: 3 });
       expect(count(raw)).toBe(0);
+      expect(requests).toEqual([{ path: '/error-reports', retry: false }]);
       expect(sent).toEqual(errorReportUploadFixture());
     } finally {
       nowSpy.mockRestore();
@@ -255,9 +274,9 @@ describe('runErrorReportQueue', () => {
       },
       uploadNow,
     );
-    let sent: { reports: Array<Record<string, unknown>> } | undefined;
+    let sent: { reports: Record<string, unknown>[] } | undefined;
     const http = fakeHttp(async (json) => {
-      sent = json as { reports: Array<Record<string, unknown>> };
+      sent = json as { reports: Record<string, unknown>[] };
       return { ingested: 2 };
     });
 
@@ -298,9 +317,9 @@ describe('runErrorReportQueue', () => {
         },
         uploadNow,
       );
-      let sent: { reports: Array<{ timestamp: number }> } | undefined;
+      let sent: { reports: { timestamp: number }[] } | undefined;
       const http = fakeHttp(async (json) => {
-        sent = json as { reports: Array<{ timestamp: number }> };
+        sent = json as { reports: { timestamp: number }[] };
         return { ingested: 1 };
       });
 
@@ -380,6 +399,10 @@ describe('runErrorReportQueue', () => {
     const disabled = fakeHttp(async () => ({ ingested: 0, disabled: true }));
     expect((await runErrorReportQueue(db, disabled, 5000)).uploaded).toBe(0);
     expect(count(raw)).toBe(2); // not deleted — wait for the capability to return
+    expect(raw.prepare('SELECT attempts FROM error_reports ORDER BY id').all()).toEqual([
+      { attempts: 0 },
+      { attempts: 0 },
+    ]);
   });
 
   it.each([0, 1])(
@@ -396,9 +419,9 @@ describe('runErrorReportQueue', () => {
       });
       expect(count(raw)).toBe(2);
       expect(
-        raw.prepare('SELECT attempts FROM error_reports ORDER BY id').all() as Array<{
+        raw.prepare('SELECT attempts FROM error_reports ORDER BY id').all() as {
           attempts: number;
-        }>,
+        }[],
       ).toEqual([{ attempts: 1 }, { attempts: 1 }]);
       expect(warn).toHaveBeenCalledWith('[errorReport] upload failed', expect.any(Error));
       warn.mockRestore();
@@ -445,7 +468,7 @@ describe('runErrorReportQueue', () => {
           | { kind: 'rejected'; error: unknown }
         >
       | undefined;
-    const competitorOutcomes: Array<Promise<unknown>> = [];
+    const competitorOutcomes: Promise<unknown>[] = [];
 
     try {
       firstOutcome = runErrorReportQueue(db, http, startedAt)
