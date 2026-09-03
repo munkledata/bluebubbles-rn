@@ -94,11 +94,18 @@ export function useCustomFolderChats(
   const activePageRequest =
     pageRequest.baseKey === baseKey ? pageRequest : { baseKey, limit: PAGE_SIZE, retry: 0 };
   const requestKey = JSON.stringify([baseKey, activePageRequest.limit, activePageRequest.retry]);
+  const activeRequestKeyRef = useRef(requestKey);
+  const requestSequenceRef = useRef(0);
+  // The reactive layer cancels stale UI publication, but an old repository read can still finish.
+  // Fence this hook's row reconciliation and successful-page cache as well.
+  activeRequestKeyRef.current = requestKey;
 
   const state = useReactiveQuery<CustomFolderChatsEnvelope>(
     async () => {
+      const requestSequence = requestSequenceRef.current + 1;
+      requestSequenceRef.current = requestSequence;
       try {
-        if (folderId == null) {
+        if (folderId == null || !accountLease.isCurrent()) {
           return { key: requestKey, folderKey, page: null, stale: true, error: null };
         }
         const result = await loadCustomFolderInboxPage(
@@ -107,26 +114,36 @@ export function useCustomFolderChats(
           searchQuery,
           accountLease,
         );
-        if (result.status === 'stale') {
+        if (
+          result.status === 'stale' ||
+          !accountLease.isCurrent() ||
+          activeBaseKeyRef.current !== baseKey ||
+          activeRequestKeyRef.current !== requestKey ||
+          requestSequenceRef.current !== requestSequence
+        ) {
           return { key: requestKey, folderKey, page: null, stale: true, error: null };
         }
 
         const page =
           result.value == null ? null : { ...result.value, rows: reconcile(result.value.rows) };
-        if (activeBaseKeyRef.current === baseKey) {
-          successfulPageRef.current = page == null ? null : { baseKey, page };
-          if (page == null) {
-            folderIdentityRef.current = null;
-          } else {
-            folderIdentityRef.current = { folderKey, folder: page.folder };
-          }
+        successfulPageRef.current = page == null ? null : { baseKey, page };
+        if (page == null) {
+          folderIdentityRef.current = null;
+        } else {
+          folderIdentityRef.current = { folderKey, folder: page.folder };
         }
         return { key: requestKey, folderKey, page, stale: false, error: null };
       } catch (cause) {
+        if (
+          !accountLease.isCurrent() ||
+          activeBaseKeyRef.current !== baseKey ||
+          activeRequestKeyRef.current !== requestKey ||
+          requestSequenceRef.current !== requestSequence
+        ) {
+          return { key: requestKey, folderKey, page: null, stale: true, error: null };
+        }
         const cached =
-          activeBaseKeyRef.current === baseKey && successfulPageRef.current?.baseKey === baseKey
-            ? successfulPageRef.current.page
-            : null;
+          successfulPageRef.current?.baseKey === baseKey ? successfulPageRef.current.page : null;
         return {
           key: requestKey,
           folderKey,
@@ -146,7 +163,7 @@ export function useCustomFolderChats(
     queryEnabled && successfulPageRef.current?.baseKey === baseKey
       ? successfulPageRef.current.page
       : null;
-  const page = current?.page ?? cachedPage;
+  const page = current?.stale ? null : (current?.page ?? cachedPage);
   const currentError = current?.error ?? null;
   const requestPending = queryEnabled && (state.isLoading || current == null);
 
@@ -173,7 +190,7 @@ export function useCustomFolderChats(
     data: page,
     folder:
       page?.folder ??
-      (queryEnabled && folderIdentityRef.current?.folderKey === folderKey
+      (queryEnabled && !current?.stale && folderIdentityRef.current?.folderKey === folderKey
         ? folderIdentityRef.current.folder
         : null),
     isLoading: requestPending && page == null && currentError == null,
