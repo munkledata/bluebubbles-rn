@@ -20,6 +20,7 @@ const mockSetChatMuteWithinTransaction = jest.fn();
 const mockComputeBackgroundIsLight = jest.fn();
 const mockAdaptiveTokensFromImage = jest.fn();
 const mockSafeOpenUrl = jest.fn();
+const mockStartChatRepair = jest.fn();
 const mockSubscribeGenerationInvalidation = jest.fn();
 const mockUseChatHeader = jest.fn();
 const mockReactiveHookCall = jest.fn();
@@ -138,7 +139,7 @@ function deferred<T>(): Deferred<T> {
 
 function sqlStatementText(value: unknown): string {
   if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
-  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  const chunks = (value as { queryChunks: { value?: unknown }[] }).queryChunks;
   return chunks
     .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
     .filter((part): part is string => typeof part === 'string')
@@ -395,7 +396,7 @@ jest.mock('@/services', () => {
     computeBackgroundIsLight: (...args: unknown[]) => mockComputeBackgroundIsLight(...args),
     resetChatLocalPreferences: chatActions.resetChatLocalPreferences,
     setChatMuted: chatActions.setChatMuted,
-    startChatRepair: jest.fn(async () => ({ messages: 0 })),
+    startChatRepair: (...args: unknown[]) => mockStartChatRepair(...args),
     updateChatAppearance: chatActions.updateChatAppearance,
     updateChatCustomization: chatActions.updateChatCustomization,
   };
@@ -609,6 +610,11 @@ beforeEach(() => {
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockComputeBackgroundIsLight.mockReset().mockResolvedValue(false);
   mockAdaptiveTokensFromImage.mockReset().mockResolvedValue(null);
+  mockStartChatRepair.mockReset().mockResolvedValue({
+    messages: 0,
+    historyExhausted: false,
+    restored: false,
+  });
 });
 
 afterEach(() => {
@@ -627,13 +633,13 @@ async function retireLease(lease: MockLease): Promise<void> {
 
 function dialogAction(label: string): (() => void) | undefined {
   const actions = mockShowDialog.mock.calls.at(-1)?.[2] as
-    Array<{ text: string; onPress?: () => void }> | undefined;
+    { text: string; onPress?: () => void }[] | undefined;
   return actions?.find((action) => action.text === label)?.onPress;
 }
 
 function pickedAsset(uri: string): {
   canceled: false;
-  assets: Array<{ uri: string; fileName: string; mimeType: string }>;
+  assets: { uri: string; fileName: string; mimeType: string }[];
 } {
   return {
     canceled: false,
@@ -2168,5 +2174,112 @@ describe('ChatSettingsScreen source and account ownership', () => {
       expect(mockLeaveGroupChat).toHaveBeenCalledWith(CHAT_GUID, mockAccountLease),
     );
     expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ChatSettingsScreen targeted repair entry', () => {
+  it('confirm-gates the exact conversation, locks the row while pending, and reports success', async () => {
+    const repair = deferred<{
+      messages: number;
+      historyExhausted: boolean;
+      restored: boolean;
+    }>();
+    mockStartChatRepair.mockReturnValueOnce(repair.promise);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    const repairRow = screen.getByRole('button', {
+      name: 'Repair this conversation from the server',
+    });
+    await fireEvent.press(repairRow);
+
+    expect(mockStartChatRepair).not.toHaveBeenCalled();
+    expect(mockShowDialog.mock.calls.at(-1)?.slice(0, 2)).toEqual([
+      'Repair Conversation',
+      'Re-download this conversation’s server details and 500 most recent messages? Your local name, theme, wallpaper, mute setting, and deleted-message protections stay in place.',
+    ]);
+    const startRepair = dialogAction('Start Repair');
+    expect(startRepair).toBeDefined();
+
+    await act(async () => {
+      startRepair?.();
+      await Promise.resolve();
+    });
+    expect(mockStartChatRepair).toHaveBeenCalledTimes(1);
+    expect(mockStartChatRepair).toHaveBeenCalledWith(CHAT_GUID);
+    const busyRepairRow = screen.getByRole('button', {
+      name: 'Repairing this conversation from the server',
+    });
+    expect(screen.getByText('Repairing Conversation…')).toBeTruthy();
+    expect(busyRepairRow.props.accessibilityState.disabled).toBe(true);
+
+    await fireEvent.press(busyRepairRow);
+    expect(mockStartChatRepair).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      repair.resolve({ messages: 234, historyExhausted: false, restored: false });
+      await repair.promise;
+    });
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenCalledWith(
+        'Conversation Repaired',
+        '234 recent messages were refreshed.',
+      ),
+    );
+    expect(screen.getByText('Repair Conversation')).toBeTruthy();
+  });
+
+  it('contains current failures and suppresses a retired repair result and confirmation', async () => {
+    const rawCurrentError = 'raw-current-repair-error-2f71';
+    mockStartChatRepair.mockRejectedValueOnce(new Error(rawCurrentError));
+    const oldLease = mockAccountLease;
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Repair this conversation from the server' }),
+    );
+    await act(async () => {
+      dialogAction('Start Repair')?.();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenCalledWith(
+        'Repair Failed',
+        'Gator couldn’t refresh this conversation. Check the server connection and try again.',
+      ),
+    );
+    expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawCurrentError);
+
+    const staleRepair = deferred<{
+      messages: number;
+      historyExhausted: boolean;
+      restored: boolean;
+    }>();
+    mockStartChatRepair.mockReturnValueOnce(staleRepair.promise);
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Repair this conversation from the server' }),
+    );
+    const retainedStart = dialogAction('Start Repair');
+    expect(retainedStart).toBeDefined();
+    await act(async () => {
+      retainedStart?.();
+      await Promise.resolve();
+    });
+    expect(mockStartChatRepair).toHaveBeenCalledTimes(2);
+    const dialogCountBeforeRetirement = mockShowDialog.mock.calls.length;
+
+    await retireLease(oldLease);
+    expect(screen.getByRole('text', { name: ACCOUNT_CHANGED_COPY })).toBeTruthy();
+
+    const rawStaleError = 'raw-retired-repair-error-b8d4';
+    await act(async () => {
+      retainedStart?.();
+      staleRepair.reject(new Error(rawStaleError));
+      await staleRepair.promise.catch(() => undefined);
+      await Promise.resolve();
+    });
+    expect(mockStartChatRepair).toHaveBeenCalledTimes(2);
+    expect(mockShowDialog).toHaveBeenCalledTimes(dialogCountBeforeRetirement);
+    expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawStaleError);
+    expect(JSON.stringify(view.toJSON())).not.toContain(rawStaleError);
   });
 });

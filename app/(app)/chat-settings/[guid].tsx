@@ -837,7 +837,11 @@ function ChatSettingsScreen({
             chevron={false}
             disabled={repairing}
             onPress={repairConversation}
-            accessibilityLabel="Repair this conversation from the server"
+            accessibilityLabel={
+              repairing
+                ? 'Repairing this conversation from the server'
+                : 'Repair this conversation from the server'
+            }
           />
         </SettingsSection>
 

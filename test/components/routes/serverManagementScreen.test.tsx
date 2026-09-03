@@ -37,7 +37,7 @@ const mockIsReduceMotionEnabled = AccessibilityInfo.isReduceMotionEnabled as jes
 >;
 const mockAddEventListener = AccessibilityInfo.addEventListener as jest.Mock;
 
-let reduceMotionListeners: Array<(enabled: boolean) => void>;
+let reduceMotionListeners: ((enabled: boolean) => void)[];
 let removeReduceMotionListeners: jest.Mock[];
 
 // The full `@ui` barrel drags in the conversation/attachment tree (expo-video/expo-image/ky —
@@ -411,6 +411,12 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(mockPush).toHaveBeenCalledWith('/server-health');
 
     await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Restore Deleted Conversations' })),
+    );
+    expect(mockPush).toHaveBeenCalledTimes(2);
+    expect(mockPush).toHaveBeenLastCalledWith('/deleted-chats');
+
+    await invokeConfiguredPress(
       retainConfiguredPress(screen.getByRole('button', { name: 'Sync Now' })),
     );
     expect(mockStartSync).toHaveBeenCalledTimes(1);
@@ -459,6 +465,9 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     );
     const oldSync = retainConfiguredPress(screen.getByRole('button', { name: 'Sync Now' }));
     const oldHealth = retainConfiguredPress(screen.getByRole('button', { name: 'Server Health' }));
+    const oldDeletedChats = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Restore Deleted Conversations' }),
+    );
     const oldPairing = retainConfiguredPress(
       screen.getByRole('button', { name: 'Show Pairing QR' }),
     );
@@ -494,6 +503,7 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(screen.getByRole('button', { name: 'Share server URL Unknown' })).toBeTruthy();
     expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(3);
     expect(screen.getByText('Idle')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Restore Deleted Conversations' })).toBeDisabled();
 
     share.mockClear();
     mockStartSync.mockClear();
@@ -503,6 +513,7 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     await invokeConfiguredPress(oldShare);
     await invokeConfiguredPress(oldSync);
     await invokeConfiguredPress(oldHealth);
+    await invokeConfiguredPress(oldDeletedChats);
     await invokeConfiguredPress(oldPairing);
     await invokeConfiguredPress(oldLogs);
     expect(share).not.toHaveBeenCalled();
@@ -542,6 +553,11 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
       retainConfiguredPress(screen.getByRole('button', { name: 'Server Health' })),
     );
     expect(mockPush).toHaveBeenCalledWith('/server-health');
+
+    await invokeConfiguredPress(
+      retainConfiguredPress(screen.getByRole('button', { name: 'Restore Deleted Conversations' })),
+    );
+    expect(mockPush).toHaveBeenLastCalledWith('/deleted-chats');
 
     await invokeConfiguredPress(
       retainConfiguredPress(screen.getByRole('button', { name: 'Show Pairing QR' })),
