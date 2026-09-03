@@ -2,6 +2,7 @@ const hydrateSession = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const pauseRealtime = jest.fn();
 const resumeRealtime = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const flushErrorReports = jest.fn<Promise<void>, []>(() => Promise.resolve());
+const reconcileMessageNotificationGroup = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const recoverOutgoing = jest.fn<Promise<{ eligible: number; sent: number }>, []>(async () => ({
   eligible: 0,
   sent: 0,
@@ -14,6 +15,9 @@ const setNativeAppLockEnabled = jest.fn(() => true);
 jest.mock('@/services/bootstrap', () => ({ hydrateSession }));
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
 jest.mock('@/services/errors', () => ({ flushErrorReports }));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  reconcileMessageNotificationGroup,
+}));
 jest.mock('@/services/send', () => ({ recoverOutgoing }));
 jest.mock('@utils/isDev', () => ({ isDevServer }));
 jest.mock('@/services/clients', () => ({
@@ -23,9 +27,14 @@ jest.mock('@native/screenSecurity', () => ({
   setNativeAppLockEnabled,
 }));
 
+// Mock registration must precede the service import so no native notification module is loaded.
+// eslint-disable-next-line import/first
 import { logger } from '@core/secure';
+// eslint-disable-next-line import/first
 import { useLockStore } from '@state/lockStore';
+// eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
+// eslint-disable-next-line import/first
 import { completeUnlock, hydrateLock, setAppLockEnabled } from '@/services/lock';
 
 beforeEach(() => {
@@ -33,6 +42,7 @@ beforeEach(() => {
   pauseRealtime.mockReset();
   resumeRealtime.mockReset().mockResolvedValue(undefined);
   flushErrorReports.mockReset().mockResolvedValue(undefined);
+  reconcileMessageNotificationGroup.mockReset().mockResolvedValue(undefined);
   recoverOutgoing.mockReset().mockResolvedValue({ eligible: 0, sent: 0 });
   isDevServer.mockReset().mockReturnValue(false);
   vaultSet.mockReset().mockResolvedValue(undefined);
@@ -105,6 +115,7 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(true);
     expect(resumeRealtime).not.toHaveBeenCalled();
     expect(flushErrorReports).not.toHaveBeenCalled();
+    expect(reconcileMessageNotificationGroup).not.toHaveBeenCalled();
     expect(recoverOutgoing).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       '[lock] ignored cold unlock without foreground boot run ownership',
@@ -125,6 +136,7 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
+    expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).toHaveBeenCalledTimes(1);
     expect(resumeRealtime.mock.invocationCallOrder[0]!).toBeLessThan(
       flushErrorReports.mock.invocationCallOrder[0]!,
@@ -137,6 +149,7 @@ describe('completeUnlock', () => {
   it('keeps every recovery non-blocking after authentication succeeds', async () => {
     let finishRealtime!: () => void;
     let finishFlush!: () => void;
+    let finishNotificationRepair!: () => void;
     let finishOutgoing!: (result: { eligible: number; sent: number }) => void;
     resumeRealtime.mockReturnValueOnce(
       new Promise<void>((resolve) => {
@@ -146,6 +159,11 @@ describe('completeUnlock', () => {
     flushErrorReports.mockReturnValueOnce(
       new Promise<void>((resolve) => {
         finishFlush = resolve;
+      }),
+    );
+    reconcileMessageNotificationGroup.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishNotificationRepair = resolve;
       }),
     );
     recoverOutgoing.mockReturnValueOnce(
@@ -164,10 +182,12 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
+    expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).toHaveBeenCalledTimes(1);
 
     finishRealtime();
     finishFlush();
+    finishNotificationRepair();
     finishOutgoing({ eligible: 0, sent: 0 });
   });
 
@@ -183,6 +203,7 @@ describe('completeUnlock', () => {
 
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
+    expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).not.toHaveBeenCalled();
   });
 
@@ -192,12 +213,14 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).not.toHaveBeenCalled();
     expect(flushErrorReports).not.toHaveBeenCalled();
+    expect(reconcileMessageNotificationGroup).not.toHaveBeenCalled();
     expect(recoverOutgoing).not.toHaveBeenCalled();
   });
 
   it('does not re-lock or reject when any post-unlock recovery fails', async () => {
     const realtimeFailure = new Error('socket unavailable');
     const flushFailure = new Error('report queue unavailable');
+    const notificationFailure = new Error('notification tray unavailable');
     const outgoingFailure = new Error('send queue unavailable');
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     useSessionStore.setState({
@@ -207,6 +230,7 @@ describe('completeUnlock', () => {
     });
     resumeRealtime.mockRejectedValueOnce(realtimeFailure);
     flushErrorReports.mockRejectedValueOnce(flushFailure);
+    reconcileMessageNotificationGroup.mockRejectedValueOnce(notificationFailure);
     recoverOutgoing.mockRejectedValueOnce(outgoingFailure);
 
     await expect(completeUnlock()).resolves.toBeUndefined();
@@ -216,6 +240,7 @@ describe('completeUnlock', () => {
     expect(warn.mock.calls).toEqual([
       ['[realtime] post-unlock resume failed', realtimeFailure],
       ['[errors] post-unlock flush failed', flushFailure],
+      ['[notif] post-unlock message-group repair failed', notificationFailure],
       ['[send] post-unlock recovery failed', outgoingFailure],
     ]);
     warn.mockRestore();

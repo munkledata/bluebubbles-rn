@@ -2,6 +2,7 @@ import { logger } from '@core/secure';
 import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
 import { handleNotificationAction, handleNotificationPress } from './actions';
 import { EventType, nativeNotificationAdapter as notifee } from './nativeNotificationAdapter';
+import { reconcileMessageNotificationGroupAfterRemoval } from './notifeeService';
 import { stashPendingNotification } from './pendingNav';
 
 /**
@@ -29,6 +30,9 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       // killed-app tap ALSO deep-links via getInitialNotification() on next mount; the layout
       // drains both, once.
       await handleNotificationPress(detail, stashPendingNotification);
+      await reconcileMessageNotificationGroupAfterRemoval(detail.notification);
+    } else if (type === EventType.DISMISSED) {
+      await reconcileMessageNotificationGroupAfterRemoval(detail.notification);
     }
   } catch (e) {
     logger.warn('[notif] background event failed', { type, error: String(e) });

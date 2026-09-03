@@ -4,6 +4,7 @@ import {
   handleNotificationPress,
 } from '@/services/notifications/actions';
 import { stashPendingNotification } from '@/services/notifications/pendingNav';
+import { reconcileMessageNotificationGroupAfterRemoval } from '@/services/notifications/notifeeService';
 
 const mockOnBackgroundEvent = jest.fn();
 const mockFlushPersistentLogs = jest.fn(async (): Promise<boolean> => true);
@@ -11,7 +12,7 @@ const mockFlushPersistentLogs = jest.fn(async (): Promise<boolean> => true);
 jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
   default: { onBackgroundEvent: mockOnBackgroundEvent },
-  EventType: { PRESS: 1, ACTION_PRESS: 2 },
+  EventType: { DISMISSED: 0, PRESS: 1, ACTION_PRESS: 2 },
 }));
 jest.mock('@/services/notifications/actions', () => ({
   handleNotificationAction: jest.fn(async () => undefined),
@@ -19,6 +20,9 @@ jest.mock('@/services/notifications/actions', () => ({
 }));
 jest.mock('@/services/notifications/pendingNav', () => ({
   stashPendingNotification: jest.fn(),
+}));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  reconcileMessageNotificationGroupAfterRemoval: jest.fn(async () => undefined),
 }));
 jest.mock('@/services/logging/fileLogSink', () => ({
   flushPersistentLogsForHeadlessCompletion: mockFlushPersistentLogs,
@@ -49,8 +53,20 @@ describe('notification background event registration', () => {
     await backgroundHandler({ type: 1, detail });
 
     expect(handleNotificationPress).toHaveBeenCalledWith(detail, stashPendingNotification);
+    expect(reconcileMessageNotificationGroupAfterRemoval).toHaveBeenCalledWith(detail.notification);
     // The background bridge no longer writes the session-scoped slot before route validation.
     expect(stashPendingNotification).not.toHaveBeenCalled();
+    expect(mockFlushPersistentLogs).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a swiped message child without running press side-effects', async () => {
+    const detail = { notification: { id: 'gator-message-7' } } as unknown as EventDetail;
+
+    await backgroundHandler({ type: 0, detail });
+
+    expect(reconcileMessageNotificationGroupAfterRemoval).toHaveBeenCalledWith(detail.notification);
+    expect(handleNotificationAction).not.toHaveBeenCalled();
+    expect(handleNotificationPress).not.toHaveBeenCalled();
     expect(mockFlushPersistentLogs).toHaveBeenCalledTimes(1);
   });
 

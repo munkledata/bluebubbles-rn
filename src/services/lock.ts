@@ -7,6 +7,7 @@ import { vault } from './clients';
 import { flushErrorReports } from './errors';
 import { pauseRealtime, resumeRealtime } from './realtimeControl';
 import { recoverOutgoing } from './send';
+import { reconcileMessageNotificationGroup } from './notifications/notifeeService';
 
 // ── App lock ───────────────────────────────────────────────────────────────────
 // The lock setting lives in the vault (NOT the encrypted DB) so it's readable at
@@ -80,6 +81,9 @@ export async function completeUnlock(): Promise<void> {
     });
     void flushErrorReports().catch((error: unknown) => {
       logger.warn('[errors] post-unlock flush failed', error);
+    });
+    void reconcileMessageNotificationGroup().catch((error: unknown) => {
+      logger.warn('[notif] post-unlock message-group repair failed', error);
     });
     if (!isDevServer()) {
       void recoverOutgoing().catch((error: unknown) => {

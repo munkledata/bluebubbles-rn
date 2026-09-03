@@ -26,6 +26,7 @@ import {
   migrateReminderNotificationId,
   nativeFaceTimeData,
   nativeRouteData,
+  nativeStatusData,
   newReminderNotificationId,
   replacementReminderNotificationId,
   resolveNotificationData,
@@ -971,5 +972,16 @@ describe('notificationRouting — native privacy boundary', () => {
     await expect(
       resolveNotificationData({ chatGuid: 'legacy-chat', messageGuid: 'legacy-message' }),
     ).resolves.toEqual({ chatGuid: 'legacy-chat', messageGuid: 'legacy-message' });
+  });
+
+  it('routes the fixed message summary to the inbox without native identifiers or a DB lookup', async () => {
+    const data = nativeStatusData('message-summary');
+
+    expect(data).toEqual({
+      gatorOwner: 'gator',
+      gatorSchema: '2',
+      gatorKind: 'message-summary',
+    });
+    await expect(resolveNotificationData(data)).resolves.toEqual({ inbox: '1' });
   });
 });

@@ -12,7 +12,15 @@ export const NOTIFICATION_DATA_OWNER = 'gator';
 export const NOTIFICATION_DATA_SCHEMA = '2';
 
 export type NotificationRouteKind =
-  'message' | 'send-failure' | 'reminder' | 'facetime' | 'locked' | 'rcs' | 'test' | 'alias';
+  | 'message'
+  | 'message-summary'
+  | 'send-failure'
+  | 'reminder'
+  | 'facetime'
+  | 'locked'
+  | 'rcs'
+  | 'test'
+  | 'alias';
 
 export interface LocalNotificationRoute {
   chatId: number;
@@ -53,6 +61,7 @@ export interface ResolvedNotificationData {
   messageDate?: string;
   reminder?: '1';
   faceTimeUuid?: string;
+  inbox?: '1';
 }
 
 const FACE_TIME_ROUTE_PREFIX = NOTIFICATION_ROUTE_KV_PREFIX;
@@ -272,7 +281,10 @@ export async function listFutureReminderTriggerRoutes(
 }
 
 export function nativeRouteData(
-  kind: Exclude<NotificationRouteKind, 'facetime' | 'locked' | 'rcs' | 'test' | 'alias'>,
+  kind: Exclude<
+    NotificationRouteKind,
+    'message-summary' | 'facetime' | 'locked' | 'rcs' | 'test' | 'alias'
+  >,
   route: LocalNotificationRoute,
   messageDate?: number | string,
 ): Record<string, string> {
@@ -287,7 +299,7 @@ export function nativeRouteData(
 }
 
 export function nativeStatusData(
-  kind: Extract<NotificationRouteKind, 'locked' | 'rcs' | 'test' | 'alias'>,
+  kind: Extract<NotificationRouteKind, 'message-summary' | 'locked' | 'rcs' | 'test' | 'alias'>,
 ): Record<string, string> {
   return {
     gatorOwner: NOTIFICATION_DATA_OWNER,
@@ -397,6 +409,9 @@ export async function resolveNotificationData(
     const faceTimeUuid = await resolveFaceTimeToken(token);
     return faceTimeUuid ? { faceTimeUuid } : null;
   }
+  // The message-group summary is deliberately route-free: its native payload contains only this
+  // owned marker, and a tap returns to the inbox without opening the encrypted database.
+  if (kind === 'message-summary') return { inbox: '1' };
   if (kind !== 'message' && kind !== 'send-failure' && kind !== 'reminder') return null;
   const chatId = positiveInteger(data.chatId);
   if (chatId == null) return null;

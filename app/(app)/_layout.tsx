@@ -1,4 +1,4 @@
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState as NativeAppState, StyleSheet, View, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
@@ -11,6 +11,7 @@ import {
   EventType,
   nativeNotificationAdapter as notifee,
 } from '@/services/notifications/nativeNotificationAdapter';
+import { reconcileMessageNotificationGroupAfterRemoval } from '@/services/notifications/notifeeService';
 import {
   drainNotificationTap,
   openFromNotification,
@@ -88,9 +89,13 @@ export default function AppLayout(): React.JSX.Element {
 }
 
 function ConnectedAppLayout(): React.JSX.Element {
+  const router = useRouter();
   // Opens a chat WITHOUT stacking one thread on another: a notification tapped while a thread is
   // already open swaps it (replace) instead of pushing, so Back from any thread → Messages.
   const openChat = useChatNavigator();
+  // A group-summary tap is not a chat transition. Pop to the existing inbox (or replace only when
+  // it is absent) so a tap from inside a thread cannot leave duplicate Home screens in the stack.
+  const openInbox = useCallback(() => router.dismissTo('/home'), [router]);
   // Every listener/effect below belongs to this mounted account. Native/AppState callbacks may be
   // queued past unmount, so they must not capture the replacement account when they finally run.
   const [accountLease] = useState(captureRealtimeDeliveryLease);
@@ -160,12 +165,12 @@ function ConnectedAppLayout(): React.JSX.Element {
         () => notifee.getInitialNotification(),
         takePendingNotification,
         handleNotificationPress,
-        openChat,
+        { openChat, openInbox },
         undefined,
         accountLease,
       ),
     );
-  }, [accountLease, openChat]);
+  }, [accountLease, openChat, openInbox]);
 
   // Foreground notification handling. Action buttons (reply / mark-read / love) run their
   // side-effects; a body tap (PRESS) while the app is VISIBLE runs its side-effects AND deep-links
@@ -182,11 +187,18 @@ function ConnectedAppLayout(): React.JSX.Element {
             handleNotificationPress(detail),
           );
           runNotificationTask('press-navigation', accountLease, () =>
-            openFromNotification(detail.notification?.data, openChat, accountLease),
+            openFromNotification(detail.notification?.data, { openChat, openInbox }, accountLease),
+          );
+          runNotificationTask('message-group-press', accountLease, () =>
+            reconcileMessageNotificationGroupAfterRemoval(detail.notification),
+          );
+        } else if (type === EventType.DISMISSED) {
+          runNotificationTask('message-group-dismiss', accountLease, () =>
+            reconcileMessageNotificationGroupAfterRemoval(detail.notification),
           );
         }
       }),
-    [accountLease, openChat],
+    [accountLease, openChat, openInbox],
   );
 
   // Cold start: a tap that LAUNCHED the app from killed isn't replayed as a foreground event —

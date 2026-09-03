@@ -32,6 +32,7 @@ import {
   ACTION_LOVE,
   ACTION_MARK_READ,
   ACTION_REPLY,
+  PRESS_INBOX,
   PRESS_OPEN,
   PRESS_REMINDER,
 } from '@/services/notifications/notifeeService';
@@ -47,7 +48,11 @@ import {
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
 jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
-  default: { cancelNotification: jest.fn(async () => undefined) },
+  AndroidGroupAlertBehavior: { ALL: 0, SUMMARY: 1, CHILDREN: 2 },
+  default: {
+    cancelNotification: jest.fn(async () => undefined),
+    getDisplayedNotifications: jest.fn(async () => []),
+  },
 }));
 // A sentinel DB handle so we can prove ensureDatabase()'s value is threaded to the writes.
 // Must be `mock`-prefixed — jest.mock factories are hoisted and may only reference such vars.
@@ -617,6 +622,20 @@ describe('notification actions — account-switch containment', () => {
 
     expect(stash).toHaveBeenCalledTimes(1);
     expect(stash).toHaveBeenCalledWith(safe.notification?.data);
+  });
+
+  it('stashes the fixed inbox summary route without opening the encrypted DB', async () => {
+    const stash = jest.fn();
+    const detail = chatDetail(
+      PRESS_INBOX,
+      { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'message-summary' },
+      { id: 'gator-message-summary' },
+    );
+
+    await handleNotificationPress(detail, stash);
+
+    expect(stash).toHaveBeenCalledWith(detail.notification?.data);
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
   });
 
   it('admits a schema-2 failed-send body tap using only its opaque local route', async () => {

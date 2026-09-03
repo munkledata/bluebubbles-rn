@@ -12,10 +12,12 @@ const mockRedirect = jest.fn((_props: { href: string }) => null);
 const mockServerRotationApprovalHost = jest.fn(() => null);
 const mockConnectionBanner = jest.fn((_props: { onRetry: () => unknown }) => null);
 const mockOpenChat = jest.fn();
+const mockDismissTo = jest.fn();
 const mockLoggerWarn = jest.fn();
-const mockForegroundHandlers: Array<
-  (event: { type: number; detail: Record<string, unknown> }) => void
-> = [];
+const mockForegroundHandlers: ((event: {
+  type: number;
+  detail: Record<string, unknown>;
+}) => void)[] = [];
 jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
   default: {
@@ -27,7 +29,7 @@ jest.mock('react-native-notify-kit', () => ({
       },
     ),
   },
-  EventType: { ACTION_PRESS: 1, PRESS: 2 },
+  EventType: { DISMISSED: 0, ACTION_PRESS: 1, PRESS: 2 },
 }));
 jest.mock('expo-router', () => ({
   Stack: () => null,
@@ -35,6 +37,7 @@ jest.mock('expo-router', () => ({
     mockRedirect(props);
     return null;
   },
+  useRouter: () => ({ dismissTo: mockDismissTo }),
 }));
 jest.mock('@core/secure', () => ({ logger: { warn: mockLoggerWarn } }));
 jest.mock('@/services', () => ({
@@ -57,6 +60,9 @@ jest.mock('@/services/notifications/notificationOpen', () => ({
 }));
 jest.mock('@/services/notifications/pendingNav', () => ({
   takePendingNotification: jest.fn(() => null),
+}));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  reconcileMessageNotificationGroupAfterRemoval: jest.fn(() => Promise.resolve()),
 }));
 jest.mock('@ui/facetime', () => ({
   FaceTimeCallOverlay: () => null,
@@ -103,6 +109,8 @@ import {
   openFromNotification,
 } from '@/services/notifications/notificationOpen';
 // eslint-disable-next-line import/first
+import { reconcileMessageNotificationGroupAfterRemoval } from '@/services/notifications/notifeeService';
+// eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -119,6 +127,7 @@ const mockHandleNotificationAction = handleNotificationAction as jest.Mock;
 const mockHandleNotificationPress = handleNotificationPress as jest.Mock;
 const mockDrainNotificationTap = drainNotificationTap as jest.Mock;
 const mockOpenFromNotification = openFromNotification as jest.Mock;
+const mockReconcileMessageGroup = reconcileMessageNotificationGroupAfterRemoval as jest.Mock;
 
 type AppStateHandler = (state: AppStateStatus) => void;
 const appStateHandlers: AppStateHandler[] = [];
@@ -176,6 +185,7 @@ async function mountLayout(): Promise<void> {
   mockHandleNotificationPress.mockClear();
   mockDrainNotificationTap.mockClear();
   mockOpenFromNotification.mockClear();
+  mockReconcileMessageGroup.mockClear();
 }
 
 async function emitAppState(state: AppStateStatus): Promise<void> {
@@ -329,6 +339,7 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockHandleNotificationAction).not.toHaveBeenCalled();
     expect(mockHandleNotificationPress).not.toHaveBeenCalled();
     expect(mockOpenFromNotification).not.toHaveBeenCalled();
+    expect(mockReconcileMessageGroup).not.toHaveBeenCalled();
     expect(mockDrainNotificationTap).not.toHaveBeenCalled();
     expect(mockResumeRealtime).not.toHaveBeenCalled();
     expect(mockFlushErrorReports).not.toHaveBeenCalled();
@@ -347,6 +358,40 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockHandleNotificationAction).toHaveBeenCalledTimes(1);
     expect(mockHandleNotificationPress).toHaveBeenCalledTimes(1);
     expect(mockOpenFromNotification).toHaveBeenCalledTimes(1);
+    expect(mockReconcileMessageGroup).toHaveBeenCalledTimes(1);
     expect(mockDrainNotificationTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a foreground notification swipe', async () => {
+    await mountLayout();
+    const detail = { notification: { id: 'gator-message-7' } };
+
+    await act(async () => {
+      mockForegroundHandlers[0]?.({ type: EventType.DISMISSED, detail });
+      await Promise.resolve();
+    });
+
+    expect(mockReconcileMessageGroup).toHaveBeenCalledWith(detail.notification);
+    expect(mockHandleNotificationAction).not.toHaveBeenCalled();
+    expect(mockHandleNotificationPress).not.toHaveBeenCalled();
+    expect(mockOpenFromNotification).not.toHaveBeenCalled();
+  });
+
+  it('injects inbox navigation that pops to Home instead of using the chat stack helper', async () => {
+    await mountLayout();
+
+    await act(async () => {
+      mockForegroundHandlers[0]?.({ type: EventType.PRESS, detail: { notification: {} } });
+      await Promise.resolve();
+    });
+
+    const navigation = mockOpenFromNotification.mock.calls[0]?.[1] as
+      { openChat: (path: string) => void; openInbox: () => void } | undefined;
+    expect(navigation?.openChat).toBe(mockOpenChat);
+
+    navigation?.openInbox();
+
+    expect(mockDismissTo).toHaveBeenCalledWith('/home');
+    expect(mockOpenChat).not.toHaveBeenCalled();
   });
 });

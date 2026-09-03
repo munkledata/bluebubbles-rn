@@ -7,7 +7,7 @@ import { stashPendingNotification } from './pendingNav';
 import { resolveNotificationData } from './notificationRouting';
 
 /**
- * Turn a tapped notification's `data` into a chat deep-link, and navigate there.
+ * Turn a tapped notification's `data` into a safe app deep-link, and navigate there.
  *
  * Message notifications carry `{ chatGuid, messageGuid?, messageDate? }`; reminders add
  * `reminder: '1'` (see notifeeService). A MESSAGE tap opens the chat PLAIN (`/chat/[guid]`)
@@ -21,8 +21,9 @@ import { resolveNotificationData } from './notificationRouting';
  * ourselves — from the foreground PRESS event (app alive) and from
  * `getInitialNotification()` (app cold-started by the tap).
  *
- * `navigate` is injected so this stays a pure, unit-testable function with no
- * expo-router dependency.
+ * Navigation is injected so this stays a pure, unit-testable function with no expo-router
+ * dependency. Chat and inbox navigation are deliberately separate: chat navigation has special
+ * push/replace rules that are not valid for returning to the inbox.
  */
 
 /** A chat to open from a notification tap, with an optional message to focus on. */
@@ -33,6 +34,12 @@ export interface NotificationOpenTarget {
   messageDate?: number;
   /** A "remind me later" notification — the only kind that anchors on its (old) message. */
   reminder?: boolean;
+}
+
+/** Explicit destinations supported by notification body taps. */
+export interface NotificationNavigation {
+  openChat: (path: string) => void;
+  openInbox: () => void;
 }
 
 /**
@@ -79,21 +86,26 @@ export function chatDeepLink(target: NotificationOpenTarget): string {
 }
 
 /**
- * Navigate to the chat a tapped notification is about, if any. `navigate` is the caller's
- * `router.push` — injected so this is testable without expo-router. Returns `true` when the
+ * Navigate to the chat a tapped notification is about, or to the inbox for the owned message-group
+ * summary. Navigation is injected so this is testable without expo-router. Returns `true` when the
  * payload was handled (including an intentional no-op for a non-chat notification), or `false`
  * when route resolution/navigation failed and a one-shot caller should preserve the payload.
  */
 export async function openFromNotification(
   data: Record<string, unknown> | undefined,
-  navigate: (path: string) => void,
+  navigation: NotificationNavigation,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<boolean> {
   if (!accountLease.isCurrent()) return true;
   try {
-    const target = notificationOpenTarget((await resolveNotificationData(data)) ?? undefined);
+    const resolved = await resolveNotificationData(data);
     if (!accountLease.isCurrent()) return true;
-    if (target) navigate(chatDeepLink(target));
+    if (resolved?.inbox === '1') {
+      navigation.openInbox();
+      return true;
+    }
+    const target = notificationOpenTarget(resolved ?? undefined);
+    if (target) navigation.openChat(chatDeepLink(target));
     return true;
   } catch (error) {
     if (!accountLease.isCurrent()) return true;
@@ -153,7 +165,7 @@ export async function drainNotificationTap<T extends TappedNotification>(
   getInitial: () => Promise<T | null>,
   takePending: () => Record<string, unknown> | null,
   runPressSideEffects: (detail: T) => void | Promise<void>,
-  navigate: (path: string) => void,
+  navigation: NotificationNavigation,
   restorePending: (data: Record<string, unknown>) => void = stashPendingNotification,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
@@ -163,7 +175,7 @@ export async function drainNotificationTap<T extends TappedNotification>(
   const initial = isRealPress(raw) ? raw : null;
   const pending = takePending();
   const tapData = initial?.notification?.data ?? pending ?? undefined;
-  const handled = await openFromNotification(tapData, navigate, accountLease);
+  const handled = await openFromNotification(tapData, navigation, accountLease);
   if (!accountLease.isCurrent()) return;
   // Both native launch state and the pending slot are destructive reads. Preserve ONE copy when
   // the encrypted route lookup failed so the next foreground drain can retry instead of silently

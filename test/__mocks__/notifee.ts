@@ -3,6 +3,7 @@
 // jest swaps in this stub at runtime via moduleNameMapper. Only the values used
 // at module-eval / call time need to exist.
 export const AndroidImportance = { NONE: 0, MIN: 1, LOW: 2, DEFAULT: 3, HIGH: 4 };
+export const AndroidGroupAlertBehavior = { ALL: 0, SUMMARY: 1, CHILDREN: 2 };
 export const AndroidStyle = { BIGPICTURE: 0, BIGTEXT: 1, INBOX: 2, MESSAGING: 3 };
 export const AndroidCategory = { CALL: 'call' };
 export const AlarmType = { SET_AND_ALLOW_WHILE_IDLE: 1 };

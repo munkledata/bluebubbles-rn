@@ -44,6 +44,10 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+function notificationNavigation() {
+  return { openChat: jest.fn(), openInbox: jest.fn() };
+}
+
 beforeEach(() => {
   resumeRealtimeDeliveries();
 });
@@ -145,27 +149,43 @@ describe('chatDeepLink', () => {
 });
 
 describe('openFromNotification', () => {
+  it('opens the inbox for the owned message-group summary', async () => {
+    mockResolveNotificationData.mockResolvedValueOnce({ inbox: '1' });
+    const navigate = notificationNavigation();
+
+    await openFromNotification(
+      { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'message-summary' },
+      navigate,
+    );
+
+    expect(navigate.openInbox).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).not.toHaveBeenCalled();
+  });
+
   it('navigates to the plain chat route for a message notification', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     await openFromNotification({ chatGuid: 'c1', messageGuid: 'm1', messageDate: '5' }, navigate);
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('navigates to the anchored deep-link for a reminder notification', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     await openFromNotification(
       { chatGuid: 'c1', messageGuid: 'm1', messageDate: '5', reminder: '1' },
       navigate,
     );
-    expect(navigate).toHaveBeenCalledWith('/chat/c1?focus=m1&focusDate=5');
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1?focus=m1&focusDate=5');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('does nothing for a notification that is not about a chat (no navigate call)', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     await openFromNotification({ faceTimeUuid: 'u1' }, navigate);
     await openFromNotification(undefined, navigate);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('navigates after a safe local-key payload is resolved through the encrypted DB', async () => {
@@ -173,19 +193,20 @@ describe('openFromNotification', () => {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'm1',
     });
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     await openFromNotification(
       { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'message', chatId: '7' },
       navigate,
     );
-    expect(navigate).toHaveBeenCalledWith('/chat/iMessage%3B-%3B%2B15551234567');
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/iMessage%3B-%3B%2B15551234567');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('contains a safe-route DB failure instead of leaking an unhandled rejection', async () => {
     const failure = new Error('encrypted DB unavailable');
     mockResolveNotificationData.mockRejectedValueOnce(failure);
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
 
     await expect(
       openFromNotification(
@@ -193,14 +214,15 @@ describe('openFromNotification', () => {
         navigate,
       ),
     ).resolves.toBe(false);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith('[notif] notification route could not be opened', failure);
   });
 
   it('does not navigate when account A retires during local route resolution', async () => {
     const resolved = deferred<Record<string, unknown> | null>();
     mockResolveNotificationData.mockReturnValueOnce(resolved.promise);
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const accountLease = captureRealtimeDeliveryLease();
     const pending = openFromNotification(
       { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'message', chatId: '7' },
@@ -214,7 +236,8 @@ describe('openFromNotification', () => {
     resolved.resolve({ chatGuid: 'account-a-chat' });
 
     await expect(pending).resolves.toBe(true);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 });
 
@@ -227,7 +250,7 @@ describe('drainNotificationTap', () => {
   };
 
   it('does nothing when neither source has a tap (a plain foreground/resume tick)', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     await drainNotificationTap(
       async () => null,
@@ -235,12 +258,13 @@ describe('drainNotificationTap', () => {
       press,
       navigate,
     );
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
   });
 
   it('navigates and runs press side-effects for a launch (getInitialNotification) tap', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     await drainNotificationTap(
       async () => messageInitial,
@@ -249,12 +273,13 @@ describe('drainNotificationTap', () => {
       navigate,
     );
     expect(press).toHaveBeenCalledWith(messageInitial);
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('navigates from the pending stash when there is no launch event (background-alive backstop)', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     await drainNotificationTap(
       async () => null,
@@ -264,24 +289,26 @@ describe('drainNotificationTap', () => {
     );
     // No launch event → no press side-effects, but the stash still opens the chat.
     expect(press).not.toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c2');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c2');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('drains BOTH sources but navigates only once (same press, no double-push)', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     const takePending = jest.fn(() => ({ chatGuid: 'c1', messageGuid: 'm1' }));
     await drainNotificationTap(async () => messageInitial, takePending, press, navigate);
     // Both the launch event and the stash describe the same tap — clear both, open once.
     expect(takePending).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('still navigates and clears the pending duplicate when press cleanup rejects', async () => {
     const failure = new Error('reminder DB unavailable');
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn(async () => {
       throw failure;
     });
@@ -292,14 +319,15 @@ describe('drainNotificationTap', () => {
     ).rejects.toBe(failure);
 
     expect(takePending).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('re-stashes one consumed copy after a route failure, then opens it once on retry', async () => {
     const failure = new Error('encrypted DB temporarily unavailable');
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     let pending: Record<string, unknown> | null = {
       chatGuid: 'c1',
@@ -324,7 +352,8 @@ describe('drainNotificationTap', () => {
 
     await drainNotificationTap(getInitial, takePending, press, navigate, restorePending);
 
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(restorePending).toHaveBeenCalledTimes(1);
     expect(restorePending).toHaveBeenCalledWith(messageInitial.notification.data);
     // The genuine launch press still owns its cleanup exactly once; the restored pending copy is
@@ -333,8 +362,9 @@ describe('drainNotificationTap', () => {
 
     await drainNotificationTap(getInitial, takePending, press, navigate, restorePending);
 
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(restorePending).toHaveBeenCalledTimes(1);
     expect(press).toHaveBeenCalledTimes(1);
     expect(pending).toBeNull();
@@ -342,7 +372,7 @@ describe('drainNotificationTap', () => {
   });
 
   it('runs press side-effects but does NOT navigate for a launch that is not about a chat', async () => {
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     const reminderInitial = {
       notification: { data: { reminder: '1' } },
@@ -355,7 +385,8 @@ describe('drainNotificationTap', () => {
       navigate,
     );
     expect(press).toHaveBeenCalledWith(reminderInitial);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
   it('IGNORES the Android launch-intent echo (a notification with no pressAction)', async () => {
@@ -363,7 +394,7 @@ describe('drainNotificationTap', () => {
     // falls back to the Activity's launch intent, which keeps its "notification" extra for the
     // Activity's whole life — so it re-serves the launching notification on every later drain.
     // Acting on it trapped the user: cold-start into a chat, press Back, get thrown right back in.
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
     await drainNotificationTap(
@@ -372,14 +403,15 @@ describe('drainNotificationTap', () => {
       press,
       navigate,
     );
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
   });
 
   it('drains the same press exactly once — a re-drain sees only the echo and stays put', async () => {
     // The real sequence on a cold start: the first read pops the sticky press event, every read
     // after it gets the launch-intent echo. Exactly one navigation must come out of that.
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
     let sticky: typeof messageInitial | typeof echo | null = messageInitial;
@@ -391,15 +423,16 @@ describe('drainNotificationTap', () => {
     await drainNotificationTap(getInitial, () => null, press, navigate);
     await drainNotificationTap(getInitial, () => null, press, navigate);
     await drainNotificationTap(getInitial, () => null, press, navigate);
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c1');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(press).toHaveBeenCalledTimes(1);
   });
 
   it('still opens from the pending stash while the echo is being served', async () => {
     // A background-alive tap stashes its data via onBackgroundEvent. That drain must work even
     // though getInitialNotification() is simultaneously handing back the OLD launching intent.
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const press = jest.fn();
     const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
     await drainNotificationTap(
@@ -408,8 +441,9 @@ describe('drainNotificationTap', () => {
       press,
       navigate,
     );
-    expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith('/chat/c2');
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c2');
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
   });
 
@@ -418,7 +452,7 @@ describe('drainNotificationTap', () => {
     const getInitial = jest.fn(() => initial.promise);
     const takePending = jest.fn(() => ({ chatGuid: 'account-b-chat' }));
     const press = jest.fn();
-    const navigate = jest.fn();
+    const navigate = notificationNavigation();
     const restorePending = jest.fn();
     const accountLease = captureRealtimeDeliveryLease();
     const pending = drainNotificationTap(
@@ -437,7 +471,8 @@ describe('drainNotificationTap', () => {
     await pending;
 
     expect(takePending).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
     expect(restorePending).not.toHaveBeenCalled();
   });

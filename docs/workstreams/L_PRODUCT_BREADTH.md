@@ -87,11 +87,28 @@ observable empty intermediate state.
 
 ## `FEAT-05` — isolated messaging additions
 
-Treat send-location, notification grouping beyond owned history, and server-assisted search as
-separate child tasks. Each selected slice needs its own capability gate, optimistic/error path,
-disablement boundary, and device sign-off; never bundle them into one release. Fresh camera-video
-capture is deliberately out of scope by owner decision: keep the existing Camera action photo-only
-without changing gallery-video selection, sending, receiving, or playback.
+Implement these as three independent slices:
+
+1. `FEAT-05A` adds current-location sending through an explicit foreground permission and one
+   bounded, user-initiated location attachment. It needs truthful denial/cancellation/error states
+   and must not introduce background location collection.
+2. `FEAT-05B` groups only current, owned, ordinary Android message children under one fixed group.
+   Two or more distinct chats produce one fixed, generic summary that alerts through its children
+   only and opens the inbox without storing a chat/message identifier or opening the encrypted DB.
+   Exclude locked/status, reminder, FaceTime, failed-send, RCS, test, alias, foreign, duplicate, and
+   malformed notices. Reconcile through the existing native-operation queue after posting,
+   withdrawal, read/cancel, native child removal, startup inspection, and warm unlock. Never rewrite
+   a detailed child from a cached native snapshot; pre-feature children adopt grouping only when a
+   fresh message naturally replaces their stable id. While App Lock is effective or its persisted
+   state is unknown, inspect/rebuild nothing and repair after unlock. Enumeration failure preserves
+   existing message history and leaves durable delivery able to retry.
+3. `FEAT-05C` adds server-assisted search only behind an explicit capability, merges it with local
+   results under one bounded identity/order contract, and labels the searched scope truthfully.
+
+Each slice needs its own capability or permission boundary, error path, disablement boundary, and
+device sign-off; never bundle them into one release. Fresh camera-video capture is deliberately out
+of scope by owner decision: keep the existing Camera action photo-only without changing
+gallery-video selection, sending, receiving, or playback.
 
 <a id="feat-06"></a>
 

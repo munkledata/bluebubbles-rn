@@ -1,6 +1,7 @@
 import notifyKit, {
   AlarmType,
   AndroidCategory,
+  AndroidGroupAlertBehavior,
   AndroidImportance,
   AndroidStyle,
   AuthorizationStatus,
@@ -69,6 +70,7 @@ export const nativeNotificationAdapter = {
 export {
   AlarmType,
   AndroidCategory,
+  AndroidGroupAlertBehavior,
   AndroidImportance,
   AndroidStyle,
   AuthorizationStatus,

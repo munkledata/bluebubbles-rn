@@ -186,7 +186,7 @@ async function handleNotificationActionForAccount(
     if (clearTray && notificationId === expectedNotificationId && accountLease.isCurrent()) {
       // Cancel the exact schema-2 id that fired. Never fall back to a raw chat guid: legacy data
       // cannot be bound to the active account and is deliberately action-inert above.
-      await cancelNotificationById(notificationId);
+      await cancelNotificationById(notificationId, accountLease);
     }
   }
 }
@@ -226,6 +226,12 @@ async function handleNotificationPressForAccount(
   // A foreground non-reminder caller has no DB side-effect to run. The background callback passes
   // `onCurrentChatPress`, so it still resolves the safe local route before stashing navigation.
   if (!isReminderPress && !onCurrentChatPress) return;
+  // A summary route contains no local chat key and needs no DB lookup. A background/headless press
+  // still has to reach the pending-navigation slot so the active app can explicitly open its inbox.
+  if (hasPrivateRouteSchema(data, ['message-summary'])) {
+    if (onCurrentChatPress && data && accountLease.isCurrent()) onCurrentChatPress(data);
+    return;
+  }
   if (!hasPrivateRouteSchema(data, ['message', 'send-failure', 'reminder'])) return;
 
   let route: Awaited<ReturnType<typeof resolveNotificationData>>;
