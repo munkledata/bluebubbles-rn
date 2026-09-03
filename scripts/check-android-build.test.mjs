@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,9 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
+  FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS,
   FORBIDDEN_PERMISSIONS,
+  REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
@@ -154,6 +157,18 @@ import './src/services/notifications/registerFcmBackgroundHandler';
 import './src/services/download/registerBoundedNativeDownloadCleanup';
 import 'expo-router/entry';
 `;
+
+function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
+  return Buffer.from(
+    [
+      ...REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS.filter(
+        (marker) => marker !== omitRequiredMarker,
+      ),
+      ...extraMarkers,
+    ].join('\0'),
+    'utf8',
+  );
+}
 
 function validate(overrides = {}) {
   return validateAndroidBuild({
@@ -369,9 +384,35 @@ test('rejects a bypassed or late expo-router bundle entry', () => {
 test('validates the packaged protobuf manifest and rejects a Direct Share resource', () => {
   const manifestProto = encodeXmlDocument(manifestNode);
   assert.deepEqual(
-    validatePackagedAndroidBundle({ manifestProto, dexBytes: Buffer.from('clean dex') }),
+    validatePackagedAndroidBundle({ manifestProto, dexBytes: cleanupDexFixture() }),
     [],
   );
+
+  for (const marker of REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS) {
+    const missingCleanup = validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({ omitRequiredMarker: marker }),
+    });
+    assert.ok(
+      missingCleanup.includes(
+        `packaged DEX is missing required pinned-shortcut cleanup marker: ${marker}`,
+      ),
+      marker,
+    );
+  }
+
+  for (const marker of FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS) {
+    const legacyPublisher = validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({ extraMarkers: [marker] }),
+    });
+    assert.ok(
+      legacyPublisher.includes(
+        `packaged DEX contains forbidden legacy shortcut-publishing marker: ${marker}`,
+      ),
+      marker,
+    );
+  }
 
   const forbiddenTarget = validatePackagedAndroidBundle({
     manifestProto,
@@ -381,7 +422,9 @@ test('validates the packaged protobuf manifest and rejects a Direct Share resour
 
   const forbiddenNativeModule = validatePackagedAndroidBundle({
     manifestProto,
-    dexBytes: Buffer.from('Lexpo/modules/shareintent/ExpoShareIntentModule;'),
+    dexBytes: cleanupDexFixture({
+      extraMarkers: ['Lexpo/modules/shareintent/ExpoShareIntentModule;'],
+    }),
   });
   assert.ok(
     forbiddenNativeModule.some((error) => error.includes('disabled inbound-share native marker')),
@@ -397,7 +440,12 @@ test('validates the packaged protobuf manifest and rejects a Direct Share resour
 function writeTestAab(
   root,
   relativePath,
-  { includeForbiddenShareTarget = false, includeForbiddenNativeModule = false } = {},
+  {
+    includeForbiddenShareTarget = false,
+    includeForbiddenNativeModule = false,
+    legacyPublisherMarker,
+    omitRequiredCleanupMarker,
+  } = {},
 ) {
   const staging = join(root, 'bundle-staging');
   const absolutePath = join(root, relativePath);
@@ -411,9 +459,15 @@ function writeTestAab(
   );
   writeFileSync(
     join(staging, 'base', 'dex', 'classes.dex'),
-    includeForbiddenNativeModule
-      ? 'Lexpo/modules/shareintent/ExpoShareIntentModule;'
-      : 'clean dex fixture',
+    cleanupDexFixture({
+      omitRequiredMarker: omitRequiredCleanupMarker,
+      extraMarkers: [
+        ...(includeForbiddenNativeModule
+          ? ['Lexpo/modules/shareintent/ExpoShareIntentModule;']
+          : []),
+        ...(legacyPublisherMarker ? [legacyPublisherMarker] : []),
+      ],
+    }),
   );
   if (includeForbiddenShareTarget) {
     mkdirSync(join(staging, 'base', 'res', 'xml'), { recursive: true });
@@ -462,6 +516,22 @@ test('artifact runner inspects both variants and the final release AAB contents'
 
     writeTestAab(root, releaseBundlePath);
     assert.doesNotThrow(() => runAndroidBuildCheck(options));
+
+    writeTestAab(root, releaseBundlePath, {
+      omitRequiredCleanupMarker: REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS[0],
+    });
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /packaged DEX is missing required pinned-shortcut cleanup marker/,
+    );
+
+    writeTestAab(root, releaseBundlePath, {
+      legacyPublisherMarker: FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS[0],
+    });
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /packaged DEX contains forbidden legacy shortcut-publishing marker/,
+    );
 
     writeTestAab(root, releaseBundlePath, { includeForbiddenShareTarget: true });
     assert.throws(

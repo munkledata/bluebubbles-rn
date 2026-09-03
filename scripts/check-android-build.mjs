@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -21,6 +22,26 @@ const PACKAGED_SHORTCUTS_ENTRY = 'base/res/xml/shortcuts.xml';
 const PACKAGED_DEX_PATTERN = 'base/dex/*.dex';
 const ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android';
 const FORBIDDEN_INBOUND_SHARE_DEX_MARKERS = ['ExpoShareIntent', 'expo/modules/shareintent'];
+
+// These exact product-owned runtime values bind an AAB to the pinned-shortcut retirement added in
+// 9d97eab. Generic ShortcutManager method names are deliberately excluded because AndroidX itself
+// contributes them to DEX even when Gator's cleanup implementation is stale or absent.
+export const REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS = [
+  'GatorShareShortcuts',
+  'clearShareShortcuts',
+  'com.bluegreengatorapps.messages.category.RETIRED_SHORTCUT',
+  'gator.retired',
+  'gator-retired-shortcut',
+  'This shortcut is no longer available',
+  'Direct Share cleanup could not replace ',
+];
+
+export const FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS = [
+  'com.bluegreengatorapps.messages.category.SHARE_TARGET',
+  'setShareShortcuts',
+  'getLaunchShortcutId',
+  'share shortcuts were not published (device cap or disabled shortcuts)',
+];
 
 export const FORBIDDEN_PERMISSIONS = [
   'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
@@ -324,6 +345,16 @@ export function validatePackagedAndroidBundle({ manifestProto, shortcutsProto, d
   }
 
   if (dexBytes) {
+    for (const marker of REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS) {
+      if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX is missing required pinned-shortcut cleanup marker: ${marker}`);
+      }
+    }
+    for (const marker of FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS) {
+      if (dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX contains forbidden legacy shortcut-publishing marker: ${marker}`);
+      }
+    }
     for (const marker of FORBIDDEN_INBOUND_SHARE_DEX_MARKERS) {
       if (dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX contains disabled inbound-share native marker: ${marker}`);
