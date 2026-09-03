@@ -276,7 +276,18 @@ function installStatefulTray(initial: Record<string, any>[] = []): {
     if (typeof notification.id === 'string') tray.set(notification.id, notification);
   });
   mockCancel.mockImplementation(async (id: string) => {
+    const cancelled = tray.get(id);
     tray.delete(id);
+    // Match Android NotificationManager: cancelling a group summary also cancels every child in
+    // that group. This caught a device-only data-loss bug that a one-key Map delete hid.
+    if (cancelled?.android?.groupSummary === true) {
+      const groupId = cancelled.android.groupId;
+      for (const [childId, child] of tray) {
+        if (groupId && child.android?.groupId === groupId && child.android.groupSummary !== true) {
+          tray.delete(childId);
+        }
+      }
+    }
   });
   mockCancelAll.mockImplementation(async () => {
     tray.clear();
@@ -450,7 +461,7 @@ describe('postNotification — detailed message', () => {
         expect.objectContaining({
           id: 'gator-message-summary',
           title: 'Gator',
-          body: 'New messages from multiple conversations',
+          body: 'New messages',
           data: {
             gatorOwner: 'gator',
             gatorSchema: '2',
@@ -490,7 +501,10 @@ describe('postNotification — detailed message', () => {
       const currentSecond = state.tray.get('gator-message-3');
       state.tray.delete('gator-message-3');
       await reconcileMessageNotificationGroupAfterRemoval(currentSecond);
-      expect(state.tray.has('gator-message-summary')).toBe(false);
+      // Android summary cancellation cascades to every grouped child. Keep the silent scaffold
+      // through the 2 -> 1 tail rather than losing the surviving conversation notification.
+      expect(state.tray.has('gator-message-summary')).toBe(true);
+      expect(state.tray.has('gator-message-1')).toBe(true);
 
       await postNotification(
         messageIntent({
@@ -504,8 +518,12 @@ describe('postNotification — detailed message', () => {
       expect(state.tray.has('gator-message-summary')).toBe(true);
       await cancelForChat('chat-3');
       expect(state.tray.has('gator-message-3')).toBe(false);
-      expect(state.tray.has('gator-message-summary')).toBe(false);
+      expect(state.tray.has('gator-message-summary')).toBe(true);
       expect(state.tray.has('gator-message-1')).toBe(true);
+
+      await cancelForChat('chat-1');
+      expect(state.tray.has('gator-message-1')).toBe(false);
+      expect(state.tray.has('gator-message-summary')).toBe(false);
     } finally {
       state.restore();
     }
@@ -587,6 +605,158 @@ describe('postNotification — detailed message', () => {
     }
   });
 
+  it('does not cancel a summary while an unrecognized native group member remains', async () => {
+    const state = installStatefulTray();
+    try {
+      await postNotification(messageIntent());
+      await postNotification(
+        messageIntent({
+          chatGuid: 'chat-3',
+          chatTitle: 'Bob',
+          senderName: 'Bob',
+          messageGuid: 'msg-other',
+          body: 'another chat',
+        }),
+      );
+      const first = state.tray.get('gator-message-1');
+      const removed = state.tray.get('gator-message-3');
+      state.tray.delete('gator-message-3');
+      state.tray.set('gator-message-1', {
+        ...first,
+        data: { ...first?.data, gatorOwner: 'unrecognized-owner' },
+      });
+      const summary = state.tray.get('gator-message-summary');
+      state.tray.set('gator-message-summary', {
+        ...summary,
+        subtitle: 'PRIVATE_SUBTITLE',
+        data: { ...summary?.data, privatePreview: 'PRIVATE_DATA' },
+        android: {
+          ...summary?.android,
+          ticker: 'PRIVATE_TICKER',
+          style: { type: 1, text: 'PRIVATE_STYLE' },
+        },
+      });
+      mockCancel.mockClear();
+
+      await reconcileMessageNotificationGroupAfterRemoval(removed);
+
+      expect(state.tray.has('gator-message-1')).toBe(true);
+      expect(state.tray.has('gator-message-summary')).toBe(true);
+      expect(JSON.stringify(state.tray.get('gator-message-summary'))).not.toContain('PRIVATE_');
+      expect(mockCancel).not.toHaveBeenCalledWith('gator-message-summary');
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('repairs a stale private summary in place while one grouped child remains', async () => {
+    const state = installStatefulTray();
+    try {
+      await postNotification(messageIntent());
+      await postNotification(
+        messageIntent({
+          chatGuid: 'chat-3',
+          chatTitle: 'Bob',
+          senderName: 'Bob',
+          messageGuid: 'msg-other',
+          body: 'another chat',
+        }),
+      );
+      const survivingChild = state.tray.get('gator-message-1');
+      const summary = state.tray.get('gator-message-summary');
+      state.tray.delete('gator-message-3');
+      state.tray.set('gator-message-summary', {
+        ...summary,
+        body: 'New messages from multiple conversations',
+        subtitle: 'PRIVATE_SUBTITLE',
+        data: { ...summary?.data, privatePreview: 'PRIVATE_DATA' },
+        android: {
+          ...summary?.android,
+          ticker: 'PRIVATE_TICKER',
+          style: { type: 1, text: 'PRIVATE_STYLE' },
+        },
+      });
+      mockDisplay.mockClear();
+      mockCancel.mockClear();
+
+      await prepareNotificationPresentationState();
+
+      expect(state.tray.get('gator-message-1')).toBe(survivingChild);
+      expect(state.tray.has('gator-message-3')).toBe(false);
+      const repairedSummary = state.tray.get('gator-message-summary');
+      expect(repairedSummary).toEqual(
+        expect.objectContaining({
+          id: 'gator-message-summary',
+          title: 'Gator',
+          body: 'New messages',
+          data: {
+            gatorOwner: 'gator',
+            gatorSchema: '2',
+            gatorKind: 'message-summary',
+          },
+        }),
+      );
+      expect(JSON.stringify(repairedSummary)).not.toContain('PRIVATE_');
+      expect(mockDisplay).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'gator-message-summary', body: 'New messages' }),
+      );
+      expect(mockCancel).not.toHaveBeenCalledWith('gator-message-summary');
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('contains a malformed MessagingStyle member and leaves delivery reusable', async () => {
+    const state = installStatefulTray();
+    try {
+      await postNotification(messageIntent());
+      await postNotification(
+        messageIntent({
+          chatGuid: 'chat-3',
+          chatTitle: 'Bob',
+          senderName: 'Bob',
+          messageGuid: 'msg-other',
+          body: 'another chat',
+        }),
+      );
+      const malformed = state.tray.get('gator-message-1');
+      state.tray.set('gator-message-1', {
+        ...malformed,
+        android: {
+          ...malformed?.android,
+          style: { type: 3 },
+        },
+      });
+      state.tray.delete('gator-message-3');
+      const summary = state.tray.get('gator-message-summary');
+      state.tray.set('gator-message-summary', {
+        ...summary,
+        subtitle: 'PRIVATE_SUBTITLE',
+        data: { ...summary?.data, privatePreview: 'PRIVATE_DATA' },
+        android: { ...summary?.android, ticker: 'PRIVATE_TICKER' },
+      });
+
+      await expect(
+        postNotification(
+          messageIntent({
+            chatGuid: 'chat-3',
+            chatTitle: 'Bob',
+            senderName: 'Bob',
+            messageGuid: 'msg-retry',
+            body: 'retry line',
+          }),
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(state.tray.has('gator-message-1')).toBe(true);
+      expect(state.tray.has('gator-message-3')).toBe(true);
+      expect(JSON.stringify(state.tray.get('gator-message-summary'))).not.toContain('PRIVATE_');
+      await expect(reconcileMessageNotificationGroup()).resolves.toBeUndefined();
+    } finally {
+      state.restore();
+    }
+  });
+
   it('does not resurrect a child swiped after the message-history snapshot was captured', async () => {
     const stale = displayedMessageChild(3, 199);
     const state = installStatefulTray([stale]);
@@ -608,7 +778,7 @@ describe('postNotification — detailed message', () => {
     }
   });
 
-  it('leaves a locked group untouched and repairs it immediately after warm unlock', async () => {
+  it('leaves a locked group untouched and retains its safe scaffold after warm unlock', async () => {
     const state = installStatefulTray();
     try {
       await postNotification(messageIntent());
@@ -638,7 +808,8 @@ describe('postNotification — detailed message', () => {
 
       useLockStore.setState({ locked: false });
       await reconcileMessageNotificationGroup();
-      expect(state.tray.has('gator-message-summary')).toBe(false);
+      expect(state.tray.has('gator-message-summary')).toBe(true);
+      expect(state.tray.has('gator-message-1')).toBe(true);
     } finally {
       state.restore();
     }
@@ -662,9 +833,22 @@ describe('postNotification — detailed message', () => {
   });
 
   it('preserves existing history and leaves the queue reusable when tray enumeration fails', async () => {
-    const existing = displayedMessageChild(1, 101);
-    const state = installStatefulTray([existing]);
+    const state = installStatefulTray();
     try {
+      await postNotification(messageIntent());
+      await postNotification(
+        messageIntent({
+          chatGuid: 'chat-3',
+          chatTitle: 'Bob',
+          senderName: 'Bob',
+          messageGuid: 'msg-other',
+          body: 'another chat',
+        }),
+      );
+      const existing = state.tray.get('gator-message-1');
+      const other = state.tray.get('gator-message-3');
+      expect(state.tray.has('gator-message-summary')).toBe(true);
+      mockCancel.mockClear();
       mockGetDisplayed.mockRejectedValueOnce(new Error('tray unavailable'));
 
       await expect(
@@ -678,7 +862,9 @@ describe('postNotification — detailed message', () => {
       ).rejects.toThrow('tray unavailable');
 
       expect(state.tray.get('gator-message-1')).toBe(existing);
-      expect(mockCancel).toHaveBeenCalledWith('gator-message-summary');
+      expect(state.tray.get('gator-message-3')).toBe(other);
+      expect(state.tray.has('gator-message-summary')).toBe(true);
+      expect(mockCancel).not.toHaveBeenCalledWith('gator-message-summary');
 
       // The queue recovers and a retry merges rather than overwrites the retained line.
       await expect(
@@ -693,9 +879,37 @@ describe('postNotification — detailed message', () => {
       const repaired = state.tray.get('gator-message-1');
       expect(repaired?.android?.groupId).toBe('gator-message-group');
       expect(repaired?.android?.style.messages.map((line: { text: string }) => line.text)).toEqual([
-        'Message 101',
+        'secret plans',
         'new line',
       ]);
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('preserves an existing group when maintenance enumeration fails', async () => {
+    const state = installStatefulTray();
+    try {
+      await postNotification(messageIntent());
+      await postNotification(
+        messageIntent({
+          chatGuid: 'chat-3',
+          chatTitle: 'Bob',
+          senderName: 'Bob',
+          messageGuid: 'msg-other',
+          body: 'another chat',
+        }),
+      );
+      const before = [...state.tray];
+      mockCancel.mockClear();
+      mockGetDisplayed.mockRejectedValueOnce(new Error('tray unavailable'));
+
+      await expect(reconcileMessageNotificationGroup()).resolves.toBeUndefined();
+
+      expect([...state.tray]).toEqual(before);
+      expect(mockCancel).not.toHaveBeenCalled();
+      await expect(reconcileMessageNotificationGroup()).resolves.toBeUndefined();
+      expect([...state.tray]).toEqual(before);
     } finally {
       state.restore();
     }

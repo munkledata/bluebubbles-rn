@@ -93,15 +93,21 @@ Implement these as three independent slices:
    bounded, user-initiated location attachment. It needs truthful denial/cancellation/error states
    and must not introduce background location collection.
 2. `FEAT-05B` groups only current, owned, ordinary Android message children under one fixed group.
-   Two or more distinct chats produce one fixed, generic summary that alerts through its children
-   only and opens the inbox without storing a chat/message identifier or opening the encrypted DB.
+   Two distinct valid chats first create one fixed, generic, non-alerting summary with the
+   count-neutral body `New messages`; it alerts through its children only and opens the inbox without
+   storing a chat/message identifier or opening the encrypted DB. Once created, retain the summary
+   through a one-child tail and cancel it only when successful native enumeration proves the fixed
+   group contains no raw child, because Android cascades summary cancellation to every grouped
+   child. Any raw same-group child, including one rejected by strict ownership/schema parsing,
+   therefore blocks cancellation; repair an existing stale or malformed fixed summary in place.
    Exclude locked/status, reminder, FaceTime, failed-send, RCS, test, alias, foreign, duplicate, and
-   malformed notices. Reconcile through the existing native-operation queue after posting,
-   withdrawal, read/cancel, native child removal, startup inspection, and warm unlock. Never rewrite
-   a detailed child from a cached native snapshot; pre-feature children adopt grouping only when a
-   fresh message naturally replaces their stable id. While App Lock is effective or its persisted
-   state is unknown, inspect/rebuild nothing and repair after unlock. Enumeration failure preserves
-   existing message history and leaves durable delivery able to retry.
+   malformed notices from valid-child counting. Reconcile through the existing native-operation
+   queue after posting, withdrawal, read/cancel, native child removal, startup inspection, and warm
+   unlock. Never rewrite a detailed child from a cached native snapshot; pre-feature children adopt
+   grouping only when a fresh message naturally replaces their stable id. While App Lock is
+   effective or its persisted state is unknown, inspect/rebuild nothing and repair after unlock.
+   Enumeration failure performs no group mutation: preserve children and summary and leave durable
+   delivery able to retry.
 3. `FEAT-05C` adds server-assisted search only behind an explicit capability, merges it with local
    results under one bounded identity/order contract, and labels the searched scope truthfully.
 

@@ -177,7 +177,13 @@ function parseDisplayedMessageHistory(
     return null;
   }
   const style = source.android?.style;
-  if (style?.type !== AndroidStyle.MESSAGING || style.messages.length < 1) return null;
+  if (
+    style?.type !== AndroidStyle.MESSAGING ||
+    !Array.isArray(style.messages) ||
+    style.messages.length < 1
+  ) {
+    return null;
+  }
 
   // Notifications written just before this upgrade contain one safe local messageId but no
   // parallel history list. Adopt that exact one-line shape; any multi-line unowned shape fails.
@@ -269,7 +275,10 @@ function fixedMessageGroupSummary(): Notification {
   return {
     id: MESSAGE_GROUP_SUMMARY_ID,
     title: 'Gator',
-    body: 'New messages from multiple conversations',
+    // Android removes every grouped child when its summary is cancelled. Once a 2+ chat group has
+    // formed, the summary therefore remains as a silent scaffold until the final child is gone.
+    // Keep the copy truthful during that temporary one-child tail as well as at 2+ children.
+    body: 'New messages',
     // Android persists this outside SQLCipher. Keep it route-free and entirely app-authored.
     data: nativeStatusData('message-summary'),
     android: {
@@ -340,7 +349,7 @@ function hasCurrentMessageGroupSummary(
     dataKeys[1] === 'gatorOwner' &&
     dataKeys[2] === 'gatorSchema' &&
     summary.title === 'Gator' &&
-    summary.body === 'New messages from multiple conversations' &&
+    summary.body === 'New messages' &&
     summary.subtitle == null &&
     summary.android?.channelId === CHANNEL_NEW_MESSAGE &&
     summary.android.groupId === MESSAGE_GROUP_ID &&
@@ -353,6 +362,25 @@ function hasCurrentMessageGroupSummary(
     summary.android.style == null &&
     summary.android.largeIcon == null &&
     summary.android.ticker == null
+  );
+}
+
+function hasDisplayedMessageGroupSummary(
+  displayed: readonly DisplayedNotificationSnapshot[],
+): boolean {
+  return displayed.some(
+    (item) => notificationId(item.notification, item.id) === MESSAGE_GROUP_SUMMARY_ID,
+  );
+}
+
+/** Any raw child in our native group makes summary cancellation destructive, even if untrusted. */
+function hasDisplayedMessageGroupMember(
+  displayed: readonly DisplayedNotificationSnapshot[],
+): boolean {
+  return displayed.some(
+    (item) =>
+      item.notification.android?.groupId === MESSAGE_GROUP_ID &&
+      item.notification.android.groupSummary !== true,
   );
 }
 
@@ -405,10 +433,26 @@ async function reconcileMessageGroupFromDisplayedNow(
   });
 
   if (!deliveryIsCurrent(context)) return;
-  if (children.length < 2) {
-    await cancelMessageGroupSummaryBestEffort(context);
-    return;
+  // Android's NotificationManager deliberately cancels all group children when their summary is
+  // cancelled. Do that only after the group is empty. A summary first appears at two children, but
+  // remains as a silent scaffold through a 2 -> 1 transition so the surviving child is not lost.
+  // Rebuilding that survivor from this native snapshot would race a user swipe and could resurrect
+  // a notification, so the episode-lifetime scaffold is the safe option at the JS bridge boundary.
+  const hasSummary = hasDisplayedMessageGroupSummary(displayed);
+  if (children.length === 0) {
+    // Strict parsing can reject a malformed or duplicate child that Android still considers a
+    // member of this group. Never let that turn into destructive cleanup of the rejected record;
+    // if a summary already exists, fall through so private or stale fields are repaired in place.
+    if (!hasDisplayedMessageGroupMember(displayed)) {
+      await cancelMessageGroupSummaryBestEffort(context);
+      return;
+    }
+    if (!hasSummary) return;
   }
+  // A first-ever single child does not need a summary. If this is the tail of an existing group,
+  // however, repair the summary in place: cancelling it would delete the child, while retaining a
+  // stale or malformed summary could persist private native fields indefinitely.
+  if (children.length === 1 && !hasSummary) return;
   if (hasCurrentMessageGroupSummary(displayed)) return;
 
   try {
@@ -447,8 +491,9 @@ async function reconcileMessageGroupNow(
       logger.warn('[notif] message-group enumeration failed', {
         errorName: nativeFailureName(error),
       });
-      await cancelMessageGroupSummaryBestEffort(context);
     }
+    // Unknown is not empty. Cancelling a group summary makes Android cancel every child in that
+    // group, so an enumeration failure must preserve the entire native group for the next retry.
     return;
   }
   if (!deliveryIsCurrent(context)) return;
@@ -1489,8 +1534,8 @@ async function postNotificationNow(
     displayed = await notifee.getDisplayedNotifications();
   } catch (error) {
     // Preserve NOTIF-03's existing multi-line child rather than overwriting unknown history with one
-    // line. Retire the now-unverifiable summary, then let the durable delivery owner retry the post.
-    await cancelMessageGroupSummaryBestEffort(context);
+    // line. The summary must remain too: Android cascades summary cancellation to every child, and
+    // enumeration failure gives us no proof that the group is empty. Let the durable owner retry.
     throw error;
   }
   if (!deliveryIsCurrent(context)) return;
