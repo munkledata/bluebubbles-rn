@@ -215,4 +215,39 @@ describe('custom-folder backup v3', () => {
       },
     ]);
   });
+
+  it('omits identity evidence with more than 512 participants', async () => {
+    const source = await createTestDb();
+    const participants = Array.from({ length: 513 }, (_, index) => ({
+      address: `participant-${index}@example.test`,
+      service: 'iMessage',
+    }));
+    const handles = await upsertHandles(source.db, participants);
+    await upsertChats(
+      source.db,
+      [
+        Chat.parse({
+          guid: 'too-many-participants',
+          chatIdentifier: null,
+          displayName: null,
+          style: 45,
+          participants,
+        }),
+      ],
+      handles,
+    );
+    const folder = await createCustomFolder(source.db, 'Participant bound');
+    await replaceCustomFolderMembership(source.db, folder.id, ['too-many-participants']);
+
+    const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 1 });
+    expect(backup.customFolderChatIdentities).toEqual([]);
+    expect(backup.customFolders).toEqual([
+      {
+        name: 'Participant bound',
+        showUnreadBadge: 1,
+        sourceMemberCount: 1,
+        memberIndexes: [],
+      },
+    ]);
+  });
 });

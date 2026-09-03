@@ -101,6 +101,12 @@ export interface CustomFolderBackupData {
   customFolders: CustomFolderBackupRow[];
 }
 
+export interface BackupV3ExportData extends CustomFolderBackupData {
+  kv: KvPair[];
+  themes: ThemeRow[];
+  chatCustomizations: PortableChatCustomizationRow[];
+}
+
 /** SQL fragments are composed into the single restore statement below. */
 const BACKUP_PHONE_COMPACT_SQL = sql`
   REPLACE(
@@ -244,7 +250,13 @@ export async function getAllThemes(db: AppDatabase): Promise<ThemeRow[]> {
 export async function getChatCustomizations(
   db: AppDatabase,
 ): Promise<PortableChatCustomizationRow[]> {
-  const rows = await db.all<ChatCustomizationExportRow>(sql`
+  return buildPortableChatCustomizations(await readChatCustomizationExportRows(db));
+}
+
+async function readChatCustomizationExportRows(
+  db: AppDatabase,
+): Promise<ChatCustomizationExportRow[]> {
+  return db.all<ChatCustomizationExportRow>(sql`
     SELECT c.id AS chatId, c.guid, c.chat_identifier AS chatIdentifier, c.style,
            c.custom_name AS customName, c.custom_color AS customColor,
            c.mute_type AS muteType, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
@@ -257,7 +269,11 @@ export async function getChatCustomizations(
         OR c.is_pinned = 1 OR c.is_archived = 1
      ORDER BY c.id, h.id
   `);
+}
 
+function buildPortableChatCustomizations(
+  rows: readonly ChatCustomizationExportRow[],
+): PortableChatCustomizationRow[] {
   const grouped = new Map<
     number,
     {
@@ -316,6 +332,23 @@ export async function getChatCustomizations(
         participants,
       ),
     };
+  });
+}
+
+interface BackupBaseExportRows {
+  kv: KvPair[];
+  themes: ThemeRow[];
+  chatCustomizations: ChatCustomizationExportRow[];
+}
+
+function readBackupBaseRowsWithinTransaction(
+  context: DbTransactionContext,
+): Promise<BackupBaseExportRows> {
+  return runInTransactionContext(context, async (db) => {
+    const kv = await getAllKv(db);
+    const themes = await getAllThemes(db);
+    const chatCustomizations = await readChatCustomizationExportRows(db);
+    return { kv, themes, chatCustomizations };
   });
 }
 
@@ -486,21 +519,9 @@ function hasBackupSchemaBoundedIdentityStrings(
   );
 }
 
-/**
- * Snapshot ordered folder metadata, complete durable membership counts, and portable identity
- * evidence behind the shared DB coordinator. Temporarily absent members are counted but omitted
- * from the identity registry because an opaque GUID is not portable across rebuilt Macs.
- */
-export async function getCustomFolderBackupData(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<CustomFolderBackupData> {
-  const rows = await withDbTransaction(
-    db,
-    (context) => readCustomFolderBackupRowsWithinTransaction(context),
-    commitGuard,
-  );
-
+function buildCustomFolderBackupData(
+  rows: readonly CustomFolderBackupExportRow[],
+): CustomFolderBackupData {
   const folderIds = new Set<number>();
   const memberCounts = new Map<number, number>();
   let associationCount = 0;
@@ -585,6 +606,45 @@ export async function getCustomFolderBackupData(
   }
 
   return { customFolderChatIdentities, customFolders };
+}
+
+/**
+ * Snapshot ordered folder metadata, complete durable membership counts, and portable identity
+ * evidence behind the shared DB coordinator. Temporarily absent members are counted but omitted
+ * from the identity registry because an opaque GUID is not portable across rebuilt Macs.
+ */
+export async function getCustomFolderBackupData(
+  db: AppDatabase,
+  commitGuard?: DbCommitGuard,
+): Promise<CustomFolderBackupData> {
+  const rows = await withDbTransaction(
+    db,
+    (context) => readCustomFolderBackupRowsWithinTransaction(context),
+    commitGuard,
+  );
+  return buildCustomFolderBackupData(rows);
+}
+
+/** Read every v3 backup domain from one committed point in time on the shared connection. */
+export async function getBackupV3ExportData(
+  db: AppDatabase,
+  commitGuard?: DbCommitGuard,
+): Promise<BackupV3ExportData> {
+  const rows = await withDbTransaction(
+    db,
+    async (context) => {
+      const base = await readBackupBaseRowsWithinTransaction(context);
+      const customFolders = await readCustomFolderBackupRowsWithinTransaction(context);
+      return { base, customFolders };
+    },
+    commitGuard,
+  );
+  return {
+    kv: rows.base.kv,
+    themes: rows.base.themes,
+    chatCustomizations: buildPortableChatCustomizations(rows.base.chatCustomizations),
+    ...buildCustomFolderBackupData(rows.customFolders),
+  };
 }
 
 export async function restoreKv(

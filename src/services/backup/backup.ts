@@ -1,8 +1,8 @@
 import {
   getAllKv,
   getAllThemes,
+  getBackupV3ExportData,
   getChatCustomizations,
-  getCustomFolderBackupData,
   restorePreparedBackupWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
@@ -94,22 +94,19 @@ export async function buildBackup(
   };
 }
 
-/**
- * Build the complete encrypted-export payload. Folder snapshotting is deliberately sequential
- * after the existing reads: it owns a short coordinated transaction on the app's one connection,
- * so launching raw reads beside it could let them join that transaction accidentally.
- */
+/** Build the complete encrypted-export payload from one coordinated database snapshot. */
 export async function buildBackupWithCustomFolders(
   db: AppDatabase,
   opts: { exportedAt: number; appVersion?: string },
   ownershipGuard?: DbCommitGuard,
 ): Promise<BackupV3> {
-  const base = await buildBackup(db, opts);
-  const folders = await getCustomFolderBackupData(db, ownershipGuard);
+  const snapshot = await getBackupV3ExportData(db, ownershipGuard);
   return BackupV3Schema.parse({
-    ...base,
     version: 3,
-    ...folders,
+    exportedAt: opts.exportedAt,
+    appVersion: opts.appVersion,
+    ...snapshot,
+    kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
   });
 }
 

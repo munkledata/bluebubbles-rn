@@ -168,34 +168,45 @@ describe('backup account ownership / picked-file cleanup', () => {
     const readStarted = deferred<void>();
     const releaseReads = deferred<void>();
     const runAll = realDb.all.bind(realDb) as unknown as (query: unknown) => Promise<unknown[]>;
-    const delayedDb = {
-      all: jest.fn(async (query: unknown) => {
-        readStarted.resolve();
-        await releaseReads.promise;
-        return runAll(query);
-      }),
-    } as unknown as AppDatabase;
+    const delayedAll = jest.fn(async (query: unknown) => {
+      readStarted.resolve();
+      await releaseReads.promise;
+      return runAll(query);
+    });
+    const delayedDb = new Proxy(realDb, {
+      get(target, property) {
+        if (property === 'all') return delayedAll;
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as AppDatabase;
     mockGetDatabase.mockReturnValue(delayedDb);
     const oldScreenLease = captureRealtimeDeliveryLease();
 
     const pending = exportEncryptedBackup('old account passphrase', 3_000, oldScreenLease);
-    await readStarted.promise;
+    try {
+      await readStarted.promise;
 
-    let drained = false;
-    const drain = pauseRealtimeDeliveries().then(() => {
-      drained = true;
-    });
-    await Promise.resolve();
-    expect(drained).toBe(false); // the short account DB read is visible to teardown
+      let drained = false;
+      const drain = pauseRealtimeDeliveries().then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false); // the short account DB read is visible to teardown
 
-    releaseReads.resolve();
-    await drain;
-    resumeRealtimeDeliveries();
+      releaseReads.resolve();
+      await drain;
+      resumeRealtimeDeliveries();
 
-    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
-    expect(mockGetSecretBox).not.toHaveBeenCalled();
-    expect(mockShare).not.toHaveBeenCalled();
-    expect(MockFile.instances).toHaveLength(0);
+      await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
+      expect(mockGetSecretBox).not.toHaveBeenCalled();
+      expect(mockShare).not.toHaveBeenCalled();
+      expect(MockFile.instances).toHaveLength(0);
+    } finally {
+      releaseReads.resolve();
+      resumeRealtimeDeliveries();
+      await pending.catch(() => undefined);
+    }
   });
 
   it('deletes a late picker cache copy without holding the Disconnect drain', async () => {

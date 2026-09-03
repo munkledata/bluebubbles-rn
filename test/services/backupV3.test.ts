@@ -18,6 +18,7 @@ import {
   restoreBackup,
   sealBackup,
 } from '@/services/backup/backup';
+import { withDbTransaction } from '@db/transaction';
 import {
   BACKUP_LIMITS,
   BackupSchema,
@@ -94,6 +95,124 @@ async function readFolderState(t: TestDb) {
 }
 
 describe('backup v3 custom folders', () => {
+  it('queues the complete export behind a rolling-back neighbour', async () => {
+    const source = await createTestDb();
+    await kvSet(source.db, 'theme.preset', 'committed-theme');
+    source.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
+      .run('Committed theme', 'dark', '{"generation":"committed"}');
+    await seedChat(source, 'snapshot-chat', { chatIdentifier: 'snapshot-stable' });
+    await setChatCustomization(source.db, 'snapshot-chat', { customName: 'Committed chat' });
+    await createCustomFolder(source.db, 'Committed folder');
+
+    let markNeighbourStarted!: () => void;
+    let releaseNeighbour!: () => void;
+    const neighbourStarted = new Promise<void>((resolve) => {
+      markNeighbourStarted = resolve;
+    });
+    const neighbourRelease = new Promise<void>((resolve) => {
+      releaseNeighbour = resolve;
+    });
+    const neighbour = withDbTransaction(source.db, async () => {
+      source.raw.prepare("UPDATE kv SET value = 'phantom-theme' WHERE key = 'theme.preset'").run();
+      source.raw
+        .prepare(
+          'UPDATE themes SET tokens = \'{"generation":"phantom"}\' WHERE name = \'Committed theme\'',
+        )
+        .run();
+      source.raw
+        .prepare("UPDATE chats SET custom_name = 'Phantom chat' WHERE guid = 'snapshot-chat'")
+        .run();
+      source.raw
+        .prepare(
+          "UPDATE custom_folders SET name = 'Phantom folder', show_unread_badge = 0 WHERE name = 'Committed folder'",
+        )
+        .run();
+      markNeighbourStarted();
+      await neighbourRelease;
+      throw new Error('neighbour rollback');
+    });
+    await neighbourStarted;
+
+    const exporting = buildBackupWithCustomFolders(source.db, { exportedAt: 42 });
+    expect(source.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toEqual({
+      value: 'phantom-theme',
+    });
+
+    releaseNeighbour();
+    await expect(neighbour).rejects.toThrow('neighbour rollback');
+    const backup = await exporting;
+    expect(backup.kv).toContainEqual({ key: 'theme.preset', value: 'committed-theme' });
+    expect(backup.kv).not.toContainEqual({ key: 'theme.preset', value: 'phantom-theme' });
+    expect(backup.themes).toContainEqual(
+      expect.objectContaining({ name: 'Committed theme', tokens: '{"generation":"committed"}' }),
+    );
+    expect(backup.chatCustomizations).toContainEqual(
+      expect.objectContaining({ customName: 'Committed chat' }),
+    );
+    expect(backup.customFolders).toEqual([
+      expect.objectContaining({ name: 'Committed folder', showUnreadBadge: 1 }),
+    ]);
+  });
+
+  it('reads base data and folders from the same committed generation', async () => {
+    const source = await createTestDb();
+    await kvSet(source.db, 'theme.preset', 'generation-old');
+    await createCustomFolder(source.db, 'Folder old');
+
+    let markFirstReadStarted!: () => void;
+    let releaseFirstRead!: () => void;
+    const firstReadStarted = new Promise<void>((resolve) => {
+      markFirstReadStarted = resolve;
+    });
+    const firstReadRelease = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    let interceptedFirstRead = false;
+    const interceptedDb = new Proxy(source.db, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target);
+        if (property === 'all' && typeof value === 'function') {
+          return async (...args: unknown[]) => {
+            if (!interceptedFirstRead) {
+              interceptedFirstRead = true;
+              markFirstReadStarted();
+              await firstReadRelease;
+            }
+            return (value as (...values: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as typeof source.db;
+
+    const exporting = buildBackupWithCustomFolders(interceptedDb, { exportedAt: 43 });
+    await firstReadStarted;
+    const writer = withDbTransaction(source.db, async () => {
+      source.raw.prepare("UPDATE kv SET value = 'generation-new' WHERE key = 'theme.preset'").run();
+      source.raw
+        .prepare(
+          "UPDATE custom_folders SET name = 'Folder new', show_unread_badge = 0 WHERE name = 'Folder old'",
+        )
+        .run();
+    });
+    releaseFirstRead();
+
+    const backup = await exporting;
+    await writer;
+    expect(backup.kv).toContainEqual({ key: 'theme.preset', value: 'generation-old' });
+    expect(backup.customFolders).toEqual([
+      expect.objectContaining({ name: 'Folder old', showUnreadBadge: 1 }),
+    ]);
+    expect(source.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toEqual({
+      value: 'generation-new',
+    });
+    expect(source.raw.prepare('SELECT name, show_unread_badge FROM custom_folders').get()).toEqual({
+      name: 'Folder new',
+      show_unread_badge: 0,
+    });
+  });
+
   it('exports one encrypted portable registry and restores it into a fresh database', async () => {
     const source = await createTestDb();
     await seedChat(source, 'source-guid-a', {
