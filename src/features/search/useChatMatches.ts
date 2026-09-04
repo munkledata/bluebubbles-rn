@@ -4,10 +4,17 @@ import { searchChatGuidsByMessage, type InboxRow } from '@db/repositories';
 import { useChats } from '@features/conversations/useChats';
 import { type ReactiveState } from '@db/useReactiveQuery';
 import { resolveTitle } from '@utils';
+import {
+  captureRealtimeDeliveryLease,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
+import { isGlobalSearchQueryValid, normalizeGlobalSearchQuery } from './query';
 
 const NO_MESSAGE_MATCHES = new Set<string>();
 
 interface MessageMatchResult {
+  generation: number;
   term: string;
   guids: Set<string>;
 }
@@ -28,40 +35,74 @@ interface MessageMatchResult {
  */
 export function useChatMatches(
   query: string,
-  opts?: { contentMatches?: boolean },
+  opts?: { contentMatches?: boolean; accountLease?: RealtimeDeliveryLease },
 ): ReactiveState<InboxRow[]> {
   const contentMatches = opts?.contentMatches ?? true;
-  const state = useChats();
-  const term = query.trim();
+  const [fallbackLease] = useState(() => opts?.accountLease ?? captureRealtimeDeliveryLease());
+  const accountLease = opts?.accountLease ?? fallbackLease;
+  const [retiredGeneration, setRetiredGeneration] = useState<number | null>(() =>
+    accountLease.isCurrent() ? null : accountLease.generation,
+  );
+  const accountCurrent = retiredGeneration !== accountLease.generation && accountLease.isCurrent();
+  const state = useChats(false, {
+    enabled: accountCurrent,
+    ownerGeneration: accountLease.generation,
+  });
+  const term = normalizeGlobalSearchQuery(query);
+  const validQuery = isGlobalSearchQueryValid(term);
   const [messageMatchResult, setMessageMatchResult] = useState<MessageMatchResult | null>(null);
 
+  useEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+        setRetiredGeneration(accountLease.generation);
+      }),
+    [accountLease],
+  );
+
   useEffect(() => {
-    if (!contentMatches || term.length < 2) return;
+    if (!accountCurrent || !contentMatches || !validQuery) return;
     let cancelled = false;
     const t = setTimeout(() => {
       searchChatGuidsByMessage(getDatabase(), term)
         .then((guids) => {
-          if (!cancelled) setMessageMatchResult({ term, guids: new Set(guids) });
+          if (!cancelled && accountLease.isCurrent()) {
+            setMessageMatchResult({
+              generation: accountLease.generation,
+              term,
+              guids: new Set(guids),
+            });
+          }
         })
         .catch(() => {
-          if (!cancelled) setMessageMatchResult({ term, guids: new Set() });
+          if (!cancelled && accountLease.isCurrent()) {
+            setMessageMatchResult({
+              generation: accountLease.generation,
+              term,
+              guids: new Set(),
+            });
+          }
         });
     }, 200);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [term, contentMatches]);
+  }, [accountCurrent, accountLease, contentMatches, term, validQuery]);
 
   // A result only applies to the exact term that produced it. Short/disabled/new queries derive
   // an empty set immediately, instead of synchronously clearing state in an effect after render.
   const msgMatchGuids =
-    contentMatches && term.length >= 2 && messageMatchResult?.term === term
+    accountCurrent &&
+    contentMatches &&
+    validQuery &&
+    messageMatchResult?.generation === accountLease.generation &&
+    messageMatchResult.term === term
       ? messageMatchResult.guids
       : NO_MESSAGE_MATCHES;
 
   const data = useMemo(() => {
-    const all = state.data ?? [];
+    const all = accountCurrent ? (state.data ?? []) : [];
     const normalizedTerm = term.toLowerCase();
     if (!normalizedTerm) return all;
     return all.filter(
@@ -69,7 +110,7 @@ export function useChatMatches(
         `${resolveTitle(r)} ${r.participantNames ?? ''}`.toLowerCase().includes(normalizedTerm) ||
         msgMatchGuids.has(r.guid),
     );
-  }, [state.data, term, msgMatchGuids]);
+  }, [accountCurrent, state.data, term, msgMatchGuids]);
 
-  return { ...state, data };
+  return accountCurrent ? { ...state, data } : { data: [], isLoading: false, error: null };
 }

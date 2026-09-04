@@ -211,6 +211,142 @@ export interface SearchResultRow {
   senderName: string | null;
 }
 
+export const SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS = 240;
+
+interface SearchResultQueryRow extends SearchResultRow {
+  text: string | null;
+}
+
+export const SEARCH_LITERAL_SCAN_CHUNK_CODE_UNITS = 64 * 1024;
+const SEARCH_LITERAL_MAX_QUERY_CODE_UNITS = 256;
+
+function foldAsciiLower(value: string): string {
+  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
+}
+
+function foldAsciiUpper(value: string): string {
+  return value.replace(/[a-z]/g, (character) => character.toUpperCase());
+}
+
+/** SQLite's default LIKE comparison is case-insensitive for ASCII and exact for other code units. */
+export function findSqliteLikeLiteral(
+  text: string,
+  rawQuery: string,
+): { index: number; length: number } | null {
+  if (!rawQuery || rawQuery.length > SEARCH_LITERAL_MAX_QUERY_CODE_UNITS) return null;
+  const query = rawQuery.normalize('NFC').trim();
+  // Both app and server reject a raw query above 256 UTF-16 code units before normalization. Keep
+  // that contract here too so the overlap, folded query and every temporary allocation stay fixed.
+  if (!query || query.length > SEARCH_LITERAL_MAX_QUERY_CODE_UNITS || query.length > text.length) {
+    return null;
+  }
+
+  const exactIndex = text.indexOf(query);
+  if (exactIndex >= 0) return { index: exactIndex, length: query.length };
+
+  const lowerQuery = foldAsciiLower(query);
+  if (lowerQuery !== query) {
+    const lowerIndex = text.indexOf(lowerQuery);
+    if (lowerIndex >= 0) return { index: lowerIndex, length: query.length };
+  }
+  const upperQuery = foldAsciiUpper(query);
+  if (upperQuery !== query) {
+    const upperIndex = text.indexOf(upperQuery);
+    if (upperIndex >= 0) return { index: upperIndex, length: query.length };
+  }
+  // With no ASCII letters, SQLite has no case variant to recover; the exact search was complete.
+  if (lowerQuery === upperQuery) return null;
+
+  // A body can use mixed ASCII casing that none of the three native searches above represents.
+  // Fold one fixed-size window at a time. The query-length overlap catches a literal spanning two
+  // windows, ASCII folding preserves UTF-16 length, and `chunkStart` advances by the full chunk on
+  // every iteration, giving linear work with bounded temporary memory.
+  const foldedQuery = lowerQuery;
+  const overlap = query.length - 1;
+  for (
+    let chunkStart = 0;
+    chunkStart < text.length;
+    chunkStart += SEARCH_LITERAL_SCAN_CHUNK_CODE_UNITS
+  ) {
+    const windowStart = Math.max(0, chunkStart - overlap);
+    const windowEnd = Math.min(text.length, chunkStart + SEARCH_LITERAL_SCAN_CHUNK_CODE_UNITS);
+    const foldedWindow = foldAsciiLower(text.slice(windowStart, windowEnd));
+    const localIndex = foldedWindow.indexOf(foldedQuery);
+    if (localIndex >= 0) return { index: windowStart + localIndex, length: query.length };
+  }
+  return null;
+}
+
+/**
+ * Hard-limit a search-result excerpt while keeping the server's literal substring match visible.
+ * Only a small local slice is converted to Unicode code points, so slicing cannot split an emoji
+ * surrogate pair and a near-16 MiB body never becomes a whole-message character array. If a stale
+ * body no longer contains the server query, the deterministic fallback is its leading excerpt.
+ */
+export function boundSearchResultSnippet(text: string | null, queryText: string): string | null {
+  if (text == null) return null;
+  const localRadius = SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS * 2;
+  const match = findSqliteLikeLiteral(text, queryText);
+  const matchIndex = match?.index ?? 0;
+  const matchLength = match?.length ?? 0;
+  let localStart = Math.max(0, matchIndex - localRadius);
+  let localEnd = Math.min(text.length, matchIndex + matchLength + localRadius);
+
+  // Move a UTF-16 boundary outward by one code unit when it would bisect a surrogate pair.
+  if (
+    localStart > 0 &&
+    text.charCodeAt(localStart) >= 0xdc00 &&
+    text.charCodeAt(localStart) <= 0xdfff
+  ) {
+    localStart--;
+  }
+  if (
+    localEnd < text.length &&
+    text.charCodeAt(localEnd - 1) >= 0xd800 &&
+    text.charCodeAt(localEnd - 1) <= 0xdbff
+  ) {
+    localEnd++;
+  }
+
+  const localCodePoints = Array.from(text.slice(localStart, localEnd));
+  if (
+    localStart === 0 &&
+    localEnd === text.length &&
+    localCodePoints.length <= SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS
+  ) {
+    return text;
+  }
+
+  const matchStart = Array.from(text.slice(localStart, matchIndex)).length;
+  const matchCodePointLength = Array.from(text.slice(matchIndex, matchIndex + matchLength)).length;
+
+  const contextBudget = Math.max(
+    0,
+    SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS -
+      Math.min(matchCodePointLength, SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS),
+  );
+  const idealStart = matchStart - Math.floor(contextBudget / 2);
+  const maxStart = Math.max(0, localCodePoints.length - SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS);
+  const start = Math.max(0, Math.min(idealStart, maxStart));
+  const end = start + SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS;
+  const snippet = localCodePoints.slice(start, end);
+  if (localStart > 0 || start > 0) snippet[0] = '…';
+  if (localEnd < text.length || end < localCodePoints.length) snippet[snippet.length - 1] = '…';
+  return snippet.join('');
+}
+
+function toPresentationSearchResults(
+  rows: SearchResultQueryRow[],
+  queryText: string,
+): SearchResultRow[] {
+  return rows.map((row) => ({
+    ...row,
+    // Never pass the full body to React. Navigation re-reads the authoritative full text by GUID.
+    text: null,
+    snippet: boundSearchResultSnippet(row.snippet ?? row.text, queryText),
+  }));
+}
+
 /**
  * FTS5 search enriched with chat + sender context for a results screen.
  * Excludes reaction rows; newest-first for parity with the Flutter search.
@@ -231,7 +367,7 @@ export async function searchMessagesEnriched(
   // `snippet()` needs the FTS table referenced by name (not an alias), so this query joins on
   // `messages_fts` directly. No mark args — it just centers the text on the match; the UI bolds the
   // query terms in JS (control-char marks don't reliably survive the native bridge).
-  return db.all<SearchResultRow>(sql`
+  const rows = await db.all<SearchResultQueryRow>(sql`
     SELECT m.id, m.guid, m.text, m.date_created AS dateCreated, m.is_from_me AS isFromMe,
            snippet(messages_fts, 0, '', '', '…', 12) AS snippet,
            c.guid AS chatGuid, c.display_name AS chatDisplayName, c.custom_name AS chatCustomName,
@@ -249,9 +385,49 @@ export async function searchMessagesEnriched(
       AND m.date_retracted IS NULL
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
-    ORDER BY m.date_created DESC
+    ORDER BY m.date_created DESC, m.guid ASC
     LIMIT ${limit}
   `);
+  return toPresentationSearchResults(rows, queryText);
+}
+
+/**
+ * Read a bounded set of already-adopted server hits through the same visibility rules and enriched
+ * projection as local FTS search. GUID is the local/server identity; callers merge these rows with
+ * local hits only after this read proves the message and owning chat committed successfully.
+ */
+export async function searchMessagesEnrichedByGuids(
+  db: AppDatabase,
+  guids: readonly string[],
+  queryText = '',
+): Promise<SearchResultRow[]> {
+  const boundedGuids = [...new Set(guids.filter((guid) => guid.length > 0))].slice(0, 50);
+  if (boundedGuids.length === 0) return [];
+  const guidList = sql.join(
+    boundedGuids.map((guid) => sql`${guid}`),
+    sql`, `,
+  );
+
+  const rows = await db.all<SearchResultQueryRow>(sql`
+    SELECT m.id, m.guid, m.text, m.date_created AS dateCreated, m.is_from_me AS isFromMe,
+           m.text AS snippet,
+           c.guid AS chatGuid, c.display_name AS chatDisplayName, c.custom_name AS chatCustomName,
+           c.chat_identifier AS chatIdentifier, c.style AS chatStyle,
+           (SELECT group_concat(COALESCE(h2.display_name, h2.address), ', ' ORDER BY h2.id)
+              FROM chat_handles ch JOIN handles h2 ON h2.id = ch.handle_id
+             WHERE ch.chat_id = c.id) AS chatParticipantNames,
+           COALESCE(h.display_name, h.address) AS senderName
+    FROM messages m
+    JOIN chats c ON c.id = m.chat_id
+    LEFT JOIN handles h ON h.id = m.handle_id
+    WHERE m.guid IN (${guidList})
+      AND ${notAnOverlayMessage()}
+      AND m.date_retracted IS NULL
+      AND m.date_deleted IS NULL
+      AND ${chatVisible('c')}
+    ORDER BY m.date_created DESC, m.guid ASC
+  `);
+  return toPresentationSearchResults(rows, queryText);
 }
 
 /**

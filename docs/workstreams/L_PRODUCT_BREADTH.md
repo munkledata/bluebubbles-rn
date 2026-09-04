@@ -112,8 +112,17 @@ Implement these as three independent slices:
    effective or its persisted state is unknown, inspect/rebuild nothing and repair after unlock.
    Enumeration failure performs no group mutation: preserve children and summary and leave durable
    delivery able to retry.
-3. `FEAT-05C` adds server-assisted search only behind an explicit capability, merges it with local
-   results under one bounded identity/order contract, and labels the searched scope truthfully.
+3. `FEAT-05C` adds server-assisted global-inbox search only behind an explicit capability. The
+   server returns one fixed newest-50 page of nondeleted, nonretracted, non-overlay iMessage/SMS
+   text with stable message and chat GUIDs; partial chat.db schemas fail closed. The app shows its
+   encrypted local results first, persists valid Mac hits before navigation, rereads them through
+   local visibility rules, and merges by message GUID with the local row winning and a deterministic
+   newest-first order. Network failure and older servers remain local-only. Account retirement must
+   abort pending work and immediately conceal settled results. Visible copy must distinguish local,
+   searching, combined, and unavailable states and clarify that Mac search covers iMessage/SMS while
+   locally stored RCS matches may still appear. Device sign-off must cover a Mac-only hit, duplicate
+   identity, result navigation, offline/old-server fallback, account replacement, and latency against
+   a realistically large Messages database.
 
 Each slice needs its own capability or permission boundary, error path, disablement boundary, and
 device sign-off; never bundle them into one release. Fresh camera-video capture is deliberately out

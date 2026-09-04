@@ -5350,6 +5350,32 @@ test('certifies exactly the reviewed live-rekey delegation boundary', () => {
   }
 });
 
+test('certifies exactly the reviewed server-search adoption transaction', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/services/search/serverMessageSearchOperation.ts',
+  );
+
+  assert.deepEqual(
+    findings.map((finding) => finding.id).sort(),
+    [
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>:mutator-call:7d230b526f88',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>:mutator-call:90186d35af9b',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>.<callback:23d601c0e7>:mutator-call:192bcb4b55a6',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>.<callback:23d601c0e7>:mutator-call:440356496de4',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>.<callback:23d601c0e7>:mutator-call:5efed3c36e62',
+    ].sort(),
+  );
+  assert.equal(
+    findings.find((finding) => finding.target === 'src/db/transaction.ts#withDbTransaction')
+      ?.detectedContext,
+    'transaction-coordinator',
+  );
+  assert.equal(
+    findings.filter((finding) => finding.detectedContext === 'withDbTransaction').length,
+    4,
+  );
+});
+
 test('certifies exactly the reviewed account-transition delegation boundary', () => {
   const findings = scanProjectDbWrites();
   const delegated = findings.filter(

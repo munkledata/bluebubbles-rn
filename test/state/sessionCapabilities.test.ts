@@ -34,6 +34,20 @@ describe('sessionAccessors.messageDeletedSupported', () => {
   });
 });
 
+describe('sessionAccessors.messageSearchSupported', () => {
+  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
+
+  it('is false unless the connected server explicitly advertises bounded search', () => {
+    expect(sessionAccessors.messageSearchSupported()).toBe(false);
+    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
+    expect(sessionAccessors.messageSearchSupported()).toBe(false);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_message_search: true }),
+    });
+    expect(sessionAccessors.messageSearchSupported()).toBe(true);
+  });
+});
+
 /**
  * The `supports_icloud_account` capability (iMessage-account F#8). The Settings "iMessage Account"
  * row gates on this accessor; false in every shape except a server that explicitly advertises it.

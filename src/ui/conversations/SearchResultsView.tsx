@@ -1,9 +1,15 @@
 import { FlashList } from '@shopify/flash-list';
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SearchResultRow } from '@db/repositories';
 import { useChatMatches } from '@features/search/useChatMatches';
-import { useSearch } from '@features/search/useSearch';
+import { isGlobalSearchQueryValid } from '@features/search/query';
+import { useSearch, type MessageSearchScope } from '@features/search/useSearch';
+import {
+  captureRealtimeDeliveryLease,
+  subscribeRealtimeGenerationInvalidation,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { formatChatDate, resolveTitle } from '@utils';
 import { useTheme } from '../theme';
 import { useChatNavigator } from '../useChatNavigator';
@@ -33,32 +39,70 @@ function chatTitle(r: SearchResultRow): string {
  * this is the former standalone /search page, merged in so there's ONE search experience. Tapping a
  * chat opens it; tapping a message scrolls to + highlights that message.
  */
-export function SearchResultsView({ query }: { query: string }): React.JSX.Element {
+function messageScopeLabel(scope: MessageSearchScope): string {
+  switch (scope) {
+    case 'searching-mac':
+      return 'Message search: this phone now; searching your Mac…';
+    case 'phone-and-mac':
+      return 'Message search: newest 50 matches from this phone and your Mac. Mac search covers iMessage/SMS; locally stored RCS matches may also appear.';
+    case 'mac-unavailable':
+      return 'Mac search unavailable. Showing message matches stored on this phone.';
+    default:
+      return 'Message search: matches stored on this phone.';
+  }
+}
+
+export function SearchResultsView({
+  query,
+  accountLease,
+}: {
+  query: string;
+  accountLease?: RealtimeDeliveryLease;
+}): React.JSX.Element {
   const theme = useTheme();
   const openChatNav = useChatNavigator();
-  const { results, loading } = useSearch(query);
+  const [fallbackLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
+  const lease = accountLease ?? fallbackLease;
+  const [retiredGeneration, setRetiredGeneration] = useState<number | null>(() =>
+    lease.isCurrent() ? null : lease.generation,
+  );
+  const accountCurrent = retiredGeneration !== lease.generation && lease.isCurrent();
+  const search = useSearch(query, 50, lease);
   // Chats section = NAME/people matches only; message-content matches show in the Messages section
   // below with the snippet, so the Chats list never looks irrelevant.
-  const matched = useChatMatches(query, { contentMatches: false });
-  const searching = query.trim().length >= 2;
+  const matched = useChatMatches(query, { contentMatches: false, accountLease: lease });
+  const searching = accountCurrent && isGlobalSearchQueryValid(query);
+  const results = accountCurrent ? search.results : [];
+  const loading = accountCurrent && search.loading;
+  const scope = accountCurrent ? search.scope : 'local-only';
   const chatRows = (searching ? (matched.data ?? []) : []).slice(0, MAX_CHAT_RESULTS);
+
+  useEffect(
+    () =>
+      subscribeRealtimeGenerationInvalidation(lease.generation, () => {
+        setRetiredGeneration(lease.generation);
+      }),
+    [lease],
+  );
 
   // Stable so the memoized ConversationTile doesn't re-render every list update.
   const openChat = useCallback(
     (guid: string): void => {
+      if (!lease.isCurrent()) return;
       openChatNav(`/chat/${encodeURIComponent(guid)}`);
     },
-    [openChatNav],
+    [lease, openChatNav],
   );
   // Open the chat focused on the matched message (the chat screen scrolls to + highlights it).
   const openMessage = useCallback(
     (r: SearchResultRow): void => {
+      if (!lease.isCurrent()) return;
       const date = r.dateCreated != null ? `&focusDate=${r.dateCreated}` : '';
       openChatNav(
         `/chat/${encodeURIComponent(r.chatGuid)}?focus=${encodeURIComponent(r.guid)}${date}`,
       );
     },
-    [openChatNav],
+    [lease, openChatNav],
   );
 
   const sectionLabel = (label: string): React.JSX.Element => (
@@ -90,8 +134,16 @@ export function SearchResultsView({ query }: { query: string }): React.JSX.Eleme
 
   // Matched chats (identical to the inbox) render above the message hits, as the same tiles.
   const listHeader =
-    chatRows.length > 0 || results.length > 0 ? (
+    searching || chatRows.length > 0 || results.length > 0 ? (
       <View>
+        {searching ? (
+          <Text
+            testID="message-search-scope"
+            style={[styles.scope, { color: theme.color.secondaryLabel }]}
+          >
+            {messageScopeLabel(scope)}
+          </Text>
+        ) : null}
         {chatRows.length > 0 ? sectionLabel('Chats') : null}
         {chatRows.map((c) => (
           <ConversationTile key={c.guid} row={c} onPress={openChat} />
@@ -126,9 +178,9 @@ export function SearchResultsView({ query }: { query: string }): React.JSX.Eleme
         </Pressable>
       )}
       ListEmptyComponent={
-        chatRows.length > 0 ? null : (
+        !accountCurrent || chatRows.length > 0 ? null : (
           <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
-            {query.trim().length < 2
+            {!isGlobalSearchQueryValid(query)
               ? 'Type to search your messages & chats'
               : loading
                 ? 'Searching…'
@@ -148,6 +200,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 6,
+  },
+  scope: {
+    fontSize: 13,
+    lineHeight: 18,
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   row: {
     flexDirection: 'row',

@@ -16,6 +16,12 @@ import { renderHook, act } from '../support/renderWithTheme';
 import { useChatMatches } from '@features/search/useChatMatches';
 import { useChats } from '@features/conversations/useChats';
 import { searchChatGuidsByMessage } from '@db/repositories';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+  type RealtimeDeliveryLease,
+} from '@/services/realtime/deliveryCoordinator';
 import { mkInboxRow } from './_fixtures';
 
 jest.mock('@features/conversations/useChats', () => ({ useChats: jest.fn() }));
@@ -41,12 +47,14 @@ async function advance(ms: number): Promise<void> {
 }
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   jest.useFakeTimers();
   mockUseChats.mockReturnValue({ data: ROWS, isLoading: false, error: null });
   mockGuidSearch.mockResolvedValue([]);
 });
 
 afterEach(() => {
+  resumeRealtimeDeliveries();
   jest.useRealTimers();
 });
 
@@ -128,5 +136,67 @@ describe('useChatMatches', () => {
     });
     await advance(200);
     expect(result.current.data).toEqual([]);
+  });
+
+  it('treats one astral Unicode character as one code point and does not start body search', async () => {
+    const { result } = await renderHook(() => useChatMatches('😀'));
+
+    await advance(500);
+
+    expect(mockGuidSearch).not.toHaveBeenCalled();
+    expect(result.current.data).toEqual([]);
+  });
+
+  it('hides account A chat matches immediately when its generation retires', async () => {
+    const accountLease = captureRealtimeDeliveryLease();
+    const { result } = await renderHook(() =>
+      useChatMatches('work', { contentMatches: false, accountLease }),
+    );
+    expect(result.current.data?.map((row) => row.guid)).toEqual(['c-2']);
+    expect(mockUseChats).toHaveBeenLastCalledWith(false, {
+      enabled: true,
+      ownerGeneration: accountLease.generation,
+    });
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+
+    expect(result.current.data).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(mockUseChats).toHaveBeenLastCalledWith(false, {
+      enabled: false,
+      ownerGeneration: accountLease.generation,
+    });
+  });
+
+  it('does not reuse account A body matches when account B repeats the same query in-place', async () => {
+    const accountA = captureRealtimeDeliveryLease();
+    mockGuidSearch.mockResolvedValueOnce(['c-2']).mockResolvedValueOnce(['c-3']);
+    const { result, rerender } = await renderHook(
+      ({ lease }: { lease: RealtimeDeliveryLease }) =>
+        useChatMatches('lunch', { accountLease: lease }),
+      { initialProps: { lease: accountA } },
+    );
+    await advance(200);
+    expect(result.current.data?.map((row) => row.guid)).toEqual(['c-2']);
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+      resumeRealtimeDeliveries();
+    });
+    const accountB = captureRealtimeDeliveryLease();
+    await act(async () => {
+      rerender({ lease: accountB });
+    });
+
+    expect(result.current.data).toEqual([]);
+    expect(mockUseChats).toHaveBeenLastCalledWith(false, {
+      enabled: true,
+      ownerGeneration: accountB.generation,
+    });
+    await advance(200);
+    expect(result.current.data?.map((row) => row.guid)).toEqual(['c-3']);
   });
 });

@@ -39,6 +39,30 @@ be verified to retain the requested reply part as well. Exact arbitrary layouts 
 parts therefore remain blocked on an additive server contract plus device observation; ambiguous
 older payloads keep the compatible part-zero fallback rather than inventing an identity.
 
+## 🟡 Source-aligned (2026-09-04) — capability-gated global message search (`FEAT-05C`)
+
+The server and app now share an additive, fail-closed search contract. The authenticated
+`POST /api/v1/message/search/bounded` route accepts normalized text only, returns at most the newest
+50 live iMessage/SMS rows with mandatory chat routing and nullable handle hydration, and excludes
+reaction/sticker overlays, retracted rows, Recently Deleted rows, empty GUIDs, and unroutable rows.
+`/server/info` emits `supports_message_search` only when the live chat.db schema proves every column
+and join needed by that contract. The older `/message/search` route is unchanged for deployed clients.
+
+The app calls the new route only when that capability is explicitly true. It shows local encrypted-DB
+matches first, fetches outside the database writer lock, persists each valid first-chat result before
+navigation, rereads local deletion/visibility rules, and merges by message GUID with local data winning
+and deterministic newest-first ordering. Older servers and network failures remain local-only; account
+retirement aborts the request and immediately conceals the entire unified result surface. Before a Mac
+hit enters a bounded transaction, endpoint-impossible nested collections are removed; the UI receives
+only a match-centered 240-code-point snippet while the encrypted DB retains the full body. The inbox
+labels whether message search is local, still searching the Mac, combined, or unavailable, and
+explicitly excludes RCS from only the Mac scope because locally stored RCS matches may still appear.
+
+This closes source-level app/server parity, not release evidence. The new server route/capability and
+app consumer must still be committed, built, deployed together, and exercised on Android against a
+realistic Mac Messages database. `WORK_PLAN_2026-08-03.md` remains authoritative for that device and
+release tail.
+
 ## ✅ Closed (2026-07-01)
 
 The top gaps have since been wired app-side against capabilities the server already exposed:

@@ -6,10 +6,13 @@ import type { HttpClient } from '@core/api/http';
 import {
   DeletedMessageList,
   MessageList,
+  SERVER_MESSAGE_SEARCH_LIMIT,
+  ServerMessageSearchList,
   SendAck,
   UnsendAck,
   deletedMessages,
   queryMessages,
+  searchMessagesOnServer,
   sendText,
   unsendMessage,
 } from '@core/api/endpoints/messages';
@@ -144,6 +147,45 @@ describe('endpoint shapes: list wrappers', () => {
   it('list wrappers tolerate an absent/null key (empty list)', () => {
     expect(ChatList.safeParse({}).success).toBe(true);
     expect(MessageList.safeParse({ messages: null }).success).toBe(true);
+  });
+
+  it('global Mac search uses the additive fixed-page route and rejects an oversized response', async () => {
+    const payload = {
+      messages: [
+        {
+          guid: 'remote-message',
+          text: 'find this',
+          chats: [{ guid: 'iMessage;-;remote-chat' }],
+          handle: null,
+        },
+      ],
+    };
+    let request: { path: string; options: unknown } | undefined;
+    const http = {
+      post: async (path: string, schema: z.ZodType, options?: unknown) => {
+        request = { path, options };
+        return schema.parseAsync(payload);
+      },
+    } as unknown as HttpClient;
+
+    const messages = await searchMessagesOnServer(http, 'find this');
+    expect(messages.map((message) => message.guid)).toEqual(['remote-message']);
+    expect(request).toEqual({
+      path: '/message/search/bounded',
+      options: {
+        signal: undefined,
+        retry: false,
+        json: { text: 'find this', limit: SERVER_MESSAGE_SEARCH_LIMIT },
+      },
+    });
+    expect(
+      ServerMessageSearchList.safeParse({
+        messages: Array.from(
+          { length: SERVER_MESSAGE_SEARCH_LIMIT + 1 },
+          () => payload.messages[0],
+        ),
+      }).success,
+    ).toBe(false);
   });
 
   it('consumes both digest-locked cursor fixtures while retaining the old-server fallback', async () => {

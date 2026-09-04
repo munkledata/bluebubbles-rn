@@ -15,6 +15,12 @@ export interface MessagePage {
 // already unwrapped the { status, message, data } envelope, so `data` IS that object.
 export const MessageList = z.object({ messages: z.array(Message).nullish() });
 
+/** Global server search is deliberately one bounded, newest-first page. */
+export const SERVER_MESSAGE_SEARCH_LIMIT = 50;
+export const ServerMessageSearchList = z
+  .object({ messages: z.array(Message).max(SERVER_MESSAGE_SEARCH_LIMIT) })
+  .strict();
+
 /**
  * The Gator write ops (send/react/attachment) return a `SendResult`, NOT a Message:
  * `{ guid?: string, viaPrivateApi: boolean }`. `guid` is the REAL message GUID on the
@@ -188,6 +194,28 @@ export async function queryMessages(
     },
   });
   return res.messages ?? [];
+}
+
+/**
+ * POST /api/v1/message/search/bounded — bounded text search over the Mac's Messages database.
+ *
+ * Call only after `supports_message_search` is explicitly true. Chats are required so a result can
+ * be adopted into the encrypted local DB before navigation; handles preserve its sender identity.
+ */
+export async function searchMessagesOnServer(
+  http: HttpClient,
+  text: string,
+  signal?: AbortSignal,
+): Promise<Message[]> {
+  const res = await http.post('/message/search/bounded', ServerMessageSearchList, {
+    signal,
+    retry: false,
+    json: {
+      text,
+      limit: SERVER_MESSAGE_SEARCH_LIMIT,
+    },
+  });
+  return res.messages;
 }
 
 /**

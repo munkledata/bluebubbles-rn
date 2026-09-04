@@ -28,6 +28,8 @@ export interface UseChatsOptions {
   countUnknown?: boolean;
   /** Stop the query and native subscription immediately when the owning account is retired. */
   enabled?: boolean;
+  /** Account generation that owns the rows; a replacement generation must not reuse old rows. */
+  ownerGeneration?: number;
 }
 
 export interface ChatsState extends ReactiveState<InboxRow[]> {
@@ -60,7 +62,7 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
       : Number.isFinite(options.pageSize)
         ? Math.max(1, Math.floor(options.pageSize))
         : 50;
-  const queryKey = `${archive}|${queryFilters.read}|${queryFilters.sender}|${queryFilters.kind}|${queryFilters.mute}|${queryFilters.service}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
+  const queryKey = `${options.ownerGeneration ?? 'unscoped'}|${archive}|${queryFilters.read}|${queryFilters.sender}|${queryFilters.kind}|${queryFilters.mute}|${queryFilters.service}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
   const enabled = options.enabled !== false;
   const [pageRequest, setPageRequest] = useState(() => ({
     key: queryKey,

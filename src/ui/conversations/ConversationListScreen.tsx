@@ -24,6 +24,7 @@ import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { useChatNavigator } from '../useChatNavigator';
+import { boundGlobalSearchInput } from '@features/search/query';
 import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
@@ -432,7 +433,8 @@ export function ConversationListScreen(): React.JSX.Element {
             autoCorrect={false}
             returnKeyType="search"
             value={search}
-            onChangeText={setSearch}
+            maxLength={256}
+            onChangeText={(value) => setSearch(boundGlobalSearchInput(value))}
             style={[
               styles.searchInput,
               { color: theme.color.label, backgroundColor: theme.color.secondaryBackground },
@@ -490,7 +492,7 @@ export function ConversationListScreen(): React.JSX.Element {
         {titleRow}
         <View style={styles.list}>
           {searching ? (
-            <SearchResultsView query={search} />
+            <SearchResultsView query={search} accountLease={accountLease} />
           ) : (
             <FlashList
               ref={listRef}

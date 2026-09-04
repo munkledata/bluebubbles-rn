@@ -6,6 +6,10 @@ import {
   searchChatGuidsByMessage,
   searchMessagesInChat,
   searchMessagesEnriched,
+  searchMessagesEnrichedByGuids,
+  findSqliteLikeLiteral,
+  SEARCH_LITERAL_SCAN_CHUNK_CODE_UNITS,
+  SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -63,7 +67,8 @@ describe('searchMessagesEnriched', () => {
     const results = await searchMessagesEnriched(db, 'keynote');
     expect(results).toHaveLength(1);
     const r = results[0]!;
-    expect(r.text).toContain('keynote');
+    expect(r.text).toBeNull();
+    expect(r.snippet).toContain('keynote');
     expect(r.chatGuid).toBe('c-craig');
     expect(r.chatDisplayName).toBe('Craig Federighi');
     expect(typeof r.dateCreated).toBe('number');
@@ -80,6 +85,80 @@ describe('searchMessagesEnriched', () => {
     await seed(db);
     // "love" is the reaction type, never indexed text → no result.
     expect(await searchMessagesEnriched(db, 'love')).toEqual([]);
+  });
+
+  it('re-reads adopted server GUIDs through local visibility rules in deterministic order', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    const results = await searchMessagesEnrichedByGuids(db, ['m1', 'r1', 'm2', 'missing', 'm1']);
+    expect(results.map((result) => result.guid)).toEqual(['m2', 'm1']);
+    expect(results.every((result) => result.text === null)).toBe(true);
+    expect(results.map((result) => result.snippet)).toEqual([
+      'totally unrelated',
+      'You catch the keynote?',
+    ]);
+  });
+
+  it('returns a deterministic match-centered bounded snippet while retaining the full DB text', async () => {
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    const chatId = (await getChatIdByGuid(db, 'c-craig'))!;
+    const fullText = `${'a'.repeat(8 * 1024 * 1024)} Birthday ${'z'.repeat(8 * 1024 * 1024 - 32)}`;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'near-limit', text: fullText, dateCreated: 400 })],
+      () => chatId,
+      new Map(),
+    );
+
+    const [result] = await searchMessagesEnrichedByGuids(db, ['near-limit'], 'IRTH');
+
+    expect(result?.text).toBeNull();
+    expect(Array.from(result?.snippet ?? '')).toHaveLength(SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS);
+    expect(result?.snippet).toMatch(/^….*Birthday.*…$/);
+    expect(
+      raw.prepare("SELECT length(text) AS length FROM messages WHERE guid = 'near-limit'").get(),
+    ).toEqual({ length: fullText.length });
+  });
+
+  it('centers a two-emoji literal without splitting surrogate pairs or exceeding the bound', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    const chatId = (await getChatIdByGuid(db, 'c-craig'))!;
+    const fullText = `${'🙂'.repeat(300)}🧪✨${'🦖'.repeat(300)}`;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'emoji-query', text: fullText, dateCreated: 500 })],
+      () => chatId,
+      new Map(),
+    );
+
+    const [result] = await searchMessagesEnrichedByGuids(db, ['emoji-query'], '🧪✨');
+    const snippet = result?.snippet ?? '';
+
+    expect(Array.from(snippet)).toHaveLength(SEARCH_RESULT_SNIPPET_MAX_CODE_POINTS);
+    expect(snippet).toContain('🧪✨');
+    expect(snippet).toMatch(/^….*…$/u);
+    expect(snippet).not.toMatch(/[\uD800-\uDFFF]/u);
+  });
+
+  it('finds an adversarial long literal near the end without per-position query comparisons', () => {
+    const query = `b${'a'.repeat(127)}`;
+    const prefix = 'a'.repeat(2 * 1024 * 1024);
+
+    expect(findSqliteLikeLiteral(`${prefix}${query}`, query)).toEqual({
+      index: prefix.length,
+      length: query.length,
+    });
+  });
+
+  it('finds a mixed-case literal that crosses a bounded scan-chunk boundary', () => {
+    const query = 'cross-chunk';
+    const match = 'CrOsS-cHuNk';
+    const matchIndex = SEARCH_LITERAL_SCAN_CHUNK_CODE_UNITS - 5;
+    const text = `${'x'.repeat(matchIndex)}${match}${'y'.repeat(32)}`;
+
+    expect(findSqliteLikeLiteral(text, query)).toEqual({ index: matchIndex, length: query.length });
   });
 
   it('excludes a deleted message even though its text is still in the FTS index', async () => {

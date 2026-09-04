@@ -28,6 +28,11 @@ export const ServerInfo = z
      */
     supports_message_deleted: z.boolean().nullish(),
     /**
+     * Whether the server exposes bounded text search over its live Messages database. Additive;
+     * absent/false on older servers, so global search remains local-only until support is explicit.
+     */
+    supports_message_search: z.boolean().nullish(),
+    /**
      * Whether the server can build + send a contact card from structured fields — the
      * `send-contact` action (`POST /api/v1/message/contact`) that assembles a vCard 3.0 server-side
      * and ships it as an attachment. Additive; absent/false on older servers. The app gates the

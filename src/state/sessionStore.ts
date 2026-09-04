@@ -115,6 +115,9 @@ export const sessionAccessors = {
    */
   messageDeletedSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_message_deleted,
+  /** Whether the connected server can run the bounded message-text search endpoint. */
+  messageSearchSupported: (): boolean =>
+    !!useSessionStore.getState().serverInfo?.supports_message_search,
   /** Whether the connected server can build + send a contact card (`send-contact`). */
   sendContactSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_send_contact,
@@ -132,6 +135,10 @@ export const useRcsEnabled = (): boolean => useSessionStore((s) => !!s.serverInf
 /** React hook: can the server emit `message-deleted`? (For future deletion affordances.) */
 export const useMessageDeletedSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_message_deleted);
+
+/** React hook: can global search include bounded message-text matches from the Mac? */
+export const useMessageSearchSupported = (): boolean =>
+  useSessionStore((s) => !!s.serverInfo?.supports_message_search);
 
 /** React hook: can the server send a contact card? (Gate the composer's "Contact" affordance.) */
 export const useSendContactSupported = (): boolean =>

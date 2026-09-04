@@ -60,7 +60,10 @@ describe('edited/SMS text is searchable (derived from attributedBody)', () => {
     const results = await searchMessagesEnriched(db, 'birthday');
     expect(results).toHaveLength(1);
     expect(results[0]!.guid).toBe('m-bday');
-    expect(results[0]!.text).toContain('birthday'); // text column was populated from attributedBody
+    // Search-result objects expose only the bounded presentation snippet; finding this term proves
+    // the attributed body was decoded into the encrypted searchable text before the query ran.
+    expect(results[0]!.text).toBeNull();
+    expect(results[0]!.snippet).toContain('birthday');
   });
 });
 

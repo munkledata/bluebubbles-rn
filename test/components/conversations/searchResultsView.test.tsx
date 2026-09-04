@@ -20,8 +20,13 @@
  * `@/services` graph and is covered by its own suite). resolveTitle/formatChatDate are REAL utils.
  */
 import React from 'react';
-import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
+import { act, renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 import type { SearchResultRow, InboxRow } from '@db/repositories';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
@@ -130,9 +135,14 @@ function chatState(data: InboxRow[]): ReturnType<typeof useChatMatches> {
 
 // Default: no data. Individual tests override the two hooks.
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   mockPush.mockClear();
-  mockUseSearch.mockReturnValue({ results: [], loading: false });
+  mockUseSearch.mockReturnValue({ results: [], loading: false, scope: 'local-only' });
   mockUseChatMatches.mockReturnValue(chatState([]));
+});
+
+afterEach(() => {
+  resumeRealtimeDeliveries();
 });
 
 describe('SearchResultsView — empty / placeholder states', () => {
@@ -141,22 +151,74 @@ describe('SearchResultsView — empty / placeholder states', () => {
     expect(screen.getByText('Type to search your messages & chats')).toBeTruthy();
   });
 
+  it('treats one astral Unicode character as one code point', async () => {
+    await renderWithTheme(<SearchResultsView query="😀" />);
+
+    expect(screen.getByText('Type to search your messages & chats')).toBeTruthy();
+    expect(screen.queryByTestId('message-search-scope')).toBeNull();
+  });
+
   it('searching + loading shows "Searching…"', async () => {
-    mockUseSearch.mockReturnValue({ results: [], loading: true });
+    mockUseSearch.mockReturnValue({ results: [], loading: true, scope: 'searching-mac' });
     await renderWithTheme(<SearchResultsView query="beach" />);
     expect(screen.getByText('Searching…')).toBeTruthy();
   });
 
   it('searching + done with no hits shows "No results"', async () => {
-    mockUseSearch.mockReturnValue({ results: [], loading: false });
+    mockUseSearch.mockReturnValue({ results: [], loading: false, scope: 'local-only' });
     await renderWithTheme(<SearchResultsView query="beach" />);
     expect(screen.getByText('No results')).toBeTruthy();
+    expect(screen.getByText('Message search: matches stored on this phone.')).toBeTruthy();
+  });
+
+  it('truthfully limits Mac RCS exclusion without excluding locally stored RCS matches', async () => {
+    mockUseSearch.mockReturnValue({ results: [], loading: false, scope: 'phone-and-mac' });
+    await renderWithTheme(<SearchResultsView query="beach" />);
+    expect(
+      screen.getByText(
+        /newest 50 matches.*Mac search covers iMessage\/SMS.*locally stored RCS matches may also appear/,
+      ),
+    ).toBeTruthy();
+  });
+
+  it('conceals chat/message rows, scope, and empty copy when the account retires', async () => {
+    const accountLease = captureRealtimeDeliveryLease();
+    mockUseChatMatches.mockReturnValue(chatState([makeChat('account-a-chat')]));
+    mockUseSearch.mockReturnValue({
+      results: [makeResult({ guid: 'account-a-message' })],
+      loading: false,
+      scope: 'phone-and-mac',
+    });
+    await renderWithTheme(<SearchResultsView query="beach" accountLease={accountLease} />);
+    expect(screen.getByText('account-a-chat')).toBeTruthy();
+    expect(screen.getByTestId('message-search-scope')).toBeTruthy();
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+    });
+
+    expect(screen.queryByText('account-a-chat')).toBeNull();
+    expect(screen.queryByText('Weekend Crew')).toBeNull();
+    expect(screen.queryByTestId('message-search-scope')).toBeNull();
+    expect(screen.queryByText('No results')).toBeNull();
+  });
+
+  it('labels a failed Mac request while retaining the phone-only scope', async () => {
+    mockUseSearch.mockReturnValue({ results: [], loading: false, scope: 'mac-unavailable' });
+    await renderWithTheme(<SearchResultsView query="beach" />);
+    expect(
+      screen.getByText('Mac search unavailable. Showing message matches stored on this phone.'),
+    ).toBeTruthy();
   });
 });
 
 describe('SearchResultsView — message hits', () => {
   it('renders the resolved chat title and the snippet for a hit', async () => {
-    mockUseSearch.mockReturnValue({ results: [makeResult()], loading: false });
+    mockUseSearch.mockReturnValue({
+      results: [makeResult()],
+      loading: false,
+      scope: 'local-only',
+    });
     await renderWithTheme(<SearchResultsView query="beach" />);
     // resolveTitle → customName wins.
     expect(screen.getByText('Weekend Crew')).toBeTruthy();
@@ -170,6 +232,7 @@ describe('SearchResultsView — message hits', () => {
     mockUseSearch.mockReturnValue({
       results: [makeResult({ snippet: 'day at the beach today' })],
       loading: false,
+      scope: 'local-only',
     });
     await renderWithTheme(<SearchResultsView query="beach" />);
     // renderSnippet splits on word boundaries; the "beach" token becomes its own bolded <Text>.
@@ -183,6 +246,7 @@ describe('SearchResultsView — message hits', () => {
         makeResult({ guid: 'msg-guid-1', chatGuid: 'iMessage;-;+15551230000', dateCreated: 42 }),
       ],
       loading: false,
+      scope: 'local-only',
     });
     await renderWithTheme(<SearchResultsView query="beach" />);
     fireEvent.press(screen.getByText('Weekend Crew'));
@@ -195,6 +259,7 @@ describe('SearchResultsView — message hits', () => {
     mockUseSearch.mockReturnValue({
       results: [makeResult({ guid: 'm2', chatGuid: 'g2', dateCreated: null })],
       loading: false,
+      scope: 'local-only',
     });
     await renderWithTheme(<SearchResultsView query="beach" />);
     fireEvent.press(screen.getByText('Weekend Crew'));
@@ -214,7 +279,7 @@ describe('SearchResultsView — exact ordinary content', () => {
       text: 'private beach rendezvous at midnight',
       dateCreated: 42,
     });
-    mockUseSearch.mockReturnValue({ results: [result], loading: false });
+    mockUseSearch.mockReturnValue({ results: [result], loading: false, scope: 'local-only' });
     await renderWithTheme(<SearchResultsView query="beach" />);
 
     expect(screen.getByText('Private Weekend Crew')).toBeTruthy();
@@ -241,7 +306,11 @@ describe('SearchResultsView — chats section', () => {
 
   it('shows BOTH section labels when chats AND messages match', async () => {
     mockUseChatMatches.mockReturnValue(chatState([makeChat('iMessage;-;+15550001111')]));
-    mockUseSearch.mockReturnValue({ results: [makeResult()], loading: false });
+    mockUseSearch.mockReturnValue({
+      results: [makeResult()],
+      loading: false,
+      scope: 'local-only',
+    });
     await renderWithTheme(<SearchResultsView query="al" />);
     expect(screen.getByText('Chats')).toBeTruthy();
     expect(screen.getByText('Messages')).toBeTruthy();
@@ -249,7 +318,7 @@ describe('SearchResultsView — chats section', () => {
 
   it('suppresses the "No results" empty text when only chats match', async () => {
     mockUseChatMatches.mockReturnValue(chatState([makeChat('iMessage;-;+15550001111')]));
-    mockUseSearch.mockReturnValue({ results: [], loading: false });
+    mockUseSearch.mockReturnValue({ results: [], loading: false, scope: 'local-only' });
     await renderWithTheme(<SearchResultsView query="al" />);
     expect(screen.getByText('Chats')).toBeTruthy();
     expect(screen.queryByText('No results')).toBeNull();
