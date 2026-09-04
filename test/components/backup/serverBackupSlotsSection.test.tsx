@@ -97,7 +97,11 @@ import {
   BackupPassphraseRejectedError,
 } from '@/services/backup/backupService';
 // eslint-disable-next-line import/first
-import { ServerBackupSlotError, type ServerBackupSlot } from '@/services/backup/serverBackupSlots';
+import {
+  ServerBackupSlotError,
+  type ServerBackupSlot,
+  type ServerBackupSlotsSnapshot,
+} from '@/services/backup/serverBackupSlots';
 // eslint-disable-next-line import/first
 import { ServerBackupSlotsSection } from '@/ui/backup/ServerBackupSlotsSection';
 
@@ -124,10 +128,19 @@ const lease = {
 
 const validSlot: ServerBackupSlot = {
   name: 'Daily',
+  revision: '00112233445566778899aabbccddeeff',
   ciphertext: 'encrypted-daily',
   createdAt: 1_000,
   updatedAt: 2_000,
 };
+
+function fencedSnapshot(slots: ServerBackupSlot[]): ServerBackupSlotsSnapshot {
+  return { slots, revisionFence: true };
+}
+
+function legacySnapshot(slots: ServerBackupSlot[]): ServerBackupSlotsSnapshot {
+  return { slots, revisionFence: false };
+}
 
 const restoreResult = {
   kv: 2,
@@ -175,13 +188,13 @@ async function fillSaveForm(name = 'Daily'): Promise<void> {
   );
 }
 
-function lastDialogButtons(): Array<{
+function lastDialogButtons(): {
   text: string;
   style?: string;
   onPress?: () => void;
-}> {
+}[] {
   const buttons = mockShowDialog.mock.calls.at(-1)?.[2] as
-    Array<{ text: string; style?: string; onPress?: () => void }> | undefined;
+    { text: string; style?: string; onPress?: () => void }[] | undefined;
   if (!buttons) throw new Error('Expected the last dialog to include buttons');
   return buttons;
 }
@@ -197,7 +210,7 @@ beforeEach(() => {
   jest.restoreAllMocks();
   mockAccountCurrent = true;
   mockGenerationInvalidation = null;
-  mockListServerBackupSlots.mockResolvedValue([]);
+  mockListServerBackupSlots.mockResolvedValue(fencedSnapshot([]));
   mockSaveServerBackupSlot.mockResolvedValue(validSlot);
   mockRestoreServerBackupSlot.mockResolvedValue(restoreResult);
   mockDeleteServerBackupSlot.mockResolvedValue(true);
@@ -206,7 +219,7 @@ beforeEach(() => {
 
 describe('ServerBackupSlotsSection query states', () => {
   it('shows a progress state until the server responds, then an empty state', async () => {
-    const pending = deferred<ServerBackupSlot[]>();
+    const pending = deferred<ServerBackupSlotsSnapshot>();
     mockListServerBackupSlots.mockReturnValueOnce(pending.promise);
 
     await renderSection();
@@ -214,7 +227,7 @@ describe('ServerBackupSlotsSection query states', () => {
     expect(screen.getByText('Checking…')).toBeTruthy();
     expect(screen.queryByLabelText('Server backup name')).toBeNull();
 
-    await act(async () => pending.resolve([]));
+    await act(async () => pending.resolve(fencedSnapshot([])));
 
     expect(await screen.findByText('No server backups yet.')).toBeTruthy();
     expect(screen.getByLabelText('Server backup name')).toBeTruthy();
@@ -235,7 +248,9 @@ describe('ServerBackupSlotsSection query states', () => {
   });
 
   it('offers a working retry after an ordinary list failure', async () => {
-    mockListServerBackupSlots.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([]);
+    mockListServerBackupSlots
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(fencedSnapshot([]));
 
     await renderSection();
 
@@ -249,11 +264,12 @@ describe('ServerBackupSlotsSection query states', () => {
   it('shows compatible and legacy slots with the correct actions enabled', async () => {
     const legacySlot: ServerBackupSlot = {
       name: 'Old Mac',
+      revision: '11112222333344445555666677778888',
       ciphertext: null,
       createdAt: 0,
       updatedAt: Number.NaN,
     };
-    mockListServerBackupSlots.mockResolvedValueOnce([validSlot, legacySlot]);
+    mockListServerBackupSlots.mockResolvedValueOnce(fencedSnapshot([validSlot, legacySlot]));
 
     await renderSection();
     await waitForLoadedSlots();
@@ -271,8 +287,41 @@ describe('ServerBackupSlotsSection query states', () => {
     ).toBe(false);
   });
 
+  it('keeps a pre-fence server read-only while preserving restore', async () => {
+    const oldServerSlot = { ...validSlot, revision: null };
+    mockListServerBackupSlots.mockResolvedValueOnce(legacySnapshot([oldServerSlot]));
+
+    await renderSection();
+    await waitForLoadedSlots();
+
+    expect(screen.getByText(/saving and deleting are disabled/)).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Save encrypted backup to server' }).props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    expect(
+      screen.getByRole('button', { name: 'Delete Daily' }).props.accessibilityState.disabled,
+    ).toBe(true);
+    expect(
+      screen.getByRole('button', { name: 'Restore Daily' }).props.accessibilityState.disabled,
+    ).toBe(false);
+
+    await fireEvent.changeText(
+      screen.getByLabelText('Server backup passphrase'),
+      'old-server-passphrase',
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Restore Daily' }));
+    await waitFor(() =>
+      expect(mockRestoreServerBackupSlot).toHaveBeenCalledWith(
+        oldServerSlot,
+        'old-server-passphrase',
+        lease,
+      ),
+    );
+  });
+
   it('disables every mutating action while another backup operation owns the screen', async () => {
-    mockListServerBackupSlots.mockResolvedValueOnce([validSlot]);
+    mockListServerBackupSlots.mockResolvedValueOnce(fencedSnapshot([validSlot]));
 
     await renderSection({ operationBusy: true });
     await waitForLoadedSlots();
@@ -326,7 +375,9 @@ describe('ServerBackupSlotsSection save flow', () => {
 
   it('saves a normalized name, publishes the slot, and clears the secret fields', async () => {
     const saved = { ...validSlot, name: 'Travel', updatedAt: 4_000 };
-    mockListServerBackupSlots.mockResolvedValueOnce([]).mockResolvedValueOnce([saved]);
+    mockListServerBackupSlots
+      .mockResolvedValueOnce(fencedSnapshot([]))
+      .mockResolvedValueOnce(fencedSnapshot([saved]));
     mockSaveServerBackupSlot.mockResolvedValueOnce(saved);
     jest.spyOn(Date, 'now').mockReturnValue(3_000);
 
@@ -341,7 +392,7 @@ describe('ServerBackupSlotsSection save flow', () => {
           name: 'Travel',
           passphrase: 'river-lantern-orbit-92',
           now: 3_000,
-          existingSlotNames: [],
+          snapshot: fencedSnapshot([]),
         },
         lease,
         expect.any(AbortSignal),
@@ -357,15 +408,17 @@ describe('ServerBackupSlotsSection save flow', () => {
     expect(screen.getByLabelText('Server backup name').props.value).toBe('');
     expect(screen.getByLabelText('Server backup passphrase').props.value).toBe('');
     expect(screen.getByLabelText('Confirm server backup passphrase').props.value).toBe('');
-    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual([saved]);
+    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual(
+      fencedSnapshot([saved]),
+    );
     expect(mockFinishOperation).toHaveBeenCalledTimes(1);
   });
 
   it('requires confirmation before replacing a named slot', async () => {
     const replacement = { ...validSlot, updatedAt: 5_000 };
     mockListServerBackupSlots
-      .mockResolvedValueOnce([validSlot])
-      .mockResolvedValueOnce([replacement]);
+      .mockResolvedValueOnce(fencedSnapshot([validSlot]))
+      .mockResolvedValueOnce(fencedSnapshot([replacement]));
     mockSaveServerBackupSlot.mockResolvedValueOnce(replacement);
 
     await renderSection();
@@ -384,12 +437,53 @@ describe('ServerBackupSlotsSection save flow', () => {
 
     await waitFor(() => expect(mockSaveServerBackupSlot).toHaveBeenCalledTimes(1));
     expect(mockSaveServerBackupSlot.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ name: 'Daily', existingSlotNames: ['Daily'] }),
+      expect.objectContaining({ name: 'Daily', snapshot: fencedSnapshot([validSlot]) }),
     );
     await waitFor(() =>
       expect(mockShowDialog).toHaveBeenLastCalledWith(
         'Server backup saved',
         '“Daily” now contains a new encrypted backup.',
+      ),
+    );
+  });
+
+  it('keeps the displayed slot and refreshes after a save conflict', async () => {
+    const refreshed = {
+      ...validSlot,
+      revision: 'ffeeddccbbaa99887766554433221100',
+      updatedAt: 6_000,
+    };
+    const refresh = deferred<ServerBackupSlotsSnapshot>();
+    mockListServerBackupSlots
+      .mockResolvedValueOnce(fencedSnapshot([validSlot]))
+      .mockReturnValueOnce(refresh.promise);
+    mockSaveServerBackupSlot.mockRejectedValueOnce(new ServerBackupSlotError('revision-conflict'));
+
+    const { queryClient } = await renderSection();
+    await waitForLoadedSlots();
+    await fillSaveForm('Daily');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save encrypted backup to server' }));
+    await pressDialogAction('Replace');
+
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenLastCalledWith(
+        'Server backup changed',
+        'This backup changed on another device. Review the refreshed slot and try again.',
+      ),
+    );
+    await waitFor(() => expect(mockListServerBackupSlots).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual(
+      fencedSnapshot([validSlot]),
+    );
+    expect(screen.getByLabelText('Server backup name').props.value).toBe('Daily');
+    expect(screen.getByLabelText('Server backup passphrase').props.value).toBe(
+      'river-lantern-orbit-92',
+    );
+
+    await act(async () => refresh.resolve(fencedSnapshot([refreshed])));
+    await waitFor(() =>
+      expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual(
+        fencedSnapshot([refreshed]),
       ),
     );
   });
@@ -479,13 +573,13 @@ describe('ServerBackupSlotsSection save flow', () => {
     await waitFor(() => expect(mockFinishOperation).toHaveBeenCalledTimes(1));
 
     expect(mockShowDialog).not.toHaveBeenCalled();
-    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual([]);
+    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual(fencedSnapshot([]));
   });
 });
 
 describe('ServerBackupSlotsSection restore and delete flows', () => {
   beforeEach(() => {
-    mockListServerBackupSlots.mockResolvedValue([validSlot]);
+    mockListServerBackupSlots.mockResolvedValue(fencedSnapshot([validSlot]));
   });
 
   it('asks for the original passphrase before starting a restore', async () => {
@@ -544,7 +638,9 @@ describe('ServerBackupSlotsSection restore and delete flows', () => {
   });
 
   it('deletes only after confirmation and removes the slot from the visible cache', async () => {
-    mockListServerBackupSlots.mockResolvedValueOnce([validSlot]).mockResolvedValueOnce([]);
+    mockListServerBackupSlots
+      .mockResolvedValueOnce(fencedSnapshot([validSlot]))
+      .mockResolvedValueOnce(fencedSnapshot([]));
 
     const { queryClient } = await renderSection();
     await waitForLoadedSlots();
@@ -561,13 +657,41 @@ describe('ServerBackupSlotsSection restore and delete flows', () => {
 
     await waitFor(() => expect(mockDeleteServerBackupSlot).toHaveBeenCalledTimes(1));
     expect(mockDeleteServerBackupSlot).toHaveBeenCalledWith(
-      'Daily',
+      { slot: validSlot, revisionFence: true },
       lease,
       expect.any(AbortSignal),
     );
     await waitFor(() => expect(screen.queryByText('Daily')).toBeNull());
-    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual([]);
+    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual(fencedSnapshot([]));
     expect(mockFinishOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the displayed slot and refreshes after a delete conflict', async () => {
+    const refresh = deferred<ServerBackupSlotsSnapshot>();
+    mockListServerBackupSlots
+      .mockResolvedValueOnce(fencedSnapshot([validSlot]))
+      .mockReturnValueOnce(refresh.promise);
+    mockDeleteServerBackupSlot.mockRejectedValueOnce(
+      new ServerBackupSlotError('revision-conflict'),
+    );
+
+    const { queryClient } = await renderSection();
+    await waitForLoadedSlots();
+    await fireEvent.press(screen.getByRole('button', { name: 'Delete Daily' }));
+    await pressDialogAction('Delete');
+
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenLastCalledWith(
+        'Server backup changed',
+        'This backup changed on another device. Review the refreshed slot and try again.',
+      ),
+    );
+    await waitFor(() => expect(mockListServerBackupSlots).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryData(['server', 'backup-slots', 7])).toEqual(
+      fencedSnapshot([validSlot]),
+    );
+
+    await act(async () => refresh.resolve(fencedSnapshot([validSlot])));
   });
 
   it.each([

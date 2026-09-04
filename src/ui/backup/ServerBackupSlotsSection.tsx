@@ -15,6 +15,7 @@ import {
   ServerBackupSlotError,
   SERVER_BACKUP_SLOT_LIMITS,
   type ServerBackupSlot,
+  type ServerBackupSlotsSnapshot,
 } from '@/services/backup/serverBackupSlots';
 import {
   getNewBackupPassphraseIssue,
@@ -36,6 +37,9 @@ interface ServerBackupSlotsSectionProps {
 }
 
 type BusyAction = 'save' | `restore:${string}` | `delete:${string}` | null;
+
+const REVISION_CONFLICT_COPY =
+  'This backup changed on another device. Review the refreshed slot and try again.';
 
 function sortSlots(slots: ServerBackupSlot[]): ServerBackupSlot[] {
   return [...slots].sort((a, b) => {
@@ -63,9 +67,16 @@ function saveFailureCopy(error: unknown): string {
       return `This device won’t add more than ${SERVER_BACKUP_SLOT_LIMITS.slots} visible slots. Delete a slot first.`;
     }
     if (error.kind === 'invalid-name') return 'Choose a shorter backup name.';
+    if (error.kind === 'revision-fence-required') {
+      return 'Saving is disabled until this server supports protected cross-device changes.';
+    }
   }
   if (isUnimplementedEndpoint(error)) return 'Server backups aren’t supported on this server.';
   return 'Couldn’t save the server backup. Check your connection.';
+}
+
+function isRevisionConflict(error: unknown): boolean {
+  return error instanceof ServerBackupSlotError && error.kind === 'revision-conflict';
 }
 
 /** Named cross-device slots. Only BB2 ciphertext is retained in query state or sent to the server. */
@@ -105,7 +116,9 @@ export function ServerBackupSlotsSection({
     retry: false,
     staleTime: 0,
   });
-  const slots = canPublish() ? (slotsQuery.data ?? []) : [];
+  const snapshot = canPublish() ? slotsQuery.data : undefined;
+  const slots = snapshot?.slots ?? [];
+  const revisionFence = snapshot?.revisionFence ?? false;
   const unsupported = slotsQuery.isError && isUnimplementedEndpoint(slotsQuery.error);
   const isBusy = operationBusy || busy !== null;
 
@@ -118,17 +131,22 @@ export function ServerBackupSlotsSection({
   const passphraseIssue = getNewBackupPassphraseIssue(passphrase);
   const canSave =
     !isBusy &&
+    revisionFence &&
     normalizedName !== null &&
     passphraseIssue === null &&
     passphrase === confirmPassphrase;
 
   const upsertCachedSlot = (slot: ServerBackupSlot): void => {
-    queryClient.setQueryData<ServerBackupSlot[]>(queryKey, (current = []) =>
-      sortSlots([...current.filter((item) => item.name !== slot.name), slot]),
-    );
+    queryClient.setQueryData<ServerBackupSlotsSnapshot>(queryKey, (current) => ({
+      revisionFence: current?.revisionFence ?? true,
+      slots: sortSlots([...(current?.slots ?? []).filter((item) => item.name !== slot.name), slot]),
+    }));
   };
 
-  const performSave = async (slotName: string): Promise<void> => {
+  const performSave = async (
+    slotName: string,
+    operationSnapshot: ServerBackupSlotsSnapshot,
+  ): Promise<void> => {
     if (!canPublish() || !tryBeginOperation()) return;
     const controller = new AbortController();
     activeRequest.current = controller;
@@ -143,7 +161,7 @@ export function ServerBackupSlotsSection({
           // This handler reads the clock after the user starts a save; render remains deterministic.
           // eslint-disable-next-line react-hooks/purity
           now: Date.now(),
-          existingSlotNames: slots.map((slot) => slot.name),
+          snapshot: operationSnapshot,
         },
         lease,
         controller.signal,
@@ -157,6 +175,11 @@ export function ServerBackupSlotsSection({
       showDialog('Server backup saved', `“${saved.name}” now contains a new encrypted backup.`);
     } catch (error) {
       if (!canPublish() || isBackupAccountChangedError(error)) return;
+      if (isRevisionConflict(error)) {
+        void queryClient.invalidateQueries({ queryKey, exact: true });
+        showDialog('Server backup changed', REVISION_CONFLICT_COPY);
+        return;
+      }
       showDialog('Server backup', saveFailureCopy(error));
     } finally {
       if (activeRequest.current === controller) activeRequest.current = null;
@@ -167,10 +190,11 @@ export function ServerBackupSlotsSection({
 
   const onSave = (): void => {
     const slotName = normalizedName;
-    if (!canSave || slotName === null) return;
-    const existing = slots.some((slot) => slot.name === slotName);
+    const operationSnapshot = snapshot;
+    if (!canSave || slotName === null || operationSnapshot === undefined) return;
+    const existing = operationSnapshot.slots.some((slot) => slot.name === slotName);
     if (!existing) {
-      void performSave(slotName);
+      void performSave(slotName, operationSnapshot);
       return;
     }
     showDialog(
@@ -182,7 +206,7 @@ export function ServerBackupSlotsSection({
           text: 'Replace',
           style: 'destructive',
           onPress: () => {
-            if (canPublish()) void performSave(slotName);
+            if (canPublish()) void performSave(slotName, operationSnapshot);
           },
         },
       ],
@@ -220,7 +244,10 @@ export function ServerBackupSlotsSection({
     })();
   };
 
-  const performDelete = async (slot: ServerBackupSlot): Promise<void> => {
+  const performDelete = async (
+    slot: ServerBackupSlot,
+    operationSnapshot: ServerBackupSlotsSnapshot,
+  ): Promise<void> => {
     if (!canPublish() || !tryBeginOperation()) return;
     const controller = new AbortController();
     activeRequest.current = controller;
@@ -228,14 +255,25 @@ export function ServerBackupSlotsSection({
     try {
       await queryClient.cancelQueries({ queryKey, exact: true });
       if (!canPublish()) return;
-      await deleteServerBackupSlot(slot.name, lease, controller.signal);
+      await deleteServerBackupSlot(
+        { slot, revisionFence: operationSnapshot.revisionFence },
+        lease,
+        controller.signal,
+      );
       if (!canPublish()) return;
-      queryClient.setQueryData<ServerBackupSlot[]>(queryKey, (current = []) =>
-        current.filter((item) => item.name !== slot.name),
+      queryClient.setQueryData<ServerBackupSlotsSnapshot>(queryKey, (current) =>
+        current === undefined
+          ? current
+          : { ...current, slots: current.slots.filter((item) => item.name !== slot.name) },
       );
       void queryClient.invalidateQueries({ queryKey, exact: true });
     } catch (error) {
       if (!canPublish() || isBackupAccountChangedError(error)) return;
+      if (isRevisionConflict(error)) {
+        void queryClient.invalidateQueries({ queryKey, exact: true });
+        showDialog('Server backup changed', REVISION_CONFLICT_COPY);
+        return;
+      }
       showDialog(
         'Delete server backup',
         isUnimplementedEndpoint(error)
@@ -250,7 +288,8 @@ export function ServerBackupSlotsSection({
   };
 
   const onDelete = (slot: ServerBackupSlot): void => {
-    if (!canPublish() || isBusy) return;
+    const operationSnapshot = snapshot;
+    if (!canPublish() || isBusy || operationSnapshot?.revisionFence !== true) return;
     showDialog(
       'Delete server backup?',
       `Delete “${slot.name}” from the server? Refresh first if another device may have changed it.`,
@@ -260,7 +299,7 @@ export function ServerBackupSlotsSection({
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            if (canPublish()) void performDelete(slot);
+            if (canPublish()) void performDelete(slot, operationSnapshot);
           },
         },
       ],
@@ -315,6 +354,12 @@ export function ServerBackupSlotsSection({
       </Text>
 
       <SettingsSection label="SAVE TO SERVER">
+        {!revisionFence ? (
+          <Text style={[styles.messageRow, { color: theme.color.secondaryLabel }]}>
+            This server can list and restore backups, but saving and deleting are disabled until it
+            supports protected cross-device changes.
+          </Text>
+        ) : null}
         <TextInput
           value={name}
           onChangeText={setName}
@@ -323,6 +368,7 @@ export function ServerBackupSlotsSection({
           autoCapitalize="sentences"
           maxLength={SERVER_BACKUP_SLOT_LIMITS.nameCharacters}
           accessibilityLabel="Server backup name"
+          editable={revisionFence && !isBusy}
           style={[styles.input, { color: theme.color.label }]}
         />
         <TextInput
@@ -333,6 +379,7 @@ export function ServerBackupSlotsSection({
           secureTextEntry
           autoCapitalize="none"
           accessibilityLabel="Server backup passphrase"
+          editable={!isBusy}
           style={[styles.input, { color: theme.color.label }]}
         />
         <TextInput
@@ -343,6 +390,7 @@ export function ServerBackupSlotsSection({
           secureTextEntry
           autoCapitalize="none"
           accessibilityLabel="Confirm server backup passphrase"
+          editable={revisionFence && !isBusy}
           style={[styles.input, { color: theme.color.label }]}
         />
         <Text style={[styles.hint, { color: theme.color.secondaryLabel }]}>
@@ -415,8 +463,8 @@ export function ServerBackupSlotsSection({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Delete ${slot.name}`}
-                  accessibilityState={{ disabled: isBusy }}
-                  disabled={isBusy}
+                  accessibilityState={{ disabled: isBusy || !revisionFence }}
+                  disabled={isBusy || !revisionFence}
                   onPress={() => onDelete(slot)}
                   style={styles.smallAction}
                 >
@@ -425,7 +473,10 @@ export function ServerBackupSlotsSection({
                   ) : (
                     <Text
                       style={{
-                        color: !isBusy ? theme.color.destructive : theme.color.tertiaryLabel,
+                        color:
+                          !isBusy && revisionFence
+                            ? theme.color.destructive
+                            : theme.color.tertiaryLabel,
                       }}
                     >
                       Delete

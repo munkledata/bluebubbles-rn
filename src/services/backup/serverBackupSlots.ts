@@ -1,4 +1,5 @@
 import { backupsApi } from '@core/api';
+import { ApiError } from '@core/api/errors';
 import type { BackupSlotWire } from '@core/api/endpoints/backups';
 import { isChunkedSecretBoxEnvelope } from '@core/crypto';
 import { http } from '../clients';
@@ -32,6 +33,8 @@ export type ServerBackupSlotErrorKind =
   | 'ciphertext-too-large'
   | 'slot-limit'
   | 'incompatible-slot'
+  | 'revision-conflict'
+  | 'revision-fence-required'
   | 'response-mismatch';
 
 export class ServerBackupSlotError extends Error {
@@ -43,10 +46,17 @@ export class ServerBackupSlotError extends Error {
 
 export interface ServerBackupSlot {
   name: string;
-  /** Null for a legacy/plaintext/malformed server record. Such records may be replaced/deleted. */
+  /** Null only for rows returned by an older server without revision fencing. */
+  revision: string | null;
+  /** Null for a legacy/plaintext/malformed server record. */
   ciphertext: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ServerBackupSlotsSnapshot {
+  slots: ServerBackupSlot[];
+  revisionFence: boolean;
 }
 
 function assertCurrent(lease: RealtimeDeliveryLease): void {
@@ -60,6 +70,23 @@ async function awaitCurrent<T>(lease: RealtimeDeliveryLease, promise: Promise<T>
     return value;
   } catch (error) {
     if (!lease.isCurrent()) throw new BackupAccountChangedError();
+    throw error;
+  }
+}
+
+async function awaitCurrentMutation<T>(
+  lease: RealtimeDeliveryLease,
+  promise: Promise<T>,
+): Promise<T> {
+  try {
+    const value = await awaitCurrent(lease, promise);
+    assertCurrent(lease);
+    return value;
+  } catch (error) {
+    if (!lease.isCurrent()) throw new BackupAccountChangedError();
+    if (error instanceof ApiError && error.status === 409) {
+      throw new ServerBackupSlotError('revision-conflict');
+    }
     throw error;
   }
 }
@@ -90,6 +117,7 @@ function toSlot(row: BackupSlotWire): ServerBackupSlot {
       : null;
   return {
     name: row.name,
+    revision: row.revision ?? null,
     ciphertext,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -105,10 +133,14 @@ function compareSlots(a: ServerBackupSlot, b: ServerBackupSlot): number {
 export async function listServerBackupSlots(
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   signal?: AbortSignal,
-): Promise<ServerBackupSlot[]> {
+): Promise<ServerBackupSlotsSnapshot> {
   assertCurrent(lease);
-  const rows = await awaitCurrent(lease, backupsApi.listSettingsBackups(http, signal));
-  return rows.map(toSlot).sort(compareSlots);
+  const response = await awaitCurrent(lease, backupsApi.listSettingsBackups(http, signal));
+  assertCurrent(lease);
+  return {
+    slots: response.backups.map(toSlot).sort(compareSlots),
+    revisionFence: response.revisionFence,
+  };
 }
 
 /** Build/seal locally, then POST only the exact ciphertext string and normalized name. */
@@ -117,17 +149,23 @@ export async function saveServerBackupSlot(
     name: string;
     passphrase: string;
     now: number;
-    existingSlotNames: readonly string[];
+    snapshot: ServerBackupSlotsSnapshot;
   },
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   signal?: AbortSignal,
 ): Promise<ServerBackupSlot> {
   assertCurrent(lease);
   const name = normalizeServerBackupSlotName(input.name);
-  const existingNames = new Set(input.existingSlotNames);
+  if (!input.snapshot.revisionFence) {
+    throw new ServerBackupSlotError('revision-fence-required');
+  }
+  const existingNames = new Set(input.snapshot.slots.map((slot) => slot.name));
   if (!existingNames.has(name) && existingNames.size >= SERVER_BACKUP_SLOT_LIMITS.slots) {
     throw new ServerBackupSlotError('slot-limit');
   }
+  const existingSlot = input.snapshot.slots.find((slot) => slot.name === name);
+  if (existingSlot?.revision === null) throw new ServerBackupSlotError('response-mismatch');
+  const expectedRevision = existingSlot?.revision ?? null;
 
   const ciphertext = await createEncryptedBackupCiphertext(input.passphrase, input.now, lease);
   if (
@@ -139,34 +177,46 @@ export async function saveServerBackupSlot(
 
   let result: ServerBackupSlot | undefined;
   const outcome = await runTrackedRealtimeWork(lease, async (activeLease) => {
-    const saved = await awaitCurrent(
+    const saved = await awaitCurrentMutation(
       activeLease,
-      backupsApi.saveSettingsBackup(http, { name, data: ciphertext }, signal),
+      backupsApi.saveSettingsBackup(http, { name, data: ciphertext, expectedRevision }, signal),
     );
-    if (saved.name !== name || saved.data !== ciphertext) {
+    assertCurrent(activeLease);
+    if (saved.name !== name || saved.data !== ciphertext || saved.revision === undefined) {
       throw new ServerBackupSlotError('response-mismatch');
     }
     result = toSlot(saved);
   });
   if (outcome === 'paused' || result === undefined) throw new BackupAccountChangedError();
+  assertCurrent(lease);
   return result;
 }
 
 /** Delete one exact server-returned name. No plaintext or passphrase participates. */
 export async function deleteServerBackupSlot(
-  name: string,
+  input: { slot: ServerBackupSlot; revisionFence: boolean },
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   signal?: AbortSignal,
 ): Promise<boolean> {
   assertCurrent(lease);
+  if (!input.revisionFence) throw new ServerBackupSlotError('revision-fence-required');
+  const { slot } = input;
+  const { name } = slot;
   if (name.length === 0 || name.length > 100 || hasControlCharacter(name)) {
     throw new ServerBackupSlotError('invalid-name');
   }
+  const expectedRevision = slot.revision;
+  if (expectedRevision === null) throw new ServerBackupSlotError('response-mismatch');
   let removed: boolean | undefined;
   const outcome = await runTrackedRealtimeWork(lease, async (activeLease) => {
-    removed = await awaitCurrent(activeLease, backupsApi.deleteSettingsBackup(http, name, signal));
+    removed = await awaitCurrentMutation(
+      activeLease,
+      backupsApi.deleteSettingsBackup(http, { name, expectedRevision }, signal),
+    );
+    assertCurrent(activeLease);
   });
   if (outcome === 'paused' || removed === undefined) throw new BackupAccountChangedError();
+  assertCurrent(lease);
   return removed;
 }
 
