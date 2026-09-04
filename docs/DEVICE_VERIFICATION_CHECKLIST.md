@@ -705,28 +705,35 @@ or Do Not Disturb access prompt is an unexpected failure.
 ### 3. External browser, Maps, and disabled embedded-WebView paths
 
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Mount a message containing an approved controlled
-      HTTPS URL. The target observer sees no HTML/image request merely from opening the chat, and
-      no remote preview artwork mounts. Only an explicit tap hands the URL to the system browser
-      and may produce the bounded target request. Do not add a personal-device interception proxy.
+      HTTPS URL and expose that same URL in Chat Settings → Shared Media → Links. The target observer
+      sees no HTML/image request merely from opening either surface, and no remote preview artwork
+      mounts. Exercise both explicit actions; only a tap may hand the URL to the system browser and
+      produce the bounded target request. Do not add a personal-device interception proxy.
 - [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Retain scheme-allowlist proof and stage inert
       `intent:`, `javascript:`, `file:`, and `content:` text. It must not become an in-app actionable
       link or open another app. Do not attempt to make Android execute a rejected value.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With a finite synthetic Find My coordinate, the
       route shows the privacy-disabled embedded-map placeholder and the observer sees no tile/script
-      request. Only **Open** may hand the synthetic point to the system Maps app. Gator requests no
-      device-location permission. Without a finite fixture, leave this result open.
+      request. Exercise both Find My **Open** and a synthetic shared-location card; only those explicit
+      actions may hand their finite points to the system Maps app. Gator requests no device-location
+      permission. Without finite fixtures, leave this result open.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** If the approved conditional FaceTime fixture
       exists, answering/starting shows Gator's browser handoff and then a system-owned custom tab or
       browser—never an embedded WebView. Do not require Chrome specifically. Any camera/microphone
-      prompt belongs to the browser, not Gator, and does not close `FACE-01` or `PLAY-02`.
+      prompt belongs to the browser, not Gator, and does not close `FACE-01` or `PLAY-02`. If the
+      foreground fallback overlay's explicit **Open** action is naturally refused, Gator shows
+      `Couldn’t open this outside Gator.`
 - [ ] **`STATIC/HOST`:** Retain proof that no production source mounts `react-native-webview`, Find
       My uses a disabled placeholder, FaceTime validates its Apple link before external handoff, and
       URL-preview lookup is cache-read-only. The dependency may remain installed; do not claim it is
       absent or that visual inspection proves zero network traffic/hostile-navigation safety.
 
-Do not uninstall browsers, Maps, Contacts, or viewers to force no-handler behavior. A naturally
-missing-handler result may be recorded, but ordinary safe URL/Maps failures can currently be
-silent; record that limitation instead of turning a tap into a pass.
+Do not uninstall browsers, Maps, Contacts, or viewers to force no-handler behavior. If a message
+preview, Chat Settings Shared Media link, Find My **Open**, shared-location card, or foreground
+FaceTime fallback-overlay **Open** action naturally fails, require `Couldn’t open this outside Gator.`
+while its initiating source and account are current, never silence, and no delayed toast after
+leaving or Disconnect. Otherwise leave the exact-native failure branch open and retain only the host
+result.
 
 ### 4. Keyboard, navigation, chat layout, reactions, and effects
 
