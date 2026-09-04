@@ -19,13 +19,16 @@ standard policy/security review and are Data Safety-exempt while exclusively int
 UGC-policy exemption is claimed. Confirm in Play Console that no other track is active before relying
 on this boundary.
 
-The conforming current local candidate is `0.1.42` / version code `58`, source
-`fd02247578e928d909f0ce73c083c3cbcedffb4c`, release commit
-`7942ed5bfbdce28ecadfefc54e7bd7cdde2e57d8`, and SHA-256
-`ad7538bc3436eea017690801efdaa307a22a0565229c94006f7aacc278270298`. Its local build, validation,
-and promotion passed, but it has not been uploaded, submitted, installed, or exercised on a device.
-Candidate-dependent rows below refer to that exact artifact. The preserved v57 AAB remains
-nonconforming historical evidence and must not be uploaded or submitted.
+The conforming current local candidate is `0.1.43` / version code `59`, source
+`7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`, release commit
+`e108ad7756cf2ae67a6873cbd1e1526df0613e18` on local branch `release/android-0.1.43`, release run
+`android-0.1.43-7a3aa20-20260904145333`, and AAB `gator-release-0.1.43-v59-e108ad7.aab`
+(`55,818,682` bytes), SHA-256
+`e2a60f7b06837b47484f71d79fccb0c585ead745a2e1a1a48952d54cd5bdc0af`. Its local build,
+validation, and promotion passed, but it has not been uploaded, submitted, installed, or exercised
+on a device. Candidate-dependent rows below refer to that exact artifact. The superseded conforming
+v58 AAB and preserved nonconforming v57 AAB remain historical evidence and must not be uploaded or
+submitted.
 
 Recheck these requirements before upload/testing and again for any later replacement:
 
@@ -37,20 +40,20 @@ Recheck these requirements before upload/testing and again for any later replace
 
 ## Readiness snapshot
 
-| Input                     | Current state                                                                                                                    |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| App name                  | Draft: `Gator` — 5/30 characters                                                                                                 |
-| Short description         | Draft below — 63/80 characters                                                                                                   |
-| Full description          | Draft below — 2,284/4,000 characters; recount after any edit                                                                     |
-| App icon                  | Technical checks pass: `play-icon-512.png` is a 512×512, 8-bit RGBA PNG; candidate visual approval remains                       |
-| Feature graphic           | Technical checks pass: `play-feature-1024x500.png` is a 1024×500, 8-bit RGB PNG with no alpha; candidate visual approval remains |
-| Phone screenshots         | **Blocked:** capture from the exact candidate with staged data; none are stored here yet                                         |
-| Privacy-policy URL        | **Blocked:** no owner-approved policy URL is recorded in this repository                                                         |
+| Input                     | Current state                                                                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App name                  | Draft: `Gator` — 5/30 characters                                                                                                                                                            |
+| Short description         | Draft below — 63/80 characters                                                                                                                                                              |
+| Full description          | Draft below — 2,284/4,000 characters; recount after any edit                                                                                                                                |
+| App icon                  | Technical checks pass: `play-icon-512.png` is a 512×512, 8-bit RGBA PNG; candidate visual approval remains                                                                                  |
+| Feature graphic           | Technical checks pass: `play-feature-1024x500.png` is a 1024×500, 8-bit RGB PNG with no alpha; candidate visual approval remains                                                            |
+| Phone screenshots         | **Blocked:** capture from the exact candidate with staged data; none are stored here yet                                                                                                    |
+| Privacy-policy URL        | **Blocked:** no owner-approved policy URL is recorded in this repository                                                                                                                    |
 | License/notices           | **Private Internal Testing posture selected:** Expo's inherited notice is preserved; third-party terms still apply; broader distribution awaits an exact inventory and owner/legal approval |
-| Data safety               | **Blocked:** reconcile the candidate, third-party SDKs, active non-internal Play artifacts, and approved privacy policy          |
-| App access                | **Blocked:** provide a stable non-production Mac server, reviewer credentials or setup QR, and step-by-step instructions         |
-| UGC safeguards            | **Deferred for Internal Testing; blocked before promotion:** required safety work is not implemented                             |
-| Developer contact/support | **Blocked:** enter owner-approved support contact details in Play Console and the app                                            |
+| Data safety               | **Blocked:** reconcile the candidate, third-party SDKs, active non-internal Play artifacts, and approved privacy policy                                                                     |
+| App access                | **Blocked:** provide a stable non-production Mac server, reviewer credentials or setup QR, and step-by-step instructions                                                                    |
+| UGC safeguards            | **Deferred for Internal Testing; blocked before promotion:** required safety work is not implemented                                                                                        |
+| Developer contact/support | **Blocked:** enter owner-approved support contact details in Play Console and the app                                                                                                       |
 
 The two image files meet their current technical size/encoding requirements, but they are still
 draft artwork. `STORE-01` must compare them with the exact candidate launcher icon and approved
@@ -136,7 +139,7 @@ closed, open, or production tracks.
 | User-generated content     | **Deferred for the current exclusive Internal Testing scope:** direct messages are UGC; no terms acceptance, in-app blocking/reporting, or moderation workflow was found                                                            | Complete `STORE-01A-UGC-SAFETY` before Closed/Open/Production promotion, or earlier if Play flags the internal app; retain policy/behavior evidence                |
 | Target audience/content    | **Pending; do not guess**                                                                                                                                                                                                           | Owner selects intended audience, answers the content-rating questionnaire, and reconciles UGC/minor safeguards                                                     |
 | Account deletion/retention | **Pending:** Disconnect wipes local app state, but does not prove deletion of server-side accounts or retained server data                                                                                                          | Decide whether Play's account-deletion rule applies and document the companion server's deletion/retention route                                                   |
-| Full-screen intent         | **Removal selected and present in v58:** source config blocks `USE_FULL_SCREEN_INTENT`, the exact AAB omits it, and call notifications omit automatic full-screen launch                                                            | Prove body-tap/Answer/Decline behavior intact on the exact candidate's Android 14/15/16 device matrix                                                              |
+| Full-screen intent         | **Removal selected and present in v59:** source config blocks `USE_FULL_SCREEN_INTENT`, the exact AAB omits it, and call notifications omit automatic full-screen launch                                                            | Prove body-tap/Answer/Decline behavior intact on the exact candidate's Android 14/15/16 device matrix                                                              |
 | Foreground service         | **Blocked:** the generated release manifest declares media-playback foreground-service access                                                                                                                                       | Complete the prompted declaration and demonstration evidence against the exact candidate                                                                           |
 | Photo/video access         | **Blocked:** the generated release manifest includes broad `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` access for gallery browsing                                                                                                       | Prove the core-use justification and declaration, or narrow the candidate to a policy-supported picker                                                             |
 | Contacts                   | **Pending:** the candidate can request `READ_CONTACTS` for explicit contact features                                                                                                                                                | Recheck current target-level policy, declaration prompts, Data safety, and the manual no-contacts journey                                                          |

@@ -11,6 +11,20 @@ broader Closed/Open/Production release gate.
 
 Current locally promoted candidate — static artifact proof only; no Play, server, or device result:
 
+- Version/build number: `0.1.43 (versionCode 59)`
+- Source commit: `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`
+- Release commit/branch: `e108ad7756cf2ae67a6873cbd1e1526df0613e18` / `release/android-0.1.43` (local only)
+- Release run: `android-0.1.43-7a3aa20-20260904145333`
+- Local AAB: `gator-release-0.1.43-v59-e108ad7.aab` — ignored; never commit it
+- AAB size/SHA-256: `55,818,682` bytes / `e2a60f7b06837b47484f71d79fccb0c585ead745a2e1a1a48952d54cd5bdc0af`
+- Upload certificate SHA-256: `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
+- Build provenance: local EAS production build on 2026-09-04; Gradle `BUILD SUCCESSFUL`; validation and local promotion passed; no hosted build or submission
+- Tester/device/Android versions: `[OPEN]`
+- Test date: `[OPEN]`
+
+Superseded pre-WebView-removal candidate — static artifact proof only; do not upload, submit, or use
+it as current runtime, package-removal, Play, or device evidence because it predates `4fca556`:
+
 - Version/build number: `0.1.42 (versionCode 58)`
 - Source commit containing `9046e27`: `fd02247578e928d909f0ce73c083c3cbcedffb4c`
 - Release commit/branch: `7942ed5bfbdce28ecadfefc54e7bd7cdde2e57d8` / `release/android-0.1.42` (local only)
@@ -19,8 +33,6 @@ Current locally promoted candidate — static artifact proof only; no Play, serv
 - AAB size/SHA-256: `55,969,473` bytes / `ad7538bc3436eea017690801efdaa307a22a0565229c94006f7aacc278270298`
 - Upload certificate SHA-256: `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
 - Build provenance: local EAS production build on 2026-08-30; Gradle `BUILD SUCCESSFUL` (1,264 tasks in 9m42s); validation and local promotion passed; no hosted build or submission
-- Tester/device/Android versions: `[OPEN]`
-- Test date: `[OPEN]`
 
 Frozen nonconforming candidate — static proof only; do not upload, submit, or use it as current
 runtime evidence because it predates the approved `PLAY-02` removal in `9046e27`:
@@ -193,16 +205,19 @@ npm run check:android-build
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. The current candidate contains the host flow from `8564b34` plus post-v57 removal
-      commit `9046e27`; exact Android network and SecureStore behavior remains unproven.
+      credentials. The v59 candidate's exact source is `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`,
+      which contains the host flow from `8564b34` plus post-v57 removal commit `9046e27`; exact
+      Android network and SecureStore behavior remains unproven.
 - [ ] URL previews make no automatic third-party request. Exercise server `payloadData`, an upgraded
       exact-key legacy-cache row, and an uncached URL; none may fetch HTML or artwork, and only an
       explicit tap may hand the URL to the external browser. Record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
-- [ ] Clean install, autolinking, and exact-AAB inspection confirm that the app-owned
-      `react-native-webview` package/native registration is absent. Expo’s transitive
-      `@expo/dom-webview` is framework-owned and is not evidence of a reachable product surface.
+- [x] The clean isolated build, guarded autolinking, and exact-v59-AAB inspection confirm that the
+      app-owned `react-native-webview` package/native registration is absent: packaged DEX omits
+      `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`. Expo’s transitive
+      `@expo/dom-webview`/`DomWebViewModule` remains framework-owned and is not evidence of a
+      reachable product surface.
 - [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
       notifications, channels, and alarms honor App Lock's generic-notification boundary, while
       Recents and screenshots honor its protected-screen boundary without leaking identity or message
@@ -211,7 +226,7 @@ npm run check:android-build
 ## 6. Android/device matrix
 
 Before device work begins, `DEVICE-01` must create a candidate-specific matrix for the exact
-`gator-release-0.1.42-v58-7942ed5.aab` candidate.
+`gator-release-0.1.43-v59-e108ad7.aab` candidate.
 At minimum:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
@@ -274,7 +289,7 @@ These four DEV results stop at the then-current migration head `0038`; they do n
   `DB-03C1-SCHEDULED-ANDROID-CI` remains open until one genuine `event=schedule` run passes and its reports are
   validated.
 
-### Current v58 candidate native/device proof
+### Current v59 candidate native/device proof
 
 - [ ] The exact release candidate and a supported physical device repeat the native contract and
       pass the crypto self-test, fresh install plus an actual signed prior-build install-over,
