@@ -83,6 +83,8 @@ never leave the device. A complete cross-device contract requires server-owned p
 an aggregate quota, a bounded read shape, and a revision fence so concurrent devices cannot overwrite
 or delete a newer same-name slot silently. The selected implementation is a quota-capped complete
 list. It preserves datasets already beyond the slot-count, per-slot-data, aggregate-data, or response
-ceilings and fails their complete-list reads closed; the 80-character new-name cap is not retroactive.
-Paginated metadata with per-slot ciphertext fetch is required only if future self-service recovery of
-that storage becomes a product requirement.
+ceilings and fails their complete-list reads closed. An exact-name overwrite may shrink an oversized
+target only when the complete post-write kind satisfies every bound; count overages or remaining
+oversized rows require exact deletion or manual cleanup. The 80-character new-name cap is not
+retroactive. Paginated metadata with per-slot ciphertext fetch is required only if future broader
+self-service recovery of that storage becomes a product requirement.
