@@ -79,6 +79,7 @@ sync, and tombstone logic must share that order without duplicating or omitting 
 
 List, save, name, explicitly overwrite, delete, and restore slots by transmitting the existing
 encrypted backup ciphertext as-is. Capability-gate older servers; passphrases and plaintext settings
-never leave the device. A complete cross-device contract requires server-owned slot count/byte bounds,
-pagination, aggregate quota, and a revision fence so concurrent devices cannot overwrite or delete a
-newer same-name slot silently.
+never leave the device. A complete cross-device contract requires server-owned per-slot/count bounds,
+an aggregate quota, a bounded read shape, and a revision fence so concurrent devices cannot overwrite
+or delete a newer same-name slot silently. The bounded read may be a quota-capped complete list or,
+when legacy-overage self-service is required, paginated metadata with per-slot ciphertext fetch.
