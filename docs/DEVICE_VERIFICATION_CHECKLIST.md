@@ -738,12 +738,11 @@ silent; record that limitation instead of turning a tap into a pass.
       Keyboard and navigation-bar space form one union rather than a doubled gap; live wallpaper
       arrival does not remount the composer, lose its draft/staged item, or strand messages behind
       translucent bars.
-- [ ] **`EXACT PLAY CANDIDATE`:** Enter a long URL/password on manual setup at large font and open/
-      close the keyboard. Record any obscured Connect/insecure-HTTP controls as the current Android
-      keyboard gap; this screen does not yet use the chat's padding behavior and must not receive a
-      broad layout pass from chat evidence. Regardless of the visual outcome, record that this
-      Android route lacks the chat screen's padding keyboard behavior. This is a device-specific
-      findings record and cannot close the manual-keyboard or accessibility-layout gap.
+- [ ] **`EXACT PLAY CANDIDATE`:** Under both gesture and three-button navigation, enter a long URL/password on manual
+      setup at large font and repeatedly open/close the keyboard. The Connect and insecure-HTTP controls remain
+      reachable while open, and no navigation-bar-sized residual gap remains after hide. Source now uses the shared
+      padding-while-visible contract with zero vertical offset; host tests prove those props, not native movement or
+      layout. Record the exact candidate result before closing the manual-keyboard/accessibility-layout gap.
 - [ ] **`EXACT PLAY CANDIDATE`:** Open a long synthetic chat, confirm chronological rendering begins
       at the newest message, scroll to history, receive a new item while unpinned, use the newest-
       message affordance, and reopen through search/reply navigation. Late preview/attachment growth
