@@ -81,5 +81,8 @@ List, save, name, explicitly overwrite, delete, and restore slots by transmittin
 encrypted backup ciphertext as-is. Capability-gate older servers; passphrases and plaintext settings
 never leave the device. A complete cross-device contract requires server-owned per-slot/count bounds,
 an aggregate quota, a bounded read shape, and a revision fence so concurrent devices cannot overwrite
-or delete a newer same-name slot silently. The bounded read may be a quota-capped complete list or,
-when legacy-overage self-service is required, paginated metadata with per-slot ciphertext fetch.
+or delete a newer same-name slot silently. The selected implementation is a quota-capped complete
+list. It preserves datasets already beyond the slot-count, per-slot-data, aggregate-data, or response
+ceilings and fails their complete-list reads closed; the 80-character new-name cap is not retroactive.
+Paginated metadata with per-slot ciphertext fetch is required only if future self-service recovery of
+that storage becomes a product requirement.
