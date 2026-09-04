@@ -87,10 +87,8 @@ async function deliver(delivery: CapturedFcmDelivery, lease: RealtimeDeliveryLea
       if (!lease.isCurrent()) return;
       if (!password) {
         logger.warn(
-          '[fcm] encrypted push but no stored server password — will arrive on next sync',
-          {
-            event: eventName,
-          },
+          '[fcm] encrypted push skipped: no stored server password; sync may recover server state, but a one-time event may be lost',
+          { event: eventName },
         );
         return;
       }
@@ -100,7 +98,10 @@ async function deliver(delivery: CapturedFcmDelivery, lease: RealtimeDeliveryLea
       } catch (e) {
         // This catch deliberately covers DECRYPTION ONLY. A later durable enqueue/dispatch error
         // must propagate to the native-callback owner instead of being mislabeled and swallowed.
-        logger.warn('[fcm] failed to decrypt push — will arrive on next sync', e);
+        logger.warn(
+          '[fcm] failed to decrypt push; sync may recover server state, but a one-time event may be lost',
+          e,
+        );
         return;
       }
       if (!lease.isCurrent()) return;
@@ -108,11 +109,12 @@ async function deliver(delivery: CapturedFcmDelivery, lease: RealtimeDeliveryLea
       await dispatchRealtimeEvent(eventName, hydratedBody, 'fcm', lease, delivery.occurrence);
       return;
     }
-    // Unknown/legacy scheme this client can't decrypt; the message arrives on next sync.
-    logger.warn('[fcm] encrypted push with unsupported scheme skipped — will arrive on next sync', {
-      event: eventName,
-      encryptionType,
-    });
+    // Unknown/legacy scheme this client cannot decrypt. A later sync may recover server-backed
+    // state, but cannot recreate one-time events such as message-send-error.
+    logger.warn(
+      '[fcm] encrypted push with unsupported scheme skipped; sync may recover server state, but a one-time event may be lost',
+      { event: eventName, encryptionType },
+    );
     return;
   }
   await dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence);
@@ -153,12 +155,15 @@ async function deliverRespectingLock(
   // would drop EVERY killed-app push. The correlated session marker must be `active` (or absent for
   // a pre-protocol legacy install) AND both address/password must exist: a partial connect or failed
   // double-delete must not let an old server repopulate the newly cleared database. SecureStore
-  // failures fail closed too; foreground/socket sync can recover a legitimate event later.
+  // failures fail closed too. Later sync may recover server-backed state, but cannot recreate a
+  // one-time event such as message-send-error.
   const sessionState = await readFcmSessionState(vault, accountRevocationMarker);
   if (!lease.isCurrent()) return;
   if (sessionState !== 'active') {
     if (sessionState === 'unavailable') {
-      logger.warn('[fcm] session check unavailable — push dropped; sync will recover');
+      logger.warn(
+        '[fcm] session check unavailable — push dropped; sync may recover server state, but a one-time event may be lost',
+      );
     } else {
       logger.debug('[fcm] push for a forgotten server — dropped');
     }
@@ -218,10 +223,13 @@ async function handleIncomingFcm(
       logger.debug('[fcm] delivery paused during account transition', { source });
     }
   } catch (error) {
-    logger.warn('[fcm] push delivery failed; sync will recover', {
-      source,
-      errorName: error instanceof Error ? error.name : 'UnknownError',
-    });
+    logger.warn(
+      '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost',
+      {
+        source,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      },
+    );
   }
 }
 

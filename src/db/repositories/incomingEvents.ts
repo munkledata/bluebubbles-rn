@@ -414,7 +414,8 @@ async function enqueuePreparedIncomingEvent(
  *
  * The transaction owns cleanup + insert + capacity admission, so a concurrent intake cannot push
  * the pending table over either bound. Existing pending work is never evicted to admit a newcomer;
- * the refused event becomes a payload-cleared poison receipt and normal sync remains recovery.
+ * the refused event becomes a payload-cleared poison receipt. Normal sync may recover server-backed
+ * state, but cannot recreate a one-time event such as message-send-error.
  */
 export async function enqueueIncomingEvent(
   db: AppDatabase,

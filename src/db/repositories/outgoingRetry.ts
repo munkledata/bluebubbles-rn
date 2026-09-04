@@ -59,11 +59,11 @@ export async function reconcileOutgoingErrorWithinTransaction(
         .where(eq(messages.guid, tempGuid));
       return false;
     }
-    // Gator fans one message-send-error over BOTH socket and FCM but supplies no shared attempt id.
-    // The first copy has already moved the bubble to this exact error and advanced/rebuilt a ladder;
-    // treating the second copy as success prevents one server failure from consuming two attempts.
-    // A genuine later retry first flips the bubble back to `sending`/error=0, so its next failure is
-    // still distinguishable and advances normally.
+    // This is the legacy/temp-only duplicate defense. Modern attemptGuid copies are deduplicated
+    // durably before this repository; an old event may still supply no shared attempt id. Its first
+    // copy has moved the bubble to this error and advanced/rebuilt a ladder, so accepting a matching
+    // second copy avoids consuming two attempts. A later retry first flips the bubble to
+    // `sending`/error=0, making its next failure distinguishable again.
     if (prior > 0 && current.sendState === 'error' && current.currentError === errorCode) {
       if (errorMessage !== undefined && current.currentErrorMessage !== errorMessage) {
         await db.update(messages).set({ errorMessage }).where(eq(messages.guid, tempGuid));
@@ -107,7 +107,8 @@ export async function reconcileOutgoingError(
 /**
  * Transaction-only message error state from a SERVER-pushed `message-send-error` (Messages.app
  * rejected the send after it already left the app). Unlike {@link reconcileOutgoingError} this does
- * NOT touch the outgoing_queue — it only surfaces the failure on the bubble (error badge + retry).
+ * NOT touch the outgoing_queue — it only surfaces the failure on the bubble. Try Again remains
+ * available only when a queue row exists or the reviewed retryable branch below rebuilds one.
  * Returns whether the guid matched a local message; false is a no-op and lets callers try another
  * server-supplied identity without a separate racy existence check.
  */
@@ -151,9 +152,10 @@ export async function markMessageSendError(
  * send: ack marks the bubble 'sent' + deletes the queue row → the async failure re-enqueues →
  * the retry is acked again → fails async again → … Nothing durable survives each cycle (the
  * ack resets both the queue row and the message's error field), so the cap lives here: at most
- * MAX_REQUEUE_CYCLES automatic ladders per tempGuid per app session; after that the failure
- * stays on the bubble for a manual retry. Bounded at {@link REQUEUE_MAP_MAX} entries (oldest key
- * evicted on insert) so a long session cannot grow it without limit.
+ * MAX_REQUEUE_CYCLES automatic ladders per tempGuid per app session; after that the failure stays
+ * on the bubble without a queue row, so the current manual action reports it cannot resend. Bounded
+ * at {@link REQUEUE_MAP_MAX} entries (oldest key evicted on insert) so a long session cannot grow
+ * it without limit.
  */
 const requeueCycles = new Map<string, number>();
 const MAX_REQUEUE_CYCLES = 2;
@@ -169,8 +171,9 @@ function requeueCycleKey(tempGuid: string, scope: string | number): string {
  * Re-arm the automatic retry ladder for a send whose failure arrived AFTER its ack — the RCS
  * immediate-ack contract: the server acks instantly, relays to Google in the background, and
  * reports a send-phase failure via `message-send-error` with `retryable: true`. By then the ack
- * already deleted the queue row, so without this the "picture failed after the ack" case was
- * manual-retry only. Rebuilds a queue row from the message (+ attachment) rows.
+ * already deleted the queue row, so without this the "picture failed after the ack" case cannot be
+ * retried from the current manual action. Rebuilds a queue row from the message (+ attachment) rows
+ * only when the server certifies that dispatch never began.
  *
  * Returns null (caller falls back to bubble-only error) when: the guid isn't a temp- row
  * anymore (promoted rows can't be re-sent), it's a reaction (never flagged retryable by the

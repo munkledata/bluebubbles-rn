@@ -10840,7 +10840,7 @@ function incomingIngressCertifiedNodes({
       'const sessionState = await readFcmSessionState(vault, accountRevocationMarker);' ||
     statementText(deliverRespectingLock, 3) !== 'if (!lease.isCurrent()) return;' ||
     statementText(deliverRespectingLock, 4) !==
-      "if (sessionState !== 'active') { if (sessionState === 'unavailable') { logger.warn('[fcm] session check unavailable — push dropped; sync will recover'); } else { logger.debug('[fcm] push for a forgotten server — dropped'); } return; }" ||
+      "if (sessionState !== 'active') { if (sessionState === 'unavailable') { logger.warn( '[fcm] session check unavailable — push dropped; sync may recover server state, but a one-time event may be lost', ); } else { logger.debug('[fcm] push for a forgotten server — dropped'); } return; }" ||
     statementText(deliverRespectingLock, 5) !== 'let locked = true;' ||
     !ts.isIfStatement(encryptedBranch) ||
     !ts.isBlock(encryptedBranch.thenStatement) ||
@@ -10852,7 +10852,7 @@ function incomingIngressCertifiedNodes({
     normalizedSnippet(supportedEncryptionBody.statements[1], fcmFile) !==
       'if (!lease.isCurrent()) return;' ||
     normalizedSnippet(supportedEncryptionBody.statements[2], fcmFile) !==
-      "if (!password) { logger.warn( '[fcm] encrypted push but no stored server password — will arrive on next sync', { event: eventName, }, ); return; }" ||
+      "if (!password) { logger.warn( '[fcm] encrypted push skipped: no stored server password; sync may recover server state, but a one-time event may be lost', { event: eventName }, ); return; }" ||
     normalizedSnippet(supportedEncryptionBody.statements[3], fcmFile) !==
       'let plaintext: string;' ||
     !passwordCall ||
@@ -10878,7 +10878,7 @@ function incomingIngressCertifiedNodes({
     !snippetIs(decryptCall.arguments[0], 'body') ||
     !snippetIs(decryptCall.arguments[1], 'password') ||
     normalizedSnippet(decryptTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn('[fcm] failed to decrypt push — will arrive on next sync', e);" ||
+      "logger.warn( '[fcm] failed to decrypt push; sync may recover server state, but a one-time event may be lost', e, );" ||
     !ts.isReturnStatement(decryptTry.catchClause.block.statements[1]) ||
     normalizedSnippet(supportedEncryptionBody.statements[5], fcmFile) !==
       'if (!lease.isCurrent()) return;' ||
@@ -10965,7 +10965,7 @@ function incomingIngressCertifiedNodes({
       checker,
     ) ||
     normalizedSnippet(encryptedBranch.thenStatement.statements[1], fcmFile) !==
-      "logger.warn('[fcm] encrypted push with unsupported scheme skipped — will arrive on next sync', { event: eventName, encryptionType, });" ||
+      "logger.warn( '[fcm] encrypted push with unsupported scheme skipped; sync may recover server state, but a one-time event may be lost', { event: eventName, encryptionType }, );" ||
     !ts.isReturnStatement(encryptedBranch.thenStatement.statements[2]) ||
     !exactly(fcmDispatchCalls, 2) ||
     !encryptedDispatchCall ||
@@ -11053,7 +11053,7 @@ function incomingIngressCertifiedNodes({
     fcmTry.tryBlock.statements.length !== 6 ||
     fcmTry.catchClause.block.statements.length !== 1 ||
     normalizedSnippet(fcmTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn('[fcm] push delivery failed; sync will recover', { source, errorName: error instanceof Error ? error.name : 'UnknownError', });" ||
+      "logger.warn( '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost', { source, errorName: error instanceof Error ? error.name : 'UnknownError', }, );" ||
     !fcmCaptureCall ||
     !fcmDeliveryDeclaration ||
     !fcmDeliveryDeclaration.initializer ||

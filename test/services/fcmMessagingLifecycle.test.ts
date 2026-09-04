@@ -349,7 +349,7 @@ describe('FCM native callback ownership', () => {
 
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      '[fcm] failed to decrypt push — will arrive on next sync',
+      '[fcm] failed to decrypt push; sync may recover server state, but a one-time event may be lost',
       decryptFailure,
     );
   });
@@ -370,11 +370,11 @@ describe('FCM native callback ownership', () => {
 
     expect(mockDecryptFcmPayload).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalledWith(
-      '[fcm] failed to decrypt push — will arrive on next sync',
+      '[fcm] failed to decrypt push; sync may recover server state, but a one-time event may be lost',
       expect.anything(),
     );
     expect(warn).toHaveBeenCalledWith(
-      '[fcm] push delivery failed; sync will recover',
+      '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost',
       expect.objectContaining({ source: 'background', errorName: 'Error' }),
     );
   });
@@ -483,7 +483,7 @@ describe('FCM native callback ownership', () => {
     await settle();
 
     expect(warn).toHaveBeenCalledWith(
-      '[fcm] push delivery failed; sync will recover',
+      '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost',
       expect.objectContaining({ source: 'foreground', errorName: 'Error' }),
     );
   });

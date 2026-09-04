@@ -1131,7 +1131,7 @@ describe('applyServerSendError', () => {
     expect(queueCount(raw)).toBe(1); // cycle 2 granted
     simulateAck();
     await applyServerSendError(db, 'temp-loop', 502, 7_000_000, true);
-    expect(queueCount(raw)).toBe(0); // cap spent: bubble-only, manual retry from here
+    expect(queueCount(raw)).toBe(0); // cap spent: bubble-only; queue-less manual retry is unavailable
     expect(stateOf(raw, 'temp-loop')).toBe('error');
 
     // The cap belongs to one account generation. A late, rolled-back old-account event may still

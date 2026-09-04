@@ -2,11 +2,26 @@
 
 **Date:** 2026-07-27 · **Audit:** `docs/RCS_BRIDGE_AUDIT_2026-07-27.md` · **Repos:** `bluebubbles-rn`, `BB/bluebubbles-server`
 
+> **Document role:** this is a dated design and implementation-evidence record. Phase labels and
+> deployment wording below describe the 2026-07-27 snapshot; current status belongs only in
+> [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md). As of server commit `e55f1210`, Gaia
+> phone namespacing prefers persisted `AuthData.DestRegID`; legacy/QR sessions fall back to the
+> established source id.
+
 ---
 
 ## 1. The one-paragraph answer
 
-Right now an RCS message only ever exists in your database if a network connection happened to be open at the exact moment Google pushed it. Nothing ever goes back and checks. **The fix is to stop trusting the live stream and start asking the phone "what do you have that I don't?" on a timer.** Concretely: for each conversation we remember the highest Google message ID we have stored (a *watermark*). Every 60 seconds the server asks Google Messages for a list of conversations, which comes back carrying each conversation's newest message ID. If that ID is higher than our watermark, we page that one conversation backwards — newest first — until we reach messages we already have, then stop. Nothing else. Separately, we keep a numbered log of everything the server learns, so the phone app can ask "give me everything since number 4,512" instead of only ever receiving live pushes. Two catch-up loops, both restartable, neither depending on a connection having been open at the right instant.
+At the 2026-07-27 audit point, an RCS message only existed in the database if a network connection
+happened to be open at the exact moment Google pushed it. Nothing went back and checked. **The fix
+was to stop trusting the live stream and start asking the phone "what do you have that I don't?" on
+a timer.** Concretely: for each conversation the server remembers the highest Google message ID it
+has stored (a *watermark*). Every 60 seconds it asks Google Messages for conversations and compares
+each newest message ID. When one is higher than the watermark, it pages that conversation backwards
+— newest first — until it reaches messages already held. Separately, a numbered ingest log lets the
+phone app ask "give me everything since number 4,512" instead of depending only on live pushes. The
+two catch-up loops are restartable and do not depend on a connection having been open at the right
+instant.
 
 ---
 
@@ -53,7 +68,7 @@ Both go in the **existing** `CREATE TABLE IF NOT EXISTS` block at `RcsCacheStore
 -- rcs_cursor answers the OTHER question ("how far back have we walked?") and is untouched.
 CREATE TABLE IF NOT EXISTS rcs_sync_state (
     conv_id         TEXT PRIMARY KEY,
-    phone_id        TEXT    NOT NULL DEFAULT '',  -- scopes the watermark to one pairing
+    phone_id        TEXT    NOT NULL DEFAULT '',  -- scopes the watermark to one phone namespace
     hw_msg_id       INTEGER NOT NULL DEFAULT 0,   -- numeric Google messageID high-water
     hw_ts_ms        INTEGER NOT NULL DEFAULT 0,   -- diagnostics + degraded fallback only
     conv_latest_id  TEXT    NOT NULL DEFAULT '',  -- Conversation.latestMessageID, last seen
@@ -106,7 +121,12 @@ On prod this writes 4,496 + ~34 rows once (~50 ms at boot) and is a no-op on eve
 
 Prod evidence: all 4,496 ids are numeric (min 17, max 16000, zero non-numeric). Among the 500 newest messages by time, id order agrees with time order on **499/499** adjacent pairs. But globally only 912 of 4,495 pairs agree, 831 rows carry ids > 15000 with timestamps back to 1970, two rows have `ts_ms = 0`, and ids 15996/15997 share the same second. So: **id is safe for live arrivals, timestamp is not safe for anything.** The timestamp is stored as a tiebreak and as a fallback for the degraded case where the sidecar is too old to send `latestMessageID`.
 
-The watermark is scoped by `phone_id` (already tracked at `bridge.go:195` from `sess.Mobile.GetSourceID()`, exposed on `/status` at `bridge.go:707,724`). A re-pair changes it → all watermarks reset to 0 rather than suppressing everything under a stale id space.
+The watermark is scoped by `phone_id`. Current sidecar code prefers the persisted, non-nil
+`AuthData.DestRegID` for a Gaia session and falls back to `sess.Mobile.GetSourceID()` only for
+legacy/QR sessions. A namespace change resets all watermarks to 0 rather than suppressing messages
+under a stale id space. Host tests prove the chosen value survives secure session save/reload; the
+first upgraded Gaia run may move from SourceID to DestRegID and deliberately performs one
+conservative reset/resweep. Physical-pair stability remains device evidence.
 
 ### 3.3 New / changed functions
 
@@ -186,7 +206,7 @@ Every 60 seconds, `RcsReconciler.tick()`:
 
 ## 4. Phases
 
-### Phase 1 — Stop the bleeding: bound every RPC (S, no behaviour change) — ✅ IMPLEMENTED 2026-07-27, NOT YET DEPLOYED
+### Phase 1 — Stop the bleeding: bound every RPC (S, no behaviour change) — ✅ 2026-07-27 SNAPSHOT: IMPLEMENTED, NOT DEPLOYED THEN
 
 **This is the correct first commit no matter what else you ever build.** Ship it alone.
 
@@ -221,7 +241,7 @@ cd /Users/munkle/github/BB/bluebubbles-server/packages/rcs-sidecar && \
 cd ../bbd && npm run typecheck && npm test -- test/rcsListener.test.ts
 ```
 
-### Phase 2 — Remember what we know (S/M, invisible) — ✅ IMPLEMENTED 2026-07-27, NOT YET DEPLOYED
+### Phase 2 — Remember what we know (S/M, invisible) — ✅ 2026-07-27 SNAPSHOT: IMPLEMENTED, NOT DEPLOYED THEN
 
 > **As built.** Three sibling tables + a one-shot seed, no `ALTER TABLE`. Two deliberate
 > deviations from what is written below, both found while building:
@@ -334,7 +354,9 @@ These are **unmeasured**, and every cost figure above is arithmetic on constants
 4. Whether the four missing ids (15858, 15933, 15934, 15984) were dropped or legitimately absent (drafts, phone-side deletions).
 5. Wall-clock latency of one `FetchMessages` page against this phone. Prod `bbd.log` is 2,227 bytes with zero backfill timing lines — there is no historical data to mine.
 6. Whether `PUSH_THROTTLE_STARTED` ever fires, and at what request volume.
-7. Whether a re-pair actually changes `sess.Mobile.GetSourceID()`, and whether phone-local ids restart at 1.
+7. Whether the persisted Gaia `DestRegID` remains stable on a physical target across restart and
+   same-phone re-pair, how it changes for a different phone, and whether phone-local ids restart at
+   1. The SourceID question applies only to the legacy/QR fallback.
 
 ---
 

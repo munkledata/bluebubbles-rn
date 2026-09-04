@@ -116,7 +116,7 @@ const SendErrorMessagePayload = z
  */
 export const MessageSendErrorPayload = z
   .object({
-    /** Future server-owned identity for one admitted dispatch attempt, shared by every fanout. */
+    /** Server-owned identity for one admitted dispatch attempt, shared by every fanout when present. */
     attemptGuid: OptionalSendErrorId,
     guid: OptionalSendErrorId,
     tempGuid: OptionalSendErrorId,

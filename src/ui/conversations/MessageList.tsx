@@ -145,8 +145,9 @@ export function MessageList({
   // Stable handlers so the memoized MessageRow isn't re-rendered by a fresh
   // closure on every list update (the row binds the message itself).
   // Tapping the "!" on a not-delivered message opens a themed sheet (Try Again / Delete) instead
-  // of silently discarding it. Try Again re-sends — and for a failed picture it RE-UPLOADS the
-  // image (from its retained on-disk path), not just the (empty) text.
+  // of silently discarding it. When the durable queue row remains, Try Again re-sends its exact
+  // payload — and for a failed picture it RE-UPLOADS the retained file, not its empty text. A
+  // queue-less post-ack error is reported as unavailable rather than reconstructed unsafely.
   // Held by GUID, then re-read from the live rows on every reactive tick — never as a frozen copy
   // of the message. The automatic retry drain runs every 20 s and flips a failed bubble to
   // 'sending' before its POST, so a snapshot taken when the sheet opened goes stale while the

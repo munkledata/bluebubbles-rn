@@ -111,7 +111,7 @@ App Lock is a foreground screen gate. It does not make the database key biometri
 
 Error reports are sent only while Share Error Reports is enabled, and only to your connected server when it supports uploads. While reporting is off, Gator does not queue or send new reports and deletes queued reports. Reports contain bounded technical fields rather than the original error message or stack trace.
 
-Gator uses Google Firebase Cloud Messaging for push delivery when configured. The app registers an FCM token with your connected server, and push event data passes through Google; payload encryption depends on the server's push settings.
+Gator uses Google Firebase Cloud Messaging for push delivery when configured. The app registers an FCM token with your connected server; push routing and the event type pass through Google. Current V2-capable servers encrypt the event body separately for each enrolled device and otherwise send an empty data object. Older compatible servers may send legacy password-encrypted or plaintext bodies according to server configuration. Detailed keyed-push delivery requires compatible app and server versions and remains open for the current release candidate.
 
 Viewing a message or Find My screen does not fetch third-party link previews or map tiles. If you open a web link or location, Android hands it to your selected browser or maps app. That provider may receive the URL or precise coordinates and, for Find My, the displayed location label.
 

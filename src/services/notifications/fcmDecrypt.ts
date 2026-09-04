@@ -3,15 +3,16 @@ import { AESEncryptionKey, AESSealedData, aesDecryptAsync } from 'expo-crypto';
 import { fromBase64, concatBytes, utf8Encode, utf8Decode } from '@utils/bytes';
 
 /**
- * Decrypt an FCM data-payload body encrypted by the Gator server (the `encryptComs` setting).
- * Mirrors the server's `AEAD_GCM_V1` scheme EXACTLY (see the server's fcmPayloadCrypto.ts):
+ * Decrypt a legacy password-derived `AEAD_GCM_V1` FCM data-payload body. This is compatibility
+ * code for older servers; current server source uses per-device `AEAD_GCM_V2_DEVICE`, which this
+ * client does not yet enroll or decrypt. The retained V1 wire format is:
  *   - AES-256-GCM via expo-crypto (native on Android)
  *   - key   = SHA-256(salt ‖ utf8(password))
  *   - frame = version(1) ‖ salt(16) ‖ iv(12) ‖ tag(16) ‖ ciphertext, base64
  *
- * Uses expo-crypto (a NATIVE module) so it only runs on-device — it cannot be exercised in
- * the Node/jest suite. The frame layout is proven by the server's round-trip test (standard
- * AES-256-GCM is interoperable), so on-device is the final verification.
+ * Uses expo-crypto (a NATIVE module) so it only runs on-device — it cannot be exercised in the
+ * Node/jest suite. Historical server vectors cover this legacy frame; device evidence remains
+ * necessary for the native bridge.
  */
 
 export const FCM_ENCRYPTION_TYPE = 'AEAD_GCM_V1';

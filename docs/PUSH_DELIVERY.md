@@ -15,28 +15,46 @@ Ten links. Any one can break it, and until this work most of them broke it _sile
 
 | #   | Link                                                                        | Where                                                            |
 | --- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 1   | An iMessage/RCS event reaches the server's domain bus                       | `packages/bbd/src/serialize/messageFanout.ts`                    |
-| 2   | The fanout calls `pushMessageSink`                                          | `packages/bbd/src/backend.ts`                                    |
+| 1   | An ordinary iMessage/RCS message reaches the server's domain bus             | `packages/bbd/src/serialize/messageFanout.ts`                    |
+| 2   | The ordinary fanout calls `pushMessageSink`                                 | `packages/bbd/src/backend.ts`                                    |
 | 3   | It reads registered devices                                                 | `configStore.listDevices()`                                      |
-| 4   | The body is trimmed under FCM's hard 4096-byte data cap                     | `packages/bbd/src/serialize/pushPayloadCap.ts`                   |
+| 4   | A `new-message` body is trimmed under FCM's hard 4096-byte data cap          | `packages/bbd/src/serialize/pushPayloadCap.ts`                   |
 | 5   | The registry fans out, deduping by send target (token)                      | `packages/bbd/src/notifications/NotificationRegistry.ts`         |
-| 6   | FCM v1: mint an OAuth token from the service account, POST the data message | `packages/bbd/src/notifications/FcmProvider.ts`                  |
+| 6   | FCM HTTP v1: mint OAuth, then POST the data message                         | `packages/bbd/src/notifications/FcmProvider.ts`                  |
 | 7   | Google delivers to the device                                               | —                                                                |
 | 8   | The app's background/foreground handler receives it                         | `src/services/notifications/fcmMessaging.ts`                     |
-| 9   | Envelope parsed → decrypted → normalized → deduped                          | `fcmPayload.ts`, `fcmDecrypt.ts`, `core/realtime/eventRouter.ts` |
+| 9   | Envelope parsed → decrypted → normalized → durably deduped                | `fcmPayload.ts`, `fcmDecrypt.ts`, `incomingEventDispatcher.ts`  |
 | 10  | DB write (source of truth), then intent → Android notification              | `dbEventSink.ts` → `intents.ts` → `notifeeService.ts`            |
 
 Properties worth knowing:
 
-- **Priority is split deliberately.** Only `new-message` is sent at FCM `high` priority.
-  `updated-message` (delivered/read/edit receipts) and `message-deleted` are silent data-only syncs
-  sent at `normal`, so they don't burn the app's finite high-priority Doze wake quota — once that
-  quota is spent, Android downgrades the _real_ message pushes and defers them by minutes.
+The table describes ordinary message fanout. Attempt-aware RCS failures instead enter through
+`RcsListener`/`composeRcsOutbound`, then call the same notification registry; only `new-message`
+uses `capMessagePushPayload`.
+
+- **Priority is split deliberately.** Among ordinary message-state events, only `new-message` is
+  sent at FCM `high` priority. `updated-message` (delivered/read/edit receipts), `message-deleted`,
+  and `message-send-error` are silent data-only state corrections sent at `normal`, so they don't
+  burn the app's finite high-priority Doze wake quota — once that quota is spent, Android downgrades
+  the _real_ message pushes and defers them by minutes. Separate user-requested test and urgent
+  server-address/bridge alerts use high priority.
 - **The device token is re-registered on EVERY reconnect**, not once (`startRealtime()`). The server
-  dedups by token, so it's idempotent. That per-connect retry is the only thing that recovers a
-  registration broken by a first-boot failure, a server change, or an FCM token rotation.
+  dedups by token, so it is idempotent. That per-connect retry recovers a registration broken by a
+  first-boot failure or server change. The native `onTokenRefresh` callback separately registers a
+  rotated FCM token immediately while realtime is active.
 - **Dead targets self-prune.** An FCM 404 / Web Push 410 removes the device row via `onDeadDevice`.
-- **Socket and FCM share ONE `EventRouter`**, so its `seen` set dedups a message delivered by both.
+- **Socket and FCM share normalization, then durable intake deduplicates them.** Canonical occurrence
+  receipts survive process death; `attemptGuid` is the exact identity for RCS send errors. The
+  in-memory `EventRouter.seen` set remains only on the legacy direct `new-message` path.
+- **Attempt-aware RCS send errors use one identity across transports.** Server commit `e55f1210`
+  generates one immutable `attemptGuid` per physical attempt and reuses the same logical DTO across
+  socket, webhook, and FCM before transport-specific serialization/encryption. Managed-device FCM
+  requires `messages:write`; unmanaged legacy push rows retain the existing compatibility policy.
+  A canonical per-device key encrypts the DTO; without one, FCM carries only the event type and
+  empty-object metadata. The current app registers no V2 key and skips `AEAD_GCM_V2_DEVICE`, so the
+  attempt payload is currently available only over socket/webhook, and the app can consume it over
+  its socket; end-to-end FCM is blocked on `PUSH-CRYPTO-01`. Legacy temp-only failures also remain
+  socket/webhook-only because they cannot be deduplicated safely across transports.
 
 ---
 
@@ -138,8 +156,40 @@ helper rather than adding a fourth copy.
   The registry dedups by token, so this is correct behaviour, not duplicate delivery. Purging would
   have deregistered a live device.
 - **`hoistChatGuid`** (`fcmPayload.ts`) folds a top-level envelope `chatGuid` into the body, but the
-  Gator server only ever sends `{type, data}` — the sibling key doesn't exist. It is harmless (the
-  guid is inside the serialized body already) and kept as tolerance for other server builds.
+  Gator server does not send that sibling key. Modern keyed FCM may also carry the separate
+  `encrypted` and `encryptionType` routing fields; they do not change this `chatGuid` invariant. The
+  helper is harmless and remains as tolerance for other server builds.
+
+### 2.6 Attempt-aware RCS send-error fanout (2026-09-04)
+
+Server commit `e55f1210` closes the source-level identity gap for RCS `message-send-error`. BBD
+reserves a UUID for each admitted physical attempt, encodes it with the logical `tempGuid` in the
+sidecar's opaque `tmpID`, and recovers that correlation from live status frames under the paired
+phone's persisted destination-registration UUID (or the established legacy/QR source-id fallback).
+Duplicate requests replay the same attempt; an authoritative failure releases only its exact
+generation, even if the original owner settles later, so a genuine retry receives a new id and a
+delayed old failure cannot evict it from the server.
+
+Socket, webhook, and attempt-aware FCM receive the same logical DTO before transport-specific
+serialization/encryption. Managed-device FCM requires `messages:write`; unmanaged legacy push rows
+retain compatibility authorization. With a canonical per-device key the DTO is encrypted; without
+one, FCM carries only the type plus `{}` metadata and never exposes temp/chat/attempt ids in
+plaintext. The current app registers only `{name, provider, token}`, supports the legacy
+password-derived `AEAD_GCM_V1`, and skips V2 ciphertext. It therefore cannot receive this attempt
+payload through FCM until the client half of `PUSH-CRYPTO-01` ships; socket/webhook can use
+`attemptGuid` now. After that implementation prerequisite, Google must still be shown to echo the
+encoded `tmpID` for text and media at the supported length, the phone namespace must be observed on
+a physical pair, and a connected killed-app FCM error must converge once on the exact candidate. A
+crash after Google accepts the send but before BBD persists the first correlated frame remains
+outside the guarantee; after the bounded 90-day/50,000-message correlation retention window, an
+exceptionally late status falls back to non-exact socket/webhook delivery instead of risking
+incorrect cross-attempt FCM dedup. Two app-side limits remain. Manual Try Again requires an existing
+outgoing queue row, so a non-retryable post-ack delivery error cannot create a user-driven attempt B.
+Also, `attemptGuid` currently identifies the incoming occurrence but is not stored as the bubble's
+active attempt owner: an already-processed A replay is deduplicated, but a first A copy delayed until
+after B can still relabel the shared tempGuid. Automatic A → B proof must use a certified
+`retryable: true` pre-dispatch error, and the stronger late-first-arrival/manual-retry contract needs
+client implementation.
 
 ---
 

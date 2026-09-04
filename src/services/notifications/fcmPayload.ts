@@ -21,10 +21,11 @@ export interface ParsedFcm {
    */
   envelopeChatGuid: string | undefined;
   /**
-   * The server encrypted the `data` body (the `encryptComs` setting). When true, `body` is
-   * the base64 ciphertext frame (not JSON) and the caller must decrypt it before dispatch —
-   * see {@link encryptionType}. An UNSUPPORTED scheme is logged + skipped (the message still
-   * arrives on the next sync) rather than failing schema validation silently.
+   * The envelope says the server encrypted the `data` body. When true, `body` is the base64
+   * ciphertext frame (not JSON) and the caller must decrypt it before dispatch — see
+   * {@link encryptionType}. An UNSUPPORTED scheme is logged + skipped rather than failing
+   * schema validation silently. A later sync may recover server-backed state, but cannot recreate
+   * one-time events such as `message-send-error`.
    */
   encrypted: boolean;
   /**

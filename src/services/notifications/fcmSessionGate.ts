@@ -9,8 +9,9 @@ export type FcmSessionState = 'active' | 'forgotten' | 'unavailable';
 
 /**
  * Determine whether a push belongs to a fully retained account without opening the database.
- * SecureStore failures are distinct from a completed forget, but both must fail closed: normal
- * foreground/socket sync can recover a legitimate event after credentials are available again.
+ * SecureStore failures are distinct from a completed forget, but both must fail closed. Normal
+ * foreground/socket sync may recover server-backed state after credentials return, but cannot
+ * recreate a one-time event such as message-send-error.
  */
 export async function readFcmSessionState(
   vault: Pick<SecureVault, 'get'>,

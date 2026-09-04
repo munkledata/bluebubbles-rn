@@ -1,16 +1,25 @@
 # RCS via Google Messages web-pairing — orchestration plan
 
-**Status: code COMPLETE (re-verified against code 2026-07-23). Send to an
-EXISTING RCS chat works end-to-end: the server routes every action by the `RCS;-;` chat guid
-(`routesToRcs` in `actionOperations.ts`), the app's ack reconcile handles the RCS tempGuid-echo
-contract (`sendOutcome.ts`), and OUTGOING bubbles render teal (`MessageBubble` threads the chat's
-service via `chatService`). The former last gap — the new-chat RCS toggle — shipped 2026-07-17:
+> **Document role:** this is the dated implementation record for the base RCS bridge, not a current
+> task-status source. [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) is authoritative.
+
+**2026-07-23 base-bridge evidence: code complete.** Send to an EXISTING RCS chat works end-to-end:
+the server routes every action by the `RCS;-;` chat guid (`routesToRcs` in `actionOperations.ts`),
+the app-facing ack returns the logical tempGuid for reconcile (`sendOutcome.ts`), and OUTGOING
+bubbles render teal (`MessageBubble` threads the chat's service via `chatService`). The former last
+gap — the new-chat RCS toggle — shipped 2026-07-17:
 `app/(app)/new-chat.tsx` offers iMessage | SMS | RCS (RCS chip gated on `useRcsEnabled`, never
 auto-picked, 1:1-only, falls back if the capability disappears mid-compose) and passes
-`service:'RCS'` through `createChat`. On-device end-to-end run against a live deploy still pending.**
+`service:'RCS'` through `createChat`. On-device end-to-end run against a live deploy still pending.
 Format: a Context section, then numbered prompts. Each prompt = concrete task (with file
 paths) + one rationale sentence (so the implementing agent can adapt when reality differs)
 + a verification step (run X, confirm Y) so failure is caught immediately.
+
+**2026-09-04 attempt-identity overlay:** server commit `e55f1210` is source/host-green and not
+claimed deployed. BBD now sends a separate opaque `{tempGuid, attemptGuid}` correlation through the
+sidecar while keeping the logical app ack unchanged. The current app accepts exact `attemptGuid`
+over socket, but it neither enrolls nor decrypts the server's `AEAD_GCM_V2_DEVICE` key scheme, so
+attempt-aware killed-app FCM is blocked on `PUSH-CRYPTO-01` before device proof can begin.
 
 **Progress — all prompts done (incl. the new-chat RCS toggle, shipped 2026-07-17):**
 - ✅ **Prompt 1** — spike LIVE-VALIDATED against the real account (pair via Gaia cookies +
@@ -22,15 +31,16 @@ paths) + one rationale sentence (so the implementing agent can adapt when realit
   `rcs-alert`/`rcs-bridge-down` handling.
 - ✅ **Prompts 8–9 (send + rich features)** — the server routes send/read/typing by the `RCS;-;`
   guid prefix, so the app's normal send path works unchanged against an existing RCS chat
-  (re-verified 2026-07-17: ack reconcile handles the RCS tempGuid echo, outgoing bubbles teal).
+  (re-verified 2026-07-17: the app-facing ack returns the logical tempGuid, outgoing bubbles teal).
   ✅ The new-chat toggle offers RCS since 2026-07-17 (`service:'RCS'` flows through `createChat`
   to the server's `new-chat` sidecar branch; chip gated on `useRcsEnabled`, 1:1-only).
 - ✅ **Prompt 10 (ops hardening)** — cookie re-auth (no re-pair), bridge alerts + `get-rcs-status`,
   `rcs-bridge-down` push, `docs/RCS_RUNBOOK.md` (server repo).
 - Test totals at completion: server bbd **375**, app **563**, sidecar `go build`/`vet` clean.
-- **Remaining:** a full on-device run against a live deploy (dashboard pairing → real RCS in
-  the app on the phone) — everything below the app was live-validated via the sidecar HTTP
-  API, but the phone-app-through-server path hasn't been exercised on-device yet.
+- **Remaining for the base bridge:** a full on-device run against a live deploy (dashboard pairing
+  → real RCS in the app on the phone) — everything below the app was live-validated via the
+  sidecar HTTP API, but the phone-app-through-server path has not been exercised on-device. The
+  later immutable-attempt and V2 FCM dependencies remain separately open in the work plan.
 
 **Findings locked in from Prompt 1 (feed into later prompts):**
 - Pinned **`go.mau.fi/mautrix-gmessages v0.2605.0`** (CalVer 26.05, latest). Local toolchain
@@ -45,7 +55,7 @@ paths) + one rationale sentence (so the implementing agent can adapt when realit
   one JSON `libgm.AuthData` blob; `NewClient(authData)` + `Connect()` resumes with no re-pair.
 - Send needs the conversation first: `GetConversation` → `ParticipantID =
   conv.GetDefaultOutgoingID()`, `SIMPayload = conv.GetSimCard().GetSIMData().GetSIMPayload()`,
-  a uuid `tmpID`, wrapped in `SendMessageRequest{MessagePayload{...}}`.
+  an opaque BBD-owned `tmpID`, wrapped in `SendMessageRequest{MessagePayload{...}}`.
 
 ---
 
@@ -64,7 +74,8 @@ OEM-privileged; Google Messages' relay API is signature-allowlisted; RCS lives i
 DB). The web-pairing protocol is the only functioning path, libgm is its only maintained
 implementation (pure Go, no cgo, monthly releases, v26.05 current), and the Gator daemon
 (`packages/bbd`) already has every seam this needs: a source-agnostic event bus whose fanout
-reaches socket + webhooks + encrypted FCM, a supervised-child-process pattern (`ZrokTunnel`),
+reaches sockets and webhooks, plus server-side encrypted FCM when a compatible per-device key is
+enrolled; a supervised-child-process pattern (`ZrokTunnel`),
 a writable Drizzle SQLite + Keychain vault, a unified REST/socket operation model, and a
 loopback-only admin UI for the pairing page. RCS chats ride the **frozen v1 API** with minted
 `RCS;-;<conversationID>` GUIDs and `service: "RCS"`, so the RN app's existing sync/realtime
@@ -181,8 +192,8 @@ consumes the sidecar's `/events` stream + `ClientReady` snapshot + cursor-pagina
 into the cache; DTO mapping — chat guid `RCS;-;<conversationID>`, message guid
 `rcs-<messageID>`, `HandleV1.service = "RCS"`, dates to Unix ms; fanout of
 `new-message`/`updated-message` (status updates arrive as message updates) reusing the three
-sinks in `serialize/messageFanout.ts` (`emitToAuthed`, webhooks, push with `AEAD_GCM_V1`
-encryption) — read that file first and choose: feed chat.db-shaped rows through the existing
+sinks in `serialize/messageFanout.ts` (`emitToAuthed`, webhooks, and push) — read that file first
+and choose: feed chat.db-shaped rows through the existing
 `wireMessageFanout`, or add a thin `wireRcsFanout` taking pre-serialized DTOs; whichever
 needs fewer lies wins. Add the additive `rcs: boolean` capability to `ServerInfoV1`
 (`packages/protocol/src/v1/entities.ts`) and its handler. Default overlap policy: ingest ALL
@@ -192,8 +203,9 @@ queryable when the phone naps, and reusing the fanout sinks is what makes socket
 webhooks work with zero new transport code.
 **Verify:** bbd typecheck/tests clean; with a paired sidecar running, text the phone and
 confirm (a) a row lands in `rcs_messages`, (b) a `new-message` event arrives on a test
-socket.io client, and (c) an FCM push fires to a registered device with the encrypted
-payload.
+socket.io client, and (c) after `PUSH-CRYPTO-01` closes, an FCM push reaches a registered device
+with the negotiated encrypted payload. The current server's V2-or-metadata-only behavior is not the
+historical V1 design assumed by this prompt.
 
 ### Prompt 6 — Serve reads: v1 endpoints + attachment bytes
 **Task:** Extend the read operations in
@@ -226,8 +238,8 @@ is mostly cosmetic — if something deeper breaks (a zod reject, an upsert colum
 model layer per the AGENTS.md migration checklist rather than special-casing the UI.
 **Verify:** `npm run typecheck && npm test` clean in the RN repo; on device against the live
 server: the RCS conversation appears in the list with the badge, history renders, and a text
-sent to the phone appears in the app in realtime (socket) and as an FCM notification with
-the app killed.
+sent to the phone appears in the app in realtime over the socket. Run the killed-app FCM row only
+after `PUSH-CRYPTO-01` adds compatible per-device enrollment/decryption to a replacement candidate.
 
 ### Prompt 8 — Send path: text from the app to RCS
 **Task:** In `packages/bbd/src/rcs/RcsSender.ts` + the action operations
@@ -239,7 +251,9 @@ onto the existing error envelope so the app's retry UI works. Also route the `ne
 operation: when the requested service is RCS (or the address resolves to an RCS-capable
 contact), create the conversation via the sidecar (`GetOrCreateConversation`) and return a
 `RCS;-;` chat — so the app can START conversations, not just reply (the RN app's new-chat
-screen already has a service toggle to extend).
+screen already has a service toggle to extend). Mark a failure automatically retryable only when
+dispatch provably never began (`ECONNREFUSED` or lifecycle rejection before fetch); timeout, reset,
+sidecar HTTP, and post-dispatch outcomes remain non-retryable because they may have reached Google.
 **Rationale:** routing at the operation layer keeps `MessageSender` and every iMessage code
 path untouched — the safest possible seam given both share endpoints.
 **Verify:** from the RN app, send a text to an RCS chat and confirm it arrives on the

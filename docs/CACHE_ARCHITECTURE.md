@@ -1,6 +1,7 @@
 # Gator RN — Data Caching Architecture
 
-_Reference notes, generated 2026-06-24 from a code-verified subsystem audit._
+_Reference notes, generated 2026-06-24 from a code-verified subsystem audit; realtime/push boundary
+updated 2026-09-04._
 
 ## TL;DR
 
@@ -70,17 +71,20 @@ FTS5 search index.
   the whole batch (incl. duplicates → forward progress), and **persists it after every page**
   so sync resumes after a kill. Only this path advances the marker.
 
-### 4. Realtime write path (FCM + socket → EventRouter → DbEventSink)
+### 4. Realtime write path (FCM + socket → durable intake → EventRouter → DbEventSink)
 
 `src/core/realtime/eventRouter.ts`, `src/services/realtime/dbEventSink.ts`,
+`src/services/realtime/incomingEventDispatcher.ts`, `src/core/realtime/incomingEventCodec.ts`,
 `src/services/notifications/fcmPayload.ts`
 
 - `parseFcmData` reads the event name from the envelope `type` and the body from the nested
   `data` JSON string (no top-level `payload`).
-- `dispatchRealtimeEvent` → one shared `EventRouter` (socket + FCM share its dedup set) →
-  `coerceData` JSON-parses the body once → zod normalize → `DbEventSink.onEvent` upserts
-  handles/chats, resolves the chat, reconciles your own optimistic `temp-` row in place, then
-  `upsertMessages`.
+- For eligible unlocked socket/FCM input, `dispatchRealtimeEvent` snapshots and normalizes the
+  envelope, derives its canonical occurrence identity, and persists it to the encrypted
+  `incoming_event_queue` **before** any domain or presentation effect. A bounded token/version-
+  fenced lease then routes the normalized event through `EventRouter`/`DbEventSink`; the DB phase is
+  checkpointed in its domain transaction and presentation retries read current DB truth. Locked FCM
+  is the deliberate no-DB exception and posts only a generic notice.
 - Does **not** advance the sync marker — the next incrementalSync re-fetches the overlap and
   the idempotent upsert + `GuidDeduper` absorb it.
 
@@ -170,19 +174,22 @@ value TEXT)`.
 
 ### 10. Bounded in-memory dedup / cancel sets
 
-- `GuidDeduper` (Set + insertion-order array, cap 5000, evicts oldest) de-dups FCM-vs-socket
-  message overlap; can be shared with the live path.
-- `EventRouter` has its own `seen` Set (cap 500) to suppress duplicate **notifications**
-  (new-message only; updated-message is not deduped).
+- `GuidDeduper` (Set + insertion-order array, cap 5000, evicts oldest) remains a compatibility
+  defense for message upserts.
+- `EventRouter` has its own process-local `seen` Set (cap 500) on the legacy direct new-message
+  path. Eligible modern socket/FCM events instead use canonical durable occurrence receipts;
+  `message-send-error` uses server `attemptGuid` as exact identity when present.
 - `outgoing.ts` `cancelledTempGuids` (cap 256) tracks user-cancelled sends.
-- All reset on every (re)launch; cross-session dedup relies on the idempotent DB upsert.
+- The in-memory sets reset on every (re)launch. Durable terminal receipts survive restart for seven
+  days and at most 2,000 rows; cross-session message convergence also retains idempotent DB upserts.
 
 ---
 
 ## Data flow
 
-- **In:** server → sync engine **or** FCM/socket → `EventRouter` / upserts → DB tables →
-  adapter flush.
+- **In:** server → sync engine **or** eligible unlocked FCM/socket → encrypted durable queue →
+  `EventRouter` / guarded upserts → DB tables → adapter flush. Locked FCM posts a generic notice
+  without opening the DB.
 - **Out:** DB write → flush → reactive subscription fires → re-query → React state → UI.
 
 ---
@@ -208,9 +215,14 @@ value TEXT)`.
   server-supplied message `payloadData` or an exact-key legacy `url_previews` row; a cache miss stays
   a raw externally opened link, and no path mounts remote artwork. A future proxy/native bounded-fetch
   design is tracked in the master work plan.
-- **Encrypted FCM payloads (AES-GCM)** — supported `AEAD_GCM_V1` frames are decrypted on-device and
-  enter `EventRouter` when the App Lock policy allows DB work. Unsupported/bad frames and locked
-  delivery catch up on the next sync; locked delivery posts only a generic notice.
+- **Encrypted FCM payloads (AES-GCM)** — the current app supports only the legacy password-derived
+  `AEAD_GCM_V1`; accepted frames enter durable intake when App Lock policy allows DB work. Current
+  server source instead offers per-device `AEAD_GCM_V2_DEVICE`, sends only type plus `{}` when no V2
+  key is enrolled, and never falls back to V1. The app does not yet enroll or decrypt V2, so
+  end-to-end keyed push is blocked on `PUSH-CRYPTO-01`. After an unsupported/bad frame or locked
+  delivery, server-state-backed message content may catch up on a later sync. One-time events such
+  as `message-send-error` are not reconstructed by ordinary sync and are lost unless another live
+  transport delivers them. Locked delivery posts only a generic notice.
 - **Backups** — new encrypted v3 backups carry allow-listed settings, user themes, per-chat
   customizations, and custom-folder name/order/badge/membership data. Folder membership uses the
   same portable service/kind/stable-identifier/participant evidence as chat-customization restore;

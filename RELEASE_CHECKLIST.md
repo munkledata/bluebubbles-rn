@@ -231,8 +231,9 @@ At minimum:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
 - [ ] Connect, full sync, send, receive, edit/unsend, react, attach, retry, search, and local delete work.
-- [ ] Kill with `adb shell am kill <package>` (never `am force-stop` for delivery testing); an FCM push
-      writes to the encrypted DB and posts the expected notification.
+- [ ] After `PUSH-CRYPTO-01` is complete in a replacement candidate, kill with
+      `adb shell am kill <package>` (never `am force-stop` for delivery testing); a compatible
+      per-device-encrypted FCM push writes to the encrypted DB and posts the expected notification.
 - [ ] Notification privacy transitions, actions, reminders, channels, killed/background/foreground
       taps, and FaceTime alerts pass with no stale private system state.
 - [ ] App Lock, generic locked notifications, Android Recents, biometric resume, account switch, and

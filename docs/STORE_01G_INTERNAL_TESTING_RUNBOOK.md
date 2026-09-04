@@ -79,6 +79,12 @@ the current handoff; future sessions should read only the Work Plan register and
 - The conforming current local candidate is `0.1.43` / version code `59`, identified in section 1.
   It is eligible for later separately approved Play and device work but supplies static artifact
   evidence only today.
+- Immutable server-owned RCS attempt identity is source/host-green at server commit `e55f1210`, but
+  that commit is not recorded as deployed against this candidate. The exact text/media echo,
+  physical-phone namespace, and restart/re-pair procedure remain open in
+  [the current-candidate matrix below](#61-push-retry-01-immutable-rcs-attempt-identity). Its FCM
+  rows are not executable with v59: this app enrolls no `AEAD_GCM_V2_DEVICE` key and cannot decrypt
+  that server scheme, so `PUSH-CRYPTO-01` must produce a replacement candidate first.
 - The release build phase is local-only and cannot submit. A separate submit phase previews by default and requires
   `--execute` plus an interactive candidate-specific phrase; no upload or submission was run for v59. The existing
   GitHub Actions native lane compiles disposable fixture/debug-signed APK/AAB verification artifacts. Manual run
@@ -168,7 +174,7 @@ Record these non-secret facts after provisioning:
 | Server fact                                                    | Value                                        | Status  |
 | -------------------------------------------------------------- | -------------------------------------------- | ------- |
 | Environment label                                              | `[OWNER INPUT — no hostname or URL]`         | OPEN    |
-| Server repository commit/version                               | `[OWNER INPUT]`                              | OPEN    |
+| Server repository commit/version                               | `[OWNER INPUT — must contain e55f1210 or reviewed descendant]` | OPEN    |
 | macOS/server compatibility owner                               | `[OWNER INPUT]`                              | OPEN    |
 | Stable HTTPS/tunnel method                                     | `[OWNER INPUT — method only]`                | OPEN    |
 | Dedicated synthetic identity confirmed                         | `No — owner deferred isolation (2026-08-23)` | BLOCKED |
@@ -265,9 +271,14 @@ v56, v57, or v58 device records.
    - Send and receive staged text plus one small staged attachment.
    - Exercise sync, reply/reaction, retry, search, and the selected edit/unsend path only when the
      staged server reports support.
+   - Complete the linked `PUSH-RETRY-01` physical-phone text/media correlation and restart/re-pair
+     checks; record only bounded non-secret evidence.
 5. **Lifecycle and notifications**
    - Exercise foreground, background, ordinary process kill, notification receipt/tap, app restart,
      and reconnect. Do not use Android force-stop as killed-process delivery evidence.
+   - After the `PUSH-CRYPTO-01` prerequisite is implemented in a replacement candidate, complete the
+     linked attempt-A/attempt-B killed-app `message-send-error` matrix with encrypted FCM and
+     cross-transport exact deduplication. This branch must not be attempted or credited to v59.
 6. **Privacy and containment**
    - Confirm locked notices remain generic, no inbound Android share target appears, and captured logs,
      screenshots, Recents, and notifications contain no private value.
@@ -280,6 +291,62 @@ v56, v57, or v58 device records.
    - Revoke or expire staged credentials and remove the tester when the round ends. After Play's
      propagation delay, verify the removed account cannot newly enroll or install; an existing copy
      can remain installed until the tester removes it.
+
+### 6.1 `PUSH-RETRY-01` immutable RCS attempt identity
+
+The current v59 app cannot complete this matrix: it registers only `{name, provider, token}` and
+supports the legacy password-derived `AEAD_GCM_V1`, while the current server sends payload data only
+under optional per-device `AEAD_GCM_V2_DEVICE`. Without that key, FCM intentionally carries only the
+event type plus `{}`. Run the socket/phone rows only with an isolated staged server whose recorded
+commit is `e55f1210` or a reviewed descendant. Run the FCM rows only after a replacement exact app
+candidate closes the prerequisite below. Keep raw phone ids, message ids, temp/attempt ids,
+payloads, tokens, and database paths out of the evidence; record only commit/build identities,
+counts, equality or difference results, timestamps, and PASS/FAIL.
+
+- [ ] **HARD PREREQUISITE FOR FCM ROWS:** `PUSH-CRYPTO-01` has added random V2 key generation,
+      managed-device registration with `messages:write`, server acknowledgement/pinning, secure key
+      lifecycle, `AEAD_GCM_V2_DEVICE` decryption with event type as authenticated data, and
+      downgrade/replay handling to the exact installed app candidate. Cross-language vectors and
+      host negative tests pass. Until then, record this prerequisite as BLOCKED and stop before the
+      killed-app FCM steps.
+
+- [ ] Pair one physical Android phone for RCS. Record only that the sidecar's destination-
+      registration phone namespace is non-empty and compares equal before and after a sidecar/BBD
+      restart; do not record the identifier itself. If an upgraded Gaia session performs the
+      documented one-time watermark reset/resweep, record that it completed without duplicate
+      visible messages.
+- [ ] Send one staged RCS text and one small staged RCS attachment. Also exercise an approved staged
+      request at the documented maximum `tmpID` length. For each, prove Google/libgm returned the
+      opaque correlation and owner-only `rcs.db` retained a non-empty correlation/phone pair for the
+      resulting real message. Record only before/after matching-row counts and PASS/FAIL.
+- [ ] After the hard prerequisite passes, begin a staged RCS attachment send while the app is alive.
+      Use a deterministic staged loopback fault seam: let readiness, admission, and media
+      preparation pass; hold the sidecar fetch pending until the immediate ack returns; then
+      background the app and run `adb shell am kill <package>`. Release the held fetch as classified
+      `ECONNREFUSED`, proving the sidecar never accepted attempt A. A text/new-chat failure,
+      bridge-down preflight, or lifecycle stop that wins before the ack does not exercise this
+      event. Confirm A is emitted with `retryable: true`, FCM starts the killed process, the keyed
+      payload decrypts as `AEAD_GCM_V2_DEVICE`, socket/FCM copies converge to one durable occurrence,
+      the exact bubble reaches error once, and the automatic ladder re-enqueues the attachment. Do
+      not use force-stop.
+- [ ] Restore the bridge and let that automatic ladder send attempt B under the same logical
+      tempGuid. Prove its attempt id differs from A. Replay an **already-processed** copy of A through
+      the other authorized transport and verify it neither evicts B's server reservation nor
+      changes B's app state. A first-ever A event delayed until after B is not yet fenced by
+      app-side attempt ownership; do not claim that stronger result.
+- [ ] Separately surface one correlated delivery-phase failure and confirm it marks only its exact
+      bubble after restart/status-only delivery. Record the current client limitation: because the
+      immediate ack already consumed its queue, Try Again reports that the message cannot be resent.
+      Do not claim a user-driven attempt B until a durable post-ack retry design is implemented.
+- [ ] Restart BBD between the correlated message frame and a status-only failure, then verify the
+      failure still resolves to the same attempt. Re-pair the staged phone and verify an old
+      phone/message correlation is not accepted in the new phone namespace.
+- [ ] Record the honest residuals with the result: a crash after Google accepts the send but before
+      BBD durably receives the first correlated frame is not covered, and a correlation older than
+      90 days or outside the newest 50,000 cached messages falls back to non-exact socket/webhook
+      delivery. These boundaries do not turn a failed run into a pass.
+
+Record the bounded result in the `RCS immutable-attempt matrix` row in section 7.
 
 Detailed native checks still belong to `DEVICE-01` and a refreshed
 [`DEVICE_VERIFICATION_CHECKLIST.md`](./DEVICE_VERIFICATION_CHECKLIST.md). This runbook does not turn a
@@ -306,6 +373,7 @@ host test into device evidence.
 | Prior-build baseline           | Project owner        | 2026-08-23 | APPROVED — execution unverified      |                            |
 | Prior-build update journey     |                      |            | OPEN                                 |                            |
 | Notification/lifecycle journey |                      |            | OPEN                                 |                            |
+| RCS immutable-attempt matrix   | Codex               | 2026-09-04 | BLOCKED — v59 lacks V2 client; server `e55f1210+` also not deployed |                            |
 | Disconnect/cleanup             |                      |            | OPEN                                 |                            |
 | Credential/tester revocation   |                      |            | OPEN                                 |                            |
 

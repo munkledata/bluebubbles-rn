@@ -388,7 +388,7 @@ function identityDescriptor(
       const explicitAttemptGuid = nonEmptyString(event.payload.attemptGuid);
       if (explicitAttemptGuid) {
         return {
-          // Additive protocol target: one immutable id is generated when a real dispatch is
+          // Current additive contract: one immutable id is generated when a real dispatch is
           // admitted and reused for every socket/FCM/webhook/redelivery copy of that attempt.
           // A later retry gets a new id even though it deliberately reuses tempGuid.
           value: ['message-send-error-attempt', explicitAttemptGuid],

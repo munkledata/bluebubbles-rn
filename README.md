@@ -123,9 +123,11 @@ the EAS profiles intentionally have no update-channel fields.
   SQLCipher-encrypted SQLite database. Server credentials, its random key, the App Lock flag, and
   a few boot-time secrets live separately in Android SecureStore/Keystore.
 - **App Lock:** this is a foreground/policy screen gate, not biometric-bound key custody. Locked
-  pushes post a generic notice and catch up after unlock. When enabled, it keeps protected content
-  out of Android Recents, including during its grace period. The independent Secure Screen setting
-  blocks screenshots and screen recording. Neither setting adds encryption to files.
+  pushes post a generic notice. Server-state-backed message content may catch up after unlock and
+  sync, but one-time events such as `message-send-error` are not reconstructed unless another live
+  transport delivers them. When enabled, App Lock keeps protected content out of Android Recents,
+  including during its grace period. The independent Secure Screen setting blocks screenshots and
+  screen recording. Neither setting adds encryption to files.
 - **Files:** attachments, wallpapers/backgrounds, cached contact images, app logs, incoming-share
   copies, and image or other Android/Expo-managed caches are ordinary plaintext files in Android
   app-private storage.

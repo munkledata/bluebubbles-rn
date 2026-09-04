@@ -121,6 +121,15 @@ Every physical send attempt needs one immutable, non-empty `attemptGuid` reused 
 and webhook copies so temp-only or RCS send errors can be deduplicated without conflating a later
 retry.
 
+Attempt-aware FCM acceptance depends on the coordinated `PUSH-CRYPTO-01` client migration. The
+server deliberately sends payload data only when a canonical per-device V2 key is enrolled;
+otherwise FCM receives routing type plus empty-object metadata. Socket/webhook attempt identity can
+be implemented and verified independently, but it does not prove the killed-app FCM branch.
+Exact occurrence identity also does not yet persist which attempt owns the optimistic bubble. It
+deduplicates an already-processed A replay, but a first A copy delayed until after B can still act on
+their shared tempGuid. Closing the parent requires durable active-attempt ownership as well as the
+V2 push migration; keep those implementation tails separate from server source proof.
+
 <a id="delete-sync-01"></a>
 
 ## `DELETE-SYNC-01` — lossless missed-deletion catch-up
