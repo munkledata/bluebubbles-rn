@@ -1,7 +1,7 @@
 # Session-scoped state inventory
 
 - **Owner:** `REL-003A`
-- **Host baseline:** 2026-08-24, post-v56 source
+- **Host baseline:** 2026-09-04, source through `40b907d`
 - **Release status:** Host inventory complete; Android A→Disconnect→B proof on a future candidate
   containing this post-v56 work remains open.
 
@@ -91,7 +91,6 @@ still has to acquire the current durable/session authority shown above.
 | App Lock store                                 | Device policy and current lock gate                                                                                                                                                                   |
 | Share-intent store                             | Device-originated handoff must survive the unauthenticated gate until a recipient is chosen; public ACTION_SEND intake remains disabled                                                               |
 | Notification channel promises/app avatar       | Android application configuration, not message/account content                                                                                                                                        |
-| URL-preview request dedupe                     | Public URL-to-public-metadata promise only; it carries no Gator credentials and the production preview hook is read-only under `NET-00`                                                               |
 | Global error-handler/logger installation flags | One-time process wiring; account log payloads are reset/cleared separately                                                                                                                            |
 | Reduced-motion listener set                    | Android accessibility preference observers only                                                                                                                                                       |
 

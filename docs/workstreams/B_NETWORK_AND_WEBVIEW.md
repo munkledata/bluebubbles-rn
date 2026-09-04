@@ -12,8 +12,10 @@ network contact, persistence, credential use, navigation, or native permission g
 
 ## `NET-01` — bounded, private-network-safe previews
 
-Keep automatic preview fetching disabled through `NET-00` unless this pipeline is intentionally
-restored. Implement restoration as four separate slices rather than one large change:
+`NET-00` removes the client HTML fetch/parser. Server-supplied `payloadData` and exact-key
+legacy-cache text may render because neither path contacts the link host; neither is an
+implementation of this task. If in-app preview retrieval is intentionally restored, implement it
+as four separate slices rather than one large change:
 
 1. `NET-01A` decides the transport or proxy boundary and records its threat model.
 2. `NET-01B` canonicalizes URLs and enforces DNS, resolved-address, and redirect policy.
@@ -145,7 +147,8 @@ arbitrary self-signed leaf.
 
 ## Sequencing contract
 
-1. Keep `NET-00` containment in force while `NET-01A..D` are designed and implemented.
+1. Keep `NET-00` containment—including the absence of a client HTML fetch/parser and remote-artwork
+   mount—in force while `NET-01A..D` are designed and implemented.
 2. For an embedded map, apply `WEB-01`, then `WEB-02`, then `WEB-03`; do not re-enable the path with
    only part of that chain. `FACE-01` reuses the completed navigation boundary.
 3. Complete `RT-01A` client containment before relying on lifecycle application or considering the

@@ -35,7 +35,7 @@ FTS5 search index.
   `chats`, `handles`, `attachments` (metadata only), `chat_handles`.
 - _Search_: `messages_fts` (FTS5 index — see layer 6).
 - _Operational/queue state_: `scheduled_messages`, the outgoing send/retry queue,
-  `sync_markers` (the incremental cursor), `url_previews` (negative-cached), `kv`, `themes`.
+  `sync_markers` (the incremental cursor), legacy read-only `url_previews` rows, `kv`, `themes`.
 
 ### 2. DB encryption key + SecureVault (Android Keystore)
 
@@ -204,9 +204,10 @@ value TEXT)`.
   prove a safe floor.
 - **Pull-to-refresh** deliberately does a _light_ sync and does not bulk re-fetch existing
   chats' messages (avoids wedging the single-threaded server).
-- **URL/Open-Graph previews** — current containment is cache-only: previously stored metadata may
-  render, but displaying a message does not fetch its arbitrary remote URL. A future proxy/native
-  bounded-fetch design is tracked in the master work plan.
+- **URL/Open-Graph previews** — the client has no HTML fetch/parser. Text-only metadata may come from
+  server-supplied message `payloadData` or an exact-key legacy `url_previews` row; a cache miss stays
+  a raw externally opened link, and no path mounts remote artwork. A future proxy/native bounded-fetch
+  design is tracked in the master work plan.
 - **Encrypted FCM payloads (AES-GCM)** — supported `AEAD_GCM_V1` frames are decrypted on-device and
   enter `EventRouter` when the App Lock policy allows DB work. Unsupported/bad frames and locked
   delivery catch up on the next sync; locked delivery posts only a generic notice.

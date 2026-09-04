@@ -147,9 +147,10 @@ but its affected-row count is not portable. Use`RETURNING` or a builder when own
 - Public ACTION_SEND/Direct Share intake is intentionally disabled. Do not reactivate historical
   `expo-share-intent` or custom native intake paths without a new approved design. See
   `docs/SHARE_INTENT_RELIABILITY.md`.
-- Validate server/user-controlled URLs and file paths before native access. URL previews are
-  attacker-controlled HTTP input and require scheme, redirect, size, timeout, and content-type
-  limits.
+- Validate server/user-controlled URLs and file paths before native access. Current server/cache
+  preview metadata is inert and must remain network-free. Any future preview fetcher must satisfy
+  `NET-01`, including scheme, DNS/address binding, redirect, decompressed-byte, timeout, and
+  content-type limits.
 
 ## UI contracts worth keeping always visible
 

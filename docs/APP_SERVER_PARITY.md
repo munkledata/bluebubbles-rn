@@ -151,7 +151,7 @@ error, batch-uploads them, and the server fingerprints (categorizes) + writes th
   the operation (401/enabled/disabled/400), and the server-info capability. Device-only: the global handlers
   firing + the real upload/disk write.
 
-## ✅ Closed (2026-07-20) — rich-link previews (`payloadData`)
+## ✅ Closed (2026-07-20) — server-supplied rich-link metadata (`payloadData`)
 
 Received links previously rendered blank cards: the app re-fetched every URL itself with a
 bot-looking User-Agent (blocked by X/Instagram/Amazon/news CDNs), while Apple's OWN pre-fetched
@@ -166,16 +166,17 @@ videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL bal
   protocol; REST + socket + FCM all carry it (single serializer). NO capability flag — additive,
   use-if-present (precedent: `messageSummaryInfo`/`isScheduled`). Validated against 578 real
   chat.db blobs (512 decode, 66 are placeholders).
-- **App** (`bluebubbles-rn`): `payload_data` JSON TEXT column (migration `0027`, COALESCE-preserved
-  like `messageSummaryInfo`); zod `PayloadData` with `.catch(undefined)`; `MessageBubble` renders
-  the card straight from it (image/icon URLs re-checked with `isSafePreviewUrl`) and passes
-  `useUrlPreview(null)` so payload-backed messages NEVER fetch. Fallback (no payload: old rows,
-  placeholders, old servers) = the client OG fetch, hardened 2026-07-20: real Safari UA, 512KB
-  pre-reject → 5MB DoS guard only, transient failures (403/429/timeout) no longer negative-cached.
-- **Postscript (0.1.28, 2026-07-21)**: preview IMAGES had never rendered on-device regardless of the
-  metadata source — a card-layout circularity resolved the image to width 0 (looked like a
-  network/library bug for a whole evening; see the AGENTS.md UI gotcha). `UrlPreviewCard` now uses a
-  fixed `width:'78%'`, verified rendering on-device. Preview cards are feature-complete end to end.
+- **App** (`bluebubbles-rn`): `payload_data` remains a COALESCE-preserved JSON TEXT column with a
+  tolerant zod `PayloadData` boundary. `MessageBubble` renders server text metadata directly without
+  contacting the link host. When `payloadData` is absent, the app may read an exact-key legacy
+  `url_previews` row; a miss leaves the raw externally opened link. Under `NET-00`, neither source
+  mounts remote artwork. App commit `40b907d` removed the dormant client OG fetch/parser on
+  2026-09-04; any future retrieval path must satisfy `NET-01`.
+- **Historical postscript (0.1.28, 2026-07-21; superseded by `NET-00` containment):** A fixed
+  `width:'78%'` resolved the then-mounted preview image's zero-width layout cycle and was verified on
+  device. The fixed width remains the stable text-card layout, but current cards intentionally do
+  not mount remote artwork; the old feature-complete claim no longer applies, and `NET-01` remains
+  open.
 
 <a id="missed-deletion-catch-up-sync-r1"></a>
 

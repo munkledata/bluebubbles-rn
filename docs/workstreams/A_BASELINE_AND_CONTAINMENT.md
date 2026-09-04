@@ -30,9 +30,10 @@ that a deliberate source regression still fails its focused check.
 ## `NET-00` — immediate automatic-preview containment
 
 Received message text must not initiate remote HTML or image traffic merely because a conversation
-was opened. Until the bounded pipeline in `NET-01` is deliberately enabled, in-app preview fetching
-stays disabled. An explicit user action may hand an allowed public URL to the system browser, and an
-already cached preview may be displayed only when doing so causes no new preview request.
+was opened. Until the bounded pipeline in `NET-01` is deliberately selected and completed, the
+client HTML fetch/parser stays absent. An explicit user action may hand an allowed public URL to the
+system browser; server-supplied `payloadData` or exact-key legacy-cache text may render only when
+doing so causes no preview request or remote-artwork mount.
 
 Apply this containment before designing the replacement pipeline. It is the safe default if that
 larger work is deferred, interrupted, or disabled again.

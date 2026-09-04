@@ -245,7 +245,7 @@ export async function seedFixtures(): Promise<number> {
       hm,
     );
 
-    // Phase 7 fixtures: a tapback on "Morning! ☀️" and a threaded reply to "You catch the keynote?".
+    // Phase 7 fixtures: reaction, sticker, reply, and a raw URL; the inline OG note below is obsolete.
     await upsertMessages(
       db,
       [

@@ -2,9 +2,9 @@
 
 - **Owner:** `REL-004A..C`
 - **Baseline:** 2026-08-24, post-v56 source
-- **Status:** Host inventory and focused remediation complete through the 2026-09-03 foreground
-  handoff follow-up; Android A→Disconnect→B and real native-handoff proof remain open on a future
-  candidate that contains this work.
+- **Status:** Host inventory and focused remediation complete through the 2026-09-04 client-preview
+  containment follow-up; Android A→Disconnect→B and real native-handoff proof remain open on a
+  future candidate that contains this work.
 
 This is the formal inventory for asynchronous work that can outlive the account that started it.
 It complements `docs/SESSION_SCOPED_STATE_INVENTORY.md`: that document owns what process-memory
@@ -31,7 +31,7 @@ closed.
 | iMessage Account              | Key is `['server', 'icloud-account', generation]`; GET success/error and alias mutation use the captured lease. Generation invalidation now reactively removes already-resolved account details.                                                                                       | `accountScreen.test.tsx` delayed success/error, alias mutation, and resolved-data retirement | Fixed in this batch                         |
 | Server Management             | Ping, stats, and server-info keys each include generation. Shared reads reject stale success/error; app-wide server-info publication and retained actions recheck ownership.                                                                                                           | `serverManagementScreen.test.tsx`                                                            | Guarded                                     |
 | Server Health                 | Ten channel keys share `['server', 'health', generation, channel]`. Reads, refresh, alert clearing, RCS actions, cache mutation, and mounted presentation are generation-owned.                                                                                                        | `serverHealthScreen.test.tsx`                                                                | Guarded                                     |
-| Local/non-account query state | Chat search is an encrypted-DB read whose query entry is destroyed at Disconnect; the exact same-key non-abortable A→B case is covered. URL-preview dedupe contains only public URL metadata, no Gator credentials, and its production network caller remains disabled under `NET-00`. | `sessionScopedState.test.ts`, URL-preview containment suites                                 | In scope only at reset/public-data boundary |
+| Local/non-account query state | Chat search is an encrypted-DB read whose query entry is destroyed at Disconnect; the exact same-key non-abortable A→B case is covered. Legacy URL-preview lookup is an exact-key DB read, while server `payloadData` comes from the message row; neither creates a client network promise that can survive account replacement. | `sessionScopedState.test.ts`, URL-preview containment suites                                 | In scope only at reset/public-data boundary |
 
 There are no production `fetchQuery`, `prefetchQuery`, TanStack mutation-cache, or other hidden
 `QueryClient` surfaces. At the `REL-004` freeze, production TanStack query functions did not consume

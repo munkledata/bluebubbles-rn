@@ -195,8 +195,9 @@ npm run check:android-build
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
       credentials. The current candidate contains the host flow from `8564b34` plus post-v57 removal
       commit `9046e27`; exact Android network and SecureStore behavior remains unproven.
-- [ ] URL previews make no automatic third-party request. Exercise the enabled preview fallback and
-      record proxy/network-capture evidence.
+- [ ] URL previews make no automatic third-party request. Exercise server `payloadData`, an upgraded
+      exact-key legacy-cache row, and an uncached URL; none may fetch HTML or artwork, and only an
+      explicit tap may hand the URL to the external browser. Record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
 - [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
