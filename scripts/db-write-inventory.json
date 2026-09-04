@@ -290,7 +290,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda",
       "path": "app/(setup)/manual.tsx",
-      "line": 29,
+      "line": 23,
       "symbol": "Manual.submit",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -303,7 +303,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510",
       "path": "app/(setup)/manual.tsx",
-      "line": 66,
+      "line": 60,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
@@ -316,7 +316,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2",
       "path": "app/(setup)/manual.tsx",
-      "line": 87,
+      "line": 81,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",

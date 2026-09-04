@@ -1,23 +1,17 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { connect } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { Button, Screen, TextField, useTheme } from '@ui';
+import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 
 export default function Manual(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const kbVisible = useKeyboardVisible();
   const [url, setUrl] = useState('');
   const [password, setPassword] = useState('');
   const [allowInsecure, setAllowInsecure] = useState(false);
@@ -34,10 +28,10 @@ export default function Manual(): React.JSX.Element {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      {/* Android edge-to-edge no longer resizes this route reliably. Apply the keyboard inset as
+          padding only while it is visible so the form stays reachable without leaving a residual
+          navigation-bar-sized gap after the keyboard hides. */}
+      <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
         <ScrollView
           contentContainerStyle={[styles.content, { paddingTop: insets.top + 32 }]}
           keyboardShouldPersistTaps="handled"
