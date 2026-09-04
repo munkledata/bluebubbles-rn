@@ -13,7 +13,10 @@ import type { MessagePreview, MessageRow, ReactionRow, UrlPreviewRow } from '@db
 // Same reasoning as messageBubble.test.tsx: keep the attachment/services (ESM `ky`) module
 // graph out of this suite — these are text-with-link bubbles only.
 jest.mock('@ui/attachments', () => {
+  // Jest must load these after installing the module mock.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Text } = require('react-native');
   return {
     AttachmentView: () => React.createElement(Text, null, 'ATT'),
@@ -27,6 +30,8 @@ jest.mock('@ui/attachments', () => {
 
 // Run the real useUrlPreview query callback without opening op-sqlite in the component test.
 jest.mock('@db/useReactiveQuery', () => {
+  // Jest must load React after installing the module mock.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
   return {
     __esModule: true,
@@ -69,12 +74,6 @@ jest.mock('@db/useReactiveQuery', () => {
 
 jest.mock('@db/repositories', () => ({ getUrlPreview: jest.fn() }));
 
-// Keep the literal-host validator real, but make the retired in-app fetch pipeline observable.
-jest.mock('@/services/urlPreview', () => ({
-  ...jest.requireActual('@/services/urlPreview'),
-  fetchOgMetadata: jest.fn(async () => ({ kind: 'transient' })),
-}));
-
 jest.mock('@utils', () => ({
   ...jest.requireActual('@utils'),
   safeOpenUrl: jest.fn(async () => true),
@@ -85,12 +84,9 @@ import { MessageBubble } from '@ui/conversations/MessageBubble';
 // eslint-disable-next-line import/first
 import { getUrlPreview } from '@db/repositories';
 // eslint-disable-next-line import/first
-import { fetchOgMetadata } from '@/services/urlPreview';
-// eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
 
 const mockGetUrlPreview = getUrlPreview as jest.MockedFunction<typeof getUrlPreview>;
-const mockFetchOgMetadata = fetchOgMetadata as jest.MockedFunction<typeof fetchOgMetadata>;
 const mockSafeOpenUrl = safeOpenUrl as jest.MockedFunction<typeof safeOpenUrl>;
 const mockFetch = jest.fn();
 const originalFetch = global.fetch;
@@ -310,7 +306,6 @@ describe('MessageBubble payloadData preview', () => {
     expect(screen.getByText('Example News')).toBeTruthy();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
     expect(mockGetUrlPreview).not.toHaveBeenCalled();
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -319,7 +314,6 @@ describe('MessageBubble payloadData preview', () => {
     await waitFor(() => expect(mockGetUrlPreview).toHaveBeenCalledTimes(1));
     expect(mockGetUrlPreview).toHaveBeenCalledWith(undefined, 'https://example.com/article');
     expect(screen.queryByText('Server Title')).toBeNull();
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
 
     fireEvent.press(screen.getByText('https://example.com/article'));
@@ -327,7 +321,6 @@ describe('MessageBubble payloadData preview', () => {
       expect(mockSafeOpenUrl).toHaveBeenCalledWith('https://example.com/article'),
     );
     expect(mockGetUrlPreview).toHaveBeenCalledTimes(1);
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -346,7 +339,6 @@ describe('MessageBubble payloadData preview', () => {
     await renderWithTheme(<MessageBubble msg={makeMsg()} showTail />);
     expect(await screen.findByText('Cached Title')).toBeTruthy();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
 
     fireEvent.press(screen.getByText('Cached Title'));
@@ -354,7 +346,6 @@ describe('MessageBubble payloadData preview', () => {
       expect(mockSafeOpenUrl).toHaveBeenCalledWith('https://example.com/article'),
     );
     expect(mockGetUrlPreview).toHaveBeenCalledTimes(1);
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -373,7 +364,6 @@ describe('MessageBubble payloadData preview', () => {
 
     expect(await screen.findAllByText('example.com')).toHaveLength(2);
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -392,7 +382,6 @@ describe('MessageBubble payloadData preview', () => {
     expect(await screen.findByText('Server Title')).toBeTruthy();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
     expect(mockGetUrlPreview).not.toHaveBeenCalled();
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -415,7 +404,6 @@ describe('MessageBubble payloadData preview', () => {
     expect(await screen.findAllByText('example.com')).toHaveLength(2);
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
     expect(mockGetUrlPreview).not.toHaveBeenCalled();
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -425,7 +413,6 @@ describe('MessageBubble payloadData preview', () => {
     });
     await renderWithTheme(<MessageBubble msg={makeMsg({ payloadData: payload })} showTail />);
     await waitFor(() => expect(mockGetUrlPreview).toHaveBeenCalledTimes(1));
-    expect(mockFetchOgMetadata).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });

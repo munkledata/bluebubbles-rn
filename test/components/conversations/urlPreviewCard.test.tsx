@@ -188,13 +188,10 @@ describe('UrlPreviewCard', () => {
     expect(screen.getByText('A Title')).toBeTruthy();
   });
 
-  it('sizes the card with a DETERMINED width — never maxWidth-only (the width-0 image bug)', async () => {
-    // Regression lock for the invisible-image bug (fixed 2026-07-21, see AGENTS.md): the card
-    // was alignSelf + maxWidth-only, so its width came from its children — and the image's
-    // width:'100%' referenced that same parent. Yoga resolves the cycle to width 0: the image
-    // "loads" (onLoad fires) but renders zero pixels, with no error, on every image library.
-    // Jest's mock layout can't reproduce Yoga's resolution, so this asserts the style contract
-    // instead: the card must carry an explicit width, not only a maxWidth.
+  it('keeps a determined width for stable text-card layout', async () => {
+    // This explicit width originally fixed a remote-artwork layout cycle. NET-00 no longer mounts
+    // artwork, but a stable text card still must not fall back to content-dependent maxWidth-only
+    // sizing. Jest cannot reproduce Yoga layout, so assert the style contract directly.
     await renderWithTheme(
       <UrlPreviewCard
         url="https://www.example.com/article"

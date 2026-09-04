@@ -67,7 +67,7 @@ export type UrlPreviewItem = z.infer<typeof UrlPreviewItem>;
  * Apple rich-link metadata for a URL balloon (`payloadData` on the wire). Presence-driven:
  * the server emits it only when the blob decoded to real data — placeholder RichLinks (link
  * sent before its metadata resolved), app balloons, and old servers simply omit it, and the
- * client falls back to its own OG fetch (useUrlPreview).
+ * client falls back to its read-only legacy preview cache or the raw external link.
  */
 export const PayloadData = z
   .object({
@@ -151,8 +151,8 @@ const MessageWire = z.object({
    * server-side. Presence-driven — arrives ONLY on URL balloons with real metadata; already in
    * SYNC_WITH_QUERY, so sync + live socket/FCM deliver it once this field exists. Same
    * `.catch(undefined)` guard as `messageSummaryInfo`: a malformed value degrades to "absent"
-   * (→ the client's own OG fetch) instead of stalling the sync page. Persisted as JSON TEXT;
-   * read back tolerantly via {@link parsePayloadData}.
+   * (→ the read-only legacy cache or raw external link) instead of stalling the sync page.
+   * Persisted as JSON TEXT; read back tolerantly via {@link parsePayloadData}.
    */
   payloadData: PayloadData.nullish().catch(undefined),
 
@@ -287,8 +287,8 @@ export function parseMessageSummaryInfo(raw: string | null | undefined): Message
  * Tolerant read-back parse for the DB's `payload_data` JSON TEXT column: `JSON.parse` then
  * validate against {@link PayloadData}. Returns null on ANY failure (absent, empty, non-JSON,
  * shape mismatch, or no urlData entries) and NEVER throws — a corrupt value degrades to "no
- * server preview" and the OG-fetch fallback takes over. Mirror of the write side
- * (`JSON.stringify` in `upsertMessages`).
+ * server preview" and the read-only legacy cache or raw external link takes over. Mirror of the
+ * write side (`JSON.stringify` in `upsertMessages`).
  */
 export function parsePayloadData(raw: string | null | undefined): PayloadData | null {
   if (!raw) return null;

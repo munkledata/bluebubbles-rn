@@ -184,8 +184,9 @@ export const MessageBubble = React.memo(function MessageBubble({
   // Apple's rich-link metadata (server-decoded payload_data): the title/summary/image the
   // SENDER's device already fetched. When it carries something renderable, synthesize the card
   // row directly — no network fetch, no url_previews cache — which is what makes bot-hostile
-  // sites (X, Instagram, …) preview reliably. Image/icon URLs remain validated for a future
-  // bounded pipeline, but NET-00's card deliberately never mounts remote preview artwork.
+  // sites (X, Instagram, …) preview reliably. Image/icon URLs receive only a literal-host screen
+  // for inert metadata; that does not authorize a request, and NET-00 deliberately never mounts
+  // remote preview artwork.
   const payloadPreview = useMemo<UrlPreviewRow | null>(() => {
     if (isRetracted || !msg.payloadData) return null;
     const item = parsePayloadData(msg.payloadData)?.urlData?.[0];

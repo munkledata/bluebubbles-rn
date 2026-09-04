@@ -158,15 +158,15 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    // Phase 7b: unsend (retract) + a local Open Graph preview cache. Additive only;
+    // Phase 7b: unsend (retract) + the legacy Open Graph preview cache. Additive only;
     // applied transactionally + idempotently by name (runMigrations skips applied).
     name: '0002_edit_unsend_url_previews',
     statements: [
       // Unsend marker. `date_edited` (0001) already serves the "Edited" flag.
       `ALTER TABLE messages ADD COLUMN date_retracted INTEGER`,
 
-      // Open Graph preview cache, keyed by URL (shared across chats).
-      // error=1 is a negative cache so dead URLs aren't re-fetched every render.
+      // Legacy Open Graph preview cache, keyed by URL (shared across chats).
+      // error=1 records the old fetcher's negative-cache result; current reads stay local.
       `CREATE TABLE url_previews (
         url TEXT PRIMARY KEY,
         title TEXT,
@@ -452,9 +452,9 @@ export const MIGRATIONS: Migration[] = [
   {
     // Apple rich-link preview metadata for URL balloons (server-decoded LPLinkMetadata as JSON
     // TEXT — the title/summary/image the SENDER's device already fetched). Lets the chat render
-    // link cards without re-fetching the URL, which bot-hostile sites (X, Instagram, …) serve a
-    // blank shell to. NULL for all existing rows; no backfill — the OG-fetch path stays the
-    // fallback for history and metadata-less links.
+    // link cards without fetching the URL, which bot-hostile sites (X, Instagram, …) may serve a
+    // blank shell to. NULL for all existing rows; no backfill — current history and metadata-less
+    // links use only the read-only legacy cache or raw external link.
     name: '0027_message_payload_data',
     statements: [`ALTER TABLE messages ADD COLUMN payload_data TEXT`],
   },

@@ -1,6 +1,6 @@
 import { isPrivateHost, isSafePreviewUrl } from '@/services/urlPreview';
 
-describe('isPrivateHost (SSRF guard)', () => {
+describe('isPrivateHost (literal metadata classifier)', () => {
   it('flags loopback / private / link-local / internal hosts', () => {
     for (const h of [
       'localhost',
@@ -28,10 +28,9 @@ describe('isPrivateHost (SSRF guard)', () => {
   });
 
   /**
-   * REGRESSION: an IPv4-mapped IPv6 host walked straight through this guard. The suite tested
-   * `::1` / `fe80::1` / `fd00::1`, which READS like IPv6 is covered — but `[::ffff:127.0.0.1]`
-   * matched none of them and `isPrivateHost` returned false, so a link in a received message
-   * could make the app fetch its own loopback (or the cloud-metadata address).
+   * HISTORICAL REGRESSION: an IPv4-mapped IPv6 host walked through this classifier when the
+   * retired client fetcher still consumed it. The suite tested `::1` / `fe80::1` / `fd00::1`,
+   * which READS like IPv6 is covered — but `[::ffff:127.0.0.1]` matched none of them.
    *
    * Both spellings are asserted on purpose: a spec-compliant URL parser normalizes the dotted
    * form to hex, but React Native ships its own URL implementation, so the dotted form can
@@ -60,8 +59,8 @@ describe('isPrivateHost (SSRF guard)', () => {
   });
 });
 
-describe('isSafePreviewUrl', () => {
-  it('allows public http(s) on standard ports', () => {
+describe('isSafePreviewUrl (inert metadata only)', () => {
+  it('allows eligible http(s) URLs with non-private literal hosts on standard ports', () => {
     expect(isSafePreviewUrl('https://example.com/a')).toBe(true);
     expect(isSafePreviewUrl('http://example.com:80')).toBe(true);
     expect(isSafePreviewUrl('https://a.b.c:443/x')).toBe(true);

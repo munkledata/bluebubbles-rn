@@ -48,13 +48,13 @@ describe('url preview cache repository', () => {
     });
   });
 
-  it('records a failed fetch as error=1 so the UI can skip re-fetching', async () => {
+  it('preserves a legacy failed-fetch marker for non-rendering', async () => {
     const t = await createTestDb();
     await setUrlPreview(t.db, URL, { error: true }, 42);
     expect(await getUrlPreview(t.db, URL)).toMatchObject({ error: 1, fetchedAt: 42, title: null });
   });
 
-  it('upserts on conflict: a re-fetch fully replaces the cached row (stale fields cleared)', async () => {
+  it('upserts on conflict: a later cache write fully replaces stale fields', async () => {
     const t = await createTestDb();
     await setUrlPreview(t.db, URL, { title: 'Old', description: 'Old desc', error: true }, 1);
     await setUrlPreview(t.db, URL, { title: 'New' }, 2);

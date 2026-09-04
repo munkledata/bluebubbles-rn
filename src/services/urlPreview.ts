@@ -1,116 +1,10 @@
-export interface OgMetadata {
-  title?: string;
-  description?: string;
-  image?: string;
-  siteName?: string;
-  domain: string;
-}
-
-const META_RE = /<meta\s+[^>]*?(?:property|name)\s*=\s*["']([^"']+)["'][^>]*?>/gi;
-const CONTENT_RE = /content\s*=\s*["']([^"']*)["']/i;
-const TITLE_RE = /<title[^>]*>([^<]*)<\/title>/i;
-
-function decode(s: string): string {
-  return (
-    s
-      // Numeric entities, BOTH decimal (`&#39;`) and hex (`&#x27;`). The hex form is what
-      // Jinja2/Django/Rails and most templating layers emit by default, so a named-only
-      // decoder leaves a literal `&#x27;` in the middle of real-world preview titles.
-      .replace(/&#(\d+);/g, (_m, d: string) => codePoint(parseInt(d, 10)))
-      .replace(/&#x([0-9a-f]+);/gi, (_m, h: string) => codePoint(parseInt(h, 16)))
-      .replace(/&apos;/g, "'")
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&nbsp;/g, ' ')
-      // `&amp;` LAST so an escaped entity (`&amp;#x27;`) decodes to the literal `&#x27;`
-      // rather than being double-decoded into an apostrophe.
-      .replace(/&amp;/g, '&')
-      .trim()
-  );
-}
-
-/** Numeric entity → character; out-of-range/invalid code points are dropped, never thrown. */
-function codePoint(n: number): string {
-  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return '';
-  try {
-    return String.fromCodePoint(n);
-  } catch {
-    return '';
-  }
-}
-
-function absolutize(src: string, base: string): string {
-  try {
-    return new URL(src, base).toString();
-  } catch {
-    return src;
-  }
-}
-
 /**
- * PURE: parse Open Graph / Twitter card meta tags (+ <title> fallback) from raw
- * HTML. No network — given HTML, return metadata. Node-testable.
+ * Literal URL classification retained for inert, server-supplied preview metadata. This module
+ * deliberately performs no network request. A future preview transport must independently resolve
+ * and pin public addresses before connecting; string checks cannot prevent DNS rebinding.
+ *
+ * Private/reserved IPv4 classification is shared by plain IPv4 and the IPv4-mapped IPv6 forms.
  */
-export function parseOgMetadata(html: string, url: string): OgMetadata {
-  let domain = url;
-  try {
-    domain = new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    /* keep raw url */
-  }
-  const out: OgMetadata = { domain };
-
-  META_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = META_RE.exec(html)) !== null) {
-    const key = m[1]!.toLowerCase();
-    const c = CONTENT_RE.exec(m[0]);
-    if (!c) continue;
-    const val = decode(c[1]!);
-    if (!val) continue;
-    if (key === 'og:title' || (key === 'twitter:title' && !out.title)) out.title = val;
-    else if (key === 'og:description' || (key === 'twitter:description' && !out.description))
-      out.description = val;
-    else if (
-      key === 'og:image' ||
-      key === 'og:image:url' ||
-      (key === 'twitter:image' && !out.image)
-    )
-      out.image = absolutize(val, url);
-    else if (key === 'og:site_name') out.siteName = val;
-  }
-  if (!out.title) {
-    const t = TITLE_RE.exec(html);
-    if (t) out.title = decode(t[1]!);
-  }
-  return out;
-}
-
-const MAX_BYTES = 512 * 1024; // parse-window: OG tags live in <head>, well inside this
-const HARD_CAP_BYTES = 5 * 1024 * 1024; // DoS guard only — header may be absent or compressed size
-const TIMEOUT_MS = 8000;
-const MAX_REDIRECTS = 3;
-
-/**
- * Outcome of a preview fetch. The split matters for caching:
- * - `ok`        → cache the metadata (success TTL)
- * - `empty`     → definitive "this URL will never preview" (unsafe target, non-HTML,
- *                 oversized) → negative-cache briefly
- * - `transient` → network error, timeout, or an HTTP error status (403/429 are usually
- *                 bot-blocks that clear on retry) → cache NOTHING so the next mount retries
- */
-export type OgFetchResult =
-  { kind: 'ok'; meta: OgMetadata } | { kind: 'empty' } | { kind: 'transient' };
-
-/**
- * SSRF guard: true if `hostname` is a private/loopback/link-local/internal address. The
- * link preview is fetched from a URL inside a RECEIVED message, so a sender must not be
- * able to make the recipient device hit internal endpoints (cloud metadata at
- * 169.254.169.254, 192.168.x, localhost, …). NOTE: this checks the literal hostname only —
- * DNS rebinding (a public name resolving to a private IP) is not catchable from JS fetch.
- */
-/** Private/reserved IPv4? Shared by plain IPv4 and the IPv4-mapped IPv6 forms below. */
 function isPrivateIpv4(a: number, b: number): boolean {
   if (a === 0 || a === 127 || a === 10) return true; // this-network, loopback, private
   if (a === 169 && b === 254) return true; // link-local (incl. cloud metadata)
@@ -126,7 +20,8 @@ function isPrivateIpv4(a: number, b: number): boolean {
  * MUST handle BOTH spellings. `new URL('http://[::ffff:127.0.0.1]')` normalizes the host to
  * the HEX form `[::ffff:7f00:1]` under a spec-compliant parser, but React Native ships its own
  * URL implementation, so the dotted form can survive to this function on device. Matching only
- * one spelling is how `[::ffff:127.0.0.1]` used to walk straight through this SSRF guard.
+ * one spelling is how `[::ffff:127.0.0.1]` used to walk through the retired fetcher's literal-host
+ * guard.
  */
 function mappedIpv4(h: string): [number, number] | null {
   // Dotted: ::ffff:127.0.0.1 (and the ::ffff:0:127.0.0.1 translated form).
@@ -159,7 +54,10 @@ export function isPrivateHost(hostname: string): boolean {
   return false;
 }
 
-/** True if `raw` is a safe PUBLIC http(s) URL (allowed scheme + port, non-private host). */
+/**
+ * Whether `raw` has an eligible HTTP(S) scheme, standard port, and non-private literal host.
+ * This is suitable only for inert metadata filtering; it does not authorize a network request.
+ */
 export function isSafePreviewUrl(raw: string): boolean {
   let u: URL;
   try {
@@ -170,88 +68,4 @@ export function isSafePreviewUrl(raw: string): boolean {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false; // only http(s)
   if (u.port && u.port !== '80' && u.port !== '443') return false; // standard web ports only
   return !isPrivateHost(u.hostname);
-}
-
-/**
- * IMPURE: securely fetch a URL and parse its OG metadata. http(s) only, HTML only,
- * size/time-capped, with an SSRF guard validating the host on EVERY redirect hop (manual
- * redirects). Returns an {@link OgFetchResult} so the caller can cache definitive failures
- * but retry transient ones. Does NOT use the Gator HttpClient, so the server auth header
- * never leaks to third-party sites.
- *
- * Callers go through {@link fetchOgMetadata}, which dedupes concurrent lookups of the same URL.
- */
-async function fetchOgMetadataUncached(url: string): Promise<OgFetchResult> {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
-  try {
-    let current = url;
-    let res: Response | null = null;
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (!isSafePreviewUrl(current)) return { kind: 'empty' }; // SSRF: private/odd-port/non-http(s)
-      const r = await fetch(current, {
-        signal: ac.signal,
-        redirect: 'manual', // follow manually so each hop is re-validated
-        headers: {
-          // A real mobile-browser UA: sites serve bot-looking UAs a login wall/empty shell,
-          // which is what made previews blank. This client IS a phone, so the UA is honest.
-          'User-Agent':
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-          Accept: 'text/html,application/xhtml+xml',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      });
-      if (r.status >= 300 && r.status < 400) {
-        const loc = r.headers.get('location');
-        if (!loc) return { kind: 'empty' }; // malformed redirect — retrying won't help
-        try {
-          current = new URL(loc, current).toString();
-        } catch {
-          return { kind: 'empty' };
-        }
-        continue;
-      }
-      res = r;
-      break;
-    }
-    if (!res) return { kind: 'transient' }; // too many redirects (loops sometimes resolve later)
-    if (!res.ok) return { kind: 'transient' }; // 403/429/5xx: often a bot-block or hiccup — retry later
-    // On device RN auto-follows redirects (it ignores `redirect: 'manual'`), so the per-hop
-    // re-validation above may not run — re-check the FINAL URL's host here so a redirect can't
-    // land the fetch on a private/internal address.
-    if (res.url && !isSafePreviewUrl(res.url)) return { kind: 'empty' };
-    const ctype = res.headers.get('content-type') ?? '';
-    // Only parse HTML(-ish) documents. xhtml+xml is HTML-shaped and safe to regex; other
-    // content types (json/images/pdf) are rejected so we never mis-parse binary as HTML.
-    if (!ctype.includes('text/html') && !ctype.includes('application/xhtml+xml'))
-      return { kind: 'empty' };
-    if (Number(res.headers.get('content-length') ?? '0') > HARD_CAP_BYTES) return { kind: 'empty' }; // absurdly large — the parse slice below is the real cap
-    const html = (await res.text()).slice(0, MAX_BYTES);
-    return { kind: 'ok', meta: parseOgMetadata(html, current) };
-  } catch {
-    return { kind: 'transient' }; // network error / timeout
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * At most ONE outbound request per URL at a time. Every link bubble's lookup runs INSIDE a
- * reactive query subscribed to the whole `url_previews` table, and op-sqlite fires those
- * callbacks per TABLE — so the moment one bubble's preview resolves and writes its row, every
- * other mounted hook re-runs, finds no cache row of its own yet, and starts a SECOND fetch of a
- * URL that is already in flight. With ten links in a thread that compounds into ~50 outbound
- * requests to third-party hosts. Sharing the promise collapses them back to one.
- */
-const inFlight = new Map<string, Promise<OgFetchResult>>();
-
-/** @see fetchOgMetadataUncached — same contract, deduped while a fetch for `url` is in flight. */
-export function fetchOgMetadata(url: string): Promise<OgFetchResult> {
-  const existing = inFlight.get(url);
-  if (existing) return existing;
-  // The fetcher resolves on every path (network errors become `transient`), but clear the entry
-  // from a `finally` regardless — a throw that slipped past it must not wedge this URL forever.
-  const pending = fetchOgMetadataUncached(url).finally(() => inFlight.delete(url));
-  inFlight.set(url, pending);
-  return pending;
 }

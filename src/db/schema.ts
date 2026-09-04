@@ -258,7 +258,8 @@ export const messages = sqliteTable(
     /** Apple rich-link preview of a URL balloon: server-decoded LPLinkMetadata (title/summary/
         site + image/icon/video URLs the SENDER's device fetched), stored as JSON TEXT. Presence-
         driven — NULL for non-URL messages, placeholders, and rows from older servers; the chat
-        falls back to its own OG fetch then. Read back tolerantly via parsePayloadData. */
+        falls back to its read-only legacy cache or raw external link then. Read back tolerantly
+        via parsePayloadData. */
     payloadData: text('payload_data'),
   },
   (t) => ({
