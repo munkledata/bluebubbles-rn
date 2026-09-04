@@ -215,14 +215,20 @@ value TEXT)`.
   server-supplied message `payloadData` or an exact-key legacy `url_previews` row; a cache miss stays
   a raw externally opened link, and no path mounts remote artwork. A future proxy/native bounded-fetch
   design is tracked in the master work plan.
-- **Encrypted FCM payloads (AES-GCM)** — the current app supports only the legacy password-derived
-  `AEAD_GCM_V1`; accepted frames enter durable intake when App Lock policy allows DB work. Current
-  server source instead offers per-device `AEAD_GCM_V2_DEVICE`, sends only type plus `{}` when no V2
-  key is enrolled, and never falls back to V1. The app does not yet enroll or decrypt V2, so
-  end-to-end keyed push is blocked on `PUSH-CRYPTO-01`. After an unsupported/bad frame or locked
-  delivery, server-state-backed message content may catch up on a later sync. One-time events such
-  as `message-send-error` are not reconstructed by ordinary sync and are lost unless another live
-  transport delivers them. Locked delivery posts only a generic notice.
+- **Encrypted FCM payloads (AES-GCM)** — `PUSH-CRYPTO-01A` adds the host-verified current-server
+  `AEAD_GCM_V2_DEVICE` path: the app requests a per-device key from Expo Crypto's secure random API,
+  saves it as pending before enrollment, requires the server's exact acknowledgement, and then
+  decrypts strict V2 frames with the event type as authenticated associated data before durable
+  intake. Legacy V1/plaintext delivery remains available only when no migration state has ever
+  existed; a pending, active, invalid, or revoked record fails closed rather than downgrading.
+  Current server source sends only the event type plus `{}` when no V2 key is enrolled. Android
+  SecureStore, native crypto, killed-process delivery, and a matching deployed server still require
+  device proof under parent `PUSH-CRYPTO-01`; authenticated device/account identity, replay defense,
+  remote revocation/staged migration, and HTTPS protection for enrollment also remain open. After an
+  unsupported/bad frame or locked delivery, server-state-backed message content may catch up on a
+  later sync. One-time events such as `message-send-error` are not reconstructed by ordinary sync
+  and are lost unless another live transport delivers them. Locked delivery posts only a generic
+  notice.
 - **Backups** — new encrypted v3 backups carry allow-listed settings, user themes, per-chat
   customizations, and custom-folder name/order/badge/membership data. Folder membership uses the
   same portable service/kind/stable-identifier/participant evidence as chat-customization restore;

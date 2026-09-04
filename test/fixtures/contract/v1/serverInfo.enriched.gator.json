@@ -4,6 +4,7 @@
   "private_api": true,
   "proxy_service": "zrok",
   "supports_header_auth": true,
+  "supports_fcm_device_encryption": true,
   "supports_message_deleted": true,
   "supports_message_search": true
 }

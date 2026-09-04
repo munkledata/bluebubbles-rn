@@ -25,12 +25,19 @@ const mockParseFcmData = jest.fn((): MockParsedFcm => ({
   encryptionType: '',
 }));
 const mockDecryptFcmPayload = jest.fn(async () => '{"guid":"decrypted-message"}');
+const mockDecryptFcmV2Payload = jest.fn(async () => '{"guid":"decrypted-v2-message"}');
 const mockEffectivelyLocked = jest.fn(
   (_lockState: unknown, _storedAppLockEnabled: boolean): boolean => false,
 );
 const mockPostLockedNotification = jest.fn(async () => undefined);
 const mockVaultGet = jest.fn<Promise<string | null>, [string]>(async (key) =>
-  key === 'serverPassword' ? 'server-password' : 'false',
+  key === 'serverPassword'
+    ? 'server-password'
+    : key === 'serverAddress'
+      ? 'https://gator.example'
+      : key === 'appLockEnabled'
+        ? 'false'
+        : null,
 );
 const mockReadFcmSessionState = jest.fn(
   async (): Promise<'active' | 'forgotten' | 'unavailable'> => 'active',
@@ -73,7 +80,9 @@ jest.mock('@/services/notifications/fcmPayload', () => ({
 }));
 jest.mock('@/services/notifications/fcmDecrypt', () => ({
   FCM_ENCRYPTION_TYPE: 'aes-gcm',
+  FCM_V2_ENCRYPTION_TYPE: 'AEAD_GCM_V2_DEVICE',
   decryptFcmPayload: mockDecryptFcmPayload,
+  decryptFcmV2Payload: mockDecryptFcmV2Payload,
 }));
 jest.mock('@/services/notifications/fcmSessionGate', () => ({
   readFcmSessionState: mockReadFcmSessionState,
@@ -89,10 +98,17 @@ jest.mock('@/services/realtime/deliveryCoordinator', () => ({
 }));
 
 import { logger } from '@core/secure';
+import {
+  activeFcmDeviceEncryptionState,
+  pendingFcmDeviceEncryptionState,
+  revokedFcmDeviceEncryptionState,
+  serializeFcmDeviceEncryptionState,
+} from '@core/realtime';
 import { startFcm } from '@/services/notifications/fcmMessaging';
 import '@/services/notifications/registerFcmBackgroundHandler';
 
 const message = { messageId: 'provider-message-1', data: { type: 'new-message' } };
+const V2_KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
 let diagnosticEvent: jest.SpyInstance;
 
 async function settle(): Promise<void> {
@@ -120,9 +136,16 @@ beforeEach(() => {
     encryptionType: '',
   });
   mockDecryptFcmPayload.mockResolvedValue('{"guid":"decrypted-message"}');
+  mockDecryptFcmV2Payload.mockResolvedValue('{"guid":"decrypted-v2-message"}');
   mockEffectivelyLocked.mockReturnValue(false);
   mockVaultGet.mockImplementation(async (key: string) =>
-    key === 'serverPassword' ? 'server-password' : 'false',
+    key === 'serverPassword'
+      ? 'server-password'
+      : key === 'serverAddress'
+        ? 'https://gator.example'
+        : key === 'appLockEnabled'
+          ? 'false'
+          : null,
   );
   mockReadFcmSessionState.mockReset().mockResolvedValue('active');
   mockRunTrackedRealtimeDelivery.mockImplementation(
@@ -333,6 +356,132 @@ describe('FCM native callback ownership', () => {
     );
   });
 
+  it.each(['pending', 'active'] as const)(
+    'authenticates and dispatches a V2 payload from %s state',
+    async (status) => {
+      const state =
+        status === 'pending'
+          ? pendingFcmDeviceEncryptionState(V2_KEY, 'https://gator.example')
+          : activeFcmDeviceEncryptionState(V2_KEY, 'device-v2', 'https://gator.example');
+      mockVaultGet.mockImplementation(async (key: string) =>
+        key === 'appLockEnabled'
+          ? 'false'
+          : key === 'fcmPushEncryptionV2'
+            ? serializeFcmDeviceEncryptionState(state)
+            : key === 'serverAddress'
+              ? 'https://gator.example'
+              : key === 'serverPassword'
+                ? 'server-password'
+                : null,
+      );
+      mockParseFcmData.mockReturnValueOnce({
+        eventName: 'message-send-error',
+        body: 'v2-frame',
+        // Current V2 does not authenticate this sibling, so it must not be merged into plaintext.
+        envelopeChatGuid: 'unauthenticated-outer-chat',
+        encrypted: true,
+        encryptionType: 'AEAD_GCM_V2_DEVICE',
+      });
+      mockDecryptFcmV2Payload.mockResolvedValueOnce('{"guid":"v2-message"}');
+
+      await mockBackgroundHandler!(message);
+
+      expect(mockDecryptFcmV2Payload).toHaveBeenCalledWith(
+        'v2-frame',
+        V2_KEY,
+        'message-send-error',
+      );
+      expect(mockDispatchRealtimeEvent).toHaveBeenCalledWith(
+        'message-send-error',
+        '{"guid":"v2-message"}',
+        'fcm',
+        activeLease,
+        expect.anything(),
+      );
+      expect(mockDispatchRealtimeEvent.mock.calls[0]?.[1]).not.toContain(
+        'unauthenticated-outer-chat',
+      );
+    },
+  );
+
+  it.each([
+    { encrypted: false, encryptionType: '', body: '{"guid":"plaintext"}' },
+    { encrypted: true, encryptionType: 'aes-gcm', body: 'legacy-frame' },
+    { encrypted: true, encryptionType: 'unknown-scheme', body: 'unknown-frame' },
+  ])('rejects legacy/unsupported delivery after V2 migration: $encryptionType', async (shape) => {
+    const state = activeFcmDeviceEncryptionState(V2_KEY, 'device-v2', 'https://gator.example');
+    mockVaultGet.mockImplementation(async (key: string) =>
+      key === 'appLockEnabled'
+        ? 'false'
+        : key === 'fcmPushEncryptionV2'
+          ? serializeFcmDeviceEncryptionState(state)
+          : key === 'serverAddress'
+            ? 'https://gator.example'
+            : null,
+    );
+    mockParseFcmData.mockReturnValueOnce({
+      eventName: 'new-message',
+      envelopeChatGuid: undefined,
+      ...shape,
+    });
+
+    await mockBackgroundHandler!(message);
+
+    expect(mockDecryptFcmPayload).not.toHaveBeenCalled();
+    expect(mockDecryptFcmV2Payload).not.toHaveBeenCalled();
+    expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['corrupt', 'not-json', 'https://gator.example'],
+    [
+      'revoked',
+      serializeFcmDeviceEncryptionState(revokedFcmDeviceEncryptionState()),
+      'https://gator.example',
+    ],
+    [
+      'wrong origin',
+      serializeFcmDeviceEncryptionState(
+        activeFcmDeviceEncryptionState(V2_KEY, 'device-v2', 'https://old.example'),
+      ),
+      'https://gator.example',
+    ],
+  ])('fails closed for %s V2 state', async (_label, storedState, currentOrigin) => {
+    mockVaultGet.mockImplementation(async (key: string) =>
+      key === 'appLockEnabled'
+        ? 'false'
+        : key === 'fcmPushEncryptionV2'
+          ? storedState
+          : key === 'serverAddress'
+            ? currentOrigin
+            : null,
+    );
+    mockParseFcmData.mockReturnValueOnce({
+      eventName: 'new-message',
+      body: 'v2-frame',
+      envelopeChatGuid: undefined,
+      encrypted: true,
+      encryptionType: 'AEAD_GCM_V2_DEVICE',
+    });
+
+    await mockBackgroundHandler!(message);
+
+    expect(mockDecryptFcmV2Payload).not.toHaveBeenCalled();
+    expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the V2 state SecureStore read is unavailable', async () => {
+    mockVaultGet.mockImplementation(async (key: string) => {
+      if (key === 'appLockEnabled') return 'false';
+      if (key === 'fcmPushEncryptionV2') throw new Error('SecureStore unavailable');
+      return key === 'serverAddress' ? 'https://gator.example' : null;
+    });
+
+    await mockBackgroundHandler!(message);
+
+    expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
+
   it('contains only decryption failures and leaves durable dispatch untouched', async () => {
     const decryptFailure = new Error('authentication tag mismatch');
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
@@ -399,6 +548,8 @@ describe('FCM native callback ownership', () => {
     expect(mockEffectivelyLocked).toHaveBeenCalledWith(expect.anything(), true);
     expect(mockPostLockedNotification).toHaveBeenCalledWith(activeLease);
     expect(mockDecryptFcmPayload).not.toHaveBeenCalled();
+    expect(mockDecryptFcmV2Payload).not.toHaveBeenCalled();
+    expect(mockVaultGet).not.toHaveBeenCalledWith('fcmPushEncryptionV2');
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
   });
 

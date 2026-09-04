@@ -13,15 +13,19 @@ auto-picked, 1:1-only, falls back if the capability disappears mid-compose) and 
 `service:'RCS'` through `createChat`. On-device end-to-end run against a live deploy still pending.
 Format: a Context section, then numbered prompts. Each prompt = concrete task (with file
 paths) + one rationale sentence (so the implementing agent can adapt when reality differs)
-+ a verification step (run X, confirm Y) so failure is caught immediately.
+
+- a verification step (run X, confirm Y) so failure is caught immediately.
 
 **2026-09-04 attempt-identity overlay:** server commit `e55f1210` is source/host-green and not
 claimed deployed. BBD now sends a separate opaque `{tempGuid, attemptGuid}` correlation through the
 sidecar while keeping the logical app ack unchanged. The current app accepts exact `attemptGuid`
-over socket, but it neither enrolls nor decrypts the server's `AEAD_GCM_V2_DEVICE` key scheme, so
-attempt-aware killed-app FCM is blocked on `PUSH-CRYPTO-01` before device proof can begin.
+over socket, and `PUSH-CRYPTO-01A` now provides a host-green enrollment/decryption path for the
+server's `AEAD_GCM_V2_DEVICE` scheme. Attempt-aware killed-app FCM still needs a matching deployed
+server plus Android device proof under parent `PUSH-CRYPTO-01`; the broader authenticated identity,
+replay, and revocation/migration protocol gaps also remain open.
 
 **Progress — all prompts done (incl. the new-chat RCS toggle, shipped 2026-07-17):**
+
 - ✅ **Prompt 1** — spike LIVE-VALIDATED against the real account (pair via Gaia cookies +
   emoji, session resume, live event stream, RCS send all confirmed).
 - ✅ **Prompts 2–6 (server bridge)** — sidecar (`packages/rcs-sidecar/`), supervision, pairing
@@ -43,6 +47,7 @@ attempt-aware killed-app FCM is blocked on `PUSH-CRYPTO-01` before device proof 
   later immutable-attempt and V2 FCM dependencies remain separately open in the work plan.
 
 **Findings locked in from Prompt 1 (feed into later prompts):**
+
 - Pinned **`go.mau.fi/mautrix-gmessages v0.2605.0`** (CalVer 26.05, latest). Local toolchain
   go1.26.4 (arm64). `DoGaiaPairing(ctx, emojiCallback)` confirmed exact.
 - **Inbound messages arrive as `*libgm.WrappedMessage` (embeds `*gmproto.Message`), NOT
@@ -54,7 +59,7 @@ attempt-aware killed-app FCM is blocked on `PUSH-CRYPTO-01` before device proof 
 - Cookies set via `authData.SetCookies(map[string]string)` before `NewClient`. Session =
   one JSON `libgm.AuthData` blob; `NewClient(authData)` + `Connect()` resumes with no re-pair.
 - Send needs the conversation first: `GetConversation` → `ParticipantID =
-  conv.GetDefaultOutgoingID()`, `SIMPayload = conv.GetSimCard().GetSIMData().GetSIMPayload()`,
+conv.GetDefaultOutgoingID()`, `SIMPayload = conv.GetSimCard().GetSIMData().GetSIMPayload()`,
   an opaque BBD-owned `tmpID`, wrapped in `SendMessageRequest{MessagePayload{...}}`.
 
 ---
@@ -83,6 +88,7 @@ pipeline needs almost no new plumbing. Works identically on Intel and Apple Sili
 per-arch binary bundling already exists for zrok).
 
 **Load-bearing facts (verified 2026-07; re-verify pairing status before Prompt 1):**
+
 - **QR pairing is DEAD** (Google removed it ~May 2026; mautrix v26.05 disabled it). Only
   **Gaia pairing** works: cookies (`SID, HSID, SSID, OSID, APISID, SAPISID`, sometimes
   `__Secure-1PSIDTS`) from an incognito login to messages.google.com (DBSC off / use
@@ -119,6 +125,7 @@ per-arch binary bundling already exists for zrok).
 ## Numbered prompts
 
 ### Prompt 1 — Phase-0 spike: pair, listen, send (throwaway Go program)
+
 **Task:** In `~/github/BB/bluebubbles-server/packages/rcs-sidecar/spike/`, create a minimal Go
 module (`go.mod`, Go ≥ 1.25, dep `go.mau.fi/mautrix-gmessages` pinned to the latest tag) with
 a `main.go` that: loads/saves `session.json` (the libgm `AuthData` blob); when unpaired, reads
@@ -126,7 +133,7 @@ pasted cookies from a local file and runs `DoGaiaPairing`, printing the confirma
 stdout; when paired, `Connect()`s, logs every event via zerolog, prints `ListConversations`,
 and accepts a stdin command `send <conversationID> <text>`.
 **Rationale:** this de-risks the three things research can't prove — the pairing flow against
-Google's *current* servers, this specific Google account (multi-phone accounts hit
+Google's _current_ servers, this specific Google account (multi-phone accounts hit
 `ErrHadMultipleDevices`), and the event stream — so read the pinned libgm source for exact
 signatures rather than trusting this doc's API names.
 **Verify:** `go build ./...` compiles clean. Then with the user in the loop: pair with real
@@ -136,6 +143,7 @@ and confirm it resumes WITHOUT re-pairing**; text the phone from another number 
 Messages on the phone.
 
 ### Prompt 2 — Productize the sidecar: `gator-rcs` HTTP daemon
+
 **Task:** In `~/github/BB/bluebubbles-server/packages/rcs-sidecar/` (its own Go module,
 AGPL-3.0 `LICENSE` + file headers), build the real binary: loopback-only HTTP server (port
 from `BBD_RCS_PORT`, bearer secret from `BBD_RCS_SECRET`, session file path from
@@ -153,6 +161,7 @@ that shares no code with the Node server.
 you text the phone, and `POST /send` delivers to Google Messages.
 
 ### Prompt 3 — bbd supervision: spawn and babysit the sidecar
+
 **Task:** In `~/github/BB/bluebubbles-server/packages/bbd/src/rcs/RcsSidecarService.ts`,
 write a lifecycle `Service` modeled directly on `networking/ZrokTunnel.ts`: spawn the binary
 (path from `BBD_RCS_BIN` env, per-arch bundle under `appResources/macos/daemons/` like zrok),
@@ -169,6 +178,7 @@ the sidecar spawns and `health()` reports it, kill the sidecar process manually 
 backoff restart log, stop the daemon and confirm the child dies.
 
 ### Prompt 4 — Pairing operations + admin UI page
+
 **Task:** Add admin-gated operations (follow `api/operations/adminCommandOperations.ts` or a
 new `buildRcsOperations` in `api/operations/`, registered in `backend.ts`): `rcs-pair-start`,
 `rcs-pair-status` (returns emoji + state), `rcs-unpair`, `rcs-status` — each proxying the
@@ -185,6 +195,7 @@ REAL pairing end-to-end from the page — cookies pasted, emoji displayed, tap o
 status flips to paired and survives a daemon restart.
 
 ### Prompt 5 — Read path: cache, GUID mapping, fanout
+
 **Task:** In `packages/bbd/src/rcs/`: Drizzle tables (`rcs_conversations`, `rcs_messages`,
 `rcs_attachments`, `rcs_cursor`) following the `DrizzleWebhookStore.ts` pattern (own store
 class, `data/config-db/tables.ts` additions or a dedicated `rcs.db`); an `RcsListener` that
@@ -208,6 +219,7 @@ with the negotiated encrypted payload. The current server's V2-or-metadata-only 
 historical V1 design assumed by this prompt.
 
 ### Prompt 6 — Serve reads: v1 endpoints + attachment bytes
+
 **Task:** Extend the read operations in
 `packages/bbd/src/api/operations/readOperations.ts` (`get-chats`, `get-chat`,
 `get-chat-messages`, `query-messages`, `get-handles`) to include/merge RCS rows from the
@@ -223,6 +235,7 @@ confirming responses are byte-identical to before the change (no regression on t
 contract).
 
 ### Prompt 7 — RN app: accept and render RCS chats
+
 **Task:** In `~/github/bluebubbles-rn`: allow `service: 'RCS'` end-to-end — zod models and
 any repository code that switches on service (grep for `'SMS'` service checks, e.g.
 `MessageBubble`'s `senderService` logic in `src/ui/conversations/MessageBubble.tsx`); add
@@ -242,6 +255,7 @@ sent to the phone appears in the app in realtime over the socket. Run the killed
 after `PUSH-CRYPTO-01` adds compatible per-device enrollment/decryption to a replacement candidate.
 
 ### Prompt 8 — Send path: text from the app to RCS
+
 **Task:** In `packages/bbd/src/rcs/RcsSender.ts` + the action operations
 (`api/operations/actionOperations.ts`): route `send-message`, `mark-chat-read`, and
 `start/stop-typing` by GUID prefix — `RCS;-;` goes to the sidecar (`POST /send`,
@@ -262,6 +276,7 @@ delivery/read status flows back into the app as message updates; send an iMessag
 confirm that path is unaffected.
 
 ### Prompt 9 — Rich RCS features: media, reactions, typing, receipts
+
 **Task:** Media send: route `send-attachment` (base64 envelope → sidecar `POST /send-media`
 → `UploadMedia` → `MediaContent` in the send request). Reactions: map Gator tapback
 types (`associatedMessageType` in `send-reaction`) ↔ `SendReaction` emoji both directions,
@@ -276,6 +291,7 @@ vice-versa; typing bubbles show both directions; reading in the app marks read o
 phone.
 
 ### Prompt 10 — Ops hardening: re-auth, alerts, upkeep
+
 **Task:** Cookie re-auth: an admin UI flow (same page as Prompt 4) to paste fresh cookies
 into a live session WITHOUT re-pairing (libgm v0.6.0+ path). Alerting: persistently surface
 `PhoneNotResponding` / `BROWSER_INACTIVE*` / auth-expired states as a server-health event
@@ -295,15 +311,15 @@ automatic; run the cookie-refresh flow with fresh cookies and confirm the sessio
 
 ## Appendix — risks & non-goals
 
-| Risk | Mitigation |
-|---|---|
+| Risk                                                               | Mitigation                                                                                           |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | Google shifts the protocol (record: migrations, not kill-switches) | Pin libgm; monthly bump routine (Prompt 10); sidecar isolation means breakage never touches iMessage |
-| Cookie/session expiry (the #1 failure mode) | Re-auth without re-pair (Prompt 10); loud alerts |
-| Pairing UX friction (incognito + cURL copy + DBSC + emoji) | One-time; admin UI walks through it |
-| Phone offline = dead air | Server cache keeps history; alerts + phone-on-charger guidance |
-| Multi-phone Google account (`ErrHadMultipleDevices`) | Prompt 1 spike tests the real account first |
-| AGPL-3.0 | Sidecar = separate AGPL program, arm's-length IPC; server/app licenses untouched |
-| History depth = phone's local DB | Cache accretes forward from pairing day; set expectations |
+| Cookie/session expiry (the #1 failure mode)                        | Re-auth without re-pair (Prompt 10); loud alerts                                                     |
+| Pairing UX friction (incognito + cURL copy + DBSC + emoji)         | One-time; admin UI walks through it                                                                  |
+| Phone offline = dead air                                           | Server cache keeps history; alerts + phone-on-charger guidance                                       |
+| Multi-phone Google account (`ErrHadMultipleDevices`)               | Prompt 1 spike tests the real account first                                                          |
+| AGPL-3.0                                                           | Sidecar = separate AGPL program, arm's-length IPC; server/app licenses untouched                     |
+| History depth = phone's local DB                                   | Cache accretes forward from pairing day; set expectations                                            |
 
 **Non-goals (v1):** message-deletion sync (device-local in Google's design); Google Fi;
 running the sidecar anywhere but next to bbd.

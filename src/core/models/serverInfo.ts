@@ -19,6 +19,8 @@ export const ServerInfo = z
     proxy_service: z.string().nullish(),
     /** Whether the server accepts header-based auth (rebuild requirement). */
     supports_header_auth: z.boolean().nullish(),
+    /** Whether device registration accepts and acknowledges a random per-device FCM key. */
+    supports_fcm_device_encryption: z.boolean().nullish(),
     /**
      * Whether the server can detect message deletions (macOS "Recently Deleted") and emit the
      * `message-deleted` event. Additive; absent/false on older servers, which simply never emit the

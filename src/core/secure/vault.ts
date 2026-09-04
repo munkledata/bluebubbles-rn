@@ -20,6 +20,8 @@ export type SecretKey =
   // mid-rotation is recoverable (see resolveDbKey).
   | 'dbEncryptionKeyPending'
   | 'automationToken'
+  // One crash-safe record for the per-device FCM key plus pending/active/revoked migration state.
+  | 'fcmPushEncryptionV2'
   // App-lock enabled flag. Lives OUTSIDE the encrypted DB so boot can decide whether
   // to show the UI gate before the database is initialized — hence the vault, not kv.
   | 'appLockEnabled';

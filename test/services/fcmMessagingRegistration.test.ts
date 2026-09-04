@@ -39,9 +39,29 @@ async function settle(): Promise<void> {
 let mockTokenRefreshHandler: TokenRefreshHandler | undefined;
 let mockBackgroundHandler: NativeHandler | undefined;
 const mockGetToken = jest.fn(async (): Promise<string> => 'fresh-token');
-const mockRegisterDevice = jest.fn(async (): Promise<{ id: string | null }> => ({
+type RegisterAck = { id: string | null; pushEncryptionType: string | null };
+type PushEncryptionExtension = { type: string; key: string };
+const mockRegisterDevice = jest.fn<
+  Promise<RegisterAck>,
+  [unknown, string, string, PushEncryptionExtension?]
+>(async (): Promise<{ id: string | null; pushEncryptionType: string | null }> => ({
   id: 'device-1',
+  pushEncryptionType: null,
 }));
+const mockServerInfo = jest.fn(async () => ({
+  server_version: '2.0.15',
+  supports_fcm_device_encryption: false,
+}));
+const vaultValues = new Map<string, string>();
+const mockVaultGet = jest.fn(
+  async (key: string): Promise<string | null> => vaultValues.get(key) ?? null,
+);
+const mockVaultSet = jest.fn(async (key: string, value: string): Promise<void> => {
+  vaultValues.set(key, value);
+});
+const mockVaultDelete = jest.fn(async (key: string): Promise<void> => {
+  vaultValues.delete(key);
+});
 const mockFlushPersistentLogs = jest.fn(async (): Promise<boolean> => true);
 
 jest.mock('@react-native-firebase/messaging', () => ({
@@ -57,10 +77,13 @@ jest.mock('@react-native-firebase/messaging', () => ({
   getToken: mockGetToken,
 }));
 jest.mock('react-native', () => ({ Platform: { Version: 35 } }));
-jest.mock('@core/api', () => ({ fcmApi: { registerDevice: mockRegisterDevice } }));
+jest.mock('@core/api', () => ({
+  fcmApi: { registerDevice: mockRegisterDevice },
+  serverApi: { serverInfo: mockServerInfo },
+}));
 jest.mock('@/services/clients', () => ({
   http: { kind: 'shared-http-client' },
-  vault: { get: jest.fn(async () => 'false') },
+  vault: { get: mockVaultGet, set: mockVaultSet, delete: mockVaultDelete },
   accountRevocationMarker: { isRevoked: jest.fn(() => false) },
 }));
 jest.mock('@/services/realtimeControl', () => ({
@@ -79,7 +102,9 @@ jest.mock('@/services/notifications/fcmPayload', () => ({
 }));
 jest.mock('@/services/notifications/fcmDecrypt', () => ({
   FCM_ENCRYPTION_TYPE: 'aes-gcm',
+  FCM_V2_ENCRYPTION_TYPE: 'AEAD_GCM_V2_DEVICE',
   decryptFcmPayload: jest.fn(),
+  decryptFcmV2Payload: jest.fn(),
 }));
 jest.mock('@/services/notifications/fcmSessionGate', () => ({
   readFcmSessionState: jest.fn(async () => 'active'),
@@ -92,20 +117,38 @@ jest.mock('@/services/notifications/notifeeService', () => ({
 }));
 
 import { logger } from '@core/secure';
+import type { SecureVault } from '@core/secure';
+import {
+  activeFcmDeviceEncryptionState,
+  FCM_DEVICE_ENCRYPTION_TYPE,
+  inspectFcmDeviceEncryptionState,
+  revokedFcmDeviceEncryptionState,
+  serializeFcmDeviceEncryptionState,
+} from '@core/realtime';
 import { useSessionStore } from '@state/sessionStore';
+import * as Crypto from 'expo-crypto';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { registerFcmToken, startFcm } from '@/services/notifications/fcmMessaging';
+import { retireFcmDeviceEncryptionState } from '@/services/notifications/fcmEncryptionState';
 import '@/services/notifications/registerFcmBackgroundHandler';
 
-function setConnectedSession(origin: string, password: string, epoch: number): void {
+function setConnectedSession(
+  origin: string,
+  password: string,
+  epoch: number,
+  supportsFcmDeviceEncryption = false,
+): void {
   useSessionStore.setState({
     status: 'connected',
     origin,
     password,
-    serverInfo: null,
+    serverInfo: {
+      server_version: '2.0.15',
+      supports_fcm_device_encryption: supportsFcmDeviceEncryption,
+    },
     error: null,
     epoch,
   });
@@ -118,7 +161,19 @@ beforeEach(async () => {
   mockTokenRefreshHandler = undefined;
   mockFlushPersistentLogs.mockResolvedValue(true);
   mockGetToken.mockResolvedValue('fresh-token');
-  mockRegisterDevice.mockResolvedValue({ id: 'device-1' });
+  mockRegisterDevice.mockResolvedValue({ id: 'device-1', pushEncryptionType: null });
+  mockServerInfo.mockReset().mockResolvedValue({
+    server_version: '2.0.15',
+    supports_fcm_device_encryption: false,
+  });
+  vaultValues.clear();
+  mockVaultGet.mockImplementation(async (key: string) => vaultValues.get(key) ?? null);
+  mockVaultSet.mockImplementation(async (key: string, value: string) => {
+    vaultValues.set(key, value);
+  });
+  mockVaultDelete.mockImplementation(async (key: string) => {
+    vaultValues.delete(key);
+  });
 });
 
 afterEach(async () => {
@@ -134,12 +189,16 @@ describe('FCM registration account ownership', () => {
 
     const handling = Promise.resolve(mockBackgroundHandler?.({ data: {} }));
     const handlingProbe = settlementProbe(handling);
-    await settle();
+    for (let index = 0; index < 50 && mockFlushPersistentLogs.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
 
-    expect(mockFlushPersistentLogs).toHaveBeenCalledTimes(1);
-    expect(handlingProbe.isSettled()).toBe(false);
+    const flushCallsWhileBlocked = mockFlushPersistentLogs.mock.calls.length;
+    const settledWhileFlushBlocked = handlingProbe.isSettled();
 
     flushGate.resolve(true);
+    expect(flushCallsWhileBlocked).toBe(1);
+    expect(settledWhileFlushBlocked).toBe(false);
     await expect(handling).resolves.toBeUndefined();
   });
 
@@ -149,7 +208,8 @@ describe('FCM registration account ownership', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     const registration = registerFcmToken();
-    expect(mockGetToken).toHaveBeenCalledTimes(1);
+    await settle();
+    const tokenLookupsBeforePause = mockGetToken.mock.calls.length;
 
     const pause = pauseRealtimeDeliveries();
     const pauseProbe = settlementProbe(pause);
@@ -159,6 +219,7 @@ describe('FCM registration account ownership', () => {
     tokenGate.resolve('account-a-token');
     await expect(registration).resolves.toBe('skipped');
     await expect(pause).resolves.toBeUndefined();
+    expect(tokenLookupsBeforePause).toBe(1);
     expect(mockRegisterDevice).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalledWith(
       '[fcm] device token registration failed',
@@ -179,19 +240,17 @@ describe('FCM registration account ownership', () => {
   });
 
   it('drains an admitted server registration and suppresses its stale failure during pause', async () => {
-    const responseGate = deferred<{ id: string | null }>();
+    const responseGate = deferred<RegisterAck>();
     const staleFailure = new Error('account A server went away');
     mockGetToken.mockResolvedValueOnce('account-a-token');
     mockRegisterDevice.mockReturnValueOnce(responseGate.promise);
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    // Prevent a test-regression path where an early assertion leaves an unconsumed rejection.
+    void responseGate.promise.catch(() => undefined);
 
     const registration = registerFcmToken();
     await settle();
-    expect(mockRegisterDevice).toHaveBeenCalledWith(
-      { kind: 'shared-http-client' },
-      'Gator (Android 35)',
-      'account-a-token',
-    );
+    const registrationCall = mockRegisterDevice.mock.calls[0];
 
     const pause = pauseRealtimeDeliveries();
     const pauseProbe = settlementProbe(pause);
@@ -201,6 +260,11 @@ describe('FCM registration account ownership', () => {
     responseGate.reject(staleFailure);
     await expect(registration).resolves.toBe('skipped');
     await expect(pause).resolves.toBeUndefined();
+    expect(registrationCall).toEqual([
+      { kind: 'shared-http-client' },
+      'Gator (Android 35)',
+      'account-a-token',
+    ]);
     expect(warn).not.toHaveBeenCalledWith('[fcm] device token registration failed', staleFailure);
   });
 
@@ -209,12 +273,14 @@ describe('FCM registration account ownership', () => {
     mockGetToken.mockReturnValueOnce(tokenGate.promise);
 
     const registration = registerFcmToken();
-    expect(mockGetToken).toHaveBeenCalledTimes(1);
+    await settle();
+    const tokenLookupsBeforeIdentityChange = mockGetToken.mock.calls.length;
 
     setConnectedSession('https://account-b.test', 'password-b', 102);
     tokenGate.resolve('account-a-token');
     await registration;
 
+    expect(tokenLookupsBeforeIdentityChange).toBe(1);
     expect(mockRegisterDevice).not.toHaveBeenCalled();
   });
 
@@ -231,7 +297,9 @@ describe('FCM registration account ownership', () => {
     resumeRealtimeDeliveries();
     mockGetToken.mockResolvedValueOnce('fresh-account-b-token');
     mockTokenRefreshHandler!('stale-callback-argument');
-    await settle();
+    for (let index = 0; index < 50 && mockRegisterDevice.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
 
     expect(mockGetToken).toHaveBeenCalledTimes(1);
     expect(mockRegisterDevice).toHaveBeenCalledWith(
@@ -244,5 +312,251 @@ describe('FCM registration account ownership', () => {
       expect.anything(),
       'stale-callback-argument',
     );
+  });
+
+  it('persists pending before V2 registration and activates only after the exact acknowledgement', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101, true);
+    const keyBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
+    const random = jest.spyOn(Crypto, 'getRandomBytesAsync').mockResolvedValueOnce(keyBytes);
+    mockRegisterDevice.mockImplementationOnce(async () => {
+      const pending = inspectFcmDeviceEncryptionState(
+        vaultValues.get('fcmPushEncryptionV2') ?? null,
+      );
+      expect(pending).toMatchObject({
+        kind: 'valid',
+        state: { status: 'pending', origin: 'https://account-a.test' },
+      });
+      return { id: 'device-v2', pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE };
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    const saved = inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null);
+    expect(saved).toMatchObject({
+      kind: 'valid',
+      state: {
+        status: 'active',
+        origin: 'https://account-a.test',
+        deviceId: 'device-v2',
+      },
+    });
+    expect(mockRegisterDevice).toHaveBeenCalledWith(
+      { kind: 'shared-http-client' },
+      'Gator (Android 35)',
+      'fresh-token',
+      {
+        type: FCM_DEVICE_ENCRYPTION_TYPE,
+        key: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+      },
+    );
+    expect(random).toHaveBeenCalledWith(32);
+  });
+
+  it('retains and reuses one pending key after a lost registration response', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101, true);
+    const random = jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValue(Uint8Array.from({ length: 32 }, () => 7));
+    mockRegisterDevice.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({
+      id: 'device-v2',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+    const firstKey = (
+      inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null) as {
+        kind: 'valid';
+        state: { key: string };
+      }
+    ).state.key;
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(random).toHaveBeenCalledTimes(1);
+    expect(mockRegisterDevice.mock.calls[0]?.[3]).toEqual({
+      type: FCM_DEVICE_ENCRYPTION_TYPE,
+      key: firstKey,
+    });
+    expect(mockRegisterDevice.mock.calls[1]?.[3]).toEqual({
+      type: FCM_DEVICE_ENCRYPTION_TYPE,
+      key: firstKey,
+    });
+  });
+
+  it('serializes simultaneous registration calls and leaves server/local key agreement', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101, true);
+    const responseGate = deferred<{ id: string; pushEncryptionType: string }>();
+    const random = jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValue(Uint8Array.from({ length: 32 }, () => 11));
+    mockRegisterDevice.mockReturnValueOnce(responseGate.promise).mockResolvedValueOnce({
+      id: 'device-v2',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+
+    const first = registerFcmToken();
+    const second = registerFcmToken();
+    for (let index = 0; index < 100 && mockRegisterDevice.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    const registrationsWhileFirstResponseBlocked = mockRegisterDevice.mock.calls.length;
+
+    responseGate.resolve({
+      id: 'device-v2',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+    await expect(Promise.all([first, second])).resolves.toEqual(['registered', 'registered']);
+
+    expect(registrationsWhileFirstResponseBlocked).toBe(1);
+    expect(mockRegisterDevice).toHaveBeenCalledTimes(2);
+    expect(random).toHaveBeenCalledTimes(1);
+    const firstKey = (mockRegisterDevice.mock.calls[0]?.[3] as { key: string }).key;
+    const secondKey = (mockRegisterDevice.mock.calls[1]?.[3] as { key: string }).key;
+    expect(secondKey).toBe(firstKey);
+    expect(vaultValues.get('fcmPushEncryptionV2')).toContain(firstKey);
+  });
+
+  it('keeps pending and reports failure when the server omits the exact V2 acknowledgement', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101, true);
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 13));
+    mockRegisterDevice.mockResolvedValueOnce({ id: 'device-v2', pushEncryptionType: null });
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(
+      inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null),
+    ).toMatchObject({ kind: 'valid', state: { status: 'pending' } });
+  });
+
+  it('fetches missing cold-boot capability instead of silently selecting legacy registration', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101);
+    useSessionStore.setState({ serverInfo: null });
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.15',
+      supports_fcm_device_encryption: true,
+    });
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 17));
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: 'device-v2',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(mockServerInfo).toHaveBeenCalledWith({ kind: 'shared-http-client' });
+    expect(mockRegisterDevice.mock.calls[0]).toHaveLength(4);
+    expect(useSessionStore.getState().serverInfo?.supports_fcm_device_encryption).toBe(true);
+  });
+
+  it('refreshes cached false capability so a server upgrade can enroll V2', async () => {
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.16',
+      supports_fcm_device_encryption: true,
+    });
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 19));
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: 'device-v2',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(mockServerInfo).toHaveBeenCalledWith({ kind: 'shared-http-client' });
+    expect(mockRegisterDevice.mock.calls[0]).toHaveLength(4);
+    expect(useSessionStore.getState().serverInfo?.supports_fcm_device_encryption).toBe(true);
+  });
+
+  it('fails without registration when cold-boot capability lookup is unavailable', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101);
+    useSessionStore.setState({ serverInfo: null });
+    mockServerInfo.mockRejectedValueOnce(new Error('server unavailable'));
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy downgrade when any migration record is already present', async () => {
+    const existing = activeFcmDeviceEncryptionState(
+      'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+      'device-v2',
+      'https://account-a.test',
+    );
+    vaultValues.set('fcmPushEncryptionV2', serializeFcmDeviceEncryptionState(existing));
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+  });
+
+  it('rejects a same-origin legacy reconnect after Disconnect retained a revoked tombstone', async () => {
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(revokedFcmDeviceEncryptionState()),
+    );
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+  });
+
+  it('generates a fresh key for a capable same-origin account after Disconnect retires A', async () => {
+    const oldKey = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        activeFcmDeviceEncryptionState(oldKey, 'device-a', 'https://account-a.test'),
+      ),
+    );
+    await retireFcmDeviceEncryptionState({
+      get: mockVaultGet,
+      set: mockVaultSet,
+      delete: mockVaultDelete,
+    } as SecureVault);
+    setConnectedSession('https://account-a.test', 'password-b', 102, true);
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 29));
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: 'device-b',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    const extension = mockRegisterDevice.mock.calls[0]?.[3] as { key: string };
+    expect(extension.key).not.toBe(oldKey);
+    expect(vaultValues.get('fcmPushEncryptionV2')).toContain(extension.key);
+    expect(vaultValues.get('fcmPushEncryptionV2')).not.toContain(oldKey);
+  });
+
+  it('rotates to a fresh key when an approved server origin changes', async () => {
+    const oldKey = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        activeFcmDeviceEncryptionState(oldKey, 'device-old', 'https://old.test'),
+      ),
+    );
+    setConnectedSession('https://new.test', 'password-a', 101, true);
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 23));
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: 'device-new',
+      pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    const extension = mockRegisterDevice.mock.calls[0]?.[3] as { key: string };
+    expect(extension.key).not.toBe(oldKey);
+    expect(vaultValues.get('fcmPushEncryptionV2')).toContain('https://new.test');
+    expect(vaultValues.get('fcmPushEncryptionV2')).not.toContain(oldKey);
   });
 });

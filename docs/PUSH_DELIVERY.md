@@ -13,18 +13,18 @@ Spans two repos: this one (the RN app) and `bluebubbles-server` (`packages/bbd`,
 
 Ten links. Any one can break it, and until this work most of them broke it _silently_.
 
-| #   | Link                                                                        | Where                                                            |
-| --- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 1   | An ordinary iMessage/RCS message reaches the server's domain bus             | `packages/bbd/src/serialize/messageFanout.ts`                    |
-| 2   | The ordinary fanout calls `pushMessageSink`                                 | `packages/bbd/src/backend.ts`                                    |
-| 3   | It reads registered devices                                                 | `configStore.listDevices()`                                      |
-| 4   | A `new-message` body is trimmed under FCM's hard 4096-byte data cap          | `packages/bbd/src/serialize/pushPayloadCap.ts`                   |
-| 5   | The registry fans out, deduping by send target (token)                      | `packages/bbd/src/notifications/NotificationRegistry.ts`         |
-| 6   | FCM HTTP v1: mint OAuth, then POST the data message                         | `packages/bbd/src/notifications/FcmProvider.ts`                  |
-| 7   | Google delivers to the device                                               | —                                                                |
-| 8   | The app's background/foreground handler receives it                         | `src/services/notifications/fcmMessaging.ts`                     |
-| 9   | Envelope parsed → decrypted → normalized → durably deduped                | `fcmPayload.ts`, `fcmDecrypt.ts`, `incomingEventDispatcher.ts`  |
-| 10  | DB write (source of truth), then intent → Android notification              | `dbEventSink.ts` → `intents.ts` → `notifeeService.ts`            |
+| #   | Link                                                                | Where                                                          |
+| --- | ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 1   | An ordinary iMessage/RCS message reaches the server's domain bus    | `packages/bbd/src/serialize/messageFanout.ts`                  |
+| 2   | The ordinary fanout calls `pushMessageSink`                         | `packages/bbd/src/backend.ts`                                  |
+| 3   | It reads registered devices                                         | `configStore.listDevices()`                                    |
+| 4   | A `new-message` body is trimmed under FCM's hard 4096-byte data cap | `packages/bbd/src/serialize/pushPayloadCap.ts`                 |
+| 5   | The registry fans out, deduping by send target (token)              | `packages/bbd/src/notifications/NotificationRegistry.ts`       |
+| 6   | FCM HTTP v1: mint OAuth, then POST the data message                 | `packages/bbd/src/notifications/FcmProvider.ts`                |
+| 7   | Google delivers to the device                                       | —                                                              |
+| 8   | The app's background/foreground handler receives it                 | `src/services/notifications/fcmMessaging.ts`                   |
+| 9   | Envelope parsed → decrypted → normalized → durably deduped          | `fcmPayload.ts`, `fcmDecrypt.ts`, `incomingEventDispatcher.ts` |
+| 10  | DB write (source of truth), then intent → Android notification      | `dbEventSink.ts` → `intents.ts` → `notifeeService.ts`          |
 
 Properties worth knowing:
 
@@ -51,10 +51,11 @@ uses `capMessagePushPayload`.
   socket, webhook, and FCM before transport-specific serialization/encryption. Managed-device FCM
   requires `messages:write`; unmanaged legacy push rows retain the existing compatibility policy.
   A canonical per-device key encrypts the DTO; without one, FCM carries only the event type and
-  empty-object metadata. The current app registers no V2 key and skips `AEAD_GCM_V2_DEVICE`, so the
-  attempt payload is currently available only over socket/webhook, and the app can consume it over
-  its socket; end-to-end FCM is blocked on `PUSH-CRYPTO-01`. Legacy temp-only failures also remain
-  socket/webhook-only because they cannot be deduplicated safely across transports.
+  empty-object metadata. The app now enrolls and decrypts the current server's
+  `AEAD_GCM_V2_DEVICE` frame through `PUSH-CRYPTO-01A`, so the attempt payload is eligible for FCM
+  device testing. End-to-end killed-app delivery, broader authenticated identity/replay protection,
+  and matching app/server deployment remain open under `PUSH-CRYPTO-01`; legacy temp-only failures
+  remain socket/webhook-only because they cannot be deduplicated safely across transports.
 
 ---
 
@@ -174,12 +175,11 @@ Socket, webhook, and attempt-aware FCM receive the same logical DTO before trans
 serialization/encryption. Managed-device FCM requires `messages:write`; unmanaged legacy push rows
 retain compatibility authorization. With a canonical per-device key the DTO is encrypted; without
 one, FCM carries only the type plus `{}` metadata and never exposes temp/chat/attempt ids in
-plaintext. The current app registers only `{name, provider, token}`, supports the legacy
-password-derived `AEAD_GCM_V1`, and skips V2 ciphertext. It therefore cannot receive this attempt
-payload through FCM until the client half of `PUSH-CRYPTO-01` ships; socket/webhook can use
-`attemptGuid` now. After that implementation prerequisite, Google must still be shown to echo the
-encoded `tmpID` for text and media at the supported length, the phone namespace must be observed on
-a physical pair, and a connected killed-app FCM error must converge once on the exact candidate. A
+plaintext. The app's `PUSH-CRYPTO-01A` client path now registers a canonical
+`AEAD_GCM_V2_DEVICE` key and decrypts that ciphertext; socket/webhook continue to use `attemptGuid`
+too. Google must still be shown to echo the encoded `tmpID` for text and media at the supported
+length, the phone namespace must be observed on a physical pair, and a connected killed-app FCM
+error must converge once on the exact candidate. A
 crash after Google accepts the send but before BBD persists the first correlated frame remains
 outside the guarantee; after the bounded 90-day/50,000-message correlation retention window, an
 exceptionally late status falls back to non-exact socket/webhook delivery instead of risking
@@ -190,6 +190,32 @@ active attempt owner: an already-processed A replay is deduplicated, but a first
 after B can still relabel the shared tempGuid. Automatic A → B proof must use a certified
 `retryable: true` pre-dispatch error, and the stronger late-first-arrival/manual-retry contract needs
 client implementation.
+
+### 2.7 Current-server V2 client foundation (2026-09-04)
+
+When `/server/info` reports `supports_fcm_device_encryption: true`, registration requests 32 secure
+random bytes from Expo Crypto, stores a canonical-origin-bound `pending` record in SecureStore
+before POST, sends `{pushEncryption:{type:'AEAD_GCM_V2_DEVICE',key}}`, and activates the record only
+after the server returns the exact encryption type and a bounded device id. Registration is FIFO,
+so reconnect and token-refresh calls cannot create competing keys; a lost response retries the same
+pending key. An absent or cached-false capability is refreshed so a server upgrade can enroll V2.
+
+Pending and active records accept only canonical standard-base64 V2 frames. The app decrypts
+`version(2) | IV(12) | tag(16) | ciphertext` with the stored raw 32-byte key and authenticates the
+exact event type as AES-GCM additional data. On the unlocked content path it rejects malformed
+state/frame/key/UTF-8, wrong origin, plaintext, V1, and unknown schemes after migration. A locked
+delivery intentionally posts only the generic notice before envelope validation. A never-migrated
+installation retains legacy compatibility. After realtime work drains, Disconnect replaces any
+present key record with a retained keyless `revoked` tombstone; a failed or timed-out retirement
+keeps the next connection blocked, and a capable reconnect creates a fresh key.
+
+This is source and host-test evidence only. Current server V2 authenticates no stable
+server/account/device/message identity or issued time beyond the event type, and it supplies no
+cryptographic replay id or durable replay window. Android Expo Crypto/SecureStore behavior,
+process-death access, Firebase delivery, locked/headless behavior, replay, and coordinated
+server-side revocation/staged migration remain open under the parent `PUSH-CRYPTO-01`. Registration
+still uses the shared `HttpClient`; only HTTPS hides the enrolled key from a local network observer,
+so owner-approved cleartext server connections do not support a strong push-confidentiality claim.
 
 ---
 

@@ -7222,6 +7222,14 @@ function incomingIngressCertifiedNodes({
     fcmPath.replace('fcmMessaging.ts', 'fcmDecrypt.ts'),
     'decryptFcmPayload',
   );
+  const decryptFcmV2Payload = fn(
+    fcmPath.replace('fcmMessaging.ts', 'fcmDecrypt.ts'),
+    'decryptFcmV2Payload',
+  );
+  const readFcmDeviceEncryptionState = fn(
+    fcmPath.replace('fcmMessaging.ts', 'fcmEncryptionState.ts'),
+    'readFcmDeviceEncryptionState',
+  );
   const deliver = fn(fcmPath, 'deliver');
   const deliverRespectingLock = fn(fcmPath, 'deliverRespectingLock');
   const handleIncomingFcm = fn(fcmPath, 'handleIncomingFcm');
@@ -7311,6 +7319,8 @@ function incomingIngressCertifiedNodes({
     parseFcmData,
     rehydrateFcmEnvelopeChatGuid,
     decryptFcmPayload,
+    decryptFcmV2Payload,
+    readFcmDeviceEncryptionState,
     deliver,
     deliverRespectingLock,
     handleIncomingFcm,
@@ -7400,6 +7410,12 @@ function incomingIngressCertifiedNodes({
     hasExactIdentifierParameters(runTrackedWork, [{ name: 'lease' }, { name: 'task' }]) &&
     hasExactIdentifierParameters(captureFcm, [{ name: 'msg' }]) &&
     hasExactIdentifierParameters(storedAppLockRequiresProtection, [{ name: 'value' }]) &&
+    hasExactIdentifierParameters(readFcmDeviceEncryptionState, [{ name: 'secureVault' }]) &&
+    hasExactIdentifierParameters(decryptFcmV2Payload, [
+      { name: 'b64Frame' },
+      { name: 'keyBase64Url' },
+      { name: 'eventType' },
+    ]) &&
     hasExactIdentifierParameters(deliver, [{ name: 'delivery' }, { name: 'lease' }]) &&
     hasExactIdentifierParameters(deliverRespectingLock, [
       { name: 'delivery' },
@@ -10619,7 +10635,68 @@ function incomingIngressCertifiedNodes({
   // FCM snapshots native data before tracking; session and lock gates re-check the same lease;
   // the locked branch posts only the generic notice and returns before durable dispatch.
   const fcmLockTry = deliverRespectingLock.body.statements[6];
-  const encryptedBranch = deliver.body.statements[1];
+  const fcmStateReadTry = deliver.body.statements[2];
+  const fcmStateReadStatement =
+    fcmStateReadTry && ts.isTryStatement(fcmStateReadTry)
+      ? fcmStateReadTry.tryBlock.statements[0]
+      : undefined;
+  const fcmStateReadAssignment =
+    fcmStateReadStatement && ts.isExpressionStatement(fcmStateReadStatement)
+      ? unwrapExpression(fcmStateReadStatement.expression)
+      : undefined;
+  const fcmStateReadAwait =
+    fcmStateReadAssignment && ts.isBinaryExpression(fcmStateReadAssignment)
+      ? unwrapExpression(fcmStateReadAssignment.right)
+      : undefined;
+  const fcmStateReadCall =
+    fcmStateReadAwait && ts.isAwaitExpression(fcmStateReadAwait)
+      ? callableCall(fcmStateReadAwait.expression, readFcmDeviceEncryptionState, checker)
+      : undefined;
+  const migratedEncryptionBranch = deliver.body.statements[4];
+  const migratedEncryptionBody =
+    migratedEncryptionBranch &&
+    ts.isIfStatement(migratedEncryptionBranch) &&
+    ts.isBlock(migratedEncryptionBranch.thenStatement)
+      ? migratedEncryptionBranch.thenStatement
+      : undefined;
+  const migratedOriginTry = migratedEncryptionBody?.statements[2];
+  const migratedOriginStatement =
+    migratedOriginTry && ts.isTryStatement(migratedOriginTry)
+      ? migratedOriginTry.tryBlock.statements[0]
+      : undefined;
+  const migratedOriginAssignment =
+    migratedOriginStatement && ts.isExpressionStatement(migratedOriginStatement)
+      ? unwrapExpression(migratedOriginStatement.expression)
+      : undefined;
+  const migratedOriginAwait =
+    migratedOriginAssignment && ts.isBinaryExpression(migratedOriginAssignment)
+      ? unwrapExpression(migratedOriginAssignment.right)
+      : undefined;
+  const migratedOriginCall =
+    migratedOriginAwait && ts.isAwaitExpression(migratedOriginAwait)
+      ? callExpression(migratedOriginAwait.expression)
+      : undefined;
+  const migratedOriginAccess = migratedOriginCall
+    ? callAccess(migratedOriginCall.expression)
+    : undefined;
+  const migratedDecryptTry = migratedEncryptionBody?.statements[7];
+  const migratedDecryptStatement =
+    migratedDecryptTry && ts.isTryStatement(migratedDecryptTry)
+      ? migratedDecryptTry.tryBlock.statements[0]
+      : undefined;
+  const migratedDecryptAssignment =
+    migratedDecryptStatement && ts.isExpressionStatement(migratedDecryptStatement)
+      ? unwrapExpression(migratedDecryptStatement.expression)
+      : undefined;
+  const migratedDecryptAwait =
+    migratedDecryptAssignment && ts.isBinaryExpression(migratedDecryptAssignment)
+      ? unwrapExpression(migratedDecryptAssignment.right)
+      : undefined;
+  const migratedDecryptCall =
+    migratedDecryptAwait && ts.isAwaitExpression(migratedDecryptAwait)
+      ? callableCall(migratedDecryptAwait.expression, decryptFcmV2Payload, checker)
+      : undefined;
+  const encryptedBranch = deliver.body.statements[5];
   const supportedEncryptionBranch =
     ts.isIfStatement(encryptedBranch) && ts.isBlock(encryptedBranch.thenStatement)
       ? encryptedBranch.thenStatement.statements[0]
@@ -10644,6 +10721,14 @@ function incomingIngressCertifiedNodes({
     filesByPath.get('src/services/notifications/fcmDecrypt.ts'),
     'FCM_ENCRYPTION_TYPE',
   );
+  const fcmV2EncryptionTypeBinding = namedImportBinding(
+    fcmFile,
+    './fcmDecrypt',
+    'FCM_V2_ENCRYPTION_TYPE',
+  );
+  const fcmV2EncryptionTypeReferences = fcmV2EncryptionTypeBinding
+    ? runtimeReferencesToBinding(fcmFile, fcmV2EncryptionTypeBinding, checker)
+    : [];
   const captureReturn = captureFcm.body.statements[5];
   const captureReturnObject =
     ts.isReturnStatement(captureReturn) && captureReturn.expression
@@ -10831,6 +10916,91 @@ function incomingIngressCertifiedNodes({
     storedAppLockRequiresProtection.body.statements.length !== 1 ||
     statementText(storedAppLockRequiresProtection, 0) !==
       "return value !== null && value !== 'false';" ||
+    deliver.body.statements.length !== 7 ||
+    statementText(deliver, 0) !==
+      'const { eventName, body, envelopeChatGuid, encrypted, encryptionType } = delivery.parsed;' ||
+    statementText(deliver, 1) !== 'let encryptionState;' ||
+    !fcmStateReadTry ||
+    !ts.isTryStatement(fcmStateReadTry) ||
+    !fcmStateReadTry.catchClause ||
+    fcmStateReadTry.finallyBlock ||
+    fcmStateReadTry.tryBlock.statements.length !== 1 ||
+    fcmStateReadTry.catchClause.variableDeclaration ||
+    fcmStateReadTry.catchClause.block.statements.length !== 2 ||
+    !fcmStateReadAssignment ||
+    !ts.isBinaryExpression(fcmStateReadAssignment) ||
+    fcmStateReadAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !identifierNamed(fcmStateReadAssignment.left, 'encryptionState') ||
+    !fcmStateReadCall ||
+    fcmStateReadCall.arguments.length !== 1 ||
+    !vaultBinding ||
+    !sameSymbol(unwrapExpression(fcmStateReadCall.arguments[0]), vaultBinding, checker) ||
+    normalizedSnippet(fcmStateReadTry.catchClause.block.statements[0], fcmFile) !==
+      "logger.warn('[fcm] push-encryption state unavailable — push dropped');" ||
+    !ts.isReturnStatement(fcmStateReadTry.catchClause.block.statements[1]) ||
+    statementText(deliver, 3) !== 'if (!lease.isCurrent()) return;' ||
+    !migratedEncryptionBranch ||
+    !ts.isIfStatement(migratedEncryptionBranch) ||
+    normalizedSnippet(migratedEncryptionBranch.expression, fcmFile) !==
+      "encryptionState.kind !== 'absent'" ||
+    !migratedEncryptionBody ||
+    migratedEncryptionBody.statements.length !== 11 ||
+    normalizedSnippet(migratedEncryptionBody.statements[0], fcmFile) !==
+      "if (encryptionState.kind !== 'valid' || encryptionState.state.status === 'revoked') { logger.warn('[fcm] push-encryption state is not usable — push dropped'); return; }" ||
+    normalizedSnippet(migratedEncryptionBody.statements[1], fcmFile) !==
+      'let currentOrigin: string | null;' ||
+    !migratedOriginTry ||
+    !ts.isTryStatement(migratedOriginTry) ||
+    !migratedOriginTry.catchClause ||
+    migratedOriginTry.finallyBlock ||
+    migratedOriginTry.tryBlock.statements.length !== 1 ||
+    migratedOriginTry.catchClause.variableDeclaration ||
+    migratedOriginTry.catchClause.block.statements.length !== 2 ||
+    !migratedOriginAssignment ||
+    !ts.isBinaryExpression(migratedOriginAssignment) ||
+    migratedOriginAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !identifierNamed(migratedOriginAssignment.left, 'currentOrigin') ||
+    !migratedOriginCall ||
+    !migratedOriginAccess ||
+    migratedOriginAccess.method !== 'get' ||
+    !sameSymbol(migratedOriginAccess.receiver, vaultBinding, checker) ||
+    migratedOriginCall.arguments.length !== 1 ||
+    !ts.isStringLiteral(unwrapExpression(migratedOriginCall.arguments[0])) ||
+    unwrapExpression(migratedOriginCall.arguments[0]).text !== 'serverAddress' ||
+    normalizedSnippet(migratedOriginTry.catchClause.block.statements[0], fcmFile) !==
+      "logger.warn('[fcm] push-encryption origin unavailable — push dropped');" ||
+    !ts.isReturnStatement(migratedOriginTry.catchClause.block.statements[1]) ||
+    normalizedSnippet(migratedEncryptionBody.statements[3], fcmFile) !==
+      'if (!lease.isCurrent()) return;' ||
+    normalizedSnippet(migratedEncryptionBody.statements[4], fcmFile) !==
+      "if (!currentOrigin || encryptionState.state.origin !== currentOrigin) { logger.warn('[fcm] push-encryption origin changed — push dropped until re-enrollment'); return; }" ||
+    normalizedSnippet(migratedEncryptionBody.statements[5], fcmFile) !==
+      "if (!encrypted || encryptionType !== FCM_V2_ENCRYPTION_TYPE || typeof body !== 'string') { logger.warn('[fcm] legacy or unsupported push rejected after V2 migration'); return; }" ||
+    !fcmV2EncryptionTypeBinding ||
+    fcmV2EncryptionTypeReferences.length !== 1 ||
+    !nodeIsInside(fcmV2EncryptionTypeReferences[0], migratedEncryptionBody.statements[5]) ||
+    normalizedSnippet(migratedEncryptionBody.statements[6], fcmFile) !== 'let plaintext: string;' ||
+    !migratedDecryptTry ||
+    !ts.isTryStatement(migratedDecryptTry) ||
+    !migratedDecryptTry.catchClause ||
+    migratedDecryptTry.finallyBlock ||
+    migratedDecryptTry.tryBlock.statements.length !== 1 ||
+    migratedDecryptTry.catchClause.block.statements.length !== 2 ||
+    !migratedDecryptAssignment ||
+    !ts.isBinaryExpression(migratedDecryptAssignment) ||
+    migratedDecryptAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !identifierNamed(migratedDecryptAssignment.left, 'plaintext') ||
+    !migratedDecryptCall ||
+    migratedDecryptCall.arguments.length !== 3 ||
+    !snippetIs(migratedDecryptCall.arguments[0], 'body') ||
+    !snippetIs(migratedDecryptCall.arguments[1], 'encryptionState.state.key') ||
+    !snippetIs(migratedDecryptCall.arguments[2], 'eventName') ||
+    normalizedSnippet(migratedDecryptTry.catchClause.block.statements[0], fcmFile) !==
+      "logger.warn( '[fcm] failed to authenticate encrypted push; sync may recover server state, but a one-time event may be lost', { errorName: error instanceof Error ? error.name : 'UnknownError' }, );" ||
+    !ts.isReturnStatement(migratedDecryptTry.catchClause.block.statements[1]) ||
+    normalizedSnippet(migratedEncryptionBody.statements[8], fcmFile) !==
+      'if (!lease.isCurrent()) return;' ||
+    !ts.isReturnStatement(migratedEncryptionBody.statements[10]) ||
     deliverRespectingLock.body.statements.length !== 10 ||
     statementText(deliverRespectingLock, 0) !==
       'const { eventName: receivedEvent } = delivery.parsed;' ||
@@ -10927,6 +11097,11 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   const fcmDispatchCalls = exactCallEdges(edges, deliver, dispatchRealtimeEvent);
+  const migratedDispatchCall = fcmDispatchCalls.find(
+    (edge) =>
+      normalizedSnippet(edge.node, fcmFile) ===
+      "dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence)",
+  );
   const encryptedDispatchCall = fcmDispatchCalls.find(
     (edge) =>
       normalizedSnippet(edge.node, fcmFile) ===
@@ -10943,7 +11118,7 @@ function incomingIngressCertifiedNodes({
     exactCallEdges(edges, deliverRespectingLock, postLockedNotification),
   );
   if (
-    deliver.body.statements.length !== 3 ||
+    deliver.body.statements.length !== 7 ||
     statementText(deliver, 0) !==
       'const { eventName, body, envelopeChatGuid, encrypted, encryptionType } = delivery.parsed;' ||
     !ts.isIfStatement(encryptedBranch) ||
@@ -10967,15 +11142,18 @@ function incomingIngressCertifiedNodes({
     normalizedSnippet(encryptedBranch.thenStatement.statements[1], fcmFile) !==
       "logger.warn( '[fcm] encrypted push with unsupported scheme skipped; sync may recover server state, but a one-time event may be lost', { event: eventName, encryptionType }, );" ||
     !ts.isReturnStatement(encryptedBranch.thenStatement.statements[2]) ||
-    !exactly(fcmDispatchCalls, 2) ||
+    !exactly(fcmDispatchCalls, 3) ||
+    !migratedDispatchCall ||
     !encryptedDispatchCall ||
     !plaintextDispatchCall ||
+    !nodeIsInside(migratedDispatchCall.node, migratedEncryptionBody.statements[9]) ||
     !nodeIsInside(encryptedDispatchCall.node, supportedEncryptionBody.statements[7]) ||
-    !nodeIsInside(plaintextDispatchCall.node, deliver.body.statements[2]) ||
+    !nodeIsInside(plaintextDispatchCall.node, deliver.body.statements[6]) ||
     !fcmDispatchCalls.every(
       (edge) =>
         coordinatorCallbackAdoptsInvocation(edge.node, deliver) &&
         [
+          "dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence)",
           "dispatchRealtimeEvent(eventName, hydratedBody, 'fcm', lease, delivery.occurrence)",
           "dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence)",
         ].includes(normalizedSnippet(edge.node, fcmFile)),
@@ -11881,7 +12059,7 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   const certified = new Set(approved);
-  if (approved.length !== 22 || certified.size !== 22) return empty();
+  if (approved.length !== 23 || certified.size !== 23) return empty();
 
   const protectedOwners = new Set([
     dispatchRealtimeEvent,

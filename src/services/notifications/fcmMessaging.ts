@@ -5,9 +5,17 @@ import {
   getToken,
 } from '@react-native-firebase/messaging';
 import type { RemoteMessage } from '@react-native-firebase/messaging';
+import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
-import { fcmApi } from '@core/api';
-import type { EventOccurrenceMetadata } from '@core/realtime';
+import { fcmApi, serverApi } from '@core/api';
+import {
+  activeFcmDeviceEncryptionState,
+  encodeFcmDeviceEncryptionKey,
+  FCM_DEVICE_ENCRYPTION_KEY_BYTES,
+  FCM_DEVICE_ENCRYPTION_TYPE,
+  pendingFcmDeviceEncryptionState,
+  type EventOccurrenceMetadata,
+} from '@core/realtime';
 import { logger } from '@core/secure';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -15,7 +23,13 @@ import { accountRevocationMarker, http, vault } from '../clients';
 import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
 import { dispatchRealtimeEvent } from '../realtimeControl';
 import { parseFcmData, rehydrateFcmEnvelopeChatGuid, type ParsedFcm } from './fcmPayload';
-import { decryptFcmPayload, FCM_ENCRYPTION_TYPE } from './fcmDecrypt';
+import {
+  decryptFcmPayload,
+  decryptFcmV2Payload,
+  FCM_ENCRYPTION_TYPE,
+  FCM_V2_ENCRYPTION_TYPE,
+} from './fcmDecrypt';
+import { readFcmDeviceEncryptionState, writeFcmDeviceEncryptionState } from './fcmEncryptionState';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeDelivery,
@@ -43,6 +57,7 @@ const fcmProcessOccurrenceNonce = `${Date.now().toString(36)}-${Math.random()
   .slice(2, 14)}`;
 let fcmLocalOccurrenceSequence = 0;
 let fcmAdmissionTail: Promise<void> = Promise.resolve();
+let fcmRegistrationTail: Promise<void> = Promise.resolve();
 
 interface CapturedFcmDelivery {
   readonly parsed: ParsedFcm;
@@ -79,6 +94,58 @@ function captureFcmDelivery(msg: RemoteMessage): CapturedFcmDelivery {
 
 async function deliver(delivery: CapturedFcmDelivery, lease: RealtimeDeliveryLease): Promise<void> {
   const { eventName, body, envelopeChatGuid, encrypted, encryptionType } = delivery.parsed;
+
+  let encryptionState;
+  try {
+    encryptionState = await readFcmDeviceEncryptionState(vault);
+  } catch {
+    logger.warn('[fcm] push-encryption state unavailable — push dropped');
+    return;
+  }
+  if (!lease.isCurrent()) return;
+
+  // A present record means this installation began V2 migration. Malformed/revoked state and every
+  // plaintext/V1/unknown envelope fail closed instead of silently restoring legacy behavior.
+  if (encryptionState.kind !== 'absent') {
+    if (encryptionState.kind !== 'valid' || encryptionState.state.status === 'revoked') {
+      logger.warn('[fcm] push-encryption state is not usable — push dropped');
+      return;
+    }
+
+    let currentOrigin: string | null;
+    try {
+      currentOrigin = await vault.get('serverAddress');
+    } catch {
+      logger.warn('[fcm] push-encryption origin unavailable — push dropped');
+      return;
+    }
+    if (!lease.isCurrent()) return;
+    if (!currentOrigin || encryptionState.state.origin !== currentOrigin) {
+      logger.warn('[fcm] push-encryption origin changed — push dropped until re-enrollment');
+      return;
+    }
+    if (!encrypted || encryptionType !== FCM_V2_ENCRYPTION_TYPE || typeof body !== 'string') {
+      logger.warn('[fcm] legacy or unsupported push rejected after V2 migration');
+      return;
+    }
+
+    let plaintext: string;
+    try {
+      plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, eventName);
+    } catch (error) {
+      logger.warn(
+        '[fcm] failed to authenticate encrypted push; sync may recover server state, but a one-time event may be lost',
+        { errorName: error instanceof Error ? error.name : 'UnknownError' },
+      );
+      return;
+    }
+    if (!lease.isCurrent()) return;
+    // V2 authenticates only `eventName` in the current server foundation. Do not merge any other
+    // unauthenticated outer-envelope metadata into the authenticated plaintext.
+    await dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence);
+    return;
+  }
+
   if (encrypted) {
     // Supported scheme → decrypt the base64 body with the stored server password, then
     // dispatch as if it had arrived plaintext (the realtime normalizer re-parses JSON strings).
@@ -318,7 +385,12 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
 
   try {
     let registered = false;
-    const result = await runTrackedRealtimeWork(accountLease, async () => {
+    // Reserve FIFO position synchronously and admit this whole flow to teardown before waiting on
+    // an older call. Reconnect and token-refresh can otherwise generate K1/K2 concurrently and
+    // leave the server holding one key while SecureStore holds the other.
+    const previous = fcmRegistrationTail;
+    const tracked = runTrackedRealtimeWork(accountLease, async () => {
+      await previous;
       if (!registrationSessionIsCurrent(session, accountLease)) return;
 
       // Deliberately re-read the current installation token instead of trusting the value supplied
@@ -327,15 +399,82 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
       const token = await getToken(getMessaging());
       if (!token || !registrationSessionIsCurrent(session, accountLease)) return;
 
+      let serverInfo = useSessionStore.getState().serverInfo;
+      // A cached true value is a monotonic security pin. False/absent capability is refreshed so
+      // an upgraded server does not leave this installation on legacy push indefinitely.
+      if (serverInfo?.supports_fcm_device_encryption !== true) {
+        serverInfo = await serverApi.serverInfo(http);
+        if (!registrationSessionIsCurrent(session, accountLease)) return;
+        useSessionStore.getState().setServerInfo(serverInfo);
+      }
+      if (!registrationSessionIsCurrent(session, accountLease)) return;
+
+      const stored = await readFcmDeviceEncryptionState(vault);
+      if (!registrationSessionIsCurrent(session, accountLease)) return;
+
+      if (serverInfo.supports_fcm_device_encryption === true) {
+        let key: string;
+        if (
+          stored.kind === 'valid' &&
+          stored.state.status !== 'revoked' &&
+          stored.state.origin === session.origin
+        ) {
+          key = stored.state.key;
+        } else {
+          const keyBytes = await Crypto.getRandomBytesAsync(FCM_DEVICE_ENCRYPTION_KEY_BYTES);
+          if (!registrationSessionIsCurrent(session, accountLease)) return;
+          key = encodeFcmDeviceEncryptionKey(keyBytes);
+        }
+
+        // Persist BEFORE POST. A server commit followed by a lost response can then be decrypted,
+        // and the next retry reuses this exact candidate instead of rotating blindly.
+        await writeFcmDeviceEncryptionState(
+          vault,
+          pendingFcmDeviceEncryptionState(key, session.origin),
+        );
+        if (!registrationSessionIsCurrent(session, accountLease)) return;
+
+        const ack = await fcmApi.registerDevice(http, DEVICE_NAME, token, {
+          type: FCM_DEVICE_ENCRYPTION_TYPE,
+          key,
+        });
+        if (
+          ack.pushEncryptionType !== FCM_DEVICE_ENCRYPTION_TYPE ||
+          !ack.id ||
+          ack.id.length > 256
+        ) {
+          throw new Error('server did not acknowledge FCM device encryption');
+        }
+        if (!registrationSessionIsCurrent(session, accountLease)) return;
+
+        await writeFcmDeviceEncryptionState(
+          vault,
+          activeFcmDeviceEncryptionState(key, ack.id, session.origin),
+        );
+        if (!registrationSessionIsCurrent(session, accountLease)) return;
+        registered = true;
+        return;
+      }
+
+      if (stored.kind !== 'absent') {
+        throw new Error('FCM push-encryption downgrade rejected');
+      }
       await fcmApi.registerDevice(http, DEVICE_NAME, token);
-      registered = true;
+      if (registrationSessionIsCurrent(session, accountLease)) registered = true;
     });
+    fcmRegistrationTail = tracked.then(
+      () => undefined,
+      () => undefined,
+    );
+    const result = await tracked;
     return result === 'delivered' && registered ? 'registered' : 'skipped';
   } catch (e) {
     // Disconnect intentionally revokes in-flight registration. Logging that expected cancellation
     // as a network failure is noisy and can attach stale account context to the next session's log.
     if (registrationSessionIsCurrent(session, accountLease)) {
-      logger.warn('[fcm] device token registration failed', e);
+      logger.warn('[fcm] device token registration failed', {
+        errorName: e instanceof Error ? e.name : 'UnknownError',
+      });
       return 'failed';
     }
     return 'skipped';

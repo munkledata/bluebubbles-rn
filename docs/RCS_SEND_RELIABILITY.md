@@ -1,11 +1,11 @@
 # RCS send reliability — the retry chain, end to end
 
-*2026-07-22/23 hardening, updated 2026-09-04 for immutable attempt identity. Companion server-side
+_2026-07-22/23 hardening, updated 2026-09-04 for immutable attempt identity. Companion server-side
 doc: `bluebubbles-server/docs/RCS_RUNBOOK.md`
 ("Send reliability" section). The incident that drove this: a picture send returned 502 and was
 never retried; a text returned 500 and recovered — because texts had automatic retry and
 pictures didn't, and the sidecar could self-heal an expired Google token for texts but not for
-media uploads.*
+media uploads._
 
 ## The chain
 
@@ -110,7 +110,7 @@ message id.
   the orphaned-success duplicate the timeout exists to prevent) and wrap transport failures into
   typed errors: `sidecar_unreachable` (503) / `timeout` (504) instead of a bare "fetch failed".
 - A down/restarting sidecar child fails **fast** with `503 { type: "bridge_unavailable",
-  retryable: true }` (pre-flight `rcsReady` on every RCS send path) — the app's HTTP layer
+retryable: true }` (pre-flight `rcsReady` on every RCS send path) — the app's HTTP layer
   treats any 5xx as retryable, so the ladder just works, but logs are now diagnosable.
 - RCS media over Google's ~100 MB limit → **413 `media_too_large`, retryable:false**, rejected
   BEFORE the whole-file base64 read (also an OOM guard — the multipart cap is 2 GiB, sized for
@@ -119,10 +119,11 @@ message id.
   and FCM before transport-specific serialization/encryption. Managed-device FCM requires
   `messages:write`; unmanaged legacy push rows retain compatibility authorization. With a canonical
   per-device key the DTO is encrypted; without one, FCM carries only the event type and `{}` data,
-  never temp/chat/attempt ids in plaintext. The current app does not enroll or decrypt the server's
-  `AEAD_GCM_V2_DEVICE` scheme, so attempt-aware FCM is blocked on `PUSH-CRYPTO-01`; the logical DTO is
-  currently consumable over socket/webhook only. It stays normal priority. Legacy temp-only errors
-  also remain socket/webhook-only because the app cannot safely deduplicate them across transports.
+  never temp/chat/attempt ids in plaintext. `PUSH-CRYPTO-01A` gives the app a host-green current-server
+  `AEAD_GCM_V2_DEVICE` enrollment/decryption path, so attempt-aware FCM is eligible for device testing.
+  Matching app/server deployment, killed-app delivery, and the broader replay/identity protocol remain
+  open under `PUSH-CRYPTO-01`. It stays normal priority. Legacy temp-only errors remain socket/webhook-only
+  because the app cannot safely deduplicate them across transports.
 
 ## Layer 5 — the sidecar (Go, `packages/rcs-sidecar`)
 
@@ -140,18 +141,18 @@ message id.
 
 ## Failure-mode matrix (what the user sees)
 
-| Failure | Before | After |
-|---|---|---|
-| Transport 5xx on a picture upload | Error bubble forever (queue skipped attachments) | Auto-retried ≤5× with backoff; converges to sent or rests as error + manual retry |
-| Expired Google token during media upload | 502, never retried (sidecar blind to media 401s) | Sidecar refreshes token + retries in-place; send succeeds |
-| Bridge long-poll dead, token valid | 30s hang → 502, not retried | Pre-flight reconnect; fast self-heal |
-| Sidecar process restarting | Opaque ECONNREFUSED 500 | Fast 503 `bridge_unavailable` (retryable) |
-| Failed client-side but actually delivered | Duplicate bubble + retry ladder kept firing (dup sends) | Echo promotes the errored bubble; ladder stops |
-| Queue retry succeeded (RCS ack) | **Swallowed** → duplicate re-sends every drain | Reconciles to sent, queue cleared |
-| Async failure after the immediate ack | Manual retry only | Auto re-enqueued when server says `retryable:true` (≤2 cycles); otherwise queue-less Try Again remains unavailable |
-| Media > 100 MB | Buffered, then opaque 400/500 deep in the chain | Immediate 413, no retry burn |
-| Ack lost but server delivered, app retries | Potential duplicate picture | Durable reservation replays the same attempt; ambiguous records do not expire |
-| Already-processed failure A is replayed after retry B | Replay could relabel B | Exact occurrence receipt deduplicates the replay; a first-delayed A still needs active-attempt ownership |
+| Failure                                               | Before                                                  | After                                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Transport 5xx on a picture upload                     | Error bubble forever (queue skipped attachments)        | Auto-retried ≤5× with backoff; converges to sent or rests as error + manual retry                                  |
+| Expired Google token during media upload              | 502, never retried (sidecar blind to media 401s)        | Sidecar refreshes token + retries in-place; send succeeds                                                          |
+| Bridge long-poll dead, token valid                    | 30s hang → 502, not retried                             | Pre-flight reconnect; fast self-heal                                                                               |
+| Sidecar process restarting                            | Opaque ECONNREFUSED 500                                 | Fast 503 `bridge_unavailable` (retryable)                                                                          |
+| Failed client-side but actually delivered             | Duplicate bubble + retry ladder kept firing (dup sends) | Echo promotes the errored bubble; ladder stops                                                                     |
+| Queue retry succeeded (RCS ack)                       | **Swallowed** → duplicate re-sends every drain          | Reconciles to sent, queue cleared                                                                                  |
+| Async failure after the immediate ack                 | Manual retry only                                       | Auto re-enqueued when server says `retryable:true` (≤2 cycles); otherwise queue-less Try Again remains unavailable |
+| Media > 100 MB                                        | Buffered, then opaque 400/500 deep in the chain         | Immediate 413, no retry burn                                                                                       |
+| Ack lost but server delivered, app retries            | Potential duplicate picture                             | Durable reservation replays the same attempt; ambiguous records do not expire                                      |
+| Already-processed failure A is replayed after retry B | Replay could relabel B                                  | Exact occurrence receipt deduplicates the replay; a first-delayed A still needs active-attempt ownership           |
 
 ## Tests that lock this
 
@@ -198,9 +199,10 @@ message id.
 
 The attempt fields are additive: an old server omits `attemptGuid`, leaving bubble-only/best-effort
 dedup, while an old/current app can ignore new socket fields and still interpret 503/413 as ordinary
-5xx/4xx statuses. The FCM branch is not independently consumable yet: the server uses optional
-per-device `AEAD_GCM_V2_DEVICE` and metadata-only fallback, while the current app enrolls no V2 key
-and skips that scheme. `PUSH-CRYPTO-01` must coordinate that migration. The original sidecar
+5xx/4xx statuses. The current-server FCM branch is host-consumable after `PUSH-CRYPTO-01A`: the app
+enrolls an optional per-device `AEAD_GCM_V2_DEVICE` key and rejects post-migration downgrade. The
+parent `PUSH-CRYPTO-01` still owns authenticated identity metadata, persistent replay defense,
+server-coordinated revocation/migration, and exact-device proof. The original sidecar
 hardening was hot-swapped onto prod 2026-07-22 (runbook procedure; backup
 `gator-rcs.bak-pre-rcs-hardening-0722`). Immutable attempt identity is source/host-green at server
 commit `e55f1210`; it is not claimed deployed or device-proven here.

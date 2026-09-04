@@ -13550,7 +13550,7 @@
     {
       "id": "src/services/bootstrap.ts#resolveBootSession:mutator-call:4be60ae765e3",
       "path": "src/services/bootstrap.ts",
-      "line": 347,
+      "line": 350,
       "symbol": "resolveBootSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -13563,7 +13563,7 @@
     {
       "id": "src/services/bootstrap.ts#inspectForegroundBootSession:mutator-call:106ee7ea858e",
       "path": "src/services/bootstrap.ts",
-      "line": 411,
+      "line": 414,
       "symbol": "inspectForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -13576,7 +13576,7 @@
     {
       "id": "src/services/bootstrap.ts#openForegroundBootDatabase:mutator-call:aa0271b15f39",
       "path": "src/services/bootstrap.ts",
-      "line": 439,
+      "line": 442,
       "symbol": "openForegroundBootDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -13589,7 +13589,7 @@
     {
       "id": "src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:f0181c470642",
       "path": "src/services/bootstrap.ts",
-      "line": 621,
+      "line": 624,
       "symbol": "activateForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -13602,7 +13602,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02",
       "path": "src/services/bootstrap.ts",
-      "line": 644,
+      "line": 647,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#resolveBootSession",
@@ -13615,7 +13615,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:94dbfeb8fde6",
       "path": "src/services/bootstrap.ts",
-      "line": 653,
+      "line": 656,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -13628,7 +13628,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02:2",
       "path": "src/services/bootstrap.ts",
-      "line": 693,
+      "line": 696,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#resolveBootSession",
@@ -13641,7 +13641,7 @@
     {
       "id": "src/services/bootstrap.ts#hydrateSession:mutator-call:c52a509eefea",
       "path": "src/services/bootstrap.ts",
-      "line": 727,
+      "line": 730,
       "symbol": "hydrateSession",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -13654,7 +13654,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:21c31fa08724",
       "path": "src/services/bootstrap.ts",
-      "line": 784,
+      "line": 787,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -13667,7 +13667,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:a35e092f20bd",
       "path": "src/services/bootstrap.ts",
-      "line": 789,
+      "line": 792,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -13680,7 +13680,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:0215e207799e",
       "path": "src/services/bootstrap.ts",
-      "line": 887,
+      "line": 890,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -13693,7 +13693,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:f72fb8307767",
       "path": "src/services/bootstrap.ts",
-      "line": 984,
+      "line": 987,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -13706,7 +13706,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:e75fcdcefedc",
       "path": "src/services/bootstrap.ts",
-      "line": 1065,
+      "line": 1068,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -13719,7 +13719,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:bd0a1be3afa9",
       "path": "src/services/bootstrap.ts",
-      "line": 1140,
+      "line": 1143,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -13732,7 +13732,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:9c87d79ec275",
       "path": "src/services/bootstrap.ts",
-      "line": 1171,
+      "line": 1174,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#wipeLocalCache",
@@ -13745,7 +13745,7 @@
     {
       "id": "src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850",
       "path": "src/services/bootstrap.ts",
-      "line": 1471,
+      "line": 1494,
       "symbol": "runForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#cleanupAccountDatabase",
@@ -13758,7 +13758,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829",
       "path": "src/services/bootstrap.ts",
-      "line": 1580,
+      "line": 1604,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#clearLocalCache",
@@ -13771,7 +13771,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e",
       "path": "src/services/bootstrap.ts",
-      "line": 1584,
+      "line": 1608,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#localCacheDirty",
@@ -13784,7 +13784,7 @@
     {
       "id": "src/services/bootstrap.ts#startForget:mutator-call:976b6c7c71bc",
       "path": "src/services/bootstrap.ts",
-      "line": 1676,
+      "line": 1700,
       "symbol": "startForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runForget",
@@ -13797,7 +13797,7 @@
     {
       "id": "src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c",
       "path": "src/services/bootstrap.ts",
-      "line": 1686,
+      "line": 1710,
       "symbol": "forget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -13810,7 +13810,7 @@
     {
       "id": "src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906",
       "path": "src/services/bootstrap.ts",
-      "line": 1700,
+      "line": 1724,
       "symbol": "runOrAwaitForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -17123,9 +17123,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendContactService.test.ts; test/services/sendReactionService.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/services/outgoingQueueEmoji.test.ts; test/services/sendAccountScope.test.ts; test/services/sendQueueHandover.test.ts; test/services/sendRetryGuard.test.ts"
     },
     {
+      "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:fbf723b9add6",
+      "path": "src/services/notifications/fcmMessaging.ts",
+      "line": 145,
+      "symbol": "deliver",
+      "operation": "mutator-call",
+      "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
+      "detectedContext": "incoming-ingress-delegation",
+      "owner": "handleIncomingFcm",
+      "transactionContext": "incoming-ingress-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/realtimeStartupOptional.test.ts; test/services/fcmMessagingLifecycle.test.ts; test/realtime/socketDispatchFailure.test.ts; test/realtime/socketEscalation.test.ts; test/features/conversations/devSeedAccountScope.test.ts; test/components/routes/chatScreen.test.tsx"
+    },
+    {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:b5d0b2820a79",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 109,
+      "line": 176,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -17138,7 +17151,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:404900f55bb6",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 120,
+      "line": 187,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -17151,7 +17164,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:23ef353517cd",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 190,
+      "line": 257,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -17164,7 +17177,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:a2c19f879c>:mutator-call:e9f1180f0d95",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 215,
+      "line": 282,
       "symbol": "handleIncomingFcm.<callback:a2c19f879c>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -17177,7 +17190,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleBackgroundFcm:mutator-call:e62b6a2acfd9",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 238,
+      "line": 305,
       "symbol": "handleBackgroundFcm",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -17190,7 +17203,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#startFcm.<callback:a43a320bdb>:mutator-call:b2b3d2f6880a",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 258,
+      "line": 325,
       "symbol": "startFcm.<callback:a43a320bdb>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",

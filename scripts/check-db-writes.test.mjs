@@ -1448,7 +1448,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     (finding) => finding.detectedContext === 'incoming-ingress-delegation',
   );
 
-  assert.equal(ingress.length, 22);
+  assert.equal(ingress.length, 23);
   assert.deepEqual(
     Object.fromEntries(
       [...new Set(ingress.map((finding) => finding.path))]
@@ -1458,7 +1458,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     {
       'app/(app)/chat/[guid].tsx': 1,
       'src/features/conversations/devSeed.ts': 5,
-      'src/services/notifications/fcmMessaging.ts': 6,
+      'src/services/notifications/fcmMessaging.ts': 7,
       'src/services/notifications/registerFcmBackgroundHandler.ts': 1,
       'src/services/realtimeControl.ts': 9,
     },
@@ -6337,6 +6337,62 @@ fullOnlyTest(
         after: 'let locked = false;',
       },
       {
+        label: 'FCM V2 migration state read is bypassed',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before: '    encryptionState = await readFcmDeviceEncryptionState(vault);',
+        after: "    encryptionState = { kind: 'absent' };",
+      },
+      {
+        label: 'FCM V2 state read loses its post-await lease check',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before:
+          '  if (!lease.isCurrent()) return;\n\n  // A present record means this installation began V2 migration.',
+        after: '  void lease;\n\n  // A present record means this installation began V2 migration.',
+      },
+      {
+        label: 'FCM V2 revoked state is treated as usable',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before: "encryptionState.kind !== 'valid' || encryptionState.state.status === 'revoked'",
+        after: "encryptionState.kind !== 'valid'",
+      },
+      {
+        label: 'FCM V2 origin binding is bypassed',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before: '    if (!currentOrigin || encryptionState.state.origin !== currentOrigin) {',
+        after: '    if (false) {',
+      },
+      {
+        label: 'FCM V2 envelope gate allows a downgrade',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before:
+          "    if (!encrypted || encryptionType !== FCM_V2_ENCRYPTION_TYPE || typeof body !== 'string') {",
+        after: "    if (typeof body !== 'string') {",
+      },
+      {
+        label: 'FCM V2 decrypt omits event-name authenticated data',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before:
+          '      plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, eventName);',
+        after:
+          "      plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, 'constant-event');",
+      },
+      {
+        label: 'FCM V2 decrypt loses its post-await lease check',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before:
+          '    if (!lease.isCurrent()) return;\n    // V2 authenticates only `eventName` in the current server foundation.',
+        after:
+          '    void lease;\n    // V2 authenticates only `eventName` in the current server foundation.',
+      },
+      {
+        label: 'FCM V2 dispatch uses unauthenticated outer data',
+        path: 'src/services/notifications/fcmMessaging.ts',
+        before:
+          "    await dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence);",
+        after:
+          "    await dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence);",
+      },
+      {
         label: 'lease-token crypto call resolves to a constant decoy',
         path: 'src/services/realtimeControl.ts',
         transform: (source) =>
@@ -6526,7 +6582,7 @@ fullOnlyTest(
       assert.equal(
         baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
           .length,
-        22,
+        23,
         'incoming-ingress fixture must exercise the live positive certificate',
       );
       for (const mutation of cases) {

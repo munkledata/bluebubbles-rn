@@ -323,6 +323,7 @@ describe('endpoint shapes: device registration', () => {
   it('registerDevice reads { id } from the /devices op', async () => {
     expect(await registerDevice(httpReturning({ id: 'dev-9' }), 'Phone', 'tok')).toEqual({
       id: 'dev-9',
+      pushEncryptionType: null,
     });
   });
 });

@@ -85,6 +85,7 @@ const areCriticalSettingsHydrated = jest.fn(() => true);
 const deleteFcmToken = jest.fn(async (): Promise<void> => undefined);
 const getMessaging = jest.fn(() => ({ app: 'messaging' }));
 const clearFileLogs = jest.fn(async (): Promise<boolean> => true);
+const retireFcmDeviceEncryptionState = jest.fn(async (): Promise<void> => undefined);
 const serverInfo = jest.fn(async (): Promise<import('@core/models').ServerInfo> => ({
   server_version: undefined,
 }));
@@ -247,6 +248,9 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   cancelAllNotifications,
   cancelReminderNotification,
 }));
+jest.mock('@/services/notifications/fcmEncryptionState', () => ({
+  retireFcmDeviceEncryptionState,
+}));
 jest.mock('expo-file-system', () => ({
   Paths: { document: '/doc' },
   Directory: class {
@@ -345,6 +349,7 @@ beforeEach(async () => {
   deleteFcmToken.mockResolvedValue(undefined);
   getMessaging.mockReturnValue({ app: 'messaging' });
   clearFileLogs.mockResolvedValue(true);
+  retireFcmDeviceEncryptionState.mockReset().mockResolvedValue(undefined);
   serverInfo.mockReset().mockResolvedValue({ server_version: undefined });
   startSync.mockReset().mockResolvedValue(undefined);
   startRealtime.mockReset().mockResolvedValue(undefined);
@@ -2241,8 +2246,53 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     await forget();
 
     expect(useSessionStore.getState().origin).toBeNull();
+    expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(1);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(clearShareShortcuts).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires the push key only after admitted realtime registration work drains', async () => {
+    let releaseRealtime!: () => void;
+    pauseRealtimeDeliveries.mockImplementationOnce(() => {
+      if (mockDeliveriesAccepting) {
+        mockDeliveriesAccepting = false;
+        mockDeliveryGeneration += 1;
+      }
+      return new Promise<void>((resolve) => {
+        releaseRealtime = resolve;
+      });
+    });
+
+    const run = forget();
+    for (let index = 0; index < 200 && releaseRealtime == null; index += 1) {
+      await Promise.resolve();
+    }
+    expect(releaseRealtime).toEqual(expect.any(Function));
+    expect(retireFcmDeviceEncryptionState).not.toHaveBeenCalled();
+
+    releaseRealtime();
+    await expect(run).resolves.toBeUndefined();
+    expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps account B blocked until the keyless push tombstone persists on a later cleanup sweep', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    retireFcmDeviceEncryptionState
+      .mockRejectedValueOnce(new Error('SecureStore write unavailable'))
+      .mockResolvedValueOnce(undefined);
+    connectToServer.mockResolvedValue({
+      ok: false,
+      kind: 'unknown',
+      message: 'test stop',
+    });
+
+    await connect('https://new.example', 'new-secret');
+    expect(connectToServer).not.toHaveBeenCalled();
+    expect(accountRevoked).toBe(true);
+
+    await connect('https://new.example', 'new-secret');
+    expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(2);
+    expect(connectToServer).toHaveBeenCalledTimes(1);
   });
 
   it('attempts the independent marker before the first SecureStore retirement write', async () => {
@@ -2494,12 +2544,14 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       expect(clearLocalCache).toHaveBeenCalledTimes(1);
       expect(connectToServer).not.toHaveBeenCalled();
       expect(accountRevoked).toBe(true);
+      expect(retireFcmDeviceEncryptionState).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
         '[forget] realtime delivery drain timed out — next connection remains blocked',
       );
 
       releaseRealtime();
       await connect('https://new.example', 'new-secret');
+      expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(1);
       expect(clearLocalCache).toHaveBeenCalledTimes(2);
       expect(connectToServer).toHaveBeenCalledTimes(1);
     } finally {

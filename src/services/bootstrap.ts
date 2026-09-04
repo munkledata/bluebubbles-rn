@@ -14,6 +14,7 @@ import { areCriticalSettingsHydrated, hydrateAllStores } from '@state/hydrateSto
 import { useSessionStore } from '@state/sessionStore';
 import { accountRevocationMarker, candidateClient, http, vault } from './clients';
 import { fileLogSink } from './logging/fileLogSink';
+import { retireFcmDeviceEncryptionState } from './notifications/fcmEncryptionState';
 import { connectToServer } from './connection';
 import { ensureDatabase, runSearchTextBackfillOnce } from './databaseControl';
 import {
@@ -55,6 +56,8 @@ const RESIDUAL_CLEANUP_FAILURE_MESSAGE =
   'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.';
 const FCM_TOKEN_RETIREMENT_FAILURE_MESSAGE =
   'Push notification retirement for the previous connection could not be confirmed.';
+const FCM_KEY_RETIREMENT_FAILURE_MESSAGE =
+  'Push encryption-key retirement for the previous connection could not be confirmed.';
 const REALTIME_DRAIN_FAILURE_MESSAGE =
   'In-flight account work from the previous connection did not stop in time.';
 const SYNC_DRAIN_FAILURE_MESSAGE =
@@ -1376,6 +1379,26 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     // do not authorize B until a later retry proves every old slot idle and wipes once more.
     logger.warn('[forget] realtime delivery drain timed out — next connection remains blocked');
   }
+
+  // Registration owns SecureStore writes and is part of the realtime drain. Retire its key only
+  // AFTER that drain succeeds, so a suspended pending/active write cannot resurrect account A's
+  // key behind the keyless revoked tombstone. On timeout, skip the mutation; the failed drain
+  // blocks B and a later full cleanup retries after all old registration slots have settled.
+  let fcmKeyRetirementFailure: Error | null = null;
+  if (realtimeDrained) {
+    const retirement = retireFcmDeviceEncryptionState(vault);
+    const result = await settleWithinDeadline(retirement, FCM_KEY_RETIREMENT_DEADLINE_MS, () =>
+      quarantineAccountCleanup(retirement),
+    );
+    if (result.kind !== 'value') {
+      fcmKeyRetirementFailure = new Error(FCM_KEY_RETIREMENT_FAILURE_MESSAGE);
+      if (result.kind === 'timeout') {
+        logger.warn('[forget] push encryption-key retirement timed out');
+      } else {
+        logger.warn('[forget] push encryption-key retirement failed');
+      }
+    }
+  }
   // An admitted send can reach its uploader after the first synchronous sweep. Re-cancel after the
   // account-work barrier, then join exact native tails that outlive their already-rejected public
   // send promise. A timeout leaves those terminal promises registered so the next cleanup retry
@@ -1533,6 +1556,7 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     inMemoryCleanupFailure ??
     fcmTokenRetirementFailure ??
     realtimeDrainFailure ??
+    fcmKeyRetirementFailure ??
     uploadDrainFailure ??
     syncDrainFailure ??
     downloadDrainFailure ??
@@ -1760,6 +1784,8 @@ const ACCOUNT_CLEANUP_JOIN_DEADLINE_MS = 5_000;
 const CREDENTIAL_CLEANUP_DEADLINE_MS = 5_000;
 /** A late token delete could retire account B's token, so it remains quarantined after this bound. */
 const FCM_TOKEN_RETIREMENT_DEADLINE_MS = 5_000;
+/** A late tombstone write could retire account B's key, so it remains quarantined after this bound. */
+const FCM_KEY_RETIREMENT_DEADLINE_MS = 5_000;
 /** DB open + reminder retirement + confirmed two-pass wipe may be slow, but never unbounded. */
 const DATABASE_CLEANUP_DEADLINE_MS = 30_000;
 /** Realtime work is DB/native presentation only; long downloads run outside this drain. */
