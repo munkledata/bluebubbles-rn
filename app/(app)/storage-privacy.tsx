@@ -98,9 +98,9 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
         <SettingsSection label="FILES OUTSIDE THE DATABASE" style={styles.gap}>
           <Text style={textStyle}>
             Downloaded or staged attachments, chat wallpapers and synced backgrounds, cached contact
-            images, app logs, incoming-share copies, and image or WebView caches are ordinary files.
-            Android keeps them in Gator’s app-private folders, so normal apps cannot browse them,
-            but SQLCipher and App Lock do not encrypt those files.
+            images, app logs, incoming-share copies, and image or other Android/Expo-managed caches
+            are ordinary files. Android keeps them in Gator’s app-private folders, so normal apps
+            cannot browse them, but SQLCipher and App Lock do not encrypt those files.
           </Text>
           <Text style={textStyle}>
             Attachments you save to Photos—and images automatically exported to Photos or the Gator

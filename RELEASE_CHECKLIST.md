@@ -200,6 +200,9 @@ npm run check:android-build
       explicit tap may hand the URL to the external browser. Record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
+- [ ] Clean install, autolinking, and exact-AAB inspection confirm that the app-owned
+      `react-native-webview` package/native registration is absent. Expo’s transitive
+      `@expo/dom-webview` is framework-owned and is not evidence of a reachable product surface.
 - [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
       notifications, channels, and alarms honor App Lock's generic-notification boundary, while
       Recents and screenshots honor its protected-screen boundary without leaking identity or message

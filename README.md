@@ -127,7 +127,8 @@ the EAS profiles intentionally have no update-channel fields.
   out of Android Recents, including during its grace period. The independent Secure Screen setting
   blocks screenshots and screen recording. Neither setting adds encryption to files.
 - **Files:** attachments, wallpapers/backgrounds, cached contact images, app logs, incoming-share
-  copies, and image/WebView caches are ordinary plaintext files in Android app-private storage.
+  copies, and image or other Android/Expo-managed caches are ordinary plaintext files in Android
+  app-private storage.
   Files explicitly saved—or images automatically exported—to Photos/the Gator album are plaintext
   copies in Android shared media storage and are not removed by disconnect or uninstall. Settings →
   Storage & File Privacy explains cleanup and backup behavior.
@@ -135,9 +136,10 @@ the EAS profiles intentionally have no update-channel fields.
   writing the temporary share file, then deletes that temporary file after sharing.
 - **Transport TLS:** HTTPS uses Android’s normal certificate and hostname validation. There is no
   application-level certificate pinning or bad-certificate bypass.
-- **Push/providers:** Firebase Cloud Messaging may carry push data. User-opened links, Find My map
-  tiles, and other provider-backed features can contact their respective services; do not claim
-  that no third party is involved.
+- **Push/providers:** Firebase Cloud Messaging may carry push data. Embedded Find My and FaceTime web
+  surfaces are disabled; user-opened links, explicit Find My system-map actions, and other
+  provider-backed features can contact their respective services. Do not claim that no third party
+  is involved.
 - **Previews:** no client Open Graph fetch/parser exists. Server-supplied or exact-key legacy-cache
   text metadata may render, but no preview path mounts remote artwork; only an explicit tap hands an
   allowed URL to the external browser.

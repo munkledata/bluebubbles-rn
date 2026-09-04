@@ -2,9 +2,9 @@
  * FaceTime join-link validation.
  *
  * A FaceTime link is supplied by the Gator server (the answer + link-mint
- * ops) and carried in Notifee action data — both attacker-influenceable. Before we ever
- * `Linking.openURL` it OR load it in the in-app call WebView, we confirm it's a real
- * FaceTime link, never an arbitrary scheme/Intent (a compromised server could otherwise
+ * ops) and carried in Notifee action data — both attacker-influenceable. Before we hand it
+ * to `Linking.openURL` for a system-owned handler, we confirm it's a real FaceTime link,
+ * never an arbitrary scheme/Intent (a compromised server could otherwise
  * return `intent://` / `tel:` / a deep link). See AGENTS.md ("A server-supplied URL
  * opened via Linking.openURL MUST be scheme-validated").
  *

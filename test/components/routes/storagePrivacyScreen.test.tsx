@@ -56,7 +56,7 @@ describe('StoragePrivacyScreen', () => {
     ).toBeTruthy();
     expect(screen.getByText(/Downloaded or staged attachments/)).toBeTruthy();
     expect(screen.getByText(/incoming-share copies/)).toBeTruthy();
-    expect(screen.getByText(/image or WebView caches/)).toBeTruthy();
+    expect(screen.getByText(/image or other Android\/Expo-managed caches/)).toBeTruthy();
     expect(screen.getByText(/automatically exported to Photos or the Gator album/)).toBeTruthy();
     expect(screen.getByText(/shared media storage/)).toBeTruthy();
     expect(screen.getByText(/app logs before another account can connect/)).toBeTruthy();

@@ -17,7 +17,7 @@ applied by Expo's default prebuild plugins; ordinary runtime/peer packages are a
 | 4 — Push | `@react-native-firebase/messaging`, `react-native-notify-kit` | FCM background handler, rich notifications |
 | 5 — Attachments | `expo-file-system`, `expo-image`, `expo-audio`, `expo-video`, `expo-image-picker` | downloads, media, voice memos |
 | 7 — Native appearance | `expo-system-ui` | applies `userInterfaceStyle: dark` and the native root background from `app.config.ts` |
-| 8 — Advanced | `react-native-webview` (Find My map via Leaflet/OSM) | message effects (JS particles via RN `Animated`, no Skia), Find My map |
+| 8 — Advanced | — (`react-native-webview` retired; embedded map/call surfaces disabled) | message effects (JS particles via RN `Animated`, no Skia), Find My list and explicit system-Maps handoff |
 
 After adding native modules, rebuild the Dev Client locally (config plugins change native code):
 `npx expo run:android` with the local Android SDK. Hosted EAS builds are not a supported project path.
@@ -41,3 +41,10 @@ above. The 2026-08-27 `SDK-01` host milestone aligned the newer SDK 57 patches f
 `expo-system-ui` (along with the rest of Expo's expected patch set); dependency ownership did not change. No package was
 removed in `DEPS-02`, so no removal-specific prebuild/rebuild gate was triggered; any future removal must be isolated
 and run through Expo Doctor, Metro export, clean prebuild/build, and the directly affected runtime flow.
+
+The later `PKG-01-WEBVIEW-REMOVAL` slice removes the app's direct community
+`react-native-webview` declaration and resolution. Expo SDK 57 still brings its separate
+`@expo/dom-webview` module transitively; that framework dependency does not authorize an embedded
+product surface, and current production source imports neither package. Host install/autolinking
+checks prove the direct package absent, while a clean replacement native candidate remains the
+packaged-artifact proof.

@@ -51,9 +51,10 @@ export async function createFaceTimeLink(
 /**
  * Place an OUTGOING FaceTime call (Private API native dial) to one or more addresses —
  * the Mac's FaceTime rings the recipient(s) from your registered number/identity. The
- * server also mints a join link for the placed call so you can join the media from the
- * in-app WebView. `POST /facetime/call` → `{ call_uuid, link }`. Either field may be
- * null if the server placed the call but couldn't return it (e.g. link mint failed).
+ * server also mints a join link for the placed call so Gator can hand it to a system-owned
+ * FaceTime or browser handler after validation. `POST /facetime/call` →
+ * `{ call_uuid, link }`. Either field may be null if the server placed the call but couldn't
+ * return it (e.g. link mint failed).
  */
 export async function startFaceTimeCall(
   http: HttpClient,

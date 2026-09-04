@@ -232,9 +232,9 @@ value TEXT)`.
 ## Characteristics & caveats
 
 - **Only ordinary attachment files use the app-managed global LRU.** The 2 GiB/4,096-file ledger
-  does not govern SQLCipher history or third-party Expo Image/WebView caches. Synced backgrounds
-  have their own native 100 MiB/256-file quota; Android/Expo-managed caches remain outside this
-  ledger and may follow OS/library cleanup policy.
+  does not govern SQLCipher history or third-party Expo Image and other Android/Expo-managed caches.
+  Synced backgrounds have their own native 100 MiB/256-file quota; Android/Expo-managed caches
+  remain outside this ledger and may follow OS/library cleanup policy.
 - **Disconnect is a verified account wipe.** `forget()` closes the authorization window, clears
   credentials and account-scoped DB contents, cancels known reminders/notifications/shortcuts, and
   removes persistent attachment/avatar/background/wallpaper directories. It clears the in-memory

@@ -70,13 +70,16 @@ configuration can be compared without disclosing credentials.
 
 ## `PKG-01` — explicit native compatibility boundaries
 
-Exact-pin shipped native boundaries such as op-sqlite, notify-kit, WebView, Firebase, and FlashList,
-and pin Drizzle where its adapter contract requires it. The lockfile supports reproducibility but is
-not the only compatibility statement; record the upgrade steps and native smoke surface for each
-critical boundary.
+Exact-pin shipped native boundaries such as op-sqlite, notify-kit, Firebase, and FlashList, and pin
+Drizzle where its adapter contract requires it. The lockfile supports reproducibility but is not the
+only compatibility statement; record the upgrade steps and native smoke surface for each critical
+boundary.
 
-Keep `expo-share-intent` absent unless a future, approved public share-intake design satisfies
-`IPC-01`. Routine installation must not silently select a new native bridge implementation.
+Keep `expo-share-intent` and direct `react-native-webview` absent while their product surfaces remain
+disabled. Reintroducing the community WebView requires reopening the applicable `WEB-01..03` or
+`FACE-01` path, selecting an exact pin, and supplying native/device proof. Expo's separate transitive
+`@expo/dom-webview` module is framework-owned and does not authorize a reachable embedded surface.
+Routine installation must not silently select a new native bridge implementation.
 
 <a id="build-01"></a>
 
