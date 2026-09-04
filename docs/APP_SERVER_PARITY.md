@@ -16,7 +16,7 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 **Original 2026-07-01 baseline:** 44 surface items matched on both sides (the core messaging, sync,
 group management, FaceTime, Find My, stats, and restart/logs flows all lined up).
 
-## 🟡 Partial (2026-08-29) — multipart message-part identity (`FEAT-03B`)
+## 🟡 Partial (updated 2026-09-04) — multipart message-part identity (`FEAT-03B`)
 
 The Gator send routes accept `partIndex` for ordinary text replies, reactions, edits, and unsend,
 and serialized messages expose a bounded aggregate `partCount`. The RN compatibility slice now
@@ -34,9 +34,12 @@ part ambiguous. A shared aggregate-retraction classifier therefore remains separ
 This is not full cross-repository multipart parity. The normalized server message does not expose a
 stable per-part topology or incoming `thread_originator_part`, so the client can identify the common
 attachments-first caption layout only when the aggregate count proves it. Apple part identifiers can
-also change after edits, unsends, or gallery collapse. The server's mention/multipart text path must
-be verified to retain the requested reply part as well. Exact arbitrary layouts and received reply
-parts therefore remain blocked on an additive server contract plus device observation; ambiguous
+also change after edits, unsends, or gallery collapse. The app endpoint and server route, gateway, and
+helper request now preserve `selectedMessageGuid` plus an optional outer `partIndex` for mention-bearing
+replies. A focused operation test proves a nonzero reply part survives the complete host-side path and
+that an ordinary mention send invents neither reply field. This is source proof only: the current production
+server has retired the Private API helper, so no live Mac dispatch is claimed. Exact arbitrary layouts and
+received reply parts remain open for an additive server topology contract plus device observation; ambiguous
 older payloads keep the compatible part-zero fallback rather than inventing an identity.
 
 ## 🟡 Source-aligned (2026-09-04) — capability-gated global message search (`FEAT-05C`)
@@ -324,26 +327,26 @@ primary tasks. The project owner approved the other 15 dispositions as written o
 eight `DROP`. These are Android-client scope decisions; `DROP` does not remove the corresponding server behavior.
 The historical directional tables remain protocol evidence and do not override this register.
 
-| Open record/capability | Approved disposition | Reason / authoritative owner |
-| --- | --- | --- |
-| Missed-deletion catch-up sync | TASK | `DELETE-SYNC-01` owns the durable observation contract and exact-device proof. |
-| `imessage-aliases-removed` | DEFER | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source. |
-| Stubbed `GET /server/update/check` | DROP | The app fails closed without issuing the nonexistent request; release/update truth is owned by the release workflow. |
-| Admin `set-config` | DROP | Full server configuration writes require local admin authentication and belong in the trusted server console. |
-| macOS permission status and prompts | DEFER | A future Server Health slice must separate safe status reads from prompt-causing actions on the Mac. |
-| Admin `get-devices` / `purge-devices` | DEFER | Revisit with push-device administration; prefer least-destructive per-device removal and exclude admin-wide purge unless separately approved. |
-| REST list/remove device | DEFER | Revisit with the same push-device administration slice; keep per-device ownership and stale-token behavior explicit. |
-| Bulk `GET /contact` | TASK | `FEAT-06` owns identity/privacy research; this is distinct from completed per-address lookup and contact-card sending. |
-| Bulk `POST /handle/query` | TASK | `FEAT-06` owns bounded bootstrap and identity research before any sync/schema work. |
-| `group-icon-changed` / `group-icon-removed` | DEFER | Participant collages are the selected product today; open a group-photo feature task before wiring refresh events. |
-| Webhook REST/admin operations | DROP | Webhooks are server-to-server integration management, not Android client parity. |
-| `get-group-message-counts` / `get-best-friend` | DROP | Novelty statistics do not justify remediation scope or a new mobile surface. |
-| VAPID/Web Push administration | DROP | This Android client uses FCM; Web Push provisioning is outside its platform scope. |
-| REST `GET /config` | DROP | Existing Server Health diagnostics already expose the useful sanitized status without adding a duplicate config surface. |
-| `toggle-tutorial` | DROP | This local admin preference has no mobile parity requirement. |
-| `config-update` | DEFER | Reconsider only with an accepted live-config feature; `RT-01A` remains the sole owner of server-origin rotation. |
-| `scheduled-message-update` | DEFER | Reopen when cross-device live refresh is required for the current hybrid server/local scheduling model. |
-| `firebase-setup-status` | DROP | The app does not drive Firebase provisioning, so provisioning-progress events have no consumer journey. |
+| Open record/capability                         | Approved disposition | Reason / authoritative owner                                                                                                                  |
+| ---------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Missed-deletion catch-up sync                  | TASK                 | `DELETE-SYNC-01` owns the durable observation contract and exact-device proof.                                                                |
+| `imessage-aliases-removed`                     | DEFER                | Keep the harmless app handler, but do not invent a server event until the server has a real alias-deregistration source.                      |
+| Stubbed `GET /server/update/check`             | DROP                 | The app fails closed without issuing the nonexistent request; release/update truth is owned by the release workflow.                          |
+| Admin `set-config`                             | DROP                 | Full server configuration writes require local admin authentication and belong in the trusted server console.                                 |
+| macOS permission status and prompts            | DEFER                | A future Server Health slice must separate safe status reads from prompt-causing actions on the Mac.                                          |
+| Admin `get-devices` / `purge-devices`          | DEFER                | Revisit with push-device administration; prefer least-destructive per-device removal and exclude admin-wide purge unless separately approved. |
+| REST list/remove device                        | DEFER                | Revisit with the same push-device administration slice; keep per-device ownership and stale-token behavior explicit.                          |
+| Bulk `GET /contact`                            | TASK                 | `FEAT-06` owns identity/privacy research; this is distinct from completed per-address lookup and contact-card sending.                        |
+| Bulk `POST /handle/query`                      | TASK                 | `FEAT-06` owns bounded bootstrap and identity research before any sync/schema work.                                                           |
+| `group-icon-changed` / `group-icon-removed`    | DEFER                | Participant collages are the selected product today; open a group-photo feature task before wiring refresh events.                            |
+| Webhook REST/admin operations                  | DROP                 | Webhooks are server-to-server integration management, not Android client parity.                                                              |
+| `get-group-message-counts` / `get-best-friend` | DROP                 | Novelty statistics do not justify remediation scope or a new mobile surface.                                                                  |
+| VAPID/Web Push administration                  | DROP                 | This Android client uses FCM; Web Push provisioning is outside its platform scope.                                                            |
+| REST `GET /config`                             | DROP                 | Existing Server Health diagnostics already expose the useful sanitized status without adding a duplicate config surface.                      |
+| `toggle-tutorial`                              | DROP                 | This local admin preference has no mobile parity requirement.                                                                                 |
+| `config-update`                                | DEFER                | Reconsider only with an accepted live-config feature; `RT-01A` remains the sole owner of server-origin rotation.                              |
+| `scheduled-message-update`                     | DEFER                | Reopen when cross-device live refresh is required for the current hybrid server/local scheduling model.                                       |
+| `firebase-setup-status`                        | DROP                 | The app does not drive Firebase provisioning, so provisioning-progress events have no consumer journey.                                       |
 
 Residual management operations embedded in rows whose read-only portions are already closed are also approved
 **DROP** for mobile parity: FCM setup/clear/OAuth, helper reinjection, Find My key import, zrok/TLS/ACME/Cloudflare
