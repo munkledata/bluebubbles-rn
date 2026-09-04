@@ -261,6 +261,19 @@ describe('ServerBackupSlotsSection query states', () => {
     expect(mockListServerBackupSlots).toHaveBeenCalledTimes(2);
   });
 
+  it('explains when the server refuses an unsafe complete backup list', async () => {
+    mockListServerBackupSlots.mockRejectedValueOnce(new ServerBackupSlotError('server-capacity'));
+
+    await renderSection();
+
+    expect(
+      await screen.findByText(
+        'The server has too many or too-large backups to list safely. Reduce its stored backups, then try again. Local export and restore are still available.',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
   it('shows compatible and legacy slots with the correct actions enabled', async () => {
     const legacySlot: ServerBackupSlot = {
       name: 'Old Mac',
@@ -521,6 +534,11 @@ describe('ServerBackupSlotsSection save flow', () => {
       'slot limit',
       () => new ServerBackupSlotError('slot-limit'),
       'This device won’t add more than 10 visible slots. Delete a slot first.',
+    ],
+    [
+      'server capacity',
+      () => new ServerBackupSlotError('server-capacity'),
+      'The server’s backup capacity is full. Delete a server backup or use a smaller backup, then try again.',
     ],
     [
       'rejected normalized name',

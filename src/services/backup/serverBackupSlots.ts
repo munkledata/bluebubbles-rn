@@ -17,10 +17,10 @@ import { BACKUP_LIMITS } from './backupSchema';
 import type { RestoreResult } from './backup';
 
 /**
- * The current server accepts at most 1 MiB of raw JSON and has no aggregate quota. Keep enough
- * headroom for JSON/name/envelope bytes, and keep one fully observed client-created list below
- * HttpClient's 16 MiB response cap. Cross-device races can exceed that bound because the server has
- * no aggregate quota; these are fail-closed client admission limits, not a server guarantee.
+ * The current server enforces the same slot/name/ciphertext limits plus an aggregate quota and a
+ * serialized-list ceiling. Keep these client checks as early feedback and for older servers that do
+ * not yet enforce the bounds; encrypted ciphertext is ASCII, so its character and UTF-8 byte counts
+ * are identical.
  */
 export const SERVER_BACKUP_SLOT_LIMITS = {
   nameCharacters: 80,
@@ -32,6 +32,7 @@ export type ServerBackupSlotErrorKind =
   | 'invalid-name'
   | 'ciphertext-too-large'
   | 'slot-limit'
+  | 'server-capacity'
   | 'incompatible-slot'
   | 'revision-conflict'
   | 'revision-fence-required'
@@ -70,6 +71,9 @@ async function awaitCurrent<T>(lease: RealtimeDeliveryLease, promise: Promise<T>
     return value;
   } catch (error) {
     if (!lease.isCurrent()) throw new BackupAccountChangedError();
+    if (error instanceof ApiError && error.status === 413) {
+      throw new ServerBackupSlotError('server-capacity');
+    }
     throw error;
   }
 }
@@ -135,12 +139,17 @@ export async function listServerBackupSlots(
   signal?: AbortSignal,
 ): Promise<ServerBackupSlotsSnapshot> {
   assertCurrent(lease);
-  const response = await awaitCurrent(lease, backupsApi.listSettingsBackups(http, signal));
-  assertCurrent(lease);
-  return {
-    slots: response.backups.map(toSlot).sort(compareSlots),
-    revisionFence: response.revisionFence,
-  };
+  try {
+    const response = await awaitCurrent(lease, backupsApi.listSettingsBackups(http, signal));
+    assertCurrent(lease);
+    return {
+      slots: response.backups.map(toSlot).sort(compareSlots),
+      revisionFence: response.revisionFence,
+    };
+  } catch (error) {
+    if (!lease.isCurrent()) throw new BackupAccountChangedError();
+    throw error;
+  }
 }
 
 /** Build/seal locally, then POST only the exact ciphertext string and normalized name. */

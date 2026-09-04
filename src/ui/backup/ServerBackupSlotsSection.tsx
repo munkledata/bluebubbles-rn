@@ -40,6 +40,8 @@ type BusyAction = 'save' | `restore:${string}` | `delete:${string}` | null;
 
 const REVISION_CONFLICT_COPY =
   'This backup changed on another device. Review the refreshed slot and try again.';
+const SERVER_CAPACITY_LIST_COPY =
+  'The server has too many or too-large backups to list safely. Reduce its stored backups, then try again. Local export and restore are still available.';
 
 function sortSlots(slots: ServerBackupSlot[]): ServerBackupSlot[] {
   return [...slots].sort((a, b) => {
@@ -65,6 +67,9 @@ function saveFailureCopy(error: unknown): string {
     }
     if (error.kind === 'slot-limit') {
       return `This device won’t add more than ${SERVER_BACKUP_SLOT_LIMITS.slots} visible slots. Delete a slot first.`;
+    }
+    if (error.kind === 'server-capacity') {
+      return 'The server’s backup capacity is full. Delete a server backup or use a smaller backup, then try again.';
     }
     if (error.kind === 'invalid-name') return 'Choose a shorter backup name.';
     if (error.kind === 'revision-fence-required') {
@@ -120,6 +125,10 @@ export function ServerBackupSlotsSection({
   const slots = snapshot?.slots ?? [];
   const revisionFence = snapshot?.revisionFence ?? false;
   const unsupported = slotsQuery.isError && isUnimplementedEndpoint(slotsQuery.error);
+  const serverCapacity =
+    slotsQuery.isError &&
+    slotsQuery.error instanceof ServerBackupSlotError &&
+    slotsQuery.error.kind === 'server-capacity';
   const isBusy = operationBusy || busy !== null;
 
   let normalizedName: string | null = null;
@@ -332,7 +341,9 @@ export function ServerBackupSlotsSection({
     return (
       <SettingsSection label="SERVER BACKUPS" style={styles.section}>
         <Text style={[styles.messageRow, { color: theme.color.secondaryLabel }]}>
-          Couldn’t load server backups. Local export and restore are still available.
+          {serverCapacity
+            ? SERVER_CAPACITY_LIST_COPY
+            : 'Couldn’t load server backups. Local export and restore are still available.'}
         </Text>
         <NavRow
           label="Try again"

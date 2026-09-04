@@ -229,6 +229,28 @@ describe('server backup slots', () => {
     expect(mockDelete).toHaveBeenCalledTimes(1);
   });
 
+  it('maps server capacity for list and save without retrying', async () => {
+    const capacity = new ApiError('bad_request', 'capacity', 413);
+    mockList.mockRejectedValueOnce(capacity);
+    await expect(listServerBackupSlots(lease)).rejects.toMatchObject({ kind: 'server-capacity' });
+    expect(mockList).toHaveBeenCalledTimes(1);
+
+    mockCreateCiphertext.mockResolvedValue('BB2.new-ciphertext');
+    mockSave.mockRejectedValueOnce(capacity);
+    await expect(
+      saveServerBackupSlot(
+        {
+          name: 'Travel',
+          passphrase: 'private passphrase',
+          now: 10,
+          snapshot: { slots: [], revisionFence: true },
+        },
+        lease,
+      ),
+    ).rejects.toMatchObject({ kind: 'server-capacity' });
+    expect(mockSave).toHaveBeenCalledTimes(1);
+  });
+
   it('prefers account retirement when it races with a revision conflict', async () => {
     let current = true;
     const retiringLease = { generation: 8, isCurrent: () => current };
@@ -257,6 +279,27 @@ describe('server backup slots', () => {
         retiringLease,
       ),
     ).rejects.toBeInstanceOf(BackupAccountChangedError);
+  });
+
+  it('prefers account retirement when it races with a capacity list rejection', async () => {
+    let current = true;
+    const retiringLease = { generation: 8, isCurrent: () => current };
+    const capacity = new ApiError('bad_request', 'capacity', 413);
+    mockList.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          queueMicrotask(() => {
+            reject(capacity);
+            queueMicrotask(() => {
+              current = false;
+            });
+          });
+        }),
+    );
+
+    await expect(listServerBackupSlots(retiringLease)).rejects.toBeInstanceOf(
+      BackupAccountChangedError,
+    );
   });
 
   it('does not return a list when account retirement wins the outer await', async () => {
