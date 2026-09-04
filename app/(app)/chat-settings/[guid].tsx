@@ -59,6 +59,7 @@ import {
 import { MediaSections } from '@ui/conversations/MediaSections';
 import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import { requestPhotoLibraryAccess } from '@ui/permissions/photoLibraryPermission';
+import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
 import { adaptiveTokensFromImage } from '@ui/theme/adaptiveFromImage';
 import {
   darkThemeOrFallback,
@@ -207,6 +208,7 @@ function ChatSettingsScreen({
   const mountAliveRef = useRef(true);
   const [lifetime] = useState<ChatSettingsLifetime>(() => ({}));
   const activeLifetimeRef = useRef<ChatSettingsLifetime | null>(lifetime);
+  const activeLinkOpenRef = useRef<object | null>(null);
   const renderGrant: ChatSettingsGrant = { chatGuid: guid, lifetime, accountLease };
   const grantIsCurrent = (grant: ChatSettingsGrant): boolean =>
     mountAliveRef.current &&
@@ -699,8 +701,24 @@ function ChatSettingsScreen({
     router.push(`/documents/${encodeURIComponent(guid)}`);
   };
   const openLink = (url: string): void => {
-    if (!grantIsCurrent(renderGrant)) return;
-    void safeOpenUrl(url);
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant) || activeLinkOpenRef.current) return;
+    const token = {};
+    activeLinkOpenRef.current = token;
+    void (async () => {
+      try {
+        const opened = await safeOpenUrl(url);
+        if (!opened && activeLinkOpenRef.current === token && grantIsCurrent(operationGrant)) {
+          showExternalOpenFailure();
+        }
+      } catch {
+        if (activeLinkOpenRef.current === token && grantIsCurrent(operationGrant)) {
+          showExternalOpenFailure();
+        }
+      } finally {
+        if (activeLinkOpenRef.current === token) activeLinkOpenRef.current = null;
+      }
+    })();
   };
   const openNotificationSettings = (): void => {
     const operationGrant = renderGrant;

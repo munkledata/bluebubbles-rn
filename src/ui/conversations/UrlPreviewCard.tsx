@@ -1,14 +1,19 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { UrlPreviewRow } from '@db/repositories';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
+import { showExternalOpenFailure } from '../toast/external-open-feedback';
+
+const ALWAYS_CURRENT = (): boolean => true;
 
 interface UrlPreviewCardProps {
   url: string;
   /** The already-fetched preview row (the parent bubble owns the hook so it runs once). */
   preview: UrlPreviewRow | null;
   isFromMe: boolean;
+  /** Stable account/route owner supplied by the message list. */
+  externalOpenIsCurrent?: () => boolean;
   /** Optional absolutely-positioned content (for example a tapback) anchored to this card. */
   overlay?: React.ReactNode;
 }
@@ -18,9 +23,65 @@ export function UrlPreviewCard({
   url,
   preview,
   isFromMe,
+  externalOpenIsCurrent = ALWAYS_CURRENT,
   overlay,
 }: UrlPreviewCardProps): React.JSX.Element | null {
   const theme = useTheme();
+  const mountedRef = useRef(true);
+  const activeUrlRef = useRef(url);
+  const sourceLifetimeRef = useRef(0);
+  const [renderSourceLifetime, setRenderSourceLifetime] = useState(0);
+  const openingRef = useRef<{ token: symbol; url: string } | null>(null);
+  const sourceTransitionPending = activeUrlRef.current !== url;
+
+  useLayoutEffect(() => {
+    if (!sourceTransitionPending) return;
+    activeUrlRef.current = url;
+    const nextLifetime = sourceLifetimeRef.current + 1;
+    sourceLifetimeRef.current = nextLifetime;
+    openingRef.current = null;
+    setRenderSourceLifetime(nextLifetime);
+  }, [sourceTransitionPending, url]);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      openingRef.current = null;
+    };
+  }, []);
+
+  const openUrl = (): void => {
+    const operationUrl = url;
+    const operationSourceLifetime = renderSourceLifetime;
+    const operationOwnerIsCurrent = externalOpenIsCurrent;
+    const operationIsCurrent = (): boolean =>
+      mountedRef.current &&
+      activeUrlRef.current === operationUrl &&
+      sourceLifetimeRef.current === operationSourceLifetime &&
+      operationOwnerIsCurrent();
+    if (!operationIsCurrent()) return;
+
+    const activeOpen = openingRef.current;
+    if (activeOpen?.url === operationUrl) return;
+    const token = Symbol('url-preview-open');
+    openingRef.current = { token, url: operationUrl };
+
+    void (async () => {
+      try {
+        const opened = await safeOpenUrl(operationUrl);
+        if (!opened && openingRef.current?.token === token && operationIsCurrent()) {
+          showExternalOpenFailure();
+        }
+      } catch {
+        if (openingRef.current?.token === token && operationIsCurrent()) {
+          showExternalOpenFailure();
+        }
+      } finally {
+        if (openingRef.current?.token === token) openingRef.current = null;
+      }
+    })();
+  };
   // NET-00: mounting a remote <Image> is itself an automatic in-app network request. Preserve
   // cached/server-supplied metadata, but never render preview artwork until NET-01 provides a
   // bounded fetch pipeline. An image-only server payload degrades to the external link's domain.
@@ -36,7 +97,8 @@ export function UrlPreviewCard({
   const card = (
     <Pressable
       testID="url-preview-card"
-      onPress={() => void safeOpenUrl(url)}
+      onPress={sourceTransitionPending ? undefined : openUrl}
+      disabled={sourceTransitionPending}
       style={[
         styles.card,
         overlay ? styles.anchoredCard : null,

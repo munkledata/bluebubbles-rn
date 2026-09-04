@@ -6,6 +6,7 @@ import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/ren
 const mockBack = jest.fn();
 const mockPush = jest.fn();
 const mockShowDialog = jest.fn();
+const mockShowToast = jest.fn();
 const mockLaunchImageLibrary = jest.fn();
 const mockRequestPhotoLibraryAccess = jest.fn();
 const mockSetGroupPhoto = jest.fn();
@@ -237,6 +238,10 @@ jest.mock('expo-file-system', () => ({
 
 jest.mock('@ui/dialog/dialogStore', () => ({
   showDialog: (...args: unknown[]) => mockShowDialog(...args),
+}));
+
+jest.mock('@ui/toast/toastStore', () => ({
+  showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
 
 jest.mock('@db/repositories', () => ({
@@ -610,6 +615,7 @@ beforeEach(() => {
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockComputeBackgroundIsLight.mockReset().mockResolvedValue(false);
   mockAdaptiveTokensFromImage.mockReset().mockResolvedValue(null);
+  mockSafeOpenUrl.mockReset().mockResolvedValue(true);
   mockStartChatRepair.mockReset().mockResolvedValue({
     messages: 0,
     historyExhausted: false,
@@ -798,8 +804,45 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(mockPush).toHaveBeenCalledWith(`/documents/${encodeURIComponent(guid)}`);
     await fireEvent.press(screen.getByText(source.link));
     expect(mockSafeOpenUrl).toHaveBeenCalledWith(source.link);
+    expect(mockShowToast).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByRole('button', { name: 'Back' }));
     expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows generic feedback for a current shared-link failure', async () => {
+    mockSafeOpenUrl.mockResolvedValue(false);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText(PRIVATE_LINK));
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('Couldn’t open this outside Gator.'),
+    );
+    expect(mockShowToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an old shared-link failure after the keyed route source changes', async () => {
+    const oldOpen = deferred<boolean>();
+    mockSafeOpenUrl.mockReturnValueOnce(oldOpen.promise).mockResolvedValueOnce(false);
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByText(PRIVATE_LINK));
+    await waitFor(() => expect(mockSafeOpenUrl).toHaveBeenCalledWith(PRIVATE_LINK));
+
+    mockPendingReactiveGuid = CHAT_GUID_B;
+    mockGuid = CHAT_GUID_B;
+    await view.rerender(<ChatSettingsScreen />);
+    mockPendingReactiveGuid = null;
+    await view.rerender(<ChatSettingsScreen />);
+
+    await act(async () => {
+      oldOpen.resolve(false);
+      await oldOpen.promise;
+    });
+    expect(mockShowToast).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByText(PRIVATE_LINK_B));
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledTimes(1));
+    expect(mockShowToast).toHaveBeenCalledWith('Couldn’t open this outside Gator.');
   });
 
   it('key-remounts pending B without retained A data and revokes A callbacks across A to B to A', async () => {

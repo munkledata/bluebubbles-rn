@@ -1,8 +1,17 @@
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isFaceTimeLink } from '@core/facetime';
 import { logger } from '@core/secure';
-import { useFaceTimeStore } from '@state/faceTimeStore';
+import { useFaceTimeStore, type ActiveFaceTimeCall } from '@state/faceTimeStore';
+import { safeOpenUrl } from '@utils';
+import { showExternalOpenFailure } from '../toast/external-open-feedback';
+
+interface FaceTimeOpenOperation {
+  token: symbol;
+  call: ActiveFaceTimeCall;
+  generation: number;
+}
 
 /**
  * Safe FaceTime handoff for an active call. The embedded WebView is deliberately disabled while
@@ -12,19 +21,80 @@ import { useFaceTimeStore } from '@state/faceTimeStore';
  */
 export function FaceTimeCallOverlay(): React.JSX.Element | null {
   const call = useFaceTimeStore((s) => s.call);
+  const generation = useFaceTimeStore((s) => s.generation);
   const close = useFaceTimeStore((s) => s.close);
   const insets = useSafeAreaInsets();
+  const mountedRef = useRef(true);
+  const activeSourceRef = useRef({ generation, call });
+  const sourceLifetimeRef = useRef(0);
+  const [renderSourceLifetime, setRenderSourceLifetime] = useState(0);
+  const openingRef = useRef<FaceTimeOpenOperation | null>(null);
+  const sourceTransitionPending =
+    activeSourceRef.current.generation !== generation || activeSourceRef.current.call !== call;
+
+  useLayoutEffect(() => {
+    if (!sourceTransitionPending) return;
+    activeSourceRef.current = { generation, call };
+    const nextLifetime = sourceLifetimeRef.current + 1;
+    sourceLifetimeRef.current = nextLifetime;
+    openingRef.current = null;
+    setRenderSourceLifetime(nextLifetime);
+  }, [call, generation, sourceTransitionPending]);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      openingRef.current = null;
+    };
+  }, []);
 
   if (!call) return null;
 
   const openInBrowser = (): void => {
-    if (!isFaceTimeLink(call.link)) {
+    const operationCall = call;
+    const operationGeneration = generation;
+    const operationSourceLifetime = renderSourceLifetime;
+    const operationIsCurrent = (): boolean => {
+      const current = useFaceTimeStore.getState();
+      const activeSource = activeSourceRef.current;
+      return (
+        mountedRef.current &&
+        sourceLifetimeRef.current === operationSourceLifetime &&
+        activeSource.generation === operationGeneration &&
+        activeSource.call === operationCall &&
+        current.generation === operationGeneration &&
+        current.call === operationCall
+      );
+    };
+    if (!operationIsCurrent()) return;
+    if (!isFaceTimeLink(operationCall.link)) {
       logger.warn('[facetime] refused non-FaceTime browser handoff');
+      showExternalOpenFailure();
       return;
     }
-    void Linking.openURL(call.link).catch((error) => {
-      logger.warn('[facetime] browser handoff failed', error);
-    });
+    const activeOpen = openingRef.current;
+    if (activeOpen?.call === operationCall && activeOpen.generation === operationGeneration) return;
+    const token = Symbol('facetime-browser-open');
+    openingRef.current = {
+      token,
+      call: operationCall,
+      generation: operationGeneration,
+    };
+    void (async () => {
+      try {
+        const opened = await safeOpenUrl(operationCall.link);
+        if (!opened && openingRef.current?.token === token && operationIsCurrent()) {
+          showExternalOpenFailure();
+        }
+      } catch {
+        if (openingRef.current?.token === token && operationIsCurrent()) {
+          showExternalOpenFailure();
+        }
+      } finally {
+        if (openingRef.current?.token === token) openingRef.current = null;
+      }
+    })();
   };
 
   return (
@@ -38,6 +108,8 @@ export function FaceTimeCallOverlay(): React.JSX.Element | null {
           onPress={openInBrowser}
           accessibilityRole="button"
           accessibilityLabel="Open FaceTime call in browser"
+          accessibilityState={{ disabled: sourceTransitionPending }}
+          disabled={sourceTransitionPending}
         >
           <Text style={styles.fallbackBtnText}>Open in browser</Text>
         </Pressable>

@@ -77,6 +77,8 @@ interface MessageBubbleProps {
   /** A chat wallpaper is set → the bubble's unbacked texts (inline "Edited", the unsent-message
    *  tombstone) get the frosted-pill treatment so they stay legible over the image. */
   hasBackground?: boolean;
+  /** Account/route ownership check for delayed external URL handoff feedback. */
+  externalOpenIsCurrent?: () => boolean;
 }
 
 const MESSAGE_ACTIONS = [{ name: 'longpress', label: 'Show message actions' }] as const;
@@ -94,6 +96,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onShowReactions,
   deferEdited,
   hasBackground,
+  externalOpenIsCurrent,
 }: MessageBubbleProps): React.JSX.Element {
   const theme = useTheme();
   // Frosted-pill treatment for the bubble's unbacked texts over a wallpaper (see MessageRow).
@@ -499,6 +502,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           url={cardUrl}
           preview={preview}
           isFromMe={isFromMe}
+          externalOpenIsCurrent={externalOpenIsCurrent}
           overlay={
             cardOverlayAnchor ? (
               <ReactionCluster

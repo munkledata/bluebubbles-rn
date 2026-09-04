@@ -2,7 +2,7 @@ import React from 'react';
 import { Image } from 'expo-image';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AttachmentRow, ChatMediaByKind } from '@db/repositories';
-import { isLocalFileUri, safeOpenUrl } from '@utils';
+import { isLocalFileUri } from '@utils';
 import { useTheme } from '../theme';
 import { useAttachmentCachePathProtection } from '../attachments/useAttachmentCachePathProtection';
 
@@ -82,13 +82,14 @@ function MediaThumb({
 export function MediaSections({
   media,
   onOpenMedia,
-  onOpenLink = safeOpenUrl,
+  onOpenLink,
   documentSummary,
   onOpenDocuments,
 }: {
   media: ChatMediaByKind | null | undefined;
   onOpenMedia: (attachmentGuid: string) => void;
-  onOpenLink?: (url: string) => unknown;
+  /** Route-owned safe opener; required so delayed failures keep the caller's lifecycle fence. */
+  onOpenLink: (url: string) => unknown;
   documentSummary?: { loadedCount: number; hasMore: boolean } | null;
   onOpenDocuments?: () => void;
 }): React.JSX.Element | null {

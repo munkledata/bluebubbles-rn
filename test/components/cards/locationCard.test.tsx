@@ -65,6 +65,8 @@ import { safeOpenUrl } from '@utils';
 // eslint-disable-next-line import/first
 import { MAX_INLINE_TEXT_ATTACHMENT_BYTES } from '@ui/attachments/readBoundedTextAttachment';
 // eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
+// eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -188,7 +190,8 @@ beforeEach(() => {
   mockLocBytes = 200;
   mockFileText.mockClear();
   (download as jest.Mock).mockClear();
-  (safeOpenUrl as jest.Mock).mockClear();
+  (safeOpenUrl as jest.Mock).mockReset().mockResolvedValue(true);
+  useToastStore.setState({ current: null, queue: [] });
 });
 
 afterEach(() => {
@@ -302,6 +305,44 @@ describe('LocationCard — tap contract', () => {
     fireEvent.press(screen.getByLabelText('Location'));
     expect(safeOpenUrl).toHaveBeenCalledWith('geo:37.7749,-122.4194?q=37.7749,-122.4194');
     expect(download).not.toHaveBeenCalled();
+    expect(useToastStore.getState().current).toBeNull();
+  });
+
+  it('shows one generic toast when Android refuses the map handoff', async () => {
+    (safeOpenUrl as jest.Mock).mockResolvedValue(false);
+    await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: 'file:///l/loc.vcf' })} isFromMe={false} />,
+    );
+    await screen.findByText('37.7749, -122.4194');
+
+    fireEvent.press(screen.getByLabelText('Location'));
+    await waitFor(() =>
+      expect(useToastStore.getState().current?.message).toBe('Couldn’t open this outside Gator.'),
+    );
+    expect(useToastStore.getState().queue).toHaveLength(0);
+  });
+
+  it('drops a delayed map failure after the source account is retired', async () => {
+    const open = deferred<boolean>();
+    (safeOpenUrl as jest.Mock).mockReturnValue(open.promise);
+    const view = await renderWithTheme(
+      <LocationCard
+        att={makeAtt({ localPath: PRIVATE_PATH, transferName: PRIVATE_FILENAME })}
+        isFromMe={false}
+      />,
+    );
+    await screen.findByText('37.7749, -122.4194');
+    fireEvent.press(screen.getByLabelText('Location'));
+    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await pauseRealtimeDeliveries();
+      open.resolve(false);
+      await open.promise;
+    });
+
+    expectUnavailableLocation(view.toJSON());
+    expect(useToastStore.getState().current).toBeNull();
   });
 
   it('localPath but unparseable loc → does nothing (no open, no download)', async () => {

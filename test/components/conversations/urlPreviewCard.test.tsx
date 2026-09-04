@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { UrlPreviewRow } from '@db/repositories';
 
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
@@ -23,9 +23,25 @@ jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.
 import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
+// eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 beforeEach(() => {
-  (safeOpenUrl as jest.Mock).mockClear();
+  (safeOpenUrl as jest.Mock).mockReset().mockResolvedValue(true);
+  useToastStore.setState({ current: null, queue: [] });
 });
 
 /** Build a fully-populated preview row; override just the fields a test cares about. */
@@ -202,7 +218,7 @@ describe('UrlPreviewCard', () => {
         isFromMe={false}
       />,
     );
-    fireEvent.press(screen.getByText('A Title'));
+    await fireEvent.press(screen.getByText('A Title'));
     await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
     // The MESSAGE's url is opened — not the preview row's own (possibly redirected) fields.
     expect(safeOpenUrl).toHaveBeenCalledWith('https://www.example.com/article');
@@ -218,9 +234,91 @@ describe('UrlPreviewCard', () => {
         isFromMe={false}
       />,
     );
-    fireEvent.press(screen.getByText('A Title'));
+    await fireEvent.press(screen.getByText('A Title'));
     await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
     expect(safeOpenUrl).toHaveBeenCalledWith('https://good.example.com/page');
+  });
+
+  it('shows one generic toast when the operating system refuses the handoff', async () => {
+    (safeOpenUrl as jest.Mock).mockResolvedValue(false);
+    await renderWithTheme(
+      <UrlPreviewCard url="https://www.example.com/article" preview={row()} isFromMe={false} />,
+    );
+
+    await fireEvent.press(screen.getByTestId('url-preview-card'));
+    await waitFor(() =>
+      expect(useToastStore.getState().current?.message).toBe('Couldn’t open this outside Gator.'),
+    );
+    expect(useToastStore.getState().queue).toHaveLength(0);
+  });
+
+  it('drops a delayed failure after the preview source is replaced', async () => {
+    const open = deferred<boolean>();
+    (safeOpenUrl as jest.Mock).mockReturnValue(open.promise);
+    const view = await renderWithTheme(
+      <UrlPreviewCard
+        url="https://first.example.invalid/private"
+        preview={row({ title: 'First link' })}
+        isFromMe={false}
+      />,
+    );
+    await fireEvent.press(screen.getByText('First link'));
+    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+
+    await view.rerender(
+      <UrlPreviewCard
+        url="https://second.example.invalid/private"
+        preview={row({ title: 'Second link' })}
+        isFromMe={false}
+      />,
+    );
+    await screen.findByText('Second link');
+    await act(async () => {
+      open.resolve(false);
+      await open.promise;
+    });
+
+    expect(useToastStore.getState().current).toBeNull();
+  });
+
+  it('keeps a delayed failure with its original owner when the same URL changes owners', async () => {
+    const open = deferred<boolean>();
+    let originalOwnerCurrent = true;
+    const originalOwner = (): boolean => originalOwnerCurrent;
+    const replacementOwner = (): boolean => true;
+    (safeOpenUrl as jest.Mock).mockReturnValueOnce(open.promise).mockResolvedValueOnce(false);
+    const view = await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row()}
+        isFromMe={false}
+        externalOpenIsCurrent={originalOwner}
+      />,
+    );
+    await fireEvent.press(screen.getByTestId('url-preview-card'));
+    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+
+    originalOwnerCurrent = false;
+    await view.rerender(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row()}
+        isFromMe={false}
+        externalOpenIsCurrent={replacementOwner}
+      />,
+    );
+
+    await act(async () => {
+      open.resolve(false);
+      await open.promise;
+    });
+
+    expect(useToastStore.getState().current).toBeNull();
+
+    await fireEvent.press(screen.getByTestId('url-preview-card'));
+    await waitFor(() =>
+      expect(useToastStore.getState().current?.message).toBe('Couldn’t open this outside Gator.'),
+    );
   });
 
   it('degrades image-only metadata to a text-only external-link card', async () => {

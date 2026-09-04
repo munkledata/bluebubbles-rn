@@ -3,7 +3,7 @@
  * media browser (moved out of app/(app)/chat-settings/[guid].tsx). Locked in:
  *   - renders NOTHING (null) when media is absent or every bucket is empty;
  *   - Photos/Videos strips with counted labels; tapping a thumb fires onOpenMedia(guid);
- *   - Documents/Links count rows; the exact URL is shown and tapping it opens via safeOpenUrl;
+ *   - Documents/Links count rows; the exact URL is shown and tapping it delegates to the route;
  *   - MediaThumb's showImage / videoPoster guards: a DOWNLOADED photo (non-null localPath) renders
  *     the real <Image source={{uri}}>, a video renders a blurhash POSTER with no source (expo-image
  *     can't decode a video file), while cache-protection refusal falls back to the neutral glyph.
@@ -25,7 +25,10 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
 }));
 
 jest.mock('expo-image', () => {
+  // Test-only loose probes intentionally forward expo-image props onto a marker View.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const RN = require('react-native');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const r = require('react');
   return {
     Image: (props: Record<string, unknown>) =>
@@ -37,18 +40,13 @@ jest.mock('expo-image', () => {
   };
 });
 
-// safeOpenUrl's real impl dynamic-imports react-native (throws under the jest-expo VM); mock ONLY it,
-// keeping every other @utils export real.
-jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
-
 // eslint-disable-next-line import/first
 import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 // eslint-disable-next-line import/first
 import { MediaSections } from '@ui/conversations/MediaSections';
 
-import { PRESET_ORDER, PRESETS } from '@ui/theme';
 // eslint-disable-next-line import/first
-import { safeOpenUrl } from '@utils';
+import { PRESET_ORDER, PRESETS } from '@ui/theme';
 // eslint-disable-next-line import/first
 import type { AttachmentRow, ChatMediaByKind } from '@db/repositories';
 
@@ -86,12 +84,16 @@ beforeEach(() => {
 
 describe('MediaSections', () => {
   it('renders nothing when media is absent', async () => {
-    const view = await renderWithTheme(<MediaSections media={null} onOpenMedia={() => {}} />);
+    const view = await renderWithTheme(
+      <MediaSections media={null} onOpenMedia={() => {}} onOpenLink={() => {}} />,
+    );
     expect(view.toJSON()).toBeNull();
   });
 
   it('renders nothing when every bucket is empty', async () => {
-    const view = await renderWithTheme(<MediaSections media={media()} onOpenMedia={() => {}} />);
+    const view = await renderWithTheme(
+      <MediaSections media={media()} onOpenMedia={() => {}} onOpenLink={() => {}} />,
+    );
     expect(view.toJSON()).toBeNull();
   });
 
@@ -104,6 +106,7 @@ describe('MediaSections', () => {
           videos: [att({ id: 3, guid: 'v-1', mimeType: 'video/mp4' })],
         })}
         onOpenMedia={onOpenMedia}
+        onOpenLink={() => {}}
       />,
     );
     expect(screen.getByText('SHARED MEDIA')).toBeTruthy();
@@ -117,7 +120,8 @@ describe('MediaSections', () => {
     await waitFor(() => expect(onOpenMedia).toHaveBeenCalledWith('v-1'));
   });
 
-  it('shows document/link counts and opens a tapped link via safeOpenUrl', async () => {
+  it('shows document/link counts and delegates a tapped link to its route owner', async () => {
+    const onOpenLink = jest.fn();
     await renderWithTheme(
       <MediaSections
         media={media({
@@ -125,13 +129,14 @@ describe('MediaSections', () => {
           links: [{ url: 'https://example.com/a', messageGuid: 'm-1', dateCreated: 123 }],
         })}
         onOpenMedia={() => {}}
+        onOpenLink={onOpenLink}
       />,
     );
     expect(screen.getByText('Documents')).toBeTruthy();
     expect(screen.getByText('Links')).toBeTruthy();
     fireEvent.press(screen.getByText('https://example.com/a'));
-    await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
-    expect(safeOpenUrl).toHaveBeenCalledWith('https://example.com/a');
+    await waitFor(() => expect(onOpenLink).toHaveBeenCalledTimes(1));
+    expect(onOpenLink).toHaveBeenCalledWith('https://example.com/a');
   });
 
   it('opens the dedicated document explorer from its bounded count summary', async () => {
@@ -141,6 +146,7 @@ describe('MediaSections', () => {
         media={media()}
         documentSummary={{ loadedCount: 50, hasMore: true }}
         onOpenMedia={() => {}}
+        onOpenLink={() => {}}
         onOpenDocuments={onOpenDocuments}
       />,
     );
@@ -151,7 +157,7 @@ describe('MediaSections', () => {
     expect(onOpenDocuments).toHaveBeenCalledTimes(1);
   });
 
-  it('delegates a tapped link to an explicit owner instead of the default native opener', async () => {
+  it('uses the explicit owner for every link instead of opening natively itself', async () => {
     const onOpenLink = jest.fn();
     await renderWithTheme(
       <MediaSections
@@ -172,7 +178,6 @@ describe('MediaSections', () => {
     fireEvent.press(screen.getByText('https://override.example.invalid/private-path'));
     await waitFor(() => expect(onOpenLink).toHaveBeenCalledTimes(1));
     expect(onOpenLink).toHaveBeenCalledWith('https://override.example.invalid/private-path');
-    expect(safeOpenUrl).not.toHaveBeenCalled();
   });
 
   // The strips above use the shared fixture (localPath/blurhash null), which only ever exercises
@@ -193,7 +198,7 @@ describe('MediaSections', () => {
 
   it('renders the real image for a downloaded photo and a source-less blurhash poster for a video', async () => {
     const view = await renderWithTheme(
-      <MediaSections media={downloaded()} onOpenMedia={() => {}} />,
+      <MediaSections media={downloaded()} onOpenMedia={() => {}} onOpenLink={() => {}} />,
     );
     const images = screen.getAllByTestId('expo-image');
     expect(images).toHaveLength(2);
@@ -218,6 +223,7 @@ describe('MediaSections', () => {
       <MediaSections
         media={media({ photos: [att({ localPath: remoteUri, blurhash: 'LRemote' })] })}
         onOpenMedia={() => {}}
+        onOpenLink={() => {}}
       />,
     );
 
@@ -233,6 +239,7 @@ describe('MediaSections', () => {
           photos: [att({ localPath: 'file:///cache/retiring.jpg', blurhash: 'LKO2?U' })],
         })}
         onOpenMedia={() => {}}
+        onOpenLink={() => {}}
       />,
     );
 
@@ -257,6 +264,7 @@ describe('MediaSections', () => {
           ],
         })}
         onOpenMedia={onOpenMedia}
+        onOpenLink={() => {}}
       />,
     );
 
@@ -291,6 +299,7 @@ describe('MediaSections — fallback tile stays visible in every shipped preset'
         <MediaSections
           media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4' })] })}
           onOpenMedia={() => {}}
+          onOpenLink={() => {}}
         />,
         { preset },
       );
@@ -309,6 +318,7 @@ describe('MediaSections — fallback tile stays visible in every shipped preset'
         <MediaSections
           media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4' })] })}
           onOpenMedia={() => {}}
+          onOpenLink={() => {}}
         />,
         { preset },
       );

@@ -454,6 +454,7 @@ export function MessageList({
             onJumpToReply={jumpToReply}
             onShowReactions={handleShowReactions}
             isHighlighted={item.guid === highlightGuid}
+            externalOpenIsCurrent={screenLease.isCurrent}
           />
         )}
         contentContainerStyle={contentStyle}

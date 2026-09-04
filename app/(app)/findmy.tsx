@@ -1,27 +1,14 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { FindMyDevice, FindMyFriend } from '@core/findmy';
 import { useFindMyStore } from '@state/findmyStore';
 import { hasCoordinates, resolveDisplayPoint, safeOpenUrl, type DisplayPoint } from '@utils';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { FindMyMap, type MapMarker } from '@ui/findmy/FindMyMap';
+import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
 import { useFindMyPolling } from '@/features/findmy/use-find-my-polling';
-
-/**
- * Open the system maps app at a point.
- *
- * Takes a resolved {@link DisplayPoint} rather than raw store values so a missing, partial, or
- * non-finite coordinate cannot become a map intent. Goes through `safeOpenUrl` (`geo:` is
- * allowlisted) instead of `Linking.openURL` so the scheme is validated at one place.
- */
-function openInMaps(point: DisplayPoint, label: string): void {
-  if (!point.visible) return;
-  const { latitude, longitude } = point;
-  void safeOpenUrl(
-    `geo:${latitude},${longitude}?q=${latitude},${longitude}(${encodeURIComponent(label)})`,
-  );
-}
+import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 
 /** Find My: devices/items/people with last location, battery, and explicit system-map actions. */
 export default function FindMyScreen(): React.JSX.Element {
@@ -37,6 +24,61 @@ export default function FindMyScreen(): React.JSX.Element {
   const refresh = useFindMyStore((s) => s.refresh);
   const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const mountedRef = useRef(true);
+  const routeFocusedRef = useRef(false);
+  const activeMapOpenRef = useRef<{ token: symbol; url: string } | null>(null);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeMapOpenRef.current = null;
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      routeFocusedRef.current = true;
+      return () => {
+        routeFocusedRef.current = false;
+        activeMapOpenRef.current = null;
+      };
+    }, []),
+  );
+
+  /**
+   * Hand one validated point to Android Maps and keep any delayed failure feedback owned by this
+   * focused route/account. One route-wide operation may run at a time, so repeated taps cannot
+   * launch duplicate native work or enqueue duplicate failure toasts.
+   */
+  const openInMaps = useCallback(
+    (point: DisplayPoint, label: string): void => {
+      const operationIsCurrent = (): boolean =>
+        mountedRef.current && routeFocusedRef.current && accountLease.isCurrent();
+      if (!point.visible || !operationIsCurrent()) return;
+      const { latitude, longitude } = point;
+      const url = `geo:${latitude},${longitude}?q=${latitude},${longitude}(${encodeURIComponent(label)})`;
+      if (activeMapOpenRef.current) return;
+      const token = Symbol('find-my-map-open');
+      activeMapOpenRef.current = { token, url };
+      void (async () => {
+        try {
+          const opened = await safeOpenUrl(url);
+          if (!opened && activeMapOpenRef.current?.token === token && operationIsCurrent()) {
+            showExternalOpenFailure();
+          }
+        } catch {
+          if (activeMapOpenRef.current?.token === token && operationIsCurrent()) {
+            showExternalOpenFailure();
+          }
+        } finally {
+          if (activeMapOpenRef.current?.token === token) activeMapOpenRef.current = null;
+        }
+      })();
+    },
+    [accountLease],
+  );
 
   useEffect(() => {
     void load();
@@ -129,14 +171,29 @@ export default function FindMyScreen(): React.JSX.Element {
         ) : null}
         {tab === 'devices'
           ? devices.map((d) => (
-              <DeviceRow key={d.id} device={d} onFocus={() => setFocusId(midDevice(d, 'd'))} />
+              <DeviceRow
+                key={d.id}
+                device={d}
+                onFocus={() => setFocusId(midDevice(d, 'd'))}
+                onOpenLocation={openInMaps}
+              />
             ))
           : tab === 'items'
             ? items.map((d) => (
-                <DeviceRow key={d.id} device={d} onFocus={() => setFocusId(midDevice(d, 'i'))} />
+                <DeviceRow
+                  key={d.id}
+                  device={d}
+                  onFocus={() => setFocusId(midDevice(d, 'i'))}
+                  onOpenLocation={openInMaps}
+                />
               ))
             : friends.map((f) => (
-                <FriendRow key={f.id} friend={f} onFocus={() => setFocusId(midFriend(f))} />
+                <FriendRow
+                  key={f.id}
+                  friend={f}
+                  onFocus={() => setFocusId(midFriend(f))}
+                  onOpenLocation={openInMaps}
+                />
               ))}
       </ScrollView>
     </Screen>
@@ -146,9 +203,11 @@ export default function FindMyScreen(): React.JSX.Element {
 function DeviceRow({
   device,
   onFocus,
+  onOpenLocation,
 }: {
   device: FindMyDevice;
   onFocus: () => void;
+  onOpenLocation: (point: DisplayPoint, label: string) => void;
 }): React.JSX.Element {
   const theme = useTheme();
   const point = resolveDisplayPoint(device.latitude, device.longitude);
@@ -175,7 +234,7 @@ function DeviceRow({
         </Text>
       </View>
       {point.visible ? (
-        <Pressable onPress={() => openInMaps(point, name)} hitSlop={10}>
+        <Pressable onPress={() => onOpenLocation(point, name)} hitSlop={10}>
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}
@@ -186,9 +245,11 @@ function DeviceRow({
 function FriendRow({
   friend,
   onFocus,
+  onOpenLocation,
 }: {
   friend: FindMyFriend;
   onFocus: () => void;
+  onOpenLocation: (point: DisplayPoint, label: string) => void;
 }): React.JSX.Element {
   const theme = useTheme();
   const point = resolveDisplayPoint(friend.latitude, friend.longitude);
@@ -206,7 +267,7 @@ function FriendRow({
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>{detail}</Text>
       </View>
       {point.visible ? (
-        <Pressable onPress={() => openInMaps(point, name)} hitSlop={10}>
+        <Pressable onPress={() => onOpenLocation(point, name)} hitSlop={10}>
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}

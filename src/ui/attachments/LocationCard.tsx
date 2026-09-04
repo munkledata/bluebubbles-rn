@@ -10,6 +10,7 @@ import { useDownloadStore } from '@state/downloadStore';
 import { parseVLocation, resolveDisplayPoint, safeOpenUrl, type VLocationData } from '@utils';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
+import { showExternalOpenFailure } from '../toast/external-open-feedback';
 import { readBoundedTextAttachment } from './readBoundedTextAttachment';
 
 interface LocationCardProps {
@@ -22,6 +23,13 @@ interface ParsedLocationState {
   localPath: string;
   sourceLifetime: number;
   value: VLocationData | null;
+}
+
+interface LocationOpenOperation {
+  token: symbol;
+  attachmentGuid: string;
+  localPath: string;
+  sourceLifetime: number;
 }
 
 /**
@@ -40,6 +48,8 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
   // fresh callback after the new attachment source becomes current.
   const [renderSourceLifetime, setRenderSourceLifetime] = useState(0);
   const activeAttachment = useRef({ guid: att.guid, localPath: att.localPath });
+  const mountedRef = useRef(true);
+  const openingRef = useRef<LocationOpenOperation | null>(null);
   const sourceTransitionPending =
     activeAttachment.current.guid !== att.guid ||
     activeAttachment.current.localPath !== att.localPath;
@@ -61,19 +71,24 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
 
   // The captured lease never becomes current again after an account transition. Force the final
   // mounted row to render generically as well as revoking its callbacks and delayed file read.
-  useLayoutEffect(
-    () =>
-      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
-        revokeSourceLifetime();
-        setAccountRetired(true);
-      }),
-    [accountLease, revokeSourceLifetime],
-  );
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    const unsubscribe = subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
+      revokeSourceLifetime();
+      setAccountRetired(true);
+    });
+    return () => {
+      mountedRef.current = false;
+      openingRef.current = null;
+      unsubscribe();
+    };
+  }, [accountLease, revokeSourceLifetime]);
 
   const sourceGrantIsCurrent = useCallback(
     (sourceLifetime: number, attachmentGuid: string, localPath: string | null): boolean => {
       const current = activeAttachment.current;
       return (
+        mountedRef.current &&
         accountLease.isCurrent() &&
         sourceLifetimeRef.current === sourceLifetime &&
         current.guid === attachmentGuid &&
@@ -162,12 +177,41 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
     }
     const { latitude, longitude } = actionPoint;
     const geoUrl = `geo:${latitude},${longitude}?q=${latitude},${longitude}`;
-    // Once handed to Android this intent cannot be recalled by a later account transition.
-    void safeOpenUrl(geoUrl);
+    const activeOpen = openingRef.current;
+    if (
+      activeOpen?.attachmentGuid === attachmentGuid &&
+      activeOpen.localPath === localPath &&
+      activeOpen.sourceLifetime === operationSourceLifetime
+    ) {
+      return;
+    }
+    const token = Symbol('location-open');
+    openingRef.current = {
+      token,
+      attachmentGuid,
+      localPath,
+      sourceLifetime: operationSourceLifetime,
+    };
+    // Once handed to Android this intent cannot be recalled. Only its failure feedback remains
+    // fenced to the exact attachment source and account that initiated it.
+    void (async () => {
+      try {
+        const opened = await safeOpenUrl(geoUrl);
+        if (!opened && openingRef.current?.token === token && operationIsCurrent()) {
+          showExternalOpenFailure();
+        }
+      } catch {
+        if (openingRef.current?.token === token && operationIsCurrent()) {
+          showExternalOpenFailure();
+        }
+      } finally {
+        if (openingRef.current?.token === token) openingRef.current = null;
+      }
+    })();
   };
 
-  // A callback manually retained across an arbitrary same-account unmount is outside this
-  // source/account lifetime. React removes the native Pressability config during normal unmount.
+  // The mounted/source/account checks also make a manually retained callback inert after unmount;
+  // React removes the native Pressability config during an ordinary UI interaction.
   const subtitle = contentUnavailable
     ? 'Location unavailable.'
     : point.visible

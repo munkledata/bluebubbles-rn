@@ -21987,7 +21987,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress:mutator-call:d714255e3467",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 149,
+      "line": 164,
       "symbol": "LocationCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -22000,7 +22000,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard:mutator-reference:0f964b79c990",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 183,
+      "line": 227,
       "symbol": "LocationCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress",

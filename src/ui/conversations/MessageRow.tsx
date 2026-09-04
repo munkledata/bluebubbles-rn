@@ -49,6 +49,8 @@ interface MessageRowProps {
   selecting?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (msg: EnrichedMessage) => void;
+  /** Stable account/route ownership check for external URL handoff feedback. */
+  externalOpenIsCurrent?: () => boolean;
 }
 
 /**
@@ -74,6 +76,7 @@ export const MessageRow = React.memo(function MessageRow({
   selecting,
   isSelected,
   onToggleSelect,
+  externalOpenIsCurrent,
 }: MessageRowProps): React.JSX.Element {
   const theme = useTheme();
   const showTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
@@ -168,6 +171,7 @@ export const MessageRow = React.memo(function MessageRow({
       // In the avatar row the avatar aligns to the bubble's bottom; defer "Edited" to below the row
       // (rendered by MessageRow) so the avatar doesn't drop to the label's level.
       deferEdited={showAvatar}
+      externalOpenIsCurrent={externalOpenIsCurrent}
     />
   );
 
