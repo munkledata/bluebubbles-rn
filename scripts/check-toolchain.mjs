@@ -22,9 +22,11 @@ export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@shopify/flash-list': '2.0.2',
   'drizzle-orm': '0.45.2',
   'react-native-notify-kit': '10.4.8',
-  'react-native-webview': '13.16.1',
 });
-export const FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze(['expo-share-intent']);
+export const FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([
+  'expo-share-intent',
+  'react-native-webview',
+]);
 const ALTERNATE_DEPENDENCY_SECTIONS = Object.freeze([
   'devDependencies',
   'optionalDependencies',

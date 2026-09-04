@@ -1,10 +1,6 @@
 import { renderWithTheme, screen } from '../support/renderWithTheme';
 import { FindMyMap, type MapMarker } from '@ui/findmy/FindMyMap';
 
-jest.mock('react-native-webview', () => {
-  throw new Error('FindMyMap must not load the WebView module while WEB-02 is open');
-});
-
 describe('FindMyMap release containment', () => {
   it('mounts no WebView and exposes no marker identity or coordinates', async () => {
     const markers: MapMarker[] = [

@@ -30,9 +30,11 @@ const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@shopify/flash-list': '2.0.2',
   'drizzle-orm': '0.45.2',
   'react-native-notify-kit': '10.4.8',
-  'react-native-webview': '13.16.1',
 });
-const EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze(['expo-share-intent']);
+const EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([
+  'expo-share-intent',
+  'react-native-webview',
+]);
 const root = resolve(import.meta.dirname, '..');
 const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
 
@@ -445,37 +447,46 @@ test('rejects drift in every reviewed native boundary pin', () => {
   }
 });
 
-test('keeps the retired share-intent package out of every install declaration', () => {
-  const packageName = EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES[0];
-  assert.ok(packageName);
+test('keeps every retired native package out of install declarations', () => {
+  for (const packageName of EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES) {
+    for (const section of [
+      'dependencies',
+      'devDependencies',
+      'optionalDependencies',
+      'peerDependencies',
+    ]) {
+      const input = validInput();
+      input.packageJson[section] = { ...input.packageJson[section], [packageName]: '1.0.0' };
+      expectToolchainError(input, `${section}.${packageName}`, `${packageName}: ${section}`);
+    }
 
-  for (const section of [
-    'dependencies',
-    'devDependencies',
-    'optionalDependencies',
-    'peerDependencies',
-  ]) {
-    const input = validInput();
-    input.packageJson[section] = { ...input.packageJson[section], [packageName]: '1.0.0' };
-    expectToolchainError(input, `${section}.${packageName}`, section);
+    for (const packagePath of [
+      `node_modules/${packageName}`,
+      `node_modules/example/node_modules/${packageName}`,
+    ]) {
+      const input = validInput();
+      input.packageLock.packages[packagePath] = { version: '1.0.0' };
+      expectToolchainError(input, `package-lock.json must not contain ${packageName}`, packagePath);
+    }
+
+    const rootLockDeclaration = validInput();
+    rootLockDeclaration.packageLock.packages[''].dependencies[packageName] = '1.0.0';
+    expectToolchainError(
+      rootLockDeclaration,
+      `package-lock.json must not contain ${packageName}`,
+      `${packageName}: root lock declaration`,
+    );
+
+    for (const overrides of [
+      { [packageName]: '8.0.1' },
+      { replacement: `npm:${packageName}@8.0.1` },
+      { parent: { child: `npm:${packageName}@8.0.1` } },
+    ]) {
+      const input = validInput();
+      input.packageJson.overrides = overrides;
+      expectToolchainError(input, `protected package ${packageName}`, `${packageName}: override`);
+    }
   }
-
-  for (const packagePath of [
-    `node_modules/${packageName}`,
-    `node_modules/example/node_modules/${packageName}`,
-  ]) {
-    const input = validInput();
-    input.packageLock.packages[packagePath] = { version: '1.0.0' };
-    expectToolchainError(input, `package-lock.json must not contain ${packageName}`, packagePath);
-  }
-
-  const rootLockDeclaration = validInput();
-  rootLockDeclaration.packageLock.packages[''].dependencies[packageName] = '1.0.0';
-  expectToolchainError(
-    rootLockDeclaration,
-    `package-lock.json must not contain ${packageName}`,
-    'root lock declaration',
-  );
 
   for (const [label, mutate] of [
     ['legacy version', (input) => (input.packageLock.lockfileVersion = 1)],
@@ -486,16 +497,6 @@ test('keeps the retired share-intent package out of every install declaration', 
     const input = validInput();
     mutate(input);
     expectToolchainError(input, 'lockfileVersion 3 packages shape', label);
-  }
-
-  for (const overrides of [
-    { [packageName]: '8.0.1' },
-    { replacement: `npm:${packageName}@8.0.1` },
-    { parent: { child: `npm:${packageName}@8.0.1` } },
-  ]) {
-    const input = validInput();
-    input.packageJson.overrides = overrides;
-    expectToolchainError(input, `protected package ${packageName}`, 'share-intent override');
   }
 
   const shrinkwrap = validInput();
