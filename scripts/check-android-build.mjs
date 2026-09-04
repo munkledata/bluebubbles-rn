@@ -43,6 +43,14 @@ export const FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS = [
   'share shortcuts were not published (device cap or disabled shortcuts)',
 ];
 
+// The exact package-registration descriptor gives a precise error for the usual autolinking path,
+// while the namespace prefix catches any other class from the retired community WebView package.
+// Expo DOM's supported bridge uses the separate expo/modules/webview namespace.
+export const FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS = [
+  'Lcom/reactnativecommunity/webview/RNCWebViewPackage;',
+  'Lcom/reactnativecommunity/webview/',
+];
+
 export const FORBIDDEN_PERMISSIONS = [
   'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
   'android.permission.SCHEDULE_EXACT_ALARM',
@@ -354,6 +362,14 @@ export function validatePackagedAndroidBundle({ manifestProto, shortcutsProto, d
       if (dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX contains forbidden legacy shortcut-publishing marker: ${marker}`);
       }
+    }
+    const communityWebViewMarker = FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS.find((marker) =>
+      dexBytes.includes(Buffer.from(marker, 'utf8')),
+    );
+    if (communityWebViewMarker) {
+      errors.push(
+        `packaged DEX contains forbidden direct community WebView marker: ${communityWebViewMarker}`,
+      );
     }
     for (const marker of FORBIDDEN_INBOUND_SHARE_DEX_MARKERS) {
       if (dexBytes.includes(Buffer.from(marker, 'utf8'))) {

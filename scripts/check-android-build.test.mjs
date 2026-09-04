@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
+  FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS,
   FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS,
   FORBIDDEN_PERMISSIONS,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
@@ -437,12 +438,38 @@ test('validates the packaged protobuf manifest and rejects a Direct Share resour
   assert.ok(invalidShortcuts.some((error) => error.includes('shortcuts.xml protobuf is invalid')));
 });
 
+test('rejects direct community WebView code without rejecting the supported Expo DOM bridge', () => {
+  const manifestProto = encodeXmlDocument(manifestNode);
+
+  for (const marker of FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS) {
+    const errors = validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({ extraMarkers: [marker] }),
+    });
+    assert.ok(
+      errors.includes(`packaged DEX contains forbidden direct community WebView marker: ${marker}`),
+      marker,
+    );
+  }
+
+  assert.deepEqual(
+    validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({
+        extraMarkers: ['Lexpo/modules/webview/DomWebViewModule;'],
+      }),
+    }),
+    [],
+  );
+});
+
 function writeTestAab(
   root,
   relativePath,
   {
     includeForbiddenShareTarget = false,
     includeForbiddenNativeModule = false,
+    communityWebViewMarker,
     legacyPublisherMarker,
     omitRequiredCleanupMarker,
   } = {},
@@ -465,6 +492,7 @@ function writeTestAab(
         ...(includeForbiddenNativeModule
           ? ['Lexpo/modules/shareintent/ExpoShareIntentModule;']
           : []),
+        ...(communityWebViewMarker ? [communityWebViewMarker] : []),
         ...(legacyPublisherMarker ? [legacyPublisherMarker] : []),
       ],
     }),
@@ -531,6 +559,14 @@ test('artifact runner inspects both variants and the final release AAB contents'
     assert.throws(
       () => runAndroidBuildCheck(options),
       /packaged DEX contains forbidden legacy shortcut-publishing marker/,
+    );
+
+    writeTestAab(root, releaseBundlePath, {
+      communityWebViewMarker: FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS[0],
+    });
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /packaged DEX contains forbidden direct community WebView marker/,
     );
 
     writeTestAab(root, releaseBundlePath, { includeForbiddenShareTarget: true });
