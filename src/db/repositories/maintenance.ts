@@ -179,6 +179,22 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
     });
   }
 
+  let deletedAttachmentMediaExports = CACHE_DELETE_BATCH_SIZE;
+  while (deletedAttachmentMediaExports === CACHE_DELETE_BATCH_SIZE) {
+    deletedAttachmentMediaExports = await withDbWriteLock(async () => {
+      const rows = await db.all<{ rowid: number }>(sql`
+        DELETE FROM attachment_media_exports
+         WHERE rowid IN (
+           SELECT rowid FROM attachment_media_exports
+            ORDER BY rowid
+            LIMIT ${CACHE_DELETE_BATCH_SIZE}
+         )
+        RETURNING rowid
+      `);
+      return rows.length;
+    });
+  }
+
   let deletedCacheEntries = CACHE_DELETE_BATCH_SIZE;
   while (deletedCacheEntries === CACHE_DELETE_BATCH_SIZE) {
     deletedCacheEntries = await withDbWriteLock(async () => {
@@ -448,6 +464,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
           OR EXISTS (SELECT 1 FROM message_guid_aliases)
           OR EXISTS (SELECT 1 FROM message_deletion_ledger)
           OR EXISTS (SELECT 1 FROM attachments)
+          OR EXISTS (SELECT 1 FROM attachment_media_exports)
           OR EXISTS (SELECT 1 FROM attachment_cache_entries)
           OR EXISTS (SELECT 1 FROM messages)
           OR EXISTS (SELECT 1 FROM chat_handles)

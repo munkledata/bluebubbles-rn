@@ -59,6 +59,7 @@ describe('migration 0045_backup_export_indexes', () => {
         MIGRATION_NAME,
         '0046_message_send_attempt_owner',
         '0047_message_retraction_topology',
+        '0048_attachment_media_exports',
       ]);
 
       expect(indexColumns(raw, 'themes_backup_export_idx')).toEqual(['is_preset', 'id']);

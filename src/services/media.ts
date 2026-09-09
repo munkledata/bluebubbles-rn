@@ -130,7 +130,13 @@ export async function shareAttachment(
  * READING the gallery (the attachment tray) separately asks only for photo/video access; it must
  * not use the SDK's no-argument default because that also requests music/audio access.
  */
-async function ensureSavePermission(): Promise<boolean> {
+export async function getImageLibrarySavePermission(): Promise<boolean> {
+  const perm = await MediaLibrary.getPermissionsAsync(true);
+  return perm.status === 'granted';
+}
+
+/** User-initiated permission boundary. Passive queue drains must use the check-only helper above. */
+export async function requestImageLibrarySavePermission(): Promise<boolean> {
   const perm = await MediaLibrary.requestPermissionsAsync(true);
   return perm.status === 'granted';
 }
@@ -172,7 +178,7 @@ export async function saveAttachmentsToPhotos(
       if (exists) readablePaths.push(path);
     }
     if (readablePaths.length === 0) return { status: 'error' };
-    const permitted = await ensureSavePermission();
+    const permitted = await requestImageLibrarySavePermission();
     if (!isCurrent()) return { status: 'stale' };
     if (!permitted) return { status: 'denied' };
     let saved = 0;
@@ -202,16 +208,20 @@ export type SaveImageResult = 'saved' | 'skipped' | 'denied' | 'error';
  */
 export async function saveImageToLibrary(
   uri: string | null | undefined,
-  opts: { album?: boolean } = {},
+  opts: { album?: boolean; permissionMode?: 'request' | 'check' } = {},
 ): Promise<SaveImageResult> {
   if (!isLocalFileUri(uri)) return 'skipped';
-  // Auto-save can run headlessly, where cache maintenance is also active. Acquire synchronously so
-  // permission/native-library awaits cannot race retirement.
+  // Foreground auto-save can race cache maintenance. Acquire synchronously so permission/native-
+  // library awaits cannot race retirement.
   const protection = acquirePathProtection(uri);
   if (!protection) return 'error';
   try {
     if (!(await attachmentPathExists(uri))) return 'error';
-    if (!(await ensureSavePermission())) return 'denied';
+    const permitted =
+      opts.permissionMode === 'check'
+        ? await getImageLibrarySavePermission()
+        : await requestImageLibrarySavePermission();
+    if (!permitted) return 'denied';
     if (!opts.album) {
       await MediaLibrary.saveToLibraryAsync(uri);
       return 'saved';

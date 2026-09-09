@@ -105,10 +105,14 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           <Text style={textStyle}>
             Attachments you save to Photos—and images automatically exported to Photos or the Gator
             album when that setting is enabled—are separate copies in Android’s shared media
-            storage. Other apps with media access can see them. An image delivered while Gator is
-            closed or in the background may instead be downloaded only to Gator’s private cache.
-            That background attempt does not create or later retry the extra Photos or Gator album
-            copy, even when automatic export is enabled.
+            storage. Other apps with media access can see them. If an image delivered while Gator is
+            closed or in the background finishes downloading, that download is only in Gator’s
+            private cache. Gator keeps a bounded encrypted record of the queued outside copy and
+            retries it on a later foreground activation when the app is unlocked and already has
+            Photos permission. Turning off auto-download or changing its save destination cancels
+            queued copies that have not started; a copy Android is already saving may still finish.
+            A process stop immediately after Android saves a copy can cause a later retry to create
+            a duplicate, but Gator caps attempts at three.
           </Text>
         </SettingsSection>
 
@@ -116,10 +120,10 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           <Text style={textStyle}>
             Gator limits its ordinary downloaded-attachment cache to 2 GiB and 4,096 files while
             preserving at least 512 MiB of free app storage. It removes the least recently used old
-            files first. Files currently on screen, used by an in-progress operation, or needed for
-            an outgoing send are protected; a new download is refused when space cannot be freed
-            safely. Android 7 devices keep persistent attachment downloads disabled because the
-            bounded startup inventory requires Android 8 or newer.
+            files first. Files currently on screen, used by an in-progress operation, needed for an
+            outgoing send, or awaiting an automatic Photos copy are protected; a new download is
+            refused when space cannot be freed safely. Android 7 devices keep persistent attachment
+            downloads disabled because the bounded startup inventory requires Android 8 or newer.
           </Text>
           <Text style={textStyle}>
             Deleting a chat removes Gator-owned downloaded files after its database purge when

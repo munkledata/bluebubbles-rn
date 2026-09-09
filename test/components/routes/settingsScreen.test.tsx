@@ -246,10 +246,10 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
 
   it('steps the Parallel Downloads cap up through the store', async () => {
     await renderWithTheme(<SettingsScreen />);
-    expect(
-      screen.getByText(/closed or in the background.*remain only in Gator’s private cache/),
-    ).toBeTruthy();
-    expect(screen.getByText(/outside copy is not automatically retried/)).toBeTruthy();
+    expect(screen.getByText(/remembers an unfinished Photos or Gator Album copy/)).toBeTruthy();
+    expect(screen.getByText(/turning off auto-download cancels unfinished copies/)).toBeTruthy();
+    expect(screen.getByText(/Tap Photos gallery or Gator album to grant/)).toBeTruthy();
+    expect(screen.getByText(/on Android 12 and earlier, tap the choice/)).toBeTruthy();
     await act(async () => {
       fireEvent.press(screen.getByLabelText('More parallel downloads'));
     });

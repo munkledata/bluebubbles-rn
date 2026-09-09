@@ -15,6 +15,7 @@ import {
   clearLocalCache,
   createCustomFolder,
   createReminder,
+  enqueueAttachmentMediaExport,
   enqueueIncomingEvent,
   getSyncMarker,
   insertErrorReport,
@@ -60,7 +61,9 @@ async function seed(db: AppDatabase): Promise<void> {
         dateCreated: 1000,
         handle: { address: 'a@x.com' },
         hasAttachments: true,
-        attachments: [Attachment.parse({ guid: 'att-1', mimeType: 'image/jpeg' })],
+        attachments: [
+          Attachment.parse({ guid: 'att-1', mimeType: 'image/jpeg', totalBytes: 1234 }),
+        ],
       }),
     ],
     () => chatId,
@@ -119,6 +122,12 @@ async function seed(db: AppDatabase): Promise<void> {
       bytes: 1234,
       lastUsedAt: 5000,
     }),
+  );
+  await enqueueAttachmentMediaExport(
+    db,
+    { attachmentGuid: 'att-1', destination: 'album' },
+    () => true,
+    () => 5000,
   );
   const folder = await createCustomFolder(db, 'Private plans');
   await replaceCustomFolderMembership(db, folder.id, ['c1', 'temporarily-missing-chat']);
@@ -222,6 +231,7 @@ describe('clearLocalCache', () => {
       'incoming_event_queue',
       'message_deletion_ledger',
       'message_guid_aliases',
+      'attachment_media_exports',
       'attachment_cache_entries',
       'attachments',
       'messages',

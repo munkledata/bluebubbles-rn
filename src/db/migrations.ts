@@ -912,4 +912,77 @@ export const MIGRATIONS: Migration[] = [
       `UPDATE reminders SET message_preview = NULL, sender_name = NULL`,
     ],
   },
+  {
+    // DL-01: remember an automatic Gallery/Gator Album copy before its bounded app-cache
+    // download starts. A foreground worker can then fulfill the copy after a killed/background
+    // delivery has already committed attachments.local_path. There is deliberately no backfill:
+    // historical local files were downloaded without a destination-bound user intent.
+    name: '0048_attachment_media_exports',
+    statements: [
+      `CREATE TABLE attachment_media_exports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        attachment_guid TEXT NOT NULL
+          REFERENCES attachments(guid) ON UPDATE CASCADE ON DELETE CASCADE
+          CONSTRAINT attachment_media_exports_attachment_guid_valid
+            CHECK (length(CAST(attachment_guid AS BLOB)) BETWEEN 1 AND 512),
+        destination TEXT NOT NULL
+          CONSTRAINT attachment_media_exports_destination_valid
+            CHECK (destination IN ('gallery', 'album')),
+        state TEXT NOT NULL DEFAULT 'pending'
+          CONSTRAINT attachment_media_exports_state_valid
+            CHECK (state IN ('pending', 'completed', 'terminal')),
+        created_at INTEGER NOT NULL
+          CONSTRAINT attachment_media_exports_created_at_nonnegative
+            CHECK (typeof(created_at) = 'integer' AND created_at >= 0),
+        expires_at INTEGER NOT NULL
+          CONSTRAINT attachment_media_exports_expires_at_valid
+            CHECK (typeof(expires_at) = 'integer'
+                   AND expires_at > created_at
+                   AND (expires_at - created_at) <= 604800000),
+        attempts INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT attachment_media_exports_attempts_valid
+            CHECK (typeof(attempts) = 'integer' AND attempts BETWEEN 0 AND 3),
+        claim_version INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT attachment_media_exports_claim_version_nonnegative
+            CHECK (typeof(claim_version) = 'integer' AND claim_version >= 0),
+        next_attempt_at INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT attachment_media_exports_next_attempt_at_nonnegative
+            CHECK (typeof(next_attempt_at) = 'integer' AND next_attempt_at >= 0),
+        lease_token TEXT
+          CONSTRAINT attachment_media_exports_lease_token_valid
+            CHECK (lease_token IS NULL OR length(CAST(lease_token AS BLOB)) BETWEEN 1 AND 128),
+        lease_expires_at INTEGER NOT NULL DEFAULT 0
+          CONSTRAINT attachment_media_exports_lease_expires_at_nonnegative
+            CHECK (typeof(lease_expires_at) = 'integer' AND lease_expires_at >= 0),
+        terminal_at INTEGER
+          CONSTRAINT attachment_media_exports_terminal_at_nonnegative
+            CHECK (terminal_at IS NULL
+                   OR (typeof(terminal_at) = 'integer' AND terminal_at >= 0)),
+        last_error_code TEXT
+          CONSTRAINT attachment_media_exports_last_error_code_valid
+            CHECK (last_error_code IS NULL OR last_error_code IN (
+              'expired', 'attempt-cap', 'ineligible', 'permission-denied',
+              'source-missing', 'native-error'
+            )),
+        CONSTRAINT attachment_media_exports_state_shape_valid CHECK (
+          (state = 'pending' AND terminal_at IS NULL)
+          OR
+          (state IN ('completed', 'terminal') AND terminal_at IS NOT NULL
+           AND lease_token IS NULL AND lease_expires_at = 0 AND next_attempt_at = 0)
+        ),
+        CONSTRAINT attachment_media_exports_lease_shape_valid CHECK (
+          (lease_token IS NULL AND lease_expires_at = 0)
+          OR
+          (state = 'pending' AND lease_token IS NOT NULL AND lease_expires_at > 0)
+        )
+      )`,
+      `CREATE UNIQUE INDEX attachment_media_exports_attachment_guid_idx
+         ON attachment_media_exports (attachment_guid)`,
+      `CREATE INDEX attachment_media_exports_claim_idx
+         ON attachment_media_exports
+           (state, next_attempt_at, lease_expires_at, created_at, id)`,
+      `CREATE INDEX attachment_media_exports_terminal_idx
+         ON attachment_media_exports (state, terminal_at, id)`,
+    ],
+  },
 ];

@@ -47,6 +47,7 @@ describe('migration 0043_custom_folders', () => {
         '0045_backup_export_indexes',
         '0046_message_send_attempt_owner',
         '0047_message_retraction_topology',
+        '0048_attachment_media_exports',
       ]);
       raw.prepare("INSERT INTO custom_folders (name, sort_order) VALUES ('Work', 0)").run();
       const folderId = (

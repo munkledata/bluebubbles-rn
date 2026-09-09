@@ -50,6 +50,7 @@ describe('migration 0046_message_send_attempt_owner', () => {
       await expect(runMigrations(runner)).resolves.toEqual([
         MIGRATION_NAME,
         '0047_message_retraction_topology',
+        '0048_attachment_media_exports',
       ]);
 
       expect(

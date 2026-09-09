@@ -180,6 +180,16 @@
       "upgradeTest": "test/db/migrations/0047_message_retraction_topology.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 48,
+      "name": "0048_attachment_media_exports",
+      "task": "DL-01",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0048_attachment_media_exports.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

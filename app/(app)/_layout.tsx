@@ -24,6 +24,7 @@ import {
   retryRealtimeConnection,
 } from '@/services';
 import { recoverOutgoing } from '@/services/send';
+import { drainPendingAttachmentMediaExports } from '@/services/download/attachmentMediaExportQueue';
 import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
@@ -52,6 +53,18 @@ function runNotificationTask(
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
     });
+}
+
+/** Account-owned foreground retry; coalesced inside the queue service per generation. */
+function runAttachmentMediaExportDrain(accountLease: RealtimeDeliveryLease): void {
+  if (!accountLease.isCurrent()) return;
+  void drainPendingAttachmentMediaExports(accountLease).catch((error: unknown) => {
+    if (accountLease.isCurrent()) {
+      secureLogger.warn('[mediaExport] foreground retry failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  });
 }
 
 /** Keep an unregistered native AppState callback from being replayed under a replacement account. */
@@ -145,10 +158,16 @@ function ConnectedAppLayout(): React.JSX.Element {
             leaseLogger.warn('[send] foreground recovery failed', error);
           });
         }
+        runAttachmentMediaExportDrain(accountLease);
       }
     });
     return () => sub.remove();
   }, [AppState, leaseLogger]);
+
+  // Cold foreground mount and post-unlock remount do not necessarily emit a new AppState event.
+  useEffect(() => {
+    runAttachmentMediaExportDrain(accountLease);
+  }, [accountLease]);
 
   // Upload any buffered error reports once the connected app has mounted ("on start"). No-op unless
   // the server advertises support + the feature is enabled; the AppState listener above catches up

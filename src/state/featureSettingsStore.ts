@@ -8,6 +8,7 @@ import {
 } from '@core/models';
 import { getDatabase } from '@db/database';
 import {
+  cancelPendingAttachmentMediaExportsWithinTransaction,
   clearErrorReportsWithinTransaction,
   kvGet,
   kvSetWithinTransaction,
@@ -84,6 +85,13 @@ export interface ErrorReportingConsentWriteContext extends HydrationOptions {
   /** Exact account database captured before this choice joins the serialized tail. */
   readonly db: AppDatabase;
   /** Required account/run authority; checked before admission, BEGIN, and COMMIT. */
+  readonly shouldCommit: () => boolean;
+}
+
+export interface AutoDownloadPolicyWriteContext extends HydrationOptions {
+  /** Exact account database captured before changing export policy. */
+  readonly db: AppDatabase;
+  /** Account/route authority checked before COMMIT and optimistic-state rollback/publication. */
   readonly shouldCommit: () => boolean;
 }
 
@@ -205,13 +213,20 @@ interface FeatureSettingsState {
   inboxFilters: InboxFilters;
   hydrated: boolean;
   hydrate: (options?: HydrationOptions) => Promise<void>;
-  setFlag: (flag: FeatureFlag, value: boolean) => Promise<void>;
+  setFlag: (
+    flag: FeatureFlag,
+    value: boolean,
+    context?: AutoDownloadPolicyWriteContext,
+  ) => Promise<void>;
   setErrorReportingConsent: (
     value: boolean,
     context: ErrorReportingConsentWriteContext,
   ) => Promise<void>;
   setMaxConcurrentDownloads: (n: number) => Promise<void>;
-  setAutoDownloadDestination: (dest: AutoDownloadDestination) => Promise<void>;
+  setAutoDownloadDestination: (
+    dest: AutoDownloadDestination,
+    context?: AutoDownloadPolicyWriteContext,
+  ) => Promise<void>;
   setInboxFilters: (filters: InboxFilters) => Promise<void>;
 }
 
@@ -307,13 +322,30 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
       // DB not open yet at launch — re-hydrated at home mount. Leave `hydrated` false.
     }
   },
-  setFlag: async (flag, value) => {
+  setFlag: async (flag, value, context) => {
+    const previous = get()[flag];
     set({ [flag]: value } as Partial<FeatureSettingsState>); // optimistic
     try {
-      await withDbTransaction(getDatabase(), (context) =>
-        kvSetWithinTransaction(context, FLAGS[flag].key, value ? '1' : '0'),
+      await withDbTransaction(
+        context?.db ?? getDatabase(),
+        async (transactionContext) => {
+          await kvSetWithinTransaction(transactionContext, FLAGS[flag].key, value ? '1' : '0');
+          if (flag === 'autoDownloadAttachments' && !value) {
+            await cancelPendingAttachmentMediaExportsWithinTransaction(transactionContext);
+          }
+        },
+        context ? () => canCommitHydration(context) : undefined,
       );
-    } catch {
+    } catch (error) {
+      if (flag === 'autoDownloadAttachments') {
+        if (context === undefined || canCommitHydration(context)) {
+          if (get()[flag] === value) {
+            set({ [flag]: previous } as Partial<FeatureSettingsState>);
+          }
+          throw error;
+        }
+        return;
+      }
       // best-effort persist; the in-memory toggle still applies this session
     }
   },
@@ -354,14 +386,32 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
       // best-effort persist; the in-memory cap still applies this session
     }
   },
-  setAutoDownloadDestination: async (dest) => {
-    set({ autoDownloadDestination: dest }); // optimistic
+  setAutoDownloadDestination: async (dest, context) => {
+    const previous = get().autoDownloadDestination;
+    if (dest === previous && context === undefined) return;
+    // Account-owned UI commands are persist-first because an external choice can wait behind a
+    // permission prompt. Its generation guard must be able to reject an older choice without that
+    // choice ever publishing over a newer App/Gallery/Album selection.
+    if (context === undefined) set({ autoDownloadDestination: dest });
     try {
-      await withDbTransaction(getDatabase(), (context) =>
-        kvSetWithinTransaction(context, AUTO_DOWNLOAD_DEST_KEY, dest),
+      await withDbTransaction(
+        context?.db ?? getDatabase(),
+        async (transactionContext) => {
+          await kvSetWithinTransaction(transactionContext, AUTO_DOWNLOAD_DEST_KEY, dest);
+          await cancelPendingAttachmentMediaExportsWithinTransaction(transactionContext);
+        },
+        context ? () => canCommitHydration(context) : undefined,
       );
-    } catch {
-      // best-effort persist; the in-memory choice still applies this session
+      if (context !== undefined && canCommitHydration(context)) {
+        set({ autoDownloadDestination: dest });
+      }
+    } catch (error) {
+      if (context === undefined || canCommitHydration(context)) {
+        if (context === undefined && get().autoDownloadDestination === dest) {
+          set({ autoDownloadDestination: previous });
+        }
+        throw error;
+      }
     }
   },
   setInboxFilters: async (filters) => {

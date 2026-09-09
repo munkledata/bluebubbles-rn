@@ -136,6 +136,8 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/db/repositories/scheduled.ts',
   'src/services/download/attachmentCacheCoordinator.ts',
   'src/services/download/attachmentCacheRecovery.ts',
+  'src/services/download/attachmentMediaExportQueue.ts',
+  'src/services/download/autoDownloadAttachments.ts',
   'src/services/download/downloadService.ts',
   'src/services/download/index.ts',
   'src/services/send/scheduleService.ts',
@@ -2180,10 +2182,10 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-resuming-v1'"],
     ],
-    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '47 as const']],
+    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '48 as const']],
     [
       'DB_RELAUNCH_MIGRATION_HEAD',
-      [ts.NodeFlags.Const, "'0047_message_retraction_topology' as const"],
+      [ts.NodeFlags.Const, "'0048_attachment_media_exports' as const"],
     ],
     ['WAIT_FOR_HOST_PROCESS_KILL', [ts.NodeFlags.Const, 'new Promise<never>(() => undefined)']],
     ['activeDbRelaunchContract', [ts.NodeFlags.Let, undefined]],
@@ -2215,25 +2217,22 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME', "'driver-runtime-concurrency-selftest.db'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A', "'db-02c-public-throwaway-key-a-v1'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B', "'db-02c-public-throwaway-key-b-v1'"],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '47 as const'],
-    [
-      'DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD',
-      "'0047_message_retraction_topology' as const",
-    ],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '48 as const'],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD', "'0048_attachment_media_exports' as const"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_KEY', "'gator-db-runtime-wave-sentinel'"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE', "'committed'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_NAME', "'driver-backup-restore-selftest.db'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_KEY', "'backup-02-public-throwaway-key-v1'"],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '47 as const'],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD', "'0047_message_retraction_topology' as const"],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '48 as const'],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD', "'0048_attachment_media_exports' as const"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_NAME', "'driver-relaunch-selftest.db'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_KEY', "'db-03b1-public-throwaway-key-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL', "'driver-relaunch-continuity-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT', '29'],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD', "'0029_chats_deleted_at'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START', "'0030_attachment_cache_entries'"],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '47 as const'],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0047_message_retraction_topology' as const"],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '48 as const'],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0048_attachment_media_exports' as const"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_NAME', "'driver-wal-write-death-selftest.db'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_KEY', "'db-03b2b1-public-throwaway-key-v1'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_BASELINE', "'db-03b2b1-baseline-v1'"],
@@ -2245,8 +2244,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT', '37'],
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD', "'0037_purge_legacy_redacted_mode_setting' as const"],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET', "'0038_scrub_reaction_selected_message_text' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0047_message_retraction_topology' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '47 as const'],
+    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0048_attachment_media_exports' as const"],
+    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '48 as const'],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT', '128'],
     ['DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH', '8_192'],
     [
@@ -2442,7 +2441,7 @@ function dbProcessRelaunchCertificateCandidate({
     [restoreBackup, 'f42bd7777a2afd3ffbbd067e825061a47b031efb298e4ebbacf314d559797a7c'],
     [
       restorePreparedBackupWithinTransaction,
-      '67dfcb0808252b825f10f5f467b59c65056061478671b3b01ec9f882c7c5699b',
+      '98c7cfce43d21aba8df8b91843f8021df9e121e8d704523adb8440025dc649d9',
     ],
     [
       resolveRcsAttemptOwnership,
@@ -4575,10 +4574,10 @@ function driverSelfTestCertificateCandidate({
     nameState.declaration.initializer.text !== 'driver-selftest.db' ||
     !(migrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationCountState.declaration.initializer, databaseFile) !==
-      '47 as const' ||
+      '48 as const' ||
     !(migrationHeadState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationHeadState.declaration.initializer, databaseFile) !==
-      "'0047_message_retraction_topology' as const" ||
+      "'0048_attachment_media_exports' as const" ||
     !(partialMigrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(partialMigrationCountState.declaration.initializer, databaseFile) !== '29' ||
     !(internalFailureState.declarationList.flags & ts.NodeFlags.Const) ||

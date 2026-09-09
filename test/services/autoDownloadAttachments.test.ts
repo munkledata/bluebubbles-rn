@@ -8,7 +8,10 @@
 // Mock the DB layer so importing the feature store doesn't pull op-sqlite (ESM, not transformable
 // under ts-jest). We drive listAttachmentsByMessageIds directly and never touch a real DB.
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
-jest.mock('@db/repositories', () => ({ listAttachmentsByMessageIds: jest.fn() }));
+jest.mock('@db/repositories', () => ({
+  enqueueAttachmentMediaExport: jest.fn(),
+  listAttachmentsByMessageIds: jest.fn(),
+}));
 jest.mock('@/services/download/index', () => ({
   download: jest.fn(),
   downloadWithClient: jest.fn(),
@@ -20,22 +23,26 @@ jest.mock('@/services/download/attachmentCacheRecovery', () => ({
   isAttachmentCacheRecoveryReady: jest.fn(),
   recoverAttachmentCache: jest.fn(),
 }));
-jest.mock('@/services/media', () => ({ saveImageToLibrary: jest.fn() }));
+jest.mock('@/services/download/attachmentMediaExportQueue', () => ({
+  fulfillAttachmentMediaExport: jest.fn(),
+}));
 
-import { listAttachmentsByMessageIds } from '@db/repositories';
+import { enqueueAttachmentMediaExport, listAttachmentsByMessageIds } from '@db/repositories';
 import { download, downloadWithClient } from '@/services/download/index';
 import { resolveAuthorizedRealtimeTransport } from '@/services/background/authorizedRealtimeTransport';
 import {
   isAttachmentCacheRecoveryReady,
   recoverAttachmentCache,
 } from '@/services/download/attachmentCacheRecovery';
-import { saveImageToLibrary } from '@/services/media';
+import { fulfillAttachmentMediaExport } from '@/services/download/attachmentMediaExportQueue';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useToastStore } from '@ui/toast/toastStore';
 import { servicePresentationAdapter } from '@ui/servicePresentation';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
+  runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import {
   autoDownloadMessageAttachments,
@@ -45,12 +52,13 @@ import {
 } from '@/services/download/autoDownloadAttachments';
 
 const mockList = listAttachmentsByMessageIds as jest.Mock;
+const mockEnqueueExport = enqueueAttachmentMediaExport as jest.Mock;
 const mockDownload = download as jest.Mock;
 const mockDownloadWithClient = downloadWithClient as jest.Mock;
 const mockResolveTransport = resolveAuthorizedRealtimeTransport as jest.Mock;
 const mockCacheReady = isAttachmentCacheRecoveryReady as jest.Mock;
 const mockRecoverCache = recoverAttachmentCache as jest.Mock;
-const mockSave = saveImageToLibrary as jest.Mock;
+const mockFulfillExport = fulfillAttachmentMediaExport as jest.Mock;
 const db = {} as never;
 
 function imageRow(over: Record<string, unknown> = {}) {
@@ -69,12 +77,13 @@ function imageRow(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   servicePresentationAdapter.resetSession();
   mockList.mockReset();
+  mockEnqueueExport.mockReset().mockResolvedValue({ status: 'enqueued', id: 1 });
   mockDownload.mockReset().mockResolvedValue('file:///dl/a1.jpg');
   mockDownloadWithClient.mockReset().mockResolvedValue('file:///dl/a1.jpg');
   mockResolveTransport.mockReset();
   mockCacheReady.mockReset().mockReturnValue(true);
   mockRecoverCache.mockReset().mockResolvedValue({ status: 'ready' });
-  mockSave.mockReset().mockResolvedValue('saved');
+  mockFulfillExport.mockReset().mockResolvedValue({ savedImages: 1, destination: 'album' });
   useFeatureSettingsStore.setState({
     hydrated: true,
     autoDownloadAttachments: true,
@@ -141,7 +150,8 @@ describe('autoDownloadMessageAttachments', () => {
       expect.any(Function),
       MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
     );
-    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockEnqueueExport).not.toHaveBeenCalled();
+    expect(mockFulfillExport).not.toHaveBeenCalled();
   });
 
   it('binds a realtime auto-download to its authorized task-local client', async () => {
@@ -196,7 +206,12 @@ describe('autoDownloadMessageAttachments', () => {
     });
 
     expect(mockDownloadWithClient).toHaveBeenCalledTimes(1);
-    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockEnqueueExport).toHaveBeenCalledWith(
+      db,
+      { attachmentGuid: 'a1', destination: 'album' },
+      expect.any(Function),
+    );
+    expect(mockFulfillExport).not.toHaveBeenCalled();
     expect(outcome).toEqual({ savedImages: 0, destination: null });
   });
 
@@ -250,7 +265,11 @@ describe('autoDownloadMessageAttachments', () => {
       useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
       mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
       const outcome = await autoDownloadMessageAttachments(db, 1);
-      expect(mockSave).toHaveBeenCalledWith('file:///dl/a1.jpg', { album: true });
+      expect(mockFulfillExport).toHaveBeenCalledWith(
+        db,
+        'a1',
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      );
       expect(outcome).toEqual({ savedImages: 1, destination: 'album' });
       // Toast is batched — nothing yet, then fires after the debounce window.
       expect(useToastStore.getState().current).toBeNull();
@@ -268,7 +287,7 @@ describe('autoDownloadMessageAttachments', () => {
       useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
       mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
       const outcome = await autoDownloadMessageAttachments(db, 1);
-      expect(mockSave).toHaveBeenCalledTimes(1);
+      expect(mockFulfillExport).toHaveBeenCalledTimes(1);
 
       servicePresentationAdapter.presentAutoDownload(outcome);
       servicePresentationAdapter.resetSession();
@@ -284,12 +303,12 @@ describe('autoDownloadMessageAttachments', () => {
   it('does not recreate an account-A toast when its gallery save finishes after reset', async () => {
     jest.useFakeTimers();
     let current = true;
-    let finishSave!: (result: 'saved') => void;
+    let finishSave!: (result: { savedImages: number; destination: 'album' }) => void;
     try {
       useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
       mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
-      mockSave.mockReturnValueOnce(
-        new Promise<'saved'>((resolve) => {
+      mockFulfillExport.mockReturnValueOnce(
+        new Promise<{ savedImages: number; destination: 'album' }>((resolve) => {
           finishSave = resolve;
         }),
       );
@@ -297,14 +316,14 @@ describe('autoDownloadMessageAttachments', () => {
         generation: 7,
         isCurrent: () => current,
       });
-      for (let i = 0; i < 20 && mockSave.mock.calls.length === 0; i += 1) {
+      for (let i = 0; i < 20 && mockFulfillExport.mock.calls.length === 0; i += 1) {
         await Promise.resolve();
       }
-      expect(mockSave).toHaveBeenCalledTimes(1);
+      expect(mockFulfillExport).toHaveBeenCalledTimes(1);
 
       current = false;
       servicePresentationAdapter.resetSession();
-      finishSave('saved');
+      finishSave({ savedImages: 1, destination: 'album' });
       await run;
       jest.advanceTimersByTime(1_300);
 
@@ -316,22 +335,29 @@ describe('autoDownloadMessageAttachments', () => {
   });
 
   it('keeps Disconnect draining until an admitted gallery save settles', async () => {
-    let finishSave!: (result: 'saved') => void;
+    let finishSave!: (result: { savedImages: number; destination: 'album' }) => void;
     let pause: Promise<void> | undefined;
     useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
     mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
-    mockSave.mockReturnValueOnce(
-      new Promise<'saved'>((resolve) => {
-        finishSave = resolve;
-      }),
+    const nativeResult = new Promise<{ savedImages: number; destination: 'album' }>((resolve) => {
+      finishSave = resolve;
+    });
+    mockFulfillExport.mockImplementationOnce(
+      async (_db: unknown, _guid: string, lease: RealtimeDeliveryLease) => {
+        let result = { savedImages: 0, destination: null as 'album' | null };
+        await runTrackedRealtimeWork(lease, async () => {
+          result = await nativeResult;
+        });
+        return result;
+      },
     );
 
     try {
       const run = autoDownloadMessageAttachments(db, 1);
-      for (let i = 0; i < 20 && mockSave.mock.calls.length === 0; i += 1) {
+      for (let i = 0; i < 20 && mockFulfillExport.mock.calls.length === 0; i += 1) {
         await Promise.resolve();
       }
-      expect(mockSave).toHaveBeenCalledTimes(1);
+      expect(mockFulfillExport).toHaveBeenCalledTimes(1);
 
       let drainFinished = false;
       pause = pauseRealtimeDeliveries().then(() => {
@@ -340,13 +366,13 @@ describe('autoDownloadMessageAttachments', () => {
       await Promise.resolve();
       expect(drainFinished).toBe(false);
 
-      finishSave('saved');
+      finishSave({ savedImages: 1, destination: 'album' });
       await run;
       await pause;
       expect(drainFinished).toBe(true);
       expect(useToastStore.getState().current).toBeNull();
     } finally {
-      finishSave?.('saved');
+      finishSave?.({ savedImages: 1, destination: 'album' });
       await pause;
       resumeRealtimeDeliveries();
     }
@@ -370,7 +396,8 @@ describe('autoDownloadMessageAttachments', () => {
         expect.any(Function),
         MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
       );
-      expect(mockSave).not.toHaveBeenCalled();
+      expect(mockEnqueueExport).not.toHaveBeenCalled();
+      expect(mockFulfillExport).not.toHaveBeenCalled();
       jest.advanceTimersByTime(1300);
       expect(useToastStore.getState().current).toBeNull();
     } finally {

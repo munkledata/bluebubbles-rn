@@ -675,8 +675,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 47,
-      migrationHead: '0047_message_retraction_topology',
+      migrationCount: 48,
+      migrationHead: '0048_attachment_media_exports',
       checks: passingChecks,
     });
 
@@ -946,8 +946,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 47,
-      migrationHead: '0047_message_retraction_topology',
+      migrationCount: 48,
+      migrationHead: '0048_attachment_media_exports',
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

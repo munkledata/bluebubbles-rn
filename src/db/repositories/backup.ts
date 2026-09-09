@@ -2017,6 +2017,36 @@ export function restorePreparedBackupWithinTransaction(
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `);
 
+    // Backup restore bypasses the live feature-settings commands, so enforce their pending-export
+    // revocation rule here in the same transaction as the restored KV values. Missing/corrupt
+    // values deliberately mirror featureSettingsStore: auto-download defaults on and destination
+    // defaults to Album. Every conflicting pending intent is revoked, including a leased one: an
+    // irreversible MediaStore write already in progress may finish, but its fenced settlement must
+    // become stale instead of letting old policy revive after lease expiry. Terminal history is
+    // never part of this delete.
+    await db.run(sql`
+      DELETE FROM attachment_media_exports
+       WHERE state = 'pending'
+         AND (
+           COALESCE(
+             (SELECT value FROM kv WHERE key = 'attachments.autoDownload' LIMIT 1),
+             '1'
+           ) <> '1'
+           OR destination <> COALESCE(
+             (
+               SELECT CASE
+                 WHEN value IN ('app', 'gallery', 'album') THEN value
+                 ELSE 'album'
+               END
+                 FROM kv
+                WHERE key = 'attachments.autoDownloadDestination'
+                LIMIT 1
+             ),
+             'album'
+           )
+         )
+    `);
+
     await db.run(sql`
       WITH source_rows AS (
         SELECT CAST(entry.key AS INTEGER) AS source_index,

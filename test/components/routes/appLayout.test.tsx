@@ -49,6 +49,9 @@ jest.mock('@/services', () => ({
 jest.mock('@/services/send', () => ({
   recoverOutgoing: jest.fn(() => Promise.resolve({ eligible: 0, sent: 0 })),
 }));
+jest.mock('@/services/download/attachmentMediaExportQueue', () => ({
+  drainPendingAttachmentMediaExports: jest.fn(() => Promise.resolve()),
+}));
 jest.mock('@utils/isDev', () => ({ isDevServer: () => false }));
 jest.mock('@/services/notifications/actions', () => ({
   handleNotificationAction: jest.fn(() => Promise.resolve()),
@@ -99,6 +102,8 @@ import {
 // eslint-disable-next-line import/first
 import { recoverOutgoing } from '@/services/send';
 // eslint-disable-next-line import/first
+import { drainPendingAttachmentMediaExports } from '@/services/download/attachmentMediaExportQueue';
+// eslint-disable-next-line import/first
 import {
   handleNotificationAction,
   handleNotificationPress,
@@ -123,6 +128,7 @@ const mockRetryRealtime = retryRealtimeConnection as jest.MockedFunction<
 >;
 const mockFlushErrorReports = flushErrorReports as jest.MockedFunction<typeof flushErrorReports>;
 const mockRecoverOutgoing = recoverOutgoing as jest.MockedFunction<typeof recoverOutgoing>;
+const mockDrainMediaExports = drainPendingAttachmentMediaExports as jest.Mock;
 const mockHandleNotificationAction = handleNotificationAction as jest.Mock;
 const mockHandleNotificationPress = handleNotificationPress as jest.Mock;
 const mockDrainNotificationTap = drainNotificationTap as jest.Mock;
@@ -173,6 +179,7 @@ async function mountLayout(): Promise<void> {
   // One callback owns lock/realtime coordination; the other drains notification taps on resume.
   expect(appStateHandlers).toHaveLength(2);
   expect(mockForegroundHandlers).toHaveLength(1);
+  await waitFor(() => expect(mockDrainMediaExports).toHaveBeenCalledTimes(1));
 
   // Ignore the layout's intentional mount-time report flush. Assertions below describe only the
   // AppState transition being driven by the test.
@@ -181,6 +188,7 @@ async function mountLayout(): Promise<void> {
   mockResumeRealtime.mockClear();
   mockFlushErrorReports.mockClear();
   mockRecoverOutgoing.mockClear();
+  mockDrainMediaExports.mockClear();
   mockHandleNotificationAction.mockClear();
   mockHandleNotificationPress.mockClear();
   mockDrainNotificationTap.mockClear();
@@ -214,6 +222,7 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(appStateHandlers).toHaveLength(0);
     expect(mockFlushErrorReports).not.toHaveBeenCalled();
     expect(mockRecoverOutgoing).not.toHaveBeenCalled();
+    expect(mockDrainMediaExports).not.toHaveBeenCalled();
   });
 
   it('locks and pauses an expired session without starting foreground recovery', async () => {
@@ -243,6 +252,7 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockResumeRealtime).toHaveBeenCalledTimes(1);
     expect(mockFlushErrorReports).toHaveBeenCalledTimes(1);
     expect(mockRecoverOutgoing).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockDrainMediaExports).toHaveBeenCalledTimes(1));
   });
 
   it('mounts the shared connection banner with the service-owned Retry action', async () => {

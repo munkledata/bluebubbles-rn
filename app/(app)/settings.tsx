@@ -13,7 +13,11 @@ import {
 } from '@native/screenSecurity';
 import { disconnectFailureMessage, forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
 import { requestDisableBatteryOptimization } from '@/services/battery';
-import { setErrorReportingConsent } from '@/services/featureSettingsCommands';
+import {
+  setAttachmentAutoDownloadDestination,
+  setAttachmentAutoDownloadEnabled,
+  setErrorReportingConsent,
+} from '@/services/featureSettingsCommands';
 import {
   getContactsPermissionState,
   isContactsAccountChangedError,
@@ -107,7 +111,6 @@ export default function SettingsScreen(): React.JSX.Element {
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const autoDownloadDestination = useFeatureSettingsStore((s) => s.autoDownloadDestination);
-  const setAutoDownloadDestination = useFeatureSettingsStore((s) => s.setAutoDownloadDestination);
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
   const showDeliveryTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
@@ -281,6 +284,36 @@ export default function SettingsScreen(): React.JSX.Element {
     } catch {
       showDialog('Secure Screen', 'Couldn’t update Android screen-capture protection.');
     }
+  };
+
+  const onToggleAutoDownload = (next: boolean): void => {
+    if (!screenCurrent()) return;
+    void setAttachmentAutoDownloadEnabled(next, accountLease).catch(() => {
+      if (screenCurrent()) {
+        showDialog(
+          'Downloads',
+          'Couldn’t update auto-download. The previous setting is unchanged.',
+        );
+      }
+    });
+  };
+
+  const onSetAutoDownloadDestination = (destination: AutoDownloadDestination): void => {
+    if (!screenCurrent()) return;
+    void setAttachmentAutoDownloadDestination(destination, accountLease)
+      .then((result) => {
+        if (result === 'denied' && screenCurrent()) {
+          showDialog('Photos', 'Photos permission is required for automatic outside copies.');
+        }
+      })
+      .catch(() => {
+        if (screenCurrent()) {
+          showDialog(
+            'Downloads',
+            'Couldn’t update the save destination. The previous setting is unchanged.',
+          );
+        }
+      });
   };
 
   const runContactsSync = async (): Promise<void> => {
@@ -638,7 +671,7 @@ export default function SettingsScreen(): React.JSX.Element {
               <SwitchRow
                 label="Auto-download Attachments"
                 value={autoDownload}
-                onValueChange={(v) => void setFlag('autoDownloadAttachments', v)}
+                onValueChange={onToggleAutoDownload}
                 accessibilityLabel="Automatically download incoming attachments"
               />
               <SwitchRow
@@ -665,12 +698,12 @@ export default function SettingsScreen(): React.JSX.Element {
                   key={opt.value}
                   label={opt.label}
                   checked={autoDownloadDestination === opt.value}
-                  onPress={() => void setAutoDownloadDestination(opt.value)}
+                  onPress={() => onSetAutoDownloadDestination(opt.value)}
                   disabled={!autoDownload}
                   dimmed={!autoDownload}
                 />
               ))}
-              <NoteRow text="Images always appear in chats. When selected, Photos and Gator Album copies are best effort while Gator is open. An image delivered while Gator is closed or in the background may remain only in Gator’s private cache; its outside copy is not automatically retried. Photos permission is requested when an outside copy is first attempted." />
+              <NoteRow text="Images always appear in chats. Tap Photos gallery or Gator album to grant the required Photos access; on Android 12 and earlier, tap the choice even if it is already selected. Gator remembers a queued Photos or Gator Album copy and retries it on a later eligible foreground activation. Changing this choice or turning off auto-download cancels queued copies that have not started; a copy Android is already saving may still finish." />
             </SettingsSection>
           </>
         )}

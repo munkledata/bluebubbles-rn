@@ -1,13 +1,12 @@
 import { logger } from '@core/secure';
 import type { EventDeliveryContext } from '@core/realtime';
 import type { HttpClient } from '@core/api';
-import { listAttachmentsByMessageIds } from '@db/repositories';
+import { enqueueAttachmentMediaExport, listAttachmentsByMessageIds } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { shouldAutoDownload } from '@utils';
 import {
   captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 
@@ -33,9 +32,10 @@ interface AutoDownloadExecutionOptions {
  * per the `autoDownloadDestination` setting, files a copy into the device gallery / a "Gator" album
  * and returns a typed save count for the mounted UI to present. A bounded background-FCM caller
  * disables the external Photos copy because expo-media-library offers no cancellation signal; it
- * persists only the app-cache file and returns no presentation outcome.
+ * persists a destination-bound receipt plus the app-cache file and returns no presentation
+ * outcome. The next eligible foreground activation drains that receipt.
  *
- * Native modules (expo-network / the download fetcher / expo-media-library) are LAZILY imported and
+ * Native modules (expo-network / the download fetcher / media-export worker) are LAZILY imported
  * only after the early returns, so this module's static import graph stays Node-safe (DbEventSink is
  * unit-tested in Node) and nothing is pulled unless there's actually an image to fetch.
  */
@@ -123,18 +123,36 @@ export async function autoDownloadMessageAttachments(
     }
 
     const { download, downloadWithClient } = await import('./index');
-    // Only pull expo-media-library when we actually need to save a copy outside the app.
     const galleryDestination: AutoDownloadOutcome['destination'] =
-      options.allowExternalMediaSave === false || autoDownloadDestination === 'app'
-        ? null
-        : autoDownloadDestination;
-    const saveImageToLibrary =
-      galleryDestination === null ? null : (await import('@/services/media')).saveImageToLibrary;
+      autoDownloadDestination === 'app' ? null : autoDownloadDestination;
 
     let actualDownloadedBytes = 0;
     for (const att of eligible) {
       if (!lease.isCurrent()) return NO_SAVED_IMAGES;
       if (actualDownloadedBytes >= MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE) break;
+      let exportPending = false;
+      // Persist the destination-bound intent BEFORE native download work. A killed/background
+      // delivery can then finish with only attachments.local_path committed; the next unlocked
+      // foreground activation will still discover and fulfill the outside Photos copy.
+      if (galleryDestination !== null && !att.isSticker) {
+        try {
+          const receipt = await enqueueAttachmentMediaExport(
+            db,
+            { attachmentGuid: att.guid, destination: galleryDestination },
+            () => lease.isCurrent(),
+          );
+          exportPending =
+            receipt.status === 'enqueued' ||
+            (receipt.status === 'duplicate' &&
+              receipt.state === 'pending' &&
+              receipt.destination === galleryDestination);
+        } catch (error) {
+          if (lease.isCurrent()) {
+            logger.debug('[autoDownload] media export receipt unavailable', error);
+          }
+        }
+      }
+      if (!lease.isCurrent()) return NO_SAVED_IMAGES;
       const remainingBytes = MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE - actualDownloadedBytes;
       let verifiedBytes = 0;
       const onVerifiedBytes = (bytes: number): void => {
@@ -150,21 +168,12 @@ export async function autoDownloadMessageAttachments(
       // filed into the user's Photos. A tapback sticker is not a picture they received; before the
       // overlay existed this was the only visible trace of a sticker at all, which is how a stray
       // image plus a "Downloaded 1 image" toast became the sole symptom of an invisible message.
-      if (path && lease.isCurrent() && saveImageToLibrary && !att.isSticker) {
-        let saveResult: Awaited<ReturnType<typeof saveImageToLibrary>> | undefined;
-        // The download itself is long-lived and generation-guarded, but this final native gallery
-        // copy is an account-visible commit. Admit it into the teardown drain so Disconnect cannot
-        // activate account B while account A is still writing into Photos.
-        await runTrackedRealtimeWork(lease, async (activeLease) => {
-          if (!activeLease.isCurrent()) return;
-          const result = await saveImageToLibrary(path, {
-            album: galleryDestination === 'album',
-          });
-          if (activeLease.isCurrent()) saveResult = result;
-        });
-        if (saveResult === 'saved' && lease.isCurrent()) {
-          savedImages += 1;
-          savedDestination = galleryDestination;
+      if (path && lease.isCurrent() && exportPending && options.allowExternalMediaSave !== false) {
+        const { fulfillAttachmentMediaExport } = await import('./attachmentMediaExportQueue');
+        const exportResult = await fulfillAttachmentMediaExport(db, att.guid, lease);
+        if (exportResult.savedImages > 0 && lease.isCurrent()) {
+          savedImages += exportResult.savedImages;
+          savedDestination = exportResult.destination;
         }
       }
     }

@@ -427,6 +427,121 @@ export const attachments = sqliteTable(
 );
 
 /**
+ * Durable intent/receipt for the extra shared-media copy of an automatically downloaded image.
+ *
+ * The app-cache source remains on `attachments.local_path`; this table deliberately does not copy
+ * a private path. Pending rows are claimed by one bounded foreground worker. Completed receipts
+ * suppress duplicate automatic exports across cache eviction/process restart until bounded
+ * maintenance retires the receipt.
+ */
+export const attachmentMediaExports = sqliteTable(
+  'attachment_media_exports',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    attachmentGuid: text('attachment_guid')
+      .notNull()
+      .references(() => attachments.guid, { onUpdate: 'cascade', onDelete: 'cascade' }),
+    destination: text('destination', { enum: ['gallery', 'album'] }).notNull(),
+    state: text('state', { enum: ['pending', 'completed', 'terminal'] })
+      .notNull()
+      .default('pending'),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    claimVersion: integer('claim_version').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull().default(0),
+    leaseToken: text('lease_token'),
+    leaseExpiresAt: integer('lease_expires_at').notNull().default(0),
+    terminalAt: integer('terminal_at'),
+    /** Bounded machine code only; never a raw native error or private path. */
+    lastErrorCode: text('last_error_code'),
+  },
+  (t) => ({
+    attachmentGuidIdx: uniqueIndex('attachment_media_exports_attachment_guid_idx').on(
+      t.attachmentGuid,
+    ),
+    claimIdx: index('attachment_media_exports_claim_idx').on(
+      t.state,
+      t.nextAttemptAt,
+      t.leaseExpiresAt,
+      t.createdAt,
+      t.id,
+    ),
+    terminalIdx: index('attachment_media_exports_terminal_idx').on(t.state, t.terminalAt, t.id),
+    attachmentGuidValid: check(
+      'attachment_media_exports_attachment_guid_valid',
+      sql`length(CAST(${t.attachmentGuid} AS BLOB)) BETWEEN 1 AND 512`,
+    ),
+    destinationValid: check(
+      'attachment_media_exports_destination_valid',
+      sql`${t.destination} IN ('gallery', 'album')`,
+    ),
+    stateValid: check(
+      'attachment_media_exports_state_valid',
+      sql`${t.state} IN ('pending', 'completed', 'terminal')`,
+    ),
+    createdAtNonnegative: check(
+      'attachment_media_exports_created_at_nonnegative',
+      sql`typeof(${t.createdAt}) = 'integer' AND ${t.createdAt} >= 0`,
+    ),
+    expiresAtValid: check(
+      'attachment_media_exports_expires_at_valid',
+      sql`typeof(${t.expiresAt}) = 'integer'
+          AND ${t.expiresAt} > ${t.createdAt}
+          AND (${t.expiresAt} - ${t.createdAt}) <= 604800000`,
+    ),
+    attemptsValid: check(
+      'attachment_media_exports_attempts_valid',
+      sql`typeof(${t.attempts}) = 'integer' AND ${t.attempts} BETWEEN 0 AND 3`,
+    ),
+    claimVersionNonnegative: check(
+      'attachment_media_exports_claim_version_nonnegative',
+      sql`typeof(${t.claimVersion}) = 'integer' AND ${t.claimVersion} >= 0`,
+    ),
+    nextAttemptAtNonnegative: check(
+      'attachment_media_exports_next_attempt_at_nonnegative',
+      sql`typeof(${t.nextAttemptAt}) = 'integer' AND ${t.nextAttemptAt} >= 0`,
+    ),
+    leaseTokenValid: check(
+      'attachment_media_exports_lease_token_valid',
+      sql`${t.leaseToken} IS NULL
+          OR length(CAST(${t.leaseToken} AS BLOB)) BETWEEN 1 AND 128`,
+    ),
+    leaseExpiresAtNonnegative: check(
+      'attachment_media_exports_lease_expires_at_nonnegative',
+      sql`typeof(${t.leaseExpiresAt}) = 'integer' AND ${t.leaseExpiresAt} >= 0`,
+    ),
+    terminalAtNonnegative: check(
+      'attachment_media_exports_terminal_at_nonnegative',
+      sql`${t.terminalAt} IS NULL
+          OR (typeof(${t.terminalAt}) = 'integer' AND ${t.terminalAt} >= 0)`,
+    ),
+    lastErrorCodeValid: check(
+      'attachment_media_exports_last_error_code_valid',
+      sql`${t.lastErrorCode} IS NULL OR ${t.lastErrorCode} IN (
+            'expired', 'attempt-cap', 'ineligible', 'permission-denied',
+            'source-missing', 'native-error'
+          )`,
+    ),
+    stateShapeValid: check(
+      'attachment_media_exports_state_shape_valid',
+      sql`(${t.state} = 'pending' AND ${t.terminalAt} IS NULL)
+          OR
+          (${t.state} IN ('completed', 'terminal') AND ${t.terminalAt} IS NOT NULL
+           AND ${t.leaseToken} IS NULL AND ${t.leaseExpiresAt} = 0
+           AND ${t.nextAttemptAt} = 0)`,
+    ),
+    leaseShapeValid: check(
+      'attachment_media_exports_lease_shape_valid',
+      sql`(${t.leaseToken} IS NULL AND ${t.leaseExpiresAt} = 0)
+          OR
+          (${t.state} = 'pending' AND ${t.leaseToken} IS NOT NULL
+           AND ${t.leaseExpiresAt} > 0)`,
+    ),
+  }),
+);
+
+/**
  * Durable accounting for completed files in the ordinary attachment cache.
  *
  * This is deliberately path-centric and has no attachment foreign key: more than one attachment

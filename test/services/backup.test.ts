@@ -307,6 +307,92 @@ describe('restoreBackup round-trip', () => {
     expect(chat.custom_name).toBe('Squad');
   });
 
+  it('keeps only pending media exports allowed by the effective restored policy', async () => {
+    const t = await createTestDb();
+    const receiptCreatedAt = 4_000_000_000_000;
+    const receiptExpiresAt = receiptCreatedAt + 7 * 24 * 60 * 60 * 1000;
+    t.raw
+      .prepare(
+        `INSERT INTO attachments (guid)
+         VALUES ('matching'), ('mismatched'), ('active-mismatch'), ('terminal-history'),
+                ('completed-history'), ('disabled')`,
+      )
+      .run();
+    const insertPending = t.raw.prepare(
+      `INSERT INTO attachment_media_exports
+         (attachment_guid, destination, created_at, expires_at)
+       VALUES (?, ?, ?, ?)`,
+    );
+    insertPending.run('matching', 'album', receiptCreatedAt, receiptExpiresAt);
+    insertPending.run('mismatched', 'gallery', receiptCreatedAt, receiptExpiresAt);
+    insertPending.run('disabled', 'album', receiptCreatedAt, receiptExpiresAt);
+    t.raw
+      .prepare(
+        `INSERT INTO attachment_media_exports
+           (attachment_guid, destination, created_at, expires_at, attempts, claim_version,
+            lease_token, lease_expires_at)
+         VALUES ('active-mismatch', 'gallery', ?, ?, 1, 1, 'active-backup-lease', ?)`,
+      )
+      .run(receiptCreatedAt, receiptExpiresAt, receiptCreatedAt + 120_000);
+    t.raw
+      .prepare(
+        `INSERT INTO attachment_media_exports
+           (attachment_guid, destination, state, created_at, expires_at, terminal_at)
+         VALUES ('terminal-history', 'gallery', 'terminal', ?, ?, ?)`,
+      )
+      .run(receiptCreatedAt, receiptExpiresAt, receiptCreatedAt);
+    t.raw
+      .prepare(
+        `INSERT INTO attachment_media_exports
+           (attachment_guid, destination, state, created_at, expires_at, terminal_at)
+         VALUES ('completed-history', 'gallery', 'completed', ?, ?, ?)`,
+      )
+      .run(receiptCreatedAt, receiptExpiresAt, receiptCreatedAt);
+
+    const restore = (kv: Backup['kv']) =>
+      restoreBackup(t.db, {
+        version: 1,
+        exportedAt: 1,
+        kv,
+        themes: [],
+        chatCustomizations: [],
+      });
+
+    // With no stored policy, the live store defaults apply: enabled, Gator Album destination.
+    await restore([]);
+    expect(
+      t.raw
+        .prepare(
+          `SELECT attachment_guid AS attachmentGuid, state
+             FROM attachment_media_exports
+            ORDER BY attachment_guid`,
+        )
+        .all(),
+    ).toEqual([
+      { attachmentGuid: 'completed-history', state: 'completed' },
+      { attachmentGuid: 'disabled', state: 'pending' },
+      { attachmentGuid: 'matching', state: 'pending' },
+      { attachmentGuid: 'terminal-history', state: 'terminal' },
+    ]);
+
+    await restore([
+      { key: 'attachments.autoDownload', value: '0' },
+      { key: 'attachments.autoDownloadDestination', value: 'album' },
+    ]);
+    expect(
+      t.raw
+        .prepare(
+          `SELECT attachment_guid AS attachmentGuid, state
+             FROM attachment_media_exports
+            ORDER BY attachment_guid`,
+        )
+        .all(),
+    ).toEqual([
+      { attachmentGuid: 'completed-history', state: 'completed' },
+      { attachmentGuid: 'terminal-history', state: 'terminal' },
+    ]);
+  });
+
   it('restores across changed server GUIDs using normalized participants', async () => {
     const sourceParticipants = [
       { address: '+1 (555) 123-4567', service: 'iMessage' },
@@ -514,6 +600,17 @@ describe('restoreBackup round-trip', () => {
 
   it('rolls back KV and every theme when a later theme write fails', async () => {
     const t = await createTestDb();
+    const receiptCreatedAt = 4_000_000_000_000;
+    const receiptExpiresAt = receiptCreatedAt + 7 * 24 * 60 * 60 * 1000;
+    t.raw.prepare("INSERT INTO attachments (guid) VALUES ('rollback-receipt')").run();
+    t.raw
+      .prepare(
+        `INSERT INTO attachment_media_exports
+           (attachment_guid, destination, created_at, expires_at, attempts, claim_version,
+            lease_token, lease_expires_at)
+         VALUES ('rollback-receipt', 'gallery', ?, ?, 1, 1, 'rollback-lease', ?)`,
+      )
+      .run(receiptCreatedAt, receiptExpiresAt, receiptCreatedAt + 120_000);
     t.raw.exec(`
       CREATE TRIGGER fail_backup_on_second_theme
       BEFORE INSERT ON themes
@@ -546,6 +643,25 @@ describe('restoreBackup round-trip', () => {
 
     expect(t.raw.prepare('SELECT name, tokens FROM themes ORDER BY id').all()).toEqual([]);
     expect(t.raw.prepare("SELECT value FROM kv WHERE key = 'theme.preset'").get()).toBeUndefined();
+    expect(
+      t.raw
+        .prepare(
+          `SELECT attachment_guid AS attachmentGuid, destination, state, attempts,
+                  claim_version AS claimVersion, lease_token AS leaseToken,
+                  lease_expires_at AS leaseExpiresAt
+             FROM attachment_media_exports
+            WHERE attachment_guid = 'rollback-receipt'`,
+        )
+        .get(),
+    ).toEqual({
+      attachmentGuid: 'rollback-receipt',
+      destination: 'gallery',
+      state: 'pending',
+      attempts: 1,
+      claimVersion: 1,
+      leaseToken: 'rollback-lease',
+      leaseExpiresAt: receiptCreatedAt + 120_000,
+    });
   });
 
   it('tracks duplicate-theme cursors per name and mode when identities are interleaved', async () => {

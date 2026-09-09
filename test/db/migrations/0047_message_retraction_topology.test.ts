@@ -49,7 +49,10 @@ describe('migration 0047_message_retraction_topology', () => {
         .run('message', 'chat-before-0047', 'PRIVATE REMINDER BODY', 'PRIVATE SENDER', 99, 'r1');
 
       stopBefore0047.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0048_attachment_media_exports',
+      ]);
       expect(
         raw
           .prepare(

@@ -5,6 +5,10 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import {
+  attachmentMediaExportOwnerEligibleSql,
+  attachmentMediaExportProtectsCacheSql,
+} from './attachmentMediaExports';
 import { messageHasVisibleContentSql } from './chatVisibility';
 
 /**
@@ -46,7 +50,11 @@ export interface AttachmentCacheQuotaSnapshot {
 }
 
 export type AttachmentCacheRetirementRefusal =
-  'not_active' | 'outgoing_protected' | 'outgoing_scan_incomplete' | 'too_many_references';
+  | 'not_active'
+  | 'outgoing_protected'
+  | 'media_export_protected'
+  | 'outgoing_scan_incomplete'
+  | 'too_many_references';
 
 export type AttachmentCacheRetirementClaim =
   | {
@@ -525,6 +533,15 @@ export async function adoptAttachmentCacheScanBatch(
         .map((row: { path: string; state: AttachmentCacheState }) => row.path),
     );
     if (zeroPaths.length > 0) {
+      await db.run(sql`
+        DELETE FROM attachment_media_exports
+         WHERE state = 'pending'
+           AND attachment_guid IN (
+             SELECT guid
+               FROM attachments
+              WHERE local_path IN (${pathSqlList(zeroPaths)})
+           )
+      `);
       const cleared = await db.all<{ id: number }>(sql`
       UPDATE attachments SET local_path = NULL
       WHERE local_path IN (${pathSqlList(zeroPaths)})
@@ -666,6 +683,13 @@ export async function repairMissingActiveAttachmentCacheEntry(
 
     const referenceCount = await boundedAttachmentReferenceCount(db, [path]);
 
+    await db.run(sql`
+      DELETE FROM attachment_media_exports
+       WHERE state = 'pending'
+         AND attachment_guid IN (
+           SELECT guid FROM attachments WHERE local_path = ${path}
+         )
+    `);
     const cleared = await db.all<{ id: number }>(sql`
     UPDATE attachments SET local_path = NULL
     WHERE local_path = ${path}
@@ -728,6 +752,16 @@ export async function getAttachmentCacheQuotaSnapshot(
       SELECT path, bytes, last_used_at
       FROM attachment_cache_entries
       WHERE state = 'active'
+        AND NOT EXISTS (
+          SELECT 1
+            FROM attachment_media_exports ame
+            JOIN attachments a ON a.guid = ame.attachment_guid
+            JOIN messages m ON m.id = a.message_id
+            JOIN chats c ON c.id = m.chat_id
+           WHERE ${attachmentMediaExportProtectsCacheSql()}
+             AND a.local_path = attachment_cache_entries.path
+             AND ${attachmentMediaExportOwnerEligibleSql()}
+        )
       ORDER BY last_used_at ASC, path ASC
       LIMIT ${fetchLimit}
     )
@@ -874,7 +908,37 @@ export async function claimAttachmentCachePathsForRetirement(
       };
     }
 
+    const mediaExportProtectedRows = await db.all<{ path: string }>(sql`
+      SELECT DISTINCT a.local_path AS path
+        FROM attachment_media_exports ame
+        JOIN attachments a ON a.guid = ame.attachment_guid
+        JOIN messages m ON m.id = a.message_id
+        JOIN chats c ON c.id = m.chat_id
+       WHERE ${attachmentMediaExportProtectsCacheSql()}
+         AND a.local_path IN (${inList})
+         AND ${attachmentMediaExportOwnerEligibleSql()}
+       ORDER BY a.local_path ASC
+    `);
+    if (mediaExportProtectedRows.length > 0) {
+      return {
+        status: 'refused',
+        reason: 'media_export_protected',
+        paths: mediaExportProtectedRows.map((row: { path: string }) => row.path),
+      };
+    }
+
     const referenceCount = attachmentReferences.length;
+
+    // Any pending receipt on a now-ineligible owner is no longer allowed to pin this source. The
+    // valid rows returned above before any mutation; cancel only the remainder, atomically with
+    // the cache claim/reference clear below.
+    await db.run(sql`
+      DELETE FROM attachment_media_exports
+       WHERE state = 'pending'
+         AND attachment_guid IN (
+           SELECT guid FROM attachments WHERE local_path IN (${inList})
+         )
+    `);
 
     // The count predicate keeps this statement all-or-none if the active set changes. The checked
     // outer context binds the claim to the following reference clear and verification.

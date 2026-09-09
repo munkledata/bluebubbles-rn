@@ -5,6 +5,7 @@
  * (bare '/' paths are NOT local files), and the error-to-result mapping.
  */
 jest.mock('expo-media-library/legacy', () => ({
+  getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
   saveToLibraryAsync: jest.fn(),
   createAssetAsync: jest.fn(),
@@ -41,6 +42,7 @@ import { statNativeAttachmentCacheFile } from '@native/boundedDownload';
 import { saveAttachmentsToPhotos, saveImageToLibrary, shareAttachment } from '@/services/media';
 
 const requestPerm = MediaLibrary.requestPermissionsAsync as jest.Mock;
+const getPerm = MediaLibrary.getPermissionsAsync as jest.Mock;
 const saveToLibrary = MediaLibrary.saveToLibraryAsync as jest.Mock;
 const createAsset = MediaLibrary.createAssetAsync as jest.Mock;
 const getAlbum = MediaLibrary.getAlbumAsync as jest.Mock;
@@ -349,6 +351,18 @@ describe('saveImageToLibrary', () => {
     saveToLibrary.mockResolvedValue(undefined);
     await saveImageToLibrary('file:///docs/a.jpg');
     expect(requestPerm).toHaveBeenCalledWith(true);
+  });
+
+  it('can check WRITE-ONLY permission without opening a passive retry dialog', async () => {
+    getPerm.mockResolvedValue({ status: 'granted' });
+    saveToLibrary.mockResolvedValue(undefined);
+
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { permissionMode: 'check' }),
+    ).resolves.toBe('saved');
+
+    expect(getPerm).toHaveBeenCalledWith(true);
+    expect(requestPerm).not.toHaveBeenCalled();
   });
 
   it('gallery save (no album) uses saveToLibraryAsync', async () => {
