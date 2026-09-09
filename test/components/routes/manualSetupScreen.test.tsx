@@ -83,6 +83,7 @@ describe('ManualSetupScreen', () => {
 
     const toggle = screen.getByRole('switch', { name: 'Allow insecure connection' });
     expect(toggle).toHaveAccessibleName('Allow insecure connection');
+    expect(toggle.props.accessibilityLabel).toBe('Allow insecure connection');
     expect(toggle.props.value).toBe(false);
 
     await act(async () => {

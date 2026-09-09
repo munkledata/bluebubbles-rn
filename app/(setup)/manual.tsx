@@ -76,7 +76,12 @@ export default function Manual(): React.JSX.Element {
                   )}${i18n.text('manual.insecure.warning.suffix')}`}
                 </Text>
               </View>
-              <Switch aria-label={label} value={allowInsecure} onValueChange={setAllowInsecure} />
+              <Switch
+                aria-label={label}
+                accessibilityLabel={label}
+                value={allowInsecure}
+                onValueChange={setAllowInsecure}
+              />
             </View>
           ) : null}
           {error ? (
