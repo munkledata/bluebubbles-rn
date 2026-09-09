@@ -382,6 +382,12 @@ test('rejects drift anywhere in the Expo file-system redirect containment chain'
 
 test('validates the headless entry order without generated Android artifacts', () => {
   assert.deepEqual(validateHeadlessEntry({ packageJson: { main: 'index.js' }, entrySource }), []);
+  assert.ok(
+    validateHeadlessEntry({
+      packageJson: { main: 'index.js' },
+      entrySource: `import { secret } from './private';\n${entrySource}`,
+    }).some((error) => error.includes('only ordered side-effect imports')),
+  );
   assert.match(
     validateHeadlessEntry({
       packageJson: { main: 'index.js' },

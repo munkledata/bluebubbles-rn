@@ -677,6 +677,10 @@ export function validateHeadlessEntry({ packageJson, entrySource }) {
 
   if (packageJson.main !== 'index.js') errors.push('package.json main must remain index.js');
   const entryImports = entrySideEffectImports(entrySource);
+  const staticImports = [...entrySource.matchAll(/^\s*import\b[^\n]*$/gm)];
+  if (staticImports.length !== entryImports.length) {
+    errors.push('index.js may contain only ordered side-effect imports');
+  }
   const routerIndex = entryImports.indexOf('expo-router/entry');
   if (entryImports[0] !== './src/services/errors/registerReactNativeExceptionPrivacy') {
     errors.push(

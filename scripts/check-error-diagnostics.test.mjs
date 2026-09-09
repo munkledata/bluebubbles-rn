@@ -24,6 +24,11 @@ const ownedNativeFile = join(
   'modules/gator-paste-input/android/src/main/java/expo/modules/gatorpasteinput/GatorPasteInputModule.kt',
 );
 const ownedNativeSource = readFileSync(ownedNativeFile, 'utf8');
+const runtimePrivacyNativeFile = join(
+  root,
+  'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt',
+);
+const runtimePrivacyNativeSource = readFileSync(runtimePrivacyNativeFile, 'utf8');
 
 function writeFixtureFile(fixtureRoot, relativePath, source) {
   const path = join(fixtureRoot, relativePath);
@@ -61,6 +66,11 @@ function initializeGuardFixture(fixtureRoot) {
   );
   mkdirSync(join(fixtureRoot, 'app'), { recursive: true });
   mkdirSync(join(fixtureRoot, 'modules'), { recursive: true });
+  writeFixtureFile(
+    fixtureRoot,
+    'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt',
+    runtimePrivacyNativeSource,
+  );
 }
 
 function topLevelFunctionText(source, fileName, name) {
@@ -439,6 +449,9 @@ test('keeps the owned console exceptions structural and narrow', () => {
     ).some((finding) => finding.reason === 'React Native console privacy contract changed'),
   );
   for (const mutated of [
+    `import { privateValue } from './private';\n${boundarySource}`,
+    `require('./privateStartupSideEffect');\n${boundarySource}`,
+    `const startup = privateStartup();\n${boundarySource}`,
     boundarySource.replace("  'log',\n", ''),
     boundarySource.replace('  installReleaseConsoleBoundary(runtimeConsole);\n', ''),
     boundarySource.replace(
@@ -446,9 +459,10 @@ test('keeps the owned console exceptions structural and narrow', () => {
       '',
     ),
     boundarySource.replace(
-      '  const release = options.release ?? !isVerboseLocalLoggingEnabled();',
+      "  const release = options.release ?? !(typeof __DEV__ !== 'undefined' && __DEV__);",
       '  const release = false;',
     ),
+    boundarySource.replace("require('@core/secure/errorDiagnostic')", "require('@core/secure')"),
     boundarySource.replace(
       "require('react-native/Libraries/Core/ExceptionsManager')",
       "require('react-native/Libraries/Core/UnsafeExceptionsManager')",
@@ -461,6 +475,19 @@ test('keeps the owned console exceptions structural and narrow', () => {
       ),
     );
   }
+
+  const registrationFile = join(root, 'src/services/errors/registerReactNativeExceptionPrivacy.ts');
+  const registrationSource = readFileSync(registrationFile, 'utf8');
+  assert.deepEqual(findUnstructuredErrorCalls(registrationSource, registrationFile), []);
+  assert.ok(
+    findUnstructuredErrorCalls(
+      `import './privateStartupSideEffect';\n${registrationSource}`,
+      registrationFile,
+    ).some(
+      (finding) =>
+        finding.reason === 'React Native exception privacy registration contract changed',
+    ),
+  );
 });
 
 test('does not let nested or duplicate declarations satisfy an owned console contract', () => {
@@ -997,6 +1024,42 @@ test('pins the complete owned native source against android shadowing and decoys
       (finding) => finding.reason === 'owned native source contract changed',
     );
     assert.equal(contractFindings.length, 1, name);
+  }
+});
+
+test('pins release native runtime logging and host-exception containment', () => {
+  assert.deepEqual(
+    findUnsafeNativeLogCalls(runtimePrivacyNativeSource, runtimePrivacyNativeFile),
+    [],
+  );
+
+  const mutations = [
+    runtimePrivacyNativeSource.replace('Int.MAX_VALUE', '0'),
+    runtimePrivacyNativeSource.replace(
+      [
+        '        override fun onWillCreateReactInstance(useDeveloperSupport: Boolean) {',
+        '          if (!useDeveloperSupport || !debuggable) {',
+        '            FLog.setMinimumLoggingLevel(Int.MAX_VALUE)',
+        '          }',
+        '        }',
+        '',
+      ].join('\n'),
+      '',
+    ),
+    runtimePrivacyNativeSource.replace('throw ReleaseReactInstanceException()', 'throw exception'),
+    runtimePrivacyNativeSource.replace('false, false', 'true, true'),
+  ];
+  for (const mutated of mutations) {
+    assert.notEqual(
+      mutated,
+      runtimePrivacyNativeSource,
+      'the native runtime privacy mutation must change the fixture',
+    );
+    assert.ok(
+      findUnsafeNativeLogCalls(mutated, runtimePrivacyNativeFile).some(
+        (finding) => finding.reason === 'native runtime privacy contract changed',
+      ),
+    );
   }
 });
 

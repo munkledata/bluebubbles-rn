@@ -1,8 +1,7 @@
-import {
-  ERROR_DIAGNOSTIC_SITES,
-  isVerboseLocalLoggingEnabled,
-  projectCapturedErrorDiagnostic,
-} from '@core/secure';
+type ErrorDiagnosticApi = Pick<
+  typeof import('@core/secure/errorDiagnostic'),
+  'ERROR_DIAGNOSTIC_SITES' | 'projectCapturedErrorDiagnostic'
+>;
 
 /** The exact fields React Native 0.86 passes to its native ExceptionsManager module. */
 export interface ReactNativeExceptionData {
@@ -61,6 +60,18 @@ const OUTPUT_METHODS_TO_SUPPRESS = [
 const installedManagers = new WeakSet<object>();
 const installedConsoles = new WeakSet<object>();
 
+function loadErrorDiagnosticApi(): ErrorDiagnosticApi {
+  try {
+    // Keep the first entry-point module runtime-import-free until its release console wrapper is
+    // installed. Metro requires this string literal, and the diagnostics guard pins the direct
+    // leaf module so this cannot silently broaden back to the secure barrel.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('@core/secure/errorDiagnostic') as ErrorDiagnosticApi;
+  } catch {
+    throw new Error('react-native-diagnostic-projector-unavailable');
+  }
+}
+
 function read(value: unknown, key: string): unknown {
   try {
     if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
@@ -88,6 +99,7 @@ export function projectReactNativeExceptionData(data: unknown): ReactNativeExcep
   const isFatal = read(data, 'isFatal') === true;
   const id = safeExceptionId(read(data, 'id'));
   try {
+    const { ERROR_DIAGNOSTIC_SITES, projectCapturedErrorDiagnostic } = loadErrorDiagnosticApi();
     const componentStack = read(data, 'componentStack');
     const event = isFatal
       ? '[fatal] runtime error'
@@ -146,6 +158,7 @@ function projectedConsoleArguments(
   fallbackEvent: '[recoverable] runtime warning' | '[uncaught] runtime error',
 ): [string, Record<string, unknown>] {
   try {
+    const { ERROR_DIAGNOSTIC_SITES, projectCapturedErrorDiagnostic } = loadErrorDiagnosticApi();
     const first = values[0];
     const isReactWarning = typeof first === 'string' && first.startsWith('Warning: ');
     const diagnostic = projectCapturedErrorDiagnostic(
@@ -227,7 +240,7 @@ function loadExceptionsManager(): ReactNativeExceptionsManager {
  * the finite payload from {@link projectReactNativeExceptionData} to native/logcat.
  */
 export function installReactNativeExceptionPrivacyBoundary(options: InstallOptions = {}): void {
-  const release = options.release ?? !isVerboseLocalLoggingEnabled();
+  const release = options.release ?? !(typeof __DEV__ !== 'undefined' && __DEV__);
   if (!release) return;
 
   const runtimeConsole = options.runtimeConsole ?? (console as unknown as MutableRuntimeConsole);

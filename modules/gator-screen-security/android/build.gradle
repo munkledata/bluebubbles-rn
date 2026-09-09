@@ -10,6 +10,8 @@ dependencies {
   // ExtraWindowEventListener is a React Native API. Keep it compile-only because the host app
   // already owns the exact ReactAndroid runtime selected by Expo/RN autolinking.
   compileOnly 'com.facebook.react:react-android'
+  // FLog is supplied at runtime by React Native's pinned Fresco 3.6.0 dependency.
+  compileOnly 'com.facebook.fresco:fbcore:3.6.0'
 }
 
 android {

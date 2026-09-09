@@ -82,15 +82,23 @@ export const ALLOWED_NATIVE_LOG_MESSAGES = new Set([
 const GENERATED_DIRECTORY_NAMES = new Set(['.gradle', 'build', 'dist', 'node_modules']);
 const OWNED_CONSOLE_SINK = 'src/core/secure/logger.ts';
 const OWNED_REACT_NATIVE_CONSOLE_BOUNDARY = 'src/services/errors/reactNativeExceptionPrivacy.ts';
+const OWNED_REACT_NATIVE_EXCEPTION_REGISTRATION =
+  'src/services/errors/registerReactNativeExceptionPrivacy.ts';
 const OWNED_CONSOLE_SINK_CONTRACT =
   '29ad9f69cac087f4f847b2901c9308ee8fac239ab9cc8486d83961410edef385';
 const OWNED_REACT_NATIVE_CONSOLE_BOUNDARY_CONTRACT =
-  'f0141cf6aed9164f125e36c37ac2b0962fe7c56821ab0ba9c89d51dea9276652';
+  'adac8f9d1270cc4d59cbc153f18fe23ffe01e9c07746b1a51972fd9fa1556b0c';
+const OWNED_REACT_NATIVE_EXCEPTION_REGISTRATION_CONTRACT =
+  '79870617ec5ff66962f30216b04678b5a8f7f3e6a655d20200b15246ea9ae9ca';
 const OWNED_NATIVE_LOG_FILE =
   'modules/gator-paste-input/android/src/main/java/expo/modules/gatorpasteinput/GatorPasteInputModule.kt';
 const OWNED_NATIVE_LOG_TAG = 'GatorPasteInput';
 const OWNED_NATIVE_LOG_SOURCE_CONTRACT =
   '6fe107f769937864ee7fd8dfd7930dc886409e4b74c7fd9836c9c0b3e63ff115';
+const OWNED_NATIVE_RUNTIME_PRIVACY_FILE =
+  'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt';
+const OWNED_NATIVE_RUNTIME_PRIVACY_SOURCE_CONTRACT =
+  'ab5ec475716570ec90c3abfc39bbf4c91e5d2dd58b984083a90a034f67065d9c';
 const NATIVE_LOG_METHODS = new Set(['d', 'e', 'i', 'println', 'v', 'w', 'wtf']);
 const JAVA_FORMAT_CHARACTER = /\p{Cf}/u;
 
@@ -448,8 +456,9 @@ function normalizedSourceHash(source) {
 
 /**
  * The only two production raw-console adapters are security boundaries, not broad file
- * exemptions. Pin their complete implementation bodies so a new assignment, shadowed `safe`, or
- * raw Reflect forwarding cannot inherit the structural whitelist by reusing trusted names.
+ * exemptions. Pin the logger adapter's complete implementation bodies and the startup boundary's
+ * complete source so added top-level work, a new assignment, or raw forwarding cannot inherit the
+ * structural whitelist by reusing trusted names.
  */
 function ownedConsoleContractFindings(sourceFile) {
   const topLevelFunctions = (name) =>
@@ -473,7 +482,9 @@ function ownedConsoleContractFindings(sourceFile) {
     ),
   );
   const capturedErrorSinkValues = topLevelFunctions('capturedErrorSinkValue');
+  const importDeclarations = sourceFile.statements.filter(ts.isImportDeclaration);
   const outputMethodDeclarations = topLevelVariableStatements('OUTPUT_METHODS_TO_SUPPRESS');
+  const errorDiagnosticApiLoaders = topLevelFunctions('loadErrorDiagnosticApi');
   const reactNativeExceptionProjectors = topLevelFunctions('projectReactNativeExceptionData');
   const projectedConsoleArgumentFunctions = topLevelFunctions('projectedConsoleArguments');
   const reactNativeBoundaries = topLevelFunctions('installReleaseConsoleBoundary');
@@ -508,13 +519,16 @@ function ownedConsoleContractFindings(sourceFile) {
   }
   if (isPath(sourceFile.fileName, OWNED_REACT_NATIVE_CONSOLE_BOUNDARY)) {
     const exactShape =
+      importDeclarations.length === 0 &&
       outputMethodDeclarations.length === 1 &&
+      errorDiagnosticApiLoaders.length === 1 &&
       reactNativeExceptionProjectors.length === 1 &&
       projectedConsoleArgumentFunctions.length === 1 &&
       reactNativeBoundaries.length === 1 &&
       exceptionManagerLoaders.length === 1 &&
       reactNativeBoundaryInstallers.length === 1;
     const outputMethodDeclaration = outputMethodDeclarations[0];
+    const errorDiagnosticApiLoader = errorDiagnosticApiLoaders[0];
     const reactNativeExceptionProjector = reactNativeExceptionProjectors[0];
     const projectedConsoleArguments = projectedConsoleArgumentFunctions[0];
     const reactNativeBoundary = reactNativeBoundaries[0];
@@ -523,26 +537,19 @@ function ownedConsoleContractFindings(sourceFile) {
     if (
       !exactShape ||
       !outputMethodDeclaration ||
+      !errorDiagnosticApiLoader ||
       !reactNativeExceptionProjector ||
       !projectedConsoleArguments ||
       !reactNativeBoundary ||
       !exceptionManagerLoader ||
       !reactNativeBoundaryInstaller ||
-      normalizedNodesHash(
-        [
-          outputMethodDeclaration,
-          reactNativeExceptionProjector,
-          projectedConsoleArguments,
-          reactNativeBoundary,
-          exceptionManagerLoader,
-          reactNativeBoundaryInstaller,
-        ],
-        sourceFile,
-      ) !== OWNED_REACT_NATIVE_CONSOLE_BOUNDARY_CONTRACT
+      normalizedSourceHash(sourceFile.getFullText()) !==
+        OWNED_REACT_NATIVE_CONSOLE_BOUNDARY_CONTRACT
     ) {
       return [
         finding(
           outputMethodDeclaration ??
+            errorDiagnosticApiLoader ??
             reactNativeExceptionProjector ??
             projectedConsoleArguments ??
             reactNativeBoundary ??
@@ -552,6 +559,18 @@ function ownedConsoleContractFindings(sourceFile) {
         ),
       ];
     }
+  }
+  if (
+    isPath(sourceFile.fileName, OWNED_REACT_NATIVE_EXCEPTION_REGISTRATION) &&
+    normalizedSourceHash(sourceFile.getFullText()) !==
+      OWNED_REACT_NATIVE_EXCEPTION_REGISTRATION_CONTRACT
+  ) {
+    return [
+      finding(
+        sourceFile.statements[0],
+        'React Native exception privacy registration contract changed',
+      ),
+    ];
   }
   return [];
 }
@@ -1730,7 +1749,10 @@ function exactOwnedNativeCall(tokens, call, owned) {
 function inspectNativeLogCalls(
   source,
   fileName = 'input.kt',
-  { owned = isPath(fileName, OWNED_NATIVE_LOG_FILE) } = {},
+  {
+    owned = isPath(fileName, OWNED_NATIVE_LOG_FILE),
+    runtimePrivacyOwned = isPath(fileName, OWNED_NATIVE_RUNTIME_PRIVACY_FILE),
+  } = {},
 ) {
   const kotlin = normalizedPath(fileName).endsWith('.kt');
   const translatedSource = kotlin ? source : decodeJavaUnicodeEscapes(source);
@@ -1743,6 +1765,16 @@ function inspectNativeLogCalls(
       line: 1,
       message: undefined,
       reason: 'owned native source contract changed',
+    });
+  }
+  if (
+    runtimePrivacyOwned &&
+    normalizedSourceHash(source) !== OWNED_NATIVE_RUNTIME_PRIVACY_SOURCE_CONTRACT
+  ) {
+    findings.push({
+      line: 1,
+      message: undefined,
+      reason: 'native runtime privacy contract changed',
     });
   }
   for (const entry of imports.imports) {
@@ -2048,11 +2080,20 @@ export function runErrorDiagnosticCheck({ root = process.cwd() } = {}) {
       `owned native source must be encountered exactly once at ${OWNED_NATIVE_LOG_FILE}; found ${ownedNativeFiles.length}`,
     );
   }
+  const ownedNativeRuntimePrivacyFiles = nativeFiles.filter(
+    (file) => normalizedPath(relative(root, file)) === OWNED_NATIVE_RUNTIME_PRIVACY_FILE,
+  );
+  if (ownedNativeRuntimePrivacyFiles.length !== 1) {
+    errors.push(
+      `native runtime privacy source must be encountered exactly once at ${OWNED_NATIVE_RUNTIME_PRIVACY_FILE}; found ${ownedNativeRuntimePrivacyFiles.length}`,
+    );
+  }
   for (const file of nativeFiles) {
     const relativeFile = normalizedPath(relative(root, file));
     const source = readFileSync(file, 'utf8');
     const inspected = inspectNativeLogCalls(source, relativeFile, {
       owned: relativeFile === OWNED_NATIVE_LOG_FILE,
+      runtimePrivacyOwned: relativeFile === OWNED_NATIVE_RUNTIME_PRIVACY_FILE,
     });
     nativeCalls += inspected.calls;
     for (const finding of inspected.findings) {
